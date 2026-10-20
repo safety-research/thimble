@@ -30,16 +30,16 @@ import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { cardFrame, frameWidth } from './cardframe.js'
-import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
+import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
-import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
+import { lineOf, newRecord, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteEdit, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop } from './tray.js'
-import { catchUpEl, keyColor, messageEl } from './view'
+import { catchUpEl, keyColor, markColors, messageEl } from './view'
 import { markNextTurn, record as recordEvent } from '../telemetry/telemetry'
 import { ownTurn } from '../observer/observer'
 import { featureOn, switchesFrom } from '../settings/features.mjs'
@@ -61,6 +61,7 @@ import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
 import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
+import { flushEngaged, resetEngaged, tellOpened } from './engaged'
 import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
@@ -608,13 +609,15 @@ export async function noteForClaude($: Engine, text: string): Promise<void> {
  *  observer has for Claude) go just before it as a row the person does not see, for Claude alone; the prompt is `t.text`, as the person
  *  would type it. Claude Code labels its row as the plugin's. */
 async function startTurn($: Engine, rows: string[], t: { text: string; typed: boolean; verb: string }): Promise<void> {
-  // what the person reads now (a squeeze's version, a catch-up) reached Claude as rows of their own
+  // what the person reads now (a squeeze's version, a catch-up), and what they opened and asked, reach Claude as rows
+  // of their own
   await tellSettled($).catch(() => undefined)
+  await flushEngaged($).catch(() => undefined)
   const notes = [...(((await $.state.get(NOTES)).value ?? []) as string[])]
   await $.state.set(NOTES, [])
   // the observer hears of the turn (its own prompt.submit hook may never see this plugin's prompt): its notes come back
-  const heard = await ownTurn($, t).catch(() => null)
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, ...rows, ...(heard ? [heard] : [])].join('\n\n') }] } })
+  await ownTurn($, t).catch(() => undefined)
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, ...rows].join('\n\n') }] } })
   await $.prompt.submit({ text: t.text, asUser: true })
 }
 
@@ -749,13 +752,16 @@ export async function saveRecord($: Engine, rec: MsgRecord): Promise<void> {
 
 /** A record: this session's, else the one a resumed session left on disk. */
 export async function recordNow($: Engine, row: string): Promise<MsgRecord | null> {
+  // a record an earlier version kept with an explain after its text: its marks placed again, so a press, ] and the
+  // drawing count the same marks
+  const placed = (r: MsgRecord) => ((r.marks || []).some(m => (m as Any).loose) ? (remark(r) as MsgRecord) : r)
   const held = (await $.state.get({ ...MSG, id: row })).value as MsgRecord | null | undefined
-  if (held) return held
+  if (held) return placed(held)
   const f = await msgFilesNow($)
   if (!f.dir) return null
   try {
     const file = `${f.dir}/${safe(row)}.json`
-    if (await $.fs.exists(file)) return JSON.parse(String(await $.fs.read(file))) as MsgRecord
+    if (await $.fs.exists(file)) return placed(JSON.parse(String(await $.fs.read(file))) as MsgRecord)
   } catch {
     // a record it cannot read: the message is drawn from its words
   }
@@ -1033,8 +1039,8 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
   await setCardFocus($, null)
   await setTray($, trayOpen(trayFrameOf(rec, i)) as Tray)
   await $.state.set(SELROW, row === (await restRow($)) ? null : row)
-  // a gloss opened: the observer's backoff for glosses starts over (the observer reads it at its next look)
-  if (m.kind === 'gloss') await $.state.set({ plugin: 'thimble', key: 'glossOpened' }, Date.now())
+  // what the person opened reaches the session, for Claude and the observer (engaged.ts); the tray shows it either way
+  await tellOpened($, trayFrameOf(rec, i), rec!.text).catch(() => undefined)
   // the mark in view, when a key opened it (it may be in a message above the screen)
   await revealMark($, rec!, i)
 }
@@ -1099,7 +1105,9 @@ async function stepSide($: Engine, frame: TrayFrame | null, dir: number): Promis
   if (next.card) { await openDetail($, next.card, null, { side: 'keep' }); return }
   const rec = await recordNow($, next.row)
   const f = rec ? (trayFrameOf(rec, next.i!) as TrayFrame | null) : null
-  if (f) await openMarkSide($, f, { keep: true })
+  if (!f) return
+  await openMarkSide($, f, { keep: true })
+  await tellOpened($, f, rec!.text).catch(() => undefined)
 }
 
 /** A card under a message takes the keys (] reached it): its own keys win while it has the focus, and the bar names
@@ -1296,19 +1304,39 @@ async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
   return Box({ marginLeft: 2, flexDirection: 'column', children: [await paneEl($, e, 'tray', {}, { w, h }), ...(link ? [link] : [])] })
 }
 
-/** Under a citation of rows of a file, the file as a link that opens it, the way Claude Code links a file in a reply:
- *  Claude Code's own Markdown draws `[revisions.jsonl:41](file:///…/revisions.jsonl#L41)`, an OSC 8 hyperlink where
- *  the terminal takes one (else the words, then the address). Null for any other frame, or a file not there. */
+/** Under a citation of rows of a file, the file's place (`revisions.jsonl:41`), always its own words. A click on it
+ *  opens the cited lines in the side panel, which works over ssh too. Where Claude Code draws a link as an OSC 8
+ *  hyperlink (drawsHyperlinks), it is also a link to the file, `file:///…/revisions.jsonl#L41`, which a ctrl or cmd
+ *  click opens on this machine; elsewhere it is the words alone, never the words then the address. Null for any other
+ *  frame, or a file not there. */
 async function trayFileLink($: Engine, e: Any, top: TrayFrame | null): Promise<Any | null> {
   if (!top || top.kind === 'gloss' || typeof top.ref !== 'string') return null
   // a file's place opens from the session's folder when there is no thimble/ folder yet (a codebase Claude only read)
   const link = fileLink(top.ref, (await rootHere($)) || String(await $.session.cwd()).replace(/\/+$/, ''))
   if (!link || !(await $.fs.exists(link.path).catch(() => false))) return null
-  const { Markdown } = $.ui.resolve(e) as Any
-  if (!Markdown) return null
-  // the place as terminals and editors make it clickable (`plugin/shell/shell.tsx:2282`), and an OSC 8 link to the file
-  const words = link.label.replace(/[[\]\\]/g, c => '\\' + c)
-  return Markdown({ key: 'tray-file', text: `[${words}](${link.href})` })
+  const { Markdown, Button, Text } = $.ui.resolve(e) as Any
+  const open = () => {
+    void expandFrame($, top, true).then(why => { if (typeof why === 'string' && why) $.ui.toast(why) }, err => {
+      const why = plainWhy(err)
+      if (why) $.ui.toast(`The cited lines did not open in the side panel: ${why}. ↵ in the tray opens them too.`)
+    })
+  }
+  if (Markdown && (await hyperlinksHere($))) {
+    const words = link.label.replace(/[[\]\\]/g, c => '\\' + c)
+    return Markdown({ key: 'tray-file', text: `[${words}](${link.href})`, onLinkPress: open, pressableLinks: [link.href] })
+  }
+  return Button({ key: 'tray-file', plain: true, label: `open ${link.label}`, onPress: open, children: [Text({ color: markColors(theme).cite, underline: true, children: link.label })] })
+}
+
+/** Whether Claude Code draws a link as an OSC 8 hyperlink here, by the environment it reads (cards.js drawsHyperlinks). */
+async function hyperlinksHere($: Engine): Promise<boolean> {
+  const env: Record<string, string | undefined> = {
+    FORCE_HYPERLINK: await $.env.get('FORCE_HYPERLINK'), TERM_PROGRAM: await $.env.get('TERM_PROGRAM'),
+    TERM_PROGRAM_VERSION: await $.env.get('TERM_PROGRAM_VERSION'), LC_TERMINAL: await $.env.get('LC_TERMINAL'),
+    TERMINAL_EMULATOR: await $.env.get('TERMINAL_EMULATOR'), WT_SESSION: await $.env.get('WT_SESSION'), TMUX: await $.env.get('TMUX'),
+    TERM: await $.env.get('TERM'), CI: await $.env.get('CI'), TEAMCITY_VERSION: await $.env.get('TEAMCITY_VERSION'), VTE_VERSION: await $.env.get('VTE_VERSION'),
+  }
+  return drawsHyperlinks(env)
 }
 
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
@@ -1328,10 +1356,11 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   const begins = shownOf(rec).replace(/\s+/g, ' ').trim().slice(0, 80)
   if (m.kind === 'gloss') {
     const g = rec.glosses?.[m.gloss!] ?? { term: '' }
-    return {
-      label: g.term, scope: { row: rec.row, mark: { kind: 'gloss', term: g.term } }, refs: (g.refs || []).slice(0, 3),
-      context: `The analyst asked this with an explainer of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The explainer said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`,
-    }
+    // an important detail is said as the person reads it: its title, its points and what to do
+    const context = g.kind === 'heads'
+      ? `The analyst asked this with an important detail of your reply open in the tray: "${g.title || g.term}", on the words "${g.term}" in your reply that begins "${begins}". It said: ${(g.bullets || []).join(' ')}${g.todo ? ` What to do: ${g.todo}` : ''} "This" or "it" may mean that detail.`
+      : `The analyst asked this with an explainer of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The explainer said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`
+    return { label: g.term, scope: { row: rec.row, mark: { kind: 'gloss', term: g.term } }, refs: (g.refs || []).slice(0, 3), context }
   }
   const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)
   return {
@@ -1635,7 +1664,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
     // v's card landed under a message off screen, a moment ago: first, a click away
     const note = (await $.state.get(CARDNOTE)).value as { row: string; id: string; about: string; at: number } | null
     if (note && (await $.clock.now()) - note.at < CARDNOTE_MS) {
-      const words = `card ready under "${cut(String(note.about || '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim(), 30)}" · click to go there`
+      const words = `card ready under "${cut(lineOf(note.about), 30)}" · click to go there`
       left.push({ key: '', words, short: 'card ready', color: keyColor('v', theme), wordsColor: keyColor('v', theme), label: 'go to the card', onPress: () => goToCard($, note.row, note.id) })
     }
     // at rest the bar names the three verbs alone (v s c) and the counts: ] still steps through the marks and the cards,
@@ -1678,7 +1707,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
       } else if (place.all.length > 1 && place.at >= 0 && (place.at < place.all.length - 1 || place.since > 1)) {
         // an earlier reply picked: its first words too, since a key cannot scroll the transcript to it
         const which = `reply ${place.at + 1} of ${place.all.length}`
-        const begins = place.at < place.all.length - 1 ? cut(shownOf(rec).replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim(), 36) : ''
+        const begins = place.at < place.all.length - 1 ? cut(lineOf(shownOf(rec)), 36) : ''
         left.push({ key: '{ }', words: begins ? `${which}: ${begins}` : which, short: which, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
       }
     }
@@ -2619,7 +2648,11 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
     // a thread (the thread list): what it is on, its conversation under it
     if (typeof a.thread === 'string') return (await openThread($, a.thread, { push })) ?? undefined
     // a citation (a mark's card in the panel, as its thread)
-    if (a.mark && typeof a.mark === 'object') { await openMarkSide($, a.mark as TrayFrame, { push }); return }
+    if (a.mark && typeof a.mark === 'object') {
+      await openMarkSide($, a.mark as TrayFrame, { push })
+      await tellOpened($, a.mark).catch(() => undefined)
+      return
+    }
     // a place a program opens: a card (its detail), a message (the keys act on it now)
     if (typeof a.object === 'string' && ID.test(a.object)) {
       const root = await rootHere($)
@@ -3081,6 +3114,8 @@ export const registerShell: Register = (on, options) => {
     try {
       // the version of a message the person settled on reaches Claude first, as a row of its own
       await tellSettled($).catch(() => undefined)
+      // what the analyst opened and asked since Claude's last reply, with their own next prompt (engaged.ts)
+      if (!e.isMeta && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) await flushEngaged($).catch(() => undefined)
       // checks of label values the person made in a detail whose close was never heard: Claude hears of them now
       if (checksPending()) await checksDone($)
       const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
@@ -3201,6 +3236,7 @@ export function resetShell(): void {
   resetDock()
   resetKeys(shellKey)
   resetAside()
+  resetEngaged()
   held.clear()
   heldFaults.clear()
   heldId = null

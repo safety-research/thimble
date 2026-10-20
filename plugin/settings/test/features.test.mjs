@@ -1,6 +1,6 @@
 // The features (settings/features.mjs): the manifest's userConfig holds the same fields; switches a person would never
-// turn apart are one feature; Notes to Claude is experimental and off by default; the observer is no switch, and runs
-// while a feature that reads answers is on.   node --test plugin/settings/test
+// turn apart are one feature; every feature is on by default and gives the person what they see; the observer is no
+// switch, and runs while a feature that reads answers is on.   node --test plugin/settings/test
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -38,16 +38,12 @@ test('switches a person would never turn apart are one feature: v proposals with
   setOptions({})
 })
 
-test('Notes to Claude is the one experimental feature, under its own heading at the end, and off by default', () => {
-  const notes = SWITCHES.find(s => s.key === 'notes')
-  assert.equal(notes.default, false)
-  assert.equal(notes.group, 'Experimental')
-  assert.deepEqual(SWITCHES.filter(s => s.group).map(s => s.key), ['notes'])
-  assert.equal(SWITCHES.at(-1).key, 'notes')
+test('every feature is on by default, and none tells Claude what the person does not see: no notes, no group of them', () => {
+  assert.equal(SWITCHES.find(s => s.key === 'notes'), undefined)
+  assert.equal(LENSES.find(l => l.name === 'notes'), undefined)
+  assert.deepEqual(SWITCHES.filter(s => s.group), [])
   setOptions({})
-  assert.equal(featureOn('notes'), false)
-  assert.equal(lensOn(LENSES.find(l => l.name === 'notes')), false)
-  for (const s of SWITCHES.filter(x => !x.group)) assert.equal(featureOn(s.key), true, s.key)
+  for (const s of SWITCHES) assert.equal(featureOn(s.key), true, s.key)
 })
 
 test('the observer is no switch: it runs while a feature that reads answers is on, and asks the lenses of those alone', () => {
@@ -69,7 +65,7 @@ test('the observer is no switch: it runs while a feature that reads answers is o
   for (const l of LENSES) assert.equal(lensOn(l), false, l.name)
   // a lens no feature names (a new one) follows the observer; its module may name its feature
   assert.equal(lensOn({ name: 'new-lens' }), false)
-  setOptions({ ...off, notes: true })
+  setOptions({ ...off, details: true })
   assert.equal(observerOn(), true)
   assert.equal(lensOn({ name: 'new-lens' }), true)
   assert.equal(switchOfLens({ name: 'whatever', option: 'details' }).key, 'details')
@@ -115,9 +111,8 @@ test('the settings panel: one row per feature, flat, its words on one line under
     assert.match(lines[at], /^(● on|○ off) {2,3}\S/)
     assert.ok(lines[at + 1].trim().startsWith(s.does.split(' ').slice(0, 3).join(' ')), s.title)
   }
-  assert.ok(text.indexOf('Experimental') > text.indexOf('Labels and coverage on the bar'))
+  assert.ok(!text.includes('Experimental'))
   assert.ok(!/\/config|Observer/.test(text))
-  assert.match(text, /○ off {2}Notes to Claude/)
   assert.match(text, /↑↓ feature · ↵ or a click turns it on or off · esc close/)
   // each feature is one part a press or the ring lands on
   assert.deepEqual(g.regions.map(r => r.id), SWITCHES.map(s => `s-${s.key}`))

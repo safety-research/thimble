@@ -127,8 +127,6 @@ declare module 'claude-code' {
       selrow: string | null
       /** the row of the latest turn's answer */
       answer: string | null
-      /** when the person last opened an explain (ms): the observer's backoff for explains starts over */
-      glossOpened: number
       /** the rows of the session's answers (each turn's last words, a turn that ended in an error left out), oldest first */
       answers: string[]
       /** the card under a reply that has the keys (] reached it): its own keys win over the verbs until 0 */

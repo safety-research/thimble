@@ -10,7 +10,7 @@
 //   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
 //   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
-//   parseAnswer(text)          -> {notes, verbs, glosses, claims, clusters} from the pass's reply, or null
+//   parseAnswer(text)          -> {verbs, glosses, claims, clusters, heads} from the pass's reply, or null
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
 // the statuses of `thimble coverage` that count as seen (some lines in Claude's context; `read` is a snapshot's from
@@ -163,9 +163,10 @@ export function digest(object, o = {}) {
     }
     L.push(`  when it was saved the session had: ${parts.join('; ')}`)
   }
-  const dec = lin.declared ?? object.declared
-  if (dec && typeof dec === 'object' && Object.keys(dec).length) L.push(`  Claude declared: ${Object.entries(dec).map(([k, v]) => `${k}: ${cut(typeof v === 'string' ? v : JSON.stringify(v), 220)}`).join('; ')}`)
-  else L.push('  Claude declared nothing it read or judged by hand')
+  // what Claude declared it read or judged by hand, in the form it saved: words, a list or fields (the kernel keeps it
+  // as given)
+  const said = declaredText(lin.declared ?? object.declared)
+  L.push(said ? `  Claude declared: ${said}` : '  Claude declared nothing it read or judged by hand')
   const probs = lin.problems || []
   if (probs.length) L.push(`  problems thimble save found: ${probs.slice(0, 5).map(p => cut(p, 140)).join('; ')}`)
   if (typeof o.drawn === 'string' && o.drawn.trim()) {
@@ -181,6 +182,15 @@ export function digest(object, o = {}) {
     L.push(`  its hint row now: ${verbs.filter(v => v.picked).map(v => v.name).join(', ') || 'none'}${named.length ? ` (Claude named ${named.join(', ')})` : ''}`)
   }
   return L.join('\n')
+}
+
+/** What a card's `declared` says, in one line, whatever form Claude saved it in; '' when it says nothing. */
+export function declaredText(d) {
+  if (d == null) return ''
+  if (typeof d === 'string') return d.replace(/\s+/g, ' ').trim()
+  if (Array.isArray(d)) return d.map(declaredText).filter(Boolean).join('; ')
+  if (typeof d === 'object') return Object.entries(d).map(([k, v]) => { const t = declaredText(v); return t ? `${k}: ${cut(t, 220)}` : '' }).filter(Boolean).join('; ')
+  return String(d)
 }
 
 /** A query's inputs in a few lines: many like files (a run's 776 transcripts) as one pattern with how many files and
@@ -248,14 +258,10 @@ export function jsonIn(text) {
   }
 }
 
-/** The pass's reply, read leniently: notes, lit verbs, glosses and claims. */
+/** The pass's reply, read leniently: lit verbs, glosses, claims and a heads-up. */
 export function parseAnswer(text) {
   const d = jsonIn(text)
   if (!d || typeof d !== 'object') return null
-  const notes = (Array.isArray(d.notes) ? d.notes : [])
-    .map(n => (typeof n === 'string' ? { note: n } : n))
-    .filter(n => n && typeof n.note === 'string' && n.note.trim())
-    .map(n => ({ note: n.note.trim(), ...(typeof n.rests_on === 'string' && n.rests_on.trim() ? { rests_on: n.rests_on.trim() } : {}) }))
   // the message row: the verbs it lights and its glosses, read as given (shell/message.js verbsOf and glossesOf check them)
   const verbs = d.verbs && typeof d.verbs === 'object' && !Array.isArray(d.verbs) ? d.verbs : {}
   const glosses = Array.isArray(d.glosses) ? d.glosses : []
@@ -264,13 +270,6 @@ export function parseAnswer(text) {
   const clusters = Array.isArray(d.clusters) ? d.clusters : []
   // the one heads-up, if any, read as given (shell/message.js headsOf checks it)
   const heads = d.heads && typeof d.heads === 'object' && !Array.isArray(d.heads) ? d.heads : null
-  return { notes, verbs, glosses, claims, clusters, heads }
+  return { verbs, glosses, claims, clusters, heads }
 }
 
-const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-
-/** Whether a line says the same as one in the list (the same words, or nearly). */
-export function isRepeat(line, list) {
-  const a = norm(line)
-  return (list || []).some(x => norm(x) === a)
-}

@@ -1,6 +1,8 @@
 // The observer: thimble's always-on, quiet part. It reads each of Claude's messages with the whole session, once,
-// after the message exists. What it finds goes to Claude as notes the person never sees, and to the message as explain
-// marks, lit verbs and where the answer stands on squeeze's chips.
+// after the message exists. All it gives reaches the person: explain marks and important details on the message's
+// words, lit verbs, where the answer stands on squeeze's chips, and the session's claims. It tells Claude nothing. The
+// session it reads holds what the person engaged with (shell/engaged.js): the explainers, details and citations they
+// opened, and what they asked in side threads.
 //
 // A hook and a queue. Each new message of Claude's is queued as it arrives:
 //   - an answer: the last words of a turn of main that answered (the person's question, a key's ask, a background
@@ -20,13 +22,13 @@
 //    cache serves that prefix (its `cache_read_input_tokens`). The fork keeps main's system prompt, so the observer's
 //    frame (registry feature `observer`) and the enabled lenses' sections (lenses/index.mjs, compose.mjs) are its
 //    prompt, then the turn template (feature `observer-turn`): the messages to read now, the evidence, each lens's
-//    digest of the state the transcript lacks (the notes Claude already has, the terms already explained, the claims
-//    so far with their ids), and the reply's skeleton. Every call is a line in the session's events (telemetry), with
+//    digest of the state the transcript lacks (the terms already explained, the heads-ups given, the claims so far
+//    with their ids), and the reply's skeleton. Every call is a line in the session's events (telemetry), with
 //    each lens's share. A frame version in `lenses` mode (observer:v4-low) is the earlier pass instead: one
 //    `$.model.complete` over the newest message's turn and digests, its frame the cached system prompt.
 // 3. A pass that fails is tried once more (a failed sign-in is said at once); a second failure is said in a toast with
 //    its fix.
-// 4. Each lens merges its part (notes, lit verbs, explain marks, a heads-up, squeeze levels, claims). The verbs go in
+// 4. Each lens merges its part (lit verbs, explain marks, a heads-up, squeeze levels, claims). The verbs go in
 //    the newest message's record; an explain mark or a heads-up goes in the record of the message that holds its term.
 //    Order with squeeze: a step the person makes on Interpretation or Background before the pass has said where the
 //    answer stands waits for the look (lookPending) and counts from the level it gives.
@@ -36,23 +38,19 @@
 // THIMBLE_PROMPTS=lens-explain:off) has no section in the prompt, no key in the reply, and no merge. THIMBLE_OBSERVER_SHADOW=<version> (such as v4-low) runs that frame version too on each look, measured
 // in the session's events and the observer's file and never merged, so two versions compare on the same session.
 //
-// Where its output goes:
-// - notes: to Claude as context the person never sees, at the first chance: the next result of a tool main runs while
-//   a turn goes on (so a note on a message reaches Claude in the turn that follows it, even when the person asked again
-//   before the look ended), else beside the next prompt of main, whatever sent it (the person, a key's ask, a
-//   notification). Once each: a prompt that never entered gives them back. Deduplicated across the session.
-// - claims: into the session's Claims (claims/term.ts), placed by their words in the turn's messages.
+// Where its output goes: the verbs, explain marks and heads-ups into the messages' records (the shell draws them), the
+// claims into the session's Claims (claims/term.ts), placed by their words in the turn's messages.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef } from '../types'
 import { answerRow, applyObserver, drawnTextOf, messageRecord, personHere } from '../shell/shell'
-import { glossesOf, headsOf } from '../shell/message.js'
+import { glossesOf, headsOf, lineOf } from '../shell/message.js'
 import { promptAt, promptText, registry } from '../prompts/prompts'
 import { FEATURES } from '../prompts/registry.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf, skeletonOf } from './compose.mjs'
-import { digest, isRepeat, jsonIn, parseAnswer } from './evidence.js'
+import { digest, jsonIn, parseAnswer } from './evidence.js'
 import { LENSES } from './lenses/index.mjs'
 import { stepsOf } from './turn.mjs'
 import { sessionKey } from '../hooks/conversation'
@@ -63,9 +61,7 @@ import { featureOn, lensOn } from '../settings/features.mjs'
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Note = { note: string; rests_on?: string; from: 'observer' }
 type Answer = {
-  notes: { note: string; rests_on?: string }[]
   verbs: Record<string, unknown>
   glosses: unknown[]
 }
@@ -85,12 +81,9 @@ const CONTEXT_OBJECTS = 4 // cards the pass reads: every new one, then the lates
 const STEPS_BUDGET = 24000 // the earlier pass (lenses mode): characters of the turn's words and tool calls it reads
 const LOOK_DELAY = 50 // ms after a message is queued before the worker takes the queue
 const RETRY_MS = 2000 // ms before a failed pass is tried again
-// explains, per session (kept in the session's file, so another session or another folder starts afresh): the terms the
-// person saw explained (never explained again in this session), the looks whose explains nobody opened, and the looks
-// still to come that give at most one
+// explains, per session (kept in the session's file, so another session or another folder starts afresh): the terms
+// already explained, never explained again in this session
 const GLOSSED_KEEP = 100
-const GLOSS_FREE = 2 // looks whose explains nobody opened before explains back off to one a look
-export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2 ** (n - GLOSS_FREE - 1)))
 
 const S = {
   session: '',
@@ -108,13 +101,8 @@ const S = {
   texts: [] as { row: string; text: string; turnId: string; queued: boolean }[], // Claude's words in the turn now
   queue: [] as Msg[],
   busy: false,
-  notesGiven: [] as string[],
-  pending: [] as Note[],
   log: [] as Record<string, unknown>[],
   glossed: [] as string[],
-  glossUnopened: 0,
-  glossSkip: 0,
-  glossOpenedAt: 0, // the person's last open of an explain the observer has counted
   headsGiven: [] as string[], // the titles of the heads-ups placed in this session, for the lens's digest
 }
 
@@ -140,11 +128,10 @@ export function lookPending(): Promise<void> | null {
 }
 
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
-const num = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0)
 const bullets = (xs: string[]) => (xs.length ? xs.map(x => `- ${x}`).join('\n') : '(none)')
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
 const cut = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n - 1) + '…')
-const oneLine = (s: string) => String(s || '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
+const oneLine = (s: string) => lineOf(s)
 // a message's record is kept by the first 24 characters of its row's id (as the shell keys it)
 const rowKey = (uuid: string) => String(uuid).slice(0, 24)
 const wait = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })
@@ -161,15 +148,9 @@ async function ensure($: Engine): Promise<void> {
       if (await $.fs.exists(S.file)) {
         const kept = JSON.parse(String(await $.fs.read(S.file)))
         S.log = Array.isArray(kept.log) ? kept.log : []
-        S.notesGiven = strs(kept.notesGiven)
         S.glossed = strs(kept.glossed)
         S.headsGiven = strs(kept.headsGiven)
-        S.glossUnopened = num(kept.glossUnopened)
-        S.glossSkip = Math.min(8, num(kept.glossSkip))
-        // a reload mid-session: the notes not yet delivered wait again, and the person's questions come back
-        const delivered = new Set(S.log.filter(r => r.kind === 'notes_delivered').flatMap(r => strs(r.notes)))
-        const added = S.log.filter(r => r.kind === 'look').flatMap(r => (Array.isArray(r.notes_added) ? (r.notes_added as Note[]) : []))
-        S.pending = added.filter(n => n && typeof n.note === 'string' && !delivered.has(n.note))
+        // a reload mid-session: the person's questions come back
         const typed = S.log.filter(r => r.kind === 'look' && typeof r.question === 'string' && r.typed !== false)
         S.questions = typed.map(r => String(r.question)).slice(-20)
       }
@@ -179,12 +160,12 @@ async function ensure($: Engine): Promise<void> {
   }
 }
 
-/** The session's file: the notes given, the terms explained, and every look, key and delivery, with the usage of each
+/** The session's file: the terms explained, the heads-ups given, and every look, with the usage of each
  *  call. */
 async function save($: Engine): Promise<void> {
   if (!S.file) return
   try {
-    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), glossed: S.glossed.slice(-GLOSSED_KEEP), glossUnopened: S.glossUnopened, glossSkip: S.glossSkip, headsGiven: S.headsGiven.slice(-40), log: S.log.slice(-400) }, null, 1))
+    await $.fs.write(S.file, JSON.stringify({ glossed: S.glossed.slice(-GLOSSED_KEEP), headsGiven: S.headsGiven.slice(-40), log: S.log.slice(-400) }, null, 1))
   } catch {
     // the file is memory for a resume and a record for measuring; the observer works without it
   }
@@ -436,16 +417,12 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     const evidence = await evidenceNow($, root, objs)
 
     // 2. the state each lens needs, the lenses enabled, one pass
-    // an explain the person opened since the last look (the shell sets glossOpened): the backoff starts over
-    const opened = num((await $.state.get({ plugin: 'thimble', key: 'glossOpened' })).value)
-    if (opened > S.glossOpenedAt) Object.assign(S, { glossOpenedAt: opened, glossUnopened: 0, glossSkip: 0 })
     const glossed = S.glossed.slice()
-    const glossSkip = S.glossSkip
     const parts = await lensParts($)
     if (!parts.length) { row.skip = 'no lens on'; return }
     // the session's claims so far, which the claims lens adds these messages' to
     const claims = parts.some(x => x.lens.name === 'claims') ? await claimsDigest($) : null
-    const st = { notesGiven: S.notesGiven, glossed, glossSkip, headsGiven: S.headsGiven, ...(claims ?? {}) }
+    const st = { glossed, headsGiven: S.headsGiven, ...(claims ?? {}) }
     // a message the person squeezed already: the pass reads the version they read
     const kept = await messageRecord($, newest.row)
     const squeezed = kept && typeof kept.shown === 'string' && kept.shown.trim() && kept.shown !== kept.text ? kept.shown : ''
@@ -475,14 +452,12 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     }
 
     // 4. each lens merges its part; the records take the verbs and marks of all of them
-    const fresher: Note[] = []
     let claimsLit: { row: string; note: string; claims: string[] } | null = null
     const ctx: Any = {
-      moved, glossSkip, isRepeat,
+      moved,
       verbs: {} as Record<string, unknown>,
       glosses: null as unknown[] | null,
       heads: null as Record<string, unknown> | null,
-      note: (n: Note) => { fresher.push(n) },
       log: (k: string, v: unknown) => { row[k] = v },
       // the claims into the session's Claims, placed by their words in the turn's messages
       claims: async (value: { claims: unknown[]; clusters: unknown[] }) => {
@@ -503,15 +478,6 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
       }
     }
 
-    // notes: those Claude already has dropped, the rest wait for the next prompt
-    const added: Note[] = []
-    for (const n of fresher) {
-      if (isRepeat(n.note, S.notesGiven)) continue
-      S.notesGiven.push(n.note)
-      S.pending.push(n)
-      added.push(n)
-    }
-    row.notes_added = added
 
     // the verbs in the newest message's record; each explain mark in the record of the message that holds its term,
     // the newest first (marks are kept by the words Claude wrote, so a term a squeeze left out is placed again when
@@ -551,11 +517,7 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
       }
     }
     row.glosses = placed
-    if (placed.length) {
-      S.glossed = [...glossed, ...placed].slice(-GLOSSED_KEEP)
-      S.glossUnopened += 1
-      S.glossSkip = glossSkipsFor(S.glossUnopened)
-    } else if (glossSkip > 0) S.glossSkip = glossSkip - 1
+    if (placed.length) S.glossed = [...glossed, ...placed].slice(-GLOSSED_KEEP)
     row.land_ms = Date.now() - newest.t
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
@@ -587,19 +549,6 @@ async function runShadow($: Engine, version: string, o: { parts: Part[]; msgs: M
 
 // ------------------------------------------------------------------------------------------------ the next prompt
 
-// the notes on the prompt in flight, until it entered (or a drop gave them back)
-let carrying: Note[] = []
-
-/** The notes as Claude reads them with a prompt or a tool's result, or null when there are none. */
-function notesText(pending: Note[]): string | null {
-  if (!pending.length) return null
-  return [
-    'Notes from a side agent that read your last answer, the cards you saved and their lineage. The analyst does not see these notes.',
-    'Act on them in this reply: if a note shows an error in what you told the analyst, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
-    ...pending.map(n => `- ${n.note}${n.rests_on ? ` (It rests on: "${cut(n.rests_on, 300)}")` : ''}`),
-  ].join('\n')
-}
-
 /** A prompt in the person's own words: the turn's question, and one of their questions. */
 async function typedPrompt(_$: Engine, text: string): Promise<void> {
   S.prompt = { text, typed: true, verb: '', from: 'composer' }
@@ -612,18 +561,12 @@ export type OwnTurn = { text: string; typed: boolean; verb: string }
 
 /**
  * The shell starts a turn of its own (shell.tsx startTurn), which this module's prompt.submit hook may never see: the
- * turn's prompt is kept for its look (a verb's press is no question of the person's), and the notes waiting for
- * Claude are taken, once, as the text Claude reads in the row before that prompt; null when there are none.
+ * turn's prompt is kept for its look (a verb's press is no question of the person's).
  */
-export async function ownTurn($: Engine, t: OwnTurn): Promise<string | null> {
+export async function ownTurn($: Engine, t: OwnTurn): Promise<void> {
   await ensure($)
   if (t.typed) await typedPrompt($, t.text)
   else S.prompt = { text: t.text, typed: false, verb: t.verb, from: 'plugin' }
-  const pending = featureOn('observer') ? S.pending : []
-  S.pending = []
-  if (!pending.length) return null
-  await logRow($, { kind: 'notes_delivered', notes: pending.map(n => n.note), with: t.verb ? `verb ${t.verb}` : 'plugin' })
-  return notesText(pending)
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
@@ -714,58 +657,26 @@ export const registerObserver: Register = (on, _options) => {
     return r
   })
 
-  // notes reach Claude in the next result of a tool main runs while its turn goes on: a look that ended after the
-  // person's next prompt went in is not a turn late
-  on('tool.call', { tool: /.+/ }, async ($, e, next) => {
-    const r = await next(e)
-    try {
-      if (e.agentId !== undefined || !r || r.deny !== undefined || !S.pending.length || !featureOn('observer')) return r
-      const went = S.pending
-      S.pending = []
-      await logRow($, { kind: 'notes_delivered', notes: went.map(n => n.note), with: `tool result ${e.tool}` })
-      return { ...r, context: [...(r.context ?? []), notesText(went)!] }
-    } catch {
-      return r
-    }
-  }).catch(($, e, next) => next(e))
-
-  // notes reach Claude beside the next prompt of main, whatever sent it: the person's, a notification, another
-  // plugin's. A turn this plugin starts itself (a verb's ask, a question from the browser) takes them through the
-  // shell (ownTurn), as this hook may never see it. The turn's prompt is kept for its look.
+  // the prompt of main's next turn, whatever sent it (the person, a notification, another plugin's), kept for its look.
+  // A turn this plugin starts itself (a verb's ask, a question from the browser) is kept through the shell (ownTurn),
+  // as this hook may never see it.
   on('prompt.submit', { origin: { kind: /./ } }, async ($, e, next) => {
     if (e.command) return next(e)
     const o = (e.origin ?? {}) as { kind?: string; name?: string; asUser?: boolean }
     if (o.kind === 'plugin' && o.name === $.plugin.name) return next(e)
     // the person's own words: typed here or through the bridge, or another plugin's prompt sent as theirs
     const typed = !e.isMeta && (/^(composer|bridge|sdk)$/.test(String(o.kind)) || (o.kind === 'plugin' && o.asUser === true))
-    let context: string | null = null
+    const r = await next(e)
+    if ((r as Any)?.drop) return r
     try {
       await ensure($)
-      carrying = featureOn('observer') ? S.pending : []
-      S.pending = []
-      context = notesText(carrying)
-    } catch {
-      // a prompt goes in as sent when the observer cannot add to it
-    }
-    const r = context ? await next({ ...e, context: [...(e.context ?? []), context] }) : await next(e)
-    const went = carrying
-    carrying = []
-    // a prompt that never entered (a hook dropped it, the engine refused it) gave Claude nothing: its notes wait
-    if ((r as Any)?.drop) { S.pending = [...went, ...S.pending]; return r }
-    try {
       if (typed) await typedPrompt($, e.text)
       else if (!e.turnId) S.prompt = { text: e.text, typed: false, verb: '', from: String(o.kind || 'unknown') }
-      if (went.length) await logRow($, { kind: 'notes_delivered', notes: went.map(n => n.note), with: o.kind === 'plugin' ? `plugin ${o.name ?? ''}`.trim() : String(o.kind || 'unknown') })
     } catch {
       // the prompt went in; only the observer's record of it is missing
     }
     return r
-  }).catch(($, e, next) => {
-    // a drop beneath, after the notes went down with the prompt, fails this hook: the notes wait for the next prompt
-    if (carrying.length) S.pending = [...carrying, ...S.pending]
-    carrying = []
-    return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 }
 
 /** For tests: the module's memory, cleared. */
@@ -773,8 +684,7 @@ export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', model: '', turnId: '', turnNo: 0, steps: 0, tools: 0, turnStart: 0, running: false, since: 0,
     prompt: { text: '', typed: true, verb: '', from: 'composer' }, questions: [], texts: [], queue: [], busy: false,
-    notesGiven: [], pending: [], log: [], glossed: [], glossUnopened: 0, glossSkip: 0, glossOpenedAt: 0, headsGiven: [],
+    log: [], glossed: [], headsGiven: [],
   })
-  carrying = []
   lookEnded()
 }

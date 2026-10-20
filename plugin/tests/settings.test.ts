@@ -104,15 +104,13 @@ async function turn($: Any, w: Any, id: string, prompt: string, answer: string) 
   await w.clock.settle()
 }
 
-const OFF_ALL = { cards: false, squeeze: false, explain: false, details: false, claims: false, notes: false }
+const OFF_ALL = { cards: false, squeeze: false, explain: false, details: false, claims: false }
 
 test('a feature turned off has no lens in the prompt and no key in the reply, and what it puts on the bar is gone: no v, no c, no claims count', { options: { claims: false, cards: false, details: false } }, async ($, on) => {
   const w = world(on, { claims: false, cards: false, details: false })
   await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
   expect(w.forks.length).toBe(1)
   const p = w.forks[0]!
-  // Notes to Claude is experimental and off by default
-  expect(p).not.toContain('LENS notes')
   expect(p).not.toContain('LENS claims')
   expect(p).not.toContain('LENS actions')
   // important details off: no heads-up section, and no heads-up in the reply
@@ -129,7 +127,7 @@ test('a feature turned off has no lens in the prompt and no key in the reply, an
   expect(bar).not.toContain('●')
 })
 
-test('with every feature that reads answers off, the observer looks at nothing and gives Claude no notes', { options: OFF_ALL }, async ($, on) => {
+test('with every feature that reads answers off, the observer looks at nothing', { options: OFF_ALL }, async ($, on) => {
   const w = world(on, OFF_ALL)
   await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
   await w.clock.advance(3000)
@@ -147,7 +145,7 @@ test("Labels and coverage on the bar: the bar's two counts hide together", { opt
   expect(textOf(await $.ui.render(HINT))).not.toContain('seen')
 })
 
-test('/thimble-settings opens the settings panel: a flat list of the features, Notes to Claude under Experimental and off, the bar as they leave it on top; a press turns one off through Claude Code, and the preview loses its key at once', async ($, on) => {
+test('/thimble-settings opens the settings panel: a flat list of the features, the bar as they leave it on top; a press turns one off through Claude Code, and the preview loses its key at once', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
   expect(await $.command.run({ command: 'thimble-settings', args: '' } as never)).toEqual({})
@@ -158,9 +156,9 @@ test('/thimble-settings opens the settings panel: a flat list of the features, N
   const t = textOf(await ui.drawn())
   for (const s of SWITCHES) expect(t).toContain(s.title)
   expect(t).toContain('● on   Cards')
-  expect(t).toContain('○ off  Notes to Claude')
-  expect(t.indexOf('Experimental')).toBeLessThan(t.indexOf('Notes to Claude'))
-  expect(t.indexOf('Labels and coverage on the bar')).toBeLessThan(t.indexOf('Experimental'))
+  // nothing that tells Claude what the person does not see
+  expect(t).not.toContain('Notes to Claude')
+  expect(t).not.toContain('Experimental')
   // no parent and no sub-settings: no Observer heading, no /config
   expect(t).not.toContain('Observer')
   expect(t).not.toContain('/config')

@@ -3,8 +3,9 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { citeCard, citeWords, drawnCard, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
-import { anchorTerm, blocks, findTerm, glossesOf, headsOf, inLinkWords, inline, linkMarks, looseOf, marksIn, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
+import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
+import { askedRow, engagedText, openedRow } from '../engaged.js'
+import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, inline, lineOf, linkMarks, marksIn, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
@@ -307,29 +308,35 @@ test('a term is found again in a rewrite that says it in another form: its words
   assert.equal(anchorTerm('of the runs', 'of vs on'), null)
 })
 
-test('an explain whose term a rewrite left out stays as a loose mark after the text; the original text never makes one', () => {
+test('an explain stands on its term in the text: in a citation\'s words it is drawn inside the citation, and a rewrite that left the term out shows none until the original is back', () => {
   const text = 'All 481 merges had their approval from [the claimer](q19#n). Emergent runs self-approved most.'
   const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: { g1: { term: 'claimer' }, g2: { term: 'Emergent vs managed' }, g3: { term: 'never said' } } })
-  // in the original a term is marked where it stands as written, outside links: none of these does; one that stands only
-  // in a citation's words (claimer) is drawn after the text, so the explain stays reachable
-  assert.deepEqual(rec.marks.filter(m => m.kind === 'gloss' && !m.loose).map(m => m.gloss), [])
-  assert.deepEqual(rec.marks.filter(m => m.loose).map(m => [m.gloss, m.inLink]), [['g1', true]])
+  // claimer stands only in a citation's words: its explain is drawn there, inside the citation; the others have no words
+  const gl = rec.marks.filter(m => m.kind === 'gloss')
+  assert.deepEqual(gl.map(m => [m.gloss, text.slice(m.start, m.end)]), [['g1', 'claimer']])
+  const runs = inline(text, 0, text.length, rec.marks)
+  assert.deepEqual(runs.filter(r => r.mark !== undefined).map(r => [r.s, rec.marks[r.mark].kind, r.within === undefined ? null : rec.marks[r.within].kind]), [['the ', 'cite', null], ['claimer', 'gloss', 'cite']])
+  // nothing is drawn after the text: every mark lies in it
+  assert.ok(rec.marks.every(m => m.end <= text.length && m.start < m.end))
   const short = 'Every flagged merge was approved by its claimer.'
   const next = remark({ ...rec, shown: short })
-  assert.deepEqual(next.marks.map(m => [m.gloss, m.loose ? 'loose' : short.slice(m.start, m.end)]), [['g1', 'claimer']])
-  // a term the original holds that the rewrite left out entirely: kept, loose, after the text
+  assert.deepEqual(next.marks.map(m => [m.gloss, short.slice(m.start, m.end)]), [['g1', 'claimer']])
+  // a term the original holds that the rewrite left out entirely: no mark while the rewrite shows, the gloss kept
   const orig = 'The runs split. **Emergent vs managed:** emergent runs self-approved most.'
   const r2 = withObserver(newRecord({ row: 'r2', session: 's1', text: orig }), { verbs: {}, glosses: { g2: { term: 'Emergent vs managed' } } })
   assert.equal(orig.slice(r2.marks[0].start, r2.marks[0].end), 'Emergent vs managed')
   const s2 = 'The runs split in two.'
   const n2 = remark({ ...r2, shown: s2 })
-  assert.deepEqual(n2.marks, [{ kind: 'gloss', start: s2.length, end: s2.length, gloss: 'g2', loose: true }])
-  assert.deepEqual(looseOf(n2.marks).map(m => m.i), [0])
-  // the drawing's blocks never hold it: it is drawn after the text
-  assert.deepEqual(marksIn(n2.marks, 0, s2.length), [])
+  assert.deepEqual(n2.marks, [])
+  assert.deepEqual(Object.keys(n2.glosses), ['g2'])
   // restored to the original, it stands on its words again
   const back = remark({ ...n2, shown: null })
   assert.equal(orig.slice(back.marks[0].start, back.marks[0].end), 'Emergent vs managed')
+  // a record an earlier version kept with the explain after the text: read again, it stands inside the citation
+  const kept = { ...rec, marks: [...linkMarks(text), { kind: 'gloss', start: text.length, end: text.length, gloss: 'g1', loose: true, inLink: true }] }
+  const again = recordFor(kept, { row: 'r1', session: 's1', text })
+  assert.deepEqual(again.marks.filter(m => m.kind === 'gloss').map(m => text.slice(m.start, m.end)), ['claimer'])
+  assert.equal(recordFor(rec, { row: 'r1', session: 's1', text }), rec)
 })
 
 test('a model call that gave no answer is said as what happened, never as its code alone', async () => {
@@ -372,19 +379,24 @@ test('a citation of code is a mark in the forms Claude writes it: a line ref, a 
   assert.deepEqual(linksIn('Hidden by [the check](app/shell.ts:1484).').map(l => l.ref), ['app/shell.ts#L1484'])
 })
 
-test('an explain finds its term written with backticks, or in part as code, and one that stands only in a citation is drawn after the text', () => {
+test('an explain finds its term written with backticks, or in part as code, and one that stands only in a citation is drawn inside it', () => {
   const text = 'The `AbovePrompt` hook calls `barEl()`, and [the narrow-bar rule in fitBar](app/host.js#L219) drops the counts.'
   assert.equal(at(text, findTerm(text, '`barEl()`')), '`barEl()`')
   assert.equal(at(text, findTerm(text, 'AbovePrompt hook')), '`AbovePrompt` hook')
   assert.equal(findTerm(text, 'Above'), null)
   assert.equal(findTerm(text, 'fitBar'), null)
-  assert.equal(inLinkWords(text, 'fitBar'), true)
+  assert.equal(at(text, findInLink(text, 'fitBar')), 'fitBar')
+  assert.equal(findInLink(text, 'barEl()'), null)
   const g = glossesOf([{ term: '`barEl()`', body: 'b' }, { term: 'fitBar', body: 'f' }, { term: 'nowhere', body: 'n' }], text)
   assert.deepEqual(Object.values(g).map(x => x.term), ['barEl()', 'fitBar'])
   const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: g })
   const runs = inline(text, 0, text.length, rec.marks)
-  assert.deepEqual(runs.filter(r => r.mark !== undefined).map(r => [r.s, rec.marks[r.mark].kind]), [['barEl()', 'gloss'], ['the narrow-bar rule in fitBar', 'cite']])
-  assert.deepEqual(looseOf(rec.marks).map(m => [rec.glosses[m.gloss].term, m.inLink]), [['fitBar', true]])
+  assert.deepEqual(runs.filter(r => r.mark !== undefined).map(r => [r.s, rec.marks[r.mark].kind]), [['barEl()', 'gloss'], ['the narrow-bar rule in ', 'cite'], ['fitBar', 'gloss']])
+  // ] steps through them in reading order: the citation, then the explain inside it
+  assert.deepEqual(rec.marks.map(m => m.kind), ['gloss', 'cite', 'gloss'])
+  // the line wraps between the citation's words and the explain, never inside either
+  const lines = wrapRuns(runs, 40)
+  assert.ok(lines.every(l => l.filter(r => r.mark !== undefined).every(r => runs.some(x => x.mark === r.mark && x.s.includes(r.s)))))
 })
 
 test('a citation whose words name nothing shows the place it opens; a whole file opens at its top, with no line about rows', async () => {
@@ -415,4 +427,56 @@ test('a heads-up is placed on its words and opens a card of its title, its point
   const drawn = gridText(draw(card.parts[0]))
   assert.match(drawn, /March is half a month\n• refunds\.csv ends on Mar 14\.\n• Per day they fell 12%\.\n→ Quote the per-day drop\./)
   assert.deepEqual(card.links.map(l => l.ref), ['refunds.csv', 'r4#month=03@per_day'])
+})
+
+test('a link is drawn as a hyperlink only where Claude Code surely draws one, so its address never shows beside its words', () => {
+  assert.equal(drawsHyperlinks({}), false)
+  assert.equal(drawsHyperlinks({ TERM: 'xterm-256color' }), false)
+  assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'tmux', TERM_PROGRAM_VERSION: '3.4' }), true)
+  assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'tmux', TERM_PROGRAM_VERSION: '3.3a' }), false)
+  assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'iTerm.app', TERM_PROGRAM_VERSION: '3.5.0' }), true)
+  assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'vscode', TERM_PROGRAM_VERSION: '1.71.0' }), false)
+  assert.equal(drawsHyperlinks({ FORCE_HYPERLINK: '1' }), true)
+  assert.equal(drawsHyperlinks({ FORCE_HYPERLINK: '0', TERM_PROGRAM: 'ghostty' }), false)
+  assert.equal(drawsHyperlinks({ WT_SESSION: 'x', TMUX: '/tmp/s,1,0', TERM_PROGRAM: 'tmux', TERM_PROGRAM_VERSION: '3.2' }), false)
+  assert.equal(drawsHyperlinks({ VTE_VERSION: '7200' }), true)
+  assert.equal(drawsHyperlinks({ VTE_VERSION: '0.50.0' }), false)
+})
+
+test('what the person engaged with, in one short row for Claude that says what it is for: an explainer, an important detail, a citation, a question to a side thread', () => {
+  const message = 'The page stays blank until `hydrate()` runs, as [app/main.ts](app/main.ts#L18) shows.'
+  const g = openedRow({ row: 'r1', i: 1, kind: 'gloss', label: 'hydrate()', gloss: { term: 'hydrate()' } }, message)
+  assert.equal(g.text, 'opened the explainer of "hydrate()" in your message that begins "The page stays blank until hydrate() runs, as app/main.ts…"')
+  const h = openedRow({ row: 'r1', i: 2, kind: 'gloss', label: 'blank', gloss: { kind: 'heads', term: 'stays blank', title: 'Only on a cold load' } }, message)
+  assert.match(h.text, /^opened the important detail "Only on a cold load" on "stays blank" in your message/)
+  const c = openedRow({ row: 'r1', i: 0, kind: 'cite', ref: 'app/main.ts#L18', label: 'app/main.ts' }, message)
+  assert.match(c.text, /^opened the citation "app\/main.ts" \(app\/main.ts#L18\) in your message/)
+  // a citation inside a card names no message
+  assert.equal(openedRow({ kind: 'cite', ref: 'q2#n', label: '2,994' }).text, 'opened the citation "2,994" (q2#n)')
+  // the same open twice is one key
+  assert.equal(openedRow({ row: 'r1', i: 1, kind: 'gloss', label: 'hydrate()', gloss: { term: 'hydrate()' } }, 'other words').key, g.key)
+  const a = askedRow({ text: 'why does it wait on the session?', scope: { row: 'r1', mark: { kind: 'gloss', term: 'hydrate()' } } })
+  assert.equal(a.text, 'asked a side thread about "hydrate()", which a side agent answers there: "why does it wait on the session?"')
+  // the row: what it is for, then each thing, so Claude reads it as context with the analyst's prompt
+  assert.equal(engagedText([g.text, a.text]), [
+    'What the analyst did on screen since your last reply. It shows what they know and what they care about; none of it asks anything of you.',
+    '- They opened the explainer of "hydrate()" in your message that begins "The page stays blank until hydrate() runs, as app/main.ts…".',
+    '- They asked a side thread about "hydrate()", which a side agent answers there: "why does it wait on the session?".',
+  ].join('\n'))
+  assert.match(askedRow({ text: 'which week?', scope: { object: 'saves', region: 'bar-3', label: 'week 3' }, card: { id: 'saves', title: 'Saves per week' } }).text, /about the card "Saves per week" \(week 3\)/)
+  assert.equal(openedRow(null), null)
+  assert.equal(askedRow({ text: '  ' }), null)
+})
+
+test('a citation\'s words keep what a code span holds: underscores and stars inside it, and an underscore inside a word', () => {
+  const text = 'It [reads `src/add_csv_export.py` first](src/add_csv_export.py#L12), then **writes** _once_ to snake_case_name.'
+  const marks = linkMarks(text)
+  assert.equal(marks[0].label, 'reads src/add_csv_export.py first')
+  assert.deepEqual(inline(text, 0, text.length, marks).filter(r => r.mark !== undefined).map(r => r.s), ['reads src/add_csv_export.py first'])
+  // an explain inside those words keeps them too
+  const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: { g1: { term: 'add_csv_export.py' } } })
+  assert.deepEqual(inline(text, 0, text.length, rec.marks).filter(r => r.mark !== undefined).map(r => r.s), ['reads src/', 'add_csv_export.py', ' first'])
+  assert.equal(plainWords('**bold** and _it_ and `a_b*c` and a_b and "*"'), 'bold and it and a_b*c and a_b and "*"')
+  assert.equal(lineOf('# The `add_csv` step\n> reads [the file](a.py#L2)'), 'The add_csv step reads the file')
+  assert.equal(citeWords('`snake_case`', 'a.py#L3'), 'snake_case')
 })

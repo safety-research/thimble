@@ -1,6 +1,6 @@
 // settings.js: thimble's features, a program on the card runtime (draw/kit.js) in the side panel. /thimble-settings,
 // or a click on `thimble` at the bar's left, opens it. The list is flat: one row per feature, named by what the person
-// gets (settings/features.mjs), with one line on what that is, and a small Experimental group at the end. ↵ or a click
+// gets (settings/features.mjs), with one line on what that is, under a heading where a feature has a group. ↵ or a click
 // turns the feature selected on or off; the host changes it through Claude Code (settings/term.ts), and Claude Code
 // loads the plugin again with it. Above the list the host draws the bar as these features leave it (shell.tsx
 // barPreviewEl), so a feature turned off shows what leaves the bar.

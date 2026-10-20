@@ -306,7 +306,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   await ui.unmount()
 })
 
-test('a quote opens its span under a link to its file, drawn as Claude Code draws a file link; c shows the record as the file holds it in the same panel, and a letter typed straight after c is a word', async ($, on) => {
+test('a quote opens its span under its file\'s place, never an address; c shows the record as the file holds it in the same panel, and a letter typed straight after c is a word', async ($, on) => {
   const w = world(on)
   w.files[`${ROOT}/revisions.jsonl`] = '{}\n'
   const clock = mock.clock(on)
@@ -321,8 +321,10 @@ test('a quote opens its span under a link to its file, drawn as Claude Code draw
     const band = await $.ui.render(BAND)
     // the cited row in full, the quoted words in their field, the row before it stepped back
     expect(textOf(band)).toContain('27 an earlier save / 28 ▌ change_summary: the totals do not match')
-    // the file, as a link Claude Code's own Markdown draws: an OSC 8 hyperlink to the file, its line as the fragment
-    expect(markdowns(band)).toContain('[revisions.jsonl:28](file:///data/revisions.jsonl#L28)')
+    // the file's place in its own words, a press: this terminal names no hyperlinks, so no address shows beside it
+    expect(buttons(band).map(b => b.props.label)).toContain('open revisions.jsonl:28')
+    expect(textOf(band)).toContain('revisions.jsonl:28')
+    expect(JSON.stringify(band)).not.toContain('file://')
     expect(await hintOf($)).toContain('thimble  ↵ e expand · c raw · a ask · 0 close · ] next')
     // c: the record as the file holds it, in place of the span, in the same panel
     expect(await press($, clock, edit('c'))).toEqual({ text: '', cursor: 0 })
@@ -347,6 +349,35 @@ test('a quote opens its span under a link to its file, drawn as Claude Code draw
     await press($, clock, edit('c'))
     expect(await press($, clock, edit('a'))).toEqual({ text: 'ca', cursor: 2 })
     expect(textOf(await $.ui.render(BAND))).not.toContain('as the file holds it')
+  } finally {
+    realCards = false
+  }
+})
+
+test('in tmux 3.4 the file\'s place is an OSC 8 link to the file; a click on it opens the cited lines in the side panel, and the tray gives way', async ($, on) => {
+  const w = world(on, DRAWING, { TERM_PROGRAM: 'tmux', TERM_PROGRAM_VERSION: '3.4' })
+  w.files[`${ROOT}/revisions.jsonl`] = '{}\n'
+  const opened: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
+  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Cite', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] : [] }))
+  on('ui.focus', () => ({}))
+  const clock = mock.clock(on)
+  realCards = true
+  try {
+    await markedTurn($, on, clock)
+    await press($, clock, edit(']'))
+    await press($, clock, edit(']'))
+    await $.ui.render(BAND)
+    await clock.settle()
+    const href = 'file:///data/revisions.jsonl#L28'
+    expect(markdowns(await $.ui.render(BAND))).toContain(`[revisions.jsonl:28](${href})`)
+    // a plain click on it is thimble's: the cited lines in the side panel, as the mark's thread
+    const ui = await $.ui.mount(BAND)
+    await ui.press({ key: 'tray-file', link: { href } })
+    await clock.settle()
+    expect(opened.some(x => x.id === 'object' && /Cite · this one/.test(String(x.title)))).toBe(true)
+    expect(textOf(await $.ui.render(BAND))).not.toContain('╭─ this one')
+    await ui.unmount()
   } finally {
     realCards = false
   }
@@ -637,6 +668,33 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   await press($, clock, edit('s'))
   // s opens the squeeze chips under it, in place of its verb row
   expect(textOf(await $.ui.render(RESUMED))).toContain('Interpretation')
+})
+
+test('a record an earlier version kept with an explain after its text: the explain stands inside the citation, and a press on it opens it', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  const dir = `${ROOT}/thimble/messages/s-1`
+  const TEXT = 'Most requests carry only an action, such as [browse-bare](events.jsonl#L1). The other [30](q1#day=2026-06-18@n) keep more.'
+  const at = (s: string) => ({ start: TEXT.indexOf(s), end: TEXT.indexOf(s) + s.length })
+  const cite1 = { kind: 'cite', ...at('[browse-bare](events.jsonl#L1)'), ref: 'events.jsonl#L1', label: 'browse-bare' }
+  const cite2 = { kind: 'cite', ...at('[30](q1#day=2026-06-18@n)'), ref: 'q1#day=2026-06-18@n', label: '30' }
+  const rec = { v: 1, row: AT, session: 's-1', text: TEXT, shown: null, marks: [cite1, cite2, { kind: 'gloss', start: TEXT.length, end: TEXT.length, gloss: 'g1', loose: true, inLink: true }], glosses: { g1: { term: 'browse-bare', title: 'browse-bare', body: 'A request that only reads a page.' } }, verbs: {}, objects: [], final: true }
+  w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'requests?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
+  w.files[`${dir}/${AT}.json`] = JSON.stringify(rec)
+  const ui = await $.ui.mount({ ...(MOUNT as object), props: { text: TEXT, isFirstOfReply: true } } as never)
+  await clock.settle()
+  const tree = await ui.drawn()
+  expect(textOf(tree)).not.toContain('explain:')
+  const g = buttons(tree).find(b => b.props.label === 'explain browse-bare')!
+  expect(g).toBeDefined()
+  await ui.press({ key: g.props.key })
+  await clock.settle()
+  // the tray opens on the explainer pressed, not on the citation after it
+  const band = textOf(await $.ui.render(BAND))
+  expect(band).toContain('╭─ browse-bare ─')
+  expect(band).toContain(' explain ─')
+  expect(band).not.toContain('╭─ 30 ')
+  await ui.unmount()
 })
 
 test('a failure reads as plain words, never JSON; a refusal that needs nothing from the person says nothing', () => {

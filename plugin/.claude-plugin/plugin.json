@@ -48,12 +48,6 @@
       "title": "Labels and coverage on the bar",
       "description": "The bar shows how much of the data Claude read (r) and how many labels there are (l). No model call: thimble counts the files after each turn.",
       "default": true
-    },
-    "notes": {
-      "type": "boolean",
-      "title": "Notes to Claude (experimental)",
-      "description": "Claude gets up to two notes on its last answer with your next prompt. You do not see them. A small part of the call after each reply.",
-      "default": false
     }
   }
 }

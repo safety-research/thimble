@@ -10,9 +10,10 @@
 //               with v's proposals in verbs.v.proposals
 //     choice    the proposal the person picked, in words ('' for none)
 //     guide     the card guide's file
+import { lineOf } from './message.js'
 
 const firstWords = s => {
-  const t = String(s || '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
+  const t = lineOf(s)
   return t.length > 80 ? t.slice(0, 79) + '…' : t
 }
 

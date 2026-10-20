@@ -348,7 +348,7 @@ test('a correction that heads a list keeps it: the request nests the list under 
   expect(record(w).shown).toBe('5,242 link edits, not 5,181; [6,543 saves](q1#day=2026-06-18@n) on June 18.\n\n**The numbers I did not cite before:**\n- 93 of the 94 idle editors were bots.')
 })
 
-test('an explain mark stays on a squeezed text: the request names its term, a term said in another form keeps its mark, and a term left out shows after the text', async ($, on) => {
+test('an explain mark stays on a squeezed text: the request names its term, a term said in another form keeps its mark, and a term left out has none until its words show again', async ($, on) => {
   const FORM = 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18; the fixture scoped them.'
   const GONE = 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18.'
   const w = world(on, [`<text>\n${FORM}\n</text>`, `<text>\n${GONE}\n</text>`])
@@ -367,24 +367,18 @@ test('an explain mark stays on a squeezed text: the request names its term, a te
   let rec = record(w)
   const g = rec.marks.find((m: Any) => m.kind === 'gloss')
   expect(FORM.slice(g.start, g.end)).toBe('fixture scoped')
-  // the rewrite one level shorter leaves the term out: its explain stays, drawn after the text
+  // the rewrite one level shorter leaves the term out: no explain mark while it shows, and nothing drawn after the
+  // text; the record keeps the explain for a version that holds its words
   await press($, clock, edit('['))
   await clock.settle()
   await writtenIn(clock)
   rec = record(w)
   expect(rec.shown).toBe(GONE)
-  expect(rec.marks.filter((m: Any) => m.kind === 'gloss').map((m: Any) => [m.loose, m.start, m.gloss])).toEqual([[true, GONE.length, 'g1']])
+  expect(rec.marks.filter((m: Any) => m.kind === 'gloss')).toEqual([])
+  expect(Object.keys(rec.glosses)).toEqual(['g1'])
   const ui = await $.ui.mount(view(TEXT))
-  expect(textOf(await ui.drawn())).toContain('explain: fixture scope (in the full answer)')
+  expect(textOf(await ui.drawn())).not.toContain('explain:')
   await ui.unmount()
-  // with the chips closed, ] reaches it after the citation and opens its explain card
-  await press($, clock, edit('s'))
-  await press($, clock, edit(']'))
-  await press($, clock, edit(']'))
-  await clock.settle()
-  const band = await hintOf($)
-  expect(band).toContain('─ fixture scope ─')
-  expect(band).toContain('─ explain ─')
 })
 
 test('a rewrite that fails says what failed in plain words and which key tries again', async ($, on) => {

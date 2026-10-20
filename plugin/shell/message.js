@@ -4,15 +4,15 @@
 // A mark is a span of the shown text (the record's `shown`, else its `text`: Claude's markdown as written):
 //   cite   {kind: 'cite', start, end, ref, label}       a link to a kernel ref, `[6,543](r1#day=2026-06-18@n)`
 //   spark  {kind: 'spark', start, end, ref, values}     a link whose words are `~`, `[~](r4@n)`: a series drawn inline
-//   gloss  {kind: 'gloss', start, end, gloss}          a term the observer explains, found by its words
-//   loose  {kind: 'gloss', start, end, gloss, loose}   an explain whose term a rewrite left out: start = end = the
-//                                                       text's length; drawn after the text, so it stays reachable
+//   gloss  {kind: 'gloss', start, end, gloss}          a term the observer explains, found by its words: in the text,
+//                                                       or in the words of a link, where it is drawn inside the link
 // `start` and `end` are string offsets into the shown markdown and cover the mark as written: a cite's or a spark's whole
-// link, a gloss's words. Marks are in text order and never overlap.
+// link, a gloss's words. Marks are in text order. They never overlap, except a gloss on words inside a link's words.
 //
 //   linkMarks(text)                  -> the cites and sparks Claude wrote
 //   placeMarks(text, glosses, prev)  -> every mark of the text: its links, then each gloss's term where it first stands
-//                                       outside a link or code; a spark keeps the values `prev` resolved for its ref
+//                                       outside a link or code, else in a link's words; a spark keeps the values `prev`
+//                                       resolved for its ref
 //   anchorTerm(text, term, taken)    -> where a term stands in a text that may say it in another form: its words, then
 //                                       the same words inflected ("claimed" → "claiming"), then its longest word
 //   seriesRef(ref)                   -> {query, col} for a spark's ref (r4@n, r4#n), or null
@@ -121,11 +121,35 @@ const VAGUE = /^(here|there|this|that|it|link|source|see|see here|see this|this 
 /** A citation's words, without its markdown; one whose words name nothing (a pronoun, an arrow) is named by its
  *  place, as editors write it (`plugin/hooks/path.ts:12`). */
 function labelOf(words, ref) {
-  const w = String(words).replace(/[*_`]/g, '').trim()
+  const w = plainWords(words).trim()
   return /[\p{L}\p{N}]/u.test(w) && !VAGUE.test(w) ? w : String(ref).replace(/#L(\d+)(?:-L?(\d+))?.*$/, (_, a, b) => `:${a}${b && b !== a ? `-${b}` : ''}`).replace(/^obj:/, '')
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Markdown's words as a reader sees them: a code span's text as written (underscores and stars kept, its backticks
+ * gone), emphasis markers dropped where they wrap words (`**a**`, `_a_`), and an underscore or a star inside or beside
+ * a word that is no emphasis kept (`add_csv_export`, `"*"`).
+ */
+export function plainWords(md) {
+  const s = String(md ?? '')
+  const emphasisOff = t => t
+    .replace(/(\*{1,3})(?=\S)([^*\n]*?\S)\1/g, '$2')
+    .replace(/(^|[^\p{L}\p{N}_])(_{1,3})(?=\S)([^_\n]*?\S)\2(?![\p{L}\p{N}_])/gu, '$1$3')
+    .replace(/`+/g, '')
+  let out = ''
+  let last = 0
+  for (const m of s.matchAll(/(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g)) {
+    out += emphasisOff(s.slice(last, m.index)) + m[2]
+    last = m.index + m[0].length
+  }
+  return out + emphasisOff(s.slice(last))
+}
+
+/** Markdown as one line of plain words: each link as its words, a heading's or a quote's marker dropped, then
+ *  plainWords, the spaces made one. */
+export const lineOf = md => plainWords(String(md ?? '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/^[ \t]*(#{1,6}[ \t]+|>[ \t]?)/gm, '')).replace(/\s+/g, ' ').trim()
 
 /** A gloss's term as the observer wrote it, without the backticks of a code span (`hydrate()` is hydrate()). */
 const termOf = term => String(term || '').replace(/`/g, '').trim()
@@ -163,13 +187,33 @@ export function findTerm(text, term, taken = []) {
   return null
 }
 
-/** Whether a gloss's term stands in the words of a link (a citation), where no explain can be drawn on it. */
-export function inLinkWords(text, term) {
+/**
+ * Where a gloss's term stands in the words of a link (a citation's words, `[the claimer](q19#n)`), the exact case first:
+ * {start, end} in the text, inside the link's brackets. The explain is drawn there, inside the link. Null when no link's
+ * words hold it, or only where `taken` (another explain) already stands.
+ */
+export function findInLink(text, term, taken = []) {
   const t = termOf(term)
-  if (!t || t.length > 120) return false
-  const re = new RegExp('(?<![\\p{L}\\p{N}_])' + t.split(/\s+/).map(escapeRe).join('[`\\s]+') + '(?![\\p{L}\\p{N}_])', 'iu')
-  return linkSpans(text).some(m => re.test(String(m[1]).replace(/`/g, '')))
+  if (!t || t.length > 120) return null
+  const s = String(text || '')
+  const code = codeRanges(s)
+  const blocked = taken.filter(m => m.kind === 'gloss').map(m => [m.start, m.end])
+  const body = t.split(/\s+/).map(w => '`?' + escapeRe(w) + '`?').join('[`\\s]+')
+  for (const flags of ['gu', 'giu']) {
+    const re = new RegExp('(?<![\\p{L}\\p{N}_`])' + body + '(?![\\p{L}\\p{N}_`])', flags)
+    for (const m of linkSpans(s)) {
+      const from = m.index + 1
+      if (within(code, m.index, m.index + m[0].length)) continue
+      for (const hit of String(m[1]).matchAll(re)) {
+        const a = from + hit.index
+        const b = a + hit[0].length
+        if (!inside(blocked, a, b)) return { start: a, end: b }
+      }
+    }
+  }
+  return null
 }
+
 
 // words that never carry a term on their own: a term's other words are tried before these
 const STOP = new Set('a an and are as at be by for from in into is it its of on or per than that the their them then this to vs versus via was were with without'.split(' '))
@@ -231,11 +275,11 @@ export function anchorTerm(text, term, taken = []) {
 
 /**
  * Every mark of the text: the links Claude wrote, then each gloss placed by its term. `glosses` is the record's
- * `{id: {term, ...}}`. A rewrite (`original`: the text it was written from) may say a term in another form, so the term
- * is found again in it (anchorTerm); one the rewrite left out entirely, which the original holds, stays as a loose mark
- * at the end of the text, drawn after it, so the explain is never lost. With no `original`, a gloss whose term is not in
- * the text gets no mark. `prev` (the marks before a change of the text) gives each spark the values already resolved for
- * its ref.
+ * `{id: {term, ...}}`. A term stands where it first stands outside links and code (findTerm), else in a link's words
+ * (findInLink), where its explain is drawn inside the link. A rewrite (`original`: the text it was written from) may say
+ * a term in another form, so the term is found again in it (anchorTerm). A gloss whose term the text does not hold gets
+ * no mark: the record keeps it, and it stands on its words again when a text that holds them shows (the original after
+ * a squeeze). `prev` (the marks before a change of the text) gives each spark the values already resolved for its ref.
  */
 export function placeMarks(text, glosses = {}, prev = [], { original = null } = {}) {
   const marks = linkMarks(text)
@@ -244,27 +288,15 @@ export function placeMarks(text, glosses = {}, prev = [], { original = null } = 
     const old = (prev || []).find(p => p.kind === 'spark' && p.ref === m.ref && Array.isArray(p.values))
     if (old) m.values = old.values
   }
-  const loose = []
   for (const [id, g] of Object.entries(glosses || {})) {
     const term = g && g.term
-    const end = String(text || '').length
-    if (original == null) {
-      const at = findTerm(text, term, marks)
-      if (at) marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id })
-      else if (inLinkWords(text, term)) loose.push({ kind: 'gloss', start: end, end, gloss: id, loose: true, inLink: true })
-      continue
-    }
-    const at = anchorTerm(text, term, marks)
-    if (at) marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id, ...(at.how !== 'term' ? { anchor: at.how } : {}) })
-    else if (inLinkWords(text, term)) loose.push({ kind: 'gloss', start: end, end, gloss: id, loose: true, inLink: true })
-    else if (findTerm(original, term) || inLinkWords(original, term)) loose.push({ kind: 'gloss', start: end, end, gloss: id, loose: true })
+    const at = original == null ? findTerm(text, term, marks) : anchorTerm(text, term, marks)
+    if (at) { marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id, ...(at.how && at.how !== 'term' ? { anchor: at.how } : {}) }); continue }
+    const inLink = findInLink(text, term, marks)
+    if (inLink) marks.push({ kind: 'gloss', start: inLink.start, end: inLink.end, gloss: id })
   }
-  return [...marks.sort((a, b) => a.start - b.start), ...loose]
+  return marks.sort((a, b) => a.start - b.start)
 }
-
-/** The marks drawn in the text (a loose mark is drawn after it), and the loose ones. */
-export const inText = marks => (marks || []).filter(m => !m.loose)
-export const looseOf = marks => (marks || []).map((m, i) => ({ ...m, i })).filter(m => m.loose)
 
 // ------------------------------------------------------------------------------------------------ the sparkline
 
@@ -365,14 +397,16 @@ export function blocks(text) {
 }
 
 /** The marks that lie inside [from, to). */
-export const marksIn = (marks, from, to) => (marks || []).map((m, i) => ({ ...m, i })).filter(m => !m.loose && m.start >= from && m.end <= to)
+export const marksIn = (marks, from, to) => (marks || []).map((m, i) => ({ ...m, i })).filter(m => m.start >= from && m.end <= to)
 
 // ------------------------------------------------------------------------------------------------ inline runs
 
 /**
- * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, mark?}` where `mark` is the mark's index in
- * the record's marks. Bold, italic and inline code as Claude Code draws them; a link that is no mark reads as its words
- * then its target, as Claude Code draws one. (A paragraph's lines are blocks of their own, so a line break stays one.)
+ * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, mark?, within?}` where `mark` is the mark's
+ * index in the record's marks. Bold, italic and inline code as Claude Code draws them; a link that is no mark reads as
+ * its words then its target, as Claude Code draws one. An explain on words inside a link's words is a run of its own
+ * between the link's runs, `within` the link's mark (or `link`, for a link that is no mark). (A paragraph's lines are
+ * blocks of their own, so a line break stays one.)
  */
 export function inline(text, from, to, marks = []) {
   const s = String(text || '')
@@ -386,9 +420,27 @@ export function inline(text, from, to, marks = []) {
     if (last && last.mark === undefined && r.mark === undefined && !!last.b === !!r.b && !!last.it === !!r.it && !!last.code === !!r.code && !!last.link === !!r.link) last.s += r.s
     else runs.push(r)
   }
+  // a link's words with the explains that stand inside them: the words before, between and after each one as the link's
+  // runs (`own`), each explain a run of its own
+  const linkWords = (a, b, own, extra = {}) => {
+    const inner = mine.filter(m => m.kind === 'gloss' && m.start >= a && m.end <= b)
+    if (!inner.length) return false
+    let at = a
+    for (const g of inner) {
+      push(plainWords(s.slice(at, g.start)), own)
+      push(plainWords(s.slice(g.start, g.end)).replace(/\s+/g, ' '), { mark: g.i, ...extra })
+      at = g.end
+    }
+    push(plainWords(s.slice(at, b)), own)
+    return true
+  }
   let i = from
   while (i < to) {
     const mk = mine.find(m => m.start === i)
+    if (mk && mk.kind === 'cite' && s[mk.start] === '[') {
+      const close = s.indexOf('](', mk.start)
+      if (close > mk.start && close < mk.end && linkWords(mk.start + 1, close, { mark: mk.i }, { within: mk.i })) { i = mk.end; continue }
+    }
     if (mk) {
       const raw = s.slice(mk.start, mk.end)
       const asCode = mk.kind === 'gloss' && /^`[^`]*`$/.test(raw)
@@ -417,7 +469,12 @@ export function inline(text, from, to, marks = []) {
     if (c === '[') {
       LINK.lastIndex = 0
       const m = /^\[([^\]\n]+)\]\(([^)\n]+)\)/.exec(s.slice(i, to))
-      if (m) { push(m[1], { link: true }); if (!/^(https?|file):/i.test(m[2])) push(` (${m[2]})`, { dim: true }); i += m[0].length; continue }
+      if (m) {
+        if (!linkWords(i + 1, i + 1 + m[1].length, { link: true }, { link: true })) push(m[1], { link: true })
+        if (!/^(https?|file):/i.test(m[2])) push(` (${m[2]})`, { dim: true })
+        i += m[0].length
+        continue
+      }
     }
     push(c)
     i++
@@ -542,16 +599,18 @@ export function remark(rec) {
   return { ...rec, marks: placeMarks(shownOf(rec), rec.glosses || {}, rec.marks || [], { original: typeof rec.shown === 'string' ? rec.text : null }) }
 }
 
-/** The record for a message whose words are `text`: the kept record when its words are the same, else a new one that
- *  keeps the kept one's glosses, verbs and objects (a summary row, a resumed session). */
+/** The record for a message whose words are `text`: the kept record when its words are the same (its marks placed
+ *  again when an earlier version left an explain after the text, so it stands on its words), else a new one that keeps
+ *  the kept one's glosses, verbs and objects (a summary row, a resumed session). */
 export function recordFor(kept, { row, session, text, at }) {
-  if (kept && kept.text === String(text ?? '')) return kept
+  if (kept && kept.text === String(text ?? '')) return (kept.marks || []).some(m => m && m.loose) ? remark(kept) : kept
   const rec = newRecord({ row, session, text, at: at || kept?.at })
   if (!kept) return rec
   return remark({ ...rec, ...(kept.uuid ? { uuid: kept.uuid } : {}), glosses: kept.glosses || {}, verbs: kept.verbs || {}, objects: kept.objects || [], final: !!kept.final })
 }
 
 const VERB_KEYS = ['v', 's']
+// a string's words on one line, cut to `n` characters only where a caller gives `n`
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 
 /**
@@ -593,9 +652,9 @@ export function verbsOf(out) {
 }
 
 /**
- * The observer's glosses as the record keeps them, `{g1: {term, title, body, here, program, refs}}`: at most three,
- * each a term found in the text (a term the text does not hold is dropped, so no gloss points at nothing), none whose
- * term is in `skip` (terms the person already saw explained).
+ * The observer's glosses as the record keeps them, `{g1: {term, title, body, here, program, refs}}`: each a term found
+ * in the text or in a link's words (a term the text does not hold is dropped, so no gloss points at nothing), none whose
+ * term is in `skip` (terms already explained in this session).
  */
 export function glossesOf(list, text, skip = []) {
   const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
@@ -604,12 +663,11 @@ export function glossesOf(list, text, skip = []) {
   let n = 0
   for (const g of Array.isArray(list) ? list : []) {
     if (!g || typeof g !== 'object') continue
-    const term = str(termOf(g.term), 80)
-    if (!term || seen.has(norm(term)) || !(findTerm(text, term) || inLinkWords(text, term))) continue
+    const term = str(termOf(g.term))
+    if (!term || seen.has(norm(term)) || !(findTerm(text, term) || findInLink(text, term))) continue
     seen.add(norm(term))
-    const refs = (Array.isArray(g.refs) ? g.refs : []).filter(r => typeof r === 'string' && isRef(r)).slice(0, 6)
-    out[`g${++n}`] = { term, title: str(g.title, 80) || term, body: str(g.body, 500), here: str(g.here, 400), program: typeof g.program === 'string' ? g.program.slice(0, 3000) : '', refs }
-    if (n >= 3) break
+    const refs = (Array.isArray(g.refs) ? g.refs : []).filter(r => typeof r === 'string' && isRef(r))
+    out[`g${++n}`] = { term, title: str(g.title) || term, body: str(g.body), here: str(g.here), program: typeof g.program === 'string' ? g.program : '', refs }
   }
   return out
 }
@@ -620,11 +678,11 @@ export function glossesOf(list, text, skip = []) {
  */
 export function headsOf(item, text) {
   if (!item || typeof item !== 'object') return {}
-  const term = str(termOf(item.term), 80)
-  const bullets = (Array.isArray(item.bullets) ? item.bullets : []).map(b => str(b, 400)).filter(Boolean).slice(0, 4)
-  if (!term || !bullets.length || !(findTerm(text, term) || inLinkWords(text, term))) return {}
-  const refs = [...new Set(bullets.flatMap(b => [...b.matchAll(/\]\(([^)\n]+)\)/g)].map(m => citeRef(m[1])).filter(Boolean)))].slice(0, 6)
-  return { h1: { kind: 'heads', term, title: str(item.title, 80) || term, bullets, todo: str(item.todo, 240), refs } }
+  const term = str(termOf(item.term))
+  const bullets = (Array.isArray(item.bullets) ? item.bullets : []).map(b => str(b)).filter(Boolean)
+  if (!term || !bullets.length || !(findTerm(text, term) || findInLink(text, term))) return {}
+  const refs = [...new Set(bullets.flatMap(b => [...b.matchAll(/\]\(([^)\n]+)\)/g)].map(m => citeRef(m[1])).filter(Boolean)))]
+  return { h1: { kind: 'heads', term, title: str(item.title) || term, bullets, todo: str(item.todo), refs } }
 }
 
 /** The record with what the observer gave for it: its lit verbs and its glosses, the marks placed again. */
