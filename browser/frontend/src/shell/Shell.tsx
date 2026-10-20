@@ -29,6 +29,9 @@ import { refFromUrl, teleport } from '../lib/teleport'
 import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
+import { FeatureOff } from './FeatureOff'
+import { LensSidebar, type SideTab } from './LensSidebar'
+import { loadFeatures, useFeature, type FeatureName } from '../features'
 import { tabSignals, useTabDots, writing } from './dots'
 import { DemoLine } from './DemoLine'
 import { NewVersion } from './NewVersion'
@@ -62,10 +65,11 @@ import { TopBar } from './TopBar'
 import { TourHost } from './TourHost'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
-const BASE: { id: Tab; label: string; icon: IconName }[] = [
+// the surfaces' tabs, each with the feature it belongs to (features.ts): a tab whose feature is off is not shown
+const BASE: { id: Tab; label: string; icon: IconName; feature?: FeatureName }[] = [
   { id: 'files', label: 'Files', icon: 'files' },
-  { id: 'canvas', label: 'Canvas', icon: 'canvas' },
-  { id: 'report', label: 'Report', icon: 'report' },
+  { id: 'canvas', label: 'Canvas', icon: 'canvas', feature: 'cards' },
+  { id: 'report', label: 'Report', icon: 'report', feature: 'report' },
 ]
 interface Layout {
   chatWidth: number
@@ -240,6 +244,15 @@ export function Shell({ ws }: { ws: string }) {
     }
   }, [ws, firstOpen])
   const demo = useDemo()
+  // which features are on (features.ts): read once here, and again when Settings changes them
+  useEffect(() => void loadFeatures(ws), [ws])
+  const cardsOn = useFeature('cards')
+  const reportOn = useFeature('report')
+  const featureOn = (t: { feature?: FeatureName }) => !t.feature || (t.feature === 'cards' ? cardsOn : reportOn)
+  // the Labels and Checks sidebar (LensSidebar.tsx): its tab while open; it pushes the panes, or the chat when it is the
+  // only thing open, rather than covering them
+  const [side, setSide] = useState<SideTab | null>(null)
+  useEffect(() => bus.on('openLens', (e) => setSide(e.tab)), [])
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
   const paneX = 12 + (layout.chatOpen ? liveWidth + 12 : 40)
@@ -281,8 +294,8 @@ export function Shell({ ws }: { ws: string }) {
   const surfaces = useMemo<SurfaceSpec[]>(
     () => [
       { id: 'files', label: 'Files', icon: 'files', panel: 'files', keep: true, render: (v, f) => <FilesTab ws={ws} active={v} focused={f} /> },
-      { id: 'canvas', label: 'Canvas', icon: 'canvas', panel: 'canvas', keep: true, render: (v, f) => <Canvas ws={ws} active={v} focused={f} /> },
-      { id: 'report', label: 'Report', icon: 'report', panel: 'report', keep: true, render: (v) => <ReportTab ws={ws} active={v} /> },
+      { id: 'canvas', label: 'Canvas', icon: 'canvas', panel: 'canvas', keep: true, render: (v, f) => (cardsOn ? <Canvas ws={ws} active={v} focused={f} /> : <FeatureOff title="Cards" />) },
+      { id: 'report', label: 'Report', icon: 'report', panel: 'report', keep: true, render: (v) => (reportOn ? <ReportTab ws={ws} active={v} /> : <FeatureOff title="Report" />) },
       ...views.map<SurfaceSpec>((view) => ({
         id: viewSurface(view.slug),
         label: view.name,
@@ -292,7 +305,7 @@ export function Shell({ ws }: { ws: string }) {
         render: (v) => <ViewSurface ws={ws} view={view} active={v} />,
       })),
     ],
-    [ws, views],
+    [ws, views, cardsOn, reportOn],
   )
 
   const dots = useTabDots(shown.filter((s): s is Tab => (BASE_SURFACES as readonly string[]).includes(s)))
@@ -303,7 +316,7 @@ export function Shell({ ws }: { ws: string }) {
     <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={demo ? 'static' : undefined} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
         ws={ws}
-        tabs={BASE.map((t) => ({
+        tabs={BASE.filter(featureOn).map((t) => ({
           value: t.id,
           label: t.label,
           dot: signals[t.id] === 'dot',
@@ -315,6 +328,8 @@ export function Shell({ ws }: { ws: string }) {
           setPanes((p) => show(p, id))
         }}
         onTabDrag={startDrag}
+        side={side}
+        onSide={setSide}
       />
       <DemoLine />
       <div className="shell-body">
@@ -365,6 +380,7 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
+        {side && <LensSidebar ws={ws} tab={side} onTab={setSide} onClose={() => setSide(null)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />

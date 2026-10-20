@@ -1,4 +1,5 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
+import type { Mark } from '../lib/marks'
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
 import type { ChatRecord, TurnUsage } from '../lib/types'
@@ -20,19 +21,12 @@ export interface UserRow {
   /** with `by` extension: the extension whose orientation instructions the message is */
   extension?: string
 }
-/** An explain mark: words of a reply and what they mean, from the explain pass after the turn (server explain.py). */
-export interface Gloss {
-  term: string
-  body: string
-  /** where the term mattered in this work, with citations */
-  here?: string
-}
 export interface TextRow {
   kind: 'text'
   index: number
   text: string
-  /** the explain marks on this row's words */
-  glosses?: Gloss[]
+  /** the lenses' marks on this row's words (lib/marks.ts) */
+  marks?: Mark[]
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
@@ -245,15 +239,18 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         }
         return
       }
+      case 'marks':
       case 'glosses': {
-        // each mark goes to the first text row of the turn that holds its words
+        // a lens's marks after an answer (`glosses`: an explainers' record of an earlier version): each goes to the
+        // first text row of the turn that holds its words
         let from = rows.length
         while (from > 0 && rows[from - 1].kind !== 'user') from--
         const texts = rows.slice(from).filter((r): r is TextRow => r.kind === 'text')
-        for (const g of e.glosses ?? []) {
-          if (!g || typeof g.term !== 'string' || !g.term) continue
-          const row = texts.find((r) => r.text.includes(g.term))
-          if (row) row.glosses = [...(row.glosses ?? []), g]
+        const got: Mark[] = e.type === 'marks' ? (e.marks ?? []) : (e.glosses ?? []).map((g, i) => ({ ...g, id: `g${index}-${i}`, lens: 'explain', surface: 'chat' as const }))
+        for (const m of got) {
+          if (!m || typeof m.term !== 'string' || !m.term) continue
+          const row = texts.find((r) => r.text.includes(m.term))
+          if (row) row.marks = [...(row.marks ?? []), m]
         }
         return
       }

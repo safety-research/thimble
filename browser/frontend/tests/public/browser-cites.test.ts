@@ -16,8 +16,8 @@ describe('citeLinks', () => {
   })
 })
 
-describe('explain marks', () => {
-  it('go to the first text row of the turn that holds the term', () => {
+describe('lens marks', () => {
+  it('go to the first text row of the turn that holds the term, an earlier explainers record among them', () => {
     const records: ChatRecord[] = [
       { type: 'user', text: 'why?' },
       { type: 'text', delta: 'Counting first.' },
@@ -25,10 +25,11 @@ describe('explain marks', () => {
       { type: 'text', delta: 'Most are a flaky-test.' },
       { type: 'done' },
       { type: 'glosses', glosses: [{ term: 'flaky-test', body: 'A test that fails at random.' }] },
+      { type: 'marks', marks: [{ id: 'm1', lens: 'details', term: 'Counting first', body: 'It counted one file.' }] },
     ]
     const rows = foldRecords(records)
-    const texts = rows.filter((r) => r.kind === 'text') as { text: string; glosses?: { term: string }[] }[]
-    expect(texts[0].glosses).toBeUndefined()
-    expect(texts[1].glosses?.map((g) => g.term)).toEqual(['flaky-test'])
+    const texts = rows.filter((r) => r.kind === 'text') as { text: string; marks?: { term: string; lens: string }[] }[]
+    expect(texts[0].marks?.map((m) => [m.lens, m.term])).toEqual([['details', 'Counting first']])
+    expect(texts[1].marks?.map((m) => [m.lens, m.term])).toEqual([['explain', 'flaky-test']])
   })
 })

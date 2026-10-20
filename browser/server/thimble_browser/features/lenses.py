@@ -1,11 +1,12 @@
 """Lenses: readers that mark passages of what Claude wrote, so the analyst sees what to look at twice. A mark is
 active: a click opens what the lens says about the passage, and a question about it opens a thread anchored to it.
 
-There are two built-in lenses, and the analyst's own checks:
+There are three built-in lenses, and the analyst's own checks (the page calls every lens a check):
 
 - **Explainers** (`explain`, teal) mark the terms the analyst may not know, with what each means here. The instructions
   are the terminal plugin's explain lens, word for word (prompts/shared.json, part `explain`).
 - **Important details** (`details`, orange) mark a detail the analyst should know before relying on the text.
+- **Unverifiable** (`unverifiable`, off at first) marks a claim that nothing in the files can support.
 - **A check** the analyst asks for (`add_check`, or POST /lenses) marks the passages its instructions name, such as
   "claims no cited source shows".
 
@@ -23,8 +24,10 @@ the chat and its answer's turn, the card's id, or `report`. A mark follows its w
 the card's takeaway or the report is not served. A chat's marks are also a `marks` record in its log, after the
 answer they mark, so the page draws them on that answer.
 
-    GET    /api/ws/{c}/lenses              the lenses, each {id, name, color, builtin, on, scope, instructions}
-    PUT    /api/ws/{c}/lenses/{id}         {on?, scope?: {chat?, cards?, report?}}: the lens as it is now
+    GET    /api/ws/{c}/lenses              the lenses, each {id, name, color, builtin, on, scope, question, leaves,
+                                           instructions, found: {chat, cards, report}}
+    PUT    /api/ws/{c}/lenses/{id}         {on?, scope?: {chat?, cards?, report?}, instructions?}: the lens as it is now
+    GET    /api/ws/{c}/lenses/{id}/found   what the lens found, where it stands now, newest first
     POST   /api/ws/{c}/lenses              {name, instructions, scope?}: the analyst's own check; it reads at once
     DELETE /api/ws/{c}/lenses/{id}         remove an own check and its marks
     POST   /api/ws/{c}/lenses/read         {lens?, surfaces?}: read now, as the analyst asks
@@ -52,12 +55,24 @@ log = logging.getLogger("thimble_browser.lenses")
 SURFACES = ("chat", "cards", "report")
 # the built-in lenses: their names, colors and today's default scope
 BUILTIN: dict[str, dict[str, Any]] = {
-    "explain": {"name": "Explainers", "color": "teal", "key": "glosses", "prompt": "lens-explain.md",
+    "explain": {"name": "Explainers", "color": "teal", "key": "glosses", "prompt": "lens-explain.md", "on": True,
+                "question": "Which terms might the reader not know?",
+                "leaves": "the term highlighted; a click explains it",
                 "scope": {"chat": True, "cards": False, "report": False}},
     "details": {"name": "Important details", "color": "orange", "key": "details", "prompt": "lens-details.md",
+                "on": True, "question": "Which details are easy to miss and matter before relying on this?",
+                "leaves": "the detail highlighted, and what to do about it beside it",
                 "scope": {"chat": False, "cards": False, "report": True}},
+    "unverifiable": {"name": "Unverifiable", "color": "gold", "key": "unverifiable", "prompt": "lens-check.md",
+                     "on": False, "question": "Which claims can't be checked against the files?",
+                     "instructions": "Mark a claim only when nothing in the files can support it, and the claim matters "
+                                     "to the conclusions.",
+                     "leaves": "the claim highlighted, and a comment beside it",
+                     "scope": {"chat": False, "cards": False, "report": True}},
 }
-OWN_COLOR = "blue"
+# the colors a check of the analyst's own takes, in turn (the page's viz families, tokens.css)
+OWN_COLORS = ("pink", "blue", "green", "violet", "gold")
+OWN_LEAVES = "the passage highlighted, and a comment beside it"
 KEEP_SEEN = 100  # terms already explained that the explain lens is told of
 TEXT_MAX = 4000
 _lock = threading.RLock()
@@ -85,13 +100,24 @@ def lenses(ws: str) -> list[dict[str, Any]]:
     out = []
     for lid, b in BUILTIN.items():
         own = (conf.get("builtin") or {}).get(lid) or {}
-        out.append({"id": lid, "name": b["name"], "color": b["color"], "builtin": True, "on": own.get("on", True),
-                    "scope": _scope(own.get("scope"), b["scope"]), "instructions": None})
+        out.append({"id": lid, "name": b["name"], "color": b["color"], "builtin": True, "on": own.get("on", b["on"]),
+                    "scope": _scope(own.get("scope"), b["scope"]), "question": b["question"], "leaves": b["leaves"],
+                    "instructions": b.get("instructions")})
     for c in conf.get("checks") or []:
-        out.append({"id": c["id"], "name": c["name"], "color": c.get("color") or OWN_COLOR, "builtin": False,
+        out.append({"id": c["id"], "name": c["name"], "color": c.get("color") or OWN_COLORS[0], "builtin": False,
                     "on": c.get("on", True), "scope": _scope(c.get("scope"), {"report": True}),
+                    "question": c.get("instructions") or "", "leaves": OWN_LEAVES,
                     "instructions": c.get("instructions") or ""})
     return out
+
+
+def with_found(ws: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The lenses with how many marks each found on each surface, shown or not: what the Checks sidebar counts."""
+    found = {x["id"]: {s: 0 for s in SURFACES} for x in rows}
+    for m in present(ws):
+        if m["lens"] in found:
+            found[m["lens"]][m["surface"]] += 1
+    return [{**x, "found": found[x["id"]]} for x in rows]
 
 
 def lens(ws: str, lid: str) -> dict[str, Any]:
@@ -110,7 +136,8 @@ def reads(ws: str, lid: str, surface: str) -> bool:
     return is_on("lenses") and x["on"] and x["scope"].get(surface, False)
 
 
-def set_lens(ws: str, lid: str, *, on: bool | None = None, scope: dict[str, Any] | None = None) -> dict[str, Any]:
+def set_lens(ws: str, lid: str, *, on: bool | None = None, scope: dict[str, Any] | None = None,
+             instructions: str | None = None) -> dict[str, Any]:
     with _lock:
         x = lens(ws, lid)
         conf = _conf(ws)
@@ -123,6 +150,12 @@ def set_lens(ws: str, lid: str, *, on: bool | None = None, scope: dict[str, Any]
             row["on"] = bool(on)
         if scope is not None:
             row["scope"] = new_scope
+        if instructions is not None:
+            if x["builtin"]:
+                raise ValueError("a built-in check keeps its own question")
+            if not instructions.strip():
+                raise ValueError("a check needs its question")
+            row["instructions"] = instructions.strip()[:TEXT_MAX]
         home.write_json(_conf_path(ws), conf)
     hub.publish(ws, {"type": "lenses"})
     return lens(ws, lid)
@@ -135,8 +168,11 @@ def add_lens(ws: str, name: str, instructions: str, scope: dict[str, Any] | None
     with _lock:
         conf = _conf(ws)
         lid = "k" + secrets.token_hex(3)
+        taken = [c.get("color") for c in conf.get("checks") or []]
+        color = min(OWN_COLORS, key=lambda c: (taken.count(c), OWN_COLORS.index(c)))
         conf.setdefault("checks", []).append({"id": lid, "name": name, "instructions": instructions, "on": True,
-                                              "scope": _scope(scope, {"report": True}), "ts": home.now()})
+                                              "color": color, "scope": _scope(scope, {"report": True}),
+                                              "ts": home.now()})
         home.write_json(_conf_path(ws), conf)
     hub.publish(ws, {"type": "lenses"})
     return lens(ws, lid)
@@ -172,14 +208,13 @@ def _card_text(cell: dict[str, Any]) -> str:
     return f"{cell.get('title') or ''}\n{cell.get('takeaway') or ''}"
 
 
-def shown(ws: str, surface: str | None = None) -> list[dict[str, Any]]:
-    """The marks the page shows now: of a lens that reads that surface, on words that are still there."""
+def present(ws: str, surface: str | None = None) -> list[dict[str, Any]]:
+    """The marks whose words are still where they were found (a card's takeaway, the report), dismissed ones left out,
+    whether their lens shows them or not."""
     out = []
     md = None
     for m in _marks(ws):
         if m.get("status") == "dismissed" or (surface and m["surface"] != surface):
-            continue
-        if not reads(ws, m["lens"], m["surface"]):
             continue
         if m["surface"] == "cards":
             try:
@@ -193,6 +228,11 @@ def shown(ws: str, surface: str | None = None) -> list[dict[str, Any]]:
                 continue
         out.append(m)
     return out
+
+
+def shown(ws: str, surface: str | None = None) -> list[dict[str, Any]]:
+    """The marks the page shows now: of a lens that reads that surface, on words that are still there."""
+    return [m for m in present(ws, surface) if reads(ws, m["lens"], m["surface"])]
 
 
 def resolve_ref(ws: str, ref: str) -> dict[str, Any]:
@@ -211,7 +251,7 @@ def resolve_ref(ws: str, ref: str) -> dict[str, Any]:
 # ---- reading: one call over what changed, for every lens that reads it
 
 def _lens_text(ws: str, x: dict[str, Any]) -> str:
-    if x["builtin"]:
+    if x["builtin"] and BUILTIN[x["id"]]["prompt"] != "lens-check.md":
         text = prompts.render(BUILTIN[x["id"]]["prompt"])
         if x["id"] == "explain":
             seen = [m["term"] for m in _marks(ws) if m["lens"] == "explain"][-KEEP_SEEN:]
@@ -223,6 +263,22 @@ def _lens_text(ws: str, x: dict[str, Any]) -> str:
 
 def _key(x: dict[str, Any]) -> str:
     return BUILTIN[x["id"]]["key"] if x["builtin"] else x["id"]
+
+
+def found(ws: str, lid: str) -> list[dict[str, Any]]:
+    """What a lens found, newest first, each mark with where it stands now: the chat and its answer, the card's question,
+    or the report; whether it is shown there."""
+    titles: dict[str, str] = {}
+    for nb in canvas.notebooks(ws):
+        for c in nb["cells"]:
+            titles[c["id"]] = c.get("title") or ""
+    out = []
+    for m in present(ws):
+        if m["lens"] != lid:
+            continue
+        where = {"chat": m["where"] or "main", "cards": titles.get(m["where"], ""), "report": "report"}[m["surface"]]
+        out.append({**m, "place": where, "shown": reads(ws, lid, m["surface"])})
+    return sorted(out, key=lambda m: str(m.get("ts") or ""), reverse=True)
 
 
 def _schema(active: list[dict[str, Any]]) -> dict[str, Any]:
@@ -366,17 +422,32 @@ def register(ctx: Any) -> None:
 
     @app.get("/api/ws/{c}/lenses")
     def get_lenses(c: str) -> list[dict[str, Any]]:
-        return lenses(ctx.ws_of(c))
+        ws = ctx.ws_of(c)
+        return with_found(ws, lenses(ws))
+
+    @app.get("/api/ws/{c}/lenses/{lid}/found")
+    def get_found(c: str, lid: str) -> list[dict[str, Any]]:
+        ws = ctx.ws_of(c)
+        try:
+            lens(ws, lid)
+        except KeyError:
+            raise HTTPException(404, f"no lens {lid!r}") from None
+        return found(ws, lid)
 
     @app.put("/api/ws/{c}/lenses/{lid}")
     def put_lens(c: str, lid: str, body: dict = Body(...)) -> dict[str, Any]:
         scope = body.get("scope")
         if scope is not None and (not isinstance(scope, dict) or any(k not in SURFACES for k in scope)):
             raise HTTPException(400, f"scope: {{surface: true or false}}, the surfaces {', '.join(SURFACES)}")
+        ws = ctx.ws_of(c)
         try:
-            return set_lens(ctx.ws_of(c), lid, on=body.get("on"), scope=scope)
+            set_lens(ws, lid, on=body.get("on"), scope=scope,
+                     instructions=str(body["instructions"]) if "instructions" in body else None)
         except KeyError:
             raise HTTPException(404, f"no lens {lid!r}") from None
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return next(x for x in with_found(ws, lenses(ws)) if x["id"] == lid)
 
     @app.post("/api/ws/{c}/lenses", status_code=201)
     async def post_lens(c: str, body: dict = Body(...)) -> dict[str, Any]:
@@ -405,7 +476,7 @@ def register(ctx: Any) -> None:
     @app.get("/api/ws/{c}/marks")
     def get_marks(c: str, surface: str | None = None) -> dict[str, Any]:
         ws = ctx.ws_of(c)
-        return {"marks": shown(ws, surface), "lenses": lenses(ws)}
+        return {"marks": shown(ws, surface), "lenses": with_found(ws, lenses(ws))}
 
     @app.post("/api/ws/{c}/marks/{mid}/dismiss")
     def dismiss(c: str, mid: str) -> dict[str, bool]:

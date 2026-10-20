@@ -17,6 +17,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isDropped, useProposals } from '../lib/proposals'
 import { parseRef } from '../lib/refs'
+import { shownMarks, useLenses } from '../lib/marks'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
@@ -111,6 +112,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows)
+  // the lenses whose marks show in the chat (lib/marks.ts): a lens turned off for the chat hides its marks at once
+  const lenses = useLenses(ws)
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
       {shown.map((r, i) => {
@@ -128,7 +131,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} glosses={r.glosses} />
+                  <ChatMarkdown text={r.text} streaming={r === lastText} marks={shownMarks(r.marks, lenses, 'chat')} lenses={lenses} />
                 </div>
                 {r.usage && <UsageLine usage={r.usage} />}
               </div>

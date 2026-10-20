@@ -1,0 +1,82 @@
+/* A lens's mark (components/LensMark.tsx), the same in the chat, on a card's takeaway and in the report: its words in
+   the lens's highlight, as the terminal draws a mark, and a click opens its card under them. The card follows thimble's
+   own shapes (tokens.css): a hairline in the lens's color, the chip radius, no side bar. --mark-fill, --mark-ink and
+   --mark-edge are the lens's viz family (lib/marks lensColors). */
+.lens-mark { position: relative; }
+.lens-mark-term {
+  font: inherit;
+  color: inherit;
+  padding: 0 1px;
+  margin: 0 -1px;
+  border: none;
+  border-radius: var(--radius-hl);
+  background: var(--mark-fill);
+  cursor: pointer;
+}
+.lens-mark.is-explainer .lens-mark-term {
+  text-decoration: underline dotted var(--mark-ink);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.lens-mark-term:hover { background: color-mix(in oklab, var(--mark-fill) 70%, var(--mark-edge)); }
+.lens-mark.is-open .lens-mark-term {
+  background: var(--mark-ink);
+  color: var(--surface-card);
+  text-decoration-color: transparent;
+}
+.lens-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(320px, 70vw);
+  padding: 10px 12px 8px;
+  border: 1px solid var(--mark-edge);
+  border-radius: var(--radius-chip);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-float);
+  font: var(--type-body-sm);
+  color: var(--text-primary);
+  white-space: normal;
+  text-align: left;
+}
+.lens-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.lens-card-term {
+  padding: 0 3px;
+  border-radius: var(--radius-hl);
+  background: var(--mark-fill);
+  font-weight: 600;
+}
+.lens-card-lens { font: var(--type-mono-sm); color: var(--mark-ink); white-space: nowrap; }
+.lens-card-title { display: block; font-weight: 600; }
+.lens-card-body, .lens-card-here { display: block; }
+.lens-card-here { color: var(--text-secondary); }
+.lens-card-body p, .lens-card-here p { margin: 0; }
+.lens-card-foot {
+  display: flex;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.lens-card-act {
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  cursor: pointer;
+}
+.lens-card-act:hover { background: var(--hover-bg, rgba(var(--ink-rgb), 0.06)); color: var(--text-primary); }
+/* a mark the sidebar's found list went to (lib/marks revealMark) */
+.lens-mark.mark-flash .lens-mark-term,
+[data-mark].mark-flash { animation: mark-flash 1.6s var(--ease-out) 1; }
+@keyframes mark-flash {
+  0%, 30% { box-shadow: 0 0 0 3px var(--mark-edge, var(--accent)); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+/* a citation's words while the citations feature is off (chat/markdown.tsx) */
+.cite-off { color: inherit; }

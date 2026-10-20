@@ -1,6 +1,6 @@
-## A check of the analyst's: {{name}}
+## A check: {{name}}
 
-The analyst asked for this check. Mark the passages its instructions name, and no others:
+Mark the passages this check's instructions name, and no others:
 
 {{instructions}}
 

@@ -11,6 +11,9 @@ import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { splitValueRef } from '../lib/refs'
+import { LensMark } from '../components/LensMark'
+import type { Lens, Mark } from '../lib/marks'
+import { useFeature } from '../features'
 
 export interface ChipCtx {
   workspace: string
@@ -129,17 +132,12 @@ export function rehypeRefChips() {
   }
 }
 
-/** An explain mark as the reply carries it (chat/model Gloss). */
-export interface GlossMarkData {
-  term: string
-  body: string
-  here?: string
-}
-const GlossContext = createContext<readonly GlossMarkData[]>([])
+/** The marks a text shows, with the lenses that made them (lib/marks.ts). */
+const MarkContext = createContext<{ marks: readonly Mark[]; lenses: readonly Lens[] }>({ marks: [], lenses: [] })
 
 /** rehype plugin: the first place each term of `terms` stands in the text (outside code and chips) becomes a
- * `<span data-gloss=i>` that renders as an explain mark. */
-export function rehypeGlosses(terms: readonly string[]) {
+ * `<span data-mark-at=i>` that renders as its lens's mark. */
+export function rehypeMarks(terms: readonly string[]) {
   return (tree: Root) => {
     const left = new Set(terms.map((_, i) => i))
     const visit = (node: Root | Element): void => {
@@ -164,7 +162,7 @@ export function rehypeGlosses(terms: readonly string[]) {
           changed = true
           left.delete(best.i)
           if (best.at > 0) next.push({ type: 'text', value: rest.slice(0, best.at) })
-          next.push({ type: 'element', tagName: 'span', properties: { dataGloss: String(best.i) }, children: [{ type: 'text', value: terms[best.i] }] })
+          next.push({ type: 'element', tagName: 'span', properties: { dataMarkAt: String(best.i) }, children: [{ type: 'text', value: terms[best.i] }] })
           rest = rest.slice(best.at + terms[best.i].length)
         }
         if (rest) next.push({ type: 'text', value: rest })
@@ -175,55 +173,23 @@ export function rehypeGlosses(terms: readonly string[]) {
   }
 }
 
-/** An explain mark: the words with a teal fill; a click opens what they mean, in place. */
-function GlossMark({ gloss, children }: { gloss: GlossMarkData; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLSpanElement>(null)
-  // a press outside the mark, or Escape, closes it
-  useEffect(() => {
-    if (!open) return
-    const down = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
-    document.addEventListener('pointerdown', down, true)
-    document.addEventListener('keydown', key)
-    return () => {
-      document.removeEventListener('pointerdown', down, true)
-      document.removeEventListener('keydown', key)
-    }
-  }, [open])
-  // the card opens under the words and stays inside the text's column: shifted left when it would pass its right edge
-  const place = (card: HTMLSpanElement | null) => {
-    if (!card) return
-    const column = card.closest('.chat-text, .chat-msg') ?? document.body
-    const over = card.getBoundingClientRect().right - column.getBoundingClientRect().right
-    if (over > 0) card.style.left = `${-over}px`
-  }
-  return (
-    <span ref={box} className={`gloss${open ? ' gloss-open' : ''}`}>
-      <button type="button" className="gloss-term" aria-expanded={open} onClick={() => setOpen((o) => !o)} title="What this means">
-        {children}
-      </button>
-      {open && (
-        <span className="gloss-card" role="note" ref={place}>
-          <span className="gloss-body">{gloss.body}</span>
-          {gloss.here && (
-            <span className="gloss-here">
-              <ChatMarkdown text={gloss.here} />
-            </span>
-          )}
-        </span>
-      )}
-    </span>
-  )
-}
-
 function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   const ctx = useContext(ChipContext)
-  const glosses = useContext(GlossContext)
-  const glossAt = (props as Record<string, unknown>)['data-gloss']
-  if (typeof glossAt === 'string' && glosses[Number(glossAt)]) return <GlossMark gloss={glosses[Number(glossAt)]}>{props.children}</GlossMark>
+  const marks = useContext(MarkContext)
+  // citations are the citations feature's (features.ts): while it is off, a link's words are plain text
+  const citing = useFeature('citations')
+  const markAt = (props as Record<string, unknown>)['data-mark-at']
+  if (typeof markAt === 'string' && marks.marks[Number(markAt)]) {
+    const m = marks.marks[Number(markAt)]
+    return (
+      <LensMark mark={m} lens={marks.lenses.find((l) => l.id === m.lens)}>
+        {props.children}
+      </LensMark>
+    )
+  }
   const ref = (props as Record<string, unknown>)['data-ref']
   const value = (props as Record<string, unknown>)['data-value']
+  if (typeof ref === 'string' && !citing) return <span className="cite-off">{typeof value === 'string' ? value : props.children}</span>
   if (typeof ref === 'string') {
     const broken = ctx.broken.has(ref)
     return <RefChip ref={ref} value={typeof value === 'string' ? value : undefined} broken={broken} brokenWhy={broken ? ctx.why?.get(ref) : undefined} anchor={ctx.anchor} workspace={ctx.workspace} cite />
@@ -245,8 +211,8 @@ const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: fals
 const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
 
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
-  const glosses = useContext(GlossContext)
-  const plugins = useMemo(() => (glosses.length ? [...rehypePlugins, () => rehypeGlosses(glosses.map((g) => g.term))] : rehypePlugins), [glosses])
+  const { marks } = useContext(MarkContext)
+  const plugins = useMemo(() => (marks.length ? [...rehypePlugins, () => rehypeMarks(marks.map((m) => m.term))] : rehypePlugins), [marks])
   return (
     <Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={components}>
       {protectTokens(citeLinks(text))}
@@ -256,17 +222,17 @@ const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
 
 /** Assistant markdown with chips. `streaming`: the text is still growing and renders per completed block. A bare
  * citation in it is its target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, glosses }: { text: string; streaming?: boolean; glosses?: readonly GlossMarkData[] }) {
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, marks, lenses }: { text: string; streaming?: boolean; marks?: readonly Mark[]; lenses?: readonly Lens[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
-  if (glosses?.length && !streaming) {
-    // the explain marks come after the reply is whole: one block, so each term is marked once
+  if (marks?.length && !streaming) {
+    // the marks come after the reply is whole: one block, so each term is marked once
     return (
-      <GlossContext.Provider value={glosses}>
+      <MarkContext.Provider value={{ marks, lenses: lenses ?? [] }}>
         <GlyphCites.Provider value={true}>
           <MarkdownBlock text={text} />
         </GlyphCites.Provider>
-      </GlossContext.Provider>
+      </MarkContext.Provider>
     )
   }
   if (!chunked && !streaming) {

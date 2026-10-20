@@ -135,3 +135,26 @@ def test_a_view_is_proposed_and_built_only_on_accept(api, monkeypatch):
     assert rows[0]["status"] == "suggested" and rows[0]["offered"]["at"]
     assert api("POST", f"/views/proposals/{rows[0]['slug']}/accept").status_code == 200
     assert started == [rows[0]["slug"]]
+
+
+def test_the_checks_list_their_question_what_they_found_and_go_to_it(api, monkeypatch):
+    reply = {"glosses": [{"where": "answer", "term": "merge queue", "body": "Where changes wait.", "here": ""}]}
+    monkeypatch.setattr(llm, "client", lambda: ScriptedClient(answer=lambda s, u: json.dumps(reply)))
+    import asyncio
+    from thimble_browser.features import lenses as lens_mod
+    asyncio.run(lens_mod.read(api.ws, chat="main", answer="It sat in the merge queue."))
+    rows = {x["id"]: x for x in api("GET", "/lenses").json()}
+    assert list(rows)[:3] == ["explain", "details", "unverifiable"]
+    assert rows["unverifiable"]["on"] is False and rows["explain"]["question"]
+    assert rows["explain"]["found"] == {"chat": 1, "cards": 0, "report": 0}
+    found = api("GET", "/lenses/explain/found").json()
+    assert [(m["term"], m["surface"], m["place"], m["shown"]) for m in found] == [("merge queue", "chat", "main", True)]
+    api("PUT", "/lenses/explain", json={"scope": {"chat": False}})
+    assert api("GET", "/lenses/explain/found").json()[0]["shown"] is False
+    assert api("GET", "/lenses").json()[0]["found"]["chat"] == 1  # still counted where it is hidden
+    a = api("POST", "/lenses", json={"name": "No citation", "instructions": "Flag any claim with no citation."}).json()
+    b = api("POST", "/lenses", json={"name": "Dates", "instructions": "Flag a date with no year."}).json()
+    assert a["color"] != b["color"] and a["question"] == "Flag any claim with no citation."
+    assert api("PUT", f"/lenses/{a['id']}", json={"instructions": "Flag a claim with no citation."}).json()["question"] == \
+        "Flag a claim with no citation."
+    assert api("PUT", "/lenses/explain", json={"instructions": "Something else."}).status_code == 400

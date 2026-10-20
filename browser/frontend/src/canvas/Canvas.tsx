@@ -332,7 +332,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         void loadChats()
       }, REFETCH_DEBOUNCE_MS)
     }
-    const offs = [bus.on('cell', later), bus.on('chat', later), bus.on('orient', later), bus.on('filter', () => void loadFilters())]
+    const offs = [bus.on('cell', later), bus.on('chat', later), bus.on('filter', () => void loadFilters())]
     return () => {
       offs.forEach((f) => f())
       if (timer != null) window.clearTimeout(timer)

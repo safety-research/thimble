@@ -53,7 +53,6 @@ export function useCanvas(ws: string): { cells: Cell[]; groups: Group[] } {
       bus.on('wsEvent', (ev) => {
         if (ev.type === 'notebook' || ev.type === 'group' || ev.type === 'canvas') later()
       }),
-      bus.on('orient', later),
     ]
     return () => {
       live = false

@@ -1986,36 +1986,3 @@ button.view-chip-values[aria-expanded='true'] {
   color: var(--text-secondary);
 }
 
-/* explain marks (chat/markdown GlossMark): a term with a teal fill; a click opens what it means under the line */
-.gloss-term {
-  font: inherit;
-  color: inherit;
-  padding: 0 2px;
-  margin: 0 -1px;
-  border: none;
-  border-bottom: 1px dotted var(--viz-teal-3);
-  border-radius: var(--radius-chip);
-  background: color-mix(in srgb, var(--viz-teal-1) 75%, transparent);
-  cursor: help;
-}
-.gloss-open .gloss-term { background: var(--viz-teal-1); }
-.gloss { position: relative; }
-.gloss-card {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 30;
-  display: block;
-  width: min(300px, 70vw);
-  padding: 8px 10px;
-  border: 1px solid var(--viz-teal-2);
-  border-left: 3px solid var(--viz-teal-3);
-  background: var(--surface-card);
-  border-radius: var(--radius-card);
-  box-shadow: 0 6px 20px rgba(var(--ink-rgb), 0.12);
-  font-size: 0.92em;
-  line-height: 1.45;
-}
-.gloss-body { display: block; }
-.gloss-here { display: block; margin-top: 4px; color: var(--text-secondary); }
-.gloss-here p { margin: 0; }
