@@ -198,5 +198,10 @@ def render(rel: str, slots: dict[str, str] | None = None, _depth: int = 0) -> st
 
 
 def tool_text(name: str) -> str:
-    """The description of one of the browser's tools: the `## <name>` section of prompts/browser/tools.md."""
-    return section(read("browser/tools.md"), name)
+    """The description of one of the browser's tools: its `## <name>` section in prompts/browser/tools.md, or in a
+    feature's prompts/browser/tools-<feature>.md."""
+    for p in [ROOT / "browser" / "tools.md", *sorted((ROOT / "browser").glob("tools-*.md"))]:
+        text = p.read_text(encoding="utf-8")
+        if re.search(rf"^## {re.escape(name)}$", text, re.M):
+            return section(text, name)
+    raise PromptError(f"no tool text for {name!r} in prompts/browser/tools*.md")

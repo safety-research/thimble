@@ -30,6 +30,15 @@ GLOB_MAX = 500
 RESULT_CHARS = 30_000
 
 
+# tools a feature module adds (register): name -> async fn(tools, args) -> Result
+EXTRA: dict[str, Callable[["Tools", dict[str, Any]], Awaitable["Result"]]] = {}
+
+
+def register(name: str, fn: Callable[["Tools", dict[str, Any]], Awaitable["Result"]]) -> None:
+    """Add a tool. Its description and schema are its `## <name>` section in prompts/browser/tools*.md."""
+    EXTRA[name] = fn
+
+
 @dataclass
 class Result:
     text: str
@@ -88,11 +97,17 @@ class Tools:
         self.writer = writer
         self.view = view  # the slug of the view this agent builds
         self.start_view = start_view
+        self.session: Any = None  # the agent.Session these tools serve, which a feature's tool may read
 
     async def call(self, name: str, args: Any) -> Result:
         """Run tool `name` on `args`, checked against its schema first (inputs stream in, so the API does not check
         them)."""
         fn = getattr(self, f"t_{name}", None)
+        if fn is None and name in EXTRA:
+            extra = EXTRA[name]
+
+            async def fn(a: dict[str, Any]) -> Result:
+                return await extra(self, a)
         if fn is None:
             return _err(f"no tool {name}")
         try:

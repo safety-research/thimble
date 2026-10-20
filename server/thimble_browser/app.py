@@ -9,12 +9,13 @@ import asyncio
 import json
 import secrets
 from pathlib import Path
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import canvas, chats, corpus, home, report, settings, views
+from . import canvas, chats, corpus, features, home, report, settings, views
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -22,6 +23,19 @@ from .hub import hub
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 SECURITY_HEADERS = {"x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
                     "content-security-policy": "frame-ancestors 'self'"}
+
+
+@dataclass
+class Ctx:
+    """What a feature module's register() gets: the app to add routes to, the agents, and the helpers every route
+    uses (folder_of: the folder of a workspace, 404 for none; ws_of: the workspace's name, checked; bad: an error as
+    the HTTP answer it should be)."""
+    app: Any
+    auth: Auth
+    sessions: Sessions
+    folder_of: Callable[[str], Path]
+    ws_of: Callable[[str], str]
+    bad: Callable[[Exception], HTTPException]
 
 
 def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]:
@@ -495,16 +509,28 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         hub.publish(c, {"type": "view", "slug": slug, "status": "deleted"})
         return {"deleted": slug}
 
-    # ---- what thimble browser does not have yet: empty answers the page shows as nothing
+    # ---- the features (features.py): each module adds its own routes, tools and agents
 
-    empty_list = ["notices", "concepts", "labels/presence", "checks", "card-checks", "card-libs"]
-    for route in empty_list:
-        app.add_api_route(f"/api/ws/{{c}}/{route}", lambda c: [], methods=["GET"])
+    ctx = Ctx(app=app, auth=auth, sessions=sessions, folder_of=folder_of, ws_of=ws_of, bad=bad)
+    for mod in features.load():
+        mod.register(ctx)
+
+    # ---- what thimble browser does not have yet: empty answers the page shows as nothing. A stub never shadows a
+    # route a feature registered (FastAPI takes the first route that matches, so stubs go last and skip taken paths).
+
+    taken = {(r.path, m) for r in app.routes for m in getattr(r, "methods", None) or ()}
+
+    def stub(route: str, value: Any) -> None:
+        path = f"/api/ws/{{c}}/{route}"
+        if (path, "GET") not in taken:
+            app.add_api_route(path, (lambda v: (lambda c: v))(value), methods=["GET"])
+
+    for route in ("notices", "concepts", "labels/presence", "checks", "card-checks", "card-libs"):
+        stub(route, [])
     for route, value in {"orientation": {}, "undo": {"undo": None, "redo": None}, "filters": {},
-                         "report-types/presets": [],
-                         "canvas/comments": {"comments": []},
+                         "report-types/presets": [], "canvas/comments": {"comments": []},
                          "settings": {"models": {}}}.items():
-        app.add_api_route(f"/api/ws/{{c}}/{route}", (lambda v: (lambda c: v))(value), methods=["GET"])
+        stub(route, value)
 
     @app.put("/api/ws/{c}/canvas/active-group")
     def active_group(c: str) -> Response:

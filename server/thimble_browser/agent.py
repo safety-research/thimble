@@ -43,11 +43,15 @@ REPO = views.REPO
 
 @dataclass
 class AgentDef:
-    """What an agent is: its prompt (from the folder) and the tools it may call."""
+    """What an agent is: its prompt (from the folder) and the tools it may call. `finished(session, result)` runs after
+    each of its turns (result: None when the turn ended normally, else stopped, failed or refused). A feature module
+    adds its agents to AGENTS, and starts one with Sessions.start_agent."""
     prompt: Callable[[Path], str]
     tools: tuple[str, ...]
     extra_roots: tuple[Path, ...] = ()
     explain: bool = False  # whether its answers get explain marks
+    finished: Callable[["Session", str | None], None] | None = None
+    effort: str | None = None  # an effort of its own, else the analyst's
 
 
 def _main_prompt(folder: Path) -> str:
@@ -138,14 +142,18 @@ class Session:
         self.cards: list[str] = []
         self._last_notify = 0.0
         self._pending_notify: asyncio.TimerHandle | None = None
+        self.meta = meta
         self.tools = Tools(ws, chat, folder, read_roots=[folder, *self.defn.extra_roots], unsandboxed=unsandboxed,
                            on_card=self.cards.append, writer=self.role == "writer", view=meta.get("view"),
                            start_view=(lambda req: manager.start_view(ws, req)) if manager else None)
+        self.tools.session = self
 
     # ---- the request
 
     def effort(self) -> str:
-        """The analyst's effort: the composer's chip for this workspace, else Settings."""
+        """The agent's own effort, else the analyst's: the composer's chip for this workspace, else Settings."""
+        if self.defn.effort:
+            return self.defn.effort
         e = (home.read_json(home.workspace_dir(self.ws) / "session.json", {}) or {}).get("effort")
         return {"ultracode": "xhigh"}.get(e, e) if e in settings.EFFORTS + ("ultracode",) else settings.read()["effort"]
 
@@ -283,7 +291,7 @@ class Session:
             self._append({"type": "done", "result": "stopped", "usage": usage.record(), "model": self._model()})
             self.running = False
             chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
-            self.finished()
+            self.finished(result)
             raise
         except Exception as e:  # noqa: BLE001 — every failure is a row the analyst sees
             log.warning("turn failed: %s", type(e).__name__)
@@ -294,7 +302,7 @@ class Session:
                       "usage": usage.record(), "model": self._model()})
         self.running = False
         chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
-        self.finished()
+        self.finished(result)
         text_out = "".join(reply).strip()
         if text_out and self.defn.explain and result is None and settings.read()["explain"]:
             asyncio.create_task(explain.after_turn(self.ws, self.chat, text_out, self.folder))
@@ -312,8 +320,13 @@ class Session:
                      "content": "The analyst stopped this before it ran."} for b in open_calls]})
         save_messages(self.ws, self.chat, messages)
 
-    def finished(self) -> None:
-        """After a turn: a writer or a builder records how it ended."""
+    def finished(self, result: str | None) -> None:
+        """After a turn: the agent's own `finished`, such as a writer's or a builder's record of how it ended."""
+        if self.defn.finished:
+            try:
+                self.defn.finished(self, result)
+            except Exception:  # noqa: BLE001
+                log.exception("finished() of %s failed", self.role)
 
     async def interrupt(self) -> bool:
         if not self.running or self.task is None:
@@ -329,34 +342,33 @@ class Session:
         await self.interrupt()
 
 
-class Writer(Session):
-    """The report's writer. Its chat is an agent thread (kind `agent`, role `writer`), and the Report tab shows it
-    writing."""
-
-    def finished(self) -> None:
-        meta = chats.meta(self.ws, self.chat)
-        last = [r for r in chats.records(self.ws, self.chat) if r.get("type") == "done"]
-        failed = bool(last and last[-1].get("result") in ("failed", "stopped", "refused"))
-        meta.update(status="failed" if failed else "done", ts_end=home.now())
-        chats.save_meta(self.ws, meta)
-        report.set_status(self.ws, "failed" if failed else "generated")
+def _writer_finished(session: Session, result: str | None) -> None:
+    """The report's writer (kind `agent`, role `writer`): the Report tab shows how it ended."""
+    meta = chats.meta(session.ws, session.chat)
+    failed = result in ("failed", "stopped", "refused")
+    meta.update(status="failed" if failed else "done", ts_end=home.now())
+    chats.save_meta(session.ws, meta)
+    report.set_status(session.ws, "failed" if failed else "generated")
 
 
-class ViewBuilder(Session):
-    """A view's builder (kind `agent`, role `dev`): finish_view marks the view built."""
+def _builder_finished(session: Session, result: str | None) -> None:
+    """A view's builder (kind `agent`, role `dev`): finish_view marked the view built, or the build failed."""
+    ws = session.ws
+    meta = chats.meta(ws, session.chat)
+    slug = meta.get("view")
+    row = next((r for r in views.proposals(ws) if r.get("slug") == slug), {})
+    built = row.get("status") == "built"
+    meta.update(status="done" if built else "failed", ts_end=home.now())
+    chats.save_meta(ws, meta)
+    if not built:
+        views.set_proposal(ws, str(slug), status="failed")
+    chats.append(ws, "main", {"type": "chip", "kind": "view", "text": f"{row.get('name') or slug}: "
+                              + ("built" if built else "the build failed"), "ref": f"view:{slug}",
+                              "view": slug, "status": "built" if built else "failed"})
 
-    def finished(self) -> None:
-        meta = chats.meta(self.ws, self.chat)
-        slug = meta.get("view")
-        row = next((r for r in views.proposals(self.ws) if r.get("slug") == slug), {})
-        built = row.get("status") == "built"
-        meta.update(status="done" if built else "failed", ts_end=home.now())
-        chats.save_meta(self.ws, meta)
-        if not built:
-            views.set_proposal(self.ws, str(slug), status="failed")
-        chats.append(self.ws, "main", {"type": "chip", "kind": "view", "text": f"{row.get('name') or slug}: "
-                                       + ("built" if built else "the build failed"), "ref": f"view:{slug}",
-                                       "view": slug, "status": "built" if built else "failed"})
+
+AGENTS["writer"].finished = _writer_finished
+AGENTS["dev"].finished = _builder_finished
 
 
 def writer_brief(ws: str, request: str) -> str:
@@ -390,10 +402,21 @@ class Sessions:
     def get(self, ws: str, chat: str) -> Session:
         key = (ws, chat)
         if key not in self._s:
-            role = role_of(chats.meta(ws, chat))
-            kind = {"writer": Writer, "dev": ViewBuilder}.get(role, Session)
-            self._s[key] = kind(ws, chat, home.corpus_of(ws), unsandboxed=self.unsandboxed, manager=self)
+            self._s[key] = Session(ws, chat, home.corpus_of(ws), unsandboxed=self.unsandboxed, manager=self)
         return self._s[key]
+
+    async def start_agent(self, ws: str, role: str, title: str, brief: str, *, shown: str | None = None,
+                          prefix: str = "a", **meta: Any) -> str:
+        """Start one of thimble's agents (AGENTS[role]) on `brief`, in a chat of its own (kind `agent`) that the chat
+        column lists under main; its chat id. `meta` goes into the chat's meta, such as the document a writer writes."""
+        if role not in AGENTS:
+            raise KeyError(role)
+        cid = prefix + secrets.token_hex(4)
+        m = chats.new_meta(cid, kind="agent", title=title, parent="main")
+        m.update(role=role, status="running", **meta)
+        chats.save_meta(ws, m)
+        await self.get(ws, cid).send(brief, shown=shown)
+        return cid
 
     def running(self, ws: str) -> set[str]:
         return {c for (w, c), s in self._s.items() if w == ws and s.running}
