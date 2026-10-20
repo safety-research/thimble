@@ -1837,6 +1837,8 @@ function runningRow(els: Any, said: Said | null) {
 
 /** The messages whose card landing the shell has looked at (whether to say so in the bar). */
 const told = new Set<string>()
+/** Whether the transcript is drawn fullscreen (it says which rows are on screen, and draws only those). */
+let fullscreenSeen = false
 /** How long the bar says a card landed under a message off screen. */
 const CARDNOTE_MS = 8000
 
@@ -1862,6 +1864,8 @@ async function goToCard($: Engine, row: string, id: string): Promise<void> {
 
 /** The squeeze chips of a message as drawn last, by its row: a click on them is read against the grid it landed on. */
 const chipsGrids = new Map<string, Any>()
+/** The rows whose chips' Client failed on the surface (ui.fault), and why: drawn without it from then on. */
+const chipsFaults = new Map<string, string>()
 /** The row whose chips hold the keyboard now (a click gave it them), mirrored from CHIPKEYS for the key hook. */
 let chipKeysRow: string | null = null
 
@@ -1870,6 +1874,8 @@ let chipKeysRow: string | null = null
  *  keys (tab, shift+tab, the arrows, enter) until esc; the line under them says so, and what the keys do then. */
 async function chipsEl($: Engine, e: Any, row: string, w: number): Promise<Any> {
   const { Client } = $.ui.resolve(e) as Any
+  // a surface whose Client failed here draws the chips as presses, keyed from the prompt alone
+  if (chipsFaults.has(row) || !Client) return paneEl($, e, 'chips', { row }, { w, h: 3 })
   const d = await paneRun($, 'chips', { row }, { w, h: 3 })
   const grid = renderTerm(d, { w })
   chipsGrids.set(row, grid)
@@ -1903,10 +1909,15 @@ async function setChipKeys($: Engine, row: string | null): Promise<void> {
 async function chipsPosted($: Engine, row: string, data: Any): Promise<void> {
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (!pick || pick.verb !== 's' || pick.row !== row) return
+  const held = chipKeysRow === row
   await setChipKeys($, row)
   if (data?.press && typeof data.press === 'object') {
     const grid = chipsGrids.get(row)
     const r = grid ? regionAt(grid, Number(data.press.x), Number(data.press.y)) : null
+    // the click that hands the chips the keys does no more than that on the chip already picked (a press there steps
+    // it); on another chip it picks that one, on a dot it sets that level
+    const picked = String((paneDrawing('chips', { row }) as Any)?.state?.focus || 'length')
+    if (r && !held && /^(chip|word)-/.test(r.id) && r.id.replace(/^(chip|word)-/, '') === picked) return
     if (r) await paneFire($, 'chips', { row }, { type: 'press', region: r.id })
     return
   }
@@ -2465,6 +2476,9 @@ export const registerShell: Register = (on, options) => {
       // the key was pressed on (its calls may not reach this plugin's hooks); one main saved meanwhile stays main's
       const row = e.agentId !== undefined ? await asideRowOf($, e.agentId) : null
       if (row && e.agentId) {
+        // a message off screen is not drawn, so it never looks at where its card landed: unless it did within a moment,
+        // the bar says the card is there
+        $.clock.after(600, () => { if (!told.has(row) && fullscreenSeen) { told.add(row); void cardLanded($, row, true).catch(() => undefined) } })
         for (const ref of await newSaves($)) {
           if (await asideMade($, e.agentId, ref.id, !turn)) { await place($, row, ref); await asideSaved($, row, ref); await $.state.set(LAST, ref) }
           else if (turn) { turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]; turn.saves = [...(turn.saves ?? []), ref] }
@@ -2559,6 +2573,8 @@ export const registerShell: Register = (on, options) => {
       // the catch-up under it, when replies piled up and the person caught up on them here
       const caught = await catchUpParts($, e, at, cols)
       // work a key asked of Claude on this message (v's card, aside.ts): one line while it runs, or why it made none
+      // the fullscreen transcript says which rows are on screen (and draws only those)
+      if (e.props.onScreen !== undefined || e.viewport?.isFullscreen) fullscreenSeen = true
       const made = await asideOn($, at)
       const aside = asideLine(made)
       // v's card just landed under this message: when the message is off screen, the bar says so for a few seconds
@@ -2609,6 +2625,7 @@ export const registerShell: Register = (on, options) => {
       const els = $.ui.resolve(e) as Any
       const { Box, Text } = els
       noteViewport(e.viewport)
+      if (e.viewport?.isFullscreen) fullscreenSeen = true
       // the conversation's width now, which a long message is measured against (Squeeze's `6 of 24 lines`): the band
       // draws first when a docked pane closes, so the verb row never counts at the width the pane left
       if (e.viewport?.columns) seeView(e.viewport.columns, e.viewport.rows ?? 48)
@@ -2638,6 +2655,17 @@ export const registerShell: Register = (on, options) => {
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => answerKey($, e, next, true))
     // past the hook's budget (the hooks worker busy drawing), the same decision answers within the .catch's grace
     .catch(async ($, e, next) => answerKey($, e, next, false))
+
+  // the chips' Client failed on the surface: they are drawn as presses again, and Claude Code draws the site anew
+  on('ui.fault', async ($, e, next) => {
+    const el = String(e.element || '')
+    if (el.startsWith('chips-')) {
+      chipsFaults.set(el.slice('chips-'.length), String(e.reason || e.phase || 'failed'))
+      if (chipKeysRow === el.slice('chips-'.length)) await setChipKeys($, null).catch(() => undefined)
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
+  })
 
   // the squeeze chips' Client (squeeze/chipsclient.js): each key and click it holds, for the chips program
   on('ui.message', async ($, e, next) => {
@@ -2780,8 +2808,10 @@ export function resetShell(): void {
   resetKeys(shellKey)
   resetAside()
   chipsGrids.clear()
+  chipsFaults.clear()
   chipKeysRow = null
   told.clear()
+  fullscreenSeen = false
   graphLayout = null
 }
 

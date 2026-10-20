@@ -269,13 +269,16 @@ test('the squeeze chips take the keyboard with a click: tab and shift+tab move b
   await ui.key({ key: 'w' })
   for (let i = 0; i < 3; i++) { await clock.advance(50); await clock.settle() }
   expect(textOf(await ui.drawn())).not.toContain('1 Length')
-  // a key in the prompt again; s opens them, a click and enter close them
+  // a key in the prompt again; s opens them, a click on the chip picked hands them the keys and changes nothing, and
+  // enter closes them (the answer stays at medium)
   await press($, clock, edit('s'))
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left' })
+  await clock.settle()
+  expect(textOf(await ui.drawn())).toMatch(/Length ○○●○ medium/)
   await ui.key({ key: 'return' })
   await clock.settle()
   expect(textOf(await ui.drawn())).not.toContain('1 Length')
-  expect(textOf(await $.ui.render(HINT))).toContain('v visualize · s squeeze')
+  expect(textOf(await $.ui.render(HINT))).toContain('v visualize · s ●')
   await ui.unmount()
 })
 
