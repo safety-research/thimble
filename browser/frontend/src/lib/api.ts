@@ -456,6 +456,13 @@ export const api = {
 
   // ---- labels and filters ----
   concepts: (c: string) => j<Concept[]>(`${ws(c)}/concepts`),
+  /** `GET /label-runs/{id}`: a label run's live state, for its row in the chat. */
+  labelRun: (c: string, id: string) => j<LabelRunLive>(`${ws(c)}/label-runs/${enc(id)}`),
+  /** `POST /label-runs/{id}`: the analyst's choice for a run Claude asked about: all, a random sample, or none. */
+  answerLabelRun: (c: string, id: string, choice: 'all' | 'sample' | 'cancel') =>
+    j<{ id: string; state: string }>(`${ws(c)}/label-runs/${enc(id)}`, { method: 'POST', body: JSON.stringify({ choice }) }),
+  /** `POST /concepts/{id}/apply/cancel`: stop the label's run, keeping what it labeled. */
+  stopLabelRun: (c: string, concept: string) => j<unknown>(`${ws(c)}/concepts/${enc(concept)}/apply/cancel`, { method: 'POST' }),
   concept: (c: string, id: string) => j<Concept>(`${ws(c)}/concepts/${enc(id)}`),
   conceptRows: (c: string, id: string, opts: { value?: string; limit?: number; offset?: number } = {}) => j<LabelRowsResponse>(`${ws(c)}/concepts/${enc(id)}/rows${q(opts)}`),
   labelsForPath: (c: string, path: string) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path })}`),
@@ -603,7 +610,7 @@ export const api = {
 export const isNotFound = (e: unknown): boolean => /^404\b/.test((e as Error)?.message ?? '')
 
 // --- the canvas's layout ---
-import type { CellMoveBody, GroupPatch, MainEffort, Pos } from './types'
+import type { CellMoveBody, GroupPatch, LabelRunLive, MainEffort, Pos } from './types'
 
 /** The canvas' layout routes: where a group's column sits and how wide a card is. */
 export const canvasApi = {

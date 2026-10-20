@@ -2,7 +2,7 @@
 import type { Mark } from '../lib/marks'
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
-import type { ChatRecord, TurnUsage } from '../lib/types'
+import type { ChatRecord, LabelRunState, TurnUsage } from '../lib/types'
 
 export interface UserRow {
   kind: 'user'
@@ -123,7 +123,14 @@ export interface NoticeRow {
   closed: boolean
   ts?: string
 }
-export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | NoticeRow
+/** a label run in the chat (backend labels/asks.py): the ask before a model reads many records, then the run; its later
+ * records change this row in place */
+export interface LabelRunRow extends LabelRunState {
+  kind: 'label_run'
+  index: number
+  ts?: string
+}
+export type Row = UserRow | TextRow | ToolRow | ChipRow | AgentRow | ErrorRow | NoteRow | NoticeRow | LabelRunRow
 
 /** Find the tool row with `id` anywhere in `rows`, nested rows included. */
 function findTool(rows: Row[], id: string): ToolRow | undefined {
@@ -173,6 +180,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
   const rows: Row[] = []
   const calls = new Map<string, number>() // a top-level tool call's id -> its record's index, for the calls folded
   const notices = new Map<string, NoticeRow>() // a notice's key -> its row while it is open
+  const labelRuns = new Map<string, LabelRunRow>() // a label run's id -> its row
   records.forEach((e, index) => {
     if (e.type === 'tool_use' && !skip?.has(index) && typeof e.parent_tool_use_id !== 'string') calls.set(e.id, index)
   })
@@ -254,6 +262,17 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
           if (!m || typeof m.term !== 'string' || !m.term) continue
           const row = texts.find((r) => r.text.includes(m.term))
           if (row) row.marks = [...(row.marks ?? []), m]
+        }
+        return
+      }
+      case 'label_run': {
+        const { type: _t, ts, ...state } = e
+        const row = labelRuns.get(e.id)
+        if (row) Object.assign(row, state, ts ? { ts } : {})
+        else {
+          const made: LabelRunRow = { kind: 'label_run', index, ...state, ...(ts ? { ts } : {}) }
+          labelRuns.set(e.id, made)
+          rows.push(made)
         }
         return
       }

@@ -1,6 +1,11 @@
 """The chat's label tools: apply_label, show_label, delete_label, set_filter and clear_filter (their texts are in
-prompts/tools-labels.md). apply_label waits for its run, so the chat's tool card runs as long as the label does
-and its result has the counts; the chat's Stop stops the run, keeping what it labeled so far.
+prompts/tools-labels.md).
+
+apply_label never holds the chat's turn for long. A prompt label over many units asks the analyst first (asks.py) and
+answers at once. Any other run starts, and apply_label waits APPLY_WAIT_S for it: a short run (a trial, a regex, code)
+answers with its counts, and a longer one goes on in the background, shown as a row of the chat, while Claude answers
+from what it has. Either way the chat's agent hears how the run ended with the analyst's next message. The chat's Stop,
+during the wait, stops the run, keeping what it labeled so far.
 """
 from __future__ import annotations
 
@@ -10,10 +15,10 @@ from typing import Any
 
 from .. import tools
 from ..tools import Result
-from . import define, run, store
+from . import asks, define, run, store
 
 TOOLS = ("apply_label", "show_label", "delete_label", "set_filter", "clear_filter")
-APPLY_WAIT_S = 900.0  # apply_label waits this long for its run, then answers with the counts so far
+APPLY_WAIT_S = 30.0  # apply_label waits this long for its run, then answers while the run goes on
 UNIT_ARG = {"records": "record", "files": "agent", "runs": "run"}
 UNIT_WORDS = {"record": "record", "agent": "file", "run": "run", "cell": "card", "span": "sentence"}
 
@@ -84,10 +89,29 @@ async def apply_label(t: tools.Tools, args: dict[str, Any]) -> Result:
     if args.get("show") and unit in store.FILE_UNITS:
         store.show(ws, cid, True)
     unchanged = how == "same" and not run.running(ws, cid) and define.covered(concept, paths, limit)
+    where = f" of {', '.join(paths)}" if unit in store.FILE_UNITS and paths != ["**/*"] else ""
+    if (waiting := asks.pending(ws, cid)) is not None:
+        return _ok(f"The label {concept['name']} [↗](concept:{cid}) still waits for the analyst's choice in the chat: "
+                   f"{waiting['text']} Answer from what you have.", extra={"label_card": card["id"]},
+                   cell_id=card["id"])
     if not unchanged and not run.running(ws, cid):
+        found = None
+        if kind == "prompt":
+            try:
+                found = await asyncio.to_thread(run.scope_units, ws, folder, concept,
+                                                paths if unit in store.FILE_UNITS else [], limit)
+            except store.LabelError as e:
+                return _err(f"defined the label {concept['name']} [↗](concept:{cid}), but it did not run: {e}")
+            est = asks.estimate(concept, found)
+            if asks.needs_asking(est):
+                if args.get("filter"):
+                    store.set_filter(ws, scope, cid, concept["labels"][0])
+                asks.ask(ws, t.chat, concept, paths=paths if unit in store.FILE_UNITS else [], est=est, where=where)
+                return _ok(asked(concept, card["id"], est, where), extra={"label_card": card["id"]},
+                           cell_id=card["id"])
         try:
             await run.start(ws, folder, concept, paths=paths if unit in store.FILE_UNITS else [], limit=limit,
-                            created_by=f"chat:{t.chat}")
+                            created_by=f"chat:{t.chat}", found=found or None)
         except store.LabelError as e:
             return _err(f"defined the label {concept['name']} [↗](concept:{cid}), but it did not run: {e}")
     if args.get("filter"):
@@ -97,8 +121,24 @@ async def apply_label(t: tools.Tools, args: dict[str, Any]) -> Result:
     except asyncio.CancelledError:
         await run.cancel(ws, cid)
         raise
+    if rec is not None and rec.get("status") == "running":
+        if not rec.get("follow"):
+            asks.follow(ws, t.chat, concept, rec, where)
+    elif rec is not None:
+        rec["told"] = True  # this answer has the counts, so the next turn need not hear them again
     return _ok(summary(ws, cid, rec, paths=paths, unchanged=unchanged), extra={"label_card": card["id"]},
                cell_id=card["id"])
+
+
+def asked(concept: dict[str, Any], card: str, est: dict[str, Any], where: str) -> str:
+    """apply_label's answer when the run waits for the analyst's go-ahead."""
+    cid = concept["id"]
+    return (f"Defined the label {concept['name']} [↗](concept:{cid}); its card is card:{card}. It has not run. "
+            f"{asks.size_line(concept, est, where)}. That is "
+            f"the analyst's time and money, so the chat asks them to run it on every one, on a random sample of "
+            f"{asks.SAMPLE}, or not at all. Their choice, and the counts once a run ends, reach you with their next "
+            f"message. Answer now from what you have, such as a trial's records or what you computed, and say that "
+            f"the label waits for their choice.")
 
 
 def summary(ws: str, cid: str, rec: dict[str, Any] | None, *, paths: list[str], unchanged: bool) -> str:
@@ -118,7 +158,8 @@ def summary(ws: str, cid: str, rec: dict[str, Any] | None, *, paths: list[str], 
     elif rec is not None:
         if rec.get("status") == "running":
             lines.append(f"The run goes on in the background ({rec.get('done', 0):,} of {rec.get('total') or 0:,} so "
-                         "far); its card shows the counts as they come.")
+                         "far); the chat and its card show it as it goes. Its counts reach you with the analyst's next "
+                         "message after it ends. Answer now from what you have, and say that the label still runs.")
         elif rec.get("status") == "error":
             lines.append(f"The run failed: {rec.get('message') or 'no reason given'}.")
         elif rec.get("stopped"):

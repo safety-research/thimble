@@ -2,8 +2,10 @@
 page while it goes (GET /concepts, GET /concepts/{id}: `run`) and its rows written as they come, so the marks, the
 counts and the card fill in during the run.
 
-- prompt: the records go to the model in batches (classify.batches), CONCURRENCY calls at once, each with the same
-  system prompt so the calls after the first read it from the cache, and structured JSON answers.
+- prompt: the records go to the model in batches (classify.batches), each with the same system prompt so the calls after
+  the first read it from the cache, and structured JSON answers. The calls run at once, as many as the Pacer lets: it
+  starts at CONCURRENCY, halves when the API answers 429 or 529 (the call waits and goes again), and grows back one at a
+  time while calls go through.
 - regex: Python's re searches each unit's text; a unit that matches takes the first value, any other the second.
 - code: the label's `label(unit)` runs in the sandbox (code_runner.py through cards/sandbox.run_script), CODE_CHUNK units
   per run of it.
@@ -28,7 +30,9 @@ from . import classify, store, units as units_mod
 
 log = logging.getLogger("thimble_browser.labels")
 
-CONCURRENCY = 10  # model calls a prompt label makes at once
+CONCURRENCY = 32  # model calls a prompt label makes at once, to start with (the Pacer lowers it when the API is busy)
+CALL_RETRIES = 6  # a call the API refused for its rate (429) or as overloaded (529, 5xx) goes again this many times
+RETRY_MAX_S = 60.0
 CODE_CHUNK = 5_000  # units per sandbox run of a code label
 CODE_TIMEOUT_S = 120.0
 REGEX_CHUNK = 2_000
@@ -37,6 +41,9 @@ MESSAGES_KEPT = 3
 
 RUNS: dict[tuple[str, str], dict[str, Any]] = {}  # (workspace, label id) -> the run record, the last one kept
 TASKS: dict[tuple[str, str], asyncio.Task] = {}
+# what runs when a run ends, after its record is kept: fn(workspace, label id, run record); a chat that started the run
+# hears how it ended (labels/asks.py). It must not raise or wait.
+ON_END: list[Any] = []
 SETTINGS: dict[str, Any] = {"unsandboxed": False}
 
 
@@ -87,13 +94,16 @@ def scope_units(ws: str, folder: Path, concept: dict[str, Any], paths: list[str]
 
 
 async def start(ws: str, folder: Path, concept: dict[str, Any], *, paths: list[str], limit: int | None = None,
-                created_by: str = "user") -> dict[str, Any]:
-    """Start a run of the label over `paths` (its glob for files); its record. LabelError when one runs already, or the
-    scope has no units."""
+                created_by: str = "user", found: list[Any] | None = None,
+                follow: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start a run of the label over `paths` (its glob for files), or over the units `found` when the caller has them
+    already; its record. `follow` names the chat that hears how the run ends (labels/asks.py). LabelError when one runs
+    already, or the scope has no units."""
     key = (ws, concept["id"])
     if running(ws, concept["id"]):
         raise store.LabelError(f"the label {concept['name']} is running already")
-    found = await asyncio.to_thread(scope_units, ws, folder, concept, paths, limit)
+    if found is None:
+        found = await asyncio.to_thread(scope_units, ws, folder, concept, paths, limit)
     if not found:
         where = {"cell": "the canvas has no cards", "span": "the report has no sentences"}.get(
             concept["unit"], f"{', '.join(paths) or 'its glob'} matches no file with records")
@@ -106,7 +116,9 @@ async def start(ws: str, folder: Path, concept: dict[str, Any], *, paths: list[s
     rec = {"run_id": secrets.token_hex(4), "status": "running", "started": home.now(), "created_by": created_by,
            "paths": list(paths), "limit": limit, "total": len(found), "matched_total": len(found), "done": 0,
            "labeled": 0, "failed": 0, "matches": 0, "message": None, "examples": 0, "version": concept["version"],
-           "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "calls": 0}}
+           "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
+                     "cache_creation_input_tokens": 0, "calls": 0},
+           "t0": time.monotonic(), "follow": follow, "pace": None}
     # a run of the definition its rows came from replaces the rows of the units it labels and keeps the others (a run
     # over other files adds to them); a run of a new definition starts the rows anew
     last = concept["applications"][-1] if concept["applications"] else None
@@ -176,6 +188,7 @@ async def _run(ws: str, folder: Path, concept: dict[str, Any], found: list[Any],
         progress.close()
         rec["message"] = "; ".join(rec.pop("_messages", [])) or None
         rec["ended"] = home.now()
+        rec["seconds"] = time.monotonic() - rec.get("t0", time.monotonic())
         _finish(ws, concept["id"], rec)
     if stopped:
         raise asyncio.CancelledError
@@ -196,6 +209,10 @@ def _finish(ws: str, cid: str, rec: dict[str, Any]) -> None:
     app = {k: rec.get(k) for k in ("total", "matched_total", "labeled", "failed", "status", "message", "created_by",
                                    "matches", "limit", "stopped")}
     app.update(ts=rec["started"], paths=rec.get("paths") or [], version=concept["version"])
+    if concept["kind"] == "prompt" and rec["usage"]["calls"]:
+        # what the run read and how long it took, which the next estimate of this label starts from (asks.estimate)
+        app.update(usage=dict(rec["usage"]), seconds=round(rec.get("seconds") or 0.0, 1), chars=rec.get("chars"),
+                   concurrency=rec.get("pace"))
     concept["applications"] = [*concept["applications"], app][-store.APPLICATIONS_KEPT:]
     if rec.get("limit") is None and rec["status"] == "done" and not rec.get("stopped"):
         concept["trial"] = False
@@ -204,6 +221,11 @@ def _finish(ws: str, cid: str, rec: dict[str, Any]) -> None:
     store.note_change(concept, "ran", f"ran over {rec.get('total') or 0:,} units")
     store.write(ws, concept)
     store.notify(ws, cid, "ran")
+    for fn in ON_END:
+        try:
+            fn(ws, cid, rec)
+        except Exception:  # noqa: BLE001 — what follows a run never fails it
+            log.exception("a run's ending hook failed")
 
 
 def _row(u: Any, value: str, confidence: float | None, source: str, **extra: Any) -> dict[str, Any]:
@@ -223,55 +245,133 @@ def _count(rec: dict[str, Any], concept: dict[str, Any], rows: list[dict[str, An
 
 # ---- prompt
 
+class Pacer:
+    """How many of a run's model calls go at once: `limit`, which starts at CONCURRENCY, halves when the API says it is
+    busy (slow) and grows by one after `limit` calls in a row went through (fine), up to `most`."""
+
+    def __init__(self, start: int | None = None, most: int | None = None) -> None:
+        self.limit = max(1, start or CONCURRENCY)
+        self.most = most or self.limit
+        self.active = 0
+        self.ok = 0
+        self.slowed = 0
+        self._cond = asyncio.Condition()
+
+    async def __aenter__(self) -> "Pacer":
+        async with self._cond:
+            await self._cond.wait_for(lambda: self.active < self.limit)
+            self.active += 1
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        async with self._cond:
+            self.active -= 1
+            self._cond.notify_all()
+
+    def slow(self) -> None:
+        self.limit = max(1, self.limit // 2)
+        self.ok = 0
+        self.slowed += 1
+
+    async def fine(self) -> None:
+        self.ok += 1
+        if self.ok >= self.limit and self.limit < self.most:
+            async with self._cond:
+                self.limit += 1
+                self.ok = 0
+                self._cond.notify_all()
+
+
+def _busy(e: BaseException) -> bool:
+    """Whether a call failed because the API is busy (429, 529 or another 5xx, a dropped connection), so it can go
+    again after a wait."""
+    if isinstance(e, (anthropic.RateLimitError, anthropic.InternalServerError, anthropic.APIConnectionError)):
+        return True
+    return isinstance(e, anthropic.APIStatusError) and e.status_code in (429, 529)
+
+
+def _wait_s(e: BaseException, attempt: int) -> float:
+    """How long to wait before a busy call goes again: the API's retry-after when it gives one, else 2, 4, 8 ... s."""
+    try:
+        after = float(getattr(getattr(e, "response", None), "headers", {}).get("retry-after") or 0)
+    except (TypeError, ValueError):
+        after = 0.0
+    return min(RETRY_MAX_S, max(after, 2.0 ** attempt) + secrets.randbelow(1000) / 1000)
+
+
 async def _call(concept: dict[str, Any], system: str, user: str, rec: dict[str, Any]) -> str | None:
-    """One classifier call: the reply's text, or None when Claude declined it."""
+    """One classifier call: the reply's text, or None when Claude declined it. It goes once: a call the API refuses as
+    busy raises, and _prompt waits and sends it again."""
     args = llm.request_args(effort=classify.EFFORT, model=concept.get("model") or settings.read()["model"])
     args["output_config"] = {**args["output_config"],
                              "format": {"type": "json_schema", "schema": classify.schema(concept)}}
-    msg = await llm.client().beta.messages.create(
+    msg = await llm.client().with_options(max_retries=0).beta.messages.create(
         max_tokens=classify.MAX_TOKENS, system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user}], **args)
     u = rec["usage"]
     u["calls"] += 1
-    for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
+    for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
         u[k] += int(getattr(msg.usage, k, 0) or 0)
     if msg.stop_reason == "refusal":
         return None
     return "".join(b.text for b in msg.content if b.type == "text")
 
 
+async def _paced(concept: dict[str, Any], system: str, user: str, rec: dict[str, Any], pacer: Pacer) -> str | None:
+    """_call as the pacer lets it go, sent again after a wait when the API says it is busy (CALL_RETRIES); a busy
+    answer also lowers how many calls go at once."""
+    attempt = 0
+    while True:
+        try:
+            async with pacer:
+                reply = await _call(concept, system, user, rec)
+        except anthropic.APIError as e:
+            attempt += 1
+            if not _busy(e) or attempt > CALL_RETRIES:
+                raise
+            if not isinstance(e, anthropic.APIConnectionError):
+                pacer.slow()
+            rec["pace"] = pacer.limit
+            await asyncio.sleep(_wait_s(e, attempt))
+            continue
+        await pacer.fine()
+        rec["pace"] = pacer.limit
+        return reply
+
+
 async def _prompt(ws: str, concept: dict[str, Any], found: list[Any], rec: dict[str, Any], progress: _Progress) -> None:
     system = classify.system_prompt(concept)
-    sem = asyncio.Semaphore(CONCURRENCY)
+    pacer = Pacer()
+    rec["pace"] = pacer.limit
     values = concept["labels"]
+    rec["chars"] = sum(min(len(u.text or ""), classify.RECORD_CHARS) for u in found)
     cut = sum(1 for u in found if u.extra.get("cut"))
     if cut:
         _note(rec, f"read {cut:,} {'unit' if cut == 1 else 'units'} only in part, as {'it is' if cut == 1 else 'they are'}"
                    f" longer than {units_mod.WHOLE_CHARS:,} characters")
 
     async def one(batch: list[Any]) -> None:
-        async with sem:
-            try:
-                reply = await _call(concept, system, classify.records_text([u.text for u in batch]), rec)
-            except (anthropic.APIError, llm.NoCredentials) as e:
-                why = llm.failure(e)
-                _note(rec, why)
-                _count(rec, concept, [], len(batch), len(batch))
-                progress()
-                return
-            if reply is None:
-                _note(rec, "Claude declined to judge some records")
-                _count(rec, concept, [], len(batch), len(batch))
-                progress()
-                return
-            got, failed = classify.answers(reply, len(batch), values)
-            for why in list(dict.fromkeys(failed.values()))[:1]:
-                _note(rec, why)
-            rows = [_row(batch[k], a["value"], a["confidence"], "prompt", rationale=a.get("reason"))
-                    for k, a in sorted(got.items())]
-            await asyncio.to_thread(store.append_rows, ws, concept["id"], rows)
-            _count(rec, concept, rows, len(batch), len(failed))
+        try:
+            reply = await _paced(concept, system, classify.records_text([u.text for u in batch]), rec, pacer)
+        except (anthropic.APIError, llm.NoCredentials) as e:
+            why = llm.failure(e)
+            _note(rec, why)
+            _count(rec, concept, [], len(batch), len(batch))
             progress()
+            return
+        if reply is None:
+            _note(rec, "Claude declined to judge some records")
+            _count(rec, concept, [], len(batch), len(batch))
+            progress()
+            return
+        got, failed = classify.answers(reply, len(batch), values)
+        for why in list(dict.fromkeys(failed.values()))[:1]:
+            _note(rec, why)
+        rows = [_row(batch[k], a["value"], a["confidence"], "prompt", rationale=a.get("reason"))
+                for k, a in sorted(got.items())]
+        await asyncio.to_thread(store.append_rows, ws, concept["id"], rows)
+        _count(rec, concept, rows, len(batch), len(failed))
+        progress()
 
     await asyncio.gather(*(one(b) for b in classify.batches(found)))
     if rec["labeled"] == 0 and rec["failed"]:

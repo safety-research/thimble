@@ -27,15 +27,27 @@ import { Note, ThreadChip } from './Notes'
 import { AnswerCards } from './AnswerCards'
 import { ApiErrorCard } from './ApiError'
 import { NoticeRow } from './Notice'
+import { LabelRunRow } from './LabelRun'
 import { DocChip, GroupChip, LabelChip, openLabel } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { UsageLine } from './usage'
 
-/** The working mark while a reply streams and no tool is pending: the spinner, the one thing that loops. */
+const QUIET_S = 8 // after this long with no new step, the working mark says how long Claude has been thinking
+
+/** The working mark while a reply runs and no tool is pending: the spinner, the one thing that loops; after QUIET_S with
+ * no new step, how long Claude has been thinking, so a long wait never looks like a stall. */
 export function Working() {
+  const [since] = useState(() => Date.now())
+  const [now, setNow] = useState(since)
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+  const s = Math.floor((now - since) / 1000)
   return (
     <div className="chat-msg chat-working-row" aria-label="working">
       <Spinner label="working" />
+      {s >= QUIET_S && <span className="chat-working-time">{`Thinking · ${s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`}`}</span>}
     </div>
   )
 }
@@ -170,6 +182,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
           case 'notice':
             return <NoticeRow key={r.index} item={r} ws={ws} />
+          case 'label_run':
+            return <LabelRunRow key={r.index} item={r} ws={ws} />
         }
       })}
       {streaming && !toolPending && <Working />}

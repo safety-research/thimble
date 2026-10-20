@@ -5,7 +5,7 @@ thimble 0.8's, with what thimble browser does not have left out.
 
 ## apply_label
 
-Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. In files, a unit is a record, a whole file or a folder of files (`unit`). The call waits until every unit has its value, which for a prompt label over many records takes a few minutes; the analyst sees the run go on in the label's card and in Files.
+Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. In files, a unit is a record, a whole file or a folder of files (`unit`). A short run, such as a trial, a regex or code, answers with its counts. A longer run goes on in the background after half a minute, and a prompt label over many records first asks the analyst whether to run it on all of them, on a sample, or not at all. Then the call answers at once, and the counts reach you with the analyst's next message. The analyst sees the run in the chat, in the label's card and in Files.
 
 ```json
 {
