@@ -296,7 +296,8 @@ async function focusPart($: Engine): Promise<void> {
 /** Where the ring stands on the selected part in the last drawing: on a card the gutter key of its first row, in a
  *  pane its first press (else the pane's first part); null when it is not drawn. */
 function selectedGutter(): string | null {
-  if (showing === 'pane') return !paneDrawn ? null : (paneDrawn.selected ? paneDrawn.buttons.get(paneDrawn.selected) : null) ?? paneDrawn.first
+  // (a selected part out of the window has no press now: none, rather than another part)
+  if (showing === 'pane') return !paneDrawn ? null : paneDrawn.selected ? paneDrawn.buttons.get(paneDrawn.selected) ?? null : paneDrawn.first
   if (!drawn) return null
   for (const [y, ids] of drawn.gutter) if (ids.includes(drawn.selected ?? '')) return GUTTER(y)
   return null
@@ -1106,6 +1107,17 @@ export function registerDetail(on: Parameters<Register>[0]): void {
           }
         }
         const part = el.startsWith('r|side|') ? regionOfKey(el) : null
+        const onPage = (key: string | null) => !!key && key.startsWith('r|side|') && Number(key.split('|')[2]) < paneDrawn!.below
+        const chosen = paneDrawn.selected ? paneDrawn.buttons.get(paneDrawn.selected) ?? null : null
+        // the ring put on the page by anything but the person (the pane taking the keys as it opens, a drawing's
+        // autoFocus, a focus asked for before the pane drew) starts on the part selected, never on another
+        if (!person && part && onPage(el) && chosen && el !== chosen && part !== paneDrawn.selected) {
+          const was = isAsk(ringAt)
+          const r = await next({ ...e, element: chosen })
+          if (!r.deny) { ringAt = chosen; ringY = Number(chosen.split('|')[2]); landed = null }
+          if (was !== isAsk(ringAt)) askRedraw($)
+          return r
+        }
         // a press in what an action opened (drawn under the conversation): the ring stands there, the selection stays
         if (person && part && Number(el.split('|')[2]) >= paneDrawn.below) { const r = await next(e); if (!r.deny) { ringAt = el; landed = null } return r }
         if (person && part) {

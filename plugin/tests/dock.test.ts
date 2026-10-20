@@ -63,7 +63,9 @@ function world(on: Any, o: { cov?: Any } = {}) {
   })
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
-  on('ui.focus', () => ({ value: {} }))
+  // where the ring lands, after the plugin's hook (the engine's end of the chain)
+  const focused: string[] = []
+  on('ui.focus', (_$: unknown, e: Any) => { focused.push(String(e.element ?? '')); return { value: {} } })
   const closed: string[] = []
   on('ui.close', (_$: unknown, e: { id: string }) => { closed.push(e.id); return { value: undefined } })
   on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Coverage', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] : [] }))
@@ -80,7 +82,7 @@ function world(on: Any, o: { cov?: Any } = {}) {
   on('session.messages', () => ({ value: [] }))
   on('config.list', () => ({ value: [] }))
   on('ui.toast', () => ({ value: undefined }))
-  return { runs, files, opened, submitted, spawns, closed }
+  return { runs, files, opened, submitted, spawns, closed, focused }
 }
 
 function textOf(n: Any): string {
@@ -307,4 +309,28 @@ test("the bar's coverage shows from the session's start, at 0% once the folder h
   await clock.settle()
   expect(w.runs.filter(r => r.includes('coverage')).length).toBeGreaterThan(before)
   expect(textOf(await $.ui.render(HINT))).toContain('seen 17%')
+})
+
+test("the ring starts on the pane's selected part: a move the person did not make, onto another part, lands on the selected one", async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  mock.session(on)
+  await turn($, on, clock)
+  await $.ui.render(HINT)
+  await press($, clock, edit('l'))
+  await clock.advance(700)
+  await clock.settle()
+  await panel($, clock)
+  // the list selects its first label, and the ring stands on it; a focus asked for by a plugin on the second (the
+  // pane taking the keys, a drawing from before) lands on the first
+  const first = await sideKey($, 'lb-0')
+  await $.ui.focus({ requestId: 'object', element: first, origin: { kind: 'person' } } as never)
+  await clock.settle()
+  await $.ui.focus({ requestId: 'object', element: await sideKey($, 'lb-1'), origin: { kind: 'plugin', name: 'thimble' } } as never)
+  await clock.settle()
+  expect(w.focused.at(-1)).toBe(first)
+  // the person's own move goes where they moved it
+  await $.ui.focus({ requestId: 'object', element: await sideKey($, 'lb-1'), origin: { kind: 'person' } } as never)
+  await clock.settle()
+  expect(w.focused.at(-1)).toBe(await sideKey($, 'lb-1'))
 })
