@@ -10,7 +10,7 @@
 //   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
 //   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
-//   parseAnswer(text)          -> {notes, line, settled, hints, verbs, glosses} from the fork's reply, or null
+//   parseAnswer(text)          -> {notes, hints, verbs, glosses, claims, clusters} from the pass's reply, or null
 //   pickHints(list, verbs)     -> the 2-3 verbs the observer chose for one object, checked against the verbs that exist
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
@@ -236,7 +236,7 @@ export function jsonIn(text) {
   }
 }
 
-/** The fork's reply, read leniently: notes, a line, whether the open line is settled, and the hints per object. */
+/** The pass's reply, read leniently: notes, the hints per object, lit verbs, glosses and claims. */
 export function parseAnswer(text) {
   const d = jsonIn(text)
   if (!d || typeof d !== 'object') return null
@@ -244,16 +244,6 @@ export function parseAnswer(text) {
     .map(n => (typeof n === 'string' ? { note: n } : n))
     .filter(n => n && typeof n.note === 'string' && n.note.trim())
     .map(n => ({ note: n.note.trim(), ...(typeof n.rests_on === 'string' && n.rests_on.trim() ? { rests_on: n.rests_on.trim() } : {}) }))
-  const L = d.line && typeof d.line === 'object' && typeof d.line.line === 'string' && d.line.line.trim() ? d.line : null
-  const line = L
-    ? {
-        line: L.line.trim(),
-        decision: typeof L.decision === 'string' ? L.decision.trim() : '',
-        title: typeof L.title === 'string' && L.title.trim() ? L.title.trim() : L.line.trim(),
-        explanation: typeof L.explanation === 'string' ? L.explanation.trim() : '',
-        rests_on: typeof L.rests_on === 'string' ? L.rests_on.trim() : '',
-      }
-    : null
   const hints = d.hints && typeof d.hints === 'object' && !Array.isArray(d.hints) ? d.hints : {}
   // the message row: the verbs it lights and its glosses, read as given (shell/message.js verbsOf and glossesOf check them)
   const verbs = d.verbs && typeof d.verbs === 'object' && !Array.isArray(d.verbs) ? d.verbs : {}
@@ -261,7 +251,7 @@ export function parseAnswer(text) {
   // the turn's claims and the clusters' renames, read as given (verbs/claims/claims.js applyTurn checks them)
   const claims = Array.isArray(d.claims) ? d.claims : []
   const clusters = Array.isArray(d.clusters) ? d.clusters : []
-  return { notes, line, settled: d.settled === true, hints, verbs, glosses, claims, clusters }
+  return { notes, hints, verbs, glosses, claims, clusters }
 }
 
 /** The observer's choice for one object, kept only where it names a verb that exists: at most three, each with its

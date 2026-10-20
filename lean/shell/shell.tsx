@@ -87,7 +87,6 @@ const CARDFOCUS = { plugin: 'thimble', key: 'cardfocus' } as const
 const RUNNING = { plugin: 'thimble', key: 'running' } as const
 const ROWVERBS = { plugin: 'thimble', key: 'rowverbs' } as const
 const SQZ = { plugin: 'thimble', key: 'sqz' } as const
-const LINE = { plugin: 'thimble', key: 'line' } as const
 const COUNTS = { plugin: 'thimble', key: 'counts' } as const
 const CLAIMS = { plugin: 'thimble', key: 'claims' } as const
 const TURNS = { plugin: 'thimble', key: 'turns' } as const
@@ -2676,9 +2675,8 @@ export const registerShell: Register = (on, options) => {
   })
 
   // the band above the prompt: the tray when it is open (one small panel, a fixed number of rows, so the transcript
-  // scrolls above it; it shows the card on top of its stack: a citation's source card or a gloss's explainer card),
-  // else the observer's line when one is open; then the thimble line, the one bar: what the keys do now at its left,
-  // the session's counts at its right. A blank row stands between the bar and what is above it, at rest as while
+  // scrolls above it; it shows the card on top of its stack: a citation's source card or a gloss's explainer card);
+  // then the thimble line, the one bar: what the keys do now at its left, the session's counts at its right. A blank row stands between the bar and what is above it, at rest as while
   // Claude works.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     try {
@@ -2693,13 +2691,10 @@ export const registerShell: Register = (on, options) => {
       const line = await barEl($, els, bw, !!e.props.isWorking)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       const above = trayTop(tray) ? await trayBand($, e, tray!) : null
-      // the observer's line (observer.ts, inside this hook): drawn by its own hook when it has one open
-      const own = above ?? ((await $.state.get(LINE)).value ? await next(e) : null)
-      if (!line) return own ?? next(e)
-      // one blank row between what stands above (Claude Code's spinner or its last status row, the tray, the
-      // observer's line) and the bar
+      if (!line) return above ?? next(e)
+      // one blank row between what stands above (Claude Code's spinner or its last status row, the tray) and the bar
       const rows: Any[] = []
-      if (own) rows.push(own)
+      if (above) rows.push(above)
       rows.push(Text({ key: 'bar-gap', children: ' ' }), line)
       return Box({ flexDirection: 'column', children: rows })
     } catch {

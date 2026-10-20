@@ -62,8 +62,7 @@ test('the digest says how many rows stand behind each cited value, how sure the 
 test("the fork's answer is read leniently, and its hints keep only verbs that exist, at most three", () => {
   const a = parseAnswer('Here: {"notes": [{"note": "412 counts all months.", "rests_on": "groupby"}, {"note": " "}], "line": {"line": "x", "decision": "send it"}, "settled": true, "hints": {"orders-by-region": [{"verb": "trace", "phrase": "trace the 412 to its rows"}, {"verb": "stress"}, {"verb": "t"}, "explore", {"verb": "squeeze"}, {"verb": "x"}]}}')
   assert.equal(a.notes.length, 1)
-  assert.equal(a.line.title, 'x')
-  assert.equal(a.settled, true)
+  assert.equal('line' in a, false)
   const list = pickHints(hintsFor(a.hints, '02-orders-by-region'), VERBS)
   assert.deepEqual(list, [{ verb: 'trace', phrase: 'trace the 412 to its rows' }, { verb: 'explore' }, { verb: 'squeeze' }])
   assert.equal(parseAnswer('no json'), null)

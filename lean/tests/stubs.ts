@@ -2,15 +2,11 @@
 // templates with the same placeholders and sections as the real ones, so a test sees what the observer composed.
 
 const STUBS: Record<string, string> = {
-  'observer/v1': 'OBSERVER {{QUESTION}} | {{DECISION}} | {{OBJECTS}} | {{COVERAGE}} | {{NOTES}} | {{OPEN}} {{LINE_RULE}} | {{GLOSSED}} | CLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}} {{GROWN}}',
   'observer/v2': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer/attention-v1': 'FRAME ATTENTION\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer/v3': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
-  'observer-turn/v1': 'TURN {{QUESTION_STEP}} | {{QUESTION}} | {{DECISION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
-  'question/v1': 'QUESTION {{QUESTION}} {{ANSWER}}',
-  'question/v2': 'QUESTION {{QUESTION}} {{ANSWER}}',
+  'observer-turn/v1': 'TURN {{QUESTION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
   'lens-notes/v1': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
-  'lens-line/v1': 'LENS line\n<!-- digest -->\n| {{SEEN}} | {{KNOWN}} | {{OPEN}}\n<!-- when open -->\nA line is open above the prompt now. Give no new line this time.\n<!-- when backoff -->\nGive no line this time: backoff.',
   'lens-actions/v2': 'LENS actions',
   'lens-actions/v3': 'LENS actions',
   'lens-squeeze/v1': 'LENS squeeze',
@@ -26,8 +22,6 @@ const STUBS: Record<string, string> = {
   'thread/v2': 'THE THREAD PROMPT',
   'forms/v2': '# Card forms\n\n## Principles\n\nOLD PRINCIPLES\n\n## Worked examples\n\nTHE WORKED FORMS',
   'forms/v3': '# Card guidance\n\n## Making a card\n\nTHE WORKED FORMS',
-  'card/v2': '# Card after, and v\'s card\n\n## The request\n\nREQUEST {{QUESTION}} | {{ANSWER}}\n\n## The view the person asked for\n\nVIEW {{WHAT}}{{CHOICE}} | {{HAS}}{{PROPOSALS}}| {{ANSWER}} | {{GUIDANCE}} | {{TOOLKIT}}\n\n## The fix\n\nFIX {{PROBLEMS}} | {{CARD}}\n\n## Saving\n\nSAVING\n\n## What the person sees\n\nTHE CARD COMES AFTER THE ANSWER',
-  'card/v1': '# Card after\n\n## The request\n\nREQUEST {{QUESTION}} | {{ANSWER}} | {{CARDS}} | {{GUIDANCE}} | {{TOOLKIT}}\n\n## The fix\n\nFIX {{PROBLEMS}} | {{CARD}} | {{TOOLKIT}}\n\n## Saving\n\n**Save what the person will keep as an object.** CARDS COME AFTER.\n\n## What the person sees\n\nTHE CARD COMES AFTER THE ANSWER',
 }
 
 /** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */

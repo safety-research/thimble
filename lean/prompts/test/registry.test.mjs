@@ -94,14 +94,6 @@ test("a template as prompt blocks: the words before its first placeholder are a 
   assert.deepEqual(fillBlocks('no placeholder', vals), [{ text: 'no placeholder' }])
   // no empty block: the API refuses one
   assert.deepEqual(fillBlocks('Rules.\n{{E}}', { E: '' }), [{ text: 'Rules.\n' }])
-  // the question step's own text: same words, its instructions first and marked
-  const q = readFileSync(join(ROOT, 'prompts', 'question', 'v1.md'), 'utf8')
-  const qv = { EARLIER: '- earlier', QUESTION: 'why?', ANSWER: 'because' }
-  const qb = fillBlocks(q, qv)
-  assert.equal(qb.length, 2)
-  assert.equal(qb[0].cache, true)
-  assert.ok(!qb[0].text.includes('why?') && qb[0].text.length > 1500, 'the fixed instructions, long enough to cache (512 tokens on current models)')
-  assert.equal(qb.map(x => x.text).join(''), fill(q, qv))
 })
 
 test('a version made of parts reads each section where it stands, and can leave a part out', () => {
@@ -130,7 +122,7 @@ test("today's texts are the v1 of their features, byte for byte", () => {
   // command's name, thimble, in place of lean, and `thimble run` with r1, r2, ... in place of `thimble q` with q1, q2, ...),
   // and the thread prompt's opening
   const want = {
-    'observer/v1.md': '289ca81d490ef224', 'question/v1.md': '84409e8c32d8fc4a', 'squeeze/v1.md': '571cc21c206dd909',
+    'squeeze/v1.md': '571cc21c206dd909',
     'forms/v1.md': '7c84d1a94721d3d6',
   }
   for (const [f, h] of Object.entries(want)) assert.equal(sha(readFileSync(join(ROOT, 'prompts', f), 'utf8')), h, f)

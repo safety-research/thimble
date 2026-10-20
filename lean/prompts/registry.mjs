@@ -26,7 +26,6 @@ export const FEATURES = {
     reads: 'observer/observer.ts, after each turn of work',
     default: 'v3-low',
     versions: {
-      v1: { about: 'one prompt in a fork of the whole session, as before lenses', mode: 'fork' },
       v2: { about: 'the frame for the lenses: one call over the new turn and a digest of the state', mode: 'lenses' },
       'attention-v1': { about: "v2 with the draft principles of when something is worth the person's attention", mode: 'lenses' },
       'v2-low': { about: 'v2 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v2.md', mode: 'lenses', effort: 'low' },
@@ -35,12 +34,7 @@ export const FEATURES = {
     },
   },
   'observer-turn': { about: "the pass's message: the new turn, its objects and the digest of the state", reads: 'observer/observer.ts', default: 'v1' },
-  question: {
-    about: "the question step: the answer against the person's literal question, and a stated decision", reads: 'observer/observer.ts', default: 'v2',
-    versions: { v1: { about: 'as before' }, v2: { about: "v1 with thimble's purpose in the 0.9 preamble's words, and cards for objects" } },
-  },
   'lens-notes': { about: 'lens: notes to Claude', reads: 'the pass', default: 'v1', optional: true },
-  'lens-line': { about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v1', optional: true },
   'lens-actions': {
     about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v3', optional: true,
     versions: { v1: { about: "observer:v1's words on lit verbs" }, v2: { about: 'v lit with a named card when a claim would be clearer seen than read' }, v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" } },

@@ -18,18 +18,6 @@ export type Said = { verb: string; text?: string; error?: string; running?: bool
 /** The hint row of one object version as the observer ranked it: its 2-3 verbs, each with a few words for this object. */
 export type Ranking = { verbs: { verb: string; phrase?: string }[]; at: number; by: 'observer' }
 
-/** The observer's one line above the prompt: the line, then (after Learn more) its explanation, written already. */
-export type ObserverLine = {
-  kind: 'offer' | 'explained'
-  line: string
-  title: string
-  explanation: string
-  decision: string
-  shownAt: number
-  /** prompts the person submitted while it was open: it clears at the second */
-  prompts: number
-}
-
 /** One mark in a message (CONTRACT 1): a citation, a gloss or a sparkline, as offsets into the shown markdown. */
 export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; anchor?: 'form' | 'word' }
 
@@ -118,7 +106,6 @@ declare module 'claude-code' {
       /** the observer's ranking of an object version's hint row, by root, id and version */
       ranked: StateFamily<Ranking | null>
       /** the observer's line above the prompt, or none */
-      line: ObserverLine | null
       /** each message's record, by its row key */
       msg: StateFamily<MsgRecord | null>
       /** the rows of Claude's messages in this session, oldest first */

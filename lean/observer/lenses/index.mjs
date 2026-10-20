@@ -4,8 +4,7 @@
 import actions from './actions/lens.mjs'
 import claims from './claims/lens.mjs'
 import explain from './explain/lens.mjs'
-import line from './line/lens.mjs'
 import notes from './notes/lens.mjs'
 import squeeze from './squeeze/lens.mjs'
 
-export const LENSES = [notes, line, actions, squeeze, explain, claims]
+export const LENSES = [notes, actions, squeeze, explain, claims]
