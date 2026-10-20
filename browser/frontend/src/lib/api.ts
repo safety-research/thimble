@@ -383,6 +383,9 @@ export const api = {
   forgeQuery: (c: string, path: string, sql: string) =>
     j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${apiBase()}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
   /** `value`: a citation's own words, so a card value is read from the version of the card that states it. */
+  /** `POST /corpora/{c}/heal`: the citation healing pass over a text (backend cards/heal.py): what it did to each
+   * citation of a card's value, and the text with each re-pointed one at its new place. */
+  heal: (c: string, text: string) => j<HealResult>(`${apiBase()}/corpora/${enc(c)}/heal`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) }),
   resolveRef: (c: string, ref: string, value?: string) => j<ResolvedRef>(`${apiBase()}/corpora/${enc(c)}/ref${q(value ? { ref, value } : { ref })}`),
   /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
    * n the number a row is cited by (`<path>#row=<n>`). */
@@ -771,4 +774,12 @@ export const undoApi = {
   undo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/undo`, { method: 'POST' }),
   /** `POST /ws/{c}/redo`: repeat the last step undone. */
   redo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/redo`, { method: 'POST' }),
+}
+
+/** What the healing pass did to a text's citations (backend cards/heal.py). */
+export interface HealResult {
+  text: string
+  of: string
+  version: string
+  changes: { label: string; ref: string; state: 'linked' | 'quiet' | 'contradicted'; how: string; to?: string; source?: string; why?: string }[]
 }

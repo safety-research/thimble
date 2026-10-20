@@ -14,6 +14,7 @@ import { splitValueRef } from '../lib/refs'
 import { LensMark } from '../components/LensMark'
 import type { Lens, Mark } from '../lib/marks'
 import { useFeature } from '../features'
+import { api, type HealResult } from '../lib/api'
 
 export interface ChipCtx {
   workspace: string
@@ -23,6 +24,10 @@ export interface ChipCtx {
   why?: ReadonlyMap<string, string>
   /** the chips carry `data-anchor` (chat prose, where a ⌘-click may start a thread from a chip) */
   anchor?: boolean
+  /** the citations the healing pass made quiet (their place is gone), with why */
+  quiet?: ReadonlyMap<string, string>
+  /** the citations it re-pointed: the new ref, and the ref as written */
+  moved?: ReadonlyMap<string, string>
 }
 
 export const ChipContext = createContext<ChipCtx>({ workspace: '', broken: new Set() })
@@ -192,7 +197,8 @@ function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   if (typeof ref === 'string' && !citing) return <span className="cite-off">{typeof value === 'string' ? value : props.children}</span>
   if (typeof ref === 'string') {
     const broken = ctx.broken.has(ref)
-    return <RefChip ref={ref} value={typeof value === 'string' ? value : undefined} broken={broken} brokenWhy={broken ? ctx.why?.get(ref) : undefined} anchor={ctx.anchor} workspace={ctx.workspace} cite />
+    const quiet = !broken && !!ctx.quiet?.has(ref)
+    return <RefChip ref={ref} value={typeof value === 'string' ? value : undefined} broken={broken} brokenWhy={broken ? ctx.why?.get(ref) : undefined} quiet={quiet} quietWhy={quiet ? ctx.quiet?.get(ref) : undefined} movedFrom={ctx.moved?.get(ref)} anchor={ctx.anchor} workspace={ctx.workspace} cite />
   }
   const { node: _node, ...rest } = props
   return <span {...rest} />
@@ -222,7 +228,50 @@ const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
 
 /** Assistant markdown with chips. `streaming`: the text is still growing and renders per completed block. A bare
  * citation in it is its target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, marks, lenses }: { text: string; streaming?: boolean; marks?: readonly Mark[]; lenses?: readonly Lens[] }) {
+/** The healing pass's results by text, for this page load: a text is checked once. */
+const healed = new Map<string, HealResult | null>()
+
+/** What the healing pass did to a whole reply's citations of card values (backend cards/heal.py), once it is whole. */
+function useHeal(workspace: string, text: string, streaming: boolean): HealResult | null {
+  const want = !streaming && !!workspace && /\]\((?:card|cell):/.test(text)
+  const [got, setGot] = useState<HealResult | null>(() => (want ? healed.get(text) ?? null : null))
+  useEffect(() => {
+    if (!want) return
+    if (healed.has(text)) { setGot(healed.get(text) ?? null); return }
+    let live = true
+    api.heal(workspace, text).then((r) => { healed.set(text, r); if (live) setGot(r) }, () => { healed.set(text, null) })
+    return () => { live = false }
+  }, [want, workspace, text])
+  return want ? got : null
+}
+
+/** Assistant markdown with its citations as the healing pass left them: a re-pointed one opens its new place (its hover
+ * says where it was moved from), a contradicted one is a broken chip with why, one whose place is gone is quiet. */
+export const ChatMarkdown = memo(function ChatMarkdown(props: { text: string; streaming?: boolean; marks?: readonly Mark[]; lenses?: readonly Lens[] }) {
+  const ctx = useContext(ChipContext)
+  const heal = useHeal(ctx.workspace, props.text, !!props.streaming)
+  const healedCtx = useMemo(() => {
+    if (!heal) return null
+    const broken = new Set(ctx.broken)
+    const why = new Map(ctx.why ?? [])
+    const quiet = new Map<string, string>()
+    const moved = new Map<string, string>()
+    for (const c of heal.changes) {
+      if (c.state === 'contradicted') { broken.add(c.ref); why.set(c.ref, c.why ?? '') }
+      else if (c.state === 'quiet') quiet.set(c.ref, c.why ?? '')
+      else if (c.to && c.to !== c.ref) moved.set(c.to, c.ref)
+    }
+    return { ...ctx, broken, why, quiet, moved }
+  }, [heal, ctx])
+  if (!heal || !healedCtx) return <ReplyMarkdown {...props} />
+  return (
+    <ChipContext.Provider value={healedCtx}>
+      <ReplyMarkdown {...props} text={heal.text} />
+    </ChipContext.Provider>
+  )
+})
+
+const ReplyMarkdown = memo(function ReplyMarkdown({ text, streaming, marks, lenses }: { text: string; streaming?: boolean; marks?: readonly Mark[]; lenses?: readonly Lens[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
   if (marks?.length && !streaming) {
