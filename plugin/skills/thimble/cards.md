@@ -21,7 +21,7 @@ Write the card as a JSON file and save it with `thimble save NAME --from card.js
 - `text` is an optional takeaway of a sentence or two, with its numbers cited. Leave it out when the content and your reply already say it.
 - `declared` says what you read or judged by hand, when part of the card rests on that.
 
-`thimble save` checks each citation and binding, saves the card anyway, and lists each problem. Fix it and save again under the same name, which makes a new version. A program that throws shows one line under the card's title with the error. To try a key or a press before the analyst does, run `node ../../draw/cli.mjs thimble/objects/<id>.json --text --event '{"type":"key","key":"f"}'`.
+`thimble save` checks each citation and binding, saves the card anyway, and lists each problem. Fix it and save again under the same name, which makes a new version. A program that throws shows one line under the card's title with the error. To try a key or a press before the analyst does, run `node <plugin>/draw/cli.mjs thimble/objects/<id>.json --text --event '{"type":"key","key":"f"}'`, where `<plugin>` is the folder two levels above this guide.
 
 ## Choosing the form
 

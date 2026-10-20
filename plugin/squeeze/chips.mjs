@@ -267,8 +267,8 @@ export const MEANS = Object.freeze({
   length: Object.freeze([
     m => `About a quarter of the original, about ${round(m.words / 4)} words${m.keep ? ', not counting the corrections listed above' : ''}. Keep the main point and the facts it rests on, and leave out the rest.`,
     m => `About as long as the original, about ${m.words} words.`,
-    m => `About one and a half times the original, about ${round(m.words * 1.5)} words. Explain what the original says more fully, such as what a term means or how one step led to the next.${m.data ? ' Add detail from the cards and the query outputs where it helps.' : ''}`,
-    m => `About two and a half times the original, about ${round(m.words * 2.5)} words. Give each point in full, with each term explained and each step that led to it.${m.data ? ' Add the detail behind each point from the cards and the query outputs.' : ''}`,
+    m => `About one and a half times the original, about ${round(m.words * 1.5)} words. Explain what the original says more fully, such as what a term means or how one step led to the next.${m.data ? ' Add detail from the cards and the query outputs where it helps, each new number cited to its place in them.' : ''}`,
+    m => `About two and a half times the original, about ${round(m.words * 2.5)} words. Give each point in full, with each term explained and each step that led to it.${m.data ? ' Add the detail behind each point from the cards and the query outputs, each new number cited to its place in them.' : ''}`,
   ]),
   interpret: Object.freeze([
     () => 'State what was found: counts, values, what happened, and sentences that sum them up or rank them. Leave out why it happened, what follows from it and what to do.',
