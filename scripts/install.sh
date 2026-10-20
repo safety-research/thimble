@@ -72,6 +72,7 @@ macos=0
 [ "$(uname -s)" = Darwin ] && macos=1
 missing=()
 notes=()
+own_python=0
 if [ "$macos" = 1 ]; then node_fix="brew install node"; uv_fix="brew install uv"
 else node_fix="from your system's packages or https://nodejs.org"; uv_fix="curl -LsSf https://astral.sh/uv/install.sh | sh"; fi
 
@@ -93,7 +94,12 @@ if [ "$plugin" = 1 ]; then
   elif ! ver_ge "$pyv" 3.10; then
     missing+=("Python is $pyv ($py), and the terminal plugin needs 3.10 or later: install a newer python3, or set THIMBLE_PYTHON")
   elif ! (cd / && "$py" -c 'import pandas') >/dev/null 2>&1; then
-    missing+=("pandas is not installed for $py, and the terminal plugin needs it: $py -m pip install --user pandas, or set THIMBLE_PYTHON to a Python that has it")
+    # thimble installs pandas into its own Python (thimble setup, below); a Python the person named stays as it is
+    if [ -n "${THIMBLE_PYTHON:-}" ]; then
+      missing+=("pandas is not installed for THIMBLE_PYTHON ($py), and the terminal plugin needs it: $py -m pip install pandas, or unset THIMBLE_PYTHON so that thimble installs its own")
+    else
+      own_python=1
+    fi
   fi
   if command -v claude >/dev/null 2>&1; then
     have="$(claude --version 2>/dev/null | awk '{print $1}')"
@@ -126,6 +132,11 @@ say "thimble: everything it needs is installed."
 
 if [ "$plugin" = 1 ]; then
   step "The terminal plugin"
+  if [ "$own_python" = 1 ]; then
+    # pandas, which `thimble run` needs: the plugin's first query would install it too, so a failure here stops nothing
+    "$root/plugin/bin/thimble" setup \
+      || notes+=("pandas is not installed yet: once the line above is fixed, run $root/plugin/bin/thimble setup")
+  fi
   source="safety-research/thimble"
   [ "$local" = 1 ] && source="$root"
   if command -v claude >/dev/null 2>&1; then
