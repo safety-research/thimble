@@ -24,8 +24,7 @@
 //    prompt, then the turn template (feature `observer-turn`): the messages to read now, the evidence, each lens's
 //    digest of the state the transcript lacks (the terms already explained, the heads-ups given, the claims so far
 //    with their ids), and the reply's skeleton. Every call is a line in the session's events (telemetry), with
-//    each lens's share. A frame version in `lenses` mode (observer:v4-low) is the earlier pass instead: one
-//    `$.model.complete` over the newest message's turn and digests, its frame the cached system prompt.
+//    each lens's share.
 // 3. A pass that fails is tried once more (a failed sign-in is said at once); a second failure is said in a toast with
 //    its fix.
 // 4. Each lens merges its part (lit verbs, explain marks, a heads-up, squeeze levels, claims). The verbs go in
@@ -35,8 +34,7 @@
 //
 // Features (settings/features.mjs): each lens belongs to a feature the person turns on or off in /thimble-settings,
 // and the observer runs only while one of those features is on. A lens turned off (there, or with
-// THIMBLE_PROMPTS=lens-explain:off) has no section in the prompt, no key in the reply, and no merge. THIMBLE_OBSERVER_SHADOW=<version> (such as v4-low) runs that frame version too on each look, measured
-// in the session's events and the observer's file and never merged, so two versions compare on the same session.
+// THIMBLE_PROMPTS=lens-explain:off) has no section in the prompt, no key in the reply, and no merge.
 //
 // Where its output goes: the verbs, explain marks and heads-ups into the messages' records (the shell draws them), the
 // claims into the session's Claims (claims/term.ts), placed by their words in the turn's messages.
@@ -46,13 +44,11 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { ObjRef } from '../types'
 import { answerRow, applyObserver, drawnTextOf, messageRecord, personHere } from '../shell/shell'
 import { glossesOf, headsOf, lineOf } from '../shell/message.js'
-import { promptAt, promptText, registry } from '../prompts/prompts'
-import { FEATURES } from '../prompts/registry.mjs'
+import { promptText } from '../prompts/prompts'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf, skeletonOf } from './compose.mjs'
 import { digest, jsonIn, parseAnswer } from './evidence.js'
 import { LENSES } from './lenses/index.mjs'
-import { stepsOf } from './turn.mjs'
 import { sessionKey } from '../hooks/conversation'
 import { modelWhy, signInFailed } from '../shell/why.js'
 import { claimsDigest, claimsGap, turnClaims } from '../claims/term'
@@ -71,14 +67,13 @@ type TurnPrompt = { text: string; typed: boolean; verb: string; from: string }
 /** One of Claude's messages, queued for a look. `row`: its record's key (empty: the shell's latest answer); `at`: when
  *  it was queued, on the session's clock (objects saved after it are new to the next look); `t`: the same, in wall time,
  *  for how long the look took to land. */
-export type Msg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; earlier: string[]; steps: number; tools: number; at: number; t: number }
+export type Msg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; steps: number; tools: number; at: number; t: number }
 type Part = { lens: Any; text: string; id: string }
 
 const LAST = { plugin: 'thimble', key: 'last' } as const
 
 const LONG_REPLY = 600 // characters: words Claude wrote before it went on working are a reply worth a look from this long
 const CONTEXT_OBJECTS = 4 // cards the pass reads: every new one, then the latest older ones up to this many
-const STEPS_BUDGET = 24000 // the earlier pass (lenses mode): characters of the turn's words and tool calls it reads
 const LOOK_DELAY = 50 // ms after a message is queued before the worker takes the queue
 const RETRY_MS = 2000 // ms before a failed pass is tried again
 // explains, per session (kept in the session's file, so another session or another folder starts afresh): the terms
@@ -97,7 +92,6 @@ const S = {
   running: false,
   since: 0, // objects saved after this are new to the next look: the first turn's start, then each look's newest message
   prompt: { text: '', typed: true, verb: '', from: 'composer' } as TurnPrompt,
-  questions: [] as string[], // the person's own questions, in order
   texts: [] as { row: string; text: string; turnId: string; queued: boolean }[], // Claude's words in the turn now
   queue: [] as Msg[],
   busy: false,
@@ -128,7 +122,6 @@ export function lookPending(): Promise<void> | null {
 }
 
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
-const bullets = (xs: string[]) => (xs.length ? xs.map(x => `- ${x}`).join('\n') : '(none)')
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
 const cut = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n - 1) + '…')
 const oneLine = (s: string) => lineOf(s)
@@ -150,9 +143,6 @@ async function ensure($: Engine): Promise<void> {
         S.log = Array.isArray(kept.log) ? kept.log : []
         S.glossed = strs(kept.glossed)
         S.headsGiven = strs(kept.headsGiven)
-        // a reload mid-session: the person's questions come back
-        const typed = S.log.filter(r => r.kind === 'look' && typeof r.question === 'string' && r.typed !== false)
-        S.questions = typed.map(r => String(r.question)).slice(-20)
       }
     } catch {
       // a file it cannot read: the observer starts this session's memory again
@@ -294,13 +284,8 @@ async function queueReplies($: Engine): Promise<void> {
   for (const t of S.texts) {
     if (t.queued || t.turnId !== S.turnId || t.text.trim().length < LONG_REPLY) continue
     t.queued = true
-    await enqueue($, { row: t.row, text: t.text, kind: 'reply', turnId: S.turnId, turnNo: S.turnNo, prompt: { ...S.prompt }, earlier: earlierQuestions(), steps: S.steps, tools: S.tools })
+    await enqueue($, { row: t.row, text: t.text, kind: 'reply', turnId: S.turnId, turnNo: S.turnNo, prompt: { ...S.prompt }, steps: S.steps, tools: S.tools })
   }
-}
-
-function earlierQuestions(): string[] {
-  const p = S.prompt
-  return p.typed && S.questions.at(-1) === p.text ? S.questions.slice(0, -1) : S.questions.slice()
 }
 
 // ------------------------------------------------------------------------------------------------ the look
@@ -316,58 +301,30 @@ async function lensParts($: Engine): Promise<Part[]> {
   return parts
 }
 
-/** The turn template a frame version reads: one a setting chose, else the one the version names, else the default. */
-async function templateFor($: Engine, frameVersion: string): Promise<{ text: string; id: string }> {
-  const { active } = await registry($)
-  const chosen = active['observer-turn']
-  const named = (FEATURES.observer.versions as Any)?.[frameVersion]?.turn as string | undefined
-  if (chosen && chosen.source === 'default' && named) return promptAt($, 'observer-turn', named)
-  return promptText($, 'observer-turn')
-}
+type Pass = { f: Any; out: Answer | null; ms: number; fork: Record<string, unknown> }
 
-type Pass = { f: Any; out: Answer | null; ms: number; mode: string; fork: Record<string, unknown> }
-
-/**
- * One pass of a frame version over the messages: the fork (mode `fork`) or the earlier completion (mode `lenses`).
- * `shadow`: measured only (its events line says so).
- */
-async function pass($: Engine, o: { frame: { text: string; id: string; version: string }; parts: Part[]; msgs: Msg[]; evidence: { objects: string; coverage: string }; st: Any; shown: string; shadow?: string }): Promise<Pass> {
-  const meta = ((FEATURES.observer.versions as Any)?.[o.frame.version] ?? {}) as { mode?: string; effort?: string }
-  const mode = meta.mode || 'fork'
-  const tmpl = await templateFor($, o.frame.version)
+/** One pass over the messages: one fork of the session, its prompt the frame with the lenses, then the turn template. */
+async function pass($: Engine, o: { frame: { text: string; id: string }; parts: Part[]; msgs: Msg[]; evidence: { objects: string; coverage: string }; st: Any; shown: string }): Promise<Pass> {
+  const tmpl = await promptText($, 'observer-turn')
   const newest = o.msgs[o.msgs.length - 1]!
   const lenses = Object.fromEntries(o.parts.map(x => [x.lens.name, x.id]))
-  const fork: Record<string, unknown> = { prompt: o.frame.id, turn_prompt: tmpl.id, mode, lenses }
-  const extra: Record<string, unknown> = { turn: newest.turnNo, mode, lens_prompts: lenses, turn_prompt: tmpl.id, messages: o.msgs.length, ...(o.shadow ? { shadow: o.shadow } : {}) }
+  const fork: Record<string, unknown> = { prompt: o.frame.id, turn_prompt: tmpl.id, lenses }
+  const extra: Record<string, unknown> = { turn: newest.turnNo, lens_prompts: lenses, turn_prompt: tmpl.id, messages: o.msgs.length }
   const system = composeSystem(o.frame.text, o.parts)
-  let vals: Record<string, unknown>
-  if (mode === 'lenses') {
-    // the earlier pass: the newest message's turn and a digest of what came before, in the message
-    const all = (await $.session.messages().catch(() => [])) as Any[]
-    vals = {
-      QUESTION: cut(newest.prompt.text, 4000) || '(none)', ROW: rowKeys(), STEPS: stepsOf(all, { answer: newest.text, budget: STEPS_BUDGET }),
-      LINES: String(newest.text.split('\n').length), ANSWER: cut(newest.text, 16000), SHOWN: o.shown, OBJECTS: o.evidence.objects,
-      COVERAGE: o.evidence.coverage, EARLIER: bullets(newest.earlier.slice(-6).map(x => cut(x, 300))),
-    }
-  } else {
-    vals = { MESSAGES: messagesText(o.msgs), ROW: rowKeys(), SHOWN: o.shown, OBJECTS: o.evidence.objects, COVERAGE: o.evidence.coverage, SKELETON: skeletonOf(o.parts.map(x => x.lens)) }
-  }
+  const vals = { MESSAGES: messagesText(o.msgs), ROW: rowKeys(), SHOWN: o.shown, OBJECTS: o.evidence.objects, COVERAGE: o.evidence.coverage, SKELETON: skeletonOf(o.parts.map(x => x.lens)) }
   const turn = composeTurn(tmpl.text, vals, o.parts, o.st)
-  const prompt = mode === 'lenses' ? turn.text : `${system.text}\n\n${turn.text}`
-  fork.prompt_chars = mode === 'lenses' ? system.text.length + turn.text.length : prompt.length
+  const prompt = `${system.text}\n\n${turn.text}`
+  fork.prompt_chars = prompt.length
   fork.lens_chars = Object.fromEntries(o.parts.map(x => [x.lens.name, (system.chars[x.lens.name] || 0) + (turn.chars[x.lens.name] || 0)]))
-  if (meta.effort) extra.effort = meta.effort
   const model = S.model || 'opus'
   const t0 = Date.now()
   const f: Any = await tracked($, { feature: 'observer', prompt: o.frame.id, model, extra }, async () => {
-    const r: Any = mode === 'lenses'
-      ? await $.model.complete({ model, system: [{ text: system.text, cache: true }], prompt: turn.text, maxTokens: 16000, ...(meta.effort ? { effort: meta.effort } : {}) } as Any)
-      : await $.model.fork({ prompt })
+    const r: Any = await $.model.fork({ prompt })
     if (r && r.isAnswered) {
       const shares = sharesOf({ system, turn, lenses: o.parts.map(x => x.lens), raw: jsonIn(r.text), rawText: r.text }) as Any
-      // in a fork, the transcript the cache served is input too: its share goes with the frame's, in characters
-      // weighed as its tokens are priced, so each lens's share is of what the call cost
-      if (mode === 'fork' && r.usage) {
+      // the transcript the cache served is input too: its share goes with the frame's, in characters weighed as its
+      // tokens are priced, so each lens's share is of what the call cost
+      if (r.usage) {
         const paid = (r.usage.input_tokens || 0) + (r.usage.cache_creation_input_tokens || 0)
         const perToken = paid ? prompt.length / paid : 4
         shares.shared_in += Math.round(0.1 * (r.usage.cache_read_input_tokens || 0) * perToken)
@@ -388,7 +345,7 @@ async function pass($: Engine, o: { frame: { text: string; id: string; version: 
     fork.error = f?.reason ?? 'no result'
     if (f && 'usage' in f) fork.usage = f.usage
   }
-  return { f, out, ms, mode, fork }
+  return { f, out, ms, fork }
 }
 
 /** One look at one or more of Claude's messages, in order (the newest last). */
@@ -428,9 +385,6 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     const squeezed = kept && typeof kept.shown === 'string' && kept.shown.trim() && kept.shown !== kept.text ? kept.shown : ''
     const shown = squeezed ? `\nThe analyst reads the newest message squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : ''
     const frame = await promptText($, 'observer')
-    const shadowOf = await shadowVersion($, frame.version)
-    // the shadow pass runs beside this one, and its row is kept when it ends
-    if (shadowOf) void runShadow($, shadowOf, { parts, msgs, evidence, st, shown }).then(r => logRow($, r)).catch(() => undefined)
     let p = await pass($, { frame, parts, msgs, evidence, st, shown })
     // 3. a pass that failed or gave nothing readable is tried once more (a failed sign-in is not: it fails again until
     // the person signs in)
@@ -531,28 +485,11 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the shadow
-
-/** The frame version THIMBLE_OBSERVER_SHADOW names, when it is another one than the look's; else null. */
-async function shadowVersion($: Engine, active: string): Promise<string | null> {
-  const v = String((await $.env.get('THIMBLE_OBSERVER_SHADOW').catch(() => '')) || '').trim().replace(/^observer:/, '')
-  return v && v !== active && (FEATURES.observer.versions as Any)?.[v] ? v : null
-}
-
-/** The shadow pass: the same messages, evidence and state through another frame version, measured and never merged. */
-async function runShadow($: Engine, version: string, o: { parts: Part[]; msgs: Msg[]; evidence: { objects: string; coverage: string }; st: Any; shown: string }): Promise<Record<string, unknown>> {
-  const frame = await promptAt($, 'observer', version)
-  const p = await pass($, { frame: { ...frame, version }, parts: o.parts, msgs: o.msgs, evidence: o.evidence, st: o.st, shown: o.shown, shadow: `observer:${version}` })
-  const newest = o.msgs[o.msgs.length - 1]!
-  return { kind: 'shadow', version, turn: newest.turnNo, messages: o.msgs.map(m => m.row), fork: p.fork, land_ms: Date.now() - newest.t }
-}
-
 // ------------------------------------------------------------------------------------------------ the next prompt
 
-/** A prompt in the person's own words: the turn's question, and one of their questions. */
+/** A prompt in the person's own words: the turn's question. */
 async function typedPrompt(_$: Engine, text: string): Promise<void> {
   S.prompt = { text, typed: true, verb: '', from: 'composer' }
-  S.questions = [...S.questions, text].slice(-20)
 }
 
 /** A turn this plugin starts itself, as its prompt row shows it: the person's words (`typed`: a question asked in the
@@ -643,7 +580,7 @@ export const registerObserver: Register = (on, _options) => {
         return r
       }
       if (lastRow) lastRow.queued = true
-      await enqueue($, { row: lastRow?.row ?? '', text, kind: 'answer', turnId: e.turnId, turnNo: S.turnNo, prompt: { ...S.prompt }, earlier: earlierQuestions(), steps: S.steps, tools: S.tools })
+      await enqueue($, { row: lastRow?.row ?? '', text, kind: 'answer', turnId: e.turnId, turnNo: S.turnNo, prompt: { ...S.prompt }, steps: S.steps, tools: S.tools })
     } catch {
       // the turn ends whatever the observer makes of it
     }
@@ -683,7 +620,7 @@ export const registerObserver: Register = (on, _options) => {
 export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', model: '', turnId: '', turnNo: 0, steps: 0, tools: 0, turnStart: 0, running: false, since: 0,
-    prompt: { text: '', typed: true, verb: '', from: 'composer' }, questions: [], texts: [], queue: [], busy: false,
+    prompt: { text: '', typed: true, verb: '', from: 'composer' }, texts: [], queue: [], busy: false,
     log: [], glossed: [], headsGiven: [],
   })
   lookEnded()

@@ -49,8 +49,8 @@ export function report(events, { plain = null, file = '' } = {}) {
   const lines = []
   lines.push(`thimble · session ${session.slice(0, 8) || '?'}${file ? ` · ${file}` : ''}`)
   if (s.prompts) {
-    const changed = s.prompts.changed ? `not the defaults: ${s.prompts.changed}` : 'all defaults'
-    lines.push(`prompts: ${changed}${s.prompts.problems?.length ? ` · ${s.prompts.problems.length} problem(s): ${s.prompts.problems[0]}` : ''}`)
+    const off = Array.isArray(s.prompts.off) && s.prompts.off.length ? `turned off: ${s.prompts.off.join(', ')}` : 'all on'
+    lines.push(`prompts: ${s.prompts.plugin ? `thimble ${s.prompts.plugin} · ` : ''}${off}${s.prompts.problems?.length ? ` · ${s.prompts.problems.length} problem(s): ${s.prompts.problems[0]}` : ''}`)
   }
   lines.push('')
   lines.push(`${pad('feature', 30)}${lpad('calls', 6)}${lpad('tokens (price-weighted)', 25)}${lpad('time', 9)}  blocked the main turn`)
@@ -65,8 +65,8 @@ export function report(events, { plain = null, file = '' } = {}) {
   }
   for (const r of side) {
     const blocked = r.turn ? '-' : `${r.blocked} of ${r.calls}`
-    line(r.feature, r, r.shadow ? `measured only, not in all · ${r.shadow}` : `${blocked}${r.failed ? ` · ${r.failed} failed` : ''}${r.prompts?.size ? ` · ${[...r.prompts].join(', ')}` : ''}`)
-    if (!r.shadow) totalW += r.w
+    line(r.feature, r, `${blocked}${r.failed ? ` · ${r.failed} failed` : ''}${r.prompts?.size ? ` · ${[...r.prompts].join(', ')}` : ''}`)
+    totalW += r.w
     if (r.lenses) {
       const ls = Object.entries(r.lenses).sort((a, b) => b[1].w - a[1].w)
       for (const [name, L] of ls) lines.push(`${pad(`  lens ${name}`, 30)}${lpad('', 6)}${lpad(`${k(L.w)} (${Math.round((100 * L.w) / (r.w || 1))}%)`, 25)}${lpad(sec(L.ms), 9)}  ${L.prompts?.size ? [...L.prompts].join(', ') : ''}`)
@@ -82,7 +82,6 @@ export function report(events, { plain = null, file = '' } = {}) {
     const lit = L.looks ? `v lit on ${L.v_lit} of ${L.looks} look${L.looks === 1 ? '' : 's'}` : 'no look ran'
     const pressed = L.v_lit || L.pressed_lit || L.pressed_dim ? ` · v pressed ${L.pressed_lit} of ${L.v_lit} times lit${L.pressed_dim ? `, ${L.pressed_dim} while dim` : ''}` : ''
     lines.push(`${pad('looks', 30)}${lit}${L.skipped ? ` (${L.skipped} skipped)` : ''}${pressed}`)
-    for (const [spec, x] of Object.entries(L.shadow || {})) lines.push(`${pad('looks (shadow)', 30)}v lit on ${x.v_lit} of ${x.looks} · ${spec}`)
   }
   const C = s.checks
   if (C) lines.push(`${pad('saves checked', 30)}${C.saves} save${C.saves === 1 ? '' : 's'} · ${C.tried} interaction${C.tried === 1 ? '' : 's'} tried · ${C.failed} with a failure${C.cut ? ` · ${C.cut} cut` : ''} · ${C.median_ms} ms median, ${C.max_ms} ms most · ${C.chars} characters to Claude`)

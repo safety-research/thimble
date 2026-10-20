@@ -210,7 +210,7 @@ export async function noteThreadSaves($: Engine, agentId: string, saves: CardRef
 async function ensureType($: Engine): Promise<string | null> {
   if (registered) return null
   try {
-    // its instructions: the registry's thread prompt (prompts/thread/)
+    // its instructions: the registry's thread prompt (prompts/thread.md)
     const p = await promptText($, 'thread')
     promptId = p.id
     await $.agent.register({

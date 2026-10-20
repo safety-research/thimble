@@ -1,17 +1,15 @@
 // compose.mjs: the observer's pass, composed from its lenses. Pure: the observer (observer.ts) reads the texts from the
 // registry and hands them in.
 //
-// A lens's fragment (prompts/lens-<name>/<version>.md) has up to three kinds of section, split by a comment line:
+// A lens's fragment (prompts/lens-<name>.md) has up to three kinds of section, split by a comment line:
 //   its instructions first (what it gives, its principles, its examples, its part of the reply);
 //   `<!-- digest -->`, the template of what it needs to know of the state, filled by the lens's digest();
 //   `<!-- when NAME -->`, a rule that holds this time when the lens's when() names it (a backoff, a quiet turn).
-// composeSystem: the frame (prompts/observer/<version>.md) with every enabled lens's instructions at {{LENSES}} (and
-// the reply's skeleton at {{SKELETON}}, where the frame has it). composeTurn: the turn template
-// (prompts/observer-turn/) with its values and every lens's digest and rules.
-// In a fork (the default), the session is the fork's own context and the prompt is the two joined: the frame and the
-// lenses, then the messages to read, the evidence, the digests and the skeleton (a value of the template). In the
-// earlier pass (`lenses` mode), the frame is the cached system prompt and the template the message, with the new turn
-// and a digest of what came before.
+// composeSystem: the frame (prompts/observer.md) with every enabled lens's instructions at {{LENSES}} (and the reply's
+// skeleton at {{SKELETON}}, where the frame has it). composeTurn: the turn template (prompts/observer-turn.md) with its
+// values and every lens's digest and rules.
+// The pass is a fork: the session is its own context and the prompt is the two joined: the frame and the lenses, then
+// the messages to read, the evidence, the digests and the skeleton (a value of the template).
 import { fill } from '../prompts/registry.mjs'
 
 /** A fragment's sections: {body, digest, when: {name: text}}. */
@@ -58,7 +56,7 @@ export function composeSystem(frame, parts) {
 /**
  * The pass's message: the turn template filled, with each lens's digest and its rules this turn. Returns {text, chars:
  * {lens: characters of its digest and rules}, shared}.
- * @param {string} template  @param {Record<string, unknown>} vals  the turn's values (QUESTION, STEPS, ANSWER, ...)
+ * @param {string} template  @param {Record<string, unknown>} vals  the turn's values (MESSAGES, OBJECTS, COVERAGE, ...)
  * @param {{lens: any, text: string}[]} parts  @param {any} st  the state the digests read
  */
 export function composeTurn(template, vals, parts, st) {

@@ -1,6 +1,6 @@
-// The post-turn pass as lenses (observer/compose.mjs, lenses/, turn.mjs): a fragment's sections, the system prompt
-// (the frame and the enabled lenses' instructions, the reply's skeleton), the message (the turn, each lens's digest and
-// its rules this turn), each lens's share of the pass, each lens's merge into the store, and the turn cut to fit.
+// The post-turn pass as lenses (observer/compose.mjs, lenses/): a fragment's sections, the system prompt (the frame and
+// the enabled lenses' instructions, the reply's skeleton), the message (the turn, each lens's digest and its rules this
+// turn), each lens's share of the pass, and each lens's merge into the store.
 //   node --test plugin/observer/test
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -11,7 +11,6 @@ import { ROOT, textOf } from '../../prompts/node.mjs'
 import { composeSystem, composeTurn, sectionsOf, sharesOf, skeletonOf } from '../compose.mjs'
 import { parseAnswer } from '../evidence.js'
 import { LENSES } from '../lenses/index.mjs'
-import { callOf, stepsOf, turnMessages } from '../turn.mjs'
 
 const byName = Object.fromEntries(LENSES.map(l => [l.name, l]))
 const FRAG = 'LENS one\n\nits principles\n\n<!-- digest -->\nKnown: {{THINGS}}\n\n<!-- when open -->\nNo line now.\n<!-- when backoff -->\nNothing now.'
@@ -52,15 +51,12 @@ test('the real fragments compose: every lens of the registry has instructions, a
   for (const h of ['## The actions that light', "## Where the answer stands on squeeze's chips", '## Explainers', '## Heads-ups', '## The claims of this turn']) assert.ok(sys.text.includes(h), h)
   assert.doesNotMatch(sys.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(sys.text, /<!--/)
-  // the fork's template (observer-turn:v3, the default): the messages to read, the evidence, the digests, the skeleton
+  // the fork's template (observer-turn): the messages to read, the evidence, the digests, the skeleton
   const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { MESSAGES: 'Read this message of Claude\'s', ROW: 'v visualize', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', SKELETON: skeletonOf(LENSES) }, parts, ST)
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(turn.text, /notes/i)
   assert.match(turn.text, /Terms that already have an explainer in this session:\n- p95/)
   assert.match(turn.text, /\{"verbs": \{\}, "glosses": \[\], "heads": null, "claims": \[\]\}\s*$/)
-  // the earlier pass's template (observer-turn:v2) still composes
-  const old = composeTurn(textOf('observer-turn', ROOT, { THIMBLE_PROMPTS: 'observer-turn:v2' }).text, { QUESTION: 'q', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, ST)
-  assert.doesNotMatch(old.text, /\{\{[A-Z_]+\}\}/)
 })
 
 test("each lens's share of the pass: its characters in and out, the frame and the turn as the shared part", () => {
@@ -109,10 +105,10 @@ test('the actions, squeeze and explain lenses each put their part where it goes'
 
 test('the explain lens has no rule of its own, and its digest and the heads-up lens\'s fill every placeholder', () => {
   assert.deepEqual(byName.explain.when({}), [])
-  const explain = readFileSync(new URL('../../prompts/lens-explain/v6.md', import.meta.url), 'utf8')
+  const explain = readFileSync(new URL('../../prompts/lens-explain.md', import.meta.url), 'utf8')
   assert.deepEqual(sectionsOf(explain).when, {})
-  for (const [name, v] of [['heads', 'v2'], ['explain', 'v6']]) {
-    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${v}.md`, import.meta.url), 'utf8')
+  for (const name of ['heads', 'explain']) {
+    const frag = readFileSync(new URL(`../../prompts/lens-${name}.md`, import.meta.url), 'utf8')
     const d = sectionsOf(frag).digest
     assert.ok(d, `lens-${name} has a digest`)
     const keys = [...d.matchAll(/\{\{([A-Z_]+)\}\}/g)].map(m => m[1])
@@ -121,26 +117,3 @@ test('the explain lens has no rule of its own, and its digest and the heads-up l
   }
 })
 
-const MSGS = [
-  { role: 'user', text: 'an earlier question', toolUses: [] },
-  { role: 'assistant', text: 'an earlier answer', toolUses: [] },
-  { role: 'user', text: 'when did they edit most?', toolUses: [] },
-  { role: 'assistant', text: 'Counting saves per day.', toolUses: [{ tool: 'Bash', input: { command: 'thimble q "saves per day" <<PY\n...\nPY' }, text: 'day n\n2026-06-18 6543\n' + 'x'.repeat(5000) }] },
-  { role: 'user', text: '', toolResults: [{ tool_use_id: 'u1', text: '...' }], toolUses: [] },
-  { role: 'assistant', text: '', toolUses: [{ tool: 'Read', input: { file_path: '/d/rev.jsonl', offset: 10, limit: 5 }, text: 'rows' }, { tool: 'Skill', input: { skill: 'thimble' }, text: 'the whole skill' }] },
-  { role: 'assistant', text: 'June 18 had the most saves.', toolUses: [] },
-]
-
-test('the turn the pass reads: from the last prompt, words and calls in order, results cut to fit, the answer apart', () => {
-  assert.equal(turnMessages(MSGS).length, 4)
-  const s = stepsOf(MSGS, { answer: 'June 18 had the most saves.', budget: 2000 })
-  assert.doesNotMatch(s, /earlier/)
-  assert.match(s, /^Claude: Counting saves per day\.\nClaude ran Bash: thimble q "saves per day" <<PY \.\.\. PY\n {2}→ day n\n {4}2026-06-18 6543/)
-  assert.match(s, /Claude ran Read: \/d\/rev\.jsonl from line 10 \(5 lines\)\n {2}→ rows/)
-  assert.match(s, /Claude ran Skill: thimble$/m)
-  assert.doesNotMatch(s, /the whole skill/)
-  assert.doesNotMatch(s, /June 18 had the most saves/)
-  assert.ok(s.length < 3000)
-  assert.equal(callOf({ tool: 'Grep', input: { pattern: 'x', path: '/d' } }), 'Grep: x in /d')
-  assert.equal(stepsOf([{ role: 'user', text: 'hi' }]), '(no steps before the answer)')
-})

@@ -3,7 +3,7 @@
 // The session's events are one file, $THIMBLE_HOME/lean/events/<session>.jsonl: the one append-only log of the session,
 // which the kernel writes its saves to (`thimble save`, the change feed the shell reads saves from) and telemetry writes
 // its lines to. It is under THIMBLE_HOME, not the data folder's thimble/, because a session's log starts before any
-// data folder is known (the first turn, the prompt versions in use, the observer's first look come before `thimble` has
+// data folder is known (the first turn, the texts turned off, the observer's first look come before `thimble` has
 // found a root, and the hooks learn the root only from the first object), and because the kernel writes nothing into a
 // folder that holds no data (a coding session gets no thimble/ folder). Readers skip the kinds they do not know.
 // Telemetry adds:
@@ -14,11 +14,11 @@
 //   {kind: 'turn', feature, agent, ms, usage, model, hook_ms, reason}     one turn: main's (feature 'main', or the verb
 //        whose request started it, such as 'visualize'), or a subagent's (feature 'thread' for a side thread).
 //        `hook_ms`: the time thimble's own hooks took inside a main turn, which is the latency thimble adds to it.
-//   {kind: 'prompts', active: {feature: version}, problems}              the versions in use, once per session
+//   {kind: 'prompts', plugin, off, problems}                             once per session: the plugin's version (its
+//        texts are the ones that version holds) and the texts THIMBLE_PROMPTS turned off
 //   {kind: 'prompt', feature, prompt, via}                               a text given on demand (the card guide, with the first data command)
-//   {kind: 'look', turn, lit, v, observer, prompts, skip?, shadow?}      one look of the observer after a turn: the verbs
-//        it lit (`v`: its note and proposals, or null), or why it skipped. With `shadow` (THIMBLE_PROMPTS_SHADOW), what
-//        a second pass with other versions would have lit; its call line carries the same `shadow`.
+//   {kind: 'look', turn, lit, v, observer, prompts, skip?}               one look of the observer after a turn: the verbs
+//        it lit (`v`: its note and proposals, or null), or why it skipped.
 //   {kind: 'press', verb, row, lit}                                       the person pressed a verb under a message,
 //        `lit`: whether it was lit then
 //   {kind: 'key', key, on}                                               a key thimble took from the prompt, and what had
@@ -96,9 +96,7 @@ export function summarize(events) {
     else if (e.kind === 'press') presses.push(e)
     else if (e.kind === 'check') checks.push(e)
     else if (e.kind === 'call') {
-      // a shadow pass (the same turn with other versions, measured only) is a row of its own
-      const r = row(e.shadow ? `${e.feature || 'other'} (shadow)` : e.feature || 'other')
-      if (e.shadow) r.shadow = String(e.shadow)
+      const r = row(e.feature || 'other')
       const w = weighted(e.usage)
       r.calls += 1
       r.w += w.total
@@ -166,18 +164,15 @@ export function checksOf(list) {
 
 /**
  * How often the observer lit v, and whether the person pressed it: looks that ran (not skipped), the ones that lit v,
- * and the presses of v that came when it was lit or dim; a shadow pass's looks counted apart, per spec.
+ * and the presses of v that came when it was lit or dim.
  */
 export function looksOf(looks, presses = []) {
   const count = list => ({ looks: list.filter(l => !l.skip).length, skipped: list.filter(l => l.skip).length, v_lit: list.filter(l => !l.skip && (l.v || (Array.isArray(l.lit) && l.lit.includes('v')))).length })
-  const shadow = {}
-  for (const l of looks.filter(x => x.shadow)) (shadow[l.shadow] ??= []).push(l)
   const v = presses.filter(p => p.verb === 'v')
   return {
-    ...count(looks.filter(l => !l.shadow)),
+    ...count(looks),
     pressed_lit: v.filter(p => p.lit).length,
     pressed_dim: v.filter(p => !p.lit).length,
-    shadow: Object.fromEntries(Object.entries(shadow).map(([k, list]) => [k, count(list)])),
   }
 }
 

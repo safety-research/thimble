@@ -185,4 +185,4 @@ export function ownReport(text, ids) {
   return m && ids.includes(m[1].trim()) ? m[1].trim() : null
 }
 
-// The thread subagent's own instructions (its system prompt) are the registry's thread prompt: prompts/thread/.
+// The thread subagent's own instructions (its system prompt) are the registry's thread prompt: prompts/thread.md.

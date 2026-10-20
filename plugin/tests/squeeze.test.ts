@@ -26,7 +26,7 @@ function world(on: any, replies: (string | Record<string, unknown>)[] = [], hold
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/queries` }))
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
-    if (/\/prompts\/squeeze\/v\d+\.md$/.test(e.path)) return { value: 'THE PROMPT' }
+    if (/\/prompts\/squeeze\.md$/.test(e.path)) return { value: 'THE PROMPT' }
     // the observer's frame, so its look after a turn is known and left out of the calls counted here
     if (/\/prompts\/observer\/v\d+\.md$/.test(e.path)) return { value: 'FRAME {{LENSES}} {{SKELETON}}' }
     if (e.path.endsWith('/squeeze/settings.json')) return { value: '{"model": "sonnet", "effort": "low"}' }
