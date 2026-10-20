@@ -8,8 +8,9 @@
 // marked: shell/cards.js); what reads less easily is one key away in the same panel, a section the card names (r the
 // rows behind the value, c its code, or a record as the file holds it), shown in place of the card until the same key
 // or 0 closes it. A citation inside a card opens over it; back returns to the card under it, and back from the first
-// card closes the tray. a opens the card in the side panel as the mark's side thread (side.ts): the card at its top,
-// the thread's conversation under it, its input bar at the bottom. Main does not see the thread.
+// card closes the tray. a asks about it: the card opens in the side panel as the mark's side thread (side.ts), the card
+// at its top, the thread's conversation under it, its input bar at the bottom holding the keys. Main does not see the
+// thread.
 //
 //   state: {stack: [frame, ...]}
 //   frame: {row, i, kind, ref, label, gloss, open} for a mark of a message (frameOf), {kind: 'cite', ref, label, open}
@@ -19,9 +20,9 @@
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
 //          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
 //          label}], problem} (cards.js drawnCard)
-//   keys: a open (a citation: in the side panel, its whole source with its thread; ↵ and 1 too, unnamed) · ↵ or e
-//         expand an explainer (a longer one in its place) · the sections' keys (r rows, when rows stand behind it; c
-//         code) · a ask an explainer (or thread: the side panel; 1 too, unnamed)
+//   keys: a ask (the side panel on the mark, its whole source and its thread, the input bar holding the keys; a
+//         citation's ↵ and 1 too, unnamed) · ↵ or e expand an explainer (a longer one in its place) · the sections'
+//         keys (r rows, when rows stand behind it; c code)
 //         · o open the first citation inside the card (the rest by a click; 2–9 still open them, unnamed) · 0 back (or
 //         close; esc too): esc at the prompt never reaches a plugin, so 0 stays named · ] [ the next and the one before
 //         (the host's order of marks and cards: k.do('step')). Letters for what the person does, so the line reads as
@@ -118,12 +119,12 @@ export function program(k, data) {
   // a: the card in the side panel, as the mark's thread, its input bar holding the keys (the question is typed there);
   // 1, its key before, still does it, unnamed
   const toThread = () => { k.do('thread', { frame: { ...top, open: null } }) }
-  // a: a citation opens in the side panel, its whole source at the top and its thread under it, the input bar holding
-  // the keys (one way to open it; ↵ does the same where it reaches the tray, but Claude Code keeps ↵ at an empty
-  // prompt). An explainer: ↵ or e writes it again at more length in its place, from the turn and the files it cites
-  // (one side call)
+  // a asks about the mark, a citation or an explainer alike: it opens in the side panel, its whole source at the top
+  // and its thread under it, the input bar holding the keys, so what is typed next is the question (↵ does the same
+  // for a citation where it reaches the tray, but Claude Code keeps ↵ at an empty prompt). An explainer: ↵ or e
+  // writes it again at more length in its place, from the turn and the files it cites (one side call)
   if (top.kind !== 'gloss') {
-    k.on('a', toThread, 'open')
+    k.on('a', toThread, 'ask')
     k.on('return', toThread)
   } else if (!heads && !(top.gloss && top.gloss.expanded)) {
     const longer = () => { k.do('expand', { frame: top }); return withTop({ expanding: true }) }
@@ -132,7 +133,7 @@ export function program(k, data) {
   }
   // a section's key opens it in place of the card, and closes it again
   sections.forEach(s => k.on(s.key, () => withTop({ open: open && open.id === s.id ? null : s.id }), s.words))
-  if (top.kind === 'gloss') k.on('a', toThread, thread ? 'thread' : 'ask')
+  if (top.kind === 'gloss') k.on('a', toThread, 'ask')
   k.on('1', toThread)
   // o: the first citation inside the card, over it; the others by a click, or 2–9, unnamed
   if (links.length) k.on('o', () => openLink(links[0]), `open ${short(links[0].label || links[0].ref || '', 28)}`)

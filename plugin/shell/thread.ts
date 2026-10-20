@@ -251,17 +251,23 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
     if (ask.anchor) t = { ...t, anchor: ask.anchor }
     if (ask.card || ask.about) t = { ...t, info: { card: ask.card ?? t.info?.card ?? null, about: ask.about ?? t.info?.about ?? '' } }
     const last = t.asks.at(-1)?.scope ?? null
+    // the thread as it was before this question, which its agent is told
+    const was = t
+    const asked = (sent: string) => ({ text, scope, sent, at: now, ...(ask.refs?.length ? { refs: ask.refs.slice(0, 50) } : {}) })
+    // the question is in the thread at once, and the thread is listed as answering, while its agent starts
+    t = { ...t, scope, status: 'running', error: undefined, asks: [...was.asks, asked('')], turns: [...was.turns, { role: 'person', text, about: aboutOf(scope), at: now }] }
+    await keep($, t)
     let sent = ''
     let delivered = false
-    if (t.agentId && await stillWorking($, t)) {
+    if (was.agentId && await stillWorking($, was)) {
       sent = nextMessage({ text, scope, last })
-      const r = await $.session.send({ to: { agentId: t.agentId }, text: sent }).catch((err: unknown) => ({ isDelivered: false, reason: String((err as Error)?.message || err) }))
+      const r = await $.session.send({ to: { agentId: was.agentId }, text: sent }).catch((err: unknown) => ({ isDelivered: false, reason: String((err as Error)?.message || err) }))
       delivered = !!(r as Any)?.isDelivered
     }
     if (!delivered) {
       // a first question, or a thread whose agent has ended: a new agent, told the earlier turns
-      const earlier = t.turns.map(x => `${x.role === 'person' ? 'Q' : 'A'}: ${x.text}`).join('\n').slice(-EARLIER_CHARS)
-      const refs = ask.refs ?? t.asks.at(-1)?.refs ?? (scope.mark?.ref ? [scope.mark.ref] : [])
+      const earlier = was.turns.map(x => `${x.role === 'person' ? 'Q' : 'A'}: ${x.text}`).join('\n').slice(-EARLIER_CHARS)
+      const refs = ask.refs ?? was.asks.at(-1)?.refs ?? (scope.mark?.ref ? [scope.mark.ref] : [])
       const selFile = scope.object || scope.pane ? `${dirOf(t)}/sel/${t.id}.json` : ''
       sent = firstMessage({ text, scope, card: ask.card || t.info?.card || null, refs, root, selFile, about: ask.about || t.info?.about || '' }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : '')
       const description = `thread · ${aboutOf(scope)}`.slice(0, 60)
@@ -275,7 +281,7 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
         await keep($, t)
         return { thread: t, problem: `the side thread did not start (${t.error}); ask Claude here instead` }
       }
-      if (t.agentId) byAgent.delete(t.agentId)
+      if (was.agentId) byAgent.delete(was.agentId)
       // the engine names the agent it started; failing that, the newest agent of the thread's type
       let id = (r as Any).agentId ? String((r as Any).agentId) : null
       if (!id) id = (await $.agent.list().catch(() => [] as Any[])).filter((x: Any) => (x.type === TYPE || x.description === description) && !byAgent.has(x.id)).at(-1)?.id ?? null
@@ -283,7 +289,7 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
       // its turns are filed under the thread in the session's events
       if (id) claimAgent(id, 'thread', promptId)
     }
-    t = { ...t, scope, status: 'running', error: undefined, asks: [...t.asks, { text, scope, sent, at: now, ...(ask.refs?.length ? { refs: ask.refs.slice(0, 50) } : {}) }], turns: [...t.turns, { role: 'person', text, about: aboutOf(scope), at: now }] }
+    t = { ...t, asks: [...was.asks, asked(sent)] }
     await keep($, t)
     if (scope.region) await noteSelection($, key, { region: scope.region, label: aboutOf(scope), refs: ask.refs || [] })
     follow($)
