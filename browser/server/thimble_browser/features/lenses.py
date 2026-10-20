@@ -42,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
 import threading
 from pathlib import Path
@@ -338,6 +339,16 @@ def _texts(ws: str, chat: str | None, answer: str | None, cards: list[str], with
     return out
 
 
+# a citation's link text, in Markdown and in the canvas's own form: words a mark may not sit on, since a click there
+# opens the citation
+LINKED = re.compile(r"\[\[[^\]]*\]\]|\[[^\]\n]*\]\([^)\n]*\)")
+
+
+def outside_links(text: str) -> str:
+    """The text with each citation's words taken out, where a mark's words must stand."""
+    return LINKED.sub(" ", text)
+
+
 def _surface_of(place: str) -> str:
     return "chat" if place == "answer" else "cards" if place.startswith("card:") else "report"
 
@@ -369,7 +380,7 @@ async def read(ws: str, *, chat: str | None = None, answer: str | None = None, c
     for x in active:
         for it in _items(got, _key(x))[:5]:
             place, term = str(it.get("where") or "answer"), str(it.get("term") or "").strip().strip("`")
-            if place not in texts or not term or term not in texts[place] or not it.get("body"):
+            if place not in texts or not term or term not in outside_links(texts[place]) or not it.get("body"):
                 continue
             surface = _surface_of(place)
             if not reads(ws, x["id"], surface):

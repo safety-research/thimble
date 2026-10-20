@@ -162,6 +162,9 @@ function CheckRow({ ws, lens, onOpen }: { ws: string; lens: Lens; onOpen: () => 
   )
 }
 
+/** The first line of a mark's Markdown as plain words: a citation's link text kept, its target dropped. Pure. */
+export const plainLine = (md: string): string => md.split('\n').find((l) => l.trim())?.replace(/^[-*]\s+/, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`]/g, '').trim() ?? ''
+
 /** A found mark drawn as it looks where it is: its words in the check's highlight, then what the check says, and its
  * place; a click goes there (lib/marks revealMark). */
 function FoundCheck({ m, lens }: { m: FoundMark; lens: Lens }) {
@@ -172,7 +175,7 @@ function FoundCheck({ m, lens }: { m: FoundMark; lens: Lens }) {
       <span className="lside-found-term" style={{ background: c.fill, textDecorationColor: c.ink }}>
         {m.term}
       </span>
-      {m.title && <span className="lside-found-title">{m.title}</span>}
+      <span className="lside-found-title">{m.title || plainLine(m.body)}</span>
       <span className="lside-found-where">{where}</span>
     </button>
   )
