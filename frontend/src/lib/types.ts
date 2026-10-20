@@ -57,13 +57,22 @@ export type ChatRecord =
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
   | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
-  | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null }
+  | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
   | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
+
+/** A turn's token use, summed over its requests (backend agent.Usage), on its `done` record. */
+export interface TurnUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  requests: number
+}
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
  * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or

@@ -96,6 +96,18 @@
 .chat-nested {
   padding: 4px 0;
 }
+/* under a finished reply: its model and the tokens its turn used (chat/usage.tsx), quiet until hovered */
+.chat-usage {
+  align-self: flex-start;
+  padding: 0 2px;
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+.chat-usage:hover,
+.chat-usage:focus-visible {
+  color: var(--text-secondary);
+}
 .chat-text {
   min-width: 0;
   padding: 0 2px;
