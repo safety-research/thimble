@@ -132,3 +132,16 @@ async def test_a_big_model_label_asks_first_and_the_turn_goes_on(big, folder, mo
     assert "chose to run the label edit purpose" in first[0]["text"] and f"yes [{asks.SAMPLE}](concept:{k['id']}/yes)" in first[0]["text"]
     assert first[1] == {"type": "text", "text": "And the label?"}
     assert agent.take_notes(ws, "main") == []
+
+
+def test_the_estimate_counts_the_real_batches_and_prices_the_model(big, folder):
+    ws = big
+    concept = store.new_concept("e", description="x", kind="prompt", unit="record", labels=None,
+                                created_by="chat:main", glob=["edits.jsonl"])
+    found = run.scope_units(ws, folder, concept, ["edits.jsonl"], None)
+    est = asks.estimate(concept, found)
+    from thimble_browser.labels import classify
+    assert est["units"] == 2000 and est["calls"] == len(classify.batches(found))
+    assert est["dollars"] and est["dollars"] > 0 and est["seconds"] > 0
+    assert asks.needs_asking(est)
+    assert not asks.needs_asking({**est, "units": asks.SAMPLE})
