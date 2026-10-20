@@ -73,7 +73,8 @@ side panel, its whole source with a side thread that the main conversation does 
 A card opens in a side panel beside the chat, and so do a label, Coverage and the thread list. The panel works with
 clicks alone, and with the keys you would expect: what you type there is a question for its side thread, `↑` `↓` move
 through its parts, `↵` opens one, and `esc` goes back. What a thing there offers (a card's Rows and Code, a label's
-Definition) is a row of words above the panel's input bar, and what one opens shows right above it. `t` at the prompt lists the side threads.
+Definition) is a row of words above the panel's input bar, and what one opens shows right above it. `t` at the prompt
+lists the side threads.
 
 A card or an answer that counts by a label shows the label under it, its values in their colors; a click opens the
 label: its values over its records, the records themselves, and how it was made.
