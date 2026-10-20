@@ -189,3 +189,22 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     got = json.loads(run(root, "label", "spam", "--answer", "cancel", "--ask", ev["ask"]).stdout)
     assert got["reads"] == 0 and got["waiting"] == 0
     assert "chose not to run it over its 420 records" in run(root, "label", "spam").stdout
+
+
+def test_a_card_counted_where_pandas_is_missing_shows_the_labels_own_counts_and_no_stale_citation(root: Path, monkeypatch: pytest.MonkeyPatch):
+    """The shell's kernel may run in a Python without pandas: after the model's reads it cannot run the count query, so
+    the old query (an earlier count) no longer counts the label. Nothing cites it, and the card shows the label's own
+    counts."""
+    st = Store(root)
+    LB.define(st, "apology", "prompt", "The message apologizes.", "chat/*.jsonl")
+    refs = [u["ref"] for u in LB.waiting(st, "apology")["units"]]
+    LB.answers(st, "apology", {"values": {refs[0]: {"value": "yes"}}})
+    old = LB.count_query(st, "apology")
+    assert old and LB.load(st, "apology")["query"] == old["id"]
+    LB.answers(st, "apology", {"values": {r: {"value": "yes" if i < 3 else "no"} for i, r in enumerate(refs[1:])}})
+    monkeypatch.setitem(sys.modules, "pandas", None)  # import pandas fails, as in a Python without it
+    assert LB.count_query(st, "apology") is None
+    assert LB.load(st, "apology")["query"] is None
+    card = LB.save_card(st, "apology")
+    assert sorted(card["data"]["counts"], key=lambda r: r["apology"]) == [{"apology": "no", "n": 2}, {"apology": "yes", "n": 4}]
+    assert card["title"] == "apology: 4 of 6 records are yes" and old["id"] not in card["text"]

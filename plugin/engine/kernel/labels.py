@@ -762,6 +762,13 @@ def count_query(st: Store, name: str) -> dict[str, Any] | None:
     try:
         import pandas  # noqa: F401
     except ImportError:
+        # this Python cannot count (the shell's, say, after the model's reads): the last count query no longer counts
+        # the label, so nothing cites it, and the card shows the label's own counts (card_spec)
+        with locked(st, name):
+            cur = load(st, name)
+            if cur is not None and cur.get("query") and cur.get("counted_rev") != cur.get("rev"):
+                cur["query"] = None
+                write(st, cur, change=False)
         return None
     lab = load(st, name)
     if lab is None:
@@ -883,7 +890,9 @@ def card_spec(st: Store, lab: dict[str, Any], q: dict[str, Any] | None) -> dict[
         "question": definition if lab.get("kind") == "prompt" else f"{lab.get('kind')}: {definition}"[:400],
         "label": lab["name"],
         "text": text,
-        "data": {"label": info, "samples": samples(st, lab), **({"counts": qid} if qid else {"counts": []})},
+        # the counts: the count query's rows, each a citation; with none, the label's own counts (no citations)
+        "data": {"label": info, "samples": samples(st, lab),
+                 "counts": qid or [{lab["name"]: v, "n": c} for v, c in s["counts"].items()]},
         "program": CARD_PROGRAM.strip(),
         "hints": [],
         "declared": {"label": f"{lab['name']} v{lab.get('version')} rev {lab.get('rev')}: {lab.get('kind')} over {scope}"},
@@ -897,7 +906,7 @@ def save_card(st: Store, name: str, q: dict[str, Any] | None = None) -> dict[str
     lab = load(st, name)
     if lab is None:
         return None
-    if q is None and lab.get("query"):
+    if q is None and lab.get("query") and lab.get("counted_rev") == lab.get("rev"):
         from . import query as Q
         q = Q.get(st, lab["query"])
     obj = O.save(st, f"label-{slug(lab['name'])}", card_spec(st, lab, q), change=f"label rev {lab.get('rev')}")
