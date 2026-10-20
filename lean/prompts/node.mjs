@@ -1,5 +1,5 @@
 // node.mjs: the prompt registry from Node (a verb's child, `thimble prompts`, `thimble guide`). The hooks module sets
-// THIMBLE_PROMPTS for the session's commands to the versions in use (the setting and the environment together), so a
+// THIMBLE_PROMPTS for the session's commands to the versions in use (from the environment), so a
 // child reads the same versions as the hooks.
 //
 //   thimble prompts                 every feature, its versions, the active one in brackets
@@ -66,7 +66,7 @@ function main(argv) {
   const [cmd, arg] = argv
   if (cmd === 'prompts') {
     const { idx, active, problems } = activeNow()
-    console.log(['Prompt versions ([active]); choose with THIMBLE_PROMPTS=feature:version,… or the Prompts setting:', ...listing(idx, active), ...problems.map(p => `! ${p}`)].join('\n'))
+    console.log(['Prompt versions ([active]); choose with THIMBLE_PROMPTS=feature:version,…:', ...listing(idx, active), ...problems.map(p => `! ${p}`)].join('\n'))
     return 0
   }
   if (cmd === 'guide') {

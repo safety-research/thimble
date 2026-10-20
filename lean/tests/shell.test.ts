@@ -388,7 +388,7 @@ async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }
   await clock.settle()
 }
 
-test('a verb of the message row: v opens its line, a pick runs it on the message, and what it made is drawn under the same message; Claude reads what it did with the next prompt', async ($, on) => {
+test('a verb of the message row: v runs on the message, and what it made is drawn under the same message; Claude reads what it did with the next prompt', async ($, on) => {
   const w = world(on, () => ({ verb: 'visualize', saved: { id: '02-trace', v: 1 }, note: 'It drew the message as 2 bars.' }))
   const clock = mock.clock(on)
   await savedTurn($, on, clock, w.files)
@@ -397,8 +397,9 @@ test('a verb of the message row: v opens its line, a pick runs it on the message
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
   // v on an empty prompt, as the thimble line names it
   await press($, clock, edit('v'))
-  expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
-  await ui.press({ key: 'r|p-proposals|0|opt-0' })
+  // with no view proposed v opens no line: it asks once a letter could no longer make it the start of a word
+  expect(textOf(await ui.drawn())).not.toContain('another view of this answer')
+  await clock.advance(700)
   await clock.settle()
   // the verb ran with the message: its record, as an object with its words, and the pick as its words
   const input = w.inputs[0] as { object: { kind: string; text: string; row: string }; message: { row: string; final: boolean }; args: string }
@@ -449,8 +450,9 @@ test("v asks Claude for a card of the message: the row reads as the person's pic
   await clock.settle()
   // v on an empty prompt, as the thimble line names it
   await press($, clock, edit('v'))
-  expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
-  await ui.press({ key: 'r|p-proposals|0|opt-0' })
+  // with no view proposed v opens no line: it asks once a letter could no longer make it the start of a word
+  expect(textOf(await ui.drawn())).not.toContain('another view of this answer')
+  await clock.advance(700)
   await clock.settle()
   expect((w.inputs[0] as { args: string }).args).toBe('')
   // the row reads as the press; Claude reads the request in a row before it that the person does not see
@@ -543,15 +545,15 @@ test("each row is written to the messages folder: an index line per row, and a r
   expect(MARKED.slice(rec.marks[0].start, rec.marks[0].end)).toBe('[6,543 saves](q1#day=2026-06-18@n)')
 })
 
-test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back; v opens its line, and a letter typed straight after gives v back to the prompt', async ($, on) => {
-  world(on)
+test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back; a letter typed straight after v gives v back to the prompt', async ($, on) => {
+  const w = world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   // the hint line names the key that opens the answer's marks; the verb row does not
   expect(textOf(await $.ui.render({ ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never))).not.toContain('marks')
   expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] cite & explain')
-  // the thimble line above the prompt counts what the session holds
-  expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
+  // the thimble line above the prompt says how much of the data the session read
+  expect(textOf(await $.ui.render(BAND))).toContain('coverage 17%')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
@@ -571,13 +573,14 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   // 0 on an empty prompt closes the tray
   expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
+  expect(textOf(await $.ui.render(BAND))).toContain('v visualize')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
-  // v opens its line under the answer; i typed straight after was the start of a word
+  // v waits a moment before it asks; i typed straight after was the start of a word, so v comes back and asks nothing
   expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(MOUNT))).toContain('▸ 1 another view of this answer')
   expect(await press($, clock, edit('i'))).toEqual({ text: 'vi', cursor: 2 })
-  expect(textOf(await $.ui.render(MOUNT))).not.toContain('▸ 1 another view')
+  await clock.advance(700)
+  await clock.settle()
+  expect(w.inputs.length).toBe(0)
   // a key in a prompt with words in it is typed
   expect(await press($, clock, edit('s', 'so'))).toEqual({ text: 'sos', cursor: 3 })
 })
@@ -599,7 +602,8 @@ function slowWrites(on: any) {
   })
   return { next: (n: number) => { ms = n } }
 }
-const lineOpen = async ($: Any) => textOf(await $.ui.render(MOUNT)).includes('▸ 1 another view of this answer')
+// the squeeze chips under the answer: the line a key opens in these tests
+const lineOpen = async ($: Any) => textOf(await $.ui.render(MOUNT)).includes('Length ○○○● full')
 
 test('a key is answered before its work runs; a key pressed while that work runs waits for it, past the hook\'s 50 ms, and is still taken: the .catch gives what the hook decided', async ($, on) => {
   const w = world(on)
@@ -607,12 +611,12 @@ test('a key is answered before its work runs; a key pressed while that work runs
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   writes.next(300)
-  // v answers at once, while its work (the line it opens) still runs
-  expect(await Promise.race([($ as Any).prompt.edit(edit('v')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
-  // 1 straight after: decided once v's work is done, so it picks in v's line; it never lands in the prompt
+  // s answers at once, while its work (the chips it opens) still runs
+  expect(await Promise.race([($ as Any).prompt.edit(edit('s')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
+  // 1 straight after: decided once s's work is done, so it picks a chip; it never lands in the prompt
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
-  expect(w.inputs.length).toBe(1)
-  expect(await lineOpen($)).toBe(false)
+  expect(w.inputs.length).toBe(0)
+  expect(await lineOpen($)).toBe(true)
 })
 
 test('a key whose answer misses even the .catch\'s grace types, and its work never runs: a key is taken or typed, never both', async ($, on) => {
@@ -621,10 +625,10 @@ test('a key whose answer misses even the .catch\'s grace types, and its work nev
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   writes.next(1400)
-  expect(await Promise.race([($ as Any).prompt.edit(edit('v')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
-  // 1 waits for v's work longer than the hook's budget and the .catch's grace together: Claude Code types it
+  expect(await Promise.race([($ as Any).prompt.edit(edit('s')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
+  // 1 waits for s's work longer than the hook's budget and the .catch's grace together: Claude Code types it
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '1', cursor: 1 })
-  // v's work ends; the 1 that typed picks nothing, and v's line stays open
+  // s's work ends; the 1 that typed picks nothing, and the chips stay open
   await sleep(500)
   await clock.settle()
   expect(w.inputs.length).toBe(0)
@@ -636,34 +640,34 @@ test('a key whose answer misses even the .catch\'s grace types, and its work nev
 // change from the edit's own "vi": what the editor shows then is the answer with the taken v out of it too.
 const shows = (answer: { text: string; cursor: number }, taken: string) => answer.text.slice(taken.length)
 
-test('a letter typed before v\'s answer came, on the box with the v still in it, is the start of a word: the v comes back and its line closes', async ($, on) => {
-  const w = world(on)
+test('a letter typed before s\'s answer came, on the box with the s still in it, is the start of a word: the s comes back and its line closes', async ($, on) => {
+  world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
-  // i, typed while the editor still showed the v: answered at once, so the editor shows "vi"
-  const i = await ($ as Any).prompt.edit(edit('i', 'v'))
-  expect(shows(i, 'v')).toBe('vi')
+  expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
+  // o, typed while the editor still showed the s: answered at once, so the editor shows "so"
+  const o = await ($ as Any).prompt.edit(edit('o', 's'))
+  expect(shows(o, 's')).toBe('so')
   await clock.settle()
   expect(await lineOpen($)).toBe(false)
-  // a key so typed that v's line takes is decided on the empty box, once v's line is open: 1 picks, no letter lands
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
-  expect(shows(await press($, clock, edit('1', 'v')), 'v')).toBe('')
-  expect(w.inputs.length).toBe(1)
+  // a key so typed that the chips take is decided on the empty box, once they are open: 1 picks a chip, no letter lands
+  expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
+  expect(shows(await press($, clock, edit('1', 's')), 's')).toBe('')
+  expect(await lineOpen($)).toBe(true)
 })
 
-test('a letter typed straight after v is a word however long v\'s work takes: the time counts from when each key came', async ($, on) => {
+test('a letter typed straight after s is a word however long s\'s work takes: the time counts from when each key came', async ($, on) => {
   world(on)
   const writes = slowWrites(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   writes.next(300)
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
-  // i comes at once, and waits for v's work, which takes longer than the gap a word allows
-  const i = ($ as Any).prompt.edit(edit('i'))
+  expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
+  // o comes at once, and waits for s's work, which takes longer than the gap a word allows
+  const o = ($ as Any).prompt.edit(edit('o'))
   await sleep(20)
   await clock.advance(1000)
-  expect(await i).toEqual({ text: 'vi', cursor: 2 })
+  expect(await o).toEqual({ text: 'so', cursor: 2 })
   await clock.settle()
   expect(await lineOpen($)).toBe(false)
 })
@@ -728,19 +732,20 @@ test('a failure reads as plain words, never JSON; a refusal that needs nothing f
   expect(plainWhy('Traceback (most recent call last):\n  File "x"')).toBe('Traceback (most recent call last):')
 })
 
-test('the thimble line is the one bar: the verbs in words at its left, a lit one with its note; the non-zero counts at its right, coverage the share read; a changed count bright for a moment; a blank row above it; its label plain', async ($, on) => {
+test('the thimble line is the one bar: the verbs in words at its left, a lit one with its note; at its right the threads and coverage (the share read), when not zero; a changed count bright for a moment; a blank row above it; its label plain', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   const bar = textOf(await $.ui.render(HINT))
   expect(bar).toContain('thimble  v visualize · s squeeze · ] cite & explain')
   // 102 of 600 rows read, as the kernel counts them (events.jsonl was only named): 17%; no zero count shows
-  expect(bar).toContain('2 cites · coverage 17%')
+  expect(bar).toContain('coverage 17%')
+  expect(bar).not.toContain('cites')
   expect(bar).not.toContain('card')
   expect(bar).not.toContain('thread')
   expect(bar).not.toContain('claims')
   // the counts that just changed are bright, then dim
-  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x) === '2 cites') on = true }); return on }
+  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x) === 'coverage 17%') on = true }); return on }
   expect(lit(await $.ui.render(HINT))).toBe(true)
   for (let i = 0; i < 40; i++) await clock.advance(50)
   expect(lit(await $.ui.render(HINT))).toBe(false)

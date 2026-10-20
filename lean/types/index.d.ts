@@ -68,7 +68,7 @@ export type SqzUi = { focus: string; running: { since: number } | null; error: s
 
 /** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */
-export type LineCounts = { cards: number; threads: number; cites: number; cov: number; at: number; changed: Record<string, number> }
+export type LineCounts = { threads: number; cov: number; at: number; changed: Record<string, number> }
 
 /** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
  *  inside a card (panes/tray.js frameOf). */

@@ -21,6 +21,8 @@
 //        a second pass with other versions would have lit; its call line carries the same `shadow`.
 //   {kind: 'press', verb, row, lit}                                       the person pressed a verb under a message,
 //        `lit`: whether it was lit then
+//   {kind: 'key', key, on}                                               a key thimble took from the prompt, and what had
+//        the keys (rest, card, tray, chips, proposals, detail): what people use
 //   {kind: 'check', id, v, tried, total, failed, cut, ms, chars}          a save's card had its interactions tried once
 //        (draw/exercise.mjs): how many, how many failed, the milliseconds it added to the save, and the characters of
 //        the line Claude read about it (0 when all ran)

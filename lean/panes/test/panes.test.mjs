@@ -140,12 +140,12 @@ test('the focus stack: a key goes to the top program that takes it, then down; t
 // ---------------------------------------------------------------- the bar in the room it has
 test('the bar is always one line: it drops the counts first (coverage last), then says each key by its first word, then its label, then cuts', async () => {
   const { barLine, fitBar } = await import('../host.js')
-  const bar = { label: 'thimble', left: [{ key: 'v', words: 'visualize' }, { key: 's', words: '● 6 of 24 lines', short: '● squeeze' }, { key: ']', words: 'cite & explain' }, { key: '1', words: 'open detail' }], counts: [{ id: 'cov', text: 'coverage 34%' }, { id: 'cards', text: '2 cards' }, { id: 'threads', text: '2 threads' }] }
+  const bar = { label: 'thimble', left: [{ key: 'v', words: 'visualize' }, { key: 's', words: '● 6 of 24 lines', short: '● squeeze' }, { key: ']', words: 'cite & explain' }, { key: '1', words: 'open detail' }], counts: [{ id: 'threads', text: '2 threads' }, { id: 'cov', text: 'coverage 34%' }] }
   const at = w => barLine(fitBar(bar, w))
-  assert.equal(at(200), 'thimble  v visualize · s ● 6 of 24 lines · ] cite & explain · 1 open detail   coverage 34% · 2 cards · 2 threads')
+  assert.equal(at(200), 'thimble  v visualize · s ● 6 of 24 lines · ] cite & explain · 1 open detail   2 threads · coverage 34%')
   // the counts go first, coverage last
-  assert.ok(at(100).endsWith('coverage 34%') && !at(100).includes('cards'))
-  assert.ok(!at(80).includes('coverage'))
+  assert.ok(at(90).endsWith('coverage 34%') && !at(90).includes('threads'))
+  assert.ok(!at(70).includes('coverage'))
   // then the words: each key keeps its first word (a lit verb its dot and name)
   assert.equal(at(50), 'v visualize · s ● squeeze · ] cite · 1 open')
   for (const w of [200, 140, 110, 90, 75, 60]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)

@@ -254,12 +254,12 @@ test("a turn a verb's ask started: the notes ride on its prompt, once; the pass 
   const clock = w.clock
   await turn($, w, clock, { id: 't1', prompt: 'I will tell my team the cap cut them off. Anything to fix first?', answer: 'Fix two things.', tools: 1, save: true })
   expect(w.questions.length).toBe(0)
-  // v pressed and its proposal picked: the verb's ask is the next prompt of main, and the note rides with it, in the
+  // v pressed (nothing proposed, so it asks at once): the verb's ask is the next prompt of main, and the note rides with it, in the
   // row for Claude alone before the prompt
   const ui = await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'Fix two things.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
   await clock.settle()
   await press($, w.clock, { origin: { kind: 'composer' }, key: { key: 'v' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'v' })
-  await ui.press({ key: 'r|p-proposals|0|opt-0' })
+  await clock.advance(700)
   await clock.settle()
   await ui.unmount()
   expect(w.submitted.at(-1)!.text).toBe('visualize another view of this answer')

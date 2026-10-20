@@ -154,13 +154,14 @@ test('a card whose key is a verb\'s letter: at rest the verb takes it, with the 
   await savedTurn($, clock)
   await reply($)
   await clock.settle()
-  // at rest v opens the views line under the message, and the card's state is as it was
+  // at rest v is the verb's: it asks Claude for another view (no line opens when none is proposed), and the card's
+  // state is as it was
   expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(700)
   await clock.settle()
-  expect(textOf(await reply($))).toContain('▸ 1 another view of this answer')
+  expect(textOf(await reply($))).not.toContain('another view of this answer')
   expect(w.preps.some(p => p.event?.key === 'v')).toBe(false)
-  // 0 closes the line; ] gives the card the focus, and v is its flip now, named in the bar
-  await press($, clock, edit('0'))
+  // ] gives the card the focus, and v is its flip now, named in the bar
   await press($, clock, edit(']'))
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('v flip · 1 open detail · ] next · 0 back')

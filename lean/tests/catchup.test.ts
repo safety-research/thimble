@@ -272,7 +272,7 @@ test('the chips work on a catch-up: ] makes it longer with one call, no step lan
   expect(textOf(await $.ui.render(view(A4, 'The last reader agrees.')))).toContain('catch-up of 4 replies')
 })
 
-test('v on a catch-up: its line opens under it, Claude reads the catch-up with the request, and the card it makes is drawn under the catch-up', async ($, on) => {
+test('v on a catch-up: it asks for a card of it, Claude reads the catch-up with the request, and the card it makes is drawn under the catch-up', async ($, on) => {
   const ask = 'The person pressed v (visualize) on the catch-up of your 2 replies since their last prompt. Make a card of it.'
   const w = world(on, [`<text>${DIGEST}</text>`], () => ({ verb: 'visualize', text: 'Claude is making another view of this answer.', ask }))
   const session = mock.session(on)
@@ -286,10 +286,10 @@ test('v on a catch-up: its line opens under it, Claude reads the catch-up with t
   await written(clock)
   await press($, clock, edit('s'))
   const cuRow = recordOf(w, row(A2)).caughtUp
-  // v: its line opens under the catch-up
+  // v: with no view proposed it asks at once, once a letter could no longer make it the start of a word
   await press($, clock, edit('v'))
-  expect(textOf(await $.ui.render(view(A2, FOLLOW)))).toContain('▸ 1 another view of this answer')
-  await press($, clock, edit('1'))
+  expect(textOf(await $.ui.render(view(A2, FOLLOW)))).not.toContain('another view of this answer')
+  await clock.advance(700)
   await clock.settle()
   // the verb ran on the catch-up's record; the row reads as the press, and the request goes before it for Claude
   expect(w.inputs[0].message.row).toBe(cuRow)

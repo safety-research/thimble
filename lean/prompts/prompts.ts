@@ -1,5 +1,5 @@
 // prompts.ts: the prompt registry (registry.mjs) from the hooks module. Once per session it finds the versions on disk,
-// picks the active one of each feature (the plugin's Prompts setting, then THIMBLE_PROMPTS), sets THIMBLE_PROMPTS for the
+// picks the active one of each feature (the defaults, or THIMBLE_PROMPTS), sets THIMBLE_PROMPTS for the
 // session's commands to the same choice (so `thimble guide` and a verb's child read the same versions), names the versions
 // in use in the session's events, and says in one line when a named version does not exist (it keeps the default).
 //
@@ -31,7 +31,6 @@ type Any = any
 type Active = { version: string; file: string | null; source: string; off?: boolean; parts?: { file: string; section?: string }[] }
 
 const R = {
-  setting: '',
   session: '',
   idx: null as Any,
   active: {} as Record<string, Active>,
@@ -51,11 +50,6 @@ async function markSkill($: Engine, loaded: boolean): Promise<void> {
   try { await $.env.set('THIMBLE_SKILL_LOADED', loaded ? '1' : '') } catch { /* the guide then prints the section again */ }
 }
 
-/** The plugin's Prompts setting (register's options). */
-export function setPromptSetting(v: unknown): void {
-  R.setting = typeof v === 'string' ? v : ''
-}
-
 const rootOf = ($: Engine) => $.plugin.root.replace(/\/+$/, '')
 
 async function resolve($: Engine): Promise<void> {
@@ -65,10 +59,9 @@ async function resolve($: Engine): Promise<void> {
     try { found[name] = (await $.fs.list(`${root}/prompts/${name}`)).filter(x => x.kind === 'file').map(x => x.name) } catch { found[name] = [] }
   }
   R.idx = indexOf(found)
-  // THIMBLE_PROMPTS as Claude Code was started with it; once set below it holds the setting too, which choose() reads
-  // again as the same choice
+  // THIMBLE_PROMPTS as Claude Code was started with it (a person's experiment with other versions; no setting)
   const env = String((await $.env.get('THIMBLE_PROMPTS')) || '')
-  const c = choose(R.idx, { setting: R.setting, env })
+  const c = choose(R.idx, { env })
   R.active = c.active
   R.problems = c.problems
   R.texts.clear()
@@ -137,8 +130,7 @@ function withBody(computed: string, body: string): string {
   return (m ? m[1] : '') + body
 }
 
-export function registerPrompts(on: Any, options: Any): void {
-  setPromptSetting(options?.prompts)
+export function registerPrompts(on: Any, _options?: Any): void {
 
   on('session.start', { cwd: /./ }, async ($: Engine, e: Any, next: Any) => {
     const r = await next(e)
@@ -230,5 +222,5 @@ export function registerPrompts(on: Any, options: Any): void {
 
 /** For tests: the module's memory, cleared. */
 export function resetPrompts(): void {
-  Object.assign(R, { setting: '', session: '', idx: null, active: {}, problems: [], texts: new Map(), leanLoaded: false, cardsGiven: false, resolving: null })
+  Object.assign(R, { session: '', idx: null, active: {}, problems: [], texts: new Map(), leanLoaded: false, cardsGiven: false, resolving: null })
 }

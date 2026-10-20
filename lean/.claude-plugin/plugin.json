@@ -17,12 +17,6 @@
       "title": "Observer",
       "description": "After each turn of work, a side agent reads the answer and the objects behind it: it leaves notes for Claude, lights v when another view would help, and marks the terms you may not know.",
       "default": true
-    },
-    "prompts": {
-      "type": "string",
-      "title": "Prompts",
-      "description": "Versions of the texts thimble's models read, in place of the defaults: feature:version pairs separated by commas, such as forms:principles. `thimble prompts` lists them. The THIMBLE_PROMPTS environment variable, when set, wins. Empty: the defaults.",
-      "default": ""
     }
   }
 }

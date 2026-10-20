@@ -27,7 +27,7 @@ import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
-import { linkMarks, newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
+import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import type { Scope as ThreadScope } from './thread'
@@ -1173,15 +1173,33 @@ function messageObject(rec: MsgRecord): Any {
   return { id: `msg-${rec.row.slice(0, 8)}`, version: 1, kind: 'message', row: rec.row, session: rec.session, title: first.length > 60 ? first.slice(0, 59) + '…' : first, text }
 }
 
-/** A verb key under a message: its line opens (a press on the open one closes it). */
+/** How long a verb key waits before it runs at once: a letter typed within it makes the key the start of a word. */
+const WORD_MS = 700
+/** v pressed with nothing proposed, waiting out WORD_MS before it asks Claude (a letter typed meanwhile cancels it). */
+let pendingV: { row: string; cancelled: boolean } | null = null
+
+/** A verb key under a message: its line opens (a press on the open one closes it). v with no view proposed asks
+ *  Claude for another view at once, once the moment in which it could begin a word has passed. */
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
   if (cur && cur.row === row && cur.verb === key) { await setPick($, null); return }
   // what the person pressed, with whether the post-turn pass had lit it (thimble stats: how often a lit verb is used)
-  const lit = !!((await recordNow($, row))?.verbs as Record<string, Any> | undefined)?.[key]?.lit
-  void recordEvent($, { kind: 'press', verb: key, row, lit })
+  const rec = await recordNow($, row)
+  const v = (rec?.verbs as Record<string, Any> | undefined)?.[key]
+  void recordEvent($, { kind: 'press', verb: key, row, lit: !!v?.lit })
   await setTray($, null)
   await setCardFocus($, null)
+  if (key === 'v' && rec && !(v?.lit && Array.isArray(v.proposals) && v.proposals.length)) {
+    await setPick($, null)
+    const wait = { row, cancelled: false }
+    pendingV = wait
+    $.clock.after(WORD_MS, () => {
+      if (wait.cancelled || pendingV !== wait) return
+      pendingV = null
+      void (async () => { const now = (await recordNow($, row)) ?? rec; await runOnMessage($, 'visualize', 'v', now, ANOTHER_VIEW) })()
+    })
+    return
+  }
   await setPick($, { row, verb: key })
   await $.state.set(SELROW, row === (await restRow($)) ? null : row)
   // the line in view, when a key opened it under a message above the screen
@@ -1347,7 +1365,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-//   thimble  v visualize · s squeeze · ] cite & explain · 1 open detail      2 cards · 11 cites · coverage 34%
+//   thimble  v visualize · s squeeze · ] cite & explain · 1 open detail                     2 threads · coverage 34%
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
 // keys act on (a lit one with its note in place of its name), `] cite & explain` when that message has marks, `1 open
@@ -1379,20 +1397,12 @@ export function percent(part: number): string {
   return `${Math.min(99, Math.round(p))}%`
 }
 
-/** This session's counts for the thimble line, counted again: the cards drawn, the side threads, the citations in
- *  Claude's words, and (with `coverage`) the share of the folder's data Claude has read, by rows. A
- *  count that changed is stamped, so it brightens. */
+/** This session's counts for the thimble line, counted again: the side threads, and (with `coverage`) the share of the
+ *  folder's data Claude has read. A count that changed is stamped, so it brightens. */
 export async function recount($: Engine, o: { coverage?: boolean } = {}): Promise<void> {
   try {
     const old = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
     const now = await $.clock.now()
-    const s = await shownNow($)
-    const cards = new Set(Object.values(s.under).flat().map(x => `${x.root}|${x.id}`)).size
-    let cites = 0
-    for (const row of await messageRows($)) {
-      const rec = await recordNow($, row)
-      if (rec) cites += linkMarks(rec.text).length
-    }
     const root = await rootHere($)
     let cov = old?.cov ?? 0
     if (o.coverage && root && person === 'now') {
@@ -1409,8 +1419,8 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         // the line keeps the last share it had
       }
     }
-    const next: LineCounts = { cards, threads: threadCount(), cites, cov, at: now, changed: { ...(old?.changed || {}) } }
-    const keys = ['cards', 'threads', 'cites', 'cov'] as const
+    const next: LineCounts = { threads: threadCount(), cov, at: now, changed: { ...(old?.changed || {}) } }
+    const keys = ['threads', 'cov'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : next[k] > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
     await $.state.set(COUNTS, next)
@@ -1644,9 +1654,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   const now = await $.clock.now()
   noteBar(now, left)
   const items: [string, number, string][] = c ? [
-    ['cards', c.cards, c.cards === 1 ? '1 card' : `${fmtN(c.cards)} cards`],
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
-    ['cites', c.cites, c.cites === 1 ? '1 cite' : `${fmtN(c.cites)} cites`],
     ['cov', c.cov, `coverage ${percent(c.cov)}`],
   ] : []
   const counts = items.filter(([, n]) => n > 0).map(([id, , text]) => ({ id, text, bright: now - (c!.changed[id] ?? 0) < BRIGHT_MS }))
@@ -1703,6 +1711,11 @@ async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<
   const t = await k.turn
   const inTime = !next.signal.aborted
   keyAnswered(shellKey, k, t, inTime)
+  // a key thimble took is a line in the session's events, with what had the keys: what people use, for measuring
+  if (t.box && inTime && e.key?.key && !e.key.ctrl && !e.key.meta) {
+    const key = String(e.key.key)
+    $.clock.after(0, () => { void (async () => { const stack = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]; await recordEvent($, { kind: 'key', key, on: detailIsOpen() ? 'detail' : stack.at(-1) ?? 'rest' }) })().catch(() => undefined) })
+  }
   if (t.box || !inTime) return t.box ?? { text: e.text, cursor: e.cursor }
   return keyTyped($, e, next)
 }
@@ -1754,6 +1767,10 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // a letter typed straight after a card's own key: that key began a word; the card goes back to where it was
   if (keyed && now - keyed.at < 700 && /^\p{L}$/u.test(k)) {
     return { box: { text: `${keyed.key}${e.inputText}`, cursor: keyed.key.length + e.inputText.length }, work: () => writeCardState($, keyed.ref.root, keyed.ref.id, { state: keyed.undo?.state ?? {}, region: keyed.undo?.region ?? null }, 'terminal') }
+  }
+  // a letter typed straight after v, while v waits to ask: v began a word, so it comes back and asks nothing
+  if (pendingV && opened && opened.key === 'v' && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
+    return { box: { text: `v${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingV) { pendingV.cancelled = true; pendingV = null } } }
   }
   // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-3 chip,
   // 0 original, s done)
@@ -1825,7 +1842,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   if (k.length === 1 && (await rowVerbs($)).some(v => v.key === k)) {
     const row = await actingRow($)
     // a letter typed at once after it (before its answer came) makes it the start of a word: its line closes again
-    const word = k === 'c' ? {} : { word: async () => { keyOpened = null; await setPick($, null) } }
+    const word = { word: async () => { keyOpened = null; if (pendingV) { pendingV.cancelled = true; pendingV = null }; await setPick($, null) } }
     if (row) return { box: consume, work: async () => { await pressRowVerb($, row, k); keyOpened = { key: k, at: now } }, ...word }
   }
   if (pick && k.length === 1) {
@@ -2611,6 +2628,7 @@ export function resetShell(): void {
   msgFiles = null
   person = 'now'
   keyOpened = null
+  pendingV = null
   cardKeyed = null
   trayKeyed = null
   placeNext = null

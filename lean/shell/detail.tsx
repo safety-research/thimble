@@ -124,7 +124,9 @@ export async function openDetailPane($: Engine, title: string): Promise<void> {
   isOpen = true
   setThreadWindow(true)
   await pushFocus($, 'detail')
-  await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) })
+  const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) })
+  // a terminal too narrow for a docked pane: Claude Code keeps it waiting, unplaced, so say why and what opens it
+  if (r && (r as Any).isPlaced === false) $.ui.toast(`The card's detail is waiting: ${(r as Any).reason || 'the terminal is too narrow for it'}. Widen the terminal to open it.`)
   // asked from a key, the open lands while the key is still in the prompt: ask for the keys again once it is gone
   regrab($)
 }

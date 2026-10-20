@@ -35,7 +35,7 @@ const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: {
 type Any = any
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
+function world(on: any, prep: (input: Any) => Any = () => DRAWING, open: Any = { isPlaced: true }) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('session.cwd', () => ({ value: ROOT }))
   on('session.id', () => ({ value: SESSION }))
@@ -60,7 +60,7 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const opened: Any[] = []
-  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
+  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: open } })
   const focused: string[] = []
   on('ui.focus', (_$: unknown, e: Any) => { focused.push(String(e.element ?? e.key)); return { value: {} } })
   on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] : [] }))
@@ -522,4 +522,11 @@ test('the thimble line says the keys of what is on top of the focus stack: the d
   await clock.settle()
   expect(await hintOf($)).not.toContain('↑↓ part')
   expect(await hintOf($)).not.toContain('type to ask')
+})
+
+test('a terminal too narrow for the docked detail: Claude Code keeps it waiting, and a toast says why and what opens it', async ($, on) => {
+  const w = world(on, undefined, { isPlaced: false, reason: 'unasked below 144 columns (120 now)' })
+  mock.clock(on)
+  await $.command.run({ command: 'obj', args: '01-saves' } as never)
+  expect(w.toasts.some(t => t.includes("The card's detail is waiting: unasked below 144 columns (120 now). Widen the terminal to open it."))).toBe(true)
 })
