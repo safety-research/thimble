@@ -1,5 +1,5 @@
-# thimble browser's checks: the server's tests (with bubblewrap, so the sandbox tests run) and the page's type check
-# and build.
+# thimble browser's checks: the server's tests (with bubblewrap and the sandbox runtime, so the sandbox tests run) and
+# the page's type check and build.
 name: checks
 
 on:
@@ -24,8 +24,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 0  # the prompt parity test reads the terminal plugin's branch
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: Install bubblewrap
-        run: sudo apt-get install -y bubblewrap
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install bubblewrap, and let it make its namespaces (the runner's AppArmor keeps it from them)
+        run: |
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Sandbox check (installs the sandbox runtime pinned in server/sandbox, fails when it does not work)
+        run: scripts/thimble-browser --check-sandbox
       - name: Tests
         working-directory: server
         run: uv run --extra dev pytest -q

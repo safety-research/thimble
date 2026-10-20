@@ -20,3 +20,4 @@ release/
 *.log
 !plugin/viewers/*/sample/**/*.log
 server/.venv
+server/sandbox/node_modules/

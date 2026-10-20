@@ -42,9 +42,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wif", metavar="ORG", choices=settings.WIF_ORGS,
                     help="sign in to Claude with Workload Identity Federation for this org (saved in Settings)")
     ap.add_argument("--model", help="the model every agent runs on (saved in Settings), such as claude-opus-5-5")
+    ap.add_argument("--check-sandbox", action="store_true",
+                    help="test the sandbox card code runs in, print one line per check, and exit")
     a = ap.parse_args(argv)
     # the credentials are only the ones Settings names: no ANTHROPIC_* variable of this shell may stand in for them
     llm.scrub_env()
+    if a.check_sandbox:
+        from . import sandbox_check
+
+        return sandbox_check.main()
     if a.wif:
         settings.write({"credentials": {"source": "wif", "org": a.wif}})
     if a.model:
