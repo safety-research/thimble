@@ -435,7 +435,7 @@ def resolve_card_ref(ws: str, ref: str, value: str | None = None) -> dict[str, A
     out: dict[str, Any] = {"ref": ref, "kind": "cell", "excerpt": f"{cell['title']}\n{cell.get('takeaway') or ''}",
                            "meta": {"card": cell["id"], "notebook": nb["id"], "kind": cell["kind"]}}
     if loc and "/" not in loc and cell["kind"] == "program":
-        return _region_ref(ws, cell, loc, out)
+        return _region_ref(ws, cell, loc, out, value)
     if not loc or "/" not in loc:
         return out
     col, row = loc.split("/", 1)
@@ -465,22 +465,40 @@ def resolve_card_ref(ws: str, ref: str, value: str | None = None) -> dict[str, A
     return out
 
 
-def _region_ref(ws: str, cell: dict[str, Any], rid: str, out: dict[str, Any]) -> dict[str, Any]:
-    """A part of a program card (`card:<id>#<part id>`): its label and the record it opens, from the card as it stands,
-    else from the newest earlier version that drew it, so a citation keeps pointing at what it cited."""
+_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _states(words: str, label: str) -> bool:
+    """Whether a part's label states a number the citation's words state (commas aside)."""
+    nums = lambda t: {n.replace(",", "") for n in _NUMBER.findall(t)}  # noqa: E731
+    return bool(nums(words) & nums(label))
+
+
+def _label_of(region: dict[str, Any] | None) -> str:
+    meta = region.get("meta") if region and isinstance(region.get("meta"), dict) else {}
+    return str(meta.get("label") or (region or {}).get("id") or "")
+
+
+def _region_ref(ws: str, cell: dict[str, Any], rid: str, out: dict[str, Any], value: str | None = None) -> dict[str, Any]:
+    """A part of a program card (`card:<id>#<part id>`): its label and the record it opens, from the card as it stands.
+    When the card no longer draws the part, or `value`, the citation's own words, states a number its label does not
+    (an edit redrew the part with another value), the part is read from the newest earlier version that drew it as
+    cited, so a citation keeps pointing at what it cited."""
     got, entry = region_in(cell.get("outputs"), rid), None
-    if got is None:
+    stated = bool(value) and any(ch.isdigit() for ch in str(value))
+    if got is None or (stated and not _states(str(value), _label_of(got))):
         for fn in EARLIER:
             try:
                 earlier = fn(ws, cell)
             except Exception:  # noqa: BLE001 — a version that cannot be read leaves the card as it stands
                 log.exception("reading a card's earlier outputs failed")
                 continue
-            for e, outs in earlier:
-                if (got := region_in(outs, rid)) is not None:
-                    entry = e
-                    break
-            if got is not None:
+            hits = [(e, r) for e, outs in earlier if (r := region_in(outs, rid)) is not None]
+            pick = next(((e, r) for e, r in hits if stated and _states(str(value), _label_of(r))), None)
+            if pick is None and got is None and hits:
+                pick = hits[0]
+            if pick is not None:
+                entry, got = pick
                 break
     if got is None:
         return out
