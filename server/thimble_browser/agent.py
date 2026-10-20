@@ -52,6 +52,8 @@ class AgentDef:
     explain: bool = False  # whether its answers get explain marks
     finished: Callable[["Session", str | None], None] | None = None
     effort: str | None = None  # an effort of its own, else the analyst's
+    group: str | None = None  # the group every card it adds goes to, whatever group its call names
+    call_refs: bool = False  # each tool result it reads starts with the call's ref, call:<chat>/<n> (calls.py)
 
 
 def _main_prompt(folder: Path) -> str:
@@ -70,7 +72,9 @@ AGENTS: dict[str, AgentDef] = {
 
 
 def role_of(meta: dict[str, Any]) -> str:
-    r = meta.get("role")
+    """The agent a chat runs: its meta's `agent` when the role the page reads differs (a step of the orientation is role
+    `step` and agent `critic`), else its `role`; main for any other."""
+    r = meta.get("agent") or meta.get("role")
     return r if r in AGENTS else "main"
 
 
@@ -103,16 +107,24 @@ def complete_prefix(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _result_content(r: Any) -> Any:
-    """A tool's result as the Messages API takes it: its text, and its pictures as image blocks after the text."""
+def _result_content(r: Any, text: str | None = None) -> Any:
+    """A tool's result as the Messages API takes it: its text (`text` in place of r.text when given), and its pictures
+    as image blocks after the text."""
     import base64  # noqa: PLC0415
 
+    text = r.text if text is None else text
     images = [p for p in (r.images or []) if p.is_file()]
     if not images:
-        return r.text
-    return [{"type": "text", "text": r.text}] + [
+        return text
+    return [{"type": "text", "text": text}] + [
         {"type": "image", "source": {"type": "base64", "media_type": "image/png",
                                      "data": base64.b64encode(p.read_bytes()).decode("ascii")}} for p in images]
+
+
+def count_calls(messages: list[dict[str, Any]]) -> int:
+    """How many tool calls the conversation holds: call n of a chat is its n-th tool_use block (calls.py)."""
+    return sum(1 for m in messages if m.get("role") == "assistant" for b in m.get("content") or []
+               if isinstance(b, dict) and b.get("type") == "tool_use")
 
 
 def _block(b: Any) -> dict[str, Any]:
@@ -156,7 +168,8 @@ class Session:
         self._pending_notify: asyncio.TimerHandle | None = None
         self.meta = meta
         self.tools = Tools(ws, chat, folder, read_roots=[folder, *self.defn.extra_roots], unsandboxed=unsandboxed,
-                           on_card=self.cards.append, writer=self.role == "writer", view=meta.get("view"),
+                           on_card=self.cards.append, writer=self.role == "writer", group=self.defn.group,
+                           view=meta.get("view"),
                            start_view=(lambda req: manager.start_view(ws, req)) if manager else None)
         self.tools.session = self
 
@@ -198,12 +211,15 @@ class Session:
 
     # ---- a turn
 
-    async def send(self, text: str, *, shown: str | None = None) -> None:
-        """Start a turn on the analyst's message `text` (`shown` is what the chat shows of it, when that differs)."""
+    async def send(self, text: str, *, shown: str | None = None, record: dict[str, Any] | None = None) -> None:
+        """Start a turn on the analyst's message `text` (`shown` is what the chat shows of it, when that differs, and
+        `record` more fields of its row, such as the follow-up of the orientation it starts)."""
         if self.running:
             raise RuntimeError("Claude is still answering the last message in this chat")
-        chats.append(self.ws, self.chat, {"type": "user", "text": shown if shown is not None else text, "by": "browser"})
+        chats.append(self.ws, self.chat, {"type": "user", "text": shown if shown is not None else text, "by": "browser",
+                                          **(record or {})})
         messages = load_messages(self.ws, self.chat)
+        self._close_open_calls(messages)  # a turn a server that stopped left open
         messages.append({"role": "user", "content": text})
         save_messages(self.ws, self.chat, messages)
         self.running = True
@@ -213,6 +229,7 @@ class Session:
     async def _stream_once(self, messages: list[dict[str, Any]], usage: Usage) -> Any:
         """One request, streamed into the log; the final message."""
         client = llm.client()
+        n = count_calls(messages)
         async with client.beta.messages.stream(**self.request(messages)) as stream:
             async for ev in stream:
                 t = ev.type
@@ -221,7 +238,8 @@ class Session:
                         self._append({"type": "text", "delta": ev.text})
                 elif t == "content_block_stop" and getattr(ev.content_block, "type", "") == "tool_use":
                     b = ev.content_block
-                    self._append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
+                    n += 1
+                    self._append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input, "n": n})
             final = await stream.get_final_message()
         usage.add(final.usage)
         return final
@@ -281,7 +299,8 @@ class Session:
                     continue
                 results = await asyncio.gather(*(self.tools.call(b.name, b.input) for b in calls))
                 blocks = []
-                for b, r in zip(calls, results):
+                first = count_calls(messages) - len(calls)
+                for i, (b, r) in enumerate(zip(calls, results)):
                     rec: dict[str, Any] = {"type": "tool_result", "id": b.id, "summary": r.text[:4000],
                                            "is_error": r.is_error}
                     if r.extra:
@@ -295,7 +314,8 @@ class Session:
                         except KeyError:
                             pass
                     self._append(rec)
-                    blocks.append({"type": "tool_result", "tool_use_id": b.id, "content": _result_content(r),
+                    text = f"[call:{self.chat}/{first + i + 1}]\n{r.text}" if self.defn.call_refs else r.text
+                    blocks.append({"type": "tool_result", "tool_use_id": b.id, "content": _result_content(r, text),
                                    **({"is_error": True} if r.is_error else {})})
                 messages.append({"role": "user", "content": blocks})
                 save_messages(self.ws, self.chat, messages)

@@ -20,6 +20,10 @@ NAMES: list[str] = [
     "view_head",
     "view_builds",
     "canvas_layout",
+    "calls",
+    "orient",
+    "card_check",
+    "checks",
 ]
 
 

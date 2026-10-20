@@ -261,7 +261,7 @@ def reopen_report_comments(ws: str, ids: list[str]) -> list[dict[str, Any]]:
 
 def _serve(ws: str, doc: dict[str, Any]) -> None:
     """report.writeup's hook: the document the page reads carries its comments."""
-    doc["comments"] = report_comments(ws, doc)
+    doc["comments"] = [*(doc.get("comments") or []), *report_comments(ws, doc)]
 
 
 # --------------------------------------------------------------------------- routes
@@ -320,7 +320,13 @@ def register(ctx: Any) -> None:
     async def dismiss(c: str, slug: str, cid: str) -> dict[str, Any]:
         ws = doc_of(c, slug)
         if not resolve_report_comments(ws, [cid]):
-            raise HTTPException(404, f"no open comment {cid!r}")
+            # not the analyst's own: a check's comment (checks.py keeps those)
+            from . import checks  # noqa: PLC0415
+
+            try:
+                checks.resolve(ws, cid)
+            except KeyError:
+                raise HTTPException(404, f"no open comment {cid!r}") from None
         return report.writeup(ws) or {}
 
     @app.post("/api/ws/{c}/investigations/main/types/{slug}/comments/{cid}/reopen")

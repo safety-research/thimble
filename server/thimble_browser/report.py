@@ -42,6 +42,9 @@ def on_save(fn: Callable[[str, str | None, str, str], None]) -> None:
     if fn not in SAVED:
         SAVED.append(fn)
 
+# what feature modules add to the document as the page reads it, such as its comments (checks.py): fn(ws, doc)
+DECORATE: list[Any] = []
+
 
 def _path(ws: str, ext: str) -> Any:
     d = home.workspace_dir(ws) / "docs"
@@ -178,7 +181,7 @@ def writeup(ws: str) -> dict[str, Any] | None:
     doc = parse(md)
     out = {"id": DOC, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
            "frame": False, "comments": []}
-    for fn in SERVE:
+    for fn in [*SERVE, *DECORATE]:
         fn(ws, out)
     return out
 

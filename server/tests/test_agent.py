@@ -19,6 +19,7 @@ def test_every_agent_has_a_fixed_tool_set_and_no_shell():
     for name, a in agent.AGENTS.items():
         for t in a.tools:
             assert hasattr(tools.Tools, f"t_{t}") or t in tools.EXTRA, (name, t)
+            tools.schema_of(t)
         assert not {"Bash", "Write", "Edit", "WebFetch"} & set(a.tools)
 
 

@@ -39,6 +39,11 @@ REF_RESOLVERS: dict[str, Callable[[str, str], dict[str, Any]]] = {}
 def resolver(ref: str) -> Callable[[str, str], dict[str, Any]] | None:
     """The feature's resolver of `ref`, or None for a ref of the core's own (a card, a file)."""
     return next((fn for prefix, fn in REF_RESOLVERS.items() if ref.startswith(prefix)), None)
+# what a feature module does after each tool call that worked, such as checking a card that got its takeaway:
+# fn(tools, name, args, result), which must not raise and must not wait (start a task for work that takes time)
+AFTER: list[Callable[["Tools", str, dict[str, Any], "Result"], None]] = []
+# what read_ref reads for a ref of a feature's own form, by its prefix, such as `call:` (calls.py): fn(tools, ref)
+REFS: dict[str, Callable[["Tools", str], "Result"]] = {}
 
 
 def register(name: str, fn: Callable[["Tools", dict[str, Any]], Awaitable["Result"]]) -> None:
@@ -99,11 +104,13 @@ class Tools:
 
     def __init__(self, ws: str, chat: str, folder: Path, *, read_roots: list[Path] | None = None,
                  unsandboxed: bool = False, on_card: Callable[[str], None] | None = None, writer: bool = False,
-                 view: str | None = None, start_view: Callable[[dict[str, Any]], Awaitable[str]] | None = None) -> None:
+                 group: str | None = None, view: str | None = None,
+                 start_view: Callable[[dict[str, Any]], Awaitable[str]] | None = None) -> None:
         self.ws, self.chat, self.folder, self.unsandboxed = ws, chat, folder.resolve(), unsandboxed
         self.read_roots = [p.resolve() for p in (read_roots or [folder])]
         self.on_card = on_card or (lambda cid: None)
         self.writer = writer
+        self.group = group  # the group every card this agent adds or moves goes to (AgentDef.group)
         self.view = view  # the slug of the view this agent builds
         self.start_view = start_view
         self.session: Any = None  # the agent.Session these tools serve, which a feature's tool may read
@@ -129,6 +136,12 @@ class Tools:
             return _err(f"{type(e).__name__}: {e}")
         if len(got.text) > RESULT_CHARS:
             got.text = got.text[:RESULT_CHARS] + f"\n[cut at {RESULT_CHARS} characters]"
+        if not got.is_error:
+            for fn_after in AFTER:
+                try:
+                    fn_after(self, name, args, got)
+                except Exception:  # noqa: BLE001 — a feature's follow-up never fails the call
+                    pass
         return got
 
     # ---- reading
@@ -227,6 +240,9 @@ class Tools:
 
     async def t_read_ref(self, args: dict[str, Any]) -> Result:
         ref = str(args.get("ref") or "").strip().strip("[]()")
+        for prefix, reader in REFS.items():
+            if ref.startswith(prefix):
+                return reader(self, ref)
         try:
             if (fn := resolver(ref)) is not None:
                 got = fn(self.ws, ref)
@@ -262,19 +278,28 @@ class Tools:
             text += "\n\nRead the output, then give the card its takeaway with edit_card."
         return _ok(text, cell_id=cell["id"])
 
+    def maker(self) -> str:
+        """Who a card this agent makes or changes is by, as the page reads it (frontend canvas/layout.cellThread): main,
+        or `chat:<id>` of a thread or one of thimble's agents, which the card's face names and opens."""
+        return "main" if self.chat in ("main", "-") else f"chat:{self.chat}"
+
     async def t_add_card(self, args: dict[str, Any]) -> Result:
         if self.writer:
             args = {**args, "group": "Report figures"}
+        elif self.group:
+            args = {**args, "group": self.group}
         try:
-            cell = canvas.new_card(self.ws, args, chat=self.chat)
+            cell = canvas.new_card(self.ws, args, by=self.maker(), chat=self.chat)
         except ValueError as e:
             return _err(str(e))
         return await self._run_and_describe(cell)
 
     async def t_edit_card(self, args: dict[str, Any]) -> Result:
+        if self.group and args.get("group"):
+            args = {**args, "group": self.group}
         try:
             before = canvas.find(self.ws, str(args.get("card") or ""))[1]
-            cell = canvas.update_card(self.ws, str(args["card"]), args)
+            cell = canvas.update_card(self.ws, str(args["card"]), args, by=self.maker())
         except KeyError:
             return _err(f"no card {args.get('card')}: list_cards names them")
         except (ValueError, PermissionError) as e:
