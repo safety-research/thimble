@@ -690,36 +690,14 @@ function roundings(n) {
 }
 
 /**
- * A rewrite held to the original: a link to a ref the original cites states the number it cites there, else it loses
- * its link (its words stay), and a number the original never states is named as a problem. A link to a place the
- * original never cited is kept: the healing pass checks it against its place, as it checks every citation of a shown
- * text (shell.tsx runHeal). Returns the text to show and the problems.
+ * A rewrite held to the original: a number the original never states is named as a problem. Its citations stay as
+ * written: the healing pass checks each one against its place, as it checks every citation of a shown text
+ * (shell.tsx runHeal), and re-points it, marks it × when the place contradicts it, or unwraps it when the place is
+ * gone. Returns the text to show and the problems.
  */
 export function checkRewrite(original, text) {
-  // each ref the original cites, with the numbers its words state there
-  // the first number each cited ref's words state in the original: the value it cites (`13,403` of `13,403 of 14,591`)
-  const cited = new Map()
-  const wordsOf = new Map()
-  for (const m of linkSpans(original)) {
-    const ref = m[2].trim()
-    if (!cited.has(ref)) { cited.set(ref, new Set()); wordsOf.set(ref, m[1]) }
-    const first = numbersIn(m[1])[0]
-    if (first) cited.get(ref).add(first)
-  }
   const problems = []
-  const out = mapLinks(text, (whole, words, ref) => {
-    const r = ref.trim()
-    if (/^(https?|mailto):/i.test(r)) return whole
-    if (!cited.has(r)) return whole
-    // a kept citation states the number the original cites there (it may add a date or a total beside it), never
-    // only another number of the text
-    const said = numbersIn(words)
-    if (said.length && cited.get(r).size && !said.some(n => cited.get(r).has(n))) {
-      problems.push(`"${words.slice(0, 40)}" was linked to the source of "${String(wordsOf.get(r)).slice(0, 40)}", so it shows as plain words`)
-      return words
-    }
-    return whole
-  })
+  const out = String(text)
   // a value the original states counts in the forms a rewrite may round it to: a whole number, one decimal, and a
   // share (0.369) as a percent (37, 36.9)
   const have = new Set(numbersIn(original).flatMap(roundings))

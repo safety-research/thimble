@@ -4,6 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, linksIn, placeOf, sourceCard } from '../cards.js'
+import { linkRuns } from '../carddetail.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
 import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
@@ -54,6 +55,11 @@ test('a citation whose key holds spaces and brackets is one mark, and its card o
   const slugged = sourceCard({ ref: 'q11#outcome=won-clean-ep@median', label: '110', resolved: { count: 3, rows: [], records: [], chain: [] }, query })
   const s2 = slugged.parts[0].data
   assert.deepEqual(s2.rows.filter(r => r.hot).map(r => [r.cells[0], r.cells[s2.hotCol]]), [['won (clean ep)', '110']])
+})
+
+test('a card detail reads a takeaway citation whose ref holds brackets as one link, nothing of it left as words', () => {
+  const runs = linkRuns('Girls: [19](r4#age=child%20(0-12)&group=b@kept) of 32, **most** of them.')
+  assert.deepEqual(runs, [{ s: 'Girls: ' }, { s: '19', link: 'r4#age=child%20(0-12)&group=b@kept' }, { s: ' of 32, ' }, { s: 'most', bold: true }, { s: ' of them.' }])
 })
 
 test('the healing pass in a drawing: a spinner while it runs, a re-pointed citation opens its new place, an unwrapped one is grey, a contradicted one has a red ×', () => {
