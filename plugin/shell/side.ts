@@ -119,6 +119,12 @@ export async function openThread($: Engine, key: string, o: { push?: boolean } =
   return null
 }
 
+/** What the panel showed before what it shows now (esc goes back to it), or null. */
+export async function sidePrev($: Engine): Promise<SideView | null> {
+  const cur = ((await $.state.get(SIDE)).value as { back: SideView[] } | null) ?? null
+  return cur?.back?.[cur.back.length - 1] ?? null
+}
+
 /** esc with nothing left to close in what the panel shows: back to what it showed before. False when there is none
  *  (the panel closes). */
 export async function sideBack($: Engine): Promise<boolean> {

@@ -185,14 +185,4 @@ export function ownReport(text, ids) {
   return m && ids.includes(m[1].trim()) ? m[1].trim() : null
 }
 
-/** What main reads when the person sends a thread's result there: the question, the part, and the answer. */
-export function toMain(thread) {
-  const turns = thread?.turns || []
-  const lastQ = [...turns].reverse().find(t => t.role === 'person')
-  const lastA = [...turns].reverse().find(t => t.role === 'claude' && t.text)
-  if (!lastA) return ''
-  const q = lastQ ? String(lastQ.text).split('\n\n')[0] : ''
-  return [`The analyst sends you the result of a side thread about ${aboutOf(thread.scope)}${thread.card ? ` on the card "${thread.card}"` : ''}.`, q ? `They asked: ${q}` : '', `The thread answered: ${lastA.text}`].filter(Boolean).join('\n')
-}
-
 // The thread subagent's own instructions (its system prompt) are the registry's thread prompt: prompts/thread/.

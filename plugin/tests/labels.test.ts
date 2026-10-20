@@ -241,47 +241,33 @@ test('a call that fails says so plainly: a toast with what failed, and the label
   expect(w.toasts.join('\n')).toContain('--again')
 })
 
-test("the detail of a label's card: each example shows its labels; a number key checks the record shown, which steps on; when the detail closes the card is counted again and Claude hears of the checks", async ($, on) => {
+test("the detail of a label's card: the rows behind a value show each record's labels; the panel takes no number keys (a record is checked in the label's own panel)", async ($, on) => {
   const w = world(on)
-  const session = mock.session(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '02-label-apology value-0' } as never)
   await pane($, clock)
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
+  // rows behind it, a press above the input bar: the value's records, each with the values labels gave it
+  const ui = await $.ui.mount({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 100, scroll: { bodyRows: 40, offset: 0 }, isFocused: true, placement: 'dock', title: 'apology', view: {} } } as never)
+  await ui.press({ key: 'side-act:rows' })
+  await clock.settle()
   const t = await pane($, clock)
-  expect(t).toContain('1 of 3')
+  expect(t).toContain('1–3 of 3')
   expect(t).toContain('I am sorry, I broke the build.')
   expect(t).toContain('apology: yes · model 0.90: says sorry')
-  // the bar names the keys that check it, by the label's values
+  // the bar names no key that checks it, and a number key is the start of a question, never a check
   const hint = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never))
-  expect(hint).toContain('1 yes · 2 no')
-  // 1 agrees with the first record; 2 says the second is no: each is the person's check, and the examples step on
-  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
-  await pane($, clock)
+  expect(hint).not.toContain('1 yes')
   expect(await press($, clock, edit('2'))).toEqual({ text: '', cursor: 0 })
-  const after = await pane($, clock)
-  const checks = w.runs.filter(r => r.includes('--check')).map(r => r.slice(r.indexOf('label')).join(' '))
-  expect(checks).toEqual(['label apology --check chat/room.jsonl#L1 yes --json', 'label apology --check chat/room.jsonl#L3 no --json'])
-  expect(after).toContain('3 of 3')
-  // flipped back, the checked records say so
-  await press($, clock, edit('['))
-  expect(await pane($, clock)).toContain('apology: yes → you: no')
-  // the pane is gone (a close the module did not hear): before the next prompt to main, Claude reads the checks in a row
-  // of its own
-  w.opened.length = 0
-  await $.prompt.submit({ text: 'so?', origin: { kind: 'composer' } } as never)
-  expect(w.runs.some(r => r.slice(-3).join(' ') === 'label apology --json')).toBe(true)
-  const note = (session.appended() as unknown as { message: { content: { text?: string }[] } }[]).map(r => String(r.message.content[0]?.text ?? '')).join('\n')
-  expect(note).toContain('The analyst checked 2 records of the label apology: they agree with 1 and changed 1: chat/room.jsonl#L3 (the label said yes, the analyst says no)')
-  expect(note).toContain('its counts are now query q9')
+  expect(w.runs.some(r => r.includes('--check'))).toBe(false)
 })
-
 test('a label shows on what is drawn: the details of any card\'s part say how its rows split by each label that holds them', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '03-per-agent agent-29' } as never)
   await pane($, clock)
-  expect(await press($, clock, edit('enter'))).toEqual({ text: '', cursor: 0 })
+  const ui = await $.ui.mount({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 100, scroll: { bodyRows: 40, offset: 0 }, isFocused: true, placement: 'dock', title: 'Messages', view: {} } } as never)
+  await ui.press({ key: 'side-act:rows' })
+  await clock.settle()
   const t = await pane($, clock)
   expect(t).not.toContain('16 rows')
   expect(t).toContain('label apology: 3 yes · 13 no')

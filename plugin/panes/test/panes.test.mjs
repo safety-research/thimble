@@ -8,7 +8,7 @@ import '../../draw/kit.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import PANES from '../index.js'
-import { barText, keyEvent, keysOf, nextState, route, takes } from '../host.js'
+import { actionsOf, backOf, barText, keyEvent, keysOf, nextState, route, takes } from '../host.js'
 
 const DK = globalThis.DrawKit
 const run = (pane, data, o = {}) => DK.run(pane.program, data, { w: 100, h: 30, mode: 'pane', ...o })
@@ -139,50 +139,68 @@ const detailData = () => {
   return PANES.detail.data({ 'card:01-saves': { object: OBJECT, drawing, versions: [{ v: 1 }, { v: 2 }], v: 2, state: {}, thread: true } }, { id: '01-saves' }, { w: 90, h: 30 })
 }
 
-test('detail: one page on both surfaces; the part selected and the bar are its state, and a state from either surface draws the same', () => {
+test('detail: one page on both surfaces; the part selected and its rows are its state, and a state from either surface draws the same', () => {
   const data = detailData()
   let { state } = act(PANES.detail, data, {}, { type: 'key', key: 'down' }, 'browser')
   assert.equal(state.region, 'day-2026-06-18')
-  ;({ state } = act(PANES.detail, data, state, keyEvent('e'), 'browser'))
+  ;({ state } = act(PANES.detail, data, state, { type: 'act:rows' }, 'browser'))
   assert.equal(state.bar, 'examples')
-  // the browser's state, drawn in the terminal: the same part selected, its examples labelled
+  // the browser's state, drawn in the terminal: the same part selected, its rows behind it
   const d = run(PANES.detail, data, { state, surface: 'terminal' })
   assert.equal(d.selected, 'day-2026-06-18')
   const t = gridText(renderTerm(d, { w: 90 }))
-  assert.match(t, /Jun 18\n1 of 3\n/)
-  // no status lines: where its values come from, how many rows, how much was read are one key away (p)
-  assert.doesNotMatch(t, /examples of|files read|no records|from /)
+  assert.match(t, /Jun 18[\s\S]*1–2 of 3/)
   assert.match(t, /Hello agents/)
   // the terminal's ring on a part is the same selection the browser's click makes
   const ring = act(PANES.detail, data, {}, { type: 'focus', region: 'day-2026-06-18' }, 'terminal')
   const click = act(PANES.detail, data, {}, { type: 'press', region: 'day-2026-06-18' }, 'browser')
   assert.deepEqual(ring.state, click.state)
-  // a click on the part already selected opens its details (the ring resting on it does not)
-  assert.equal(act(PANES.detail, data, click.state, { type: 'press', region: 'day-2026-06-18' }, 'browser').state.bar, 'details')
-  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h earlier version · esc back')
-  // the browser has no o: it is the browser
+  // a click on the part already selected shows its rows (the ring resting on it does not), and again hides them
+  const shown = act(PANES.detail, data, click.state, { type: 'press', region: 'day-2026-06-18' }, 'browser')
+  assert.equal(shown.state.bar, 'examples')
+  assert.equal(act(PANES.detail, data, shown.state, { type: 'press', region: 'day-2026-06-18' }, 'browser').state.bar, null)
+  // its subject: the title, the card's id and its versions; it names no key but esc, and offers its rows and how it
+  // was drawn above the input bar
+  const at = run(PANES.detail, data)
+  assert.match(gridText(renderTerm(at, { w: 90 })), /^▎ Saves per day\n▎ card · edited\s*\n/)
+  assert.equal(barText([at]), 'esc back')
+  assert.deepEqual(actionsOf(at), [{ event: 'act:rows', words: 'Rows', on: false }, { event: 'act:code', words: 'Code', on: false }, { event: 'act:version', words: 'Earlier version', on: false }])
+  assert.deepEqual(actionsOf(run(PANES.detail, data, { state: { bar: 'examples' } })).slice(0, 2), [{ event: 'act:rows:on', words: 'Rows', on: true }, { event: 'act:code', words: 'Code', on: false }])
+  // the code: one press, Code; it opens under the card (the card stays), in the region the panel draws above the actions
+  const code = run(PANES.detail, data, { state: { prog: true } })
+  assert.deepEqual(actionsOf(code).map(a => [a.words, a.on]), [['Rows', false], ['Code', true], ['Earlier version', false]])
+  const codeText = gridText(renderTerm(code, { w: 90 }))
+  assert.match(codeText, /Saves per day[\s\S]*how Claude drew this/)
+  assert.ok(renderTerm(code, { w: 90 }).regions.some(r => r.id === 'side:opened'))
 })
 
-test('detail: what the card does is the host\'s (k.do): a version, the thread, closing; rows behind a part are wanted (k.want)', () => {
+test("detail: what the card does is the host's (k.do): a version, a record of its rows, a label, closing; rows behind a part are wanted (k.want)", () => {
   const data = detailData()
-  assert.deepEqual(act(PANES.detail, data, {}, keyEvent('h'), 'terminal').d.effects, [{ v: 1, do: 'version' }])
+  assert.deepEqual(act(PANES.detail, data, {}, { type: 'act:version' }, 'terminal').d.effects, [{ v: 1, do: 'version' }])
   assert.deepEqual(act(PANES.detail, data, {}, keyEvent('esc'), 'terminal').d.effects, [{ do: 'close' }])
-  // esc with the bar open empties it instead
+  // esc with the rows open hides them instead
   const open = act(PANES.detail, data, { bar: 'details' }, keyEvent('esc'), 'terminal')
   assert.equal(open.d.effects, undefined)
   assert.equal(open.state.bar, null)
-  // one esc closes what was opened last: the examples (with the details over them) in one press, then the detail
-  const ex = act(PANES.detail, data, { bar: 'examples', ex: 2 }, keyEvent('esc'), 'terminal')
-  assert.equal(ex.d.effects, undefined)
-  assert.equal(ex.state.bar, null)
-  assert.deepEqual(act(PANES.detail, data, ex.state, keyEvent('esc'), 'terminal').d.effects, [{ do: 'close' }])
-  // the program over the card closes first, the bar under it after
+  assert.deepEqual(act(PANES.detail, data, open.state, keyEvent('esc'), 'terminal').d.effects, [{ do: 'close' }])
+  // the program over the card closes first, the rows under it after
   const both = act(PANES.detail, data, { bar: 'examples', prog: true }, keyEvent('esc'), 'terminal')
   assert.equal(both.state.prog, false)
   assert.equal(both.state.bar, 'examples')
   // the details want the part's rows, and nothing about where the card's values come from
   const d = run(PANES.detail, data, { state: { region: 'day-2026-06-17', bar: 'details' } })
   assert.ok(!(d.wants || []).some(w => w.request.facts))
+  // a record of the rows opens as a citation over the card; the next records come on a press
+  const rows = { region: 'day-2026-06-18', bar: 'examples' }
+  assert.deepEqual(act(PANES.detail, data, rows, { type: 'press', region: 'side:rows:1' }, 'terminal').d.effects, undefined)
+  assert.equal(act(PANES.detail, data, rows, { type: 'press', region: 'side:rows:more' }, 'terminal').state.ex, 8)
+  // a label the card rests on: its name and its values in its subject, each a press that opens it in the panel
+  const labeled = PANES.detail.data({ 'card:01-saves': { object: OBJECT, drawing: runProgram(OBJECT, { w: 80, h: 20, mode: 'detail' }), versions: [{ v: 2 }], v: 2, state: {}, labels: [{ name: 'apology', values: ['yes', 'no'] }] } }, { id: '01-saves' }, { w: 90, h: 30 })
+  assert.match(gridText(renderTerm(run(PANES.detail, labeled), { w: 90 })), /▎ label apology  ● yes  ● no/)
+  assert.deepEqual(act(PANES.detail, labeled, {}, { type: 'press', region: 'side:label:0' }, 'terminal').d.effects, [{ name: 'apology', value: null, do: 'label' }])
+  assert.deepEqual(act(PANES.detail, labeled, {}, { type: 'press', region: 'side:label:0:1' }, 'terminal').d.effects, [{ name: 'apology', value: 'no', do: 'label' }])
+  // no letter keys: e, p, h, f and the brackets are gone (their presses stand in their place)
+  for (const key of ['e', 'p', 'h', 'f', ']', '[', '0', 'a']) assert.equal(takes(run(PANES.detail, data, { state: rows }), keyEvent(key)), false, key)
 })
 
 // ---------------------------------------------------------------- the focus stack and the bar
@@ -190,24 +208,26 @@ test('the focus stack: a key goes to the top program that takes it, then down; t
   const card = { id: 'card', drawing: { on: [{ name: 'j', label: 'next run' }, { name: 'press:run-3', label: '' }] } }
   const pane = { id: 'detail', drawing: run(PANES.detail, detailData()) }
   assert.equal(route([card, pane], keyEvent('j')).id, 'card')
-  assert.equal(route([card, pane], keyEvent('e')).id, 'detail')
+  assert.equal(route([card, pane], keyEvent('esc')).id, 'detail')
   assert.equal(route([card, pane], keyEvent('z')), null)
   assert.equal(route([card, pane], { type: 'press', region: 'run-3' }).id, 'card')
-  assert.match(barText([card.drawing, pane.drawing]), /^j next run · ↑↓ part · ↵ details/)
+  assert.equal(barText([card.drawing, pane.drawing]), 'j next run · esc back')
   // keys that share their words are one entry; a key with no words is an alias, not shown
   assert.deepEqual(keysOf({ on: [{ name: '<', label: 'change' }, { name: '>', label: 'change' }, { name: ',', label: '' }, { name: 'up', label: 'part' }, { name: 'down', label: 'part' }, { name: 'press', label: 'x' }] }), [{ key: '< >', words: 'change' }, { key: '↑↓', words: 'part' }])
 })
 
 // ---------------------------------------------------------------- the bar in the room it has
-test('the bar is always one line: it drops the counts first (coverage last), then says each key by its first word, then its label, then cuts', async () => {
+test('the bar is always one line: it drops the counts but coverage first, then says each key by its first word, then drops coverage, then its label, then cuts', async () => {
   const { barLine, fitBar } = await import('../host.js')
   const bar = { label: 'thimble', left: [{ key: 'v', words: 'visualize' }, { key: 's', words: '● 6 of 24 lines', short: '● squeeze' }, { key: ']', words: 'cite & explain' }, { key: '1', words: 'open detail' }], counts: [{ id: 'threads', text: '2 threads' }, { id: 'cov', text: 'coverage 34%' }] }
   const at = w => barLine(fitBar(bar, w))
   assert.equal(at(200), 'thimble  v visualize · s ● 6 of 24 lines · ] cite & explain · 1 open detail   2 threads · coverage 34%')
-  // the counts go first, coverage last
+  // the counts but coverage go first
   assert.ok(at(90).endsWith('coverage 34%') && !at(90).includes('threads'))
-  assert.ok(!at(70).includes('coverage'))
-  // then the words: each key keeps its first word (a lit verb its dot and name)
+  // then the words: each key keeps its first word (a lit verb its dot and name), and coverage stays
+  assert.equal(at(70), 'thimble  v visualize · s ● squeeze · ] cite · 1 open   coverage 34%')
+  // then coverage, then the label
+  assert.equal(at(60), 'thimble  v visualize · s ● squeeze · ] cite · 1 open')
   assert.equal(at(50), 'v visualize · s ● squeeze · ] cite · 1 open')
   for (const w of [200, 140, 110, 90, 75, 60]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
   // narrower than the shortest form: the last form, marked to be cut at its end (never a second line)
@@ -272,7 +292,7 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   assert.match(gridText(renderTerm(full, { w: 70 })), /Jun 18 6,543/)
   // letters for what the person does, so the line reads as words, never as a number: a asks, o opens the first citation
   // inside the card (2–9 still open them, unnamed)
-  assert.equal(barText([full]), '↵ e expand · a ask · o open A · 0 close · ] next')
+  assert.equal(barText([full]), '↵ open · o open A · 0 close · ] next')
   // o opens the first citation inside the card over it; 0 goes back to the card under it
   const opened = act(PANES.tray, data, { stack: [f0] }, keyEvent('o'), 'terminal', { got, w: 70 })
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('2'), 'terminal', { got, w: 70 }).state.stack.at(-1), { kind: 'cite', ref: 'q1#user=A@n', label: 'A' })
@@ -285,11 +305,13 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   // does too, unnamed
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('a'), 'terminal').d.effects, [{ do: 'thread', frame: { ...f0, open: null } }])
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'terminal').d.effects, [{ do: 'thread', frame: { ...f0, open: null } }])
-  // a mark with a thread says so, and a opens it
+  // a mark with a thread says so, and ↵ opens it (one way to open a citation in the side panel)
   const withThread = PANES.tray.data({ threads: [{ key: 'mark-r1-q3-day-2026-06-18-n', turns: [{ role: 'person', text: 'why so high?' }] }] })
   const t = run(PANES.tray, withThread, { state: { stack: [f0] }, w: 70, got })
-  assert.match(gridText(renderTerm(t, { w: 70 })), /↳ thread: why so high\? · a opens it/)
-  assert.equal(barText([t]), '↵ e expand · a thread · o open A · 0 close · ] next')
+  assert.match(gridText(renderTerm(t, { w: 70 })), /↳ thread: why so high\? · ↵ opens it/)
+  assert.equal(barText([t]), '↵ open · o open A · 0 close · ] next')
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('return'), 'terminal').d.effects, [{ do: 'thread', frame: { ...f0, open: null } }])
+  assert.equal(takes(t, keyEvent('e')), false)
 })
 
 test('tray: a citation opens on its most readable form; each section the card names (r rows, c code) is a key away in the same panel, never shown first', async () => {
@@ -303,14 +325,14 @@ test('tray: a citation opens on its most readable form; each section the card na
   const shown = gridText(renderTerm(full, { w: 70 }))
   assert.match(shown, /day 06-18 6,543/)
   assert.doesNotMatch(shown, /tally|L28/)
-  assert.equal(barText([full]), '↵ e expand · r rows · c code · a ask · 0 close · ] next')
+  assert.equal(barText([full]), '↵ open · r rows · c code · 0 close · ] next')
   // c shows the code in place of the card, in the same panel; the frame says which; c again or 0 brings the card back
   const code = act(PANES.tray, data, { stack: [f0] }, keyEvent('c'), 'terminal', { got, w: 70 })
   assert.equal(code.state.stack.at(-1).open, 'code')
   const drawn = run(PANES.tray, data, { state: code.state, w: 70, got })
   assert.match(gridText(renderTerm(drawn, { w: 70 })), /6,543.*cite · code[\s\S]*tally\(df, "day"\)/)
   assert.doesNotMatch(gridText(renderTerm(drawn, { w: 70 })), /day 06-18 6,543/)
-  assert.equal(barText([drawn]), '↵ e expand · r rows · c code · a ask · 0 back · ] next')
+  assert.equal(barText([drawn]), '↵ open · r rows · c code · 0 back · ] next')
   assert.equal(act(PANES.tray, data, code.state, keyEvent('c'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('0'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('r'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, 'rows')
@@ -343,7 +365,7 @@ test('the keys Claude Code keeps never reach a program in the terminal: ← and 
 })
 
 // ---------------------------------------------------------------- the side panel's panes
-test('threads: the list is a tree under main, the newest first; the selected thread is the pane\'s thread; ↵ or a press on the selected row opens it', async () => {
+test('threads: the list is a tree under main, the newest first; it is no thread itself; a press on a row (↵ with the ring on it) opens that thread', async () => {
   const { rowsOf, selectedOf, ago } = await import('../threads.js')
   const now = Date.parse('2026-10-20T12:00:00Z')
   const list = [
@@ -353,23 +375,24 @@ test('threads: the list is a tree under main, the newest first; the selected thr
   assert.equal(ago('2026-10-20T11:40:00Z', now), '20m')
   const data = { rows: rowsOf(list, now) }
   assert.deepEqual(data.rows.map(r => [r.name, r.asks, r.last]), [['main/6,543 saves', 1, 'why so high?'], ['main/Saves per day', 2, 'and the day before?']])
-  // nothing chosen yet: the newest is selected, and the pane's thread is it
+  // nothing chosen yet: the newest is selected; the list has no conversation and no input bar of its own
   assert.equal(selectedOf({}, data), 'mark-r1-q3')
-  assert.deepEqual(PANES.threads.thread({}, {}, data), { key: 'mark-r1-q3' })
-  assert.equal(PANES.threads.thread({}, {}, { rows: [] }), null)
+  assert.equal(PANES.threads.thread({}, {}, data), null)
   const d = run(PANES.threads, data, { w: 70 })
   const text = gridText(renderTerm(d, { w: 70 }))
   assert.match(text, /main\n[\s\S]*├─ main\/6,543 saves +answering…[\s\S]*why so high\?[\s\S]*└─ main\/Saves per day +2 questions · 20m/)
   assert.equal(d.selected, 't0')
-  // the ring onto the second row selects it; a press on the selected row (or ↵) opens it
+  assert.match(text, /^▎ Threads\n▎ 2 threads in this session/)
+  // the ring onto the second row selects it; a press on any row opens it
   const moved = act(PANES.threads, data, {}, { type: 'focus', region: 't1' }, 'terminal', { w: 70 })
   assert.equal(moved.state.sel, 'card-01-saves')
-  assert.deepEqual(act(PANES.threads, data, moved.state, { type: 'press', region: 't1' }, 'terminal', { w: 70 }).d.effects, [{ do: 'open', thread: 'card-01-saves' }])
+  assert.deepEqual(act(PANES.threads, data, {}, { type: 'press', region: 't1' }, 'terminal', { w: 70 }).d.effects, [{ do: 'open', thread: 'card-01-saves' }])
   assert.deepEqual(act(PANES.threads, data, moved.state, keyEvent('return'), 'terminal', { w: 70 }).d.effects, [{ do: 'open', thread: 'card-01-saves' }])
-  assert.match(gridText(renderTerm(run(PANES.threads, { rows: [] }, { w: 70 }), { w: 70 })), /No threads yet/)
+  assert.equal(barText([d]), '')
+  assert.match(gridText(renderTerm(run(PANES.threads, { rows: [] }, { w: 70 }), { w: 70 })), /none in this session yet/)
 })
 
-test('mark: a citation in the side panel is the tray\'s card at the panel\'s width; its thread is the mark\'s own; ] [ step a message\'s marks, a citation inside opens over it', async () => {
+test("mark: a citation in the side panel is the tray's card at the panel's width, under one subject block (no frame of its own); its thread is the mark's own; its sections are actions above the input bar; a citation inside opens over it", async () => {
   const { scopeOf } = await import('../tray.js')
   const { threadKey } = await import('../../shell/threads.js')
   const f0 = { row: 'r1', i: 0, kind: 'cite', ref: 'q3#day=2026-06-18@n', label: '6,543' }
@@ -381,16 +404,27 @@ test('mark: a citation in the side panel is the tray\'s card at the panel\'s wid
   const d = run(PANES.mark, data, { w: 70 })
   assert.equal(d.wants[0].request.card.ref, 'q3#day=2026-06-18@n')
   const inner = globalThis.DrawKit.run('return k.text("Jun 18 **6,543**")', {}, { w: 60 })
-  const got = { [d.wants[0].key]: { drawings: [inner], links: [{ id: 'n1', ref: 'q1#user=A@n', label: 'A' }] } }
+  const rows = globalThis.DrawKit.run('return k.text("q3 · 3 rows")', {}, { w: 60 })
+  const got = { [d.wants[0].key]: { drawings: [inner], right: 'cite · saves.jsonl', links: [{ id: 'n1', ref: 'q1#user=A@n', label: 'A' }], sections: [{ id: 'rows', key: 'r', words: 'rows', drawings: [rows] }] } }
   const full = run(PANES.mark, data, { w: 70, got })
-  assert.match(gridText(renderTerm(full, { w: 70 })), /6,543[\s\S]*Jun 18 6,543/)
-  assert.equal(barText([full]), 'o open A · ] next')
-  assert.deepEqual(act(PANES.mark, data, {}, keyEvent('o'), 'terminal', { got, w: 70 }).d.effects, [{ do: 'open', mark: { kind: 'cite', ref: 'q1#user=A@n', label: 'A' } }])
-  assert.deepEqual(act(PANES.mark, data, {}, keyEvent(']'), 'terminal', { got, w: 70 }).d.effects, [{ dir: 1, do: 'step' }])
-  assert.deepEqual(act(PANES.mark, data, {}, keyEvent('2'), 'terminal', { got, w: 70 }).d.effects, [{ do: 'open', mark: { kind: 'cite', ref: 'q1#user=A@n', label: 'A' } }])
-  // a citation opened from an answer (no message): no stepping
-  const loose = run(PANES.mark, PANES.mark.data({}, { frame: { kind: 'cite', ref: 'q2#n', label: '2,994' } }), { w: 70 })
-  assert.ok(!loose.on.some(h => h.name === ']'))
+  const text = gridText(renderTerm(full, { w: 70 }))
+  // its subject once, at the top: the cited words, and what they cite; then the card, with no frame of its own
+  assert.match(text, /^▎ 6,543\n▎ citation · saves\.jsonl\n\nJun 18 6,543/)
+  assert.doesNotMatch(text, /╭/)
+  // no keys of its own; its sections are actions above the input bar, shown in place of the card
+  assert.equal(barText([full]), '')
+  assert.deepEqual(actionsOf(full), [{ event: 'act:rows', words: 'Rows', on: false }])
+  const opened = act(PANES.mark, data, {}, { type: 'act:rows' }, 'terminal', { got, w: 70 })
+  assert.equal(opened.state.open, 'rows')
+  const after = run(PANES.mark, data, { w: 70, got, state: opened.state })
+  // the card stays; the rows open under it, in the region the panel draws above the actions
+  assert.match(gridText(renderTerm(after, { w: 70 })), /Jun 18 6,543[\s\S]*q3 · 3 rows/)
+  assert.ok(renderTerm(after, { w: 70 }).regions.some(r => r.id === 'side:opened'))
+  assert.deepEqual(actionsOf(after), [{ event: 'act:rows:on', words: 'Rows', on: true }])
+  assert.equal(backOf(after), 'the citation')
+  // a citation inside the card opens over it, on a press
+  assert.deepEqual(act(PANES.mark, data, {}, { type: 'press', region: 'n1' }, 'terminal', { got, w: 70 }).d.effects, [{ do: 'open', mark: { kind: 'cite', ref: 'q1#user=A@n', label: 'A' } }])
+  for (const key of ['o', ']', '[', '2', 'r']) assert.equal(takes(full, keyEvent(key)), false, key)
 })
 
 test("a mark's side thread is told what the person reads on it: an important detail's points and what to do, an explainer's words", async () => {

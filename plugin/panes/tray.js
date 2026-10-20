@@ -19,8 +19,9 @@
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
 //          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
 //          label}], problem} (cards.js drawnCard)
-//   keys: ↵ or e expand (a citation: its whole source in the side panel; an explainer: a longer one in its place) · the
-//         sections' keys (r rows, when rows stand behind it; c code) · a ask (or thread: the side panel; 1 too, unnamed)
+//   keys: ↵ open (a citation: in the side panel, its whole source with its thread; a and 1 too, unnamed) · ↵ or e
+//         expand an explainer (a longer one in its place) · the sections' keys (r rows, when rows stand behind it; c
+//         code) · a ask an explainer (or thread: the side panel; 1 too, unnamed)
 //         · o open the first citation inside the card (the rest by a click; 2–9 still open them, unnamed) · 0 back (or
 //         close; esc too): esc at the prompt never reaches a plugin, so 0 stays named · ] [ the next and the one before
 //         (the host's order of marks and cards: k.do('step')). Letters for what the person does, so the line reads as
@@ -117,12 +118,11 @@ export function program(k, data) {
   // a: the card in the side panel, as the mark's thread, its input bar holding the keys (the question is typed there);
   // 1, its key before, still does it, unnamed
   const toThread = () => { k.do('thread', { frame: { ...top, open: null } }) }
-  // ↵ or e: more of it. A citation's whole source in the side panel, with its thread (a query's full output); an
-  // explainer written again at more length in its place, from the turn and the files it cites (one side call)
+  // ↵: a citation opens in the side panel, its whole source at the top and its thread under it, the input bar holding
+  // the keys (one way to open it: a does the same). An explainer: ↵ or e writes it again at more length in its place,
+  // from the turn and the files it cites (one side call)
   if (top.kind !== 'gloss') {
-    const full = () => { k.do('expand', { frame: { ...top, open: null } }) }
-    k.on('return', full, 'expand')
-    k.on('e', full, 'expand')
+    k.on('return', toThread, 'open')
   } else if (!heads && !(top.gloss && top.gloss.expanded)) {
     const longer = () => { k.do('expand', { frame: top }); return withTop({ expanding: true }) }
     k.on('return', longer, 'expand')
@@ -130,7 +130,7 @@ export function program(k, data) {
   }
   // a section's key opens it in place of the card, and closes it again
   sections.forEach(s => k.on(s.key, () => withTop({ open: open && open.id === s.id ? null : s.id }), s.words))
-  k.on('a', toThread, thread ? 'thread' : 'ask')
+  k.on('a', toThread, top.kind === 'gloss' ? (thread ? 'thread' : 'ask') : undefined)
   k.on('1', toThread)
   // o: the first citation inside the card, over it; the others by a click, or 2–9, unnamed
   if (links.length) k.on('o', () => openLink(links[0]), `open ${short(links[0].label || links[0].ref || '', 28)}`)
@@ -151,7 +151,7 @@ export function program(k, data) {
   if (top.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text('{dim:writing a longer explanation…}'))
   if (thread && thread.turns.length && !open && card && !card.problem && !card.error) {
     const q = (thread.turns.find(t => t.role === 'person') || {}).text || ''
-    parts.push(k.region('thread', { label: 'the thread about this mark' }, k.text(`{dim:↳ thread:} ${k.escape(q.length > 60 ? q.slice(0, 59) + '…' : q)} {dim:· a opens it}`, { wrap: false })))
+    parts.push(k.region('thread', { label: 'the thread about this mark' }, k.text(`{dim:↳ thread:} ${k.escape(q.length > 60 ? q.slice(0, 59) + '…' : q)} {dim:· ${top.kind === 'gloss' ? 'a' : '↵'} opens it}`, { wrap: false })))
   }
   const title = top.label.length > inner - 12 ? top.label.slice(0, Math.max(8, inner - 13)) + '…' : top.label
   // the frame's right says what the card is from (the card's own words, `cite · revisions.jsonl`), the section open,

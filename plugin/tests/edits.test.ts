@@ -135,10 +135,10 @@ test('a card made and saved again in one turn, a re-save after a citation that d
   expect(t).toContain('Trees per row')
   // (the title names its version for the test; the header names none)
   expect(t).not.toMatch(/\bv\d\b(?!\))|edited/)
-  expect(textOf(await $.ui.render(HINT))).not.toMatch(/\bh (earlier|newest|versions)/)
+  expect(t).not.toMatch(/Earlier version|Newest version/)
 })
 
-test('a change the analyst asked for is an edit: the header says edited, and h steps back to the card as first made and comes back', async ($, on) => {
+test('a change the analyst asked for is an edit: the subject says edited, and Earlier version steps back to the card as first made and comes back', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await turnSaving($, w, clock, [{ v: 1 }, { v: 2 }], 'how many trees per row?')
@@ -152,17 +152,19 @@ test('a change the analyst asked for is an edit: the header says edited, and h s
   expect(t).toContain('edited')
   expect(t).toContain('Trees per row (v5)')
   expect(t).not.toMatch(/\bv\d\b(?!\))/)
-  expect(textOf(await $.ui.render(HINT))).toContain('h earlier version')
-  // h: the card as first made, as its first turn left it
-  await clock.advance(1000)
-  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
+  // a step back is an action above the input bar, in words (h is a letter of the question)
+  expect(t).toContain('Earlier version')
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
+  // Earlier version: the card as first made, as its first turn left it
+  await ui.press({ key: 'side-act:version' })
+  await clock.settle()
   t = await drawn($, clock, PANE)
   expect(t).toContain('as first made')
   expect(t).toContain('Trees per row (v2)')
-  expect(textOf(await $.ui.render(HINT))).toContain('h newest version')
-  // h again: the card now
-  await clock.advance(1000)
-  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
+  expect(t).toContain('Newest version')
+  // Newest version: the card now
+  await ui.press({ key: 'side-act:version' })
+  await clock.settle()
   t = await drawn($, clock, PANE)
   expect(t).toContain('Trees per row (v5)')
   expect(t).toContain('edited')

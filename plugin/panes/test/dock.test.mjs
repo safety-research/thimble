@@ -12,7 +12,7 @@ import '../../draw/kit.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import PANES from '../index.js'
 import { barCells, mixCells, typeMix } from '../coverage.js'
-import { barText, keyEvent, nextState, takes } from '../host.js'
+import { actionsOf, backOf, barText, keyEvent, nextState, takes } from '../host.js'
 
 const DK = globalThis.DrawKit
 const SIZE = { w: 96, h: 30 }
@@ -44,8 +44,7 @@ const covData = (cov = COV) => PANES.coverage.data({ coverage: { cov } }, {}, SI
 
 test('coverage: files touched and files seen apart; the rows seen, apart from those only computed over; the type bar in shades of seen, computed over and untouched; the groups are wildcard patterns, the * lit', () => {
   const { after, text } = turn(PANES.coverage, covData(), {}, null)
-  assert.match(text, /Coverage of this session · 5 files · 1,500 rows/)
-  assert.match(text, /seen 60 rows \(4%\)/)
+  assert.match(text, /^▎ Coverage\n▎ what this session read of the folder · 5 files · 1,500 rows · seen 60 rows \(4%\)/)
   assert.match(text, /files  4 of 5 touched · 1 seen \(some of their lines in Claude's context\)/)
   assert.match(text, /rows   300 computed over, none seen/)
   assert.match(text, /█ seen  ▓ read by a label's model  ▒ computed over  ░ untouched/)
@@ -59,8 +58,8 @@ test('coverage: files touched and files seen apart; the rows seen, apart from th
   assert.match(text, /▸ runs\/\*\.jsonl\s+4\s+4\s+1/)
   const star = after.root.kids.flatMap(k => k.kids || []).flatMap(k => k.kid?.runs || []).find(r => r.s === '*')
   assert.equal(star.tone, 'accent')
-  // at the top esc is the panel's (back to what it showed, or close)
-  assert.equal(barText([after]), '[ ] step · g by type')
+  // no key of its own; at the top esc is the panel's (back to what it showed, or close)
+  assert.equal(barText([after]), '')
   assert.equal(takes(after, keyEvent('esc')), false)
   // the group selected carries its pattern, and the pane's thread says what the pane shows, in the kernel's words
   assert.equal(after.regions.find(r => r.id === 'g-0').meta.ref, 'runs/*.jsonl')
@@ -68,35 +67,41 @@ test('coverage: files touched and files seen apart; the rows seen, apart from th
   assert.match(about, /what this session did with the folder's files, by `thimble coverage`: 60 of 1,500 rows seen \(4%\), from 1 of 5 source files; 4 files touched; 300 rows computed over and not seen/)
 })
 
-test('coverage: g groups by type (t is the panel\'s thread list); a group opens its files with what happened to each; a file opens its seen lines, which the host reads; esc goes back', () => {
-  assert.equal(takes(turn(PANES.coverage, covData(), {}, null).after, keyEvent('t')), false)
-  let { state, text } = turn(PANES.coverage, covData(), {}, keyEvent('g'))
-  assert.match(text, /▸ jsonl\s+4/)
-  ;({ state, text } = turn(PANES.coverage, covData(), state, keyEvent('g')))
-  assert.match(text, /▸ runs\/\*\.jsonl/)
-  // a press on the selected group opens it: each file by its name (the pattern in the header names its folder)
+test('coverage: by type and by pattern are presses; a press on a group opens its files with what happened to each, a file its seen lines, which the host reads; esc goes back, and the way back names where', () => {
+  assert.equal(takes(turn(PANES.coverage, covData(), {}, null).after, keyEvent('g')), false)
+  let { state, text } = turn(PANES.coverage, covData(), {}, { type: 'press', region: 'by-type' })
+  assert.equal(state.by, 'type')
+  assert.match(text, /type\s+files touched\s+seen[^\n]*\n\s+jsonl\s+4/)
+  ;({ state, text } = turn(PANES.coverage, covData(), state, { type: 'press', region: 'by-pattern' }))
+  assert.match(text, /pattern\s+files touched\s+seen[^\n]*\n\s+runs\/\*\.jsonl/)
+  // a press on a group opens it: each file by its name (the pattern in the subject names its folder)
   ;({ state, text } = turn(PANES.coverage, covData(), state, { type: 'press', region: 'g-0' }))
   assert.equal(state.group, 'runs/*.jsonl')
+  assert.match(text, /^▎ runs\/\*\.jsonl\n▎ files of the folder · 4 files · 1,200 rows · seen 60 rows \(5%\)/)
   assert.match(text, /1 seen · 1 searched · 1 only computed over · 1 only counted/)
   assert.match(text, /seen      r1\.jsonl\s+300  seen 60 of 300 rows \(20%\): rows 1–40, 100–119/)
   assert.match(text, /searched  r2\.jsonl\s+300  searched by grep; which lines it showed is not known/)
   assert.match(text, /computed  r4\.jsonl\s+300  computed over all 300 rows \(q1\); none of them seen/)
   assert.match(text, /counted   r3\.jsonl\s+300  only named, listed or counted \(wc\); none of its lines seen/)
-  // the ring on a file selects it; ↵ (a press on it) opens it
+  // esc goes back to every group, which the way back names
+  assert.equal(backOf(turn(PANES.coverage, covData(), state, null).after), 'Coverage')
+  // the ring on a file selects it; a press (↵ with the ring on it) opens it
   ;({ state } = turn(PANES.coverage, covData(), state, { type: 'focus', region: 'f-0' }))
   const opened = turn(PANES.coverage, covData(), state, { type: 'press', region: 'f-0' })
   assert.equal(opened.state.file, 'runs/r1.jsonl')
   assert.match(opened.text, /▸ seen  rows 1–40  \(40\)/)
+  assert.equal(backOf(opened.after), 'runs/*.jsonl')
   const want = opened.after.wants[0]
   assert.deepEqual(want.request, { lines: 'runs/r1.jsonl', from: 1, to: want.request.to })
   const lines = Array.from({ length: want.request.to }, (_, i) => `{"n": ${i + 1}}`)
   const shown = turn(PANES.coverage, covData(), opened.state, null, { [want.key]: { lines } })
   assert.match(shown.text, / 1 ▌\{"n": 1\}/)
-  // ] steps to the next seen range; ↵ opens its lines as a citation over the pane, and a question carries them
-  const next = turn(PANES.coverage, covData(), opened.state, keyEvent(']'))
+  // the ring on the next seen range selects it, and its ref is what a question carries; a press opens its lines as a
+  // citation over the pane
+  const next = turn(PANES.coverage, covData(), opened.state, { type: 'focus', region: 'rg-1' })
   assert.equal(next.state.at, 'rg-1')
   assert.equal(next.after.regions.find(r => r.id === 'rg-1').meta.ref, 'runs/r1.jsonl#L100-119')
-  assert.deepEqual(turn(PANES.coverage, covData(), next.state, keyEvent('return')).d.effects, [{ mark: { kind: 'cite', ref: 'runs/r1.jsonl#L100-119', label: 'runs/r1.jsonl lines 100–119' }, do: 'open' }])
+  assert.deepEqual(turn(PANES.coverage, covData(), next.state, { type: 'press', region: 'rg-1' }).d.effects, [{ mark: { kind: 'cite', ref: 'runs/r1.jsonl#L100-119', label: 'runs/r1.jsonl lines 100–119' }, do: 'open' }])
   // esc: back to the group, back to the groups; at the top it is the panel's
   let back = turn(PANES.coverage, covData(), opened.state, keyEvent('esc'))
   assert.equal(back.state.file, null)
@@ -136,69 +141,95 @@ const RECS = [
 const labData = () => PANES.labels.data({ labels: { list: LABELS, checks: 3 } }, {}, SIZE)
 const page = d => Object.fromEntries((d.wants || []).map(w => [w.key, { total: 6, records: RECS }]))
 
-test('labels: the list shows each label with its kind and scope, a bar of its values in their colors and a legend; a number opens one', () => {
-  const { after, text, state } = turn(PANES.labels, labData(), {}, null)
-  assert.match(text, /Labels · 2 in this folder/)
-  assert.match(text, /▸● apology\s+prompt · chat\/\*\.jsonl/)
-  assert.match(text, /● yes 2   ● no 3   ░ waiting for the model 1/)
-  assert.match(text, /● fails\s+regex · runs\/\*\.log/)
+test('labels: the list shows each label with a bar of its values in their colors and a legend; a press opens one; no key of its own', () => {
+  const { after, text } = turn(PANES.labels, labData(), {}, null)
+  assert.match(text, /▎ Labels\n▎ 2 labels in this folder/)
+  assert.match(text, /● apology\s+█+░*\s+6 records/)
+  assert.match(text, /● yes 2   ● no 3   ░ not labeled yet 1/)
+  assert.match(text, /● fails\s+█+\s+40 records/)
   // the bar's cells in the values' tones: the first value the accent, as the label card colors it
-  const bar = after.root.kids[2].kid.runs.filter(r => /^[█░]+$/.test(r.s)).map(r => r.tone)
+  const bar = after.root.kids.flatMap(k => k.kid?.kids || []).flatMap(k => k.runs || []).filter(r => /^[█░]+$/.test(r.s)).map(r => r.tone).slice(0, 3)
   assert.deepEqual(bar, ['accent', 'c3', 'unseen'])
-  assert.equal(barText([after]), '[ ] step · 1 2 open a label')
+  // no key of its own: the ring walks the labels, a press opens one, esc is the panel's
+  assert.equal(barText([after]), '')
   assert.equal(takes(after, keyEvent('esc')), false)
-  assert.equal(turn(PANES.labels, labData(), state, keyEvent('2')).state.open, 'fails')
+  const opened = turn(PANES.labels, labData(), {}, { type: 'press', region: 'lb-1' })
+  assert.equal(opened.state.open, 'fails')
+  assert.equal(opened.state.from, 'list')
+  // opened from the list, esc goes back to it, and the way back names it
+  assert.equal(backOf(opened.after), 'labels')
+  assert.equal(turn(PANES.labels, labData(), opened.state, keyEvent('esc')).state.open, null)
 })
 
-test('labels: one label says what made it and its definition, its values with bars, and its records in color; the number keys check the record shown and step on; f filters', () => {
-  let { after, state } = turn(PANES.labels, labData(), {}, keyEvent('1'))
+test('labels: one label opens on its values over its records and the records, says how far it is in plain words; how it was made is an action', () => {
+  let { after, state } = turn(PANES.labels, labData(), {}, { type: 'press', region: 'lb-0' })
   assert.equal(state.open, 'apology')
   // the records are a page the host reads, at the label's generation of checks
   assert.deepEqual(after.wants[0].request, { records: 'apology', value: '*', at: 0, n: 20, gen: 3 })
   const got = page(after)
   let t = turn(PANES.labels, labData(), state, null, got)
-  assert.match(t.text, /made by\s+a model, reading each record against the definition · 1 wait for it/)
-  assert.match(t.text, /definition Does the agent apologize for something it did\?/)
-  assert.match(t.text, /values\s+● yes\s+█+\s+2\s+33%/)
-  assert.match(t.text, /no value yet/)
-  assert.match(t.text, /checks\s+1 checked: 0 agree, 1 changed/)
-  assert.match(t.text, /▸ room\.jsonl:1\s+● yes\s+model 0\.92\s+I'm sorry, I broke the build\./)
+  const lines = t.text.split('\n')
+  // the subject: the label, and how far it is, in plain words with its counts
+  assert.match(lines[0], /^▎ ● apology/)
+  assert.match(lines[1], /^▎ label over chat\/\*\.jsonl · labeled 5 of 6 records · 1 waiting for the model · you checked 1/)
+  // then its values, each a bar and a count, before anything else
+  assert.match(lines[3], /^● yes\s+█+\s+2\s+33%/)
+  assert.match(lines[4], /^● no\s+█+\s+3\s+50%/)
+  assert.match(lines[5], /^░ not labeled yet\s+█+\s+1/)
+  // then its records in their colors, and the one selected whole, with the values to check it
+  assert.match(t.text, /records · all 6\s+1 of 6/)
+  assert.match(t.text, /room\.jsonl:1\s+● yes\s+model 0\.92\s+I'm sorry, I broke the build\./)
   assert.match(t.text, /room\.jsonl:2\s+● no\s+you \(was yes\)/)
-  assert.match(t.text, /room\.jsonl:3\s+● waiting/)
+  assert.match(t.text, /room\.jsonl:3\s+● not yet/)
   assert.match(t.text, /chat\/room\.jsonl#L1 · ● yes · the model, 92% sure/)
   assert.match(t.text, /why: says sorry for the build/)
-  assert.equal(barText([t.after]), '[ ] record · 1 yes · 2 no · f filter · esc back')
-  // a question under it carries the record selected; ↵ on it (a press) opens its row as a citation over the pane
+  assert.match(t.text, /your check:\s+● yes\s+● no/)
+  // how it was made is an action above the input bar, in words; its definition is not shown up front
+  assert.deepEqual(actionsOf(t.after), [{ event: 'act:def', words: 'Definition', on: false }])
+  assert.doesNotMatch(t.text, /Does the agent apologize/)
+  assert.doesNotMatch(t.text, /made by/)
+  // no key of its own but esc, back to the list
+  assert.equal(barText([t.after]), 'esc labels')
+  assert.equal(takes(t.after, keyEvent('f')) || takes(t.after, keyEvent(']')) || takes(t.after, keyEvent('1')), false)
+  // a record carries its ref; a press on it opens its row as a citation over the pane
   assert.equal(t.after.regions.find(r => r.id === 'rec-0').meta.ref, 'chat/room.jsonl#L1')
   assert.deepEqual(turn(PANES.labels, labData(), state, { type: 'press', region: 'rec-0' }, got).d.effects, [{ mark: { kind: 'cite', ref: 'chat/room.jsonl#L1', label: 'apology = yes: room.jsonl:1' }, do: 'open' }])
   assert.match(PANES.labels.thread({}, state, labData()).about, /^the label apology, made by a model, reading each record against the definition, over chat\/\*\.jsonl: 6 records \(yes 2, no 3, 1 waiting for the model\); the analyst checked 1/)
-  // 2: the analyst says the record is no; the host keeps the check, and the next record is selected
-  const checked = turn(PANES.labels, labData(), state, keyEvent('2'), got)
+  // a press on a value of the check row: the analyst says the record is no; the host keeps the check, and the next
+  // record is selected
+  const checked = turn(PANES.labels, labData(), state, { type: 'press', region: 'chk-1' }, got)
   assert.deepEqual(checked.d.effects, [{ label: 'apology', ref: 'chat/room.jsonl#L1', value: 'no', do: 'check' }])
   assert.equal(checked.state.rec, 1)
-  // f: the records of yes, then of no, then of those with no value yet, then all again
-  ;({ state } = turn(PANES.labels, labData(), state, keyEvent('f'), got))
+  // a press on a value filters the records to it; again, or `show all`, shows every record
+  ;({ state } = turn(PANES.labels, labData(), state, { type: 'press', region: 'val-0' }, got))
   assert.equal(state.filter, 'yes')
   t = turn(PANES.labels, labData(), state, null)
   assert.equal(t.after.wants[0].request.value, 'yes')
-  assert.match(turn(PANES.labels, labData(), state, null, page(t.after)).text, /filter: yes \(2\)/)
-  ;({ state } = turn(PANES.labels, labData(), state, keyEvent('f')))
-  ;({ state } = turn(PANES.labels, labData(), state, keyEvent('f')))
-  assert.equal(state.filter, '-')
-  ;({ state } = turn(PANES.labels, labData(), state, keyEvent('f')))
-  assert.equal(state.filter, null)
-  // a press on a value filters to it, a press again takes the filter off; esc goes back to the list
-  ;({ state } = turn(PANES.labels, labData(), state, { type: 'press', region: 'val-1' }))
-  assert.equal(state.filter, 'no')
-  ;({ state } = turn(PANES.labels, labData(), state, { type: 'press', region: 'val-1' }))
-  assert.equal(state.filter, null)
-  assert.equal(turn(PANES.labels, labData(), state, keyEvent('esc')).state.open, null)
+  assert.match(turn(PANES.labels, labData(), state, null, page(t.after)).text, /records · yes 2 · show all/)
+  assert.equal(turn(PANES.labels, labData(), state, { type: 'press', region: 'filter-all' }).state.filter, null)
+  assert.equal(turn(PANES.labels, labData(), state, { type: 'press', region: 'val-0' }).state.filter, null)
+  assert.equal(turn(PANES.labels, labData(), state, { type: 'press', region: 'filter-none' }).state.filter, '-')
+  // Definition opens how it was made, in the `side:opened` region the panel draws above the actions; esc closes it
+  const def = turn(PANES.labels, labData(), state, { type: 'act:def' }, got)
+  assert.match(def.text, /made by a model, reading each record against the definition\nover chat\/\*\.jsonl\n▎ Does the agent apologize for something it did\?/)
+  assert.ok(renderTerm(def.after, { w: SIZE.w }).regions.some(r => r.id === 'side:opened'))
+  assert.deepEqual(actionsOf(def.after), [{ event: 'act:def:on', words: 'Definition', on: true }])
+  assert.equal(turn(PANES.labels, labData(), def.state, keyEvent('esc'), got).state.def, false)
+  // where Claude made the label: the host scrolls the conversation to its card
+  const withCard = () => PANES.labels.data({ labels: { list: [{ ...LABELS[0], card: '07-label-apology' }, LABELS[1]], checks: 3 } }, {}, SIZE)
+  assert.deepEqual(actionsOf(turn(PANES.labels, withCard(), state, null, got).after).map(a => a.words), ['Definition', 'Where Claude made it'])
+  assert.deepEqual(turn(PANES.labels, withCard(), state, { type: 'act:made' }, got).d.effects, [{ card: '07-label-apology', do: 'reveal' }])
+  // opened from beside a card (not from the list), esc is the panel's: back to what it showed, or close
+  assert.equal(takes(turn(PANES.labels, labData(), { open: 'apology' }, null).after, keyEvent('esc')), false)
 })
 
-test('labels: a rule label says it was a rule, its pattern in its own color; no labels yet says how one comes', () => {
-  const t = turn(PANES.labels, labData(), { open: 'fails' }, null)
-  assert.match(t.text, /made by\s+a rule: a record whose text matches the pattern is fail, the rest pass/)
-  assert.match(t.text, /pattern\s+\(\?i\)fail\|error/)
+test('labels: a rule label says it was a rule, its pattern under Definition; one label alone opens on itself; no labels yet says how one comes', () => {
+  const t = turn(PANES.labels, labData(), { open: 'fails', def: true }, null)
+  assert.match(t.text, /made by a rule: text that matches the pattern is fail, the rest pass/)
+  assert.match(t.text, /▎ \(\?i\)fail\|error/)
+  assert.match(t.text, /label over runs\/\*\.log · 40 records, all labeled/)
+  const one = turn(PANES.labels, PANES.labels.data({ labels: { list: [LABELS[1]] } }, {}, SIZE), {}, null)
+  assert.match(one.text, /▎ ● fails/)
   const none = turn(PANES.labels, PANES.labels.data({ labels: { list: [] } }, {}, SIZE), {}, null)
   assert.match(none.text, /No labels here yet/)
 })

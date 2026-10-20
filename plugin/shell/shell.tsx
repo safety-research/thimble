@@ -58,7 +58,8 @@ import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
-import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, resetDock, restPane, toggleDock } from './dock'
+import { labelsRow } from './labeluse'
+import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, registerDock, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
 import { flushEngaged, resetEngaged, tellOpened } from './engaged'
@@ -1419,14 +1420,21 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     const root = await rootHere($)
     let cov = old?.cov ?? 0
     let mix = old?.mix ?? []
-    if (o.coverage && root && person === 'now' && featureOn('counts')) {
+    // the folder's rows: coverage shows from the session's start (seen 0%) once there is a folder of data to see. Before
+    // Claude's first thimble command the folder is the session's own (as the Coverage pane reads it), never the home
+    // folder; the kernel's count writes nothing there
+    let covRows = old?.covRows ?? 0
+    const cwd = String(await $.session.cwd()).replace(/\/+$/, '')
+    const covRoot = root ?? (cwd && cwd !== String((await $.env.get('HOME')) || '').replace(/\/+$/, '') ? cwd : null)
+    if (o.coverage && covRoot && person === 'now' && featureOn('counts')) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
-        const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
+        const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env: { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
         const got = JSON.parse(r.stdout)
         const files = (got.files || []) as Any[]
         const rows = files.reduce((n, f) => n + (Number(f.rows) || 0), 0)
         // the kernel's own share, by the rule its text says (a search, a listing or a count is not a read)
+        covRows = Number(got.total?.rows) || rows
         if (typeof got.total?.seen_share === 'number') cov = got.total.seen_share
         else if (typeof got.total?.read_share === 'number') cov = got.total.read_share
         else if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
@@ -1437,7 +1445,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
       }
     }
     const claims = await claimCount($).catch(() => old?.claims ?? 0)
-    const next: LineCounts = { claims, threads: threadCount(), cov, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
+    const next: LineCounts = { claims, threads: threadCount(), cov, covRows, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
     const keys = ['claims', 'threads', 'cov', 'labels'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : (next[k] ?? 0) > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
@@ -1735,9 +1743,10 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   // so the bar never names one key twice. Unnamed, a click on the count still opens it.
   const named = namedKeys(left)
   const keyed = (k: string | null | undefined) => !!k && !focus && !named.has(k)
-  // a count whose feature is off is not shown: coverage and the labels with theirs
+  // a count whose feature is off is not shown: coverage and the labels with theirs. Coverage shows at 0% too, once
+  // the folder has rows: what Claude has seen of it so far
   const shown = (id: string) => (id === 'cov' || id === 'labels' ? on('counts') : true)
-  const counts = items.filter(([id, n]) => n > 0 && shown(id)).map(([id, , words, key]) => {
+  const counts = items.filter(([id, n]) => (n > 0 || (id === 'cov' && (c?.covRows ?? 0) > 0)) && shown(id)).map(([id, , words, key]) => {
     const bright = now - (c!.changed[id] ?? 0) < BRIGHT_MS
     // (coverage's and the labels' words begin with their key: dock.ts)
     const dk = id === 'cov' ? DOCK_KEY.coverage : id === 'labels' ? DOCK_KEY.labels : null
@@ -2094,7 +2103,7 @@ async function cardLanded($: Engine, row: string, off: boolean): Promise<void> {
 }
 
 /** A click on the bar's `card ready under …`: the card in view, and the note gone. */
-async function goToCard($: Engine, row: string, id: string): Promise<void> {
+export async function goToCard($: Engine, row: string, id: string): Promise<void> {
   await $.state.set(CARDNOTE, null)
   // the message by its row in the transcript (drawn or not), its end in view, where the card is; then the card itself
   const uuid = (await recordNow($, row))?.uuid
@@ -2236,9 +2245,11 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const o = p.object || {}
   const fw = frameWidth(outer, p.grid.w, o.title)
   const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: Math.min(rows, p.grid.h), color: ring })
+  // the labels its data came through, beside it (labeluse.ts)
+  const used = await labelsRow($, els, `card-${ref.id}-${p.object?.version ?? ref.v ?? ''}`, [ref.id], ref.root)
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
-    children: [body, ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
+    children: [body, ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
   })
 }
 
@@ -2635,7 +2646,7 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   // a switch turned on or off in the settings panel (settings/term.ts)
   if (pane === 'settings') return settingsAction($, a)
   // a label value checked in the label viewer (dock.ts); what a pane opens is the panel's, below
-  if ((pane === 'coverage' || pane === 'labels') && name === 'check') return dockAction($, pane, a)
+  if ((pane === 'coverage' || pane === 'labels') && (name === 'check' || name === 'reveal')) return dockAction($, pane, a)
   if (name === 'open') {
     // what a pane in the side panel opens goes over it there (esc comes back to it)
     const v = detailIsOpen() ? await sideNow($) : null
@@ -2670,6 +2681,7 @@ export const registerShell: Register = (on, options) => {
   // thread's report never reach the shell's prompt hooks (or main)
   registerThreads(on, options)
   registerDetail(on)
+  registerDock(on)
   // work a key asks of Claude beside the conversation (v's card): its agent's steps, its end, its reports kept out of
   // main; main reads one row naming the cards it made
   registerAside(on, options)
@@ -2981,6 +2993,9 @@ export const registerShell: Register = (on, options) => {
           ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy || !!caught, lead: busy ?? (picked ? '▸' : null), leadColor: busy ? null : FOCUS[theme] })
           : await next(e))
       }
+      // the labels its citations rest on, beside it (labeluse.ts)
+      const used = rec.marks.length && !hidden ? await labelsRow($, els, `msg-${at}`, rec.marks.map(m => String((m as Any).ref || '')).filter(Boolean), null, { marginLeft: 2 }) : null
+      if (used) parts.push(used)
       if (open && open !== 's') {
         // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar
         parts.push(Box({ key: `vl-${at}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row: at, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))

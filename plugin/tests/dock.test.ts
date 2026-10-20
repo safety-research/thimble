@@ -32,7 +32,7 @@ const RECORDS = [
 ]
 const RESOLVED = { ref: 'chat/room.jsonl#L2', chain: [], rows: ['chat/room.jsonl#L2'], count: 1, records: [{ ref: 'chat/room.jsonl#L2', text: 'Merged.' }], notes: [] }
 
-function world(on: Any) {
+function world(on: Any, o: { cov?: Any } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -50,11 +50,13 @@ function world(on: Any) {
     const a = e.argv
     let out: unknown = {}
     if (a.some(x => x.endsWith('prep.mjs'))) out = { drawing: DRAWING }
-    else if (a.includes('coverage')) out = COVERAGE
+    else if (a.includes('coverage')) out = o.cov ?? COVERAGE
     else if (a.includes('resolve')) out = RESOLVED
     else if (a[1] === 'label' && a.includes('--records')) out = { label: LABELS[0], value: null, at: 0, total: 3, records: RECORDS }
     else if (a[1] === 'label' && a.includes('--check')) out = { ref: a[a.indexOf('--check') + 1], was: 'yes', now: a[a.indexOf('--check') + 2], ...LABELS[0] }
     else if (a[1] === 'label' && a[2] === '--json') out = LABELS
+    // the labels a card or a citation rests on: the count query r1 is apology's
+    else if (a[1] === 'label' && a.includes('--used-by')) out = { by: Object.fromEntries(a.slice(3, -1).filter(r => r.startsWith('r1')).map(r => [r, ['apology']])), labels: a.slice(3, -1).some(r => r.startsWith('r1')) ? [LABELS[0]] : [] }
     else if (a[1] === 'label' && a.includes('--json')) out = { ...LABELS[0], card: 'label-apology', card_version: 2 }
     else if (a[0] === 'awk') return { value: { exitCode: 0, stdout: Array.from({ length: 30 }, (_, i) => `{"n": ${i + 1}}`).join('\n') + '\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -103,6 +105,8 @@ const panel = async ($: Any, clock: { settle: () => Promise<void> }) => { for (l
 /** The panel's title as its last open with a title named it (an open with none takes the keys back). */
 const titled = (w: { opened: Any[] }) => [...w.opened].reverse().find(o => o.title)
 const askKeyOf = async ($: Any) => /"key":"(ask-\d+)"/.exec(JSON.stringify(await $.ui.render(PANEL)))?.[1] ?? ''
+/** The press of a part of the pane in the side panel, as drawn now (`r|side|<row>|<id>`). */
+const sideKey = async ($: Any, id: string) => new RegExp(`"key":"(r\\|side\\|\\d+\\|${id})"`).exec(JSON.stringify(await $.ui.render(PANEL)))?.[1] ?? `r|side|0|${id}`
 
 async function turn($: Any, on: Any, clock: { settle: () => Promise<void> }) {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
@@ -113,7 +117,7 @@ async function turn($: Any, on: Any, clock: { settle: () => Promise<void> }) {
   await clock.settle()
 }
 
-test('the bar names the coverage with a small bar of its file types and the labels, each with its key; a click on coverage opens Coverage in the side panel, its keys reach it, a question goes to its thread, and ↵ on a read range opens it as a citation', async ($, on) => {
+test('the bar names the coverage with a small bar of its file types and the labels, each with its key; a click on coverage opens Coverage in the side panel, its parts are presses, a question goes to its thread, and a press on a read range opens it as a citation', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await turn($, on, clock)
@@ -130,33 +134,39 @@ test('the bar names the coverage with a small bar of its file types and the labe
   await clock.settle()
   expect(titled(w)).toMatchObject({ id: 'object', title: 'Coverage', focus: true })
   const drawn = await panel($, clock)
-  expect(drawn).toContain('Coverage of this session · 2 files · 600 rows')
+  expect(drawn).toContain('▎ Coverage')
+  expect(drawn).toContain('▎ what this session read of the folder · 2 files · 600 rows · seen 102 rows (17%)')
   expect(drawn).toContain('runs/*.jsonl')
   // the panel's input bar is under it, about the group selected
   expect(JSON.stringify(await $.ui.render(PANEL))).toContain('Ask about runs/*.jsonl')
-  // the bar names each key once: g groups (t stays the panel's thread list), and while the panel holds the keys the
-  // counts name none (r and l there begin a question); a click on a count still opens it
+  // the bar names no key of the panel's, only what esc does; while the panel holds the keys the counts name none (r
+  // and l there begin a question), and a click on a count still opens it
   const held = textOf(await $.ui.render(HINT))
-  expect(held).toContain('g by type')
-  expect(held).not.toContain('t by')
+  expect(held).toContain('esc close')
+  expect(held).not.toContain('g by type')
   expect(held).toContain('seen 17%')
   expect(held).not.toContain('r seen')
   expect(held).not.toContain('l 2 labels')
-  // g is the pane's: it groups the files by type, and never reaches the prompt
+  // g is no key: it begins a question; by type is a press
   expect(await key($, clock, 'g')).toEqual({ text: '', cursor: 0 })
-  expect(await panel($, clock)).toContain('▸ jsonl')
-  await key($, clock, 'g')
-  // ↵ opens the group, then its first file: the file's read lines
-  await key($, clock, 'return')
+  expect(JSON.stringify(await $.ui.render(PANEL))).toContain('"value":"g"')
+  const ui = await $.ui.mount({ ...(PANEL as Any) } as never)
+  await ui.press({ key: await sideKey($, 'by-type') })
+  await clock.settle()
+  expect(await panel($, clock)).toMatch(/type\s+files touched/)
+  await ui.press({ key: await sideKey($, 'by-pattern') })
+  await clock.settle()
+  // a press on the group opens it, then one on its first file: the file's read lines, and the way back names the group
+  await ui.press({ key: await sideKey($, 'g-0') })
   await panel($, clock)
-  await key($, clock, 'return')
+  await ui.press({ key: await sideKey($, 'f-0') })
   const fileView = await panel($, clock)
   expect(fileView).toContain('seen  rows 1–102')
   expect(fileView).toContain('1 ▌{"n": 1}')
+  expect(fileView).toContain('‹ runs/*.jsonl')
   // the file's lines were the person's read, never Claude's
   expect(w.runs.some(r => r[0] === 'awk' && r.includes('/data/runs/r1.jsonl'))).toBe(true)
   // a question typed under it goes to the pane's thread, about the read range selected and carrying its ref
-  const ui = await $.ui.mount({ ...(PANEL as Any) } as never)
   await ui.input({ key: await askKeyOf($), text: 'why only the first 102 rows?' })
   await clock.settle()
   expect(w.spawns.length).toBe(1)
@@ -166,15 +176,17 @@ test('the bar names the coverage with a small bar of its file types and the labe
   expect(prompt).toContain("what this session did with the folder's files, by `thimble coverage`: 102 of 600 rows seen (17%), from 1 of 2 source files; 2 files touched")
   expect(prompt).toContain('runs/r1.jsonl#L1-102')
   expect(w.submitted.length).toBe(0)
-  // ↵ on the range: its lines as a citation, over the pane in the panel
-  await key($, clock, 'return')
+  // a press on the range: its lines as a citation, over the pane in the panel
+  await ui.press({ key: await sideKey($, 'rg-0') })
+  await clock.settle()
   await panel($, clock)
   expect(String(titled(w)?.title)).toContain('runs/r1.jsonl lines 1–102')
 })
 
-test('l opens the label viewer in the side panel; a number key checks the record shown, as the person; a question asks its thread; a click on the bar closes it', async ($, on) => {
+test('l opens the labels in the side panel; a press opens one, on its values and records; a press on a value of the check row is the person\'s check; a question asks its thread; a click on the bar closes it, and Claude hears of the checks', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
+  const session = mock.session(on)
   await turn($, on, clock)
   await $.ui.render(HINT)
   // l acts once a moment passed with no letter after it (as t does)
@@ -183,21 +195,28 @@ test('l opens the label viewer in the side panel; a number key checks the record
   await clock.settle()
   expect(titled(w)).toMatchObject({ id: 'object', title: 'Labels', focus: true })
   const list = await panel($, clock)
-  expect(list).toContain('Labels · 2 in this folder')
+  expect(list).toContain('▎ Labels')
+  expect(list).toContain('▎ 2 labels in this folder')
   expect(list).toContain('● yes 1   ● no 2')
-  // 1 opens the first label: its records are a page the kernel reads for the person
-  await key($, clock, '1')
+  // a press opens the first label: its values first, then its records, a page the kernel reads for the person
+  const ui = await $.ui.mount({ ...(PANEL as Any) } as never)
+  await ui.press({ key: await sideKey($, 'lb-0') })
+  await clock.settle()
   const one = await panel($, clock)
-  expect(one).toContain('made by    a model, reading each record against the definition')
+  expect(one).toContain('▎ ● apology')
   expect(one).toContain('room.jsonl:1')
+  // how it was made: an action above the input bar, in words
+  expect(one).toContain('Definition')
+  expect(one).not.toContain('made by')
+  expect(one).toContain('‹ labels')
   expect(w.runs.some(r => r[1] === 'label' && r[2] === 'apology' && r.includes('--records'))).toBe(true)
-  expect(textOf(await $.ui.render(HINT))).toContain('[ ] record · 1 yes · 2 no · f filter')
-  // 2: the person says the record shown is no
-  expect(await key($, clock, '2')).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await $.ui.render(HINT))).not.toContain('f filter')
+  // the person says the record shown is no: a press on no in its check row
+  await ui.press({ key: await sideKey($, 'chk-1') })
+  await clock.settle()
   expect(w.runs.some(r => r[1] === 'label' && r[2] === 'apology' && r.includes('--check') && r.includes('chat/room.jsonl#L1') && r.includes('no'))).toBe(true)
   // a question typed under it: about the record selected, with what the label is
   await panel($, clock)
-  const ui = await $.ui.mount({ ...(PANEL as Any) } as never)
   await ui.input({ key: await askKeyOf($), text: 'is this one really no?' })
   await clock.settle()
   const prompt = String(w.spawns[0].prompt)
@@ -205,13 +224,19 @@ test('l opens the label viewer in the side panel; a number key checks the record
   expect(prompt).toContain('a record of apology, room.jsonl:2')
   expect(prompt).toContain('the label apology, made by a model, reading each record against the definition, over chat/*.jsonl')
   expect(prompt).toContain('chat/room.jsonl#L2')
-  // a click on the bar's labels closes the viewer (inside it, a letter starts a question); the panel's close then has
+  // a click on the bar's labels closes the panel (inside it, a letter starts a question); the panel's close then has
   // Claude hear of the checks (labels.ts checksDone, as for the card detail)
   await panel($, clock)
   const band = await $.ui.mount({ ...(HINT as Any) } as never)
   await band.press({ key: 'count-labels' })
   await clock.settle()
   expect(w.closed).toEqual(['object'])
+  // (the close heard or not: by the next prompt to main, Claude has read the checks in a row of its own)
+  w.opened.length = 0
+  await $.prompt.submit({ text: 'so?', origin: { kind: 'composer' } } as never)
+  await clock.settle()
+  const heard = (session.appended() as unknown as { message: { content: { text?: string }[] } }[]).map(r => String(r.message.content[0]?.text ?? '')).join('\n')
+  expect(heard).toContain('The analyst checked 1 record of the label apology')
 })
 
 test('l then a letter at once is a word: both letters stay in the prompt and no panel opens', async ($, on) => {
@@ -224,4 +249,62 @@ test('l then a letter at once is a word: both letters stay in the prompt and no 
   await clock.advance(800)
   await clock.settle()
   expect(w.opened.length).toBe(0)
+})
+
+test("a label beside what counts by it: an answer that cites a label's count shows the label under it, its name and its values; a click on a value opens the label in the side panel on that value's records", async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }) as never)
+  const TEXT = 'Only [1](r1#apology=yes@n) of the 3 messages apologizes.'
+  await $.turn.start({ turnId: 't1', text: 'who apologized?' } as never)
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: TEXT }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: TEXT, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  const REPLY = { plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: TEXT, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+  // the labels its citations rest on are read once, as the person's read (never counted as Claude's)
+  await $.ui.render(REPLY)
+  await clock.settle()
+  const drawn = await $.ui.render(REPLY)
+  expect(w.runs.filter(r => r.includes('--used-by')).length).toBe(1)
+  expect(w.runs.find(r => r.includes('--used-by'))).toContain('r1#apology=yes@n')
+  expect(textOf(drawn)).toContain('label apology  ● yes  ● no')
+  // each value in its color, the label card's: the first value the accent
+  const colors: string[] = []
+  walk(drawn, x => { if (x.type === 'Text' && /^● (yes|no)$/.test(textOf(x))) colors.push(String(x.props?.color)) })
+  expect(colors.length).toBe(2)
+  expect(colors[0]).not.toBe(colors[1])
+  // a click on no: the label opens in the side panel, its records those that are no
+  const key = /"key":"(lu-msg-[^"]+-v0-1)"/.exec(JSON.stringify(drawn))?.[1]
+  expect(key).toBeTruthy()
+  const ui = await $.ui.mount({ ...(REPLY as Any) } as never)
+  await ui.press({ key: key! })
+  await clock.settle()
+  expect(titled(w)).toMatchObject({ id: 'object', title: 'Labels', focus: true })
+  const panelText = await panel($, clock)
+  expect(panelText).toContain('▎ ● apology')
+  expect(panelText).toContain('records · no 2 · show all')
+  expect(w.runs.some(r => r[1] === 'label' && r[2] === 'apology' && r.includes('--records') && r.includes('no'))).toBe(true)
+  // opened from beside the answer, esc is the panel's (it closes it): no way back is drawn
+  expect(panelText).not.toContain('‹ labels')
+})
+
+test("the bar's coverage shows from the session's start, at 0% once the folder has rows, and follows Claude's calls while it works", async ($, on) => {
+  const NONE = { ...COVERAGE, files: COVERAGE.files.map(f => ({ ...f, status: 'not read', seen_lines: 0, ranges: [] })), total: { ...COVERAGE.total, seen_rows: 0, seen_share: 0, seen_files: 0, touched_files: 0 } }
+  const cov: { now: Any } = { now: NONE }
+  const w = world(on, { get cov() { return cov.now } })
+  const clock = mock.clock(on)
+  on('session.start', (_$: unknown, e: Any) => ({ cwd: e.cwd }) as never)
+  on('tool.call', () => ({ result: 'one\ntwo\n' }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
+  await clock.settle()
+  // nothing read yet: the folder has rows, so the bar says so, seen 0%
+  expect(textOf(await $.ui.render(HINT))).toContain('r seen 0%')
+  // a call while Claude works: the coverage is counted again a moment after it, before the turn ends
+  const before = w.runs.filter(r => r.includes('coverage')).length
+  cov.now = COVERAGE
+  await $.tool.call({ tool: 'Read', file_path: `${ROOT}/runs/r1.jsonl` } as never)
+  await clock.advance(1600)
+  await clock.settle()
+  expect(w.runs.filter(r => r.includes('coverage')).length).toBeGreaterThan(before)
+  expect(textOf(await $.ui.render(HINT))).toContain('seen 17%')
 })

@@ -34,7 +34,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { recount } from './shell'
 import { promptText } from '../prompts/prompts'
 import { claimAgent } from '../telemetry/telemetry'
-import { aboutOf, firstMessage, forkDirective, nameOf, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
+import { aboutOf, firstMessage, forkDirective, nameOf, nextMessage, ownReport, samePart, threadKey, turnsOf } from './threads.js'
 import { sessionKey } from '../hooks/conversation'
 import { tellAsked } from './engaged'
 
@@ -300,15 +300,6 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
 async function stillWorking($: Engine, t: Thread): Promise<boolean> {
   const a = ((await $.agent.list().catch(() => [])) as Any[]).find(x => x?.id === t.agentId)
   return a ? ['pending', 'running', 'waiting'].includes(String(a.status)) : t.status === 'running'
-}
-
-/** The thread's last answer, for main: appended as a row Claude reads with the next prompt (no turn of its own). */
-export async function sendToMain($: Engine, key: string): Promise<string> {
-  const t = threads.get(key)
-  const text = t ? toMain(t) : ''
-  if (!text) return 'The thread has no answer yet to send.'
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
-  return 'Sent the thread’s answer to Claude: it reads it with your next prompt.'
 }
 
 /** Read the thread's turns again from its agent's transcript. */

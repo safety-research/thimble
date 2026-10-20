@@ -160,7 +160,7 @@ test('under a reply: the dial turns where it is clicked, ] then . or n turn it t
   expect(await drawn($, clock, reply)).toContain('Plums')
 })
 
-test('the detail shows every chapter at once, from the one the card is at; a part of a page is the card\'s own at that page; a shows one at a time', async ($, on) => {
+test('the detail shows every chapter at once, from the one the card is at; a part of a page is the card\'s own at that page; the card\'s own keys stand as presses above the input bar', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await turnSaving($, w, clock, [1])
@@ -172,8 +172,9 @@ test('the detail shows every chapter at once, from the one the card is at; a par
   expect(t).toContain('chapter 1 of 3')
   expect(t).toContain('chapter 2 of 3')
   expect(t).toContain('Victoria')
-  expect(textOf(await $.ui.render(HINT))).toContain('n next chapter · p previous chapter')
-  expect(textOf(await $.ui.render(HINT))).toContain('a chapter by chapter')
+  // the card's own keys, in words above the input bar; the bar names none
+  expect(t).toContain('next chapter · previous chapter')
+  expect(textOf(await $.ui.render(HINT))).not.toContain('next chapter')
   // a click on a part of chapter 3 selects it: the card's own part, the card at chapter 3 (under the reply too)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   const key = keysIn(await ui.drawn()).find(k => k.startsWith('r|pane|') && k.endsWith('|pg3~~tree-0'))!
@@ -182,22 +183,14 @@ test('the detail shows every chapter at once, from the one the card is at; a par
   await clock.settle()
   expect(JSON.parse(w.files[STATE]!)).toMatchObject({ state: { chapter: 3 }, region: 'tree-0' })
   expect(await drawn($, clock, reply)).toContain('Plums')
-  // the card's own p goes to the heading of chapter 2
+  // previous chapter, the card's own p as a press: the heading of chapter 2
   await clock.advance(1000)
-  expect(await press($, clock, edit('p'))).toEqual({ text: '', cursor: 0 })
+  await ui.press({ key: 'side-key:p' })
   await clock.settle()
   t = await drawn($, clock, PANE)
   expect(JSON.parse(w.files[STATE]!).state).toEqual({ chapter: 2 })
   expect(t).toContain('── chapter 2 of 3')
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about chapter 2 of 3…')
-  // a: one chapter at a time, at chapter 2
-  await clock.advance(1000)
-  expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
-  t = await drawn($, clock, PANE)
-  expect(t).toContain('Pears')
-  expect(t).not.toContain('chapter 1 of 3')
-  expect(t).not.toContain('Victoria')
-  expect(textOf(await $.ui.render(HINT))).toContain('a all chapters')
 })
 
 test('in the detail, a card\'s own key that began a question gives its letter back, and the chapter goes back where it was', async ($, on) => {
@@ -207,6 +200,10 @@ test('in the detail, a card\'s own key that began a question gives its letter ba
   await drawn($, clock, reply)
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
   await drawn($, clock, PANE)
+  // ↑ from the input bar puts the ring on the card's parts, where the card's own keys reach it
+  const first = keysIn(await (await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)).drawn()).find(k => k.startsWith('r|pane|'))!
+  await $.ui.focus({ requestId: 'object', element: first, origin: { kind: 'person' } } as never)
+  await clock.settle()
   await clock.advance(1000)
   // "now…": n turns the chapter, and o straight after it makes it the start of the question
   expect(await press($, clock, edit('n'))).toEqual({ text: '', cursor: 0 })
