@@ -28,10 +28,9 @@ from fastapi import Body, HTTPException
 
 from .. import chats, home, settings
 from . import classify, run, store
+from . import estimate as E
 
-SAMPLE = 300  # the units "Run on a sample" reads, chosen at random
-ASK_SECONDS = 60.0  # a prompt label over more than SAMPLE units asks first when its run takes longer than this
-ASK_DOLLARS = 1.0  # or costs more than this
+SAMPLE = E.SAMPLE  # the units "Run on a sample" reads, chosen at random; a prompt label over more asks first
 # what a call costs, per million tokens: (input, output). A model not named here gets no price in the estimate.
 PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-opus-5": (5.0, 25.0), "claude-opus-4-8": (5.0, 25.0),
           "claude-sonnet-5-5": (2.0, 10.0), "claude-sonnet-5": (2.0, 10.0), "claude-haiku-5-5": (0.1, 0.5),
@@ -80,21 +79,8 @@ def estimate(concept: dict[str, Any], found: list[Any]) -> dict[str, Any]:
 
 
 def needs_asking(est: dict[str, Any]) -> bool:
-    """Whether a prompt label's run is big enough to ask first: more than a sample, and a minute or a dollar."""
-    return est["units"] > SAMPLE and (est["seconds"] >= ASK_SECONDS or (est["dollars"] or 0) >= ASK_DOLLARS)
-
-
-def minutes(seconds: float) -> str:
-    m = seconds / 60
-    if m < 1.5:
-        return "1 min"
-    return f"{round(m):,} min" if m < 90 else f"{m / 60:.1f} hours"
-
-
-def dollars(d: float | None) -> str:
-    if d is None:
-        return ""
-    return f"${d:,.2f}" if d < 10 else f"${round(d):,}"
+    """Whether a prompt label's run asks first: more units than a sample (estimate.py, the plugin's rule too)."""
+    return E.needs_asking(est["units"])
 
 
 def _words(unit: str, n: int) -> str:
@@ -104,12 +90,15 @@ def _words(unit: str, n: int) -> str:
 
 
 def size_line(concept: dict[str, Any], est: dict[str, Any], where: str) -> str:
-    """The run's size in one line: "Read 14,591 records of revisions.jsonl with Claude: about 860 calls, about 6 min,
-    about $25"."""
-    parts = [f"about {est['calls']:,} {'call' if est['calls'] == 1 else 'calls'}", f"about {minutes(est['seconds'])}"]
-    if est["dollars"] is not None:
-        parts.append(f"about {dollars(est['dollars'])}")
-    return f"Read {_words(concept['unit'], est['units'])}{where} with Claude: {', '.join(parts)}"
+    """What the run reads, which is certain: "Read 14,591 records of revisions.jsonl with Claude". The line under the
+    choices is calls_line(): its model calls, the one exact number (time and cost are rough, so the ask leaves them
+    out)."""
+    return f"Read {_words(concept['unit'], est['units'])}{where} with Claude"
+
+
+def calls_line(est: dict[str, Any]) -> str:
+    """"292 model calls": the run's real batches."""
+    return E.calls_line(est["calls"])
 
 
 # ---- the chat's records
@@ -139,7 +128,7 @@ def _record(ws: str, ask: dict[str, Any], state: str, text: str, **extra: Any) -
     rec = {"type": "label_run", "id": ask["id"], "concept": ask["concept"], "name": ask["name"], "state": state,
            "text": text, **extra}
     if state == "asked":
-        rec.update(units=ask["units"], sample=min(SAMPLE, ask["units"]))
+        rec.update(units=ask["units"], sample=min(SAMPLE, ask["units"]), meta=calls_line(ask["estimate"]))
     if not ask.get("chat"):  # the label editor's ask: the editor shows it, and no chat has a row of it
         return
     try:
@@ -233,7 +222,8 @@ def where_of(unit: str, paths: list[str]) -> str:
 def shown(a: dict[str, Any]) -> dict[str, Any]:
     """An ask as the label editor shows it (the same fields as the chat's `asked` row)."""
     return {"id": a["id"], "concept": a["concept"], "name": a["name"], "state": a.get("state"), "text": a.get("text"),
-            "units": a["units"], "sample": min(SAMPLE, a["units"])}
+            "units": a["units"], "sample": min(SAMPLE, a["units"]),
+            "meta": calls_line(a["estimate"]) if a.get("estimate") else None}
 
 
 run.ON_END.append(_ended)
@@ -257,7 +247,7 @@ async def answer(ws: str, folder: Path, rid: str, choice: str) -> dict[str, Any]
         _record(ws, a, "cancelled", f"Not run: the label {a['name']} changed or was deleted since.")
         raise store.LabelError("the label changed or was deleted since Claude asked")
     if choice == "cancel":
-        _record(ws, a, "cancelled", f"Not run. {size_line(concept, a['estimate'], a.get('where') or '')}.")
+        _record(ws, a, "cancelled", f"Not run: it would read {_words(concept['unit'], a['units'])}{a.get('where') or ''}.")
         _tell(ws, a["chat"], f"The analyst chose not to run the label {concept['name']} [↗](concept:{concept['id']}) "
                              f"over its {a['units']:,} units.")
         return a

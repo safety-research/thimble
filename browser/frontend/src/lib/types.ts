@@ -80,6 +80,8 @@ export interface LabelRunState {
   /** an ask's units, and how many "Run on a sample" reads */
   units?: number
   sample?: number
+  /** an ask's line under its choices: the run's exact number of model calls ("292 model calls") */
+  meta?: string | null
   total?: number
   done?: number
   failed?: number
@@ -96,6 +98,8 @@ export interface LabelAskShown {
   text: string
   units: number
   sample: number
+  /** the line under its choices: the run's exact number of model calls ("292 model calls") */
+  meta?: string | null
 }
 
 /** `GET /label-runs/{id}`: the row's live state while its run goes (status, done of total, calls at once, seconds). */

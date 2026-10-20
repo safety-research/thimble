@@ -1,6 +1,7 @@
 // A label run in the chat that started it (backend labels/asks.py), one row that changes with the run. Before a model
-// reads many records it is the run's size in one line, "Read 14,591 records of revisions.jsonl with Claude: about 860
-// calls, about 6 min, about $25.", and the analyst's three choices: Run all, Run on a sample, Cancel. While the run goes
+// reads many records it is what the run reads in one line, "Read 14,591 records of revisions.jsonl with Claude.", the
+// analyst's three choices (Run all, Run on a sample, Cancel), and under them one dim line with the run's exact number of
+// model calls, "292 model calls" (time and cost are rough, so the ask leaves them out). While the run goes
 // it says how far it is ("2,340 done · 1 min 20 s"), read again on each `concepts` event of its label, with Stop.
 // Once it ended, the counts it found, or the failure in one line with its fix. The label's chip opens it. The label
 // editor's Run asks with the same line and choices (LabelAsk, AskChoices).
@@ -104,6 +105,7 @@ export function LabelAsk({ ws, ask, onAnswered }: { ws: string; ask: LabelAskSho
       <div className="chat-labelrun-body">
         <span className="chat-labelrun-text">{ask.text}</span>
         <AskChoices ws={ws} id={ask.id} name={ask.name} units={ask.units} sample={ask.sample} onAnswered={onAnswered} />
+        {ask.meta && <span className="chat-labelrun-meta">{ask.meta}</span>}
       </div>
     </div>
   )
@@ -143,6 +145,7 @@ export function LabelRunRow({ item, ws }: { item: LabelRunRowT; ws: string }) {
           <LabelChip name={item.name} onClick={(e) => (e.stopPropagation(), openLabel(ws, item.name))} />
         </span>
         {state === 'asked' && <AskChoices ws={ws} id={item.id} name={item.name} units={item.units} sample={item.sample} />}
+        {state === 'asked' && item.meta && <span className="chat-labelrun-meta">{item.meta}</span>}
         {state === 'running' && (
           <span className="chat-labelrun-acts">
             <Button variant="ghost" size="sm" busy={busy === 'stop'} onClick={stop}>

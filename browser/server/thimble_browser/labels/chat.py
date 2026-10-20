@@ -134,7 +134,7 @@ def asked(concept: dict[str, Any], card: str, est: dict[str, Any], where: str) -
     """apply_label's answer when the run waits for the analyst's go-ahead."""
     cid = concept["id"]
     return (f"Defined the label {concept['name']} [↗](concept:{cid}); its card is card:{card}. It has not run. "
-            f"{asks.size_line(concept, est, where)}. That is "
+            f"{asks.size_line(concept, est, where)}, in {asks.calls_line(est)}. That is "
             f"the analyst's time and money, so the chat asks them to run it on every one, on a random sample of "
             f"{asks.SAMPLE}, or not at all. Their choice, and the counts once a run ends, reach you with their next "
             f"message. Answer now from what you have, such as a trial's records or what you computed, and say that "

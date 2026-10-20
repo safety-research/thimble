@@ -509,6 +509,69 @@ def again(st: Store, name: str) -> dict[str, Any]:
     return {"label": lab, "again": n, "waiting": n + still}
 
 
+def scope_key(lab: dict[str, Any]) -> str:
+    """The label's definition and scope in one string: the person's yes holds for this exact label and scope only."""
+    return json.dumps([lab.get("version"), lab.get("rule"), lab.get("in"), lab.get("where"), lab.get("within")])
+
+
+def hold_for_ask(st: Store, name: str, calls: int) -> dict[str, Any]:
+    """A big prompt label waits for the person's choice before the model reads it: its records stay waiting, and its
+    run is `ask` (no session starts its reads) until the person answers (answer_ask). Returns the ask."""
+    import secrets  # noqa: PLC0415
+
+    with locked(st, name):
+        lab = load(st, name)
+        if lab is None:
+            raise LabelError(f"no label {name!r}")
+        n = sum(1 for u in (lab.get("units") or {}).values() if u.get("wait"))
+        ask = {"id": "a" + secrets.token_hex(6), "units": n, "calls": calls, "scope": scope_key(lab), "at": time.time()}
+        lab["run"] = {"state": "ask", "ask": ask, "waiting": n}
+        write(st, lab, change=False)
+    return ask
+
+
+def approved(lab: dict[str, Any]) -> bool:
+    """Whether the person already said to read every record of this exact label and scope."""
+    return bool(lab.get("approved")) and lab.get("approved") == scope_key(lab)
+
+
+def answer_ask(st: Store, name: str, ask_id: str, choice: str, sample: int, seed: int = 0) -> dict[str, Any]:
+    """The person's choice for the ask `ask_id`: all (the model reads every waiting record, and this label and scope need
+    not ask again), sample (`sample` of them at random; the others leave the label, which is then a trial), or cancel
+    (none; the waiting records leave the label). LabelError for an ask that is not the one waiting."""
+    if choice not in ("all", "sample", "cancel"):
+        raise LabelError("the choice is all, sample or cancel")
+    with locked(st, name):
+        lab = load(st, name)
+        if lab is None:
+            raise LabelError(f"no label {name!r}")
+        run = lab.get("run") or {}
+        ask = run.get("ask") or {}
+        if run.get("state") != "ask" or ask.get("id") != ask_id:
+            raise LabelError("no ask of this label waits with that id (it was answered, or the label changed since): "
+                             "--answer is the analyst's key in the terminal")
+        if ask.get("scope") != scope_key(lab):
+            raise LabelError("the label changed since it asked")
+        units = lab.get("units") or {}
+        wait = [r for r, u in units.items() if u.get("wait")]
+        if choice == "all":
+            lab["approved"] = scope_key(lab)
+            keep = set(wait)
+        elif choice == "sample":
+            keep = set(random.Random(seed).sample(wait, min(sample, len(wait))))
+            lab["trial"] = True
+        else:
+            keep = set()
+        for r in wait:
+            if r not in keep:
+                del units[r]
+        now = time.time()
+        lab["run"] = {"state": "asked", "asked": now, "waiting": len(keep), "chose": choice} if keep else \
+            {"state": "cancelled", "at": now, "chose": choice, "units": len(wait)}
+        write(st, lab)
+    return {"label": lab, "choice": choice, "reads": len(keep), "of": len(wait)}
+
+
 # ------------------------------------------------------------------ what a record's labels say
 
 

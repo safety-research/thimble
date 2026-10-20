@@ -7,6 +7,9 @@
 //                  model reads the waiting records beside the session (labelreads.mjs), its calls made here with
 //                  $.model.complete, side by side; the progress shows under the card, the new card takes the old
 //                  one's place, and Claude hears what the reads gave with its next prompt
+//   askFromFeed  a `label_ask` line (a --prompt label over more records than a sample): the model reads nothing yet;
+//                the terminal asks the person under the label's card and in the bar (1 run all, 2 run on a sample, 0
+//                cancel), and answerAsk runs their choice as the person (`thimble label NAME --answer … --ask ID`)
 //   labelsOf     what k.want({labels: refs, gen}) asks: each record's labels, read through `thimble label --of`,
 //                kept per set of refs and per generation (a check starts a new one, so the examples read them again)
 //   check        the detail's k.do('check', {label, ref, value}): `thimble label NAME --check REF VALUE`, as the
@@ -118,6 +121,53 @@ async function readHere($: Engine, ev: Any): Promise<void> {
   await noteForClaude($, out.error ? `The model's reads of the label ${name} failed: ${out.error}` : out.note)
   if (out.error) $.ui.toast(`× label ${name}: ${String(out.error).slice(0, 200)}`)
   else if (out.failed) $.ui.toast(`! ${String(out.text).slice(0, 240)}`)
+}
+
+// ------------------------------------------------------------------------------------------------ the ask before a big run
+
+/** The ask that waits for the person's choice: a big label's run, with the sentence that says what it reads, the line
+ *  under its choices (its model calls) and the card it is drawn under. One at a time: a newer ask takes its place. */
+const LABELASK = { plugin: 'thimble', key: 'labelask' } as const
+export type LabelAsk = { root: string; name: string; ask: string; card: string | null; text: string; meta: string; units: number; sample: number }
+
+/** A `label_ask` line of the change feed: the ask waits for the person (the bar and the card's row show it). */
+export async function askFromFeed($: Engine, ev: Any): Promise<void> {
+  if (typeof ev?.name !== 'string' || !ID.test(ev.name) || typeof ev.root !== 'string' || typeof ev.ask !== 'string') return
+  const a: LabelAsk = {
+    root: String(ev.root).replace(/\/+$/, ''), name: ev.name, ask: ev.ask,
+    card: typeof ev.object === 'string' && ID.test(ev.object) ? ev.object : null,
+    text: String(ev.text || `Read ${Number(ev.units) || 0} records with Claude`), meta: String(ev.meta || ''),
+    units: Number(ev.units) || 0, sample: Number(ev.sample) || 0,
+  }
+  await $.state.set(LABELASK, a)
+}
+
+/** The ask that waits, if any. */
+export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
+  return ((await $.state.get(LABELASK)).value ?? null) as LabelAsk | null
+}
+
+/** The person's choice for the ask: run all, run on a sample, or cancel, as their own command. The reads start here,
+ *  beside the session, and Claude hears the choice with the next prompt. */
+export async function answerAsk($: Engine, choice: 'all' | 'sample' | 'cancel'): Promise<void> {
+  const a = await labelAskNow($)
+  if (!a) return
+  await $.state.set(LABELASK, null)
+  const r = await kernel($, a.root, ['label', a.name, '--answer', choice, '--ask', a.ask])
+  let got: Any = null
+  try { got = JSON.parse(r.out) } catch { got = null }
+  if (!r.ok || !got) {
+    $.ui.toast(`× The label ${a.name} did not start: ${r.out.split('\n').slice(-1)[0]?.replace(/^thimble label: /, '').slice(0, 200) || 'thimble label gave nothing'}. Ask Claude to run it again.`)
+    return
+  }
+  if (choice === 'cancel') {
+    await noteForClaude($, `The analyst chose not to run the label ${a.name}: the model reads none of its ${a.units.toLocaleString('en-US')} records.`)
+    return
+  }
+  const what = choice === 'all' ? `all ${a.units.toLocaleString('en-US')} records` : `a random sample of ${Number(got.reads || a.sample).toLocaleString('en-US')} records`
+  await noteForClaude($, `The analyst chose to run the label ${a.name} on ${what}. The model reads them beside the session; \`thimble label ${a.name}\` shows the counts.`)
+  const card = got.card && typeof got.card.id === 'string' ? got.card.id : a.card
+  labelFromFeed($, { name: a.name, root: a.root, object: card, t: `${a.ask}-${choice}` })
 }
 
 /** How many checks the person has made: the examples' labels are read again when it changes. */

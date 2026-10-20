@@ -248,6 +248,12 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+/* the ask's one exact number under its choices, "292 model calls" */
+.chat-labelrun-meta {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 
 /* -------- notes: what an act left (the chip that goes there, the spinner while it is in flight) and a stopped or
    failed reply (the ✕ mark and one word, the detail behind the chevron); quiet text, no frame -------- */
