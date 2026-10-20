@@ -28,7 +28,7 @@
 // `links` are the nested marks a card holds, in reading order: [{id, ref, label}]. They look as a citation looks in the
 // answer (the cite tone, underlined), with no digit of their own: 2 opens the first, 3 the next, and a click opens any.
 import { citeRef } from './object.js'
-import { plainWords, seriesRef } from './message.js'
+import { linkSpans, mapLinks, plainWords, seriesRef } from './message.js'
 
 const MAX_LINKS = 8
 // a citation's words that name nothing (a pronoun, an arrow): the place it opens is shown in their stead
@@ -59,7 +59,7 @@ export function cardKind(ref) {
 /** The kernel refs a card's words cite (`[words](ref)`), each once, as nested marks. */
 export function linksIn(md, look = null) {
   const out = []
-  for (const m of String(md || '').matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
+  for (const m of linkSpans(md)) {
     const c = look ? look(m[1], m[2]) : null
     // a citation the healing pass unwrapped is words, not a link; one it re-pointed opens its new place
     if (c && c.state === 'quiet') continue
@@ -75,7 +75,7 @@ export function linksIn(md, look = null) {
 
 /** Card words as the healing pass reads them: each citation's target written as the ref the card opens. */
 export function healMd(md) {
-  return String(md || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (all, w, t) => { const r = citeRef(t); return r ? `[${w}](${r})` : all })
+  return mapLinks(md || '', (all, w, t) => { const r = citeRef(t); return r ? `[${w}](${r})` : all })
 }
 
 /** What the pass did to a citation of card words, by its words and target (by its ref alone when the words were
@@ -99,7 +99,7 @@ export function linkedText(md, links, look = null) {
   let out = ''
   let i = 0
   const s = String(md || '')
-  for (const m of s.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
+  for (const m of linkSpans(s)) {
     out += esc(s.slice(i, m.index)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
     // the healing pass: an unwrapped citation in grey, a contradicted one with a red ×, a re-pointed one at its new place
     const c = look ? look(m[1], m[2]) : null

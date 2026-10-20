@@ -11,7 +11,7 @@
 //                       catch-up's), so a side thread's answer can be cut to the rows its panel has
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
 //                       rows; its keys are in the bar under it, and its color says cite or explain
-import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
+import { blocks, inline, mapLinks, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
 import { paintRegions } from './cells'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -180,7 +180,7 @@ function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string,
   const total = widths.reduce((s, x) => s + x + 3, 1)
   if (total > w) {
     // too wide to draw whole: Claude Code's Markdown, with each mark as its words
-    const plain = text.slice(b.start, b.end).replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1')
+    const plain = mapLinks(text.slice(b.start, b.end), (all, words) => words)
     if (lines) return plain.split('\n').map((l, k) => els.Text({ key: `${key}-r${k}`, wrap: 'truncate-end', children: l }))
     return [els.Markdown({ text: plain })]
   }

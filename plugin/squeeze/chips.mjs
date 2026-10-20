@@ -46,6 +46,7 @@
 //     made:     [{key, ms, model, usage}]   each call, for its time and cost
 //   }
 // `shown` holds the text at `at` (null at the original); the marks are placed again on it (shell/message.js remark).
+import { linkSpans, mapLinks } from '../shell/message.js'
 
 /** The chips every message has, in the order drawn. `level0` is where the original stands until the observer says. */
 export const CHIPS = Object.freeze([
@@ -230,7 +231,7 @@ export function rebaseAt(before, after, at) {
 export function rowsOf(text, cols = 100) {
   const w = Math.max(20, cols)
   let n = 0
-  for (const raw of String(text || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/\*\*|`/g, '').split('\n')) {
+  for (const raw of mapLinks(text || '', (all, words) => words).replace(/\*\*|`/g, '').split('\n')) {
     if (!raw.trim()) { n++; continue }
     let len = 0
     let rows = 1
@@ -256,7 +257,7 @@ export function isLong(text, { cols = 100, room = 26 } = {}) {
 
 /** The words of a message as the person reads them: a citation counts its words, not its ref. */
 export function wordsOf(text) {
-  return String(text || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
+  return mapLinks(text || '', (all, words) => words).split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
 }
 
 /** What a level of Length means for this message: a target the model aims for, set by the original's length (the
@@ -555,7 +556,7 @@ const SAID = /\b(earlier|before|previously|last time|in my (last|earlier|previou
 const ITEM = /^\s*([-*+]|\d+[.)])\s+/
 // an offer of more work, which only sounds like a correction ("I can check whether the answers were wrong")
 const OFFER = /^\s*(\*\*)?(I can|I could|Want me|Do you want|If you (want|like)|Should I|Shall I)\b/i
-const plainLine = t => String(t).replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/[*_`]/g, '')
+const plainLine = t => mapLinks(t, (all, words) => words).replace(/[*_`]/g, '')
 
 /** The indent of a line, in columns. */
 const indentOf = l => /^[ \t]*/.exec(l)[0].replace(/\t/g, '    ').length
@@ -675,9 +676,8 @@ export function dropOrphanHeads(text) {
   return { text: dropped.length ? lines.join('\n') : String(text || ''), dropped }
 }
 
-const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
 const norm = s => String(s).replace(/(\d),(?=\d{3}\b)/g, '$1')
-const numbersIn = s => (norm(String(s).replace(LINK, '$1 $2')).match(/\d+(?:\.\d+)?/g) || []).filter(n => n.length > 1 || Number(n) > 9)
+const numbersIn = s => (norm(mapLinks(s, (all, words, ref) => `${words} ${ref}`)).match(/\d+(?:\.\d+)?/g) || []).filter(n => n.length > 1 || Number(n) > 9)
 
 /** The forms a stated value may be rounded to in a rewrite: itself, a whole number, one decimal, and a share between
  *  0 and 1 as a percent. */
@@ -698,14 +698,14 @@ export function checkRewrite(original, text) {
   // the first number each cited ref's words state in the original: the value it cites (`13,403` of `13,403 of 14,591`)
   const cited = new Map()
   const wordsOf = new Map()
-  for (const m of String(original).matchAll(LINK)) {
+  for (const m of linkSpans(original)) {
     const ref = m[2].trim()
     if (!cited.has(ref)) { cited.set(ref, new Set()); wordsOf.set(ref, m[1]) }
     const first = numbersIn(m[1])[0]
     if (first) cited.get(ref).add(first)
   }
   const problems = []
-  const out = String(text).replace(LINK, (whole, words, ref) => {
+  const out = mapLinks(text, (whole, words, ref) => {
     const r = ref.trim()
     if (/^(https?|mailto):/i.test(r)) return whole
     if (!cited.has(r)) {
@@ -724,7 +724,7 @@ export function checkRewrite(original, text) {
   // a value the original states counts in the forms a rewrite may round it to: a whole number, one decimal, and a
   // share (0.369) as a percent (37, 36.9)
   const have = new Set(numbersIn(original).flatMap(roundings))
-  const stray = [...new Set(numbersIn(out.replace(LINK, '$1')).filter(n => !have.has(n)))]
+  const stray = [...new Set(numbersIn(mapLinks(out, (all, words) => words)).filter(n => !have.has(n)))]
   if (stray.length) problems.push(`${stray.slice(0, 3).map(n => `"${n}"`).join(', ')} ${stray.length === 1 ? 'is' : 'are'} not in the original`)
   return { text: out, problems }
 }
@@ -749,14 +749,17 @@ export function revealCut(text, n) {
   // a code fence, whole
   const fences = [...s.slice(0, i).matchAll(/^\s*```/gm)].length
   if (fences % 2) { const close = s.indexOf('```', i); i = close < 0 ? s.length : lineEnd(close) }
-  // a link, inline code or bold left open on this line: on to where it closes
+  // a link, inline code or bold left open on this line: on to where it closes (a link's target may hold brackets)
+  const links = linkSpans(s)
   for (let guard = 0; guard < 8 && i < s.length; guard++) {
     const line = s.slice(s.lastIndexOf('\n', i - 1) + 1, i)
     const ticks = (line.match(/`/g) || []).length
     const stars = (line.match(/\*\*/g) || []).length
     const openLink = /\[[^\]\n]*$|\]\([^)\n]*$/.test(line)
+    const link = links.find(m => m.index < i && i < m.index + m[0].length)
     if (ticks % 2) { const e = s.indexOf('`', i); i = e < 0 ? s.length : e + 1; continue }
     if (stars % 2) { const e = s.indexOf('**', i); i = e < 0 ? s.length : e + 2; continue }
+    if (link) { i = link.index + link[0].length; continue }
     if (openLink) { const e = s.indexOf(')', i); i = e < 0 ? s.length : e + 1; continue }
     break
   }
@@ -831,7 +834,7 @@ export function restore(rec, remark) {
 
 /** A message's first words, plain (a citation as its words), for naming it to Claude. */
 export function firstWordsOf(text, n = 8) {
-  const words = String(text || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/\*\*|__|`/g, '').replace(/^[#>|\s]+/gm, ' ').split(/\s+/).filter(Boolean)
+  const words = mapLinks(text || '', (all, words) => words).replace(/\*\*|__|`/g, '').replace(/^[#>|\s]+/gm, ' ').split(/\s+/).filter(Boolean)
   return words.slice(0, n).join(' ') + (words.length > n ? '…' : '')
 }
 
