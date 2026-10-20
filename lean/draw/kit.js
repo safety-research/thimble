@@ -2345,6 +2345,7 @@
       const examples = error ? {} : pages ? pages.examples : ctx.examples
       const out = { kit: KIT, w: W, h: H, mode: opts.mode || 'inline', title: title, root: rootNode, cites: cites, examples: examples, regions: error ? [] : regions, warnings: ctx.warnings, ms: ms }
       const controls = Object.keys(ctx.controls).map(id => pages && id === pages.knob ? Object.assign({}, ctx.controls[id], { all: true }) : ctx.controls[id])
+        .concat(pages ? Object.keys(pages.controls).map(id => pages.controls[id]) : [])
       if (controls.length && !error) out.controls = controls
       if (!error && (controls.length || Object.keys(state).length)) out.state = state
       // what reaches the program: the keys and events its handlers take, which a host shows and routes to it; a key that
@@ -2394,11 +2395,11 @@
     const c = unrolled(ctx, all)
     if (!c) return null
     const kk = makeKit(newCtx({}, null, Infinity), W, H, opts)
-    const cites = {}, examples = {}
+    const cites = {}, examples = {}, controls = {}
     const blocks = []
     c.values.forEach((v, i) => {
       const n = i + 1
-      const label = `${c.label} ${c.shown[i]}`
+      const label = pageLabel(c, i)
       const rule = Math.max(2, W - Array.from(label).length - 4)
       const head = { t: 'region', id: pageIdOf(n, ''), meta: { label: label, page: n }, kid: kk.text(`{dim:──} **${escapeMarkup(label)}** {dim:${'─'.repeat(rule)}}`, { wrap: false }) }
       let body
@@ -2411,11 +2412,20 @@
         pagePrefix(body, pctx, n, c.id)
         Object.keys(pctx.cites).forEach(id => { cites[pageIdOf(n, id)] = Object.assign({}, pctx.cites[id], { id: pageIdOf(n, id) }) })
         Object.keys(pctx.examples).forEach(id => { examples[pageIdOf(n, id)] = Object.assign({}, pctx.examples[id], { id: pageIdOf(n, id) }) })
+        // a knob only some pages have (a step of the diagram on page 2) is still a knob of the card, so its dial turns
+        Object.keys(pctx.controls).forEach(id => { if (!ctx.controls[id] && !controls[id]) controls[id] = pctx.controls[id] })
         pctx.warnings.forEach(w => warn(ctx, w))
       }
       blocks.push({ t: 'stack', kids: [head, body], gap: 1 })
     })
-    return { root: { t: 'stack', kids: blocks, gap: 2 }, cites: cites, examples: examples, knob: c.id, n: c.values.length, at: c.i + 1 }
+    return { root: { t: 'stack', kids: blocks, gap: 2 }, cites: cites, examples: examples, controls: controls, knob: c.id, n: c.values.length, at: c.i + 1 }
+  }
+
+  // a page's heading: its value as the person reads it, after the knob's label when the value is a number or "3 of 9"
+  // (`chapter 3 of 9`), alone when it is words already (`contents`, `chapter 2 of 7`)
+  function pageLabel(c, i) {
+    const shown = String(c.shown[i])
+    return /^\s*[\p{L}]/u.test(shown) ? shown : `${c.label} ${shown}`
   }
 
   // One page's ids made its own, in place: its regions, the parts of its bars, tables, plots and canvases, its brushes,

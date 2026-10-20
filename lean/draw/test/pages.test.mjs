@@ -156,3 +156,22 @@ test('versions count as the person saw them: drafts saved in one turn are folded
   const draft = globalThis.DrawKit.run(PANES.detail.program, { ...data, v: 5 }, { w: 90, h: 30, mode: 'pane' })
   assert.match(head(draft), /v5 draft · v7$/)
 })
+
+test('a page heading is its value when the value is words; a knob only one page has is still a knob of the card', () => {
+  const book = {
+    program: `
+const p = k.knob('page', { values: [0, 1, 2], label: 'page', fmt: v => v ? 'chapter ' + v + ' of 2' : 'contents' })
+const parts = [k.text('**' + (p ? 'Chapter ' + p : 'Contents') + '**')]
+if (p === 2) { const s = k.knob('step', { values: [0, 1, 2], label: 'step' }); parts.push(k.dial('step'), k.region('box-' + s, { label: 'box ' + s }, k.text('box ' + s))) }
+return k.stack(...parts)`,
+    data: {},
+  }
+  const d = runProgram(book, { w: 50, mode: 'detail', all: true })
+  const t = renderTerm(d, { w: 50 })
+  assert.deepEqual(t.regions.filter(r => /~~$/.test(r.id)).map(r => r.meta.label), ['contents', 'chapter 1 of 2', 'chapter 2 of 2'])
+  // page 2's step: its dial is the knob's, and turning it draws page 2 at the new step
+  assert.deepEqual(d.controls.map(c => c.id), ['page', 'step'])
+  assert.ok(t.regions.some(r => r.id === 'step' && r.meta.knob === 'step'))
+  const turned = runProgram(book, { w: 50, mode: 'detail', all: true, state: turn(d, {}, 'step', 1) })
+  assert.match(gridText(renderTerm(turned, { w: 50 })), /box 1/)
+})

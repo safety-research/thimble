@@ -165,6 +165,9 @@ function regrab($: Engine): void {
 /** The ring onto the selected part: the gutter cell of the part's first row (its ▸), when that row is drawn. */
 async function focusPart($: Engine): Promise<void> {
   const key = selectedGutter()
+  // the wheel moved the selected part out of the window (a long page, every page at once): the window goes back to it,
+  // and the drawing that brings it puts the ring there, so the keys are the card's again and never stay with the ask line
+  if (!key && drawn?.selected && win.by && !isAsk(ringAt)) { win.by = 0; win.follow = 'part'; $.ui.invalidate('ui.render'); return }
   // never while the person types in the ask line: a drawing asked for before the first letter would take it back
   if (!key || ringAt === key || isAsk(ringAt)) return
   const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
@@ -358,20 +361,23 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
   const cur = await current($)
   if (!cur || !drawn) return
   const { sel, p } = cur
-  // every page at once: the kit reads a page's part (`pg3~~x`) back as `x` on page 3
+  // every page at once: a page's part (`pg3~~x`) is the card's own `x` with the knob at page 3, and the program answers
+  // as that one page (one page drawn, not every page, so the key's answer comes quickly)
   const ak = allKnob(p.drawing)
-  const got = await cardEvent($, p.object, sel, event, { w: drawn.w, h: drawn.h, browser: browserOn(), all: ak?.id ?? null })
+  const mapped = ak && typeof event.region === 'string' ? ownPart(p.drawing, event.region) : null
+  const ev = mapped ? { ...event, region: mapped.region ?? undefined } : event
+  const at: Detail = mapped?.state ? { ...sel, state: { ...(sel.state || {}), ...mapped.state } } : sel
+  const got = await cardEvent($, p.object, at, ev, { w: drawn.w, h: drawn.h, browser: browserOn() })
   if (!got || got.drawing?.error) {
     $.ui.toast(`× The card could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return
   }
-  const region = typeof event.region === 'string' ? ownPart(p.drawing, event.region).region : sel.region
+  const region = typeof ev.region === 'string' ? ev.region : sel.region
   let next: Detail = { ...(sel as Detail), state: got.state, region, ex: 0 }
   // the card's own key (or a press on a part of a page) turned the page of a card shown all at once: the page goes to
   // that page's heading. A press on a part runs at the part's own page, which is no turn
   const page = ak ? pageAt(ak, got.state?.[ak.id]) : 0
-  const from = pageOf(String(event.region ?? ''))
-  const was = ak && from && from.page >= 1 ? ak.values[from.page - 1] : sel.state?.[ak?.id ?? ''] ?? ak?.values[ak.i]
+  const was = ak ? at.state?.[ak.id] ?? ak.values[ak.i] : null
   if (ak && JSON.stringify(got.state?.[ak.id]) !== JSON.stringify(was)) {
     next = { ...next, region: null }
     await patchPaneState($, 'detail', { id: sel.id }, { region: pageId(page, ''), ex: 0 })
@@ -379,7 +385,7 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
   const ask = got.ask
   if (ask && ask.text) {
     const o = p.object
-    const refs = ask.refs?.length ? ask.refs : ask.region ? regionRefs(o, got.drawing, page ? pageId(page, ask.region) : ask.region).refs : []
+    const refs = ask.refs?.length ? ask.refs : ask.region ? regionRefs(o, got.drawing, ask.region).refs : []
     const r = await askThread($, { text: ask.text, scope: { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label }, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
     if (r.problem) $.ui.toast(`× ${r.problem}`)
   } else if (ask) next = { ...next, ask }
@@ -716,16 +722,20 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
   if (back && beganWord(back.key, now - back.at, typed)) {
     return { box: none, work: async () => {
       lastKey = null
-      if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
-      // a card's own key (a page turned on n) goes back too: its state, its part, and the page's selection
-      if (back.card) {
-        const now = ((await $.state.get(SEL)).value as Detail | null) ?? sel
-        await $.state.set(SEL, { ...now, state: back.card.state, region: back.card.region })
-        await writeCardState($, sel.root, sel.id, { state: back.card.state, region: back.card.region }, 'terminal')
-        await setPaneState($, 'detail', { id: sel.id }, back.card.pane, 'terminal')
-        await mirror($)
-      }
+      // the question at once, so the letters after it join it; what the key changed goes back after, outside the key's
+      // own work (the next key waits for that work)
       toAsk($, `${back.key}${typed}`)
+      $.clock.after(0, () => { void (async () => {
+        if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
+        // a card's own key (a page turned on n) goes back too: its state, its part, and the page's selection
+        if (back.card) {
+          const now = ((await $.state.get(SEL)).value as Detail | null) ?? sel
+          await $.state.set(SEL, { ...now, state: back.card.state, region: back.card.region })
+          await writeCardState($, sel.root, sel.id, { state: back.card.state, region: back.card.region }, 'terminal')
+          await setPaneState($, 'detail', { id: sel.id }, back.card.pane, 'terminal')
+          await mirror($)
+        }
+      })().catch(() => undefined) })
     } }
   }
   // the card's own keys (its program's k.on) come before the detail's
@@ -815,8 +825,11 @@ export function registerDetail(on: Parameters<Register>[0]): void {
         ringY = top.y
         return next({ ...e, element: ringAt })
       }
-      // not drawn yet: the ring stays, and the drawing that brings the part puts it there
+      // not drawn yet (the wheel moved it out of the window): the window goes back to it, and the drawing that brings
+      // the part puts the ring there
       ringAt = null
+      win.by = 0
+      win.follow = 'part'
       $.ui.invalidate('ui.render')
       return {}
     } catch {
