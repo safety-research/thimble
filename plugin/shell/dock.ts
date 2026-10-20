@@ -1,7 +1,8 @@
 // dock.ts: Coverage (what Claude read of the folder, panes/coverage.js) and the label viewer (panes/labels.js), which
 // open in the side panel (side.ts openSide) as threads: the pane at the top, its thread's conversation under it, the
 // input bar at the bottom, so "why was events.jsonl not read?" is asked from Coverage itself. The bar's right side names
-// them: `coverage 34%` with a small bar of the folder's file types, and `2 labels` once the folder has labels; a click
+// them: `seen 12%` (the share of the folder's rows that entered Claude's context) with a small bar of the folder's file
+// types, and `2 labels` once the folder has labels; a click
 // on either, or its key (r, l) from the empty prompt, opens its pane, and the same again closes it. This module is what
 // the side panel does not do for them:
 //
@@ -16,12 +17,13 @@
 // It reads, as the person: nothing it runs counts as what Claude read (shell.tsx leanEnv), and it makes no model call.
 import type { EngineInterface } from 'claude-code'
 
-import { mixCells, typeMix } from '../panes/coverage.js'
+import { barCells, typeMix } from '../panes/coverage.js'
 import { termColor } from '../draw/palette.js'
 import { detailIsOpen, PANE as PANEL } from './detail'
 import { check as checkLabel, labelGen } from './labels'
 import { instance, redraw } from './panes'
 import { currentTheme, leanEnv, paneWhere } from './shell'
+import { threadList } from './thread'
 import { openSide, sideBack, sideNow } from './side'
 import { sessionKey } from '../hooks/conversation'
 import { keyColor } from './view'
@@ -99,9 +101,9 @@ export async function readCoverage($: Engine): Promise<void> {
 
 /** The coverage the bar's count read after a turn (shell.tsx recount): the pane shows it, and the small type bar is
  *  made from it. */
-export function noteCoverage(got: Any): { tone: string; read: boolean; n: number }[] {
+export function noteCoverage(got: Any): { tone: string; seen: boolean; n: number }[] {
   if (got && Array.isArray(got.files)) { held.coverage.cov = got; held.coverage.error = null; held.coverage.gen++ }
-  return Array.isArray(got?.types) ? mixCells(typeMix(got.types), MIX_CELLS) : []
+  return Array.isArray(got?.types) ? barCells(typeMix(got.types), MIX_CELLS) : []
 }
 
 /** The folder's labels, read again. */
@@ -148,8 +150,10 @@ export async function dockStore($: Engine, kind: string): Promise<unknown> {
   const said = (h: { gen: number; loading: boolean; error: string | null }, more: Record<string, unknown> = {}) => ({ toJSON: () => ({ gen: h.gen, loading: h.loading, error: h.error, ...more }) })
   if (kind === 'coverage' && !held.coverage.cov && !held.coverage.loading && !held.coverage.error) $.clock.after(0, () => { void readCoverage($) })
   if (kind === 'labels' && !held.labels.list && !held.labels.loading && !held.labels.error) $.clock.after(0, () => { void readLabels($) })
-  if (kind === 'coverage') return { ...held.coverage, ...said(held.coverage) }
-  if (kind === 'labels') { const checks = await labelGen($); return { ...held.labels, checks, ...said(held.labels, { checks }) } }
+  // whether the pane's thread has a conversation, which the side panel draws under it: the pane leaves it room
+  const chat = threadList().some(t => (t.scope as Any)?.pane === kind && t.turns.length > 0)
+  if (kind === 'coverage') return { ...held.coverage, chat, ...said(held.coverage, { chat }) }
+  if (kind === 'labels') { const checks = await labelGen($); return { ...held.labels, checks, chat, ...said(held.labels, { checks, chat }) } }
   return undefined
 }
 
@@ -228,18 +232,21 @@ export function restPane(k: string, named: { cov: boolean; labels: boolean }): D
 // ------------------------------------------------------------------------------------------------ the bar's counts
 
 type Count = { id: string; text: string; bright: boolean }
-type Counts = { cov: number; labels?: number; mix?: { tone: string; read: boolean; n: number }[] }
+type Counts = { cov: number; labels?: number; mix?: { tone: string; seen: boolean; n: number }[] }
 
-/** The bar's counts of the two panes, as fitBar measures them: `r coverage 34% ████████` and `l 2 labels`. */
+/** The bar's counts of the two panes, as fitBar measures them: `r seen 12% ████████` and `l 2 labels`. The coverage
+ *  is one word and one number, the share of the folder's rows that entered Claude's context ("seen", the kernel's word:
+ *  "read" was what a query or a rule computed over too); what was only computed over, and the files touched, are the
+ *  pane's to say. */
 export function dockCounts(c: Counts, percent: (x: number) => string): [string, number, string][] {
   const mix = (c.mix || []).reduce((s, x) => s + x.n, 0)
   return [
-    ['cov', c.cov, `${DOCK_KEY.coverage} coverage ${percent(c.cov)}${mix ? ` ${'█'.repeat(mix)}` : ''}`],
+    ['cov', c.cov, `${DOCK_KEY.coverage} seen ${percent(c.cov)}${mix ? ` ${'█'.repeat(mix)}` : ''}`],
     ['labels', c.labels ?? 0, `${DOCK_KEY.labels} ${c.labels === 1 ? '1 label' : `${(c.labels ?? 0).toLocaleString('en-US')} labels`}`],
   ]
 }
 
-/** One count drawn: its key in the key's color, its words, the coverage's small type bar in the types' colors (read
+/** One count drawn: its key in the key's color, its words, the coverage's small type bar in the types' colors (seen
  *  bright, the rest pale), the whole a press that opens its pane. */
 export function dockCountEl($: Engine, els: Any, x: Count, c: Counts, press: boolean): Any {
   const { Button, Text } = els
@@ -253,10 +260,10 @@ export function dockCountEl($: Engine, els: Any, x: Count, c: Counts, press: boo
   ]
   if (pane === 'coverage' && c.mix?.length) {
     kids.push(Text({ key: 'cm-gap', children: ' ' }))
-    c.mix.forEach((m, i) => kids.push(Text({ key: `cm-${i}`, color: termColor(m.read ? m.tone : `${m.tone}-faint`, theme) ?? 'inactive', children: '█'.repeat(m.n) })))
+    c.mix.forEach((m, i) => kids.push(Text({ key: `cm-${i}`, color: termColor(m.seen ? m.tone : `${m.tone}-faint`, theme) ?? 'inactive', children: '█'.repeat(m.n) })))
   }
   if (!press) return Text({ key: `count-${x.id}`, children: kids })
-  return Button({ key: `count-${x.id}`, plain: true, label: pane === 'coverage' ? 'open Coverage: what Claude read' : 'open the labels', onPress: () => toggleDock($, pane), children: kids })
+  return Button({ key: `count-${x.id}`, plain: true, label: pane === 'coverage' ? 'open Coverage: what Claude saw' : 'open the labels', onPress: () => toggleDock($, pane), children: kids })
 }
 
 /** For tests: the module's memory, cleared. */

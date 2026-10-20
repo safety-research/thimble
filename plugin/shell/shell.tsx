@@ -1235,7 +1235,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-//   thimble  v visualize · s squeeze · ] cite & explain · 1 open detail                     2 threads · coverage 34%
+//   thimble  v visualize · s squeeze · ] cite & explain · 1 open detail                    t 2 threads · r seen 12% ▆▆▃▁
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
 // keys act on (a lit one with its note in place of its name), `] cite & explain` when that message has marks, `1 open
@@ -1250,7 +1250,7 @@ const BRIGHT_MS = 1600
  *  rows; a file searched or named counts as not read. */
 function readShare(f: Any): number {
   if (!f || !f.rows) return 0
-  if (f.computed) return Math.min(1, f.computed / f.rows)
+  // (a query or a rule that computed over its rows put none of them in Claude's context)
   if (f.read_lines) return Math.min(1, f.read_lines / Math.max(1, f.lines || f.rows))
   if (f.shown) return Math.min(1, f.shown / f.rows)
   return 0
@@ -1284,7 +1284,8 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         const files = (got.files || []) as Any[]
         const rows = files.reduce((n, f) => n + (Number(f.rows) || 0), 0)
         // the kernel's own share, by the rule its text says (a search, a listing or a count is not a read)
-        if (typeof got.total?.read_share === 'number') cov = got.total.read_share
+        if (typeof got.total?.seen_share === 'number') cov = got.total.seen_share
+        else if (typeof got.total?.read_share === 'number') cov = got.total.read_share
         else if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
         // the Coverage pane shows it, and the bar's small type bar is made from it (dock.ts)
         mix = noteCoverage(got)
@@ -1559,7 +1560,7 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     ['claims', c.claims ?? 0, c.claims === 1 ? '1 claim' : `${fmtN(c.claims ?? 0)} claims`, 'c'],
     // t: the list of them in the side panel
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`, 't'],
-    // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 34% ▆▆▆▆`, `l 2 labels` (their
+    // coverage and the labels open their panes in the side panel (dock.ts): `r seen 12% ▆▆▃▁`, `l 2 labels` (their
     // key in their words)
     ...dockCounts(c, percent),
   ] : []

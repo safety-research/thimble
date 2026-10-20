@@ -40,16 +40,17 @@ test('row sets count their rows, and a whole file counts as unknown', () => {
   assert.equal(rowCount(['a.jsonl']), null)
 })
 
-test('a file only counted or searched is not read: the digest says so, from a snapshot of now and of before', () => {
+test('a file only computed over, counted or searched is not seen: the digest says so, from a snapshot of now and of before', () => {
   const at = cov => digest({ ...OBJECT, lineage: { ...OBJECT.lineage, coverage: cov } }, {})
-  // now: not_read holds every file not read, and files says how each was touched
-  const now = at({ files: { 'orders.csv': 'computed', 'a.py': 'read', 'b.py': 'named', 'c.py': 'searched' }, not_read: ['b.py', 'c.py', 'd.py'] })
-  assert.match(now, /the session had: computed orders.csv; read a.py; not read b.py \(only named or counted\), c.py \(searched\), d.py$/m)
-  // before: not_read held only the untouched files
-  assert.match(at({ files: { 'orders.csv': 'computed', 'b.py': 'named' }, not_read: ['d.py'] }), /not read d.py, b.py \(only named or counted\)$/m)
+  // now: not_read holds every file not seen, and files says how each was touched
+  const now = at({ files: { 'orders.csv': 'computed', 'a.py': 'seen', 'b.py': 'named', 'c.py': 'searched', 'e.md': 'model' }, not_read: ['orders.csv', 'b.py', 'c.py', 'e.md', 'd.py'] })
+  assert.match(now, /the session had: seen a.py; not seen orders.csv \(computed over\), b.py \(only named or counted\), c.py \(searched\), e.md \(read by a label's model\), d.py$/m)
+  // before: not_read held only the untouched files, a file read was `read`, and one a query loaded `computed` (now
+  // said as what it was: computed over, not seen)
+  assert.match(at({ files: { 'orders.csv': 'computed', 'a.py': 'read', 'b.py': 'named' }, not_read: ['d.py'] }), /seen a.py; not seen d.py, orders.csv \(computed over\), b.py \(only named or counted\)$/m)
   // many: counted by how
   const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s${i}.py`, i < 8 ? 'named' : 'searched']))
-  assert.match(at({ files: many, not_read: Object.keys(many), not_read_count: 12 }), /not read 12 files \(8 only named or counted, 1 searched\), as s0.py, s1.py, s2.py, s3.py$/m)
+  assert.match(at({ files: many, not_read: Object.keys(many), not_read_count: 12 }), /not seen 12 files \(8 only named or counted, 1 searched\), as s0.py, s1.py, s2.py, s3.py$/m)
   assert.equal(slim({ id: 'x', lineage: { coverage: { files: {}, not_read: ['a'], total: { not_read_files: 40 } } } }).lineage.coverage.not_read_count, 40)
 })
 
@@ -63,7 +64,7 @@ test('the digest says how many rows stand behind each cited value, how sure the 
   assert.match(d, /"412 refunds" = 412 \(q3#region=West@n\): rests on 412 rows of orders.csv/)
   assert.match(d, /numbers in its words that cite nothing: 31%/)
   assert.match(d, /query q3 "refunds per region": orders.csv \(18,204 rows read\); rows found by key, but their number does not equal the count column/)
-  assert.match(d, /not read returns.csv, notes.txt/)
+  assert.match(d, /not seen returns.csv, notes.txt/)
   assert.match(d, /Claude declared: read: ten refund rows by hand/)
   assert.match(d, /t trace: where it came from · where these numbers come from/)
   assert.match(d, /its hint row now: explore, trace \(Claude named explore\)/)

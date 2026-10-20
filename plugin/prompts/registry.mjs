@@ -14,10 +14,12 @@ export const FEATURES = {
   observer: {
     about: "the post-turn pass: its frame, which holds the shared principles and composes the enabled lenses",
     reads: 'observer/observer.ts, after each turn of work',
-    default: 'v3-low',
+    default: 'v4-low',
     versions: {
       v3: { about: "the frame for the lenses (one call over the new turn and a digest of the state), with thimble's purpose in the 0.9 preamble's words, and cards for objects", mode: 'lenses' },
       'v3-low': { about: 'v3 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low' },
+      v4: { about: "v3 in coverage's words: a file is seen when some of its lines entered Claude's context; one only computed over, counted, listed or searched is not; and v3's word on explainers (they wait until opened, so give one for a term the analyst has not used)", mode: 'lenses' },
+      'v4-low': { about: 'v4 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v4.md', mode: 'lenses', effort: 'low' },
     },
   },
   'observer-turn': {

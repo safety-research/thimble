@@ -66,8 +66,9 @@ The analyst never sees your shell output, so the work your answer rests on has t
 - **Draw a shape in a sentence only when the sentence claims one.** `[~](r3@n)` draws column `n` of r3's output in
   place, for a trend, a burst or a spread that the numbers alone hide. One in a message is the most that helps.
 - **Say what you did not read.** Words such as "only", "all", "stopped" and "from then on" are claims about every
-  record or about order, and one record the other way makes the answer false. `thimble coverage` lists what this
-  session read and what it only searched, named or never touched. When a file you did not read could change the
+  record or about order, and one record the other way makes the answer false. `thimble coverage` says which files you
+  saw (some of their lines entered your context) and which you only computed over, searched, named or never touched:
+  none of those were seen. What a label's model read is counted apart. When a file you did not see could change the
   answer, say so.
 
 ```

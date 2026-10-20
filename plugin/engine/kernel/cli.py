@@ -11,7 +11,8 @@ session's permission mode and sandbox like any other command.
                                                its rows; a row's ref: that row; a value's ref (r3#day=2026-06-18@n,
                                                card:saves#/days/4/n): where it came from, down to its source rows and
                                                a few of them; card:NAME: the card's lineage
-    thimble coverage [NAME] [--all]            what was read and what was not (of this session, or of a card)
+    thimble coverage [NAME] [--all]            what entered Claude's context, what was only computed over, and what
+                                               was never touched (of this session, or of a card)
     thimble label [NAME]                       the labels, or one label's counts per value (each a citation)
     thimble label NAME --in GLOB (--regex RE | --code [FILE] | --prompt "DEFINITION") [--values yes,no]
                   [--where EXPR] [--within LABEL=VALUE] [--limit N] [--reason]
@@ -289,7 +290,8 @@ def cmd_q(a: argparse.Namespace) -> int:
         read.append(f"{x['path']} ({fmt(got)} of {fmt(tot)} rows)" if got and tot else f"{x['path']} (opened)")
     tail = [f"\n{q['id']} {'FAILED: ' + q['error'] if q['error'] else 'done'} in {q['seconds']}s"]
     if read:
-        tail.append("read " + ", ".join(read[:6]) + (f" and {len(read) - 6} more files" if len(read) > 6 else ""))
+        # what the query went over, which is not what entered Claude's context (`thimble coverage` says that apart)
+        tail.append("computed over " + ", ".join(read[:6]) + (f" and {len(read) - 6} more files" if len(read) > 6 else ""))
     if q.get("uses"):
         tail.append("uses " + ", ".join(u["name"] if u["name"] == u["query"] else f"{u['name']} (kept by {u['query']})" for u in q["uses"]))
     if q.get("kept"):
@@ -391,7 +393,7 @@ def cmd_save(a: argparse.Namespace) -> int:
         print("  source rows behind its values: " + ", ".join(f"{f} ({x['count']:,})" for f, x in list(rows.items())[:6]))
     t = lin["coverage"]["total"]
     if t["not_read_files"]:
-        print(f"  this session has not read {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows)")
+        print(f"  this session has not seen {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows): none of their lines entered Claude's context")
     ex = _value_example(obj)
     if ex:
         print(f"Cite one of its values as {ex}; `thimble rows {ex}` shows where it came from.")
@@ -567,7 +569,7 @@ def cmd_coverage(a: argparse.Namespace) -> int:
         s = c.get("session")
         if s:
             t = s["total"]
-            print(f"When it was saved, the session had not read {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows).")
+            print(f"When it was saved, the session had not seen {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows): none of their lines had entered Claude's context.")
         return 0
     cov = LIN.coverage(st, None if a.all else "")
     if a.json:
@@ -914,7 +916,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label", help="the words the citation shows: a citation of a whole query opens the row that holds them")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_resolve)
-    p = sub.add_parser("coverage", help="what was read and what was not")
+    p = sub.add_parser("coverage", help="what entered Claude's context and what was only computed over")
     p.add_argument("name", nargs="?")
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
