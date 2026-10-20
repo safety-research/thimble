@@ -129,10 +129,24 @@ export async function openDetailPane($: Engine, title: string): Promise<void> {
   setThreadWindow(true)
   await pushFocus($, 'detail')
   const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) })
-  // a terminal too narrow for a docked pane: Claude Code keeps it waiting, unplaced, so say why and what opens it
-  if (r && (r as Any).isPlaced === false) $.ui.toast(`The card's detail is waiting: ${(r as Any).reason || 'the terminal is too narrow for it'}. Widen the terminal to open it.`)
+  // a terminal too narrow for a docked pane a key opened (one a command opens is placed at any width): Claude Code
+  // would keep it waiting, undrawn, with the keys still the detail's. It is closed again, and the toast says what opens it
+  if (r && (r as Any).isPlaced === false) {
+    await $.ui.close({ id: PANE }).catch(() => undefined)
+    if (isOpen) await closed($)
+    $.ui.toast(waitingWords(String((r as Any).reason || '')))
+    return
+  }
   // asked from a key, the open lands while the key is still in the prompt: ask for the keys again once it is gone
   regrab($)
+}
+
+/** What the toast says when the detail cannot be placed: the width it needs and what opens it now. */
+export function waitingWords(reason: string): string {
+  const m = /(\d+) columns \((\d+) now\)/.exec(reason)
+  return m
+    ? `The card's detail needs ${m[1]} columns when a key opens it (${m[2]} now). Type /card to open it here, or widen the terminal.`
+    : `The card's detail cannot open here${reason ? ` (${reason})` : ''}. Type /card to open it.`
 }
 
 async function closed($: Engine): Promise<void> {

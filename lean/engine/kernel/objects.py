@@ -51,14 +51,16 @@ def all_ids(st: Store) -> list[str]:
 
 
 def find_id(st: Store, name: str) -> str | None:
-    """The id of an object by its id, or by its slug without the number prefix."""
-    name = name.removeprefix("obj:")
+    """The id of an object by its id, or by its name without the number prefix, as given or as its id spells it (a name
+    with an underscore or a capital is the same card again)."""
+    name = name.removeprefix("obj:").removeprefix("card:")
     ids = all_ids(st)
     if name in ids:
         return name
-    for i in ids:
-        if re.sub(r"^\d+-", "", i) == name:
-            return i
+    for want in dict.fromkeys([name, slugify(name)]):
+        for i in ids:
+            if re.sub(r"^\d+-", "", i) == want:
+                return i
     return None
 
 

@@ -524,9 +524,11 @@ test('the bar says the keys of what is on top of the focus stack: the detail gon
   expect(await hintOf($)).not.toContain('type to ask')
 })
 
-test('a terminal too narrow for the docked detail: Claude Code keeps it waiting, and a toast says why and what opens it', async ($, on) => {
-  const w = world(on, undefined, { isPlaced: false, reason: 'unasked below 144 columns (120 now)' })
-  mock.clock(on)
+test('a terminal too narrow for the docked detail: the waiting pane is closed again, the keys stay the chat\'s, and a toast says what opens it', async ($, on) => {
+  const w = world(on, undefined, { isPlaced: false, reason: 'unasked below 144 columns (120 now): placed when the person opens it, or when the terminal widens' })
+  const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '01-saves' } as never)
-  expect(w.toasts.some(t => t.includes("The card's detail is waiting: unasked below 144 columns (120 now). Widen the terminal to open it."))).toBe(true)
+  await clock.settle()
+  expect(w.toasts).toContain("The card's detail needs 144 columns when a key opens it (120 now). Type /card to open it here, or widen the terminal.")
+  expect(await hintOf($)).not.toContain('↑↓ part')
 })

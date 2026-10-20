@@ -142,6 +142,19 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert LB.status(LB.load(st, "apology"))["waiting"] == 2
 
 
+def test_a_label_named_with_an_underscore_keeps_one_card_through_its_versions(root: Path):
+    r = run(root, "label", "says_sorry", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    assert r.returncode == 0, r.stdout + r.stderr
+    st = Store(root)
+    card = LB.load(st, "says_sorry")["card"]
+    w = json.loads(run(root, "label", "says_sorry", "--waiting").stdout)
+    payload = {"values": {u["ref"]: {"value": "no"} for u in w["units"]}}
+    got = json.loads(run(root, "label", "says_sorry", "--answers", "-", "--json", stdin=json.dumps(payload)).stdout)
+    # the card saved again is the same card at its next version, never a second card
+    assert got["card"] == {"id": card, "version": 2}
+    assert [i for i in O.all_ids(st) if "says-sorry" in i] == [card]
+
+
 def test_the_same_definition_keeps_its_values_and_labels_only_new_records(root: Path):
     run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.", "--limit", "2")
     st = Store(root)
