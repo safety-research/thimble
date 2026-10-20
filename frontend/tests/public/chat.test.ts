@@ -63,10 +63,10 @@ test('an extension\'s orientation instructions lead its follow-up as a line nami
 })
 
 describe('tool names', () => {
-  test("the chat recognizes the plugin's MCP server by the prefix Claude Code gives its tools", () => {
-    const plugin = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.claude-plugin/plugin.json'), 'utf8')) as { name: string }
-    const mcp = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.mcp.json'), 'utf8')) as { mcpServers: Record<string, unknown> }
-    for (const server of Object.keys(mcp.mcpServers)) expect(MCP_PREFIXES).toContain(`mcp__plugin_${plugin.name}_${server}__`)
+  test("the chat recognizes thimble browser's tools by the prefix Claude Code gives them (server tools.SERVER)", () => {
+    const tools = readFileSync(path.join(ROOT, 'server/thimble_browser/tools.py'), 'utf8')
+    const server = /^SERVER = "([^"]+)"/m.exec(tools)![1]
+    expect(MCP_PREFIXES).toContain(`mcp__${server}__`)
   })
 })
 

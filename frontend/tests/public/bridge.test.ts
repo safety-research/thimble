@@ -13,7 +13,7 @@ import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
-const BRIDGE = readFileSync(path.resolve(__dirname, '../../../backend/app/viewer_bridge.js'), 'utf8')
+const BRIDGE = readFileSync(path.resolve(__dirname, '../../../server/thimble_browser/views/kit/viewer_bridge.js'), 'utf8')
 const VIEW = `<!doctype html><html><head><script>${BRIDGE.replace(/<\/script/gi, '<\\/script')}</script></head><body>
 <section data-anchor="view:review-threads/pr-12">
   <article id="one" data-anchor="board.jsonl#L1">the first post</article>

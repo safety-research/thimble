@@ -15,7 +15,7 @@ import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
 import { refLabel } from '../../src/lib/refs'
 
-const APP = path.resolve(__dirname, '../../../backend/app')
+const APP = path.resolve(__dirname, '../../../server/thimble_browser/views/kit')
 const read = (n: string) => readFileSync(path.join(APP, n), 'utf8')
 const script = (js: string) => `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>`
 // the kit as views.frame_document loads it, with a stand-in for the canvas's chart drawing (frontend lib/kitChart)

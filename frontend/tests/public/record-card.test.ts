@@ -9,7 +9,7 @@ import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
 
-const APP = path.resolve(__dirname, '../../../backend/app')
+const APP = path.resolve(__dirname, '../../../server/thimble_browser/views/kit')
 const BRIDGE = readFileSync(path.join(APP, 'viewer_bridge.js'), 'utf8')
 const COLOUR = `window.__thimbleLabelOrder = ${readFileSync(path.join(APP, 'label_order.json'), 'utf8')}\n` + readFileSync(path.join(APP, 'viewer_colour.js'), 'utf8')
 const script = (js: string) => `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>`

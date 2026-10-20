@@ -98,15 +98,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
       </nav>
       <span className="shell-spacer" />
       <span ref={setTools} className="shell-tools">
-        <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />
-        <Button variant="icon" icon="redo" title={history.labels.redo ? `Redo: ${history.labels.redo}` : 'Redo'} aria-label="Redo" disabled={!history.labels.redo} onClick={history.redo} data-tel="redo" />
-        <Button variant="icon" icon="bug" title="Report a problem" aria-label="Report a problem" aria-haspopup="dialog" aria-expanded={problemOpen} onClick={() => {
-            setThemeOpen(false)
-            setSettingsOpen(false)
-            setPrefill(null)
-            setProblemOpen((o) => !o)
-          }}
-          data-tel="report-problem" />
+        {/* thimble browser has no undo, problem report or settings yet: their buttons come back with them */}
         <Button variant="icon" icon={links ? 'link' : 'link-off'} title={links ? 'Hide links' : 'Show links'} aria-label={links ? 'Hide links' : 'Show links'} aria-pressed={links} className={`shell-links${links ? ' on' : ''}`} onClick={toggleLinks} data-tel="links" />
         <Button variant="icon" icon="palette" title="Theme" aria-label="Theme" aria-haspopup="dialog" aria-expanded={themeOpen} onClick={() => {
             setSettingsOpen(false)
@@ -114,12 +106,6 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
             setThemeOpen((o) => !o)
           }}
           data-tel="theme" />
-        <Button ref={setGear} variant="icon" icon="gear" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => {
-            setThemeOpen(false)
-            setProblemOpen(false)
-            setSettingsOpen((o) => !o)
-          }}
-          data-tel="settings" />
       </span>
       {/* the popover hangs under the tools, flush with their right end */}
       <ThemePopover anchor={tools} open={themeOpen} onClose={() => setThemeOpen(false)} />

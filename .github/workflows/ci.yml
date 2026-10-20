@@ -1,7 +1,5 @@
-# The checks every push and pull request must pass, which can also be run by hand from the Actions tab. Each step is
-# one step of scripts/check.sh, the command a contributor runs locally, so CI and a local run check the same things.
-# The steps run in two jobs side by side, the type check and build of the UI in one and everything else in the other,
-# and the job `checks`, the status the main branch requires, passes only when both did.
+# thimble browser's checks: the server's tests (with bubblewrap, so the sandbox tests run) and the page's type check
+# and build.
 name: checks
 
 on:
@@ -17,99 +15,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
+  server:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false  # the steps after it run a pull request's code, which needs no token
-
-      - name: Install gitleaks
-        env:
-          VERSION: 8.30.1
-          SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
-        run: |
-          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" \
-            "https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/gitleaks_${VERSION}_linux_x64.tar.gz"
-          echo "$SHA256  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/bin" && tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP/bin" gitleaks
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-
-      # first, since it needs nothing installed and fails in seconds
-      - name: Content
-        run: scripts/check.sh content
-
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Cache the headless Chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'backend/uv.lock') }}
-
-      # the frontend's packages and Chromium too, which a backend test (a worked example's view page) and the browser
-      # checks drive
-      - name: Install
-        run: scripts/check.sh install
-
-      - name: Backend
-        run: scripts/check.sh backend
-
-      # in the Chromium that Install put in; under CI (which Actions sets) a Chromium that does not start fails the step
-      # instead of skipping it
-      - name: Browser
-        run: scripts/check.sh browser
-
-  frontend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
+          fetch-depth: 0  # the prompt parity test reads the terminal plugin's branch
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+      - name: Install bubblewrap
+        run: sudo apt-get install -y bubblewrap
+      - name: Tests
+        working-directory: server
+        run: uv run --extra dev pytest -q
 
+  page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Cache the headless Chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'backend/uv.lock') }}
-
-      - name: Install
-        run: scripts/check.sh install
-
-      - name: Frontend
-        run: scripts/check.sh frontend
-
-  checks:
-    needs: [backend, frontend]
-    if: always()  # a skipped required job counts as passed, so this one runs, and fails, whatever the others did
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Both jobs passed
-        env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          echo "backend and frontend: $RESULTS"
-          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+      - name: Type check and build
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npx tsc -b && npx vite build

@@ -19,9 +19,9 @@ const label = (labels: string[], colors: number[] = []) =>
 
 describe('the order new values take the label palette', () => {
   test('is one list: the JSON the view kit gets, the frontend constant and the kernel constant', () => {
-    const app = path.resolve(__dirname, '../../../backend/app')
+    const app = path.resolve(__dirname, '../../../server/thimble_browser/views/kit')
     const json = JSON.parse(readFileSync(path.join(app, 'label_order.json'), 'utf8'))
-    const py = readFileSync(path.join(app, 'kernel_thimble.py'), 'utf8')
+    const py = readFileSync(path.resolve(__dirname, '../../../server/thimble_browser/cards/kernel_thimble.py'), 'utf8')
     const kernel = JSON.parse(`[${/^LABEL_ORDER = \(([^)]*)\)/m.exec(py)![1]}]`)
     expect(json).toEqual(ORDER)
     expect([...LABEL_ORDER]).toEqual(ORDER)

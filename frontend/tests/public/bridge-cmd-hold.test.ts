@@ -9,9 +9,9 @@ import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
 
-const BRIDGE = readFileSync(path.resolve(__dirname, '../../../backend/app/viewer_bridge.js'), 'utf8')
+const BRIDGE = readFileSync(path.resolve(__dirname, '../../../server/thimble_browser/views/kit/viewer_bridge.js'), 'utf8')
 // the kit's formatted text, with what it needs loaded before it as views.frame_document loads them
-const KIT = ['viewer_colour.js', 'viewer_controls.js', 'viewer_text.js'].map((f) => readFileSync(path.resolve(__dirname, '../../../backend/app', f), 'utf8'))
+const KIT = ['viewer_colour.js', 'viewer_controls.js', 'viewer_text.js'].map((f) => readFileSync(path.resolve(__dirname, '../../../server/thimble_browser/views/kit', f), 'utf8'))
 const page = (platform: string) => `<!doctype html><html><head><script>Object.defineProperty(navigator, 'platform', { get: () => '${platform}' })</script><script>${BRIDGE.replace(/<\/script/gi, '<\\/script')}</script></head><body>
 <section data-anchor="view:board">
   <article id="one" data-anchor="board.jsonl#L1">the first post</article>

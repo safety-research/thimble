@@ -2,8 +2,8 @@
 // stripes a file row carries, the marks over the columns of the labels that are on and the focused one, a record's
 // gutter cells and marks, the marks a custom view's records take, and a text cut into segments at its spans. A class's
 // colour is an index into the label palette, --label-1..LABEL_COLOURS; 0 is --label-none, the grey of "no match".
-import labelOrder from '../../../backend/app/label_order.json'
-import labelWheel from '../../../backend/app/label_wheel.json'
+import labelOrder from '../../../server/thimble_browser/views/kit/label_order.json'
+import labelWheel from '../../../server/thimble_browser/views/kit/label_wheel.json'
 import { recordKey, recordOf } from '../lib/refs'
 import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow, ReadCut } from '../lib/types'
 
@@ -43,7 +43,7 @@ export const LABEL_COLOURS = 12
 export const LABEL_PICKS = 18
 
 /** The palette's places as the pickers show them, around the color wheel: a column per hue (red, orange, gold, green,
- * teal, sky, blue, purple, pink), its light place above its dark (backend/app/label_wheel.json, which the view kit's
+ * teal, sky, blue, purple, pink), its light place above its dark (server/thimble_browser/views/kit/label_wheel.json, which the view kit's
  * picker reads too). */
 export const LABEL_WHEEL: readonly (readonly number[])[] = labelWheel
 

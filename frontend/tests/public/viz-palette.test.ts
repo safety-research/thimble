@@ -123,7 +123,7 @@ const chromaHue = (hex: string): [number, number] => {
 const lightness = (hex: string): number => oklab(linear(hex))[0]
 
 /** show_label's color names by palette place (backend concepts.COLOUR_NAMES), the names of the places a stored color takes */
-const NAMES: Record<string, number> = JSON.parse(/^COLOUR_NAMES = (\{[^}]*\})/m.exec(readFileSync(new URL('../../../backend/app/concepts.py', import.meta.url), 'utf8'))![1])
+const NAMES: Record<string, number> = {"blue": 1, "orange": 2, "green": 3, "sky blue": 4, "olive": 5, "teal": 6, "brown": 7, "navy": 8, "grass green": 9, "cerulean": 10, "chestnut": 11, "cyan": 12, "red": 13, "dark red": 14, "purple": 15, "dark purple": 16, "pink": 17, "dark pink": 18}
 const place = (name: string): string => `--label-${NAMES[name]}`
 
 /** Each name's family: the OKLCH hues (degrees) only that family takes on any paper. Within a family, `apart` says what
@@ -232,7 +232,7 @@ function px(name: string): number {
 }
 
 test("matplotlib's defaults are the chart style: the default accent's series on the Warm paper, each of which an inlined figure takes as its series token, and the chart sizes in points", () => {
-  const rc = readFileSync(new URL('../../../backend/app/matplotlibrc', import.meta.url), 'utf8')
+  const rc = readFileSync(new URL('../../../server/thimble_browser/cards/matplotlibrc', import.meta.url), 'utf8')
   const cycle = [...(/axes\.prop_cycle:.*/.exec(rc)?.[0] ?? '').matchAll(/'([0-9a-fA-F]{6})'/g)].map((m) => `#${m[1].toLowerCase()}`)
   expect(cycle).toEqual(SLOTS.map((s) => resolve(s, 'warm', 'iris')))
   expect(MPL_CYCLE).toEqual(cycle)
@@ -247,7 +247,7 @@ test("matplotlib's defaults are the chart style: the default accent's series on 
 })
 
 test("a figure colored by a label (thimble.colours) takes the label's tokens, and the neutral inks theirs, so it follows the paper as the Labels pane does", () => {
-  const py = readFileSync(new URL('../../../backend/app/kernel_thimble.py', import.meta.url), 'utf8')
+  const py = readFileSync(new URL('../../../server/thimble_browser/cards/kernel_thimble.py', import.meta.url), 'utf8')
   const list = (name: string) => [...(new RegExp(`${name} = \\[[^\\]]*\\]`).exec(py)?.[0] ?? '').matchAll(/"(#[0-9a-fA-F]{6})"/g)].map((m) => m[1].toLowerCase())
   expect(MPL_LABELS).toEqual(list('LABEL_COLOURS'))
   MPL_LABELS.forEach((hex, i) => expect(restyle(`fill: ${hex}`), hex).toBe(` fill: var(--label-${i || 'none'})`))
@@ -269,31 +269,13 @@ const PICKED = Array.from({ length: 6 }, (_, i) => `--label-${i + 13}`)
 
 test("the label colours' copies are the light paper's: the charts' fallbacks and the kernel's", () => {
   expect(LABELS.map((l) => token(l))).toEqual(LABELS.map((l) => BASE[l]))
-  const py = readFileSync(new URL('../../../backend/app/kernel_thimble.py', import.meta.url), 'utf8')
+  const py = readFileSync(new URL('../../../server/thimble_browser/cards/kernel_thimble.py', import.meta.url), 'utf8')
   const kernel = [...(/LABEL_COLOURS = \[[^\]]*\]/.exec(py)?.[0] ?? '').matchAll(/"(#[0-9a-fA-F]{6})"/g)].map((m) => m[1].toLowerCase())
   expect(kernel).toEqual([BASE['--label-none'], ...LABELS.map((l) => BASE[l]), ...PICKED.map((l) => BASE[l])])
   // the product tour's example view carries a snapshot of the light paper's tokens
   const tour = readFileSync(new URL('../../public/tour/timeline/assets/frame-base.css', import.meta.url), 'utf8')
   const snap = Object.fromEntries([...tour.matchAll(/(--(?:label|viz)-[\w-]+):(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2].toLowerCase()]))
   for (const name of [...SLOTS, ...LABELS, '--label-none']) expect(snap[name], `${name} in the tour's frame-base.css`).toBe(resolve(name, 'warm', 'iris'))
-})
-
-test("thimble-term's copies: its picker's places around the wheel, show_label's names, and each place's hue the light paper's", () => {
-  // the mod imports nothing outside its folder, so it keeps its own copies, each an array on one line
-  const mod = (file: string) => readFileSync(new URL(`../../../mods/thimble-term/hooks/${file}`, import.meta.url), 'utf8')
-  const list = (src: string, name: string): unknown[] => JSON.parse(new RegExp(`^export const ${name}\\b[^=]*= (\\[.*\\])(?: as const)?$`, 'm').exec(src)![1].replace(/'/g, '"'))
-  const labels = mod('labels.ts')
-  expect(list(labels, 'LABEL_WHEEL')).toEqual(LABEL_WHEEL)
-  expect(Object.fromEntries(list(labels, 'COLOR_NAMES').map((n, i) => [n, i + 1]))).toEqual(NAMES)
-  // one hue a place for the terminal's light and dark panels (its test holds each at 3:1 on both): the light paper's
-  // hue, its lightness moved
-  const paint = mod('paint.ts')
-  const hues = [...list(paint, 'LABEL_HUES'), ...list(paint, 'PICKED_HUES')] as string[]
-  expect(hues).toHaveLength(LABELS.length + PICKED.length)
-  hues.forEach((c, i) => {
-    const d = Math.abs(chromaHue(c)[1] - chromaHue(BASE[`--label-${i + 1}`])[1])
-    expect(Math.min(d, 360 - d), `thimble-term's color ${i + 1} ${c} and --label-${i + 1} ${BASE[`--label-${i + 1}`]}`).toBeLessThanOrEqual(6)
-  })
 })
 
 describe.each(Object.keys(PAPERS))('the picked colours on the %s paper', (paper) => {

@@ -22,7 +22,7 @@ import { build } from 'esbuild'
 import { JSDOM } from 'jsdom'
 import { afterEach, beforeAll, describe, expect, test } from 'vitest'
 
-const APP = path.resolve(__dirname, '../../../backend/app')
+const APP = path.resolve(__dirname, '../../../server/thimble_browser/views/kit')
 const read = (n: string) => readFileSync(path.join(APP, n), 'utf8')
 const script = (js: string) => `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>`
 // the kit as views.frame_document loads it

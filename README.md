@@ -1,82 +1,58 @@
 <p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
 
-**thimble** is an open source Claude Code plugin for human oversight. It opens a workbench where you and Claude make sense of large volumes of agent output together. Where Claude Code answers in paragraphs that are hard to understand and verify, thimble answers visually, with charts and cards that cite every claim.
+# thimble browser
 
-> [!CAUTION]
-> - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
-> - **thimble is not an official Anthropic product.**
+A workspace in a web page for making sense of a folder of files with Claude. You open a folder, ask a question in the
+chat, and Claude answers with cards that show the evidence: charts, tables and the records themselves. Every number
+and quote in an answer is a link that opens the file at the lines it came from.
 
-For feedback, bug reports, or anything else, please reach out to [@mjoerke](https://github.com/mjoerke). I would love to hear from you!
+This branch is a prototype of thimble browser as a product of its own, apart from the thimble plugin for the terminal.
+It keeps the page of thimble 0.8 and puts a new, small server behind it.
 
-## Demo
+## Start
 
-https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
-
-## Installation
-
-### With Claude (recommended)
+You need Claude Code, signed in (run `claude` once and sign in), [uv](https://docs.astral.sh/uv/), and Node 20 or
+later. Card code runs in a sandbox, which on Linux is bubblewrap (`apt install bubblewrap`).
 
 ```
-claude "install thimble from https://github.com/safety-research/thimble"
+scripts/thimble-browser path/to/folder
 ```
-Instructions for agents installing thimble on the user's behalf are in [CLAUDE.md](CLAUDE.md).
 
-### Manual installation
+The first run builds the page. The server listens on 127.0.0.1, prints a sign-in link and opens it. Press Enter in
+its window for a new link. To try it on a made-up folder of agent runs: `scripts/thimble-browser samples/agent-runs`.
 
-1. Download the zip from the [latest release](https://github.com/safety-research/thimble/releases/latest).
-2. Unzip it.
-3. Run `bash scripts/install.sh` inside the unzipped folder.
+## What works
 
-For a development build, clone the repo and run `bash scripts/install.sh`. See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+- The file browser: the tree, readers for JSONL, CSV and Markdown, search in a file and across the folder, hover
+  previews of citations.
+- The chat, with threads: ⌘-click a card, a record or a passage to ask about it.
+- Cards on the canvas: plots, tables, diagrams, timelines, examples and notes. Their code runs in the sandbox.
+- Citations: a click opens the file at the cited lines, or the card at the cited value.
+- Explain marks: after each answer, terms you may not know get a teal mark that opens what they mean.
+- The report: Write drafts it from the chat and the cards, with figures and citations, and you edit it in place.
 
-## Usage
+Not yet: generative views, labels, the orientation, checks, settings, and card code on macOS.
 
-Run `thimble` in a folder with files you'd like to analyze, just like you run `claude`. Use `thimble mode terminal|browser` to switch between browser and terminal modes (see below).
+## How it works
 
-- To attach thimble to a running Claude Code session, run `/thimble`.
+- `frontend/` is the page (React), from thimble 0.8.
+- `server/` is the server (Python). It serves the page, reads the folder, keeps the workspace in
+  `~/.thimble-browser` (never in the folder), runs card code in the sandbox, and starts the person's own Claude Code,
+  headless, for each chat. Claude gets only Read, Grep and Glob inside the folder and thimble's card tools, so it
+  never asks for a permission.
+- `prompts/browser/` holds what Claude reads. The parts about writing for the person, citing and explaining terms are
+  the terminal plugin's own text, copied into `prompts/terminal/` by `scripts/sync-terminal-prompts` and named in
+  `prompts/shared.json`. A test checks that they match.
 
-### Terminal mode
+## Tests
 
-In terminal mode, thimble operates as a Claude Code mod and shows its work directly in the terminal, with no server or browser.
+```
+cd server && uv run --extra dev pytest
+```
 
-![terminal mode: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
-
-To switch a directory to terminal mode, run `thimble mode terminal` in it, then `thimble`. `thimble mode browser` switches it back.
-
-## Commands
-
-**Inside a Claude Code session**
-
-| Command | What it does |
-|---|---|
-| `/thimble` | open this folder in thimble and print the dashboard link |
-| `/thimble fresh` | archive this workspace and open an empty one |
-| `/thimble restore [<name>]` | bring an archived workspace back |
-| `/thimble:orient [focus]` | start an orientation |
-| `/thimble:label <name> [definition]` | define a label and apply it to the records |
-| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document |
-
-**From a shell** (`thimble help` lists every command)
-
-| Command | What it does |
-|---|---|
-| `thimble` | start Claude Code with thimble in this folder (a shortcut for `claude`, then `/thimble`); `thimble -c` continues the last session |
-| `thimble demo` | download the [demo datasets](demos/README.md) and open them in the browser |
-| `thimble mode browser\|terminal` | show thimble's work in the browser or in the terminal |
-| `thimble list`, `thimble purge <id>` | list the workspaces, or delete one |
-| `thimble doctor` | a checklist of what is installed and running, with the fix for each problem (`--verbose` for the details) |
-| `thimble unpair` | sign out every browser |
-| `thimble feedback` | write a problem report (a zip) |
-| `thimble update`, `thimble uninstall` | update to the latest release, or uninstall |
-
-## Requirements
-
-Claude Code (tested with 2.1.300), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
-
-## Security & Privacy
-
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`.
+`tests/test_prompt_parity.py` fails when the terminal plugin's text changes on its branch, or when a change that
+`prompts/shared.json` lists no longer applies. Run `scripts/sync-terminal-prompts` and look at the result.
 
 ## License
 
-Apache-2.0; see [LICENSE](LICENSE).
+Apache-2.0
