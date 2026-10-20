@@ -32,6 +32,8 @@ export interface TextRow {
   apiError?: string
   /** the model and token use of the turn this row ends (its `done` record), on the turn's last text row */
   usage?: { model?: string } & TurnUsage
+  /** the cards the turn made or changed (its `done` record's `cells`), drawn under its last text row */
+  cards?: string[]
 }
 export interface ToolResult {
   summary: string
@@ -234,6 +236,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
           const r = rows[k]
           if (r.kind === 'text' && !r.apiError) {
             r.usage = { ...e.usage, ...(e.model ? { model: e.model } : {}) }
+            if (e.cells?.length) r.cards = [...e.cells]
             return
           }
         }

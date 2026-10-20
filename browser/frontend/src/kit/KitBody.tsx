@@ -51,7 +51,7 @@ function pageMeasure(): Measure {
   return approxMeasure
 }
 
-export function KitBody({ cell }: { cell: Cell; width?: number }) {
+export function KitBody({ cell, width }: { cell: Cell; width?: number }) {
   const run = kitRunOf(cell)
   const { resolved } = useTheme()
   // what the analyst turned or pressed, for this run of the card: a new run draws from its own drawing again
@@ -60,6 +60,20 @@ export function KitBody({ cell }: { cell: Cell; width?: number }) {
   const [hover, setHover] = useState<string | null>(null)
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => setLive(null), [run])
+  // a place much narrower than the drawing (an answer's card in the chat) draws the program again at its own width in
+  // columns, as the terminal draws a card at the width it has, rather than shrinking the type
+  const fitW = width && run ? Math.max(32, Math.floor(width / CW)) : null
+  useEffect(() => {
+    if (!run || !fitW || fitW >= (run.w || run.drawing?.w || 0) * 0.8) return
+    let alive = true
+    programSandbox()
+      .run(String(cell.program ?? ''), run.data, { w: fitW, state: {}, title: cell.title, id: cell.id })
+      .then((d) => alive && setLive({ drawing: d, state: (d.state as Record<string, unknown> | undefined) ?? {} }))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [run, fitW, cell.program, cell.title, cell.id])
   const measure = useMemo(pageMeasure, [])
   const drawing = live?.drawing ?? run?.drawing ?? null
   const rendered = useMemo(

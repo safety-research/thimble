@@ -1986,3 +1986,28 @@ button.view-chip-values[aria-expanded='true'] {
   color: var(--text-secondary);
 }
 
+
+/* the cards a turn made, under its answer (chat/AnswerCards.tsx): the canvas card's face, a size for the column */
+.chat-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.chat-card {
+  margin: 0;
+  padding: 10px 12px 12px;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.chat-card-q {
+  display: block;
+  margin: 0 0 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font: 600 var(--text-ui-sm) / 1.4 var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.chat-card-q:hover { text-decoration: underline; }
+.chat-card-body { overflow-x: auto; }
+.chat-card-take { margin-top: 8px; color: var(--text-primary); }
