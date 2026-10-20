@@ -32,7 +32,7 @@ import { paintRegions, selectable } from './cells'
 import { cardFrame, frameWidth } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
-import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
+import { newRecord, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
@@ -750,13 +750,16 @@ export async function saveRecord($: Engine, rec: MsgRecord): Promise<void> {
 
 /** A record: this session's, else the one a resumed session left on disk. */
 export async function recordNow($: Engine, row: string): Promise<MsgRecord | null> {
+  // a record an earlier version kept with an explain after its text: its marks placed again, so a press, ] and the
+  // drawing count the same marks
+  const placed = (r: MsgRecord) => ((r.marks || []).some(m => (m as Any).loose) ? (remark(r) as MsgRecord) : r)
   const held = (await $.state.get({ ...MSG, id: row })).value as MsgRecord | null | undefined
-  if (held) return held
+  if (held) return placed(held)
   const f = await msgFilesNow($)
   if (!f.dir) return null
   try {
     const file = `${f.dir}/${safe(row)}.json`
-    if (await $.fs.exists(file)) return JSON.parse(String(await $.fs.read(file))) as MsgRecord
+    if (await $.fs.exists(file)) return placed(JSON.parse(String(await $.fs.read(file))) as MsgRecord)
   } catch {
     // a record it cannot read: the message is drawn from its words
   }

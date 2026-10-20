@@ -670,6 +670,33 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   expect(textOf(await $.ui.render(RESUMED))).toContain('Interpretation')
 })
 
+test('a record an earlier version kept with an explain after its text: the explain stands inside the citation, and a press on it opens it', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  const dir = `${ROOT}/thimble/messages/s-1`
+  const TEXT = 'Most requests carry only an action, such as [browse-bare](events.jsonl#L1). The other [30](q1#day=2026-06-18@n) keep more.'
+  const at = (s: string) => ({ start: TEXT.indexOf(s), end: TEXT.indexOf(s) + s.length })
+  const cite1 = { kind: 'cite', ...at('[browse-bare](events.jsonl#L1)'), ref: 'events.jsonl#L1', label: 'browse-bare' }
+  const cite2 = { kind: 'cite', ...at('[30](q1#day=2026-06-18@n)'), ref: 'q1#day=2026-06-18@n', label: '30' }
+  const rec = { v: 1, row: AT, session: 's-1', text: TEXT, shown: null, marks: [cite1, cite2, { kind: 'gloss', start: TEXT.length, end: TEXT.length, gloss: 'g1', loose: true, inLink: true }], glosses: { g1: { term: 'browse-bare', title: 'browse-bare', body: 'A request that only reads a page.' } }, verbs: {}, objects: [], final: true }
+  w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'requests?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
+  w.files[`${dir}/${AT}.json`] = JSON.stringify(rec)
+  const ui = await $.ui.mount({ ...(MOUNT as object), props: { text: TEXT, isFirstOfReply: true } } as never)
+  await clock.settle()
+  const tree = await ui.drawn()
+  expect(textOf(tree)).not.toContain('explain:')
+  const g = buttons(tree).find(b => b.props.label === 'explain browse-bare')!
+  expect(g).toBeDefined()
+  await ui.press({ key: g.props.key })
+  await clock.settle()
+  // the tray opens on the explainer pressed, not on the citation after it
+  const band = textOf(await $.ui.render(BAND))
+  expect(band).toContain('╭─ browse-bare ─')
+  expect(band).toContain(' explain ─')
+  expect(band).not.toContain('╭─ 30 ')
+  await ui.unmount()
+})
+
 test('a failure reads as plain words, never JSON; a refusal that needs nothing from the person says nothing', () => {
   // the engine refuses a scroll that a key asked for, or one to a mark not drawn now: the tray shows the mark anyway
   expect(plainWhy({ deny: 'not person-initiated' })).toBeNull()
