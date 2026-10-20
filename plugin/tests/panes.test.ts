@@ -130,7 +130,7 @@ test('a card under a reply is drawn as it was left (its state, its part); at res
   // ] gives the card the focus: the bar names its keys, then the host's
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
-  expect(textOf(await $.ui.render(HINT))).toContain('j next day · o open detail · ] next · 0 back')
+  expect(textOf(await $.ui.render(HINT))).toContain('j next day · a ask · ] next · 0 back')
   // j now is the card's: its program answers, and the state is kept for every surface
   expect(await press($, clock, edit('j'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
@@ -139,6 +139,24 @@ test('a card under a reply is drawn as it was left (its state, its part); at res
   // a letter straight after it: j began a word, and the card goes back to where it was
   expect(await press($, clock, edit('u'))).toEqual({ text: 'ju', cursor: 2 })
   expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!).state).toEqual({ at: 2 })
+})
+
+test('a card reached with ] says a ask, as a citation and an explainer do; a opens its detail in the side panel with the input bar holding the keys', async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  await savedTurn($, clock)
+  await reply($)
+  await clock.settle()
+  expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  const bar = textOf(await $.ui.render(HINT))
+  expect(bar).toContain('a ask · ] next · 0 back')
+  expect(bar).not.toContain('open detail')
+  expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await clock.settle() }
+  // the card's detail in the side panel, its input bar holding the keys: what is typed next is the question
+  expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  expect(textOf(await $.ui.render(HINT))).toContain('esc close')
 })
 
 test('a card whose key is a verb\'s letter: at rest the verb takes it, with the focus the card does', async ($, on) => {
@@ -165,7 +183,7 @@ test('a card whose key is a verb\'s letter: at rest the verb takes it, with the 
   // ] gives the card the focus, and v is its flip now, named in the bar
   await press($, clock, edit(']'))
   await clock.settle()
-  expect(textOf(await $.ui.render(HINT))).toContain('v flip · o open detail · ] next · 0 back')
+  expect(textOf(await $.ui.render(HINT))).toContain('v flip · a ask · ] next · 0 back')
   expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(p => p.event?.key === 'v' && p.mode === 'inline')).toBe(true)

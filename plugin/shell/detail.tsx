@@ -38,7 +38,7 @@
 //   window     a page taller than its rows shows the rows around the selected part; once the person opens the bar
 //              under the card (↵ details, e examples, a flip) it shows the bar, and the wheel moves it from there.
 //              While the input bar holds the keys the wheel scrolls the thread's conversation instead
-// A card under a reply shows `1 open detail`; 1 on an empty prompt opens the latest card's detail.
+// A card reached with ] names `a ask`, which opens its detail here; 1 on an empty prompt opens the latest card's detail.
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Sel } from '../types'
@@ -171,6 +171,8 @@ let landed: string | null = null
 const fields = new Map<string, { seen: string }>()
 // the latest request for the keys (focusEntry): only its later checks run
 let keysAsked = 0
+// a question on its way to its thread (askHere)
+let sending = false
 let askDrawn = 0
 function askRedraw($: Engine): void {
   void $.state.set(ASKLINE, ++askDrawn).catch(() => undefined)
@@ -968,7 +970,11 @@ function openedOnly(grid: Any): Any {
  *  ring goes back to the thing. */
 async function askHere($: Engine, text: string): Promise<void> {
   if (!String(text || '').trim()) return
-  const problem = await askSide($, text)
+  // the question stays in the input bar while its thread's agent starts: a second ↵ then sends nothing more
+  if (sending) return
+  sending = true
+  let problem: string | null
+  try { problem = await askSide($, text) } finally { sending = false }
   if (problem) { $.ui.toast(`× ${problem}`); return }
   // the line empties: a field drawn afresh, so no word of the question stays in it
   draft = ''
@@ -1452,6 +1458,7 @@ export function markOpen(open: boolean): void {
 /** For tests: the module's memory, cleared. */
 export function resetDetail(): void {
   isOpen = false
+  sending = false
   drawn = null
   paneDrawn = null
   showing = 'card'

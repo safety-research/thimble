@@ -1561,12 +1561,13 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   // a key the host keeps never reaches the card here (Claude Code's ← → ↑ ↓ ↵ among them), so the bar never names it
   const taken = hostKeys('inline', 'terminal')
   const own = keysOf(d ? { ...d, on: (d.on || []).filter((h: Any) => !(String(h?.name) in taken)) } : d)
-  // a card with pages: , and . turn them when its own keys do not, and o opens them to read (1 where the card takes
-  // o itself); 0 gives the keys back, since esc at the prompt never reaches a plugin
+  // a asks about the card, as about a citation or an explainer: its detail in the side panel, the input bar holding the
+  // keys (1 where the card takes a itself). A card with pages: , and . turn them when its own keys do not, and o opens
+  // them to read; 0 gives the keys back, since esc at the prompt never reaches a plugin
   const pk = pageKnob(d)
-  const o = d && cardTakesKey(d, 'o') ? '1' : 'o'
-  const open = pk ? (PAGES_DEFAULT === 'all' ? `${o} read all ${pagesWord(pk)}` : `${o} open ${pagesWord(pk)}`) : `${o} open detail`
-  return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), open, '] next', '0 back'].join(' · ') }
+  const ask = `${d && cardTakesKey(d, 'a') ? '1' : 'a'} ask`
+  const pages = pk && !(d && cardTakesKey(d, 'o')) ? [PAGES_DEFAULT === 'all' ? `o read all ${pagesWord(pk)}` : `o open ${pagesWord(pk)}`] : []
+  return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), ask, ...pages, '] next', '0 back'].join(' · ') }
 }
 
 /** The keys of what has focus now: the top of the focus stack that is still there; a surface whose state is set but
@@ -1989,8 +1990,8 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     if (await paneTakes($, 'proposals', args, ev)) return { box: consume, work: () => paneFire($, 'proposals', args, ev) }
     if (/^[0-9]$/.test(k)) return { box: null }
   }
-  // a card with the focus: its own keys win over the verbs (the bar names them); o (or 1) opens its detail, ] [ step on, 0 and
-  // ⌫ give the keys back; a key it does not take gives the keys back and types
+  // a card with the focus: its own keys win over the verbs (the bar names them); a (or 1, or o) asks about it in its
+  // detail, ] [ step on, 0 and ⌫ give the keys back; a key it does not take gives the keys back and types
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   if (cf && !pick) {
     if (k === '0' || k === 'backspace') return { box: consume, work: () => setCardFocus($, null) }
@@ -2007,8 +2008,9 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     }
     // , and . turn the card's page knob (else its only knob) a step, here where it is drawn
     if ((k === ',' || k === '.') && d && turnable(d)) return { box: consume, work: () => inlineTurn($, cf, null, k === '.' ? 1 : -1) }
-    // o opens its detail, as 1 does, when the card does not take o itself
-    if (k === 'o') return { box: consume, work: async () => { await setCardFocus($, null); await openCard($, cf) } }
+    // a asks about it: its detail, the input bar holding the keys, as 1 does; o too (its pages to read), when the card
+    // does not take either itself
+    if (k === 'a' || k === 'o') return { box: consume, work: async () => { await setCardFocus($, null); await openCard($, cf) } }
     return { box: null, work: () => setCardFocus($, null) }
   }
   if (k === ']' || k === '[') return { box: consume, work: async () => { await setPick($, null); await stepMark($, k === ']' ? 1 : -1) } }
@@ -2075,7 +2077,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
 // ------------------------------------------------------------------------------------------------ drawing
 
 /** The one quiet row under a label's card while the model reads its records (`label… 120 of 412 records`); nothing at
- *  rest. Its keys (`1 open detail`) are in the hint line under the prompt, and the card the keys act on shows it by
+ *  rest. Its keys (`a ask`) are in the hint line under the prompt, and the card the keys act on shows it by
  *  its frame. */
 function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null

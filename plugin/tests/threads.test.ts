@@ -356,6 +356,24 @@ test('a question begun gives the conversation more rows, and the citations they 
   expect(w.opened.slice(opens).some(x => x.id === 'object' && x.focus)).toBe(true)
 })
 
+test('a second ↵ while the thread\'s agent starts sends nothing more: the question is asked once', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, clock)
+  await press($, clock, edit(']'))
+  await press($, clock, edit('a'))
+  await clock.advance(2000)
+  await pane($, clock)
+  const ui = await mounted($)
+  const field = (await fieldOf($)).key
+  // ↵, and ↵ again before the first has started the thread's agent
+  await Promise.all([ui.input({ key: field, text: 'why so high?' }), ui.input({ key: field, text: 'why so high?' })])
+  await clock.settle()
+  expect(w.spawns.length).toBe(1)
+  const file = JSON.parse(w.files[`${ROOT}/thimble/threads/${SESSION}/mark-aaaaaaaa-bbbb-cccc-dddd-q1-day-2026-06-18-n.json`]!)
+  expect(file.asks.map((a: Any) => a.text)).toEqual(['why so high?'])
+})
+
 test('the thread list opens from the prompt, never from inside a thread: t in the panel is a letter of the question; the bar\'s threads opens the list, which has no input bar, and a press on a row opens that thread', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
