@@ -135,6 +135,7 @@ def _record(ws: str, ask: dict[str, Any], state: str, text: str, **extra: Any) -
     """The row's new state, in the chat the run belongs to."""
     ask.update(state=state, text=text, **extra)
     _save(ws, ask)
+    store.notify(ws, ask["concept"], "ask", rows=False)  # the page reads the label again: its editor shows the ask
     rec = {"type": "label_run", "id": ask["id"], "concept": ask["concept"], "name": ask["name"], "state": state,
            "text": text, **extra}
     if state == "asked":

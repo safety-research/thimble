@@ -645,7 +645,8 @@ export function draftBody(d: LabelDraft, colour: number, used: readonly number[]
   return {
     name: d.name,
     unit: unitOfOver(d.over, marks),
-    ...(files ? { marks, glob: d.glob } : {}),
+    // a label described with no files chosen reads every file, a scope the analyst can narrow in its card
+    ...(files ? { marks, glob: d.glob || '*' } : {}),
     kind: d.kind,
     model: '',
     classes: draftClasses(d.values, colour, used),
