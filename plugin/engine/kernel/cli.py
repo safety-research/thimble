@@ -394,7 +394,7 @@ def cmd_save(a: argparse.Namespace) -> int:
         print("  source rows behind its values: " + ", ".join(f"{f} ({x['count']:,})" for f, x in list(rows.items())[:6]))
     t = lin["coverage"]["total"]
     if t["not_read_files"]:
-        print(f"  this session has not seen {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows): none of their lines entered Claude's context")
+        print(f"  this session has not seen {t['not_read_files']:,} of {t['files']:,} source files: none of their lines entered Claude's context")
     ex = _value_example(obj)
     if ex:
         print(f"Cite one of its values as {ex}; `thimble rows {ex}` shows where it came from.")
@@ -590,7 +590,7 @@ def cmd_coverage(a: argparse.Namespace) -> int:
         s = c.get("session")
         if s:
             t = s["total"]
-            print(f"When it was saved, the session had not seen {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows): none of their lines had entered Claude's context.")
+            print(f"When it was saved, the session had not seen {t['not_read_files']:,} of {t['files']:,} source files: none of their lines had entered Claude's context.")
         return 0
     cov = LIN.coverage(st, None if a.all else "")
     if a.json:

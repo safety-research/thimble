@@ -1145,9 +1145,12 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     model_rows = sum(o["model_rows"] for o in out_files)
     computed_rows = sum(o["computed_rows"] for o in out_files)
     not_seen = [o for o in out_files if not o["seen"]]
+    seen_files = len(out_files) - len(not_seen)
+    # the bar's share is of files, read when some of a file entered Claude's context: each file counts once, whatever its
+    # unit, so an image weighs as much as a log of 14,591 records; what a query or a rule only computed over is not read
     total = {"files": len(files), "rows": rows_all,
-             "touched_files": sum(1 for o in out_files if o["touched"]), "seen_files": len(out_files) - len(not_seen),
-             "seen_rows": round(seen_rows), "seen_share": seen_rows / rows_all if rows_all else 0.0,
+             "touched_files": sum(1 for o in out_files if o["touched"]), "seen_files": seen_files,
+             "seen_rows": round(seen_rows), "seen_share": seen_files / len(files) if files else 0.0,
              "model_files": sum(1 for o in out_files if o["model"]), "model_rows": model_rows,
              "model_share": model_rows / rows_all if rows_all else 0.0,
              "computed_files": sum(1 for o in out_files if o["computed_rows"]), "computed_rows": computed_rows,
@@ -1267,9 +1270,9 @@ def percent(part: float) -> str:
 
 
 def coverage_sentence(cov: dict[str, Any]) -> str:
-    """What the session read, in words that claim no more than happened, each file in its own unit: a file is read when
-    some of it entered Claude's context; what a label's model read and what a query or a rule computed over are said
-    apart, and a search, a listing or a count is not read."""
+    """What the session read, in words that claim no more than happened: first the share of files read (the bar's
+    number), then each unit's part; a file is read when some of it entered Claude's context; what a label's model read
+    and what a query or a rule computed over are said apart, and a search, a listing or a count is not read."""
     t = cov["total"]
     if not t["files"]:
         return "There are no files."
@@ -1278,8 +1281,8 @@ def coverage_sentence(cov: dict[str, Any]) -> str:
     if not t["not_seen_files"]:
         out = [f"Read all {t['files']:,} files, at least in part: {share} entered Claude's context."]
     elif t["seen_files"]:
-        out = [f"Read: {share} entered Claude's context, from {t['seen_files']:,} of {t['files']:,} files; "
-               f"{t['touched_files']:,} were touched in some way."]
+        out = [f"Read {t['seen_files']:,} of {t['files']:,} files ({percent(t['seen_files'] / t['files'])}), at least in part: "
+               f"{share} entered Claude's context; {t['touched_files']:,} were touched in some way."]
     else:
         out = [f"Read: no part of the {t['files']:,} files entered Claude's context; {t['touched_files']:,} were touched in some way."]
     model, computed = amounts(units, "model"), amounts(units, "computed")
