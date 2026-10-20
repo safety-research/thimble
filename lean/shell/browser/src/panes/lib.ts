@@ -63,28 +63,22 @@ export async function readStore(name: string): Promise<unknown> {
 }
 
 /** A card a program shows inside itself (the tray's): a citation's source card from the page server (cards.js
- *  citeCard, the terminal's own), or a term's explain card, each part drawn in the page's sandbox at `w`. */
+ *  citeCard, the terminal's own), or a term's explain card, each part and each section's part drawn in the page's
+ *  sandbox at `w` (cards.js drawnCard, as the terminal draws them). */
 async function cardWant(c: any, w: number, h: number): Promise<unknown> {
+  const cards = await serverModule('code/shell/cards.js')
   let spec: any
-  if (c?.kind === 'gloss') spec = (await serverModule('code/shell/cards.js')).explainerCard({ gloss: c.gloss || {} })
+  if (c?.kind === 'gloss') spec = cards.explainerCard({ gloss: c.gloss || {} })
   else if (typeof c?.ref === 'string' && c.ref) {
     spec = await api(`card?ref=${encodeURIComponent(c.ref)}&label=${encodeURIComponent(c.kind === 'spark' ? 'sparkline' : String(c.label || c.ref))}&room=${h}`)
     if (spec.error) return { problem: spec.error, drawings: [], links: [] }
   } else return { problem: 'this mark names no ref, so there are no rows to show', drawings: [], links: [] }
-  if (spec.problem) return { title: spec.title, right: spec.right, problem: spec.problem, drawings: [], links: [] }
-  const drawings: any[] = []
-  for (const part of spec.parts || []) {
-    // each part its own object, so the page's cache of drawings keeps them apart
-    const id = `card-${hashOf(String(part.program) + JSON.stringify(part.data ?? null))}`
-    try {
-      const d = await drawingOf({ id, version: 1, program: part.program, data: part.data ?? {} }, { w, mode: 'inline' })
-      if (d?.error && part.pic) continue
-      drawings.push(d)
-    } catch (err: any) {
-      if (!part.pic) return { problem: `the card could not be drawn: ${String(err?.message || err).slice(0, 160)}`, drawings: [], links: [] }
-    }
-  }
-  return { title: spec.title, right: spec.right, drawings, links: spec.links || [], ...(spec.why ? { why: spec.why } : {}) }
+  // each part its own object, so the page's cache of drawings keeps them apart; a card drawn whole keeps its own id,
+  // so its rows' refs read as the card's
+  return cards.drawnCard(spec, (part: any) => {
+    const hash = hashOf(String(part.program) + JSON.stringify(part.data ?? null))
+    return drawingOf({ id: part.id || `card-${hash}`, version: `cite-${hash}`, program: part.program, data: part.data ?? {} }, { w, mode: 'inline' })
+  })
 }
 
 function hashOf(s: string): string {

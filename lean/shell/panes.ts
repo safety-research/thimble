@@ -298,8 +298,9 @@ export async function paneEl($: Engine, e: Any, name: string, args: Record<strin
   const els = $.ui.resolve(e) as Any
   const d = await paneRun($, name, args, size)
   const grid = renderTerm(d, { w: size.w })
+  // the part the program selected (k.select) is marked as a card's selected part is
   return paintRegions(grid, els, {
-    theme: theme(), key: `p-${name}`, frame: o.frame ?? null, painted: !!o.painted,
+    theme: theme(), key: `p-${name}`, frame: o.frame ?? null, painted: !!o.painted, selected: typeof d?.selected === 'string' ? d.selected : null,
     onPress: (id: string, dir?: number) => { void paneFire($, name, args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) },
   })
 }

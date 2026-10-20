@@ -309,3 +309,59 @@ def test_counts_of_a_groupby_loop_keep_their_own_rows_beside_the_rows_found_by_k
     assert sh["why"].startswith(f"{q['id']} does not keep which rows this value used: these are the")
     st_ = LIN.resolve(st, f"{q['id']}#run=alpha@steps")
     assert st_["count"] == 5 and "why" not in st_
+
+
+# ------------------------------------------------------------------ the span a citation of a file opens
+
+
+def test_a_quote_resolves_to_its_span_the_rows_around_it_and_the_quoted_words_in_the_field_that_holds_them(root: Path) -> None:
+    with open(root / "say.jsonl", "w") as f:
+        for i in range(1, 7):
+            f.write(json.dumps({"user": f"u{i}", "body": f"page body {i}", "change_summary": f"summary {i}"}) + "\n")
+        f.write(json.dumps({"user": "kim", "body": "a long page body", "change_summary": "add SEC county map sources"}) + "\n")
+        f.write(json.dumps({"user": "lee", "body": "the next body", "change_summary": "tidy"}) + "\n")
+    st = Store(root)
+    r = LIN.resolve(st, "say.jsonl#L7", label='"add SEC county map"')
+    sp = r["span"]
+    assert sp["path"] == "say.jsonl" and sp["file"] == str((root / "say.jsonl").resolve()) and sp["unit"] == "line"
+    # two rows before it, the one after it (the file ends there), each as its words
+    assert [(x["n"], x["hot"]) for x in sp["rows"]] == [(5, False), (6, False), (7, True), (8, False)]
+    assert sp["rows"][0]["text"] == "page body 5"
+    hot = sp["rows"][2]
+    # the quote is not in the row's words (its body): the row reads as the field that holds it, the quote placed
+    assert hot["field"] == "change_summary" and hot["text"] == "add SEC county map sources"
+    assert hot["text"][hot["at"][0]:hot["at"][1]] == "add SEC county map"
+    assert '"change_summary": "add SEC county map sources"' in sp["raw"]
+    # a quote in the row's words is marked there, with no field named
+    hot = LIN.resolve(st, "say.jsonl#L7", label='"a long page"')["span"]["rows"][2]
+    assert hot["text"] == "a long page body" and hot["at"] == [0, 11] and "field" not in hot
+    # words that quote nothing (a number) mark nothing
+    assert "at" not in LIN.resolve(st, "say.jsonl#L7", label="7 saves")["span"]["rows"][2]
+    # an ellipsis splits a quote: from its first part to the end of its last
+    hot = LIN.resolve(st, "say.jsonl#L7", label="“add SEC … map”")["span"]["rows"][2]
+    assert hot["text"][hot["at"][0]:hot["at"][1]] == "add SEC county map"
+
+
+def test_lines_of_a_text_file_resolve_to_their_span_and_a_query_or_a_whole_file_to_none(root: Path) -> None:
+    (root / "notes.md").write_text("# notes\nfirst\nsecond line here\nthird\nfourth\nfifth\n")
+    st = Store(root)
+    sp = LIN.resolve(st, "notes.md#L3", label='"second line"')["span"]
+    assert [(x["n"], x["hot"], x["text"]) for x in sp["rows"]] == [(1, False, "# notes"), (2, False, "first"), (3, True, "second line here"), (4, False, "third"), (5, False, "fourth")]
+    assert sp["rows"][2]["at"] == [0, 11] and "raw" not in sp
+    assert [x["n"] for x in LIN.resolve(st, "notes.md#L2-3")["span"]["rows"]] == [1, 2, 3, 4, 5]
+    q = Q.run(st, "per user", 'df = load("edits.jsonl")\ntally(df, "user")')
+    assert "span" not in LIN.resolve(st, f"{q['id']}#user=ana@n")
+    assert "span" not in LIN.resolve(st, "edits.jsonl")
+    assert LIN.span(st, "edits.jsonl#L99") is None
+
+
+def test_a_value_of_a_card_names_the_refs_its_part_carries(root: Path) -> None:
+    from kernel import objects as O
+
+    st = Store(root)
+    q = Q.run(st, "edits per day", 'df = load("edits.jsonl")\ntally(df, "day")')
+    O.save(st, "per-day", {"title": "Edits per day", "data": {"days": q["id"]}})
+    r = LIN.resolve(st, "obj:per-day#/days/1/n")
+    step = r["chain"][0]
+    assert step["step"] == "object" and step["id"] == "01-per-day"
+    assert step["marks"] == ["obj:01-per-day#/days/1/n", "obj:01-per-day#/days/1", f"{q['id']}#day=2026-03-02"]

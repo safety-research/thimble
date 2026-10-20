@@ -24,6 +24,17 @@ const VERBS = [
   { key: 't', name: 'trace', line: 'where it came from', phrase: 'where these numbers come from', picked: true },
 ]
 const RESOLVED = { ref: 'q1#day=2026-06-18@n', chain: [{ step: 'query', id: 'q1', about: 'saves per day' }], rows: ['revisions.jsonl#L28-31'], count: 4, records: [{ ref: 'revisions.jsonl#L28', text: 'x' }], notes: [] }
+// a quote's row, as `thimble resolve --json` gives its span: the rows around it, the quoted words placed in their field
+const QUOTED = {
+  ref: 'revisions.jsonl#L28', chain: [{ step: 'source', ref: 'revisions.jsonl#L28', kind: 'jsonl' }], rows: ['revisions.jsonl#L28'], count: 1, records: [], notes: [],
+  span: { path: 'revisions.jsonl', file: '/data/revisions.jsonl', kind: 'jsonl', unit: 'line', cited: 1, raw: '{\n "label": "watcher",\n "change_summary": "the totals do not match"\n}',
+    rows: [{ ref: 'revisions.jsonl#L27', n: 27, hot: false, text: 'an earlier save' }, { ref: 'revisions.jsonl#L28', n: 28, hot: true, text: 'the totals do not match', at: [4, 10], field: 'change_summary', meta: 'watcher' }] },
+}
+/** Tray cards drawn as one line of what each part shows (its head, or its rows with the cited one marked), where a
+ *  test reads which part the tray shows: the test's sandbox runs no program from a string. */
+let realCards = false
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const partWords = (d: any): string => String(d?.head ?? (Array.isArray(d?.rows) ? d.rows.map((r: { n: string; hot: boolean; text: string }) => `${r.n} ${r.hot ? '▌ ' : ''}${String(r.text).replace(/\{\w+:|\}|\*\*/g, '')}`).join(' / ') : ''))
 
 const TRACE = { ...OBJECT, id: '02-trace', title: 'Trace · Jun 18', verb: 'trace' }
 // what prep.mjs answers for a save's check (its interactions tried once): all ran, unless a test sets a failure
@@ -75,12 +86,14 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
       files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: id, version: 1 }) + '\n'
       return { value: { exitCode: 0, stdout: `saved ${id} v1: thimble/objects/${id}.json`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
-    if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing, verbs: VERBS, problems: [], ...(JSON.parse(String(e.init?.stdin || '{}')).check ? { check: checked } : {}) }
+    const prep = e.argv.some(a => a.endsWith('prep.mjs')) ? JSON.parse(String(e.init?.stdin || '{}')) : null
+    if (prep && realCards && prep.noVerbs) out = { drawing: { ...DRAWING, w: prep.w, h: 1, root: { t: 'text', runs: [{ s: partWords(prep.object.data), tone: 'ink' }], wrap: false }, regions: [] }, verbs: [], problems: [] }
+    else if (prep) out = { drawing, verbs: VERBS, problems: [], ...(prep.check ? { check: checked } : {}) }
     else if (e.argv.some(a => a.endsWith('verb.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       inputs.push(input)
       out = verb(input)
-    } else if (e.argv.includes('resolve')) out = RESOLVED
+    } else if (e.argv.includes('resolve')) out = e.argv.includes('revisions.jsonl#L28') ? QUOTED : RESOLVED
     else if (e.argv.includes('coverage')) out = { files: [{ path: 'revisions.jsonl', rows: 300, lines: 300, status: 'computed', computed: 102 }, { path: 'events.jsonl', rows: 300, lines: 300, status: 'not read', computed: 0 }] }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -308,9 +321,56 @@ test('a reply draws its citations inline, each underlined and a press that opens
   expect(card).toContain('Jun 18')
   // the tray's keys are in the thimble line under it, not on its frame
   expect(card.split('╯')[0]).not.toContain('1 ask')
-  expect(await hintOf($)).toContain('thimble  1 ask · 0 close · ] next')
+  // with the keys of the card's sections: the rows behind the value, and its code
+  expect(await hintOf($)).toContain('thimble  1 ask · r rows · c code · 0 close · ] next')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
+})
+
+test('a quote opens its span under a link to its file, drawn as Claude Code draws a file link; c shows the record as the file holds it in the same panel, and a letter typed straight after c is a word', async ($, on) => {
+  const w = world(on)
+  w.files[`${ROOT}/revisions.jsonl`] = '{}\n'
+  const clock = mock.clock(on)
+  realCards = true
+  try {
+    await markedTurn($, on, clock)
+    await press($, clock, edit(']'))
+    await press($, clock, edit(']'))
+    // the card is read through the kernel once the tray asks for it
+    await $.ui.render(BAND)
+    await clock.settle()
+    const band = await $.ui.render(BAND)
+    // the cited row in full, the quoted words in their field, the row before it stepped back
+    expect(textOf(band)).toContain('27 an earlier save / 28 ▌ change_summary: the totals do not match')
+    // the file, as a link Claude Code's own Markdown draws: an OSC 8 hyperlink to the file, its line as the fragment
+    expect(markdowns(band)).toContain('↗ [revisions.jsonl:28](file:///data/revisions.jsonl#L28)')
+    expect(await hintOf($)).toContain('thimble  1 ask · c raw · 0 close · ] next')
+    // c: the record as the file holds it, in place of the span, in the same panel
+    expect(await press($, clock, edit('c'))).toEqual({ text: '', cursor: 0 })
+    let now = textOf(await $.ui.render(BAND))
+    expect(now).toContain('revisions.jsonl:28, as the file holds it')
+    expect(now).not.toContain('27 an earlier save')
+    expect(now).toContain('cite · revisions.jsonl · raw')
+    expect(await hintOf($)).toContain('thimble  1 ask · c raw · 0 back · ] next')
+    // 0 brings the span back; the tray stays open
+    expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
+    now = textOf(await $.ui.render(BAND))
+    expect(now).toContain('28 ▌ change_summary')
+    expect(now).not.toContain('as the file holds it')
+    // a number has no file of its own: no link under it
+    await press($, clock, edit('['))
+    await $.ui.render(BAND)
+    await clock.settle()
+    expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
+    expect(markdowns(await $.ui.render(BAND)).some(m => m.startsWith('↗'))).toBe(false)
+    await press($, clock, edit(']'))
+    // c, then a letter at once: the person began a word (a question for the mark's thread), so c is given back
+    await press($, clock, edit('c'))
+    expect(await press($, clock, edit('a'))).toEqual({ text: 'ca', cursor: 2 })
+    expect(textOf(await $.ui.render(BAND))).not.toContain('as the file holds it')
+  } finally {
+    realCards = false
+  }
 })
 
 // ------------------------------------------------------------------------------------------------ verbs, pressed
