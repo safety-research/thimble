@@ -24,6 +24,7 @@ the Report tab and the documents' figures.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from fastapi import Body, HTTPException
@@ -127,9 +128,14 @@ async def edit_document(t: Any, args: dict[str, Any]) -> Result:
 
 # ---- the write as it streams in
 
+# a citation or figure still streaming in at the end of a draft, which would show as raw Markdown until it closes
+_OPEN_LINK = re.compile(r"!?\[\[?[^\]\n]*(\]\([^)\n]*|\|[^\]\n]*)?$")
+
+
 def draft_of(md: str, name: str, args: dict[str, Any]) -> str | None:
-    """What the document will be once the call `name` streaming in with `args` so far is saved, as far as it came;
-    None while that cannot be told yet. Pure."""
+    """What the document will be once the call `name` streaming in with `args` so far is saved, as far as it came, less
+    a link not yet closed at its end; None while that cannot be told yet. Pure."""
+    args = {k: _OPEN_LINK.sub("", v) if k == list(args)[-1] and isinstance(v, str) else v for k, v in args.items()}
     if name == "write_document":
         text = str(args.get("text") or "").lstrip()
         return report.attribute(md, text, "claude") if text.startswith("# ") else None
