@@ -3,13 +3,14 @@
 //
 //   the graph       each claim a dot, the claims of a cluster together in the cluster's color under its name (each
 //                   cluster a rectangle of the graph, sized by how many claims it holds); a hollow dot is a claim a
-//                   later one corrected, a heavier one a claim said twice or more. A dashed line joins a correction to
-//                   the claim it corrects, a thin one two claims that cite the same rows. The dots keep their places
-//                   while the ring walks them.
+//                   later one corrected, a heavier one a claim said twice or more; a cluster's earlier claims stand at
+//                   its left, its later ones at its right, and linked claims near each other. A dashed amber line joins a correction to the claim it corrects, a blue one a claim
+//                   to one it supports or shares a topic with (red: contradicts), and, for the claim selected, a gray
+//                   one to each claim that cites the same rows. The dots keep their places while the ring walks them.
 //   the claim       under the graph, the claim selected: its words, its turn, where it came from (a press, or ↵ on
 //                   its dot, opens the place in the transcript over the pane, as a citation opens), the claim that
-//                   corrects it or that it corrects, and its evidence (each citation with what its rows say; its
-//                   digit opens it over the pane)
+//                   corrects it or that it corrects, the claims it is linked to, and its evidence (each citation with
+//                   what its rows say; its digit opens it over the pane)
 //   where it came from   the same module with args {source}: the message that said the claim, its words marked, and
 //                   the other places it was said
 //
@@ -51,6 +52,24 @@ export const nodeRegion = id => `n-${String(id).replace(/[^A-Za-z0-9_.:-]/g, '-'
 export const toneOf = i => `c${(Math.max(0, i) % 6) + 1}`
 /** A claim's dot: hollow once corrected, heavier when said twice or more. */
 export const dotOf = c => (c.revised_by ? '○' : (c.n || 1) >= 2 ? '◉' : '●')
+/** An edge's tone: a correction amber, a contradiction red, another link blue, the same rows gray (bright when it is
+ *  the selected claim's). */
+export const edgeTone = (e, bright) => (e.kind === 'corrects' ? 'warn' : e.kind === 'relates' ? (e.how === 'contradicts' ? 'bad' : 'accent') : bright ? 'ink' : 'dim')
+
+const MAX_LINKS = 3
+const LINK_WORDS = { supports: ['supports', 'supported by'], contradicts: ['contradicts', 'contradicted by'], 'same topic': ['same topic as', 'same topic as'] }
+/** The claims a claim is linked to (relates edges, either way), in words: [{id, how, words}], at most three. */
+export function linksOf(c, edges, byId) {
+  const out = []
+  for (const e of edges) {
+    if (e.kind !== 'relates' || (e.a !== c.id && e.b !== c.id)) continue
+    const id = e.a === c.id ? e.b : e.a
+    if (!byId.has(id)) continue
+    const w = LINK_WORDS[e.how] || LINK_WORDS['same topic']
+    out.push({ id, how: e.how, words: e.a === c.id ? w[0] : w[1] })
+  }
+  return out.slice(0, MAX_LINKS)
+}
 
 /** Who said a claim and when, in a few words: `turn 2`, `turn 2 · you`, `the folder`. */
 export function whenOf(c) {
@@ -125,10 +144,11 @@ export function slotsOf(groups, W, H) {
 
 /**
  * The graph laid out in cells, w × h: each cluster a rectangle of the area (slotsOf) with its name on the top row and
- * its claims under it, pushed apart and pulled together along their edges inside the rectangle, then snapped to
- * cells so no two dots touch. So a cluster's claims are always together, and apart from another's. A cell is about
- * twice as tall as wide, so heights count double. Deterministic for the same input. {pos: Map(id -> {x, y}), names:
- * [{id, name, x, y}]}
+ * its claims under it, in the room they need. Each claim starts where its turn puts it (the order `nodes` gives: earlier
+ * left, later right), the claims are pushed apart and pulled together along their edges inside the rectangle, so
+ * linked claims stand near each other, then snapped to cells so no two dots touch. So a cluster's claims are always
+ * together, apart from another's, and roughly in time. A cell is about twice as tall as wide, so heights count double.
+ * Deterministic. {pos: Map(id -> {x, y}), names: [{id, name, x, y}]}
  */
 export function layout(nodes, clusters, edges, { w, h }) {
   const W = Math.max(20, w)
@@ -140,15 +160,15 @@ export function layout(nodes, clusters, edges, { w, h }) {
   const slots = slotsOf(groups, W, H)
   const P = []
   for (const sl of slots) {
-    // the island takes the room its claims need, at the rectangle's top left under the name: a cluster of one claim
-    // in a wide rectangle keeps its dot by its name
+    // the island takes the room its claims need, at the rectangle's top left under the name
     const n = sl.g.nodes.length
     const x0 = sl.x + 1, y0 = sl.y + 1
     const x1 = sl.x + Math.max(1, Math.min(sl.w - 3, Math.max(Array.from(sl.g.name).length, 8 * Math.ceil(Math.sqrt(n)) + 2)))
     const y1 = sl.y + Math.max(1, Math.min(sl.h - 1, 2 * Math.ceil(Math.sqrt(n)) + 1))
-    for (const n of sl.g.nodes) {
-      P.push({ id: n.id, sl, x0, x1, y0, y1, x: (x0 + x1) / 2 + (hash(n.id) - 0.5) * (x1 - x0) * 0.8, y: (y0 + y1) / 2 + (hash(n.id + '#') - 0.5) * (y1 - y0) * 0.8, vx: 0, vy: 0 })
-    }
+    sl.g.nodes.forEach((nd, i) => {
+      const tx = x0 + ((x1 - x0) * (i + 0.5)) / n
+      P.push({ id: nd.id, sl, x0, x1, y0, y1, tx, x: tx, y: y0 + (y1 - y0) * hash(nd.id + '#'), vx: 0, vy: 0 })
+    })
   }
   const at = new Map(P.map((p, i) => [p.id, i]))
   const springs = edges.map(e => [at.get(e.a), at.get(e.b)]).filter(([i, j]) => i != null && j != null && P[i].sl === P[j].sl)
@@ -166,7 +186,8 @@ export function layout(nodes, clusters, edges, { w, h }) {
         const f = (8 * a) / d2
         p.vx -= dx * f; p.vy -= (dy * f) / 2; q.vx += dx * f; q.vy += (dy * f) / 2
       }
-      p.vx += ((p.x0 + p.x1) / 2 - p.x) * 0.02 * a
+      // its place in time, and the island's middle row
+      p.vx += (p.tx - p.x) * 0.04 * a
       p.vy += ((p.y0 + p.y1) / 2 - p.y) * 0.02 * a
     }
     for (const [i, j] of springs) {
@@ -212,7 +233,7 @@ export function layout(nodes, clusters, edges, { w, h }) {
 const slim = c => ({
   id: c.id, text: c.text, by: c.by, cluster: c.cluster ?? null, turn: c.turn ?? null, n: c.n || 1,
   ...(c.revised_by ? { revised_by: c.revised_by } : {}), ...(c.revises ? { revises: c.revises } : {}),
-  ...(c.folder ? { folder: true } : {}),
+  ...(c.folder ? { folder: true } : {}), ...(c.links && c.links.length ? { links: c.links.map(l => ({ to: l.to, how: l.how })) } : {}),
   sources: (c.sources || []).slice(0, 8).map(s => ({ ref: s.ref, label: s.label || s.ref, ...(s.quote ? { quote: s.quote } : {}) })),
   said: (c.said || []).slice(0, 6).map(s => ({ row: s.row ?? null, by: s.by, turn: s.turn ?? null, quote: s.quote || '', sentence: s.sentence || '', ...(s.start != null ? { start: s.start, end: s.end } : {}), ...(s.ref ? { ref: s.ref } : {}) })),
 })
@@ -285,7 +306,9 @@ export function program(k, data) {
   const claim = byId.get(st.claim) || newest
   const evidence = (claim.sources || []).slice(0, MAX_EVIDENCE)
   const other = claim.revised_by ? byId.get(claim.revised_by) : claim.revises ? byId.get(claim.revises) : null
-  const rowsHere = new Set(['said', ...evidence.map((_, i) => `ev-${i + 1}`), ...(other ? [`fix-${other.id}`] : [])])
+  // the claims it is linked to, either way: what it supports or contradicts, what supports or contradicts it
+  const links = linksOf(claim, data.edges || [], byId)
+  const rowsHere = new Set(['said', ...evidence.map((_, i) => `ev-${i + 1}`), ...(other ? [`fix-${other.id}`] : []), ...links.map(l => `rel-${l.id}`)])
   const pick = id => (byId.has(id) ? { claim: id, part: nodeRegion(id) } : null)
   const nodeOf = r => claims.find(c => nodeRegion(c.id) === r) || null
 
@@ -312,6 +335,7 @@ export function program(k, data) {
     const ev = /^ev-(\d+)$/.exec(r)
     if (ev) { openEvidence(evidence[Number(ev[1]) - 1]); return null }
     if (other && r === `fix-${other.id}`) return pick(other.id)
+    if (r.startsWith('rel-') && links.some(l => `rel-${l.id}` === r)) return pick(r.slice(4))
     if (r === 'folder') { k.do('folder'); return null }
     return null
   })
@@ -345,6 +369,10 @@ export function program(k, data) {
     const how = claim.revised_by ? `corrected in ${whenOf(other) || 'a later turn'} by` : 'corrects'
     add(`  {warn:${k.escape(how)}} ${k.escape(cut(other.text, W - how.length - 6))}`, `fix-${other.id}`, { label: `claim: ${other.text}`, ref: (other.sources || []).map(x => x.ref).slice(0, 6) })
   }
+  links.forEach(l => {
+    const o = byId.get(l.id)
+    add(`  {${l.how === 'contradicts' ? 'bad' : 'accent'}:${k.escape(l.words)}} ${k.escape(cut(o.text, W - l.words.length - 6))}`, `rel-${o.id}`, { label: `claim: ${o.text}`, ref: (o.sources || []).map(x => x.ref).slice(0, 6) })
+  })
   evidence.forEach((s, i) => {
     const got = k.want({ rows: [s.ref] })
     const words = got ? chainWords(got) : null
@@ -357,7 +385,7 @@ export function program(k, data) {
   // about two fifths of the rest
   const all = k.h || 40
   const H = Math.max(12, all - 4 - (data.talk ? Math.floor(all * 0.4) : 0))
-  const legend = k.text('{dim:○ corrected · ◉ said again · ╌ a correction · ─ cite the same rows}', { wrap: false })
+  const legend = k.text(`{dim:○ corrected  ◉ said again} {warn:╌} {dim:correction} {ink:─} {dim:same rows} {accent:─} {dim:related} {bad:─} {dim:contradicts}${W >= 104 ? '{dim:  · earlier left, later right}' : ''}`, { wrap: false })
   // as tall as the graph needs (about two rows a claim, and room for each cluster's name), at most the rows left
   const need = 4 + Math.ceil(claims.length * 0.8) + 2 * groups.length
   // the rows under the graph are those of the tallest claim's, so the graph keeps its size and its dots their places
@@ -365,12 +393,13 @@ export function program(k, data) {
   const tallest = Math.max(...claims.map(x => {
     const other2 = x.revised_by || x.revises ? 1 : 0
     const from = (x.said || []).some(p => p.sentence || p.quote) || (x.folder && (x.sources || []).length) ? 1 : 0
-    return 2 + Math.min(3, wrap(x.text, W - 2).length) + from + other2 + Math.min(MAX_EVIDENCE, (x.sources || []).length)
+    return 2 + Math.min(3, wrap(x.text, W - 2).length) + from + other2 + linksOf(x, data.edges || [], byId).length + Math.min(MAX_EVIDENCE, (x.sources || []).length)
   }))
   const gh = Math.max(6, Math.min(need, H - head.length - Math.max(tallest, panel.length) - 3))
   const edges = data.edges || []
   const named = groups.map(g => ({ id: g.id, name: g.folder ? `${g.name} (folder)` : g.name }))
-  const lay = trim(layout(claims.map(c => ({ id: c.id, cluster: c.cluster })), named, edges, { w: W, h: gh }))
+  const order = claims.slice().sort((p, q) => num(p) - num(q))
+  const lay = trim(layout(order.map(c => ({ id: c.id, cluster: c.cluster })), named, edges, { w: W, h: gh }))
   const c = k.canvas(W, lay.h)
   for (const nm of lay.names) {
     const gg = groups.find(x => String(x.id) === nm.id)
@@ -382,15 +411,13 @@ export function program(k, data) {
     if (!p) continue
     c.dot(p.x, p.y, tone(x), { glyph: dotOf(x), bold: x.id === claim.id, part: nodeRegion(x.id), meta: { label: `claim: ${x.text}`, ref: (x.sources || []).map(s => s.ref).slice(0, 6) } })
   }
-  // the edges on the cells left blank: the selected claim's first and bright; of the rest, faint, each correction and
-  // the claims of one cluster that cite the same rows (between clusters only the selected claim's, which keeps a large
-  // graph readable)
+  // the edges on the cells left blank: the selected claim's first and bright, then the other corrections and links,
+  // faint. Two claims that cite the same rows are joined only while one is selected, which keeps the graph readable
   const mine = e => e.a === claim.id || e.b === claim.id
-  const near = e => e.kind === 'corrects' || String(byId.get(e.a)?.cluster) === String(byId.get(e.b)?.cluster)
-  for (const e of [...edges.filter(mine), ...edges.filter(e => !mine(e) && near(e))]) {
+  for (const e of [...edges.filter(mine), ...edges.filter(e => !mine(e) && e.kind !== 'rows')]) {
     const a = lay.pos.get(e.a), b = lay.pos.get(e.b)
     if (!a || !b) continue
-    const t = e.kind === 'corrects' ? 'warn' : mine(e) ? 'accent' : 'dim'
+    const t = edgeTone(e, mine(e))
     c.link(a.x, a.y, b.x, b.y, mine(e) ? t : `${t}-faint`, { dash: e.kind === 'corrects' })
   }
   return k.stack(...head, k.text(' '), c, legend, ...panel)

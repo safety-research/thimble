@@ -5,7 +5,7 @@
 //
 //   {v: 1, session, updated,
 //    claims: [{id, text, by, cluster, turn, said: [place], sources: [{ref, label}], revises?, revised_by?,
-//              folder?: {card, id}}],
+//              links?: [{to, how: supports | contradicts | same topic, folder?}], folder?: {card, id}}],
 //    clusters: [{id, name, turn, named, from?, folder?}],
 //    gaps: [{turn, why}],
 //    folder?: {card, v, at, claims, clusters}}
@@ -15,10 +15,11 @@
 //            the folder's map has {by: 'folder', quote, ref}: the words of its first evidence row.
 //   ×N       a claim's said.length: each distinct place it was said.
 //
-// After a turn of work the observer's pass lists the turn's claims ({quote, claim, by, cluster, same, revises});
+// After a turn of work the observer's pass lists the turn's claims ({quote, claim, by, cluster, same, revises, links});
 // applyTurn places each by its quote in the turn's messages, takes the citations in or near its sentence as its
 // sources, merges a restatement into the claim it repeats (a new place, so ×N grows), links a correction both ways
-// (revises / revised_by), and puts each new claim in a cluster: one named so far, or a new one. The folder's map (a
+// (revises / revised_by), keeps the links a claim names to others, and puts each new claim in a cluster: one named so
+// far, or a new one. The folder's map (a
 // card Claude saved, mergeFolder) adds its claims beside the session's.
 import { blocks, linkMarks } from '../shell/message.js'
 const MAX_TEXT = 200
@@ -382,6 +383,16 @@ function applyClusters(store, list, grown, turn) {
 const capital = t => (t ? t[0].toUpperCase() + t.slice(1) : t)
 
 /** The lens's claims, held to what the store needs; anything else is dropped. */
+/** How one claim bears on another, as the lens or the folder's map names it: supports, contradicts or same topic, or
+ *  null. */
+export function howOf(v) {
+  const s = String(v ?? '').toLowerCase()
+  if (/contra|conflict|disagree/.test(s)) return 'contradicts'
+  if (/support|back|show|explain/.test(s)) return 'supports'
+  if (/topic|same|about|relat/.test(s)) return 'same topic'
+  return null
+}
+
 export function parseClaims(list) {
   const out = []
   for (const [i, x] of (Array.isArray(list) ? list : []).entries()) {
@@ -394,7 +405,8 @@ export function parseClaims(list) {
     const text = own || (same ? '' : capital(plainOf(quote).plain.replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)))
     if (!quote || (!same && !text)) continue
     // `at`: its place in the lens's list (1 for the first), which a later claim of the same turn revises as "#1"
-    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null })
+    const links = (Array.isArray(x.links) ? x.links : []).map(l => ({ to: str(String(l?.to ?? ''), 20), how: howOf(l?.how ?? l?.type) })).filter(l => l.to && l.how).slice(0, 4)
+    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null, links })
   }
   return out.slice(0, 40)
 }
@@ -422,6 +434,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
   const res = { store, added: [], restated: [], revised: [], dropped: [], clusters: [] }
   const items = parseClaims(out?.claims)
   const local = new Map()
+  const links = []
   for (const it of items) {
     if (it.revises && /^#\d+$/.test(it.revises)) it.revises = local.get(Number(it.revises.slice(1))) || null
     const known = it.same ? store.claims.find(c => c.id === it.same) : null
@@ -437,6 +450,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     if (target) {
       local.set(it.at, target.id)
+      for (const l of it.links) links.push({ from: target.id, ...l })
       if (!target.said.some(p => samePlace(p, where.place))) {
         target.said.push(where.place)
         addSources(target, where.sources)
@@ -456,6 +470,16 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     store.claims.push(claim)
     res.added.push(id)
     local.set(it.at, id)
+    for (const l of it.links) links.push({ from: id, ...l })
+  }
+  // the links each claim names to another (an id so far, or #N of this turn), kept on the claim that names them
+  res.linked = 0
+  for (const l of links) {
+    const to = /^#\d+$/.test(l.to) ? local.get(Number(l.to.slice(1))) : l.to
+    const a = store.claims.find(c => c.id === l.from)
+    if (!a || !to || to === a.id || !store.claims.some(c => c.id === to)) continue
+    a.links = [...(a.links || []).filter(x => x.to !== to), { to, how: l.how }].slice(-6)
+    res.linked++
   }
   res.clusters = applyClusters(store, out?.clusters, grown, turn)
   oneNameOneCluster(store)
@@ -572,6 +596,15 @@ export function mergeFolder(store, data, { card = 'folder-claims', v = null, at 
     res.added.push(id)
     seen.set(fid, id)
   }
+  // the map's relations, as links on its claims (a save of the map again replaces them)
+  for (const c of store.claims) if (c.links && [...seen.values()].includes(c.id)) c.links = c.links.filter(l => !l.folder)
+  for (const r of Array.isArray(d.relations) ? d.relations : []) {
+    const a = store.claims.find(c => c.id === seen.get(String(r?.from)))
+    const to = seen.get(String(r?.to))
+    const how = howOf(r?.type ?? r?.how)
+    if (!a || !to || to === a.id || !how) continue
+    a.links = [...(a.links || []).filter(x => x.to !== to), { to, how, folder: true }]
+  }
   // a claim an earlier version of the map held and this one does not: gone, unless the session said it too
   const keep = new Set(seen.values())
   store.claims = store.claims.filter(c => {
@@ -609,22 +642,24 @@ export function viewOf(store) {
 }
 
 /**
- * The graph's edges: a correction (the claim that corrects to the one it corrects), and two claims that cite the same
- * rows (each later claim citing a ref to the first claim that cited it, so a ref many claims cite draws a star, not
- * every pair). One edge per pair, a correction first. [{a, b, kind: 'corrects' | 'rows', ref?}]
+ * The graph's edges: a correction (the claim that corrects to the one it corrects), a link one claim names to another
+ * (supports, contradicts, same topic), and two claims that cite the same rows (each later claim citing a ref to the
+ * first claim that cited it, so a ref many claims cite draws a star, not every pair). One edge per pair, in that order
+ * of kinds. [{a, b, kind: 'corrects' | 'relates' | 'rows', ref?, how?}]
  */
 export function edgesOf(flat) {
   const ids = new Set(flat.map(c => c.id))
   const out = []
   const seen = new Set()
-  const add = (a, b, kind, ref) => {
+  const add = (a, b, kind, ref, how) => {
     if (!ids.has(a) || !ids.has(b) || a === b) return
     const key = [a, b].sort().join('|')
     if (seen.has(key)) return
     seen.add(key)
-    out.push({ a, b, kind, ...(ref ? { ref } : {}) })
+    out.push({ a, b, kind, ...(ref ? { ref } : {}), ...(how ? { how } : {}) })
   }
   for (const c of flat) if (c.revises) add(c.id, c.revises, 'corrects')
+  for (const c of flat) for (const l of c.links || []) add(c.id, l.to, 'relates', null, l.how)
   const first = new Map()
   for (const c of flat) {
     for (const s of c.sources || []) {

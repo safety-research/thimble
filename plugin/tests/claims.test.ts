@@ -31,7 +31,7 @@ const Q2 = "I'm going to tell my manager the tilt is one editor. Anything to fix
 const A2 = 'Fix one thing: it is two editors, not one. Kestrel and Wren made [63%](q8#user=top2@share) of the tilt. The June 18 burst, [6,543 saves](q1#day=2026-06-18@n), stands.'
 const FORK2 = { notes: [], verbs: {}, glosses: [], claims: [
   { same: 'c1', quote: 'the tilt is one editor', by: 'analyst' },
-  { quote: 'it is two editors, not one', claim: 'The tilt is two editors, Kestrel and Wren, not one', revises: 'c1' },
+  { quote: 'it is two editors, not one', claim: 'The tilt is two editors, Kestrel and Wren, not one', revises: 'c1', links: [{ to: 'c2', how: 'same topic' }] },
   { same: 'c3', quote: 'The June 18 burst, 6,543 saves, stands' },
 ] }
 const MAP = {
@@ -199,6 +199,7 @@ test('a later turn: a claim said again counts ×N, a correction is linked both w
   const c1 = store.claims.find((c: Any) => c.id === 'c1')
   const c4 = store.claims.find((c: Any) => c.id === 'c4')
   expect([c1.revised_by, c4.revises]).toEqual(['c4', 'c1'])
+  expect(c4.links).toEqual([{ to: 'c2', how: 'same topic' }])
   expect(c1.said.map((p: Any) => [p.by, p.turn])).toEqual([['claude', 1], ['person', 2]])
   expect(store.claims.find((c: Any) => c.id === 'c3').said.length).toBe(2)
   const bar = await hint($)
@@ -219,6 +220,7 @@ test('c opens the Claims pane in the side panel: the graph of claims in clusters
   expect(t).toContain('The tilt is two editors, Kestrel and Wren, not one')
   expect(t).not.toMatch(/judgment|finding ·|precisely/)
   expect(t).toMatch(/corrects\s+The tilt in the edits is one editor/)
+  expect(t).toMatch(/same topic as Kestrel made 41% of June's edits/)
   // no key hints in the pane: they are in the bar, with what a typed question is about
   expect(t).not.toContain('esc')
   const bar = await hint($)

@@ -55,7 +55,10 @@ test("the lens's claims are read as given: a quote names a claim that gives no w
     ['A correction', 'person', null, 'c1'],
   ])
   // one kind: a statement, with no parts beside its words
-  assert.deepEqual(Object.keys(got[0]).sort(), ['at', 'by', 'cluster', 'quote', 'revises', 'same', 'text'])
+  assert.deepEqual(Object.keys(got[0]).sort(), ['at', 'by', 'cluster', 'links', 'quote', 'revises', 'same', 'text'])
+  // the links a claim names to others: supports, contradicts or same topic, in the words it gives
+  assert.deepEqual(parseClaims([{ quote: 'q', links: [{ to: 'c1', how: 'Supports' }, { to: '#2', how: 'contradiction' }, { to: 'c3', how: 'same topic' }, { to: 'c4', how: 'causes' }, { how: 'supports' }] }])[0].links,
+    [{ to: 'c1', how: 'supports' }, { to: '#2', how: 'contradicts' }, { to: 'c3', how: 'same topic' }])
   const a = parseAnswer('{"notes": [], "claims": [{"claim": "x", "quote": "y"}], "clusters": [{"id": "k1", "name": "z"}]}')
   assert.deepEqual(lens.read(a), { claims: [{ claim: 'x', quote: 'y' }], clusters: [{ id: 'k1', name: 'z' }] })
 })
@@ -187,6 +190,7 @@ const MAP = {
     { id: 'pinned', name: 'Pinned the belt', cluster: 'belt', evidence: [{ ref: 'trials/t3.jsonl#L2' }] },
     { id: 'scale-off', name: 'The scale is off', cluster: 'scale', evidence: [{ ref: 'trials/t2.jsonl#L2', quote: 'the scale is off' }] },
   ],
+  relations: [{ from: 'belt-skips', to: 'scale-off', type: 'contradicts' }],
 }
 
 test("the folder's map joins the session's claims, marked as the folder's; saved again it changes in place", () => {
@@ -201,6 +205,8 @@ test("the folder's map joins the session's claims, marked as the folder's; saved
   assert.deepEqual([pinned.by, store.clusters.find(k => k.id === pinned.cluster).name], ['folder', 'belt slips'])
   assert.deepEqual(store.folder, { card: '07-folder-claims', v: 1, at: 'T', claims: 3, clusters: 2, scope: { unit: 'trials', n: 3, what: 'every trial counted' } })
   assert.deepEqual(viewOf(store).groups.map(g => g.name), ['the belt', 'belt slips', 'scale theory'])
+  // the map's relations are links on its claims
+  assert.deepEqual(store.claims.find(c => c.id === 'c1').links, [{ to: store.claims.find(c => c.text === 'The scale is off').id, how: 'contradicts', folder: true }])
   // saved again with a claim fixed and one gone: changed in place, the gone one goes (the session's own stays)
   const v2 = { ...MAP, claims: [{ ...MAP.claims[0], name: 'The belt skips one slot in 3' }, MAP.claims[2]] }
   const again = mergeFolder(store, v2, { card: '07-folder-claims', v: 2, at: 'T2' })
@@ -218,15 +224,18 @@ function turn2() {
   const A2 = 'Fix one thing: it is two editors, not one. Kestrel and Wren made [63%](q8#user=top2@share) of it; Kestrel alone [41%](q4#user=Kestrel@share). June 18 was the busiest day.'
   applyTurn(store, { places: [{ row: 'r3', by: 'claude', turn: 2, text: A2 }], turn: 2, out: { claims: [
     { quote: 'it is two editors, not one', claim: 'The tilt is two editors, not one', revises: 'c1' },
-    { quote: 'Kestrel and Wren made 63% of it', claim: 'Kestrel and Wren made 63% of the tilt', cluster: 'k2' },
-    { same: 'c3', quote: 'June 18 was the busiest day' },
+    { quote: 'Kestrel and Wren made 63% of it', claim: 'Kestrel and Wren made 63% of the tilt', cluster: 'k2', links: [{ to: '#1', how: 'supports' }, { to: 'c9', how: 'supports' }] },
+    { same: 'c3', quote: 'June 18 was the busiest day', links: [{ to: 'c4', how: 'same topic' }] },
   ] } })
   return { store, A2 }
 }
 
-test("the graph's edges: a correction, and claims that cite the same rows (a star to the first that cites them), one per pair", () => {
+test("the graph's edges: a correction, a link one claim names to another, and claims that cite the same rows (a star to the first that cites them), one per pair", () => {
   const { store } = turn2()
-  assert.deepEqual(edgesOf(viewOf(store).flat), [{ a: 'c5', b: 'c1', kind: 'corrects' }, { a: 'c6', b: 'c2', kind: 'rows', ref: 'q4#user=Kestrel@share' }])
+  // a link to #N is to that claim of the same turn; a link to a claim that is not there is dropped
+  assert.deepEqual(store.claims.find(c => c.id === 'c6').links, [{ to: 'c5', how: 'supports' }])
+  assert.deepEqual(store.claims.find(c => c.id === 'c3').links, [{ to: 'c4', how: 'same topic' }])
+  assert.deepEqual(edgesOf(viewOf(store).flat), [{ a: 'c5', b: 'c1', kind: 'corrects' }, { a: 'c6', b: 'c5', kind: 'relates', how: 'supports' }, { a: 'c3', b: 'c4', kind: 'relates', how: 'same topic' }, { a: 'c6', b: 'c2', kind: 'rows', ref: 'q4#user=Kestrel@share' }])
   const flat = [{ id: 'a', sources: [{ ref: 'x' }, { ref: 'y' }] }, { id: 'b', sources: [{ ref: 'x' }, { ref: 'y' }] }, { id: 'c', sources: [{ ref: 'x' }] }, { id: 'd', revises: 'a', sources: [{ ref: 'x' }] }]
   assert.deepEqual(edgesOf(flat).map(e => `${e.a}-${e.b} ${e.kind}`), ['d-a corrects', 'b-a rows', 'c-a rows'])
 })
@@ -303,6 +312,10 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   const ev = run(st, { type: 'focus', region: 'ev-1' })
   assert.deepEqual(ev.state, { claim: 'c2', part: 'ev-1' })
   assert.equal(run(ev.state).regions.find(r => r.id === 'ev-1').meta.ref, 'q4#user=Kestrel@share')
+  // the claims it is linked to, either way, each a row a press goes to
+  const linked = draw(data, { state: { claim: 'c5' } }).text
+  assert.match(linked, /supported by Kestrel and Wren made 63% of the tilt/)
+  assert.deepEqual(run({ claim: 'c5' }, { type: 'press', region: 'rel-c6' }).state, { claim: 'c6', part: 'n-c6' })
   // a corrected claim names the claim that corrects it, and a press goes there
   const old = draw(data, { state: { claim: 'c1' } }).text
   assert.match(old, /○ The tilt in the edits is one editor/)
