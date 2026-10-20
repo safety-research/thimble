@@ -276,8 +276,23 @@ def test_run_makes_r_ids_and_q_is_an_unlisted_alias_that_goes_on_with_them(root:
     for args in ((), ("--help",), ("no-such-command",)):
         out = _thimble(root, *args)
         text = out.stdout + out.stderr
-        assert "thimble run " in text or ",run," in text, text
+        assert "thimble run " in text or "{run," in text, text
         assert not re.search(r"thimble q |[,{'](q|query)[,}']|, (q|query),", text), text
+
+
+def test_rows_does_what_sources_list_and_resolve_did_and_they_are_unlisted_aliases(root: Path) -> None:
+    assert _thimble(root, "run", "runs by result", stdin='tally(load("runs.csv"), "passed")').returncode == 0
+    alone = _thimble(root, "rows")
+    assert "runs.csv" in alone.stdout and "no cards yet" in alone.stdout, alone.stdout + alone.stderr
+    for cmd in ("rows", "resolve", "from"):
+        out = _thimble(root, cmd, "r1#passed=1@n")
+        assert "2 source rows: runs.csv#row=1,3" in out.stdout, (cmd, out.stdout + out.stderr)
+    assert "runs.csv" in _thimble(root, "sources").stdout
+    for args in ((), ("--help",), ("no-such-command",)):
+        out = _thimble(root, *args)
+        text = out.stdout + out.stderr
+        assert "thimble rows" in text or "rows," in text, text
+        assert not re.search(r"thimble (sources|list|resolve|from)\b|'(sources|list|resolve|from)'|,(sources|list|resolve|from)[,}]", text), text
 
 
 def test_new_ids_go_on_from_the_highest_id_old_or_new(root: Path) -> None:

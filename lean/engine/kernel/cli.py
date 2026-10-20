@@ -1,17 +1,16 @@
 """thimble: thimble's kernel as one command, which Claude runs with the Bash tool, so every call goes through the
 session's permission mode and sandbox like any other command.
 
-    thimble sources [GLOB]                     the source files here: kind, rows, size
-    thimble rows TARGET [--where EXPR] [--search RE] [--label NAME=VALUE] [-n 5] [--first] [--fields a,b]
-                                               rows with their refs: one ref, or a random sample of a file or glob
     thimble run "what it answers" <<'PY' ... PY
-                                               run Python over the sources; keeps the code, inputs, output and the rows
+                                               run Python over the files; keeps the code, inputs, output and the rows
                                                behind each output row, as r1, r2, ... (--rerun r3 runs r3 again)
     thimble save [NAME] [--rerun] <<'JSON' ... JSON   (or --from FILE)
                                                save a card (its program, data and lineage) or a new version of one
-    thimble list [NAME]                        the cards, or one card with its lineage
-    thimble resolve REF [-n 5] [--label WORDS] where a value came from, down to its source rows (a few of them, spread
-                                               across the rows)
+    thimble rows [TARGET] [--where EXPR] [--search RE] [--label NAME=VALUE] [-n 5] [--first] [--fields a,b]
+                                               alone: the files here and the saved cards; a file or glob: a sample of
+                                               its rows; a row's ref: that row; a value's ref (r3#day=2026-06-18@n,
+                                               card:saves#/days/4/n): where it came from, down to its source rows and
+                                               a few of them; card:NAME: the card's lineage
     thimble coverage [NAME] [--all]            what was read and what was not (of this session, or of a card)
     thimble label [NAME]                       the labels, or one label's counts per value (each a citation)
     thimble label NAME --in GLOB (--regex RE | --code [FILE] | --prompt "DEFINITION") [--values yes,no]
@@ -26,7 +25,7 @@ group's rows; use("r3") is an earlier query's output; keep(name, x) and use(name
 (use of a `thimble label` gives each record's `_ref` and value); rows(glob), sample(df, n), pd, np, re, json. The
 last expression is the output. `thimble run --help` says more.
 
-Add --json to sources, run, list, resolve or coverage for the whole record.
+Add --json to rows, run or coverage for the whole record.
 """
 from __future__ import annotations
 
@@ -102,7 +101,7 @@ def cmd_sources(a: argparse.Namespace) -> int:
         for t, fs in sorted(by_top.items(), key=lambda kv: -len(kv[1])):
             kinds = sorted({str(cnt.get(f, {}).get("kind")) for f in fs})
             rows = sum(cnt.get(f, {}).get("rows", 0) for f in fs)
-            print(f"{t}…  {len(fs)} more files  {'/'.join(kinds)}  {fmt(rows)} rows  (thimble sources '{t}**' lists them)")
+            print(f"{t}…  {len(fs)} more files  {'/'.join(kinds)}  {fmt(rows)} rows  (thimble rows '{t}**' lists them)")
     total = sum(c.get("rows", 0) for c in cnt.values())
     print(f"\n{len(files):,} source files, {total:,} rows under {st.root}. A row's ref is its stable id: cite it as [↗](<ref>).")
     return 0
@@ -138,14 +137,31 @@ def shorten(v: Any, width: int, fields: list[str] | None) -> str:
 
 
 def cmd_rows(a: argparse.Namespace) -> int:
+    """One look-up for everything: the files and cards (no target), a file's rows, a row, a value's chain down to its
+    rows, or a card's lineage. The old look-ups (sources, resolve, list) are what it calls."""
+    if not a.target:
+        if a.json:
+            st = Store()
+            files = [f for f in S.list_sources(st.root) if S.kind_of(Path(f))]
+            cnt = S.counts(st.root, files, st.cache / "counts.json")
+            objs = [O.load(st, i) for i in O.all_ids(st)]
+            out_json({"sources": [{"path": f, **{k: v for k, v in cnt.get(f, {}).items() if k != "key"}} for f in files],
+                      "cards": [{k: o.get(k) for k in ("id", "version", "title", "updated")} for o in objs if o]})
+            return 0
+        rc = cmd_sources(argparse.Namespace(glob=None, json=False))
+        print()
+        cmd_list(argparse.Namespace(name=None, json=False))
+        return rc
+    whole = re.match(r"^(?:obj|card):([A-Za-z0-9_.-]+)$", a.target)
+    if whole:
+        return cmd_list(argparse.Namespace(name=whole.group(1), json=a.json))
+    if R.QUERY_OR_CARD.match(a.target):
+        return cmd_resolve(argparse.Namespace(ref=[a.target], n=a.n, random=False, first=a.first, label=None, json=a.json))
     st = Store()
     width, fields = a.width, [f for f in (a.fields or "").split(",") if f] or None
     if "#" in a.target:
         try:
             p = R.parse(a.target)
-            if p["kind"] in ("query", "object"):
-                print(f"{a.target} is a value, not a source row: `thimble resolve {a.target}` shows its rows")
-                return 1
             if p["kind"] != "file" or not p.get("locator"):
                 rows = S.fetch(st.root, a.target, limit=a.n if p["kind"] not in ("block",) else None)
                 for row in rows:
@@ -378,7 +394,7 @@ def cmd_save(a: argparse.Namespace) -> int:
         print(f"  this session has not read {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows)")
     ex = _value_example(obj)
     if ex:
-        print(f"Cite or resolve one of its values as {ex}.")
+        print(f"Cite one of its values as {ex}; `thimble rows {ex}` shows where it came from.")
     return 0
 
 
@@ -848,13 +864,15 @@ def _label(st: Store, a: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd")
+    # sources, list and resolve (or from) are what `rows` does, under the names they had before it: they still work,
+    # and neither help nor usage lists them
+    sub = ap.add_subparsers(dest="cmd", metavar="{run,save,rows,coverage,label}")
     p = sub.add_parser("sources", help="the source files here")
     p.add_argument("glob", nargs="?")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_sources)
-    p = sub.add_parser("rows", help="rows with their refs")
-    p.add_argument("target")
+    p = sub.add_parser("rows", help="the files and cards, a file's rows, a row, or where a value came from")
+    p.add_argument("target", nargs="?")
     p.add_argument("--where", help="keep rows for which this Python expression is true (r is the row, text its raw text)")
     p.add_argument("--search", help="keep rows whose raw text matches this regex")
     p.add_argument("-n", type=int, default=5)
@@ -863,6 +881,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fields")
     p.add_argument("--width", type=int, default=300)
     p.add_argument("--label", metavar="NAME=VALUE", help="keep rows the label gave this value (NAME alone: every row it holds), each shown with its value")
+    p.add_argument("--json", action="store_true", help="the whole record: the files and cards, or a value's chain")
     p.set_defaults(fn=cmd_rows)
     p = sub.add_parser("run", help="run Python over the sources and keep its lineage",
                        description=Q.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -927,6 +946,8 @@ def main(argv: list[str] | None = None) -> int:
         # the commands in one screen: argparse's usage lines would only repeat them
         print(__doc__.strip())
         return 0
+    if not args[0].startswith("-") and args[0] not in sub.choices:
+        ap.error(f"no command {args[0]!r}: the commands are run, save, rows, coverage and label")
     a = ap.parse_args(args)
     if not getattr(a, "fn", None):
         print(__doc__.strip())

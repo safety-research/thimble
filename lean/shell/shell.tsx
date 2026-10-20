@@ -1340,7 +1340,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   if (frame.row == null) {
     return {
       label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } }, refs: [frame.ref!],
-      context: `The analyst asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`thimble resolve ${frame.ref}\` shows its rows.`,
+      context: `The analyst asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`thimble rows ${frame.ref}\` shows its rows.`,
     }
   }
   const rec = await recordNow($, frame.row)
@@ -1357,7 +1357,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)
   return {
     label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } }, refs: [seriesRef(m.ref!)?.query ?? m.ref!],
-    context: `The analyst asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`thimble resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
+    context: `The analyst asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`thimble rows ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
   }
 }
 
@@ -2533,7 +2533,7 @@ export const registerShell: Register = (on, options) => {
         await closeTray($)
       } else if (sel && open && sel.cite) {
         pendingAsk = { text: e.text, about: { id: sel.cite, v: null, region: null, label: citeLabels.get(sel.cite) || sel.cite } }
-        context.push(`The analyst asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`thimble resolve ${sel.cite}\` shows its rows.`)
+        context.push(`The analyst asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`thimble rows ${sel.cite}\` shows its rows.`)
       } else if (sel && open && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {
         const p = await prepared($, sel, 96, sel.state)
         const meta = sel.region ? regionMeta(p.drawing, sel.region) : null
@@ -2543,7 +2543,7 @@ export const registerShell: Register = (on, options) => {
         context.push([
           `The analyst asked this with a card open in the detail view: ${p.object?.id}@${p.object?.version} "${p.object?.title || ''}" (${sel.root}/thimble/objects/${sel.id}.json).${knobs}`,
           sel.region ? `They had selected its part ${sel.region} ("${label}"). "This", "here" or "it" may mean that part.` : 'No part of it was selected.',
-          refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${sel.id}\` the object's lineage.` : `\`thimble list ${sel.id}\` shows the object's lineage.`,
+          refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`thimble rows <ref>\` opens the rows, \`thimble rows card:${sel.id}\` the card's lineage.` : `\`thimble rows card:${sel.id}\` shows the card's lineage.`,
         ].join('\n'))
         pendingAsk = { text: e.text, about: { id: sel.id, v: p.object?.version ?? sel.v, region: sel.region, label } }
       }

@@ -34,8 +34,9 @@ A key value with a space, a bracket or other punctuation is written as its slug,
 
 Object values:
 
-    obj:<id>                      an object (thimble/objects/<id>.json); the id may leave out its number prefix
-    obj:<id>#/<pointer>           a value of the object's data, such as obj:03-saves-by-day#/days/4/n
+    obj:<id>                      a card (thimble/objects/<id>.json); the id may leave out its number prefix; card:<id>
+                                  is the same ref
+    obj:<id>#/<pointer>           a value of the card's data, such as obj:03-saves-by-day#/days/4/n
 """
 from __future__ import annotations
 
@@ -48,7 +49,9 @@ _NUMS = r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*"
 _FP = r"[^#\s](?:[^#\n]*[^#\s])?"  # a path may hold spaces inside it, never at its ends, never a `#`
 QUERY_ID = r"[qr]\d+"  # a query's id: r<n>, or q<n> from before the rename
 _QUERY = re.compile(r"^(" + QUERY_ID + r")(?:#(.*)|(@.*))?$")
-_OBJ = re.compile(r"^obj:([A-Za-z0-9_.-]+)(?:#(/.*)?)?$")
+_OBJ = re.compile(r"^(?:obj|card):([A-Za-z0-9_.-]+)(?:#(/.*)?)?$")
+# a value's ref (a query's output, a card's value), as `thimble rows` tells one from a row of a file
+QUERY_OR_CARD = re.compile(r"^(?:(?:" + QUERY_ID + r")(?:[#@].*)?|(?:obj|card):[A-Za-z0-9_.-]+#.*)$")
 _LINES = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
 _LINESET = re.compile(r"^L(" + _NUMS + r")$")
 _BLOCK = re.compile(r"^L(\d+)\.b(\d+)$")

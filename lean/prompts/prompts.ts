@@ -54,7 +54,7 @@ async function resolve($: Engine): Promise<void> {
   try { await $.env.set('THIMBLE_PROMPTS', specOf(R.active, R.idx)) } catch { /* the children read the defaults */ }
   const active = Object.fromEntries(Object.entries(R.active).map(([n, a]) => [n, a.version]))
   await record($, { kind: 'prompts', active, changed: specOf(R.active, R.idx) || null, problems: R.problems })
-  if (R.problems.length) $.ui.toast(`thimble prompts: ${R.problems[0]}${R.problems.length > 1 ? ` (and ${R.problems.length - 1} more: thimble prompts)` : ''}`)
+  if (R.problems.length) $.ui.toast(`thimble prompts: ${R.problems[0]}${R.problems.length > 1 ? ` (and ${R.problems.length - 1} more: thimble dev prompts)` : ''}`)
 }
 
 /** The registry for this session: resolved once, again when the session changes. */

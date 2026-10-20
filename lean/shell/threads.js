@@ -48,7 +48,7 @@ export function firstMessage({ text, scope = {}, card = null, refs = [], root = 
     const m = scope.mark
     lines.push(m.kind === 'gloss' ? `About: the term "${m.term || m.label}" in Claude's message.` : `About: Claude's citation "${m.label || m.ref}" (${m.ref}).`)
   }
-  if (refs.length) lines.push(`Its rows: ${refs.slice(0, 6).join(', ')}${refs.length > 6 ? ` and ${refs.length - 6} more` : ''} (\`thimble resolve <ref>\` opens them).`)
+  if (refs.length) lines.push(`Its rows: ${refs.slice(0, 6).join(', ')}${refs.length > 6 ? ` and ${refs.length - 6} more` : ''} (\`thimble rows <ref>\` opens them).`)
   if (root) lines.push(`The data: ${root}`)
   if (selFile) lines.push(`The part the analyst has selected now, for a later message that names none: ${selFile}`)
   return lines.join('\n').trim()
