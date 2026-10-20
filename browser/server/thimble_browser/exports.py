@@ -127,10 +127,8 @@ def _pieces(text: str, notes: Notes) -> list[tuple[str, int | None]]:
     return out
 
 
-def read_model(ws: str) -> dict[str, Any]:
-    doc = report.writeup(ws)
-    if doc is None:
-        raise HTTPException(404, "the report is not written yet")
+def read_model(ws: str, slug: str = report.DOC) -> dict[str, Any]:
+    doc = report.writeup(ws, slug)
     notes = Notes(ws, corpus_of(ws))
     title = _collapse(doc.get("title")) or "Report"
     sections = []
@@ -437,11 +435,11 @@ def _filename(title: str, ext: str) -> str:
     return f"{base}.{ext}"
 
 
-def export(ws: str, fmt: str, pictures: dict[str, str] | None = None) -> tuple[bytes, str, str]:
-    """(content, file name, mime) of the report in `fmt` (markdown or html; pdf is html the page prints)."""
+def export(ws: str, fmt: str, pictures: dict[str, str] | None = None, slug: str = report.DOC) -> tuple[bytes, str, str]:
+    """(content, file name, mime) of a document in `fmt` (markdown or html; pdf is html the page prints)."""
     if fmt not in ("markdown", "html", "pdf"):
         raise HTTPException(404, f"the report has no export format {fmt!r}")
-    m = read_model(ws)
+    m = read_model(ws, slug)
     pictures = pictures or {}
     figs: dict[str, dict[str, str]] = {}
     for sec in m["sections"]:
@@ -461,7 +459,7 @@ def register(ctx: Any) -> None:
 
     def doc_of(c: str, slug: str) -> str:
         ws = ctx.ws_of(c)
-        if slug != report.DOC:
+        if not report.exists(ws, slug):
             raise HTTPException(404, f"no document {slug!r}")
         return ws
 
@@ -472,11 +470,11 @@ def register(ctx: Any) -> None:
     @app.get("/api/ws/{c}/investigations/main/types/{slug}/exports")
     def formats(c: str, slug: str) -> dict[str, Any]:
         ws = doc_of(c, slug)
-        return {"formats": [dict(f) for f in FORMATS] if report.markdown(ws) is not None else []}
+        return {"formats": [dict(f) for f in FORMATS] if report.markdown(ws, slug) is not None else []}
 
     @app.get("/api/ws/{c}/investigations/main/types/{slug}/export/{fmt}")
     def export_get(c: str, slug: str, fmt: str) -> Response:
-        return answer(*export(doc_of(c, slug), fmt))
+        return answer(*export(doc_of(c, slug), fmt, slug=slug))
 
     @app.post("/api/ws/{c}/investigations/main/types/{slug}/export/{fmt}")
     async def export_post(c: str, slug: str, fmt: str, request: Request) -> Response:
@@ -486,11 +484,11 @@ def register(ctx: Any) -> None:
         except ValueError:
             raise HTTPException(400, "the body is not JSON") from None
         pictures = check_pictures(body.get("pictures") if isinstance(body, dict) else None)
-        return answer(*export(ws, fmt, pictures))
+        return answer(*export(ws, fmt, pictures, slug=slug))
 
     @app.get("/api/ws/{c}/investigations/main/types/{slug}/export")
     def export_text(c: str, slug: str) -> dict[str, Any]:
         ws = doc_of(c, slug)
-        data, _, _ = export(ws, "markdown")
-        return {"markdown": data.decode("utf-8"), "title": read_model(ws)["title"]}
+        data, _, _ = export(ws, "markdown", slug=slug)
+        return {"markdown": data.decode("utf-8"), "title": read_model(ws, slug)["title"]}
 

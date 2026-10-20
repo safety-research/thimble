@@ -902,6 +902,8 @@ export interface WriteupParagraph {
   kind?: StoryBlockKind
   /** a story quote's speaker */
   speaker?: string
+  /** a quote (`> ` in the report's Markdown), such as a record's words from the data */
+  quote?: boolean
 }
 
 export interface WriteupFigure {
@@ -1766,8 +1768,8 @@ export interface CellMoveBody {
 /** One block of the report editor's save (`PUT …/types/{slug}/blocks`): `id` is the unit's id, or the editor's for a new block. */
 export interface ReportBlock {
   id: string
-  type: 'heading' | 'paragraph' | 'bullet' | 'figure'
-  /** the heading, the paragraph's sentences joined, or the bullet item, with `[[…]]` citations */
+  type: 'heading' | 'paragraph' | 'bullet' | 'quote' | 'figure'
+  /** the heading, the paragraph's sentences joined, the bullet item or the quote, with `[[…]]` citations */
   text?: string
   level?: number
   /** a figure's `card:<id>` (or legacy `cell:<id>`), '' before one is picked */
@@ -1788,6 +1790,24 @@ export interface ReportBlocksBody {
 /** A figure placed before every paragraph of its section (the reconciler's `lead`). */
 export interface WriteupFigure {
   lead?: boolean
+  /** `claude` while the figure is Claude's, as a paragraph's `by` */
+  by?: string
+}
+
+/** A lens's mark on the report (backend features/lenses.py): `term`, the exact words it marks, and what it says. */
+export interface ReportMark {
+  id: string
+  lens: string
+  surface: 'report'
+  term: string
+  title?: string
+  body: string
+  here?: string
+}
+
+export interface Writeup {
+  /** the lenses' marks on the report, served with it */
+  marks?: ReportMark[]
 }
 
 // ---- label cards: the details drawer (canvas/LabelDetails.tsx) ----

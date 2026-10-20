@@ -566,18 +566,11 @@ export const api = {
   cardAsView: (c: string, card: string) => j<{ slug: string; query: ViewQuery }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
 
   // ---- documents ----
-  frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
-  addFrameSection: (c: string, slug: DocumentType, heading: string) => j<Writeup>(`${inv(c, slug)}/frame/sections`, { method: 'POST', body: JSON.stringify({ heading }) }),
-  addFrameParagraph: (c: string, slug: DocumentType, sid: string, text: string) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/paragraphs`, { method: 'POST', body: JSON.stringify({ text }) }),
-  addFrameFigure: (c: string, slug: DocumentType, sid: string, body: { cell: string; caption?: string; after?: string }) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/figures`, { method: 'POST', body: JSON.stringify(body) }),
-  deleteFrameUnit: (c: string, slug: DocumentType, uid: string) => j<Writeup>(`${inv(c, slug)}/frame/units/${enc(uid)}`, { method: 'DELETE' }),
-  putFrameUnit: (c: string, slug: DocumentType, uid: string, patch: { text?: string; heading?: string; caption?: string }) => j<Writeup>(`${inv(c, slug)}/frame/units/${enc(uid)}`, { method: 'PUT', body: JSON.stringify(patch) }),
-  /** Write (`POST /ws/{c}/write`): a click, which starts the document's writer through thimble's plugin; it writes it,
-   * or revises it once written. `text` is a request typed at one place, `after` that place, and `model` and `effort`
-   * the run's values (Settings' writer row when left out). The answer is the agent id or the refusal's kind and reason;
-   * 403 without the analyst's cookie. */
-  write: (c: string, slug: DocumentType, body: { text?: string; after?: string; model?: string; effort?: string } = {}) =>
-    j<StartAnswer>(`${ws(c)}/write`, { method: 'POST', body: JSON.stringify({ doc: slug, ...body }) }).then(startAnswer),
+  /** Write (`POST /ws/{c}/write`): the analyst's request for the report, which goes to Claude in the chat; `text` is
+   * their instructions and `after_text` the words of the passage a request placed in the report follows. Answers the
+   * chat it went to, or `kind: busy` with the reason while Claude still answers there. */
+  write: (c: string, slug: DocumentType, body: { text?: string; after_text?: string } = {}) =>
+    j<{ chat?: string; kind?: string; reason?: string }>(`${ws(c)}/write`, { method: 'POST', body: JSON.stringify({ doc: slug, ...body }) }),
   /** Send the analyst's session what the analyst wrote at one place (`POST /ws/{c}/events {kind: card}`, the `card`
    * bullet of prompts/main.md): a request sent with ⌘↵ (lib/agentKey) or /card, made in document `doc` after the
    * passage `after` names, or on card `card`. A card main makes for it with add_card in the group
@@ -631,11 +624,12 @@ import type { ReportBlocksBody } from './types'
 
 /** The report editor's save route. */
 export const reportApi = {
-  /** `PUT …/types/{slug}/blocks`: the editor's whole document as blocks; answers the stored document or frame. */
+  /** `PUT …/types/{slug}/blocks`: the editor's whole document as blocks; answers the stored document. */
   putBlocks: (c: string, slug: DocumentType, body: ReportBlocksBody) => j<Writeup>(`${inv(c, slug)}/blocks`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `PUT …/types/{slug}/locks/{block}`: the analyst's lock on one block (the title's id is `title`); answers the stored document or frame. */
-  lock: (c: string, slug: DocumentType, block: string, body: { locked: boolean; client?: string }) =>
-    j<Writeup>(`${inv(c, slug)}/locks/${enc(block)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  /** `GET /lenses`: the lenses whose marks the report draws, each with its color (a viz family name). */
+  lenses: (c: string) => j<{ id: string; name: string; color: string }[]>(`${ws(c)}/lenses`),
+  /** `POST /marks/{id}/dismiss`: a mark the analyst is done with, which no longer shows. */
+  dismissMark: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/marks/${enc(id)}/dismiss`, { method: 'POST' }),
 }
 
 // ---- the problem report (shell/ProblemReport.tsx; backend feedback.py) ----
@@ -683,40 +677,28 @@ export const labelApi = {
   apply: (c: string, id: string, body: ApplyBody) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }),
 }
 
-// --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---
-import type { AnyDoc, DeckBody, DeckDoc, DocHistory, DocPreset, NewDocBody, PageDoc, ReportType, StoryBody, StoryDoc, TypesState } from './types'
+// --- the report's state and its kept drafts (report/) ---
+import type { AnyDoc, DocHistory, NewDocBody, ReportType, TypesState } from './types'
 
 export const docsApi = {
   /** `GET …/investigations/main/types`: per type, whether its document exists, its renderer and its name. */
   types: (c: string) => j<TypesState>(`${ws(c)}/investigations/main/types`),
-  /** `GET …/types/{slug}`: the stored document of any shape (404 before a write). */
+  /** `GET …/types/{slug}`: the report as stored, an empty one before anything is written. */
   document: (c: string, slug: string) => j<AnyDoc>(inv(c, slug)),
-  /** `GET …/types/{slug}/versions`: every generation of the written document, newest first (404 before a write). */
+  /** `GET …/types/{slug}/versions`: the drafts kept around Claude's changes to the report. */
   versions: (c: string, slug: string) => j<DocHistory>(`${inv(c, slug)}/versions`),
   /** `GET …/types/{slug}/versions/{n}`: generation `n` as it stood (404 when its text is not kept). */
   version: (c: string, slug: string, n: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}`),
-  /** `GET …/types/{slug}/versions/{n}/revisions/{i}`: an earlier save of the writer run that wrote generation `n`. */
-  revision: (c: string, slug: string, n: number, i: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}/revisions/${i}`),
   /** `POST …/types/{slug}/versions/{n}[/revisions/{i}]/restore`: that draft, or that save of it, made the newest draft
    * again, as the analyst's; answers the document. The top bar's Undo reverts it. */
   restore: (c: string, slug: string, n: number, i: number | null) =>
     j<AnyDoc>(`${inv(c, slug)}/versions/${n}${i != null ? `/revisions/${i}` : ''}/restore`, { method: 'POST' }),
-  /** `GET /report-types/presets`: the presets + New offers. */
-  presets: (c: string) => j<DocPreset[]>(`${ws(c)}/report-types/presets`),
-  /** `POST /report-types/new`: a preset's document, a page, or one of the analyst's own from a name and a brief. */
+  /** `POST /report-types/new`: another document of the report's kind, from a name. */
   createDoc: (c: string, body: NewDocBody) => j<ReportType>(`${ws(c)}/report-types/new`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `PUT /report-types/{slug}`: a type of the workspace's own renamed. */
+  /** `PUT /report-types/{slug}`: a document of the person's own renamed. */
   renameType: (c: string, slug: string, name: string) => j<ReportType>(`${ws(c)}/report-types/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ name }) }),
-  /** `DELETE /report-types/{slug}`: a type of the workspace's own and its document. */
+  /** `DELETE /report-types/{slug}`: a document of the person's own, with its drafts. */
   deleteType: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/report-types/${enc(slug)}`, { method: 'DELETE' }),
-  /** `PUT …/types/{slug}/deck`: the deck editor's whole deck, into the written deck or its frame; answers what is stored. */
-  putDeck: (c: string, slug: string, body: DeckBody) => j<DeckDoc>(`${inv(c, slug)}/deck`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `PUT …/types/{slug}/story`: the story editor's whole story, into the written story or its frame; answers what is stored. */
-  putStory: (c: string, slug: string, body: StoryBody) => j<StoryDoc>(`${inv(c, slug)}/story`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `PUT …/types/{slug}/html`: the page's whole html from the code drawer; creates the page's document when none is written. */
-  putHtml: (c: string, slug: string, html: string) => j<PageDoc>(`${inv(c, slug)}/html`, { method: 'PUT', body: JSON.stringify({ html }) }),
-  /** `GET …/types/{slug}/film`: a video's film as its frame loads it, under the views' policy, with its timing and bridge. */
-  film: (c: string, slug: string) => j<{ html: string }>(`${inv(c, slug)}/film`),
 }
 
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---
@@ -780,23 +762,4 @@ export const undoApi = {
   undo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/undo`, { method: 'POST' }),
   /** `POST /ws/{c}/redo`: repeat the last step undone. */
   redo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/redo`, { method: 'POST' }),
-}
-
-// --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
-import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
-
-export const checksApi = {
-  /** `GET /checks`: every check of the workspace, the built-ins first, each with its latest run per document. */
-  list: (c: string) => j<Check[]>(`${ws(c)}/checks`),
-  /** `POST /checks`: a new check from a name and a prompt (201), which the server turns on and runs; a 409 when the
-   * name is taken. */
-  create: (c: string, body: { name: string; prompt: string; covers?: CheckCover[] }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `PATCH /checks/{id}`: turned on or off, renamed, its prompt or colour changed; answers the check. The server runs
-   * a check turned on, and one that is on given a new prompt, wherever it has passages it has not seen. */
-  update: (c: string, id: string, patch: CheckPatch) => j<Check>(`${ws(c)}/checks/${enc(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-  /** Run (`POST /checks/{id}/run`): a click that starts the check's agent on one document through thimble's plugin, for
-   * the passages that changed since it last checked them; answers the run. */
-  run: (c: string, id: string, doc: string) => j<CheckRun>(`${ws(c)}/checks/${enc(id)}/run`, { method: 'POST', body: JSON.stringify({ doc }) }),
-  /** `POST /checks/{id}/runs/{doc}/stop`: stop the check's run on one document; answers the check. */
-  stop: (c: string, id: string, doc: string) => j<Check>(`${ws(c)}/checks/${enc(id)}/runs/${enc(doc)}/stop`, { method: 'POST' }),
 }

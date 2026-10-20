@@ -13,7 +13,7 @@ import { UserMessage } from '../components/Message'
 import { RefChip, scrubIds } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { ChipRun, ToolCard, type ToolState } from '../components/ToolCard'
-import { api } from '../lib/api'
+import { api, docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isDropped, useProposals } from '../lib/proposals'
 import { parseRef } from '../lib/refs'
@@ -594,11 +594,11 @@ function useChipSettled(ws: string, item: ChipRowT): Settled | null {
     })
     const p = parseRef(ref)
     if (p?.kind === 'report') {
-      // the written document, or its frame before a write
-      api
-        .frame(ws, p.slug)
+      // the written document
+      docsApi
+        .document(ws, p.slug)
         .then((d) => {
-          if (alive && d.generated_at && !d.partial && !d.frame) setSettled('done')
+          if (alive && (d as { generated_at?: string }).generated_at) setSettled('done')
         })
         .catch(() => undefined)
     }

@@ -1,53 +1,53 @@
-// The report's margin: a card for every comment the page shows (a check's, Claude's note, or the analyst's), aligned
-// with its passage and stacked so no two meet (checkComments.ts stackCards). Each is the comment card the canvas draws
-// too (CommentCard.tsx): its check's name and its statement, its details on request and ✓, and, while it is active, a
-// field that opens a thread on the passage. A new comment from the toolbar is a card with a field until Enter stores it.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
+// The report's margin: a card for each lens mark the page shows beside its words (lensMarks.ts marginMarks), aligned
+// with the highlight and stacked so no two meet. A card shows the lens's name in its color beside its swatch, ✓ (done,
+// which hides the mark), the mark's title and what it says; open, what to do and a field whose text asks Claude about
+// it in a thread anchored to the mark.
+import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { ChatMarkdown, ChipContext } from '../chat/markdown'
 import { TextArea } from '../components/Field'
+import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { CommentCard } from './CommentCard'
-import { NOTE_COLOR, stackCards, type CheckLook, type DocComment } from './checkComments'
+import { track } from '../lib/telemetry'
+import type { ReportMark } from '../lib/types'
+import { Glyph, IconButton } from './icons'
+import { inkOf, lookOf, type LensLook } from './lensMarks'
 
 /** the room the margin takes beside the page's column: report.css `.wu-rail`, 228 wide with 12 before it and 16 after */
 export const RAIL_ROOM = 228 + 12 + 16
-
-/** the room between two stacked cards, and how far above its passage's first line a card's top sits */
+/** the room between two stacked cards, and how far above its highlight's line a card's top sits */
 const GAP = 8
 const LIFT = 8
-const DRAFT_ID = 'draft'
+const NO_REFS: ReadonlySet<string> = new Set()
+
+/** Cards at their wanted tops, each pushed below the one before it; with `anchor`, that card stands exactly at its place
+ * and the others move around it. Pure. */
+export function stackCards(items: readonly { id: string; top: number; height: number }[], gap = GAP, anchor: string | null = null): Map<string, number> {
+  const list = [...items].sort((a, b) => a.top - b.top)
+  const tops = list.map((it) => Math.round(it.top))
+  const k = anchor ? list.findIndex((it) => it.id === anchor) : -1
+  for (let i = 1; i < list.length; i++) if (i !== k) tops[i] = Math.max(tops[i], tops[i - 1] + list[i - 1].height + gap)
+  for (let i = k - 1; i >= 0; i--) tops[i] = Math.min(tops[i], tops[i + 1] - list[i].height - gap)
+  return new Map(list.map((it, i) => [it.id, tops[i]]))
+}
 
 export interface MarginProps {
   ws: string
-  slug: string
-  comments: readonly DocComment[]
-  /** each comment's check, its colour and name */
-  look: CheckLook
+  marks: readonly ReportMark[]
+  lenses: ReadonlyMap<string, LensLook>
   active: string | null
   onActivate: (id: string | null) => void
-  onResolve: (comment: DocComment) => Promise<void>
-  /** the passage a new comment of the analyst's is being written on */
-  draft: string | null
-  onDraft: (sid: string, text: string) => Promise<void>
-  onDraftCancel: () => void
-  /** the page column, where the passages are */
+  onDone: (mark: ReportMark) => void
+  /** the page column, where the highlights are */
   column: RefObject<HTMLElement | null>
-  /** a passage's text, for the thread a reply opens */
-  textOf: (sid: string) => string
 }
 
 const esc = (s: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&'))
 
-/** A passage's element in the column: its `data-sid` mark, else, for a section heading no comment tints yet (the
- * decorations mark a heading only while it is tinted), its stored block. */
-const passageEl = (col: HTMLElement, sid: string): Element | null =>
-  col.querySelector(`[data-sid="${esc(sid)}"]`) ?? col.querySelector(`[data-anchor-cell][data-anchor$="#${esc(sid)}"]`)
-
-export function Margin({ ws, slug, comments, look, active, onActivate, onResolve, draft, onDraft, onDraftCancel, column, textOf }: MarginProps) {
+export function Margin({ ws, marks, lenses, active, onActivate, onDone, column }: MarginProps) {
   const rail = useRef<HTMLDivElement | null>(null)
   const cards = useRef(new Map<string, HTMLDivElement>())
   const [tops, setTops] = useState<Map<string, number>>(new Map())
-  const items: { id: string; sid: string }[] = [...comments.map((c) => ({ id: c.id, sid: c.sid })), ...(draft ? [{ id: DRAFT_ID, sid: draft }] : [])]
-  const key = items.map((i) => `${i.id}@${i.sid}`).join(',') + `|${active}`
+  const key = marks.map((m) => m.id).join(',') + `|${active}`
 
   const layout = useCallback(() => {
     const col = column.current
@@ -55,18 +55,17 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
     if (!col || !r) return
     const base = r.getBoundingClientRect().top
     const want: { id: string; top: number; height: number }[] = []
-    for (const it of items) {
-      const el = passageEl(col, it.sid)
-      const card = cards.current.get(it.id)
+    for (const m of marks) {
+      const el = col.querySelector(`[data-mark="${esc(m.id)}"]`)
+      const card = cards.current.get(m.id)
       if (!el || !card) continue
-      want.push({ id: it.id, top: el.getBoundingClientRect().top - base - LIFT, height: card.offsetHeight })
+      want.push({ id: m.id, top: el.getBoundingClientRect().top - base - LIFT, height: card.offsetHeight })
     }
-    const next = stackCards(want, GAP, draft ? DRAFT_ID : active)
+    const next = stackCards(want, GAP, active)
     setTops((prev) => (prev.size === next.size && [...next].every(([k, v]) => prev.get(k) === v) ? prev : next))
   }, [column, key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // placed after every render, and again whenever the column's text moves (an edit, a figure loading, a resize) or a
-  // comment's Show more opens or Show less folds its details
+  // placed after every render, and again whenever the column's text moves (an edit, a figure loading, a resize)
   useLayoutEffect(() => {
     layout()
   })
@@ -94,50 +93,92 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
     if (el) cards.current.set(id, el)
     else cards.current.delete(id)
   }
-
   return (
-    <div className="wu-rail" ref={rail} aria-label="Comments">
-      {comments.map((c) => {
-        const top = tops.get(c.id)
+    <div className="wu-rail" ref={rail} aria-label="Marks">
+      {marks.map((m) => {
+        const top = tops.get(m.id)
         return (
-          <CommentCard
-            key={c.id}
+          <MarkCard
+            key={m.id}
             ws={ws}
-            comment={{ ...c, details: c.details ?? '', fixed: c.tag }}
-            look={look}
-            active={c.id === active}
-            style={{ top: top ?? 0, visibility: top == null ? 'hidden' : undefined }}
-            cardRef={setCard(c.id)}
-            onActivate={() => onActivate(c.id)}
-            onResolve={() => onResolve(c)}
-            thread={{ anchor: `report:${slug}#${c.sid}`, passage: textOf(c.sid), surface: 'report' }}
+            mark={m}
+            look={lookOf(lenses, m.lens)}
+            active={m.id === active}
+            cardRef={setCard(m.id)}
+            top={top}
+            onActivate={() => onActivate(m.id === active ? null : m.id)}
+            onDone={() => onDone(m)}
           />
         )
       })}
-      {draft && <DraftCard key={draft} top={tops.get(DRAFT_ID)} cardRef={setCard(DRAFT_ID)} onSave={(text) => onDraft(draft, text)} onCancel={onDraftCancel} />}
     </div>
   )
 }
 
-/** The analyst's new comment, at its passage until Enter stores it; Escape, or leaving it empty, drops it. The canvas
- * places one beside a card (canvas/CommentLayer) with its own `style` and `className`. */
-export function DraftCard({ top, style, className = '', attrs, onMouseDown, cardRef, onSave, onCancel }: { top: number | undefined; style?: CSSProperties; className?: string; attrs?: Record<string, string>; onMouseDown?: (e: MouseEvent<HTMLDivElement>) => void; cardRef: (el: HTMLDivElement | null) => void; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
+/** One mark's card: the lens's swatch and name, ✓, the title and what the mark says; open, what to do and Ask. */
+export function MarkCard({ ws, mark, look, active, top, cardRef, onActivate, onDone }: { ws: string; mark: ReportMark; look: LensLook; active: boolean; top: number | undefined; cardRef: (el: HTMLDivElement | null) => void; onActivate: () => void; onDone: () => void }) {
+  const ink = inkOf(look.color)
+  const statement = mark.title || mark.body
+  const details = mark.title ? [mark.body, mark.here].filter(Boolean).join('\n\n') : mark.here ?? ''
+  return (
+    <div
+      ref={cardRef}
+      className={`wu-cm${active ? ' wu-cm-active' : ''}`}
+      style={{ top: top ?? 0, visibility: top == null ? 'hidden' : undefined }}
+      onClick={(e) => {
+        e.stopPropagation()
+        onActivate()
+      }}
+      data-mark-card={mark.id}
+    >
+      <div className="wu-cm-head">
+        <span className="wu-cm-sq" style={{ background: ink }} />
+        <span className="wu-cm-name" style={{ color: ink }}>
+          {look.name}
+        </span>
+        <IconButton
+          label="Done"
+          className="wu-cm-resolve"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDone()
+          }}
+        >
+          <Glyph name="check" size={13} strokeWidth={2} />
+        </IconButton>
+      </div>
+      <ChipContext.Provider value={{ workspace: ws, broken: NO_REFS }}>
+        <div className="wu-cm-text wu-cm-statement chat-text">
+          <ChatMarkdown text={statement} />
+        </div>
+        {active && details && (
+          <div className="wu-cm-details wu-cm-md chat-text">
+            <ChatMarkdown text={details} />
+          </div>
+        )}
+      </ChipContext.Provider>
+      {active && <Ask ws={ws} mark={mark} look={look} />}
+    </div>
+  )
+}
+
+/** The open card's field: its text goes to Claude as the first message of a thread anchored to the mark. */
+function Ask({ ws, mark, look }: { ws: string; mark: ReportMark; look: LensLook }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  // the field takes the caret once the card stands at its passage, without scrolling the page to it
-  const field = useRef<HTMLTextAreaElement | null>(null)
-  const placed = top != null
-  useEffect(() => {
-    if (placed) field.current?.focus({ preventScroll: true })
-  }, [placed])
-  const save = async () => {
-    const t = text.trim()
-    if (!t || busy) return
+  const send = async () => {
+    const msg = text.trim()
+    if (!msg || busy) return
     setBusy(true)
     try {
-      await onSave(t)
+      const said = [mark.title, mark.body, mark.here].filter(Boolean).join(' ')
+      const meta = await api.createThread(ws, { anchor: `mark:${mark.id}`, anchor_text: `${look.name} on "${mark.term}": ${said}`, text: msg })
+      track('thread-open', { target: `mark:${mark.id}`, detail: { from: 'report-mark' } })
+      bus.emit('openChat', { chatId: meta.id })
+      setText('')
     } catch (e) {
-      bus.emit('toast', { text: `Could not save the comment. ${(e as Error).message}`, kind: 'error' })
+      bus.emit('toast', { text: `Could not open a thread. ${(e as Error).message}`, kind: 'error' })
+    } finally {
       setBusy(false)
     }
   }
@@ -145,38 +186,12 @@ export function DraftCard({ top, style, className = '', attrs, onMouseDown, card
     e.stopPropagation()
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      void save()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      onCancel()
+      void send()
     }
   }
   return (
-    <div ref={cardRef} className={`wu-cm wu-cm-active wu-cm-draft${className ? ` ${className}` : ''}`} style={{ top: top ?? 0, visibility: top == null ? 'hidden' : undefined, ...style }} {...attrs} onClick={(e) => e.stopPropagation()} onMouseDown={onMouseDown}>
-      <div className="wu-cm-head">
-        <span className="wu-cm-sq" style={{ background: NOTE_COLOR }} />
-        <span className="wu-cm-name" style={{ color: NOTE_COLOR }}>
-          You
-        </span>
-      </div>
-      <div className="wu-cm-reply">
-        <TextArea
-          ref={field}
-          bare
-          block
-          autoGrow
-          rows={1}
-          maxHeight={160}
-          value={text}
-          onChange={setText}
-          onKeyDown={onKey}
-          onBlur={() => {
-            if (!text.trim() && !busy) onCancel()
-          }}
-          disabled={busy}
-          aria-label="Comment"
-        />
-      </div>
+    <div className="wu-cm-reply" onClick={(e) => e.stopPropagation()}>
+      <TextArea bare block autoGrow rows={1} maxHeight={120} value={text} onChange={setText} onKeyDown={onKey} disabled={busy} placeholder="Ask about this…" aria-label="Ask about this mark" />
     </div>
   )
 }

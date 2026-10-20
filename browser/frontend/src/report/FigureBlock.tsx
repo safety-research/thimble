@@ -1,5 +1,5 @@
-// The figure block: a canvas card embedded in the report, with its question, `from canvas` and ×, its output at the
-// card's width (or its body, for cards with no run), and a caption edited in place. Before a card is picked the block is
+// The figure block: a canvas card embedded in the report, with its question and its own controls inside its frame (Ask,
+// a thread about the card where Claude changes it in place, and Remove), its output at the card's width (or its body, for cards with no run), and a caption edited in place. Before a card is picked the block is
 // the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor. A
 // figure follows its card: when the card changes (the stream's `cell` record) it is read again and drawn in place, and a
 // caption that still says the card's takeaway word for word takes the new takeaway, also after a change made while the
@@ -22,7 +22,6 @@ import { bus } from '../lib/bus'
 import { hhmm } from '../lib/time'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import { teleport } from '../lib/teleport'
 import type { CardVersion, Cell, WriteupFigure } from '../lib/types'
 import { useReportCtx } from './context'
 import { anchorFor, figureCandidates, readableText } from './model'
@@ -339,12 +338,26 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
           <span className="wu-fig-q" draggable={drag ? true : undefined} onDragStart={drag?.onDragStart} onDragEnd={drag?.onDragEnd}>
             {cell?.title || (cell === null ? 'The card is gone' : '')}
           </span>
-          {cellRef && (
-            <button type="button" className="wu-fig-from" onClick={() => teleport(cellRef)}>
-              from canvas
-            </button>
+          {cellRef && cell && !readOnly && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="chat"
+              className="wu-fig-act wu-fig-ask"
+              title="Ask about this card; Claude changes it in place"
+              onClick={(e) => {
+                const el = (e.currentTarget as HTMLElement).closest<HTMLElement>('[data-anchor]')
+                if (el) bus.emit('askAbout', { el })
+              }}
+            >
+              Ask
+            </Button>
           )}
-          {!readOnly && onRemove && <Button variant="icon" size="sm" icon="x" title="Remove" aria-label="Remove" className="wu-fig-x" onClick={onRemove} />}
+          {!readOnly && onRemove && (
+            <Button variant="ghost" size="sm" className="wu-fig-act wu-fig-remove" title="Take the card out of the report; it stays on the canvas" onClick={onRemove}>
+              Remove
+            </Button>
+          )}
         </div>
       )}
       <div className="wu-fig-body">

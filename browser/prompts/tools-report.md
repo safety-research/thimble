@@ -4,12 +4,14 @@ Each `## <tool>` section is one tool, in the same form as tools.md (server/thimb
 
 ## read_document
 
-Read the report as it stands, as Markdown: the analyst's own notes, headings and figures included. Read it before you change it.
+Read the report as it stands, as Markdown: the analyst's own notes, headings and figures included, and above each block you wrote, the line `<!-- by: claude -->`. Read it before you change it.
 
 ```json
 {
   "type": "object",
-  "properties": {}
+  "properties": {
+    "doc": {"type": "string", "description": "The document's slug, as a request for it names it. Default: the report."}
+  }
 }
 ```
 
@@ -21,6 +23,7 @@ Save the report whole, as Markdown in the report's form. Use it for a report tha
 {
   "type": "object",
   "properties": {
+    "doc": {"type": "string", "description": "The document's slug, as a request for it names it. Default: the report."},
     "text": {"type": "string", "description": "The whole report: `# ` its title, `## ` each section, cited paragraphs, and figures as `![what to take from it](card:<id>)` on lines of their own."}
   },
   "required": ["text"]
@@ -35,6 +38,7 @@ Change one passage of the report in place: the words `old_text`, exactly as read
 {
   "type": "object",
   "properties": {
+    "doc": {"type": "string", "description": "The document's slug, as a request for it names it. Default: the report."},
     "old_text": {"type": "string", "description": "Words of the report, exactly as they stand, enough of them to occur once."},
     "new_text": {"type": "string", "description": "What they become, in the report's Markdown form."}
   },

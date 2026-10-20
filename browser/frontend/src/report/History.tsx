@@ -56,9 +56,8 @@ export interface HistoryMenuProps {
   onView: (view: HistoryView | null, rows: HistoryRow[]) => void
 }
 
-/** A save's text: generation `n`, or an earlier save of its run. */
-export const readRef = (ws: string, slug: string, ref: DraftRef): Promise<AnyDoc> =>
-  ref.rev != null ? docsApi.revision(ws, slug, ref.n, ref.rev) : docsApi.version(ws, slug, ref.n)
+/** A kept draft's text. */
+export const readRef = (ws: string, slug: string, ref: DraftRef): Promise<AnyDoc> => docsApi.version(ws, slug, ref.n)
 
 const plural = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`
 

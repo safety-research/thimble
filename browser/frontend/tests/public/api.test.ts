@@ -1,4 +1,4 @@
-// The browser's client for the backend's routes (src/lib/api.ts, src/report/commentsApi.ts). The backend answers only
+// The browser's client for the backend's routes (src/lib/api.ts). The backend answers only
 // its own origin and refuses a state-changing request whose body is not JSON (backend/app/http_guard.py), so every
 // call goes to a relative /api path (under the browser's own /b/<key> once it holds its key, src/lib/browserKey.ts),
 // every call that changes state sends JSON as JSON, and a workspace name or an id is percent-encoded into its path
@@ -7,7 +7,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as client from '../../src/lib/api.ts'
 import { bus } from '../../src/lib/bus.ts'
-import { commentsApi } from '../../src/report/commentsApi.ts'
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown }
 let calls: Call[] = []
@@ -33,8 +32,6 @@ const CLIENTS: Record<string, Record<string, unknown>> = {
   docsApi: client.docsApi,
   scaleApi: client.scaleApi,
   undoApi: client.undoApi,
-  checksApi: client.checksApi,
-  commentsApi,
 }
 
 /** Every method called with the probe workspace first and plain values after it; each request it made. */
@@ -103,18 +100,16 @@ describe('the API client', () => {
 
   test("a message reaches main as an event; the Report tab's Write and the refused card's buttons are clicks of their own routes", async () => {
     await client.api.postEvent('w', 'main', { text: 'How many reviews?' })
-    await client.api.write('w', 'report', { text: 'Add the review load.', after: 'report:report#p1' })
+    await client.api.write('w', 'report', { text: 'Add the review load.', after_text: 'The runs.' })
     await client.api.startIt('w', 'r1')
     await client.api.again('w', 'r2')
     await client.api.buildView('w', 'posts', { model: 'claude-opus-5-5', effort: 'high' })
-    await client.checksApi.run('w', 'unverified', 'report')
     expect(calls.map((c) => [c.method, c.url, JSON.parse(String(c.body))])).toEqual([
       ['POST', '/api/ws/w/events', { kind: 'main', payload: { text: 'How many reviews?' } }],
-      ['POST', '/api/ws/w/write', { doc: 'report', text: 'Add the review load.', after: 'report:report#p1' }],
+      ['POST', '/api/ws/w/write', { doc: 'report', text: 'Add the review load.', after_text: 'The runs.' }],
       ['POST', '/api/ws/w/subagents/start-it', { request: 'r1' }],
       ['POST', '/api/ws/w/subagents/again', { request: 'r2' }],
       ['POST', '/api/ws/w/views/posts/build', { model: 'claude-opus-5-5', effort: 'high' }],
-      ['POST', '/api/ws/w/checks/unverified/run', { doc: 'report' }],
     ])
     // main opens on an empty chat: the browser has no Start of its own
     expect('start' in client.api).toBe(false)

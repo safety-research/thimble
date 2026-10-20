@@ -3090,3 +3090,95 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 .wu-refused {
   margin: 8px 16px 0;
 }
+
+/* -------- the reports as tabs (ReportTab): the File browser's open-file tabs (files.css .reader-tab), with + New -------- */
+.wu-root {
+  --files-side-bg: color-mix(in oklab, var(--bg-panel) 40%, var(--surface-card));
+  --files-rule: rgba(var(--ink-rgb), 0.1);
+}
+.wu-tabs-bar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 34px;
+  background: var(--files-side-bg);
+  box-shadow: inset 0 -1px 0 var(--files-rule);
+  color: var(--text-tertiary);
+}
+.wu-tabs-bar .reader-tabs {
+  flex: 0 1 auto;
+}
+.wu-tabs-bar .reader-tab-x {
+  font: inherit;
+}
+.wu-tabs-bar .wu-new.btn {
+  align-self: center;
+  margin-left: 6px;
+}
+.wu-tabs-bar .reader-tabs-more.btn {
+  align-self: center;
+  margin: 0 6px;
+}
+/* a report's tab while Claude writes it: the spinner after its name */
+.wu-tabs-bar .reader-tab-pick .spinner {
+  flex: none;
+}
+/* -------- Write on the report's toolbar: the field for instructions or feedback, then the button -------- */
+.wu-write {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 6px;
+}
+.wu-write .wu-write-field {
+  width: clamp(160px, 26vw, 320px);
+  height: 30px;
+  font: var(--type-ui-sm);
+}
+.wu-bar .wu-write .btn-primary {
+  margin-left: 0;
+}
+.wu-failed-line {
+  flex: none;
+  margin: 0;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--files-rule);
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+}
+/* -------- a lens's mark on its words (decorations.ts): its lens's fill; open, an underline in the ink -------- */
+.wu-root .wu-editor .wu-lens {
+  background: var(--lens);
+  border-radius: var(--radius-hl);
+  cursor: pointer;
+}
+.wu-root .wu-editor .wu-lens-active {
+  box-shadow: 0 1.5px 0 currentColor;
+}
+/* -------- a block Claude wrote, until the person edits it: a quiet "Claude" in the right gutter, a line below the block's
+   actions (which stand on its first line) and gone while the block is hovered -------- */
+.wu-root .wu-editor .wu-by-claude .bn-block-content {
+  position: relative;
+}
+.wu-root .wu-editor .wu-by-claude .bn-block-content::after {
+  content: 'Claude';
+  position: absolute;
+  top: 1.75em;
+  left: calc(100% + 14px);
+  font: 400 10.5px / 1.6 var(--font-mono);
+  color: var(--text-tertiary);
+  opacity: 0.75;
+  pointer-events: none;
+}
+.wu-root .wu-editor .wu-by-claude:hover .bn-block-content::after {
+  opacity: 0;
+}
+/* the figure's own controls inside its frame (FigureBlock): Ask and Remove, quiet until the figure is hovered */
+.wu-fig .wu-fig-act.btn {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.wu-fig:hover .wu-fig-act.btn {
+  color: var(--text-secondary);
+}

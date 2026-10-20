@@ -11,7 +11,7 @@ import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
 import type { Concept, TypesState } from '../lib/types'
-import { BUILTIN_SLUGS, docLabel } from '../report/model'
+import { docLabel, SLUG } from '../report/model'
 
 interface BaseProps {
   onClick?: (e: MouseEvent<HTMLElement>) => void
@@ -56,7 +56,7 @@ function loadTypes(ws: string): void {
 }
 
 function useDocName(ws: string, slug: string): string {
-  const builtin = (BUILTIN_SLUGS as readonly string[]).includes(slug)
+  const builtin = slug === SLUG
   const [, bump] = useState(0)
   useEffect(() => {
     if (builtin || !ws) return

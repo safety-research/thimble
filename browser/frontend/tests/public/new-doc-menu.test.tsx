@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-// + New (src/report/DocMenus.tsx) lists the report types the workspace's extensions give as they are when it opens, so
-// an extension switched on or off shows there without a reload.
+// New (src/report/DocMenus.tsx) makes another report, of the one kind the server makes, from a name: what it offers is
+// what the server can make (POST /report-types/new {kind: document, name}), so it never asks for a kind the server
+// refuses. The new report opens as a tab (src/report/ReportTab.tsx openTabs), and closing a tab leaves the report.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { docsApi } from '../../src/lib/api.ts'
-import type { DocPreset } from '../../src/lib/types.ts'
 import { NewDocMenu } from '../../src/report/DocMenus.tsx'
+import { nextOpen, openTabs } from '../../src/report/ReportTab.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {
@@ -14,25 +15,32 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const preset = (id: string, name: string): DocPreset => ({ id, name, description: '', renderer: 'document' })
-
-test('+ New reads the report types again each time it opens', async () => {
-  // jsdom has no ResizeObserver, which the menu's popover watches its size with
+test('New asks for a name and makes a report of the kind the server makes', async () => {
+  // jsdom has no ResizeObserver, which the popover watches its size with
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
-  let served = [preset('report', 'Report')]
-  vi.spyOn(docsApi, 'presets').mockImplementation(async () => served)
-  const el = await mount(<NewDocMenu ws="w" onMade={() => undefined} />)
+  const create = vi.spyOn(docsApi, 'createDoc').mockResolvedValue({ slug: 'team-update', name: 'Team update', description: '', renderer: 'document', builtin: false })
+  const onMade = vi.fn()
+  const el = await mount(<NewDocMenu ws="w" onMade={onMade} />)
+  await act(async () => el.querySelector<HTMLButtonElement>('button.wu-new')!.click())
   await settle()
-  const items = () => [...document.querySelectorAll('[role=menu] [role=menuitem]')].map((b) => b.textContent?.trim())
-  const toggle = async () => {
-    await act(async () => el.querySelector<HTMLButtonElement>('button.wu-new')!.click())
-    await settle()
-  }
-  await toggle()
-  expect(items()).toContain('Report')
-  expect(items()).not.toContain('Video')
-  await toggle()
-  served = [preset('report', 'Report'), preset('video', 'Video')]
-  await toggle()
-  expect(items()).toContain('Video')
+  const field = document.querySelector<HTMLInputElement>('#wu-doc-name')!
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  await act(async () => {
+    set.call(field, 'Team update')
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => field.form!.requestSubmit())
+  await settle()
+  // every kind New offers is one the server makes: a document, with its name
+  expect(create).toHaveBeenCalledWith('w', { kind: 'document', name: 'Team update' })
+  expect(onMade).toHaveBeenCalledWith(expect.objectContaining({ slug: 'team-update' }))
+})
+
+test('the tabs open are the ones kept that still exist, and the current one; a closed tab gives way to its neighbor', () => {
+  const types = { report: { exists: true, renderer: 'document', name: 'Report' }, notes: { exists: false, renderer: 'document', name: 'Notes' } }
+  expect(openTabs(['report', 'gone', 'notes'], types, 'notes')).toEqual(['report', 'notes'])
+  expect(openTabs(['report'], types, 'notes')).toEqual(['report', 'notes'])
+  expect(nextOpen(['report', 'notes', 'plan'], 'notes')).toBe('plan')
+  expect(nextOpen(['report', 'notes'], 'notes')).toBe('report')
+  expect(nextOpen(['notes'], 'notes')).toBe('report')
 })

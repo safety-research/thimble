@@ -1,46 +1,38 @@
-// The Report tab: the type bar, then the document in its arrangement. The bar holds the types as chips with an icon,
-// drawn as the Files views bar draws its views (Segmented), + New
-// (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
-// Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
-// `write` browser event; `report` stream events follow it). While a writer of the document runs, Stop stands beside
-// Writing (WriteAction.tsx StopWriter), and while Claude Code asks that writer in the terminal the bar says so. A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
-// not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
-// with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
+// The Report tab: the open reports as tabs, as the File browser opens files, with + for a new report (DocMenus.tsx);
+// then the open report's toolbar: its ⋯ (rename, delete), History (History.tsx), Export (ExportMenu.tsx) and Write
+// (WriteAction.tsx), a field for instructions or feedback that go to Claude in the chat; while Claude writes, Stop stands
+// beside Writing. Closing a tab leaves its report as it is; the tabs open are kept per workspace. A report is the
+// person's from the start: the editor shows it, empty or not, so they can type notes and place cards before they ask
+// for anything. The editor's module (Documents.tsx) is imported once in an
+// effect rather than with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never
+// shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Segmented } from '../components/Button'
-import type { IconName } from '../components/Icon'
+import { Button } from '../components/Button'
+import { Icon } from '../components/Icon'
+import { Menu } from '../components/Menu'
 import { FilterChip } from '../components/FilterChip'
 import { Mark } from '../components/Marks'
 import { Spinner } from '../components/Spinner'
-import { Tipped } from '../components/Tooltip'
-import { api, docsApi, isNotFound } from '../lib/api'
+import { api, docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { revealAnchor } from '../lib/teleport'
-import type { AnyDoc, TypesState, Writeup } from '../lib/types'
+import type { TypesState, Writeup } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
-import { ReportProblemButton } from '../shell/ProblemReport'
-import { writerDoc } from '../chat/threads'
-import { terminalWaits, useChatMetas } from '../chat/waiting'
 import { NewDocMenu, TypeActions } from './DocMenus'
 import type { DocFilter } from './Editor'
 import { DraftDiff, HistoryMenu, PastDraft } from './History'
 import type { HistoryRow, HistoryView } from './historyModel'
-import { LockNote } from './LockNote'
 import { ExportMenu } from './ExportMenu'
-import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
+import { docKey, docLabel, labelReadDocument, reportFilterSets, SLUG } from './model'
 import { StopWriter, WriteAction } from './WriteAction'
-import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE, writingAfter } from './writeFailures'
-import { RefusedCard } from '../chat/Refused'
-import { ApiErrorCard } from '../chat/ApiError'
 import { failureText, loadChunk } from '../lib/chunkRecovery'
 
 type DocsModule = typeof import('./Documents')
 let docsModule: DocsModule | null = null
 let docsLoading: Promise<DocsModule> | null = null
-/** The views' chunk, fetched once per page. */
+/** The editor's chunk, fetched once per page. */
 function loadDocs(): Promise<DocsModule> {
   if (!docsLoading) {
     docsLoading = loadChunk(() => import('./Documents')).then((m) => {
@@ -58,31 +50,41 @@ const REFETCH_DEBOUNCE_MS = 300
 const ROWS_LIMIT = 5000
 /** this tab's token on its saves, so its own `edited` events are not refetched */
 const CLIENT = Math.random().toString(36).slice(2, 10)
+/** The line under the bar after a write that stopped before it finished. */
+export const WRITE_FAILED_LINE = 'Claude stopped before it finished writing. The chat says why.'
 
-type Load = { state: 'loading' } | { state: 'ok'; doc: AnyDoc } | { state: 'none' } | { state: 'error'; message: string }
+type Load = { state: 'loading' } | { state: 'ok'; doc: Writeup } | { state: 'error'; message: string }
 
-/** Each kind of document's icon in the type bar, by its renderer. */
-const DOC_ICON: Record<string, IconName> = { document: 'doc', slides: 'image', story: 'writeup', video: 'run', custom: 'page' }
+/** The tabs to show: the ones kept open that still exist, in their order, and the current one, which is always open.
+ * Pure. */
+export function openTabs(kept: readonly string[], types: TypesState | null, current: string): string[] {
+  const known = (s: string) => !types || s in types
+  const out = kept.filter((s, i) => known(s) && kept.indexOf(s) === i)
+  if (!out.includes(current)) out.push(current)
+  return out
+}
+
+/** The tab that opens when tab `closing` closes: the one after it, else the one before, else the report. Pure. */
+export function nextOpen(tabs: readonly string[], closing: string): string {
+  const i = tabs.indexOf(closing)
+  const rest = tabs.filter((s) => s !== closing)
+  return rest[Math.min(i, rest.length - 1)] ?? SLUG
+}
 
 export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const [slug, setSlugState] = useState<string>(() => readStorage<string>(docKey(ws), SLUG) || SLUG)
+  // the reports open as tabs, kept per workspace
+  const openKey = `${docKey(ws)}-open`
+  const [opened, setOpened] = useState<string[]>(() => readStorage<string[]>(openKey, [SLUG]))
+  useEffect(() => writeStorage(openKey, opened), [openKey, opened])
   const [types, setTypes] = useState<TypesState | null>(null)
   const [load, setLoad] = useState<Load>({ state: 'loading' })
   const [filter, setFilter] = useState<DocFilter | null>(null)
-  const [writingSlug, setWritingSlug] = useState<string | null>(null)
-  const [generating, setGenerating] = useState<Record<string, boolean>>({})
-  const [drawer, setDrawer] = useState(false)
+  // a write asked for here, until the stream says it started
+  const [asked, setAsked] = useState<string | null>(null)
   // a past draft, or a comparison of two, shown read-only in place of the editor (History.tsx), with the history's rows
-  // for the band; null for the current draft in the editor
   const [past, setPast] = useState<{ view: HistoryView; rows: HistoryRow[] } | null>(null)
-  // the chats, for a writer's session of the document shown (below)
-  const chats = useChatMetas(ws)
-  const { failures, dismiss } = useWriteFailures(ws)
-  const failure = failures[slug] ?? null
-  // a writer's start that did not happen: its card under the bar, with the kind's buttons
-  const { refusals, dismiss: dismissRefusal } = useWriteRefusals()
-  const refused = refusals[slug] ?? null
-  // the views' module is fetched the first time the tab is shown, and stays mounted after
+  // the editor's module is fetched the first time the tab is shown, and stays mounted after
   const [shown, setShown] = useState(active)
   useEffect(() => {
     if (active) setShown(true)
@@ -104,21 +106,18 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const filterConcept = useRef<string | null>(null)
   const slugRef = useRef(slug)
   slugRef.current = slug
-  // every document read or saved here, by slug, so a switch back to one shows it at once while it is read again; and
-  // the one the body showed last, which it keeps showing while a document not read yet loads after a switch, so the
-  // body never stands empty between two documents, and the layout does not jump
-  const kept = useRef(new Map<string, AnyDoc>())
-  const lastShown = useRef<{ slug: string; doc: AnyDoc } | null>(null)
+  // every document read or saved here, by slug, so a switch back to one shows it at once while it is read again
+  const kept = useRef(new Map<string, Writeup>())
 
   const setSlug = useCallback(
     (next: string) => {
+      setOpened((o) => (o.includes(next) ? o : [...o, next]))
       if (next === slugRef.current) return
       slugRef.current = next
       setSlugState(next)
       writeStorage(docKey(ws), next)
       const hit = kept.current.get(next)
       setLoad(hit ? { state: 'ok', doc: hit } : { state: 'loading' })
-      setDrawer(false)
       setPast(null)
       track('ui-click', { target: `report:${next}`, detail: { action: 'switch' } })
     },
@@ -129,37 +128,23 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     try {
       const state = await docsApi.types(ws)
       setTypes(state)
+      // a document shown that is gone (deleted here or in another tab) gives way to the report
+      if (!(slugRef.current in state)) setSlug(SLUG)
       return state
     } catch {
       return null
     }
-  }, [ws])
+  }, [ws, setSlug])
 
   const read = useCallback(async () => {
     const s = slugRef.current
-    const state = await readTypes()
-    if (slugRef.current !== s) return
-    const renderer = rendererOf(state, s, null)
-    const settle = (next: Load) => {
-      if (next.state === 'ok') kept.current.set(s, next.doc)
-      else kept.current.delete(s)
-      if (slugRef.current === s) setLoad(next)
-    }
-    // a page the state says is not written yet is not fetched: its route answers 404 until then; the report, the
-    // slides and the story read as their frame before a write
-    const framed = renderer === 'document' || renderer === 'slides' || renderer === 'story'
-    if (!framed && state?.[s] && !state[s].exists) return settle({ state: 'none' })
+    void readTypes()
     try {
-      if (framed && (renderer === 'document' || (state?.[s] && !state[s].exists))) {
-        try {
-          return settle({ state: 'ok', doc: await api.frame(ws, s) })
-        } catch (e) {
-          if (!isNotFound(e)) throw e
-        }
-      }
-      settle({ state: 'ok', doc: await docsApi.document(ws, s) })
+      const doc = (await docsApi.document(ws, s)) as Writeup
+      kept.current.set(s, doc)
+      if (slugRef.current === s) setLoad({ state: 'ok', doc })
     } catch (e) {
-      settle(isNotFound(e) ? { state: 'none' } : { state: 'error', message: (e as Error).message })
+      if (slugRef.current === s) setLoad({ state: 'error', message: (e as Error).message })
     }
   }, [ws, readTypes])
 
@@ -172,7 +157,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         return setFilter(null)
       }
       filterConcept.current = entry.concept
-      // every value's rows, so a document the label never read (it runs over the report) takes no filter from it
+      // every value's rows, so a document the label never read takes no filter from it
       const [concept, rows] = await Promise.all([api.concept(ws, entry.concept).catch(() => null), api.conceptRows(ws, entry.concept, { limit: ROWS_LIMIT })])
       if (filterConcept.current !== entry.concept || slugRef.current !== s) return
       if (!labelReadDocument(rows.rows, s)) return setFilter(null)
@@ -204,30 +189,14 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         const e = ev as { slug?: unknown; status?: unknown; client?: unknown }
         const evSlug = typeof e.slug === 'string' ? e.slug : ''
         if (!evSlug) return
-        // a failure's mark on the document and its card come from writeFailures.ts
-        const writing = writingAfter(e.status)
-        if (writing !== null) setGenerating((g) => ({ ...g, [evSlug]: writing }))
-        if (e.status === 'deleted' || e.status === 'created' || e.status === 'renamed') {
-          // a type made, renamed or deleted, here or in another tab or by the chat: the bar follows, and a deleted
-          // document shown goes back to the report
-          kept.current.delete(evSlug)
-          if (e.status === 'deleted' && evSlug === slugRef.current) setSlug(SLUG)
-          typesLater()
-          return
-        }
+        if (e.status === 'generating') setAsked((a) => (a === evSlug ? null : a))
+        typesLater()
         if (evSlug !== slugRef.current) {
-          // its kept copy is out of date: a switch to it waits for the new one rather than show the old
-          if (e.status !== 'generating') {
-            kept.current.delete(evSlug)
-            typesLater()
-          }
+          kept.current.delete(evSlug)
           return
         }
-        if (e.status === 'edited') {
-          if (e.client !== CLIENT) later()
-          return
-        }
-        if (e.status === 'generating') return
+        if (e.status === 'edited' && e.client === CLIENT) return
+        if (e.status === 'generating' || e.status === 'created' || e.status === 'renamed') return
         later()
       }),
       bus.on('filter', (e) => {
@@ -242,7 +211,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
       if (timer != null) window.clearTimeout(timer)
       if (typesTimer != null) window.clearTimeout(typesTimer)
     }
-  }, [read, readFilter, readTypes, setSlug])
+  }, [read, readFilter, readTypes])
 
   // a chip's teleport into a document: the document it names comes forward, then the element
   useEffect(
@@ -278,158 +247,120 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   }
 
   const doc = load.state === 'ok' ? load.doc : null
-  const renderer = rendererOf(types, slug, doc)
-  const isPage = renderer === 'custom'
-  const isVideo = renderer === 'video'
-  useEffect(() => {
-    if (doc) lastShown.current = { slug, doc }
-  }, [slug, doc])
-  // what the body shows: the selected document, or while it loads after a switch the one shown before it
-  const held = load.state === 'loading' ? lastShown.current : null
-  const bodySlug = held ? held.slug : slug
-  const bodyDoc = held ? held.doc : doc
-  const bodyRenderer = held ? rendererOf(types, held.slug, held.doc) : renderer
-  // a writer's session of this document that runs: the write goes on after its first save (the stream says
-  // `generated` then), so the primary action stays Writing, never Revise, until the session ends
-  const writer = chats.find((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === slug) ?? null
-  // that writer waits on a permission prompt Claude Code asks in the terminal: the bar says so in place of Writing
-  const writerWaits = !!writer && terminalWaits(null, chats).has(writer.id)
-  // a document is being written while its write is pending or a writer of it runs (which goes on after its first save)
-  const writingOf = (s: string) => !!generating[s] || types?.[s]?.status === 'generating' || chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s)
-  const busy = writingSlug === slug || !!generating[slug] || types?.[slug]?.status === 'generating' || !!writer
-  // Write is a click: the writer starts through thimble's plugin, and the answer says whether it did; the stream's
-  // `report` events (generating, then generated or failed) carry the write from there, so the button stays busy while
-  // the writer works. A start that did not happen shows its card under the bar
-  const write = async () => {
-    if (busy || demoStop()) return
+  const state = types?.[slug]
+  const busy = asked === slug || state?.status === 'generating'
+  // Claude has written in it before: the primary action reads Revise
+  const written = (state?.generation ?? 0) > 0
+  const failed = state?.status === 'failed' && !busy
+  const name = docLabel(slug, types)
+  // Write: the analyst's instructions go to Claude in the chat; the stream's `report` events carry the write from there
+  const write = async (instructions: string): Promise<boolean> => {
+    if (busy) return false
     const s = slug
-    setWritingSlug(s)
-    track('ui-click', { target: `ui:report-write`, detail: { slug: s } })
+    setAsked(s)
+    track('ui-click', { target: 'ui:report-write', detail: { slug: s, instructions: !!instructions } })
     try {
-      const a = await api.write(ws, s)
-      if (a.agentId || a.program) setGenerating((g) => ({ ...g, [s]: true }))
-      else if (a.kind) noteRefusal(s, { kind: a.kind, reason: a.reason ?? '', request: a.request ?? null, expired: a.expired })
+      const a = await api.write(ws, s, { text: instructions })
+      if (a.kind === 'busy') {
+        setAsked(null)
+        bus.emit('toast', { text: `Not sent: ${a.reason ?? 'Claude is busy'}. Try again once it has answered.`, kind: 'error' })
+        return false
+      }
+      return true
     } catch (e) {
-      bus.emit('toast', { text: `Could not ask for the ${s}. ${(e as Error).message}`, kind: 'error' })
-    } finally {
-      setWritingSlug((w) => (w === s ? null : w))
+      setAsked(null)
+      bus.emit('toast', { text: `Could not ask for the ${name.toLowerCase()}. ${(e as Error).message}`, kind: 'error' })
+      return false
     }
   }
   const made = async (t: { slug: string }) => {
     await readTypes()
     setSlug(t.slug)
   }
-  // a save lands on the document it was made in: a save after a switch only updates that document's kept copy
   const onSaved = useMemo(
-    () => (saved: AnyDoc) => {
-      kept.current.set(bodySlug, saved)
-      if (slugRef.current === bodySlug) setLoad({ state: 'ok', doc: saved })
+    () => (saved: Writeup) => {
+      kept.current.set(slug, saved)
+      if (slugRef.current === slug) setLoad({ state: 'ok', doc: saved })
     },
-    [bodySlug],
-  )
-
-  const items = switcherItems(types)
-  // a document the writer has produced: the primary action reads Revise; a frame, or nothing yet, reads Write
-  const written = !!bodyDoc && !(bodyDoc as Writeup).frame
-  const arranged = bodyRenderer === 'slides' || bodyRenderer === 'story'
-  const fallback = (
-    <div className="wu-status">
-      <Spinner size={14} label="Loading the editor" />
-    </div>
+    [slug],
   )
   const closePast = useCallback(() => setPast(null), [])
-  // Restore in History: the restored draft is the current one, shown in the editor
   const onRestored = useCallback(
-    (saved: AnyDoc) => {
+    (saved: Writeup) => {
       onSaved(saved)
       setPast(null)
     },
     [onSaved],
   )
-  const pastShown = past != null && written && !isPage && !isVideo
-  const view = pastShown ? (
+  const view = past ? (
     past.view.kind === 'diff' ? (
       <DraftDiff ws={ws} slug={slug} from={past.view.from} to={past.view.to} rows={past.rows} onClose={closePast} />
     ) : (
-      <PastDraft ws={ws} slug={slug} target={past.view.target} rows={past.rows} onClose={closePast} onRestored={onRestored} />
+      <PastDraft ws={ws} slug={slug} target={past.view.target} rows={past.rows} onClose={closePast} onRestored={(d) => onRestored(d as Writeup)} />
     )
-  ) : shown && (bodyDoc || (isPage && load.state === 'none')) ? (
-      views ? (
-        <views.DocumentView ws={ws} slug={bodySlug} renderer={bodyRenderer} doc={bodyDoc} filter={filter} client={CLIENT} drawer={drawer || load.state === 'none'} onSaved={onSaved} writing={writingOf(bodySlug)} />
-      ) : viewsError ? (
-        <div className="wu-status wu-error">
-          Could not load the editor
-          <div className="wu-error-detail">{viewsError}</div>
-        </div>
-      ) : (
-        fallback
-      )
-    ) : null
+  ) : shown && doc ? (
+    views ? (
+      <views.DocumentView ws={ws} slug={slug} doc={doc} filter={filter} client={CLIENT} onSaved={onSaved} />
+    ) : viewsError ? (
+      <div className="wu-status wu-error">
+        Could not load the editor
+        <div className="wu-error-detail">{viewsError}</div>
+      </div>
+    ) : (
+      <div className="wu-status">
+        <Spinner size={14} label="Loading the editor" />
+      </div>
+    )
+  ) : null
+  const tabs = openTabs(opened, types, slug)
+  const close = (s: string) => {
+    track('ui-click', { target: `report:${s}`, detail: { action: 'tab-close' } })
+    const next = nextOpen(tabs, s)
+    setOpened(tabs.filter((t) => t !== s).length ? tabs.filter((t) => t !== s) : [SLUG])
+    if (s === slug) setSlug(next)
+  }
   return (
-    <div className="wu-root" ref={root} data-panel="report" data-doc={slug} data-renderer={renderer}>
-      <div className="wu-bar">
-        <Segmented
-          className="wu-types"
-          label="Documents"
-          size="lg"
-          value={slug}
-          onChange={setSlug}
-          options={items.map((it) => ({
-            value: it.slug,
-            icon: DOC_ICON[it.renderer] ?? 'doc',
-            className: it.generating || writingOf(it.slug) ? 'is-updating' : undefined,
-            label: (
-              <span className="wu-type" data-doc-chip={it.slug}>
-                {!(it.generating || writingOf(it.slug)) && failures[it.slug] && <Mark kind="failed" label="Not written" className="wu-type-failed" />}
-                {it.label}
-                {(it.generating || writingOf(it.slug)) && <Spinner size={10} label="Writing" className="tab-dot tab-spinner" />}
+    <div className="wu-root" ref={root} data-panel="report" data-doc={slug} data-renderer="document">
+      <div className="wu-tabs-bar">
+        <span className="reader-tabs" role="tablist" aria-label="Open reports">
+          {tabs.map((s) => {
+            const writing = asked === s || types?.[s]?.status === 'generating'
+            return (
+              <span key={s} className={'reader-tab' + (s === slug ? ' active' : '')} data-doc-chip={s}>
+                <button type="button" role="tab" aria-selected={s === slug} className="reader-tab-pick" onClick={() => setSlug(s)}>
+                  {!writing && types?.[s]?.status === 'failed' ? <Mark kind="failed" label="Not finished" className="reader-tab-glyph" /> : <Icon name="doc" size={13} className="reader-tab-glyph" />}
+                  <span className="reader-tab-name">{docLabel(s, types)}</span>
+                  {writing && <Spinner size={10} label="Writing" />}
+                </button>
+                {tabs.length > 1 && (
+                  <button type="button" className="reader-tab-x" aria-label={`Close ${docLabel(s, types)}`} title="Close the tab; the report stays" onClick={() => close(s)}>
+                    <Icon name="x" size={11} />
+                  </button>
+                )}
               </span>
-            ),
-          }))}
-        />
-        {ownType(slug) && types?.[slug] && <TypeActions ws={ws} slug={slug} name={types[slug].name || slug} onDeleted={() => setSlug(SLUG)} />}
+            )
+          })}
+        </span>
         <NewDocMenu ws={ws} onMade={(t) => void made(t)} />
         <span className="wu-bar-spacer" />
-        {filter && <FilterChip concept={filter.concept} name={filter.name} value={filter.value} count={filter.sets.sids.size} onClear={() => void clearFilter()} />}
-        {written && !isPage && !isVideo && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
-        {written && <ExportMenu ws={ws} slug={slug} page={isPage} />}
-        {isPage && load.state !== 'loading' && <Button variant="icon" icon="code" title="Code" aria-label="Code" active={drawer || load.state === 'none'} disabled={load.state === 'none'} onClick={() => setDrawer((d) => !d)} />}
-        {written && <LockNote doc={bodyDoc} root={root} />}
-        {writer && <StopWriter key={writer.id} ws={ws} chat={writer.id} />}
-        <WriteAction
-          name={ownType(slug) ? docLabel(slug, types) : docLabel(slug, types).toLowerCase()}
-          written={written}
-          busy={busy}
-          waiting={writerWaits}
-          disabled={(load.state === 'loading' && !held) || load.state === 'error'}
-          history={!isPage && !isVideo}
-          onWrite={() => void write()}
-        />
+        <ClosedReports types={types} open={tabs} onOpen={setSlug} />
       </div>
-      {refused && !busy && (
-        <div className="wu-refused" data-refused={slug}>
-          <RefusedCard ws={ws} what={`the ${docLabel(slug, types).toLowerCase()}'s writer`} refusal={refused.refusal} onDismiss={() => dismissRefusal(slug)} onStarted={() => setGenerating((g) => ({ ...g, [slug]: true }))} />
-        </div>
+      <div className="wu-bar">
+        {slug !== SLUG && state && <TypeActions ws={ws} slug={slug} name={name} onDeleted={() => close(slug)} />}
+        {filter && <FilterChip concept={filter.concept} name={filter.name} value={filter.value} count={filter.sets.sids.size} onClear={() => void clearFilter()} />}
+        <span className="wu-bar-spacer" />
+        {written && <HistoryMenu ws={ws} slug={slug} generation={doc?.generation} view={past ? past.view : null} onView={(v, rows) => setPast(v == null ? null : { view: v, rows })} />}
+        {doc && (doc.sections ?? []).length > 0 && <ExportMenu ws={ws} slug={slug} />}
+        {busy && <StopWriter ws={ws} />}
+        <WriteAction name={name} written={written} busy={busy} disabled={load.state !== 'ok'} onWrite={write} />
+      </div>
+      {failed && (
+        <p className="wu-failed-line" role="status" data-failed={slug}>
+          {WRITE_FAILED_LINE}
+        </p>
       )}
-      {failure && !busy && (
-        <div className="wu-failed" data-failed={slug}>
-          <ApiErrorCard
-            line={failure.note}
-            head={failedText(failure)}
-            detail={failedDetail(failure)}
-            retrying={WRITE_RETRY_NOTE}
-            onRetry={write}
-            actions={
-              <>
-                <ReportProblemButton {...failedReport(failure)} compact />
-                <Button variant="icon" size="sm" icon="x" title="Dismiss" aria-label="Dismiss" onClick={() => dismiss(failure)} />
-              </>
-            }
-          />
-        </div>
-      )}
-      <div className={`wu-body${arranged ? ' wu-body-strip' : ''}`}>
-        {load.state === 'loading' && !held && (
+      <div className="wu-body">
+        {load.state === 'loading' && (
           <div className="wu-status">
             <Spinner size={14} label="Loading the document" />
           </div>
@@ -442,15 +373,20 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         )}
         {view}
       </div>
-      {arranged && (
-        <div className="wu-strip glass">
-          <span className="wu-strip-name">Report</span>
-          <span>
-            {bodyRenderer}
-            {written && bodyDoc?.generation != null && ` · draft ${bodyDoc.generation}`}
-          </span>
-        </div>
-      )}
     </div>
+  )
+}
+
+/** The reports whose tabs are closed, in a menu at the tab strip's end, so a closed report opens again. */
+function ClosedReports({ types, open, onOpen }: { types: TypesState | null; open: readonly string[]; onOpen: (slug: string) => void }) {
+  const closed = Object.keys(types ?? {}).filter((s) => !open.includes(s))
+  if (!closed.length) return null
+  return (
+    <Menu
+      label="Closed reports"
+      align="end"
+      items={closed.map((s) => ({ id: s, label: docLabel(s, types), icon: 'doc' as const, onSelect: () => onOpen(s) }))}
+      trigger={<Button size="sm" className="reader-tabs-more">{`${closed.length} closed`}</Button>}
+    />
   )
 }

@@ -2,7 +2,7 @@
 // a block's text, card drop positions, filter sets, the other document types in the report's shape and the type bar's
 // options. The story's helpers are in storyModel.ts.
 import { parseRef } from '../lib/refs'
-import type { AnyDoc, Cell, DeckBody, DeckDoc, DeckSlide, LabelRow, PageDoc, ReportBlock, StoryDoc, TypesState, VideoDoc, Writeup, WriteupFigure, WriteupParagraph, WriteupSection, WriteupSentence } from '../lib/types'
+import type { AnyDoc, Cell, LabelRow, ReportBlock, TypesState, Writeup, WriteupFigure, WriteupParagraph, WriteupSection, WriteupSentence } from '../lib/types'
 import { storageKey } from '../lib/workspace'
 import { parseInline, type InlineNode } from './inlineParse'
 
@@ -210,28 +210,12 @@ export function blocksFromDoc(doc: Pick<Writeup, 'title' | 'sections'>): DocBloc
       const items = p.sentences ?? []
       if (items.length > 0 && items.every((s) => s.bullet)) {
         for (const s of items) blocks.push({ id: s.id, type: 'bullet', text: s.text.trim(), marker: s.bullet === '1.' ? '1.' : '-' })
-      } else blocks.push({ id: p.id, type: 'paragraph', text: paragraphText(p) })
+      } else blocks.push({ id: p.id, type: p.quote ? 'quote' : 'paragraph', text: paragraphText(p) })
       for (const f of figuresAfter(sec, p.id)) blocks.push(figureBlock(f))
     }
     for (const f of figuresAfter(sec, null)) blocks.push(figureBlock(f))
   }
   return { title: doc.title ?? '', blocks }
-}
-
-/** The ids of the editor blocks the analyst locked: title, headings, paragraphs, every item of a locked list, figures. */
-export function lockedBlocks(doc: Pick<Writeup, 'sections' | 'title_locked'>): Set<string> {
-  const out = new Set<string>()
-  if (doc.title_locked) out.add(TITLE_ID)
-  for (const sec of doc.sections ?? []) {
-    if (sec.locked) out.add(sec.id)
-    for (const p of sec.paragraphs ?? []) {
-      if (!p.locked) continue
-      out.add(p.id)
-      for (const s of p.sentences ?? []) out.add(s.id)
-    }
-    for (const f of sec.figures ?? []) if (f.locked) out.add(f.id)
-  }
-  return out
 }
 
 /** The text every block was built from, by id (the title under TITLE_ID), so an untouched block saves as it was. */
@@ -270,6 +254,9 @@ export function editorBlocksFromWire(wire: DocBlocks, withTitle = true): EditorP
         break
       case 'paragraph':
         out.push({ id: b.id, type: 'paragraph', content: contentFromText(b.text ?? '') })
+        break
+      case 'quote':
+        out.push({ id: b.id, type: 'quote', content: contentFromText(b.text ?? '') })
         break
       case 'bullet':
         out.push({ id: b.id, type: b.marker === '1.' ? 'numberedListItem' : 'bulletListItem', content: contentFromText(b.text ?? '') })
@@ -320,6 +307,11 @@ export function wireFromEditor(blocks: readonly EditorBlockLike[], orig: Readonl
       case 'figure':
         out.push({ id: b.id, type: 'figure', cell: String(props.cell ?? ''), caption: String(props.caption ?? '') })
         break
+      case 'quote': {
+        const text = textOf(b)
+        if (text) out.push({ id: b.id, type: 'quote', text })
+        break
+      }
       case PROMPT_TYPE:
         // a prompt is the editor's alone until Enter turns it into a figure request: the document never stores one
         break
@@ -336,8 +328,8 @@ export function wireFromEditor(blocks: readonly EditorBlockLike[], orig: Readonl
 export const PROMPT_TYPE = 'prompt'
 
 /** What a text block can be turned into, from its type menu or the slash menu's Turn into items. */
-export type BlockKind = 'text' | 'heading' | 'subheading' | 'bullets' | 'numbers'
-export const BLOCK_KINDS: readonly BlockKind[] = ['text', 'heading', 'subheading', 'bullets', 'numbers']
+export type BlockKind = 'text' | 'heading' | 'subheading' | 'bullets' | 'numbers' | 'quote'
+export const BLOCK_KINDS: readonly BlockKind[] = ['text', 'heading', 'subheading', 'bullets', 'numbers', 'quote']
 
 /** The kind of an editor block; null for a block whose type does not change (the title, a figure, a prompt). */
 export function kindOf(block: Pick<EditorBlockLike, 'id' | 'type' | 'props'>): BlockKind | null {
@@ -351,6 +343,8 @@ export function kindOf(block: Pick<EditorBlockLike, 'id' | 'type' | 'props'>): B
       return 'bullets'
     case 'numberedListItem':
       return 'numbers'
+    case 'quote':
+      return 'quote'
     default:
       return null
   }
@@ -367,6 +361,8 @@ export function blockOfKind(kind: BlockKind): { type: string; props?: Record<str
       return { type: 'bulletListItem' }
     case 'numbers':
       return { type: 'numberedListItem' }
+    case 'quote':
+      return { type: 'quote' }
     default:
       return { type: 'paragraph' }
   }
@@ -407,28 +403,6 @@ export function actsTop(line: { top: number; height: number }, height: number, b
   const centred = line.top + (line.height - height) / 2
   if (centred >= paneTop) return centred
   return Math.max(centred, Math.min(paneTop, blockBottom - height))
-}
-
-/** Every sentence of a document in the report's shape, in reading order. */
-export function allSentences(doc: Pick<Writeup, 'sections'>): WriteupSentence[] {
-  return (doc.sections ?? []).flatMap((sec) => (sec.paragraphs ?? []).flatMap((p) => p.sentences ?? []))
-}
-
-/** The ids a comment can be on, in reading order: the title, then each section's id and its sentences'. */
-export function passageOrder(doc: Pick<Writeup, 'sections'>): string[] {
-  return [TITLE_ID, ...(doc.sections ?? []).flatMap((sec) => [sec.id, ...(sec.paragraphs ?? []).flatMap((p) => (p.sentences ?? []).map((s) => s.id))])]
-}
-
-/** Each sentence's paragraph as the ids of its sentences, by sentence id: what a comment on a whole paragraph tints. */
-export function paragraphOf(doc: Pick<Writeup, 'sections'>): Map<string, string[]> {
-  const out = new Map<string, string[]>()
-  for (const sec of doc.sections ?? []) {
-    for (const p of sec.paragraphs ?? []) {
-      const ids = (p.sentences ?? []).map((s) => s.id)
-      for (const id of ids) out.set(id, ids)
-    }
-  }
-  return out
 }
 
 /** The ⌘ pointer's anchor of a block: the section, the paragraph (`#p<id>`), the bullet's sentence, the figure; the title is the document. */
@@ -478,385 +452,16 @@ export function indexDoc(doc: Pick<Writeup, 'sections'>): { byParagraph: Map<str
   return { byParagraph, bySentence, sections }
 }
 
-// ---- the other documents in the report's shape: a story's sections, a deck's slides, a page's claims ----
-
-export type DocShape = 'document' | 'story' | 'slides' | 'page' | 'video'
-
-/** What a stored document is, by its renderer or its shape: `document` (sections), `story` (sections of blocks beside
- * their card), `slides`, `page` (html). */
-export function shapeOf(doc: AnyDoc | null | undefined): DocShape {
-  if (!doc) return 'document'
-  const d = doc as { renderer?: string; slides?: unknown; sections?: unknown }
-  if (d.renderer === 'story') return 'story'
-  if (d.renderer === 'slides' || Array.isArray(d.slides)) return 'slides'
-  if (d.renderer === 'video') return 'video'
-  if (d.renderer === 'custom' && !Array.isArray(d.sections)) return 'page'
-  return 'document'
-}
-
-/** a page's claims as one section */
-export const CLAIMS_ID = 'claims'
-
-/** A story's sections, already in the report's shape. */
-export const sectionsOfStory = (doc: Pick<StoryDoc, 'sections'>): WriteupSection[] => doc.sections ?? []
-
-/** A deck as sections: each slide a section whose lines are bullets (one block and one anchor per line), its figures leading. */
-export function sectionsOfDeck(doc: Pick<DeckDoc, 'slides'>): WriteupSection[] {
-  return (doc.slides ?? []).map((s) => ({
-    id: s.id,
-    heading: s.heading ?? '',
-    paragraphs: [{ id: `${s.id}-p`, sentences: (s.sentences ?? []).map((x) => ({ ...x, bullet: x.bullet ?? '-' })) }],
-    figures: slideFigures(s).map((f) => ({ id: f.id, cell: f.cell, caption: f.caption ?? '', lead: true })),
-  }))
-}
-
-// ---- a deck's slides and their layouts (Deck.tsx; backend slides.py) ----
-
-/** A slide's arrangement: `title`, `text` (heading and lines), `figure` (lines beside one or two cards), `card` (one
- * card across), `figures` (two to four cards in a row or grid), `quote`. */
-export type SlideLayout = 'title' | 'text' | 'figure' | 'card' | 'figures' | 'quote'
-
-/** A layout as the picker offers it: an arrangement with its card slots, a grid, and whether the lines are bullets
- * (null leaves them as they are). Ids match backend slides.PRESETS. */
-export interface LayoutPreset {
-  id: string
-  label: string
-  layout: SlideLayout
-  slots: number
-  grid: boolean
-  bullets: boolean | null
-}
-
-export const PRESETS: readonly LayoutPreset[] = [
-  { id: 'title', label: 'Title', layout: 'title', slots: 0, grid: false, bullets: null },
-  { id: 'bullets', label: 'Bullets', layout: 'text', slots: 0, grid: false, bullets: true },
-  { id: 'paragraph', label: 'Paragraph', layout: 'text', slots: 0, grid: false, bullets: false },
-  { id: 'bullets + card', label: 'Bullets + card', layout: 'figure', slots: 1, grid: false, bullets: true },
-  { id: 'paragraph + card', label: 'Paragraph + card', layout: 'figure', slots: 1, grid: false, bullets: false },
-  { id: 'card', label: 'Card, full slide', layout: 'card', slots: 1, grid: false, bullets: null },
-  { id: 'two cards', label: 'Two cards', layout: 'figures', slots: 2, grid: false, bullets: null },
-  { id: 'three cards', label: 'Three cards', layout: 'figures', slots: 3, grid: false, bullets: null },
-  { id: 'four cards', label: 'Four cards', layout: 'figures', slots: 4, grid: false, bullets: null },
-  { id: 'card grid', label: 'Four cards in a grid', layout: 'figures', slots: 4, grid: true, bullets: null },
-  { id: 'quote', label: 'Quote', layout: 'quote', slots: 0, grid: false, bullets: null },
-]
-const LAYOUT_IDS = new Set<string>(['title', 'text', 'figure', 'card', 'figures', 'quote'])
-/** the most cards a slide holds */
-export const MAX_SLIDE_FIGURES = 4
-/** the card slots each layout shows, least and most; the others show none */
-const SLOT_RANGE: Partial<Record<SlideLayout, [number, number]>> = { figure: [1, 2], card: [1, 1], figures: [2, MAX_SLIDE_FIGURES] }
-/** the figure's share of the width a slide's format may set, in percent */
-export const FIGURE_WIDTHS = [40, 50, 60] as const
-
-/** A slide's figures in order: an older deck's `figure`, then `figures`, each once. */
-export function slideFigures(s: Pick<DeckSlide, 'figure' | 'figures'>): { id: string; cell: string; caption: string }[] {
-  const out: { id: string; cell: string; caption: string }[] = []
-  for (const f of [s.figure, ...(s.figures ?? [])]) if (f && f.cell && !out.some((g) => g.id === f.id)) out.push({ id: f.id, cell: f.cell, caption: f.caption ?? '' })
-  return out
-}
-
-/** A slide's quote, the sentence marked `quote`. */
-export const slideQuote = (s: Pick<DeckSlide, 'sentences'>): WriteupSentence | null => (s.sentences ?? []).find((x) => x.quote) ?? null
-
-/** A slide's lines, its quote left out. */
-export const slideLines = (s: Pick<DeckSlide, 'sentences'>): WriteupSentence[] => (s.sentences ?? []).filter((x) => !x.quote)
-
-/** A slide's layout: the stored one, else the one its cells call for, as the server has it (slides.layout_of). */
-export function layoutOf(s: Pick<DeckSlide, 'layout' | 'sentences' | 'figure' | 'figures'>): SlideLayout {
-  if (s.layout && LAYOUT_IDS.has(s.layout)) return s.layout as SlideLayout
-  const figs = slideFigures(s).length
-  if (slideQuote(s) && !figs) return 'quote'
-  if (figs >= 2) return 'figures'
-  if (figs) return 'figure'
-  return slideLines(s).length ? 'text' : 'title'
-}
-
-/** A slide as the deck's editor holds it. The first `slotsOf` figures stand in the layout's card slots; the rest stay
- * on the slide unseen until a layout with room shows them. */
-export interface EditSlide {
-  id: string
-  heading: string
-  layout: SlideLayout
-  side: 'left' | 'right'
-  width: number
-  /** the card slots the layout shows, within its range (slotsOf) */
-  slots: number
-  /** four cards in a grid of two by two rather than in a row */
-  grid: boolean
-  lines: { id: string; text: string }[]
-  bullets: boolean
-  quote: { id: string; text: string; speaker: string } | null
-  figures: { id: string; cell: string; caption: string }[]
-  notes: string
-}
-
-/** The card slots a slide shows: its `slots` within its layout's range; none for a layout without cards. */
-export function slotsOf(s: Pick<EditSlide, 'layout' | 'slots'>): number {
-  const range = SLOT_RANGE[s.layout]
-  return range ? Math.max(range[0], Math.min(range[1], s.slots)) : 0
-}
-
-/** A stored slide as the editor holds it. Lines are bullets unless all are prose; slots follow the format, else as
- * the server reads them (slides.slots_of). */
-export function editSlide(s: DeckSlide): EditSlide {
-  const lines = slideLines(s)
-  const q = slideQuote(s)
-  const width = s.format?.width
-  const layout = layoutOf(s)
-  const figures = slideFigures(s)
-  const stored = s.format?.slots
-  const slots = slotsOf({ layout, slots: typeof stored === 'number' ? stored : layout === 'figures' ? figures.length : 1 })
-  return {
-    id: s.id,
-    heading: s.heading ?? '',
-    layout,
-    side: s.format?.side === 'left' ? 'left' : 'right',
-    width: typeof width === 'number' ? width : 50,
-    slots,
-    grid: layout === 'figures' && slots === MAX_SLIDE_FIGURES && s.format?.grid === true,
-    lines: lines.map((x) => ({ id: x.id, text: x.text })),
-    bullets: !lines.length || lines.some((x) => !!x.bullet),
-    quote: q ? { id: q.id, text: q.text, speaker: q.speaker ?? '' } : null,
-    figures,
-    notes: s.notes ?? '',
-  }
-}
-
-/** The preset a slide's layout, slots, grid and lines match, which the picker marks. */
-export function presetOf(s: Pick<EditSlide, 'layout' | 'slots' | 'grid' | 'bullets'>): string {
-  switch (s.layout) {
-    case 'text':
-      return s.bullets ? 'bullets' : 'paragraph'
-    case 'figure':
-      return s.bullets ? 'bullets + card' : 'paragraph + card'
-    case 'figures':
-      return s.grid && slotsOf(s) === MAX_SLIDE_FIGURES ? 'card grid' : (['two cards', 'three cards', 'four cards'][slotsOf(s) - 2] ?? 'two cards')
-    default:
-      return s.layout
-  }
-}
-
-/** The slide in preset `id`: its layout, grid and lines as the preset has them; slots are kept where the preset
- * leaves the count open. Every cell stays on the slide. */
-export function applyPreset(s: EditSlide, id: string): EditSlide {
-  const p = PRESETS.find((x) => x.id === id)
-  if (!p) return s
-  const keep = p.layout === 'figure' && s.layout === 'figure'
-  return { ...s, layout: p.layout, slots: keep ? s.slots : p.slots, grid: p.grid, bullets: p.bullets ?? s.bullets }
-}
-
-/** The slide with one more card slot, or null where its layout has no room (lines gain up to two cards, cards side by
- * side go up to four, a quote takes none). */
-export function addSlot(s: EditSlide): EditSlide | null {
-  const n = slotsOf(s)
-  switch (s.layout) {
-    case 'title':
-    case 'text':
-      return { ...s, layout: 'figure', slots: 1, grid: false }
-    case 'figure':
-      return n < 2 ? { ...s, slots: n + 1 } : null
-    case 'card':
-      return { ...s, layout: 'figures', slots: 2, grid: false }
-    case 'figures':
-      return n < MAX_SLIDE_FIGURES ? { ...s, slots: n + 1, grid: false } : null
-    default:
-      return null
-  }
-}
-
-/** The slide with one card slot fewer, or null where it shows none; the removed card stays on the slide, unseen. */
-export function removeSlot(s: EditSlide): EditSlide | null {
-  const n = slotsOf(s)
-  switch (s.layout) {
-    case 'figure':
-      return n > 1 ? { ...s, slots: n - 1 } : { ...s, layout: 'text', slots: 0 }
-    case 'card':
-      return { ...s, layout: 'title', slots: 0 }
-    case 'figures':
-      return n > 2 ? { ...s, slots: n - 1, grid: false } : { ...s, layout: 'card', slots: 1, grid: false }
-    default:
-      return null
-  }
-}
-
-/** A new slide in preset `id` (default bullets), its id from `mint`. */
-export const newSlide = (mint: () => string, preset = 'bullets'): EditSlide =>
-  applyPreset({ id: mint(), heading: '', layout: 'text', side: 'right', width: 50, slots: 0, grid: false, lines: [], bullets: true, quote: null, figures: [], notes: '' }, preset)
-
-/** A copy of a slide under new ids: its lines, quote and figures are the analyst's new ones, since the copy is theirs. */
-export function duplicateSlide(s: EditSlide, mint: () => string): EditSlide {
-  return { ...s, id: mint(), lines: s.lines.map((l) => ({ id: mint(), text: l.text })), quote: s.quote ? { ...s.quote, id: mint() } : null, figures: s.figures.map((f) => ({ ...f, id: mint() })) }
-}
-
-/** `list` with the item at `from` moved to `to`. */
-export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
-  const out = [...list]
-  if (from < 0 || from >= out.length) return out
-  const [it] = out.splice(from, 1)
-  out.splice(Math.max(0, Math.min(to, out.length)), 0, it)
-  return out
-}
-
-/** A slide with a card dropped on it: into slot `slot` (replacing its card) or the first empty one, else a slot added
- * for it, else the last slot. A card already on the slide only moves. Slots fill from the first. `mint` gives the new
- * figure's id. */
-export function dropCard(s: EditSlide, cell: string, mint: () => string, slot: number | null = null): EditSlide {
-  const ref = cell.startsWith('card:') ? cell : `card:${cell}`
-  const had = s.figures.find((f) => f.cell === ref)
-  let shown = slotsOf(s)
-  if (had && slot == null && s.figures.indexOf(had) < shown) return s
-  const figures = s.figures.filter((f) => f.cell !== ref)
-  const fig = had ?? { id: mint(), cell: ref, caption: '' }
-  let next: EditSlide = s
-  const filled = Math.min(figures.length, shown)
-  if (slot == null && filled >= shown) {
-    const grown = addSlot(s)
-    if (grown) {
-      next = grown
-      shown = slotsOf(grown)
-    }
-  }
-  const at = slot != null ? Math.min(slot, shown - 1) : shown - 1
-  const place = Math.max(0, Math.min(at, Math.min(figures.length, shown)))
-  // a new card on a filled slot takes its place; one the slide holds moves there, the others shifting over
-  const replaces = !had && place < figures.length && place < shown && (slot != null || filled >= shown)
-  figures.splice(place, replaces ? 1 : 0, fig)
-  return { ...next, figures: figures.slice(0, MAX_SLIDE_FIGURES) }
-}
-
-/** The deck editor's save (PUT …/deck) from its title and slides; a line left empty is left out. */
-export function deckBody(title: string, slides: readonly EditSlide[], client?: string): DeckBody {
-  return {
-    title: title.replace(/\s+/g, ' ').trim(),
-    client,
-    slides: slides.map((s) => ({
-      id: s.id,
-      heading: s.heading.replace(/\s+/g, ' ').trim(),
-      layout: s.layout,
-      format: slideFormat(s),
-      lines: s.lines.filter((l) => l.text.trim()).map((l) => ({ id: l.id, text: l.text.trim() })),
-      bullets: s.bullets,
-      quote: s.quote && s.quote.text.trim() ? { id: s.quote.id, text: s.quote.text.trim(), speaker: s.quote.speaker.trim() } : null,
-      figures: s.figures.map((f) => ({ id: f.id, cell: f.cell, caption: f.caption })),
-      notes: s.notes.trim(),
-    })),
-  }
-}
-
-/** A slide's stored format: the figure's side and width and its slots for the lines beside cards, the slots (and the
- * grid) for cards side by side; null for the other layouts. */
-function slideFormat(s: EditSlide): DeckBody['slides'][number]['format'] {
-  if (s.layout === 'figure') return { side: s.side, width: s.width, slots: slotsOf(s) }
-  if (s.layout === 'figures') return s.grid && slotsOf(s) === MAX_SLIDE_FIGURES ? { slots: slotsOf(s), grid: true } : { slots: slotsOf(s) }
-  return null
-}
-
-/** A text field's lines as a slide's lines: each line keeps the id of the line it replaces at its place, and a line
- * added gets a new id from `mint`. */
-export function linesFromText(text: string, before: readonly { id: string }[], mint: () => string): { id: string; text: string }[] {
-  return text
-    .split('\n')
-    .map((t) => t.replace(/^\s*[-•*]\s+/, '').trim())
-    .filter(Boolean)
-    .map((t, i) => ({ id: before[i]?.id ?? mint(), text: t }))
-}
-
-/** A page's claims as one section without a heading; none without claims. */
-export function sectionsOfPage(doc: Pick<PageDoc, 'claims'>): WriteupSection[] {
-  const claims = doc.claims ?? []
-  return claims.length ? [{ id: CLAIMS_ID, heading: '', paragraphs: [{ id: `${CLAIMS_ID}-p`, sentences: claims }], figures: [] }] : []
-}
-
-/** A video's lines, each a section without a heading holding one paragraph of its sentences. */
-export function sectionsOfVideo(doc: Pick<VideoDoc, 'lines'>): WriteupSection[] {
-  return (doc.lines ?? []).map((l) => ({ id: l.id, heading: '', paragraphs: [{ id: `${l.id}-p`, sentences: l.sentences ?? [] }], figures: [] }))
-}
-
+/** A document's sections, as History reads a past draft. */
 export function sectionsOf(doc: AnyDoc): WriteupSection[] {
-  switch (shapeOf(doc)) {
-    case 'story':
-      return sectionsOfStory(doc as StoryDoc)
-    case 'slides':
-      return sectionsOfDeck(doc as DeckDoc)
-    case 'page':
-      return sectionsOfPage(doc as PageDoc)
-    case 'video':
-      return sectionsOfVideo(doc as VideoDoc)
-    default:
-      return (doc as Writeup).sections ?? []
-  }
-}
-
-/** Any document in the report's shape, so the marks, the figures and the filter read it as they read the report. */
-export function asWriteup(doc: AnyDoc): Writeup {
-  if (shapeOf(doc) === 'document') return doc as Writeup
-  return { ...(doc as object), title: doc.title ?? '', sections: sectionsOf(doc), comments: doc.comments ?? [], frame: false } as Writeup
+  return (doc as Writeup).sections ?? []
 }
 
 // ---- the switcher ----
 
 /** the three document types in the type bar's order */
-export const BUILTIN_SLUGS = ['report', 'slides', 'story'] as const
-const BUILTIN_RENDERER: Record<string, string> = { report: 'document', story: 'story', slides: 'slides' }
-const BUILTIN_LABEL: Record<string, string> = { report: 'Report', story: 'Story', slides: 'Slides' }
-
-/** A document's name on its tab in the type bar: Report, Slides, Story, or a custom type's name (else its slug). */
-export const docLabel = (slug: string, state: TypesState | null | undefined): string => BUILTIN_LABEL[slug] ?? ((state?.[slug]?.name ?? '').trim() || slug)
-
-export interface SwitcherItem {
-  slug: string
-  /** the option's text: Report, Slides, Story, or a page's name */
-  label: string
-  exists: boolean
-  renderer: string
-  page: boolean
-  generating: boolean
-}
-
-/** The type bar's options: Report, Slides, Story, then the workspace's own types in state order. */
-export function switcherItems(state: TypesState | null): SwitcherItem[] {
-  if (!state) return BUILTIN_SLUGS.map((slug) => ({ slug, label: docLabel(slug, null), exists: false, renderer: BUILTIN_RENDERER[slug], page: false, generating: false }))
-  const builtin = BUILTIN_SLUGS.filter((s) => s in state) as string[]
-  const rest = Object.keys(state).filter((s) => !(BUILTIN_SLUGS as readonly string[]).includes(s))
-  return [...builtin, ...rest].map((slug) => {
-    const e = state[slug]
-    return {
-      slug,
-      label: docLabel(slug, state),
-      exists: !!e.exists,
-      renderer: e.renderer ?? BUILTIN_RENDERER[slug] ?? 'document',
-      page: !!e.page,
-      generating: e.status === 'generating',
-    }
-  })
-}
-
-/** An entry of + New: what it makes (`kind`, POST /report-types/new) and its label; `custom` asks for a name and a
- * brief first. */
-export interface NewDocItem {
-  kind: string
-  label: string
-  custom?: boolean
-}
-
-/** + New's entries: a page, each preset in the server's order, then a document of the analyst's own. */
-export function newDocItems(presets: readonly { id: string; name: string }[]): NewDocItem[] {
-  return [{ kind: 'page', label: 'Page' }, ...presets.map((p) => ({ kind: p.id, label: p.name })), { kind: 'document', label: 'Custom', custom: true }]
-}
-
-/** Whether the analyst may rename or delete a type: every type but the three built-ins. */
-export const ownType = (slug: string): boolean => !(BUILTIN_SLUGS as readonly string[]).includes(slug)
-
-/** The renderer that decides a slug's view: the state's entry, else the document's shape, else the report's. */
-export function rendererOf(state: TypesState | null, slug: string, doc: AnyDoc | null): string {
-  const r = state?.[slug]?.renderer
-  if (r) return r
-  if (doc) {
-    const shape = shapeOf(doc)
-    return shape === 'page' ? 'custom' : shape
-  }
-  return BUILTIN_RENDERER[slug] ?? 'document'
-}
+/** A document's name on its chip in the bar: Report, or the name the person gave it (else its slug). */
+export const docLabel = (slug: string, state: TypesState | null | undefined): string => (slug === SLUG ? 'Report' : (state?.[slug]?.name ?? '').trim() || slug)
 
 /** The browser-storage key of the document the tab shows, per workspace. */
 export const docKey = (ws: string): string => storageKey(ws, 'report-doc')

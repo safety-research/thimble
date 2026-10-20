@@ -4,7 +4,7 @@
 import type { ReactNode } from 'react'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import type { WriteupSentence } from '../lib/types'
-import type { Flag } from './checkComments'
+import type { Flag } from './decorations'
 import { parseInline, type InlineNode } from './inlineParse'
 import { readableText } from './model'
 

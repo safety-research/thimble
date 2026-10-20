@@ -1,95 +1,64 @@
-// The type bar's two menus. + New makes a document: a page, a preset (prompts/types on the server), or a custom type
-// from a name and a brief. The ⋯ beside a workspace's own type renames or deletes it with its document. The chat makes
-// the same documents through start_writing's `type` (backend write_session).
+// The bar's two menus. New makes another document of the report's kind, from a name: one the person owns, types into
+// and places cards in, and which Write fills. The ⋯ beside a document of the person's own renames or deletes it.
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
-import { TextArea, TextInput } from '../components/Field'
+import { TextInput } from '../components/Field'
 import { Menu, Popover, type MenuItem } from '../components/Menu'
 import { docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import type { DocPreset, ReportType } from '../lib/types'
-import { newDocItems } from './model'
+import type { ReportType } from '../lib/types'
 
-/** + New and its sheet for a document of the analyst's own; `onMade` gets the new type. */
+/** New and its sheet for the new document's name; `onMade` gets the new document. */
 export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType) => void }) {
-  const [presets, setPresets] = useState<DocPreset[]>([])
-  // counts the menu's openings: the presets are read again at each, since switching an extension changes them
-  const [opened, setOpened] = useState(0)
   const [busy, setBusy] = useState(false)
   const [asking, setAsking] = useState(false)
   const [name, setName] = useState('')
-  const [brief, setBrief] = useState('')
   const trigger = useRef<HTMLButtonElement | null>(null)
   const nameField = useRef<HTMLInputElement | null>(null)
-  useEffect(() => {
-    let live = true
-    docsApi
-      .presets(ws)
-      .then((p) => live && setPresets(p))
-      .catch(() => {
-        /* + New still offers a page and a custom document */
-      })
-    return () => {
-      live = false
-    }
-  }, [ws, opened])
   useEffect(() => {
     if (!asking) return
     const id = window.requestAnimationFrame(() => nameField.current?.focus())
     return () => window.cancelAnimationFrame(id)
   }, [asking])
 
-  const make = async (kind: string, body: { name?: string; brief?: string } = {}) => {
-    if (busy) return
+  const make = async () => {
+    if (busy || !name.trim()) return
     setBusy(true)
     try {
-      const t = await docsApi.createDoc(ws, { kind, ...body })
-      track('ui-click', { target: `report:${t.slug}`, detail: { action: 'doc-new', kind } })
+      const t = await docsApi.createDoc(ws, { kind: 'document', name: name.trim() })
+      track('ui-click', { target: `report:${t.slug}`, detail: { action: 'doc-new' } })
       setAsking(false)
       setName('')
-      setBrief('')
       onMade(t)
     } catch (e) {
-      bus.emit('toast', { text: `Could not make the document. ${(e as Error).message}`, kind: 'error' })
+      bus.emit('toast', { text: `Could not make the report. ${(e as Error).message}`, kind: 'error' })
     } finally {
       setBusy(false)
     }
   }
-  const items: MenuItem[] = newDocItems(presets).map((it) => ({
-    id: it.kind,
-    label: it.custom ? `${it.label}…` : it.label,
-    onSelect: () => (it.custom ? setAsking(true) : void make(it.kind)),
-  }))
-  const ready = !!name.trim() && !!brief.trim()
   return (
     <>
-      <Menu label="New document" trigger={
-          <Button ref={trigger} icon="plus" className="wu-new" disabled={busy} data-doc-chip="+new">
-            New
-          </Button>
-        } items={items} onOpenChange={(open) => open && setOpened((n) => n + 1)} />
-      <Popover anchor={trigger} open={asking} onClose={() => setAsking(false)} label="A document of your own" className="wu-doc-sheet" width={320}>
+      <Button ref={trigger} icon="plus" className="wu-new" disabled={busy} data-doc-chip="+new" aria-haspopup="dialog" aria-expanded={asking} onClick={() => setAsking((a) => !a)}>
+        New
+      </Button>
+      <Popover anchor={trigger} open={asking} onClose={() => setAsking(false)} label="A new report" className="wu-doc-sheet" width={300}>
         <form
           className="wu-doc-form"
           onSubmit={(e) => {
             e.preventDefault()
-            if (ready) void make('document', { name: name.trim(), brief: brief.trim() })
+            void make()
           }}
         >
           <label className="label" htmlFor="wu-doc-name">
             Name
           </label>
-          <TextInput id="wu-doc-name" ref={nameField} value={name} onChange={setName} block />
-          <label className="label" htmlFor="wu-doc-brief">
-            What it is for
-          </label>
-          <TextArea id="wu-doc-brief" value={brief} onChange={setBrief} block rows={3} />
+          <TextInput id="wu-doc-name" ref={nameField} value={name} onChange={setName} block placeholder="Team update" />
           <div className="wu-doc-actions">
             <Button size="sm" onClick={() => setAsking(false)}>
               Cancel
             </Button>
-            <Button size="sm" variant="secondary" type="submit" busy={busy} disabled={!ready}>
+            <Button size="sm" variant="secondary" type="submit" busy={busy} disabled={!name.trim()}>
               Make
             </Button>
           </div>
@@ -99,7 +68,7 @@ export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType)
   )
 }
 
-/** The ⋯ beside a type of the workspace's own: Rename and Delete, each confirmed in a sheet. */
+/** The ⋯ beside a document of the person's own: Rename and Delete, each confirmed in a sheet. */
 export function TypeActions({ ws, slug, name, onDeleted }: { ws: string; slug: string; name: string; onDeleted: () => void }) {
   const [sheet, setSheet] = useState<'rename' | 'delete' | null>(null)
   const [value, setValue] = useState(name)
@@ -159,7 +128,7 @@ export function TypeActions({ ws, slug, name, onDeleted }: { ws: string; slug: s
         ) : (
           <div className="wu-doc-form">
             <p className="wu-doc-warn">
-              Delete {name} and its document? The checks' comments on it go with it.
+              Delete {name}? Its drafts go with it.
             </p>
             <div className="wu-doc-actions">
               <Button size="sm" onClick={() => setSheet(null)}>

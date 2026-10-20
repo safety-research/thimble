@@ -7,7 +7,7 @@
 // drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) the
 // cited lines of its output under what it points at in plain words (lib/calls, chat/model callTarget). A click, on the
 // citation or on the chip that heads its label, teleports to the ref's surface (lib/teleport); a ⌘-click asks about it.
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -21,6 +21,7 @@ import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
+import { dragCard } from '../lib/cardDrag'
 import { glyphOf } from '../lib/fileGlyph'
 import { Chip, type ChipTone } from './Chip'
 import type { IconName } from './Icon'
@@ -424,7 +425,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
           {shownValue(value ?? '')}
         </span>
       ) : (
-        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={kind && NAME_KINDS.has(kind) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
+        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={kind && NAME_KINDS.has(kind) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers} {...(wholeCell ? { draggable: true, onDragStart: (e: DragEvent) => dragCard(e, wholeCell) } : {})}>
           {iconOnly ? null : label}
         </Chip>
       )}

@@ -32,7 +32,7 @@ import { ReportTab } from '../report/ReportTab'
 import { FeatureOff } from './FeatureOff'
 import { LensSidebar, type SideTab } from './LensSidebar'
 import { loadFeatures, useFeature, type FeatureName } from '../features'
-import { tabSignals, useTabDots, writing } from './dots'
+import { tabSignals, useReportTypes, useTabDots, writing } from './dots'
 import { DemoLine } from './DemoLine'
 import { NewVersion } from './NewVersion'
 import { DragGhost, PaneArea, usePaneDrag, type SurfaceSpec } from './PaneArea'
@@ -309,8 +309,8 @@ export function Shell({ ws }: { ws: string }) {
   )
 
   const dots = useTabDots(shown.filter((s): s is Tab => (BASE_SURFACES as readonly string[]).includes(s)))
-  const metas = useChatMetas(ws)
-  const signals = tabSignals(dots, writing(metas))
+  const reportTypes = useReportTypes(ws)
+  const signals = tabSignals(dots, writing(reportTypes))
 
   return (
     <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={demo ? 'static' : undefined} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>

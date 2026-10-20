@@ -257,13 +257,14 @@ def _ran(ws: str, cell: dict[str, Any]) -> None:
     _save(ws, undo, redo)
 
 
-def _on_report(ws: str, before: str | None, after: str, by: str) -> None:
-    """report.on_save: a save that changed the text is a step."""
+def _on_report(ws: str, before: str | None, after: str, by: str, slug: str = report.DOC) -> None:
+    """report.on_save: a save that changed the text of a document is a step."""
     if _is_applying() or (before or "").strip() == after.strip():
         return
+    what = "the report" if slug == report.DOC else report.name_of(ws, slug)
     with _lock:
-        _push(ws, {"kind": "doc", "op": "edited", "target": report.DOC, "by": by, "before": before, "after": after,
-                   "label": "edit the report" if by == ANALYST else "write the report"})
+        _push(ws, {"kind": "doc", "op": "edited", "target": slug, "by": by, "before": before, "after": after,
+                   "label": f"edit {what}" if by == ANALYST else f"write {what}"})
 
 
 # --------------------------------------------------------------------------- choosing and applying a step
@@ -350,8 +351,8 @@ def _set_card(ws: str, cid: str, fields: dict[str, Any]) -> None:
     canvas.emit(ws, cell, "edited")
 
 
-def _set_report(ws: str, md: str | None) -> None:
-    p = home.workspace_dir(ws) / "docs" / f"{report.DOC}.md"
+def _set_report(ws: str, md: str | None, slug: str = report.DOC) -> None:
+    p = home.workspace_dir(ws) / "docs" / f"{slug}.md"
     if md is None:
         try:
             p.unlink()
@@ -360,14 +361,14 @@ def _set_report(ws: str, md: str | None) -> None:
     else:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(md, encoding="utf-8")
-    hub.publish(ws, {"type": "report", "slug": report.DOC, "status": "edited", "by": "undo"})
+    hub.publish(ws, {"type": "report", "slug": slug, "status": "edited", "by": "undo"})
 
 
 def _apply(ws: str, step: dict[str, Any], forward: bool) -> None:
     _applying.on = True
     try:
         if step["kind"] == "doc":
-            _set_report(ws, step.get("after") if forward else step.get("before"))
+            _set_report(ws, step.get("after") if forward else step.get("before"), str(step.get("target") or report.DOC))
             return
         op, cid = step["op"], str(step["target"])
         if op == "created":

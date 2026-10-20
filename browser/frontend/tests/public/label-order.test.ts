@@ -10,7 +10,6 @@ import { describe, expect, test } from 'vitest'
 import { nextFreeColour } from '../../src/files/LabelCard.tsx'
 import { keyChips, keyColor } from '../../src/files/colorChoice.ts'
 import { classesOf, draftClasses, freeColour, LABEL_ORDER, ownColour, paletteFrom } from '../../src/files/labels.ts'
-import { CHECK_COLOURS, freeColour as freeCheckColour } from '../../src/report/checkComments.ts'
 import type { Concept, SourceKey } from '../../src/lib/types.ts'
 
 const ORDER = [1, 2, 3, 5, 6, 7, 4, 8, 9, 10, 11, 12]
@@ -59,13 +58,5 @@ describe('the order new values take the label palette', () => {
     const key: SourceKey = { key: 'type', values: Array.from({ length: 13 }, (_, i) => ({ value: `v${i}`, n: 100 - i })), more: { values: 0, n: 0 }, none: 0, at: [] }
     expect(keyChips(key).slice(0, 12).map((c) => c.color)).toEqual(ORDER.map((n) => `var(--label-${n})`))
     expect(keyColor(12)).toBe('var(--label-none)')
-  })
-
-  test('a new report check takes the first of the eight check colors in the order that no check has', () => {
-    expect(CHECK_COLOURS).toEqual([1, 2, 3, 5, 6, 7, 4, 8])
-    // the built-in checks hold blue, green and gold
-    expect(freeCheckColour([{ colour: 1 }, { colour: 3 }, { colour: 5 }])).toBe(2)
-    expect(freeCheckColour([{ colour: 1 }, { colour: 2 }, { colour: 3 }, { colour: 5 }])).toBe(6)
-    expect(freeCheckColour([{ colour: 1 }, { colour: 2 }, { colour: 3 }, { colour: 5 }, { colour: 6 }, { colour: 7 }])).toBe(4)
   })
 })
