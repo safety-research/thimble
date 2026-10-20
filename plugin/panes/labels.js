@@ -53,9 +53,18 @@ const SWATCH = /^[■●▪◼█▆▇▌◆▲]$/u
  *  the card colors none of them. */
 export function tonesIn(grid, values) {
   const out = {}
+  for (const [v, at] of Object.entries(spotsIn(grid, values))) out[v] = at.tone
+  return out
+}
+
+/** Where a drawn card names a label's values in their colors, as tonesIn finds them: {value: {tone, y, x, w}}, the
+ *  cells from the value's mark (or its first letter) to its last letter, so the shell can make each one a press that
+ *  opens the label on that value. */
+export function spotsIn(grid, values) {
+  const out = {}
   const left = new Set((values || []).filter(v => typeof v === 'string' && v.trim()))
-  for (const row of (grid && grid.rows) || []) {
-    if (!left.size) break
+  ;((grid && grid.rows) || []).forEach((row, y) => {
+    if (!left.size) return
     let text = ''
     const at = []
     row.forEach((c, i) => { if (c && !c.cont) { for (const ch of String(c.ch || ' ')) { text += ch; at.push(i) } } })
@@ -68,15 +77,22 @@ export function tonesIn(grid, values) {
         const c = row[at[i]]
         const colored = x => x && x.tone && !PLAIN.test(x.tone) && !x.bg
         // the mark before it: one or two cells back, over a space
-        const mark = [1, 2].map(b => (i - b >= 0 ? row[at[i - b]] : null)).find(x => x && String(x.ch).trim())
+        const back = [1, 2].find(b => { const x = i - b >= 0 ? row[at[i - b]] : null; return !!x && !!String(x.ch).trim() })
+        const mark = back ? row[at[i - back]] : null
         // (a mark's gray is a color it gives the value: only ink and paper are no color there)
         const swatch = x => x && x.tone && !/^(ink|paper)$/.test(x.tone) && !x.bg
-        const tone = !word || !c || c.bg ? null : colored(c) ? c.tone : mark && SWATCH.test(String(mark.ch)) && swatch(mark) ? mark.tone : null
-        if (tone) { out[v] = tone; left.delete(v); break }
+        const marked = mark && SWATCH.test(String(mark.ch)) && swatch(mark)
+        const tone = !word || !c || c.bg ? null : colored(c) ? c.tone : marked ? mark.tone : null
+        if (tone) {
+          const x = marked ? at[i - back] : at[i]
+          out[v] = { tone, y, x, w: at[i + v.length - 1] + 1 - x }
+          left.delete(v)
+          break
+        }
         i = text.indexOf(v, i + 1)
       }
     }
-  }
+  })
   return out
 }
 
@@ -86,6 +102,14 @@ export function toneBeside(l, v) {
   const t = (l && l.tones) || {}
   if (Object.keys(t).length) return t[v] || 'ink'
   return valueTone(l && l.values, v)
+}
+
+/** How a label was made, in a few plain words for the row beside a card and the panel's head: a rule (a regex or code)
+ *  went over the text, or Claude read each record (a model label, or values Claude gave records it read). */
+export function howMade(kind) {
+  if (kind === 'prompt' || kind === 'set') return 'read by Claude'
+  if (kind === 'regex' || kind === 'code') return 'a rule over the text'
+  return ''
 }
 
 /** What made a label, in plain words. */
@@ -278,7 +302,7 @@ function labelView(k, data, st, lab, W) {
   out.push(subjectBlock(k, {
     glyph: `{${valueTone(values, values[0])}:●}`,
     title: k.escape(lab.name),
-    line: `label over ${k.escape(lab.in || 'the records Claude named')} · ${k.escape(stateWords(lab))}${data.refreshing ? ' · ◌' : ''}`,
+    line: `label over ${k.escape(lab.in || 'the records Claude named')}${howMade(lab.kind) ? ` · ${howMade(lab.kind)}` : ''} · ${k.escape(stateWords(lab))}${data.refreshing ? ' · ◌' : ''}`,
   }))
 
   // ---- the values: each its color, bar, count and share; a press filters the records to it
