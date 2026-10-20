@@ -1,11 +1,11 @@
 // store.js: the session's claims, as pure functions. No `$`, no Node, no DOM: the observer's claims lens, the Claims
-// pane (atlas.js), the hooks (term.ts) and the tests import it.
+// pane (graph.js), the hooks (term.ts) and the tests import it.
 //
-// One JSON file per session, thimble/claims/<session>.json:
+// A claim is one statement the transcript makes, of one kind. One JSON file per session, thimble/claims/<session>.json:
 //
 //   {v: 1, session, updated,
-//    claims: [{id, text, kind, by, cluster, turn, said: [place], sources: [{ref, label}], revises?, revised_by?,
-//              precisely?, based_on?, judgment?, unstated?, folder?: {card, id}, links?: [{to, type}]}],
+//    claims: [{id, text, by, cluster, turn, said: [place], sources: [{ref, label}], revises?, revised_by?,
+//              links?: [{to, how: supports | contradicts | same topic, folder?}], folder?: {card, id}}],
 //    clusters: [{id, name, turn, named, from?, folder?}],
 //    gaps: [{turn, why}],
 //    folder?: {card, v, at, claims, clusters}}
@@ -14,28 +14,14 @@
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown. A claim of
 //            the folder's map has {by: 'folder', quote, ref}: the words of its first evidence row.
 //   ×N       a claim's said.length: each distinct place it was said.
-//   what it means (the lens gives it with the claim, so opening a claim costs nothing):
-//            precisely  the claim restated so it can be checked: the quantity, what it is counted out of, the window,
-//                       how it was measured
-//            based_on   the evidence in a few words, only when the sentence that said it cites nothing
-//            judgment   only when a word of the claim is Claude's reading, not a measurement: that word and why
-//            unstated   only when the words leave out a denominator or a window: what is missing
 //
-// After a turn of work the observer's pass lists the turn's claims ({quote, claim, by, kind, cluster, same, revises,
-// precisely, based_on, judgment, unstated}); applyTurn places each by its quote in the turn's messages, takes the
-// citations in or near its sentence as its sources, merges a restatement into the claim it repeats (a new place, so ×N
-// grows), links a correction both ways (revises / revised_by), and puts each new claim in a cluster: one named so far,
-// or a new one. The folder's map (a card Claude saved, mergeFolder) adds its claims beside the session's.
+// After a turn of work the observer's pass lists the turn's claims ({quote, claim, by, cluster, same, revises, links});
+// applyTurn places each by its quote in the turn's messages, takes the citations in or near its sentence as its
+// sources, merges a restatement into the claim it repeats (a new place, so ×N grows), links a correction both ways
+// (revises / revised_by), keeps the links a claim names to others, and puts each new claim in a cluster: one named so
+// far, or a new one. The folder's map (a
+// card Claude saved, mergeFolder) adds its claims beside the session's.
 import { blocks, linkMarks } from '../shell/message.js'
-
-/** The kinds, in the order the pane sorts them, each with its tone (the atlas's colors). */
-export const KINDS = [
-  { id: 'fact', name: 'fact', tone: 'c4' },
-  { id: 'finding', name: 'finding', tone: 'c1' },
-  { id: 'judgment', name: 'judgment call', tone: 'c5' },
-  { id: 'event', name: 'event', tone: 'c3' },
-  { id: 'claim', name: 'claim', tone: 'c2' },
-]
 const MAX_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
@@ -44,17 +30,6 @@ export const GROWN = { least: 6, factor: 2 }
 
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 const cutTo = (s, n) => (s.length <= n ? s : s.slice(0, n - 1).trimEnd() + '…')
-
-/** A kind as one of the five ids ("judgment call" reads as judgment); claim when it is none of them. */
-export function kindOf(k) {
-  const s = String(k == null ? '' : k).toLowerCase().trim()
-  if (s.startsWith('judg') || s === 'decision') return 'judgment'
-  return KINDS.some(x => x.id === s) ? s : 'claim'
-}
-
-export const kindName = k => (KINDS.find(x => x.id === kindOf(k)) || KINDS[4]).name
-export const kindTone = k => (KINDS.find(x => x.id === kindOf(k)) || KINDS[4]).tone
-export const kindRank = k => KINDS.findIndex(x => x.id === kindOf(k))
 
 /** A new, empty store for a session. */
 export function emptyStore(session = '') {
@@ -246,15 +221,17 @@ export function findQuote(md, quote) {
 
 const numbersIn = t => new Set((String(t || '').match(/\d[\d,.]*/g) || []).map(x => x.replace(/[,.]+$/, '').replace(/,/g, '')))
 
-/** The citations in or near [start, end): those in its sentence; with none there, those of its block (a paragraph, a
- *  list item, a table row) whose words hold a number the claim states (`text`), so a sentence with no citation of its
- *  own borrows only one that shows the same value. At most four, each {ref, label}. */
+/** The citations in or near [start, end): those in its own words, else those in its sentence (a sentence can hold
+ *  several claims, each with its citations); with none there, those of its block (a paragraph, a list item, a table
+ *  row) whose words hold a number the claim states (`text`), so a sentence with no citation of its own borrows only one
+ *  that shows the same value. At most four, each {ref, label}. */
 export function sourcesNear(md, start, end, text = '') {
   const s = String(md || '')
   const marks = linkMarks(s)
   if (!marks.length) return []
   const sent = sentenceAt(s, start, end)
-  let got = marks.filter(m => m.start >= sent.start && m.end <= Math.max(sent.end, end))
+  const own = marks.filter(m => m.start < end && m.end > start)
+  let got = own.length ? own : marks.filter(m => m.start >= sent.start && m.end <= Math.max(sent.end, end))
   const want = numbersIn(text)
   if (!got.length && want.size) {
     const b = blocks(s).find(x => start >= x.start && start <= x.end)
@@ -405,20 +382,19 @@ function applyClusters(store, list, grown, turn) {
 
 // ------------------------------------------------------------------------------------------------ one turn
 
-/** What a claim means, as the lens gave it: each part a short line of plain words, or left out. */
-export const MEANING = { precisely: 240, based_on: 140, judgment: 160, unstated: 160 }
-export function meaningOf(x) {
-  const out = {}
-  for (const [k, n] of Object.entries(MEANING)) {
-    const v = str(x?.[k] ?? (k === 'based_on' ? x?.basedOn : undefined), n).trim()
-    if (v && !/^(none|n\/a|-|null)$/i.test(v)) out[k] = v
-  }
-  return out
-}
-
 const capital = t => (t ? t[0].toUpperCase() + t.slice(1) : t)
 
 /** The lens's claims, held to what the store needs; anything else is dropped. */
+/** How one claim bears on another, as the lens or the folder's map names it: supports, contradicts or same topic, or
+ *  null. */
+export function howOf(v) {
+  const s = String(v ?? '').toLowerCase()
+  if (/contra|conflict|disagree/.test(s)) return 'contradicts'
+  if (/support|back|show|explain/.test(s)) return 'supports'
+  if (/topic|same|about|relat/.test(s)) return 'same topic'
+  return null
+}
+
 export function parseClaims(list) {
   const out = []
   for (const [i, x] of (Array.isArray(list) ? list : []).entries()) {
@@ -431,7 +407,8 @@ export function parseClaims(list) {
     const text = own || (same ? '' : capital(plainOf(quote).plain.replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)))
     if (!quote || (!same && !text)) continue
     // `at`: its place in the lens's list (1 for the first), which a later claim of the same turn revises as "#1"
-    out.push({ at: i + 1, text, quote, by, kind: kindOf(x.kind), cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null, meaning: meaningOf(x) })
+    const links = (Array.isArray(x.links) ? x.links : []).map(l => ({ to: str(String(l?.to ?? ''), 20), how: howOf(l?.how ?? l?.type) })).filter(l => l.to && l.how).slice(0, 4)
+    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null, links })
   }
   return out.slice(0, 40)
 }
@@ -453,14 +430,17 @@ export function restates(store, text, skip = new Set()) {
 /**
  * One turn's claims into the store (changed in place, and returned). `places` are the turn's messages, each
  * {row, by, turn, text}; `out` is the lens's {claims, clusters}; `grown` the clusters the lens was offered to rename
- * or split. Returns {store, added, restated, revised, unstated, dropped, clusters}.
+ * or split. Returns {store, added, restated, revised, dropped, clusters}.
  */
 export function applyTurn(store, { places = [], out = {}, turn = null, at = null, grown = [] } = {}) {
   const res = { store, added: [], restated: [], revised: [], dropped: [], clusters: [] }
   const items = parseClaims(out?.claims)
   const local = new Map()
+  const links = []
   for (const it of items) {
+    // #N: the Nth claim of this same list, which has no id yet
     if (it.revises && /^#\d+$/.test(it.revises)) it.revises = local.get(Number(it.revises.slice(1))) || null
+    if (it.same && /^#\d+$/.test(it.same)) it.same = local.get(Number(it.same.slice(1))) || null
     const known = it.same ? store.claims.find(c => c.id === it.same) : null
     const where = locate(it.quote, places, it.by, it.text || known?.text || '')
     if (!where) { res.dropped.push({ claim: it.text || it.same, why: `its words "${cutTo(it.quote, 60)}" are not in this turn's messages` }); continue }
@@ -474,7 +454,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     if (target) {
       local.set(it.at, target.id)
-      for (const [k, v] of Object.entries(it.meaning)) if (!target[k]) target[k] = v
+      for (const l of it.links) links.push({ from: target.id, ...l })
       if (!target.said.some(p => samePlace(p, where.place))) {
         target.said.push(where.place)
         addSources(target, where.sources)
@@ -483,7 +463,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
       continue
     }
     const id = nextId(store.claims, 'c')
-    const claim = { id, text: it.text, kind: it.kind, by: it.by, cluster: clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources, ...it.meaning }
+    const claim = { id, text: it.text, by: it.by, cluster: clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources }
     const old = it.revises ? store.claims.find(c => c.id === it.revises) : null
     if (old) {
       claim.revises = old.id
@@ -494,8 +474,17 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     store.claims.push(claim)
     res.added.push(id)
     local.set(it.at, id)
+    for (const l of it.links) links.push({ from: id, ...l })
   }
-  res.unstated = res.added.filter(id => store.claims.find(c => c.id === id)?.unstated)
+  // the links each claim names to another (an id so far, or #N of this turn), kept on the claim that names them
+  res.linked = 0
+  for (const l of links) {
+    const to = /^#\d+$/.test(l.to) ? local.get(Number(l.to.slice(1))) : l.to
+    const a = store.claims.find(c => c.id === l.from)
+    if (!a || !to || to === a.id || !store.claims.some(c => c.id === to)) continue
+    a.links = [...(a.links || []).filter(x => x.to !== to), { to, how: l.how }].slice(-6)
+    res.linked++
+  }
   res.clusters = applyClusters(store, out?.clusters, grown, turn)
   oneNameOneCluster(store)
   for (const c of store.clusters) if (!c.named) c.named = Math.max(1, sizeOf(store, c.id))
@@ -516,12 +505,9 @@ export function clearGap(store, turn) {
   return store
 }
 
-/** The note c lights with for one turn, or '' to stay dim: a new claim that reads two ways (its words left out what it
- *  counts out of, or its window) first, then a claim this turn corrected. New claims alone light nothing: the count at
- *  the bar's right says they came. */
+/** The note c lights with for one turn, or '' to stay dim: only a correction lights it. New claims alone light nothing:
+ *  the count at the bar's right says they came. */
 export function noteFor(res) {
-  const open = res?.unstated?.length || 0
-  if (open) return `${open} claim${open === 1 ? ' reads' : 's read'} two ways`
   const fixed = res?.revised?.length || 0
   if (fixed) return `${fixed} claim${fixed === 1 ? '' : 's'} corrected`
   return ''
@@ -543,27 +529,6 @@ export function promptLines(store, max = 120) {
   }
 }
 
-/**
- * The claims so far that bear on this turn, as the lens reads them: every claim while the store is small; once it is
- * long, the claims that share at least two words with the turn's words (a number counts twice) and the latest few, so
- * the digest stays about the same size as a session grows. Returns {claims, clusters, left}.
- */
-export function nearLines(store, text, { all = 24, latest = 8, max = 40 } = {}) {
-  const list = store.claims
-  if (list.length <= all) return { ...promptLines(store, max + all), left: 0 }
-  const turn = new Set(wordsOf(text))
-  const score = c => {
-    let n = 0
-    for (const w of new Set(wordsOf(c.text))) if (turn.has(w)) n += /\d/.test(w) ? 2 : 1
-    return n
-  }
-  const recent = new Set(list.slice(-latest).map(c => c.id))
-  const near = list.map(c => ({ c, n: score(c) })).filter(x => recent.has(x.c.id) || x.n >= 2)
-  const keep = new Set(near.sort((a, b) => b.n - a.n).slice(0, max).map(x => x.c.id))
-  const sub = { ...store, claims: list.filter(c => keep.has(c.id)) }
-  return { claims: promptLines(sub, max).claims, clusters: promptLines(store).clusters, left: list.length - sub.claims.length }
-}
-
 const CLAIMY = /\d|\]\(|\b(all|every|most|none|never|always|only|no one|nobody|more|less|fewer|than|because|caused?|due to|led to|drove|drives|so that|therefore|biased?|typical|usually|rarely|often|increase[ds]?|decrease[ds]?|rose|fell|grew|dropped|same|different|wrong|right|true|false|correct)\b/i
 
 /** Whether a turn's words state nothing that could be true or false: no number, no citation, no cause, no comparison
@@ -583,18 +548,9 @@ export function grownLines(grown) {
 /** Whether a card is a map of the folder's claims: saved under the name folder-claims (the kernel numbers it). */
 export const isFolderCard = id => /(^|^\d+-)folder-claims$/.test(String(id || ''))
 
-const RELATIONS = { contradicts: 'contradicts', supports: 'supports', 'same topic': 'same topic' }
-function relationOf(t) {
-  const s = String(t == null ? '' : t).toLowerCase().trim()
-  if (s.startsWith('contra')) return 'contradicts'
-  if (s.startsWith('support')) return 'supports'
-  if (s.startsWith('same') || s === 'topic') return 'same topic'
-  return RELATIONS[s] || null
-}
-
 /**
- * The folder's map (the data of a folder-claims card: {scope, clusters: [{id, name, lead}], claims: [{id, name, kind,
- * cluster, evidence: [{ref, quote}], n, of}], relations: [{from, to, type}]}) into the store, each claim marked
+ * The folder's map (the data of a folder-claims card: {scope, clusters: [{id, name, lead}], claims: [{id, name, cluster,
+ * evidence: [{ref, quote}], n, of}]}) into the store, each claim marked
  * `by: folder`, its evidence as its sources and its first quote as where it was said. Saved again (a fixed version),
  * the map's claims are matched by their ids in the map and changed in place; a claim the new version left out goes,
  * unless the session said it too. A claim the session already holds word for word is said again, not added.
@@ -623,10 +579,10 @@ export function mergeFolder(store, data, { card = 'folder-claims', v = null, at 
     const sources = ev.slice(0, 6).map(e => ({ ref: e.ref, label: shortRef(e.ref), ...(e.quote ? { quote: str(e.quote, MAX_QUOTE) } : {}) }))
     const q = ev.find(e => e.quote)
     const place = { by: 'folder', turn, at, quote: q ? cutTo(str(q.quote, MAX_QUOTE), MAX_QUOTE) : '', sentence: '', ref: ev[0]?.ref || null }
-    const extra = { ...(typeof x.n === 'number' ? { n_of: x.n } : {}), ...(typeof x.of === 'number' ? { of: x.of } : {}), ...(x.note ? { precisely: str(x.note, MEANING.precisely) } : {}) }
+    const extra = { ...(typeof x.n === 'number' ? { n_of: x.n } : {}), ...(typeof x.of === 'number' ? { of: x.of } : {}) }
     let c = store.claims.find(y => y.folder && y.folder.card === card && y.folder.id === fid)
     if (c) {
-      Object.assign(c, { text, kind: kindOf(x.kind), cluster: ids.get(String(x.cluster)) ?? null, sources, ...extra })
+      Object.assign(c, { text, cluster: ids.get(String(x.cluster)) ?? null, sources, ...extra })
       c.said = [place, ...c.said.filter(p => p.by !== 'folder')]
       seen.set(fid, c.id)
       continue
@@ -640,19 +596,18 @@ export function mergeFolder(store, data, { card = 'folder-claims', v = null, at 
       continue
     }
     const id = nextId(store.claims, 'c')
-    store.claims.push({ id, text, kind: kindOf(x.kind), by: 'folder', cluster: ids.get(String(x.cluster)) ?? null, turn, at, said: [place], sources, folder: { card, id: fid }, ...extra })
+    store.claims.push({ id, text, by: 'folder', cluster: ids.get(String(x.cluster)) ?? null, turn, at, said: [place], sources, folder: { card, id: fid }, ...extra })
     res.added.push(id)
     seen.set(fid, id)
   }
-  // the map's relations, by the store's ids
-  for (const c of store.claims) if (c.folder && c.folder.card === card) c.links = []
+  // the map's relations, as links on its claims (a save of the map again replaces them)
+  for (const c of store.claims) if (c.links && [...seen.values()].includes(c.id)) c.links = c.links.filter(l => !l.folder)
   for (const r of Array.isArray(d.relations) ? d.relations : []) {
-    const type = relationOf(r?.type)
-    const a = seen.get(String(r?.from))
-    const b = seen.get(String(r?.to))
-    if (!type || !a || !b || a === b) continue
-    const c = store.claims.find(y => y.id === a)
-    if (c && !(c.links || []).some(l => l.to === b && l.type === type)) c.links = [...(c.links || []), { to: b, type }].slice(0, 12)
+    const a = store.claims.find(c => c.id === seen.get(String(r?.from)))
+    const to = seen.get(String(r?.to))
+    const how = howOf(r?.type ?? r?.how)
+    if (!a || !to || to === a.id || !how) continue
+    a.links = [...(a.links || []).filter(x => x.to !== to), { to, how, folder: true }]
   }
   // a claim an earlier version of the map held and this one does not: gone, unless the session said it too
   const keep = new Set(seen.values())
@@ -673,8 +628,7 @@ export function mergeFolder(store, data, { card = 'folder-claims', v = null, at 
 
 /**
  * The store as the pane shows it: the clusters in the order their work began (the session's first, the folder's
- * after), each with its claims sorted by kind and then in the order said, and the claims between clusters last. Each
- * claim carries `n` (×N).
+ * after), each with its claims in the order said, and the claims between clusters last. Each claim carries `n` (×N).
  */
 export function viewOf(store) {
   const groups = store.clusters.map(k => ({ ...k, claims: store.claims.filter(c => c.cluster === k.id) })).filter(g => g.claims.length)
@@ -682,10 +636,9 @@ export function viewOf(store) {
   groups.sort((a, b) => rank(a) - rank(b) || String(a.id).localeCompare(String(b.id), 'en', { numeric: true }))
   const loose = store.claims.filter(c => !c.cluster || !store.clusters.some(k => k.id === c.cluster))
   if (loose.length) groups.push({ id: null, name: 'between clusters', claims: loose })
-  const order = new Map(store.claims.map((c, i) => [c.id, i]))
   const flat = []
   for (const g of groups) {
-    g.claims = g.claims.map(c => ({ ...c, n: c.said.length })).sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || order.get(a.id) - order.get(b.id))
+    g.claims = g.claims.map(c => ({ ...c, n: c.said.length }))
     for (const c of g.claims) flat.push(c)
   }
   const turns = store.claims.map(c => c.turn).filter(t => typeof t === 'number')
@@ -693,76 +646,34 @@ export function viewOf(store) {
 }
 
 /**
- * The claims a claim bears on, each once with why, in this order: the claim it corrects or that corrects it, the
- * folder map's relations (contradicts, supports, same topic), the claims that cite a row it cites, and the claims
- * said just before and after it in the same message. At most `max`. [{id, why}]
+ * The graph's edges: a correction (the claim that corrects to the one it corrects), a link one claim names to another
+ * (supports, contradicts, same topic), and two claims that cite the same rows (each later claim citing a ref to the
+ * first claim that cited it, so a ref many claims cite draws a star, not every pair; two values of one selection,
+ * `q4#user=Kestrel@n` and `@share`, are the same rows). One edge per pair, in that order
+ * of kinds. [{a, b, kind: 'corrects' | 'relates' | 'rows', ref?, how?}]
  */
-export function related(flat, id, max = 6) {
-  const c = flat.find(x => x.id === id)
-  if (!c) return []
-  const out = new Map()
-  const add = (to, why) => { if (to && to !== id && !out.has(to) && flat.some(x => x.id === to)) out.set(to, why) }
-  if (c.revises) add(c.revises, 'corrects')
-  if (c.revised_by) add(c.revised_by, 'corrected by')
-  for (const l of c.links || []) add(l.to, l.type)
-  for (const x of flat) for (const l of x.links || []) if (l.to === id) add(x.id, l.type === 'supports' ? 'supported by' : l.type)
-  const refs = new Set((c.sources || []).map(s => s.ref))
-  for (const x of flat) if ((x.sources || []).some(s => refs.has(s.ref))) add(x.id, 'same evidence')
-  const row = c.said?.[0]?.row
-  if (row) {
-    const same = flat.filter(x => x.said?.[0]?.row === row).sort((a, b) => (a.said[0].start ?? 0) - (b.said[0].start ?? 0))
-    const k = same.findIndex(x => x.id === id)
-    for (const x of [same[k - 1], same[k + 1]]) if (x) add(x.id, 'said beside it')
+export function edgesOf(flat) {
+  const ids = new Set(flat.map(c => c.id))
+  const out = []
+  const seen = new Set()
+  const add = (a, b, kind, ref, how) => {
+    if (!ids.has(a) || !ids.has(b) || a === b) return
+    const key = [a, b].sort().join('|')
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ a, b, kind, ...(ref ? { ref } : {}), ...(how ? { how } : {}) })
   }
-  return [...out].slice(0, max).map(([to, why]) => ({ id: to, why }))
-}
-
-/** The links between clusters: pairs of clusters whose claims bear on each other (a correction, a relation of the
- *  folder's map, a row both cite), with how many. Pairs of the same cluster are left out. [{a, b, n, corrects}] */
-export function clusterLinks(view) {
-  const flat = view.flat || []
-  const byId = new Map(flat.map(c => [c.id, c]))
-  const pairs = new Map()
-  const link = (x, y, corrects) => {
-    const a = byId.get(x)?.cluster ?? null
-    const b = byId.get(y)?.cluster ?? null
-    if (a == null || b == null || a === b) return
-    const [p, q] = String(a) < String(b) ? [a, b] : [b, a]
-    const key = `${p}|${q}`
-    const cur = pairs.get(key) || { a: p, b: q, n: 0, corrects: false, seen: new Set() }
-    const pair = [x, y].sort().join('|')
-    if (cur.seen.has(pair)) return
-    cur.seen.add(pair)
-    cur.n++
-    cur.corrects = cur.corrects || !!corrects
-    pairs.set(key, cur)
-  }
+  for (const c of flat) if (c.revises) add(c.id, c.revises, 'corrects')
+  for (const c of flat) for (const l of c.links || []) add(c.id, l.to, 'relates', null, l.how)
+  // the same rows: the same selection of a query (`q4#user=Kestrel`, whichever value after `@` it names), or the same row
+  const rowsOf = ref => String(ref).replace(/@[^@#/]*$/, '')
+  const first = new Map()
   for (const c of flat) {
-    if (c.revises) link(c.id, c.revises, true)
-    for (const l of c.links || []) link(c.id, l.to, false)
+    for (const s of c.sources || []) {
+      const key = rowsOf(s.ref)
+      if (!first.has(key)) first.set(key, c.id)
+      else add(c.id, first.get(key), 'rows', s.ref)
+    }
   }
-  const byRef = new Map()
-  for (const c of flat) for (const s of c.sources || []) byRef.set(s.ref, [...(byRef.get(s.ref) || []), c.id])
-  for (const ids of byRef.values()) for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) link(ids[i], ids[j], false)
-  return [...pairs.values()].map(({ seen, ...p }) => p)
-}
-
-/**
- * Lanes for an arc diagram of the cluster links, beside the map's rows: each link {a, b} between the rows `rowOf(a)`
- * and `rowOf(b)` gets the innermost lane free over its span (two links share a lane only when their spans do not
- * touch). Returns [{...link, top, bottom, lane}] and the number of lanes.
- */
-export function laneLinks(links, rowOf) {
-  const placed = []
-  const spans = links.map(l => {
-    const ra = rowOf(l.a)
-    const rb = rowOf(l.b)
-    return ra == null || rb == null ? null : { ...l, top: Math.min(ra, rb), bottom: Math.max(ra, rb) }
-  }).filter(Boolean).sort((x, y) => (x.bottom - x.top) - (y.bottom - y.top) || x.top - y.top)
-  for (const s of spans) {
-    let lane = 0
-    while (placed.some(p => p.lane === lane && p.top <= s.bottom && s.top <= p.bottom)) lane++
-    placed.push({ ...s, lane })
-  }
-  return { links: placed, lanes: placed.reduce((n, p) => Math.max(n, p.lane + 1), 0) }
+  return out
 }
