@@ -27,7 +27,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
-import { barText } from '../panes/host.js'
+import { barText, hostKeys } from '../panes/host.js'
 import { paintRegions } from './cells'
 import { askMerge, beganWord, examplesView, linkRuns, partsOf, versionsOf } from './carddetail.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
@@ -582,7 +582,9 @@ export async function detailKeys($: Engine): Promise<string | null> {
   if (isAsk(ringAt) || draft) return `↵ ask${sel.ask ? ` about ${cut(String(sel.ask.label), 40)}` : ''} · esc back to the card`
   // the program run now (it follows the card's drawing and the detail's state as they change)
   const d = await paneNow($, 'detail', { id: sel.id })
-  const keys = barText([{ on: drawn?.on || [] }, d])
+  // the card's keys that reach it here (Claude Code keeps ← and →, so the bar never names them), then the detail's
+  const taken = hostKeys('detail', 'terminal')
+  const keys = barText([{ on: (drawn?.on || []).filter((h: Any) => !(String(h?.name) in taken)) }, d])
   const ask = sel.ask ? `type to ask about ${cut(String(sel.ask.label), 40)}` : 'type to ask this card'
   const parts = keys.split(' · ').filter(Boolean)
   const esc = parts.findIndex(x => x.startsWith('esc '))

@@ -8,7 +8,9 @@
 // and the levels (and, while the call runs, where they go: record.squeeze.want).
 //
 //   state: {focus: chip id, adding: true while the person types a stretch}
-//   keys: 1-9 pick · ] [ next chip · < > (or , .) change · + new stretch · 0 original (at the original: close) · s done
+//   keys: [ ] change · 1-9 chip · + new stretch · 0 original (at the original: close) · s done. No key is labelled
+//         < >: next to Claude Code's `← for agents` it reads as the arrow keys, and ← in an empty prompt leaves the
+//         conversation for the agents view. < > and , . still change, unnamed.
 //   presses: a chip picks it (the picked one steps up); a dot sets that level; + starts a stretch
 //   events: stretch {text} (the two ends the person typed, from the host's input)
 import { chipsOf, glyph, isOriginal, noteOf, stepAt, stretchChip } from '../verbs/squeeze/chips.mjs'
@@ -51,23 +53,20 @@ export function program(k, data) {
   const pending = !!rec.squeeze.want && !same(rec.squeeze.want, rec.squeeze.at)
 
   // ---- what the person does
-  // a step names the key it came from (, and . are < and >), so a rewrite that fails says which key tries again
+  // a step names the key the bar names for it ([ or ], whichever key made it), so a rewrite that fails says which key
+  // tries again
   const step = (id, dir) => {
     const to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, id, dir)
-    if (to) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '<' : '>' })
+    if (to) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '[' : ']' })
     return { focus: id, adding: false }
   }
-  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id, adding: false })))
-  const next = dir => () => {
-    const i = Math.max(0, chips.findIndex(c => c.id === focus))
-    return { focus: chips[(i + dir + chips.length) % chips.length].id, adding: false }
-  }
-  k.on('<', () => step(focus, -1), 'change')
-  k.on('>', () => step(focus, 1), 'change')
+  k.on('[', () => step(focus, -1), 'change')
+  k.on(']', () => step(focus, 1), 'change')
+  k.on('<', () => step(focus, -1))
+  k.on('>', () => step(focus, 1))
   k.on(',', () => step(focus, -1))
   k.on('.', () => step(focus, 1))
-  k.on(']', next(1), 'next chip')
-  k.on('[', next(-1))
+  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id, adding: false }), 'chip'))
   const stretch = () => {
     k.do('input', { row: data.row, label: 'two ends, such as engineer and manager', event: 'stretch', prefix: '+' })
     return { adding: true }

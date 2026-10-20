@@ -5,7 +5,8 @@
 // When it looks: after a turn of main that answered, once the answer exists, when the turn did work (it ran a tool,
 // saved an object, or wrote a long answer), or when the person's message states a decision (they will tell, send,
 // share or choose something), or when the answer drifted from the question. A look never runs mid-turn and never
-// delays one.
+// delays one. It looks only where a person is (the shell's personHere): never in a `-p` run, and in a session of
+// Claude Code's background service only once the person's first prompt came.
 //
 // One look, in order:
 // 1. The question step (registry feature `question`): one small completion, with no transcript, compares the answer
@@ -54,7 +55,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
-import { answerRow, applyObserver, cardSettled, claimsStore, drawnTextOf, leanEnv, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
+import { answerRow, applyObserver, cardSettled, claimsStore, drawnTextOf, leanEnv, messageRecord, personHere, saveClaims, setVerb, turnPlaces } from '../shell/shell'
 import { glossesOf } from '../shell/message.js'
 import { applyTurn, basedOnFrom, clearGap, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
 import { promptText, promptTextAt, shadowVersions } from '../prompts/prompts'
@@ -924,6 +925,9 @@ export const registerObserver: Register = (on, options) => {
     try {
       await flushDeferred($)
       if (!(await isOn($))) return r
+      // no look where no person reads it: a `-p` run never, a session of the background service from the person's
+      // first prompt (as the shell starts its work)
+      if (personHere() !== 'now') return r
       const p = S.prompt
       const earlier = p.typed && S.questions.at(-1) === p.text ? S.questions.slice(0, -1) : S.questions.slice()
       const t: Look = { turnId: e.turnId, turnNo: S.turnNo, steps: S.steps, tools: S.tools, answer: e.answer || '', question: p.text, typed: p.typed, verb: p.verb, earlier, since: S.since }

@@ -3,7 +3,7 @@
 // drawing, and the same rules for what reaches it. No `$`, no DOM, no Node: the terminal (shell/panes.ts) and the
 // browser (shell/browser/src/panes/) both import this file, so the two read a program's keys the same way.
 //
-//   keysOf(drawing)            the keys a program takes, as the bar says them: [{key: '< >', words: 'change'}]. Keys
+//   keysOf(drawing)            the keys a program takes, as the bar says them: [{key: '[ ]', words: 'change'}]. Keys
 //                              that share their words are one entry; a key with no words is not shown (an alias)
 //   barText(drawings)          the keys of a focus stack (top first) as one line: 'r replay · esc close'
 //   takes(drawing, event)      whether the program has a handler the event reaches
@@ -125,13 +125,16 @@ export function joinShared(mine, theirs, keys) {
 // for its own prompt. A card's program learns them as k.keys (draw/kit.js); a key it takes there never reaches it, and
 // the bar names only the keys that do.
 
-const CC_OWN = { esc: 'Claude Code keeps it', return: 'Claude Code keeps it', tab: 'Claude Code keeps it', 'shift+tab': 'Claude Code keeps it', up: 'Claude Code keeps it for the prompt history', down: 'Claude Code keeps it for the prompt history', backspace: 'Claude Code keeps it' }
+// ← and → never reach a program in the terminal either: Claude Code keeps them (← in an empty prompt opens its agents
+// view), so no bar names them there
+const CC_OWN = { esc: 'Claude Code keeps it', return: 'Claude Code keeps it', tab: 'Claude Code keeps it', 'shift+tab': 'Claude Code keeps it', up: 'Claude Code keeps it for the prompt history', down: 'Claude Code keeps it for the prompt history', left: 'Claude Code keeps it (← opens its agents view)', right: 'Claude Code keeps it', backspace: 'Claude Code keeps it' }
 
 /** The keys the host keeps where a card is drawn ('inline': under a reply, focused with ]; 'detail': its detail), on a
  *  surface ('terminal' | 'browser'), each with why: {key: why}. */
 export function hostKeys(mode, surface = 'terminal') {
   if (mode === 'detail') {
-    return { esc: 'goes back', up: 'moves between parts', down: 'moves between parts', tab: 'moves between parts', 'shift+tab': 'moves between parts', return: 'opens the part', '0': 'clears' }
+    const kept = surface === 'terminal' ? { left: 'Claude Code keeps it', right: 'Claude Code keeps it' } : {}
+    return { esc: 'goes back', up: 'moves between parts', down: 'moves between parts', tab: 'moves between parts', 'shift+tab': 'moves between parts', return: 'opens the part', '0': 'clears', ...kept }
   }
   const moving = { 0: 'goes back', 1: 'opens the detail', ']': 'moves to the next thing', '[': 'moves to the one before' }
   return surface === 'terminal' ? { ...CC_OWN, ...moving } : { ...moving, esc: 'goes back' }

@@ -1145,6 +1145,11 @@ async function loadRowVerbs($: Engine): Promise<void> {
  *  runs, a pre-warmed spare or a background job, until the person's first prompt), `never` (a `-p` run, the SDK). */
 let person: 'now' | 'later' | 'never' = 'now'
 
+/** Whether a person is at this session now (the observer looks only then). */
+export function personHere(): 'now' | 'later' | 'never' {
+  return person
+}
+
 /** The work of a person's session that starts Node children: the verbs of the message row, and the thimble line's
  *  counts with the share of the data Claude read. */
 async function startForPerson($: Engine): Promise<void> {
@@ -1160,7 +1165,7 @@ async function startForPerson($: Engine): Promise<void> {
 // ------------------------------------------------------------------------------------------------ the answers
 //
 // The keys act on one of Claude's answers: the last words of a turn that answered (a turn that ended in an error
-// answers nothing: its last row is Claude Code's error). By default the newest; < and > pick an earlier or a later one,
+// answers nothing: its last row is Claude Code's error). By default the newest; { and } pick an earlier or a later one,
 // so a long answer stays in reach when short replies came after it (a subagent's report, a follow-up), and the
 // thimble line says which reply the keys act on whenever more than one came since the person's last prompt.
 
@@ -1194,7 +1199,7 @@ async function answerPlace($: Engine, row: string): Promise<{ all: string[]; at:
   return { all, at: all.indexOf(row), since: all.filter(r => after.has(r)).length }
 }
 
-/** < and >: the keys act on the answer before or after the one they act on now; the newest gives the keys back to the
+/** { and }: the keys act on the answer before or after the one they act on now; the newest gives the keys back to the
  *  latest turn. Returns false when there is none that way. */
 async function stepAnswer($: Engine, dir: number): Promise<boolean> {
   const all = await answerRows($)
@@ -1883,8 +1888,9 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   if (!cf) return undefined
   const d = await inlineDrawing($, cf)
-  const taken = new Set(Object.keys(hostKeys('inline', 'terminal')))
-  const own = keysOf(d).filter(g => !g.key.split(' ').some(x => taken.has(x === '↵' ? 'return' : x === '↑' ? 'up' : x === '↓' ? 'down' : x)))
+  // a key the host keeps never reaches the card here (Claude Code's ← → ↑ ↓ ↵ among them), so the bar never names it
+  const taken = hostKeys('inline', 'terminal')
+  const own = keysOf(d ? { ...d, on: (d.on || []).filter((h: Any) => !(String(h?.name) in taken)) } : d)
   return { keys: [...own.map(g => `${g.key} ${g.words}`), '1 open detail', '] next', '0 back'].join(' · ') }
 }
 
@@ -1905,7 +1911,7 @@ async function focusKeys($: Engine): Promise<FocusWords | null> {
 }
 
 /** Keys as the bar says them, `1 ask · 0 close · ] next`, cut into each key and its words: the key is the first
- *  token and any symbols after it (`< >`, `] [`, `↑ ↓`); a lit verb's `s ● note` keeps its color. */
+ *  token and any symbols after it (`[ ]`, `{ }`, `↑ ↓`); a lit verb's `s ● note` keeps its color. */
 function keySegments(keys: string): { key: string; words: string; color?: string; short?: string; onPress?: () => unknown }[] {
   return keys.split(' · ').map(seg => {
     const lit = /^([a-z]) ● (.*)$/.exec(seg)
@@ -1929,7 +1935,7 @@ const barSeen: { at: number; keys: Set<string> }[] = []
 /** How long a key stays the line's after the line stopped naming it: about the time to see that it changed. */
 const BAR_SEEN_MS = 1000
 
-/** The keys a line names, as keys come to prompt.edit: `1–4` is 1 to 4, `< >` is two keys, ⌫ is backspace. */
+/** The keys a line names, as keys come to prompt.edit: `1–4` is 1 to 4, `[ ]` is two keys, ⌫ is backspace. */
 function namedKeys(left: BarSeg[]): Set<string> {
   const out = new Set<string>()
   for (const g of left) {
@@ -2003,13 +2009,13 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       if (ref) left.push({ key: '1', words: 'open detail', color: FOCUS[theme], onPress: () => openDetail($, ref) })
       if (browserFlag) left.push({ key: 'o', words: 'browser', color: FOCUS[theme], onPress: async () => $.ui.toast(await openBrowser($, { row })) })
       // which reply the keys act on, once more than one came since the person's last prompt or an earlier one is
-      // picked: < and > pick another
+      // picked: { and } pick another (as ] and [ step through the marks; never < >, which read as the arrow keys)
       const place = await answerPlace($, row)
       if (place.all.length > 1 && place.at >= 0 && (place.at < place.all.length - 1 || place.since > 1)) {
         // an earlier reply picked: its first words too, since a key cannot scroll the transcript to it
         const which = `reply ${place.at + 1} of ${place.all.length}`
         const begins = place.at < place.all.length - 1 ? cut(shownOf(rec).replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim(), 36) : ''
-        left.push({ key: '< >', words: begins ? `${which}: ${begins}` : which, short: which, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
+        left.push({ key: '{ }', words: begins ? `${which}: ${begins}` : which, short: which, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
       }
     }
   }
@@ -2157,7 +2163,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
       } }
     }
   }
-  // the squeeze chips open under a message: their program's keys first (panes/chips.js: 1-9 pick, < > change, + a
+  // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-9 chip, + a
   // stretch, 0 original, s done); the + of a stretch, which asks for the prompt, types into it
   if (pick && pick.verb === 's' && !tray) {
     const d = await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k })
@@ -2203,10 +2209,10 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     return { box: null, work: () => setCardFocus($, null) }
   }
   if (k === ']' || k === '[') return { box: consume, work: async () => { await setPick($, null); await stepMark($, k === ']' ? 1 : -1) } }
-  // < and > at rest: the answer before or after the one the keys act on (a letter typed at once after it: a word)
-  if ((k === '<' || k === '>') && !pick && !(await $.state.get(CLAIMPANE)).value && (await answerRows($)).length > 1) {
+  // { and } at rest: the answer before or after the one the keys act on (a letter typed at once after it: a word)
+  if ((k === '{' || k === '}') && !pick && !(await $.state.get(CLAIMPANE)).value && (await answerRows($)).length > 1) {
     const was = (await $.state.get(SELROW)).value as string | null | undefined
-    return { box: consume, work: () => stepAnswer($, k === '<' ? -1 : 1), word: () => $.state.set(SELROW, was ?? null) }
+    return { box: consume, work: () => stepAnswer($, k === '{' ? -1 : 1), word: () => $.state.set(SELROW, was ?? null) }
   }
   if (k === '0' || k === 'backspace') return pick ? { box: consume, work: () => setPick($, null) } : { box: null }
   if (/^[1-9]$/.test(k)) {
@@ -2479,7 +2485,7 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
     if (a.at && typeof a.at === 'object') {
       const at: Record<string, number> = {}
       for (const [k, v] of Object.entries(a.at as Record<string, unknown>)) if (Number.isInteger(v)) at[k] = v as number
-      void sqSetLevels($, row, at, a.key === '<' || a.key === '>' ? a.key : null)
+      void sqSetLevels($, row, at, a.key === '[' || a.key === ']' ? a.key : null)
       return
     }
     return '× The chips asked for a squeeze with no levels.'
@@ -2736,14 +2742,14 @@ export const registerShell: Register = (on, options) => {
         await $.state.set(ANSWER, row)
         const answers = await answerRows($)
         if (!answers.includes(row)) await $.state.set(ANSWERS, [...answers, row])
-        // a message taller than the screen arrives squeezed (one call, outside the turn's end)
-        $.clock.after(0, () => { void sqArrive($, row).catch(() => undefined) })
+        // a message taller than the screen arrives squeezed (one call, outside the turn's end), where a person reads it
+        if (person === 'now') $.clock.after(0, () => { void sqArrive($, row).catch(() => undefined) })
         // the thimble line: what this turn read, saved and cited
         $.clock.after(0, () => { void recount($, { coverage: true }) })
         // claims the corpus orientation saved in this turn light c under its answer
         if (turn.oriented) await setVerb($, row, 'c', { lit: true, note: `${turn.oriented} claims from the corpus` })
         // the card after the answer: a turn of the person's that ran thimble and saved nothing (a verb's turn draws its own)
-        const card = turn.leaned && !turn.saved && !turn.unplaced.length && !turn.placed.length && turnFeature() === 'main' ? await cardVersion($) : null
+        const card = person === 'now' && turn.leaned && !turn.saved && !turn.unplaced.length && !turn.placed.length && turnFeature() === 'main' ? await cardVersion($) : null
         if (card) {
           const q = question
           const work: Promise<void> = new Promise<void>(done => { $.clock.after(0, () => { void cardAfterTurn($, { row, question: q, version: card }).finally(() => { if (cardWork === work) cardWork = null; done() }) }) })
@@ -2794,7 +2800,7 @@ export const registerShell: Register = (on, options) => {
       })()
       const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
       const open = pick && pick.row === at ? pick.verb : null
-      // a message the person picked for the keys (< >, a mark of it) other than the latest answer: ▸ in place of its ●
+      // a message the person picked for the keys ({ }, a mark of it) other than the latest answer: ▸ in place of its ●
       const picked = (await $.state.get(SELROW)).value === at
       if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null) return next(e)
       const tray = (await $.state.get(TRAY)).value as Tray | null
@@ -2861,7 +2867,7 @@ export const registerShell: Register = (on, options) => {
   })
 
   // keys while the prompt is empty: v and s open their line under the message the keys act on, and c the claims list;
-  // < and > pick the answer the keys act on; ] and [ move through the marks, opening the tray (through the claims while
+  // { and } pick the answer the keys act on; ] and [ move through the marks, opening the tray (through the claims while
   // the list or a claim is open); a digit
   // picks in the open line, opens a cluster of the list, or opens a mark or a source inside the card; 0 closes the
   // card, then the line or list. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing

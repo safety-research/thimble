@@ -738,7 +738,7 @@ async function answerTurn($: any, clock: { settle: () => Promise<void> }, o: { t
   await clock.settle()
 }
 
-test('the keys act on the newest answer, never on an error; < and > pick another answer, which the bar names and the reply marks', async ($, on) => {
+test('the keys act on the newest answer, never on an error; { and } pick another answer, which the bar names and the reply marks', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
@@ -752,18 +752,19 @@ test('the keys act on the newest answer, never on an error; < and > pick another
   // the keys act on the short follow-up (the error answered nothing), and the bar says which of the two replies
   let bar = await hintOf($)
   expect(bar).toContain('v visualize')
-  expect(bar).toContain('< > reply 2 of 2')
+  expect(bar).toContain('{ } reply 2 of 2')
   expect(bar).not.toContain('cite & explain')
-  // < picks the long answer: its marks are the keys' now, and its first row shows ▸ in place of its bullet
-  expect(await press($, clock, edit('<'))).toEqual({ text: '', cursor: 0 })
+  // { picks the long answer: its marks are the keys' now, and its first row shows ▸ in place of its bullet
+  expect(await press($, clock, edit('{'))).toEqual({ text: '', cursor: 0 })
   bar = await hintOf($)
-  expect(bar).toContain('< > reply 1 of 2')
+  expect(bar).toContain('{ } reply 1 of 2')
   expect(bar).toContain('] cite & explain')
   const long = textOf(await $.ui.render({ ...(MOUNT as object), requestId: LONG, props: { text: MARKED, isFirstOfReply: true } } as never))
   expect(long.startsWith('▸')).toBe(true)
-  // > gives the keys back to the newest answer
-  await press($, clock, edit('>'))
-  expect(await hintOf($)).toContain('< > reply 2 of 2')
+  // } gives the keys back to the newest answer; no key of the bar reads as an arrow key
+  await press($, clock, edit('}'))
+  expect(await hintOf($)).toContain('{ } reply 2 of 2')
+  expect(await hintOf($)).not.toMatch(/[<>←→]/)
   expect(await hintOf($)).not.toContain('cite & explain')
 })
 

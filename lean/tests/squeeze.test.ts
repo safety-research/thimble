@@ -108,7 +108,7 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   expect(drawn).toContain('+')
   // nothing under the chips: their keys are in the thimble line, once
   expect(drawn).not.toContain('change')
-  expect(await hintOf($)).toContain('< > change · ] next chip · + new stretch · 0 close')
+  expect(await hintOf($)).toContain('[ ] change · 1–3 chip · + new stretch · 0 close')
   // only the picked chip has a fill: its words, dots and level, and no other chip's
   const filled = (t: Any): string => (Array.isArray(t) ? t.map(filled).join('') : t && typeof t === 'object' ? (t.props?.backgroundColor ? textOf(t) : filled(t.children ?? t.props?.children)) : '')
   const fill = filled(await $.ui.render(view(TEXT)))
@@ -129,8 +129,8 @@ test('a chip change rewrites the message in place with one call; the citations a
   const clock = mock.clock(on)
   await answered($, on, clock)
   await press($, clock, edit('s'))
-  // < : Length one level down, to medium
-  expect(await press($, clock, edit('<'))).toEqual({ text: '', cursor: 0 })
+  // [ : Length one level down, to medium
+  expect(await press($, clock, edit('['))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.calls.length).toBe(1)
   const call = w.calls[0]
@@ -154,7 +154,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(drawn).not.toContain('from this one')
   expect(drawn).toContain('Length ○○●○ medium')
   expect(drawn).not.toContain('rewriting')
-  expect(await hintOf($)).toContain('< > change · ] next chip · + new stretch · 0 original · s done')
+  expect(await hintOf($)).toContain('[ ] change · 1–3 chip · + new stretch · 0 original · s done')
   await ui.unmount()
   await press($, clock, edit('0'))
   await clock.settle()
@@ -164,7 +164,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(back.marks.filter((m: Any) => m.kind === 'cite').map((m: Any) => TEXT.slice(m.start, m.end))).toEqual(['[6,543 saves](q1#day=2026-06-18@n)', '[this one](revisions.jsonl#L28)'])
   expect(await hintOf($)).toContain('0 close')
   // a state seen before comes back from the record, with no call
-  await press($, clock, edit('<'))
+  await press($, clock, edit('['))
   await clock.settle()
   expect(w.calls.length).toBe(1)
   expect(record(w).shown).toBe(SHORT)
@@ -179,7 +179,7 @@ test('the new text writes itself in from the top: the old text dims while the ca
   await answered($, on, clock)
   await press($, clock, edit('s'))
   await press($, clock, edit('3'))
-  await press($, clock, edit('>'))
+  await press($, clock, edit(']'))
   await clock.settle()
   expect(w.calls[0].prompt).toContain('- Familiarity: fluent (levels new to the field · beginner · working · fluent · expert; the original is at a level not yet known)')
   // the first piece only: whole words, the citation whole
@@ -196,9 +196,9 @@ test('the new text writes itself in from the top: the old text dims while the ca
   expect(whole).toContain('untiltheeveningrunended.Theagents')
   expect(whole.match(/eveningrunended/g)!.length).toBe(4)
   // a state seen before writes itself in too, with no call
-  await press($, clock, edit('<'))
+  await press($, clock, edit('['))
   await clock.settle()
-  await press($, clock, edit('>'))
+  await press($, clock, edit(']'))
   await clock.settle()
   expect(w.calls.length).toBe(1)
   expect((textOf(await $.ui.render(view(TEXT))).replace(/\s+/g, '').match(/eveningrunended/g) || []).length).toBeLessThan(4)
@@ -212,7 +212,7 @@ test('a stretch: + then two ends and ↵ make a chip that stands at the original
   const clock = mock.clock(on)
   await answered($, on, clock)
   await press($, clock, edit('s'))
-  await press($, clock, edit('<'))
+  await press($, clock, edit('['))
   await clock.settle()
   // + is typed into the prompt, and what is left to type shows after it, as the chip row and the hint line say
   const plus = await press($, clock, edit('+'))
@@ -240,9 +240,10 @@ test('a stretch: + then two ends and ↵ make a chip that stands at the original
   let drawn = textOf(await $.ui.render(view(TEXT)))
   expect(drawn).toContain(' engineer ●○○○ manager ')
   expect(drawn).toContain('Length ○○●○ medium')
-  expect(await hintOf($)).toContain('< > change · ] next chip · + new stretch · 0 original · s done')
-  // > steps it toward manager: one call, with Length still at medium
-  await press($, clock, edit('>'))
+  // the stretch is a fourth chip, on 4
+  expect(await hintOf($)).toContain('[ ] change · 1–4 chip · + new stretch · 0 original · s done')
+  // ] steps it toward manager: one call, with Length still at medium
+  await press($, clock, edit(']'))
   await clock.settle()
   expect(w.calls.length).toBe(2)
   const call = w.calls[1].prompt
@@ -322,7 +323,7 @@ test('a rewrite that cites a ref the original never cited shows it as plain word
   await answered($, on, clock)
   await press($, clock, edit('s'))
   await press($, clock, edit('3'))
-  await press($, clock, edit('<'))
+  await press($, clock, edit('['))
   await clock.settle()
   expect(w.calls[0].prompt).toContain('- Familiarity: beginner')
   const rec = record(w)
@@ -340,7 +341,7 @@ test('keys pressed while a rewrite is on its way add up: the chip shows where it
   await answered($, on, clock)
   await press($, clock, edit('s'))
   // three presses before the first call comes back: medium, short, one line (no settling between them)
-  for (let i = 0; i < 3; i++) await ($ as Any).prompt.edit(edit('<'))
+  for (let i = 0; i < 3; i++) await ($ as Any).prompt.edit(edit('['))
   await clock.settle()
   expect(textOf(await $.ui.render(view(TEXT)))).toContain('Length ●○○○ one line')
   await clock.settle()
@@ -399,14 +400,14 @@ test('an explain mark stays on a squeezed text: the request names its term, a te
   w.files[`${dir}/${AT}.json`] = JSON.stringify({ v: 1, row: AT, session: 's-1', text: TEXT, shown: null, marks, glosses: { g1: { term: 'fixture scope', title: 'fixture scope', body: 'How widely one fixture is shared.' } }, verbs: {}, objects: [], final: true })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   await press($, clock, edit('s'))
-  await press($, clock, edit('<'))
+  await press($, clock, edit('['))
   await clock.settle()
   expect(w.calls[0].prompt).toContain('Terms the person can open an explanation of. Where your text keeps what a term names, use the term in these words:\n- fixture scope')
   let rec = record(w)
   const g = rec.marks.find((m: Any) => m.kind === 'gloss')
   expect(FORM.slice(g.start, g.end)).toBe('fixture scoped')
   // the rewrite one level shorter leaves the term out: its explain stays, drawn after the text
-  await press($, clock, edit('<'))
+  await press($, clock, edit('['))
   await clock.settle()
   await writtenIn(clock)
   rec = record(w)
@@ -431,11 +432,11 @@ test('a rewrite that fails says what failed in plain words and which key tries a
   const clock = mock.clock(on)
   await answered($, on, clock)
   await press($, clock, edit('s'))
-  await press($, clock, edit('<'))
+  await press($, clock, edit('['))
   await clock.settle()
   const bar = await hintOf($)
-  expect(bar).toContain('The rewrite failed: no reply came from the API (the connection or the sign-in failed). Press < to try again')
+  expect(bar).toContain('The rewrite failed: no reply came from the API (the connection or the sign-in failed). Press [ to try again')
   expect(bar).not.toContain('unknown')
   // the browser's chips read the same words from the record
-  expect(record(w).squeeze.error).toContain('Press < to try again')
+  expect(record(w).squeeze.error).toContain('Press [ to try again')
 })

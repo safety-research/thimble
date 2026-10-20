@@ -47,7 +47,7 @@ const BLANK: SqzUi = { focus: 'length', adding: false, running: null, error: nul
 // prompt's text; the last screen size
 const inflight = new Map<string, { want: Want | null }>()
 const revealing = new Map<string, number>()
-// `key`: the key the person pressed for it (< or >), which presses it again after a failure; none for a press of the
+// `key`: the key the bar names for it ([ or ]), which presses it again after a failure; none for a press of the
 // pointer or a message that arrived squeezed
 type Want = { at: At; key?: string | null }
 let cfg: Record<string, unknown> = {}

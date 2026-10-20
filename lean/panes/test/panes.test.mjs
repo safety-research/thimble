@@ -92,11 +92,14 @@ const chipsData = (rec = REC, w = 100) => PANES.chips.data({ 'record:r1': rec, '
 test('chips: keys pick and change a chip; the rewrite is the host\'s action; the same presses in both surfaces', () => {
   const data = chipsData()
   const d0 = run(PANES.chips, data)
-  assert.equal(barText([d0]), '< > change · ] next chip · + new stretch · 0 close · s done')
-  let { d, state } = act(PANES.chips, data, {}, keyEvent('<'), 'terminal')
-  // the step names its key, so a rewrite that fails says which key tries again
-  assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, key: '<', do: 'squeeze' }])
-  ;({ d, state } = act(PANES.chips, data, state, keyEvent(']'), 'terminal'))
+  // no key reads as an arrow key: [ ] change, a digit picks a chip
+  assert.equal(barText([d0]), '[ ] change · 1–3 chip · + new stretch · 0 close · s done')
+  let { d, state } = act(PANES.chips, data, {}, keyEvent('['), 'terminal')
+  // the step names the key the bar names, so a rewrite that fails says which key tries again
+  assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
+  // < and , still change, unnamed, and name [ for a retry too
+  assert.deepEqual(act(PANES.chips, data, {}, keyEvent('<'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
+  ;({ d, state } = act(PANES.chips, data, state, keyEvent('2'), 'terminal'))
   assert.equal(state.focus, 'interpret')
   // a press on a dot in the browser sets that level at once
   const web = act(PANES.chips, data, state, { type: 'press', region: 'lvl-familiarity-4' }, 'browser')
@@ -206,15 +209,15 @@ test('the bar is always one line: it drops the counts first (coverage last), the
 test('a status in the bar is cut at its end, never to its first word, and the keys keep their words longest', async () => {
   const { barLine, fitBar } = await import('../host.js')
   const status = '! "55" is not in the original, so it shows as plain words'
-  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '< >', words: 'change' }, { key: ']', words: 'next chip' }, { key: '+', words: 'new stretch' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'claims', text: '19 claims' }] }
+  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '[ ]', words: 'change' }, { key: '1–3', words: 'chip' }, { key: '+', words: 'new stretch' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'claims', text: '19 claims' }] }
   const at = w => barLine(fitBar(bar, w))
-  assert.equal(at(200), `thimble  ${status} · < > change · ] next chip · + new stretch · 0 original · s done   22 cites · 19 claims`)
+  assert.equal(at(200), `thimble  ${status} · [ ] change · 1–3 chip · + new stretch · 0 original · s done   22 cites · 19 claims`)
   // short of room: the counts go, then the status is cut at its end and every key keeps its words
   const mid = at(110)
   assert.ok(mid.length <= 110, mid)
   assert.ok(mid.startsWith('thimble  ! "55" is not in'), mid)
   assert.ok(mid.includes('…'), mid)
-  assert.ok(mid.endsWith('< > change · ] next chip · + new stretch · 0 original · s done'), mid)
+  assert.ok(mid.endsWith('[ ] change · 1–3 chip · + new stretch · 0 original · s done'), mid)
   assert.ok(!/! "55 ·/.test(mid) && !/! "55$/.test(mid), mid)
   for (const w of [200, 140, 110, 90, 80]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
 })
@@ -224,7 +227,9 @@ test('keys in a row of digits read as a range; the keys a host keeps where a car
   assert.deepEqual(keysOf({ on: [{ name: '2', label: 'open' }, { name: '3', label: 'open' }, { name: '4', label: 'open' }] }), [{ key: '2–4', words: 'open' }])
   const inline = hostKeys('inline', 'terminal')
   for (const k of ['0', '1', ']', '[', 'esc', 'return', 'up']) assert.ok(inline[k], k)
-  assert.ok(!inline.c && !inline.v && !inline.left, 'letters and ← → reach a focused card')
+  assert.ok(!inline.c && !inline.v, 'letters reach a focused card')
+  // ← and → never reach the prompt's hook in an empty prompt: Claude Code keeps them (← opens its agents view)
+  assert.ok(inline.left && inline.right, '← → stay with Claude Code')
   const detail = hostKeys('detail', 'terminal')
   assert.ok(detail.esc && detail.up && detail['0'] && !detail[']'])
 })
@@ -285,4 +290,13 @@ test('claims: a turn the observer could not read is said under the head, with wh
   assert.equal(lines[1], "{bad:Turn 3 was not read: the observer's call failed: the sign-in failed or expired.} {dim:Press c twice to read it again.}")
   assert.equal(lines[2], '{dim:Turn 4 was not read (x). Reading it again…}')
   assert.equal(lines[3], '{dim:1 more turn not read.}')
+})
+
+test('the keys Claude Code keeps never reach a program in the terminal: ← and → among them, so no bar names them there', async () => {
+  const { hostKeys } = await import('../host.js')
+  for (const mode of ['inline', 'detail']) {
+    assert.ok('left' in hostKeys(mode, 'terminal') && 'right' in hostKeys(mode, 'terminal'), mode)
+    // the browser's page gets them
+    assert.ok(!('left' in hostKeys(mode, 'browser')), mode)
+  }
 })

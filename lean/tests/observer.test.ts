@@ -628,3 +628,31 @@ test('a long answer arrives squeezed at once, beside the look; a step on Report 
   expect(rec.squeeze.at).toEqual({ length: 1, interpret: 1 })
   expect(Object.keys(rec.squeeze.versions)).toEqual(['length=1', 'length=1&interpret=1'])
 })
+
+test('a -p run gets no look: no model call and no thimble coverage after its turns', async ($, on) => {
+  const w = world(on)
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: ROOT, surface: null, isInteractive: false } as never)
+  await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
+  await w.clock.settle()
+  expect(w.questions.length).toBe(0)
+  expect(w.forks.length).toBe(0)
+  expect(w.runs.some(r => r.includes('coverage'))).toBe(false)
+})
+
+test("a session of the background service gets no look until the person's first prompt, and looks as usual after it", async ($, on) => {
+  const w = world(on, { env: { CLAUDE_CODE_SESSION_KIND: 'bg' } })
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
+  // a turn the service ran with no person at the prompt
+  await $.turn.start({ turnId: 't0', text: '' } as never)
+  await step($, w, 't0', 0, 2)
+  await $.turn.complete({ turnId: 't0', answer: 'Done with the background job.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(100)
+  await w.clock.settle()
+  expect(w.forks.length).toBe(0)
+  // the person's first prompt: the next turn of work gets its look
+  await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
+  await w.clock.settle()
+  expect(w.forks.length).toBe(1)
+})
