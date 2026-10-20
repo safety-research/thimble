@@ -26,7 +26,7 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   })
   on('fs.exists', (_$, e) => ({ value: e.path in files }))
   on('fs.read', (_$, e) => ({ value: files[e.path] ?? '' }))
-  mock.env(on, { THIMBLE_HOME: '/th', HOME: '/home/x' })
+  mock.env(on, { THIMBLE_HOME: '/th', HOME: '/home/t' })
   const env: Record<string, string | undefined> = {}
   on('env.set', (_$, e) => {
     env[e.name] = e.value

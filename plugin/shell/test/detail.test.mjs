@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { askMerge, asTable, barAfter, beganWord, cycleKnob, examplesView, exampleSet, fmtWords, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, programLines, recordWords, stepPart, stepVersion, versionsOf } from '../carddetail.js'
-import { aboutOf, answerOf, firstMessage, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from '../threads.js'
+import { aboutOf, answerOf, firstMessage, forkDirective, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from '../threads.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { renderTerm } from '../../draw/term.js'
 
@@ -248,4 +248,20 @@ test("a pane's thread when its module says nothing: one per pane instance, each 
   assert.deepEqual(none, { scope: { pane: 'coverage', key: 'coverage', title: 'Coverage' }, label: 'Coverage', refs: [] })
   assert.equal(name({ scope: { object: '01-saves' }, card: 'Saves per day' }), 'main/Saves per day')
   assert.equal(name({ scope: { row: 'r', mark: { kind: 'cite', ref: 'q1', label: '6,543 saves' } } }), 'main/6,543 saves')
+})
+
+test("a thread's fork: its opening call is no step, its directive is the person's question, its last words the answer", () => {
+  const msgs = [
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'Agent', id: 'x', input: { prompt: 'p' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: [{ type: 'text', text: 'Fork started' }] }, { type: 'text', text: '<fork-boilerplate>\nrules\n</fork-boilerplate>\n\nYour directive: GUIDE\n\nwhy so high?' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', id: 'y', input: { command: 'thimble rows r1' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'y', content: 'rows' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Because 645 adults.' }] },
+  ]
+  const turns = turnsOf(msgs)
+  assert.deepEqual(turns.map(t => t.role), ['person', 'claude'])
+  assert.ok(turns[0].text.endsWith('why so high?'))
+  assert.equal(turns[1].text, 'Because 645 adults.')
+  assert.deepEqual(turns[1].calls, ['thimble rows r1'])
+  assert.match(forkDirective('GUIDE', 'why so high?'), /^GUIDE\n\nYou answer in a side thread beside the conversation above, which is context\. [^\n]+\n\nwhy so high\?$/)
 })

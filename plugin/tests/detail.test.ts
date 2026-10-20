@@ -222,6 +222,13 @@ test('keys act only while the composer is empty; a key that began a word gives i
   await clock.advance(1000)
   expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('Saves per day (first)')
+  // h then a letter at once began a word ("how…"): the question holds both, and the version h showed goes back
+  await clock.advance(1000)
+  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('o'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"ho"')
+  expect(await pane($, clock)).toContain('Saves per day (first)')
 })
 
 test('a question typed while the detail is open goes to the card\'s side thread, never to main; its reports never enter main; a later question names a new part', async ($, on) => {
@@ -238,7 +245,9 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(w.views.length).toBe(0)
   // its agent: the question, the part and the card, and the folder of the data
   expect(w.spawns.length).toBe(1)
-  expect(w.spawns[0].subagent_type).toBe('thimble:thread')
+  // a fork of main, which ends quietly (nothing of it in main's transcript), told the thread's instructions first
+  expect(w.spawns[0].subagent_type).toBe('fork')
+  expect(w.spawns[0].prompt).toContain('You answer in a side thread beside the conversation above')
   expect(w.spawns[0].prompt).toContain('why so many links?\n\nAbout: the part "Jun 18" (day-2026-06-18) of the card "Saves per day" (01-saves@2')
   expect(w.spawns[0].cwd).toBe(ROOT)
   // the thread's hand-back and its task notification are dropped; another agent's notification is main's
