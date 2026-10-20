@@ -67,8 +67,8 @@ test('a lens can be turned off; a feature that is no lens cannot', () => {
 
 test('the spec of the versions in use names only those that are not the defaults', () => {
   const idx = indexOf({ forms: ['principles.md'] })
-  const c = choose(idx, { env: 'forms:principles,observer:v3-low,lens-claims:off' })
-  assert.equal(specOf(c.active, idx), 'lens-claims:off,forms:principles')
+  const c = choose(idx, { env: 'forms:principles,observer:v3-low,lens-explain:off' })
+  assert.equal(specOf(c.active, idx), 'lens-explain:off,forms:principles')
   assert.equal(idOf('forms', 'principles'), 'forms:principles')
 })
 

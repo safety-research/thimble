@@ -261,16 +261,6 @@ test('the corrections of its own earlier answer are found in the original: a lis
   assert.deepEqual(mustKeep('June 18 had 6,543 saves, most of them on one page.'), [])
 })
 
-test('a claim of this message that revises one of its own earlier claims is a correction to keep; one that revises the person\'s is not', () => {
-  const claims = { claims: [
-    { id: 'c1', by: 'claude', text: 'old' },
-    { id: 'c2', by: 'claude', revises: 'c1', said: [{ row: 'r2', sentence: 'It is 316, not 317.' }] },
-    { id: 'c3', by: 'person', text: 'theirs' },
-    { id: 'c4', by: 'claude', revises: 'c3', said: [{ row: 'r2', sentence: 'Not two thirds: half.' }] },
-  ] }
-  assert.deepEqual(mustKeep('No lead here.', { claims, row: 'r2' }), ['It is 316, not 317.'])
-})
-
 test('a rewrite that leaves a correction out gets it back after it; one that kept it in other words is left as it is', () => {
   const keep = ['**AgentRelent:** 316, not 317.', '**The split:** 5,242, not 5,181.']
   const r = keepCorrections('The peak was June 18 (316 edits, not 317).', keep)

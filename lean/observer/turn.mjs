@@ -71,11 +71,3 @@ export function stepsOf(msgs, { answer = '', budget = 40000, floor = 240 } = {})
   }
   return lines.length ? lines.join('\n') : '(no steps before the answer)'
 }
-
-/** The turn's words: the person's message and what Claude wrote in the turn (its words between tool calls and its
- *  answer), with no tool output. What the claims lens reads its digest and its quiet rule from. */
-export function turnWords(msgs, question = '') {
-  const parts = [String(question || '')]
-  for (const m of turnMessages(msgs)) if (m && m.role === 'assistant' && String(m.text || '').trim()) parts.push(String(m.text))
-  return parts.join('\n').trim()
-}

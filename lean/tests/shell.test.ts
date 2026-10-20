@@ -802,7 +802,7 @@ test('the keys act on the newest answer, never on an error; { and } pick another
   expect(await hintOf($)).not.toContain('cite & explain')
 })
 
-test('a conversation continued in a new session (moved to the background, --fork-session) finds its records: the cards under its replies, its answers and its claims', async ($, on) => {
+test('a conversation continued in a new session (moved to the background, --fork-session) finds its records: the cards under its replies and its answers', async ($, on) => {
   const w = world(on, undefined, undefined, {}, 's-2')
   const clock = mock.clock(on)
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
@@ -811,23 +811,20 @@ test('a conversation continued in a new session (moved to the background, --fork
   on('session.usage', () => ({ value: { startedAt: 1700000000000, context: {}, rateLimits: [] } }))
   on('session.messages', () => ({ value: [{ role: 'user', text: 'when?', toolUses: [] }, { role: 'assistant', text: 'June 18 had the most saves.', toolUses: [] }] }))
   const CONV = '/home/t/.thimble/lean/conversations/1700000000000.json'
-  // what the first session (s-1) kept: its conversation, the card under its answer, the answer's record, its claims
+  // what the first session (s-1) kept: its conversation, the card under its answer, the answer's record
   w.files[CONV] = JSON.stringify({ key: 's-1', sessions: ['s-1'] })
   w.files[SHOWN] = JSON.stringify({ under: { [AT]: [{ id: '01-saves', v: 1, root: ROOT }] } })
   const dir = `${ROOT}/thimble/messages/s-1`
   w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'when?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
   w.files[`${dir}/${AT}.json`] = JSON.stringify({ v: 1, row: AT, session: 's-1', text: 'June 18 had the most saves.', shown: null, marks: [], glosses: {}, verbs: {}, objects: ['01-saves'], final: true })
-  w.files[`${ROOT}/thimble/claims/s-1.json`] = JSON.stringify({ v: 1, session: 's-1', claims: [{ id: 'c1', text: 'June 18 had the most saves', kind: 'finding', said: [{ row: AT, by: 'claude', turn: 1 }], sources: [] }], clusters: [], gaps: [] })
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
   await clock.settle()
-  // the card is drawn under the same reply (once its drawing is ready), the keys act on its answer, and the line counts
-  // its claim
+  // the card is drawn under the same reply (once its drawing is ready), and the keys act on its answer
   await reply($)
   await clock.settle()
   expect(textOf(await reply($))).toContain('6,543')
   const bar = await hintOf($)
   expect(bar).toContain('v visualize')
-  expect(bar).toContain('1 claim')
   // the new session joined the conversation, and its commands file their records under its key
   expect(JSON.parse(w.files[CONV]!).sessions).toEqual(['s-1', 's-2'])
 })

@@ -44,10 +44,6 @@ export const FEATURES = {
     about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v3', optional: true,
     versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' }, v3: { about: "v2, opened with the 0.9 rule for terms (explain a term the person has not used the first time) as its reason" } },
   },
-  'lens-claims': {
-    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v2', optional: true,
-    versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" } },
-  },
   squeeze: {
     about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v6',
     versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" }, v4: { about: 'v3, with the corrections in the original named in the request and put back when a rewrite leaves one out: a correction may be shortened, never dropped', keep: true }, v5: { about: 'v4, with the terms of the explain marks named in the request and kept in their words where the text keeps what they name', keep: true, terms: true }, v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
@@ -87,7 +83,6 @@ export const FEATURES = {
     versions: { v1: { about: 'as coh-labels wrote it, from the 0.9 classifier' }, v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
   },
   thimble: { about: 'the thimble skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'thimble', versions: { skill: { file: 'skills/thimble/SKILL.md', about: 'as SKILL.md says now' } } },
-  claims: { about: 'the corpus orientation (a subagent reads it)', reads: 'verbs/claims/run.mjs, /verb claims orient', default: 'skill', skill: 'claims', versions: { skill: { file: 'verbs/claims/SKILL.md' } } },
   map: { about: 'the map skill', reads: 'the skill', default: 'skill', skill: 'map', versions: { skill: { file: 'verbs/map/SKILL.md' } } },
   explore: { about: 'the explore skill', reads: 'the skill', default: 'skill', skill: 'explore', versions: { skill: { file: 'verbs/explore/SKILL.md' } } },
   trace: { about: 'the trace skill', reads: 'the skill, and the trace verb', default: 'skill', skill: 'trace', versions: { skill: { file: 'verbs/trace/SKILL.md' } } },

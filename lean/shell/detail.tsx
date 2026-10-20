@@ -94,7 +94,7 @@ export function noteDock(e: Any): void {
   if (e?.viewport?.columns && e.props?.placement === 'dock') viewCols = e.viewport.columns + (e.props.bodyColumns ?? 0) + 1
 }
 
-/** The columns a docked pane of ours asks for, leaving the chat its share (the detail's, the Claims pane's). */
+/** The columns a docked pane of ours asks for, leaving the chat its share. */
 export function paneColumns(): number {
   return detailColumns(viewCols)
 }

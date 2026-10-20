@@ -72,7 +72,7 @@ export type SqzUi = { focus: string; adding: boolean; running: { since: number }
 
 /** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */
-export type LineCounts = { cards: number; threads: number; cites: number; claims: number; cov: number; at: number; changed: Record<string, number> }
+export type LineCounts = { cards: number; threads: number; cites: number; cov: number; at: number; changed: Record<string, number> }
 
 /** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
  *  inside a card (panes/tray.js frameOf). */
@@ -113,7 +113,7 @@ declare module 'claude-code' {
       /** the tray above the prompt, or none */
       tray: Tray | null
       /** the line a verb opened under a message's verb row, or none */
-      /** the line a verb opened under a message's verb row (c opens the Claims pane instead), or none */
+      /** the line a verb opened under a message's verb row, or none */
       pick: { row: string; verb: string; open?: string | null } | null
       /** the message the keys act on, when the person picked one other than the latest */
       selrow: string | null
@@ -137,19 +137,10 @@ declare module 'claude-code' {
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
-      /** the turns whose failed look the observer runs again now (observer.ts readAgain): the Claims pane says so */
-      reread: number[]
-      /** this session's claims (CONTRACT 7), as held for the drawing; thimble/claims/<session>.json on disk */
-      claims: Record<string, unknown> | null
-      /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */
-      turns: StateFamily<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null>
-      /** the Claims pane: the message it was opened from, the claim the ring is on (its card shows), and the replay
-       *  while one grows the graph (how many of the claims, in the order made, are shown) */
-      claimpane: { row: string; focus: string | null; replay: { gen: number; k: number; order: string[] } | null } | null
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
       events: { file: string; n: number; bytes?: number }
       /** what takes the keys, newest last (the shell's focus stack): the thimble line says the keys of the top one */
-      focus: ('detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card')[]
+      focus: ('detail' | 'chips' | 'proposals' | 'tray' | 'card')[]
       /** when a card's state file last changed, by root and id: a drawing that reads the card's state draws again */
       cardver: StateFamily<number>
       /** how many times a pane was asked to draw again, by the pane's instance: its drawings read it */

@@ -21,7 +21,7 @@ import { modelWhy } from '../../shell/why.js'
 import { tracked } from '../../telemetry/telemetry'
 import { FEATURES } from '../../prompts/registry.mjs'
 import { lookPending } from '../../observer/observer'
-import { answerRow, claimsStore, closeTray, questionBefore, recordNow, saveRecord } from '../../shell/shell'
+import { answerRow, closeTray, questionBefore, recordNow, saveRecord } from '../../shell/shell'
 import { sessionKey } from '../../hooks/conversation'
 import { ARRIVE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, stretchChip, termsOf, unplacedMoves, withStretch } from './chips.mjs'
 
@@ -252,7 +252,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     // a version that keeps corrections (squeeze:v4): the corrections in the original are named in the request, and one
     // the rewrite left out is put back after it
     const keeps = !!(FEATURES.squeeze.versions as Any)?.[sp.version]?.keep
-    const keep: string[] = keeps ? mustKeep(rec.text, { claims: await claimsStore($).catch(() => null), row }) : []
+    const keep: string[] = keeps ? mustKeep(rec.text) : []
     // a version that keeps the terms of the explain marks (squeeze:v5): the terms are named in the request
     const terms: string[] = (FEATURES.squeeze.versions as Any)?.[sp.version]?.terms ? termsOf(rec) : []
     const req = request(probe, {

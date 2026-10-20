@@ -1,7 +1,7 @@
-// panes.ts: the terminal's host for programs on the card runtime that thimble itself writes (lean/panes/): the Claims
-// graph, the squeeze chips, the card detail. A pane is a program like a card: its data comes from thimble's own stores,
-// its state is kept where the browser reads it too, what the person does reaches it through k.on, and it draws through
-// the same renderer as a card. The browser runs the same program file (shell/browser/src/panes/) on the same stores.
+// panes.ts: the terminal's host for programs on the card runtime that thimble itself writes (lean/panes/): the squeeze
+// chips, the card detail, the tray, v's proposals. A pane is a program like a card: its data comes from thimble's own
+// stores, its state is kept in a file (so a resumed session finds it), what the person does reaches it through k.on,
+// and it draws through the same renderer as a card.
 //
 //   paneDraw($, name, args, size)        the program run on its stores and state now: its drawing
 //   paneTakes($, name, args, event)       whether the program takes the event, with nothing run (a key's answer)

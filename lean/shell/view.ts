@@ -9,7 +9,7 @@
 //                       its text (a message drawn as above)
 //   verbRowEl(els, o)   the verbs as keys (kept for the bar's words; the bar above the prompt draws them)
 //   verbLineEl(els, o)  the line a verb opens under its message: v's proposals (squeeze's chips are term.ts's; c opens
-//                       the Claims pane, claimsview.ts)
+//                       nothing)
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
 //                       rows; its keys are in the thimble line under it, and its color says cite or explain
 import { blocks, inline, looseOf, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'

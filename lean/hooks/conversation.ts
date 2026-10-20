@@ -1,6 +1,6 @@
 // conversation.ts: the key thimble keeps a session's records under. Claude Code can continue a conversation in a new
 // session, with a new id and the transcript copied there (a session moved to the background, `--fork-session`). What
-// thimble kept for it (the cards drawn under replies, the message records with their squeezes, the claims, the
+// thimble kept for it (the cards drawn under replies, the message records with their squeezes, the
 // observer's memory, the change feed and what Claude read) belongs to the conversation, so a continuation finds it
 // again under the same key: the id of the conversation's first session.
 //

@@ -512,9 +512,7 @@ test('on a tall card, e shows what it opens: the window moves to the bar under t
 test('the thimble line says the keys of what is on top of the focus stack: the detail gone, they are gone', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  // the Claims pane first, then the detail on top of it: the detail's keys
-  await press($, clock, edit('c'))
-  await clock.settle()
+  // the detail: its keys
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   expect(await hintOf($)).toContain('↑↓ part')

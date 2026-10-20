@@ -348,11 +348,10 @@ function clipLines(x, max = 2000) {
  * The corrections of Claude's own earlier answer in a message, as the original writes them (markdown, links kept): a
  * list under a lead that says it corrects ("Two corrections to my last answer:") gives each item with the sub-items
  * under it, so a heading item ("**The numbers I didn't cite before:**") keeps the list it heads; a paragraph that
- * opens with such a lead is one; a sentence that sets an earlier statement right is one. `claims`: the session's claims
- * store, when the observer has read the message: a claim said in this message that revises one of Claude's earlier
- * claims adds the sentence that says it. At most `max`, each cut at a line to at most 2,000 characters.
+ * opens with such a lead is one; a sentence that sets an earlier statement right is one. At most `max`, each cut at a
+ * line to at most 2,000 characters.
  */
-export function mustKeep(text, { claims = null, row = null, max = 4 } = {}) {
+export function mustKeep(text, { max = 4 } = {}) {
   const out = []
   const add = t => {
     const x = String(t || '').trim()
@@ -370,16 +369,6 @@ export function mustKeep(text, { claims = null, row = null, max = 4 } = {}) {
     }
     if (lead === 0 && !ITEM.test(lines[0])) { add(para); continue }
     for (const sent of para.split(/(?<=[.!?])\s+(?=[A-Z*"(])/)) if (SAID.test(plainLine(sent)) && !OFFER.test(plainLine(sent))) add(sent)
-  }
-  if (claims && row) {
-    const byId = new Map((claims.claims || []).map(c => [c.id, c]))
-    for (const c of claims.claims || []) {
-      if (!c.revises || c.by === 'person') continue
-      const old = byId.get(c.revises)
-      if (!old || old.by === 'person') continue
-      const here = (c.said || []).find(p => p.row === row)
-      if (here?.sentence) add(here.sentence)
-    }
   }
   return out.slice(0, max)
 }

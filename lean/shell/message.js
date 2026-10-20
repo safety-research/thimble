@@ -515,12 +515,12 @@ export function recordFor(kept, { row, session, text, at }) {
   return remark({ ...rec, ...(kept.uuid ? { uuid: kept.uuid } : {}), glosses: kept.glosses || {}, verbs: kept.verbs || {}, objects: kept.objects || [], final: !!kept.final })
 }
 
-const VERB_KEYS = ['v', 's', 'c']
+const VERB_KEYS = ['v', 's']
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 
 /**
- * The observer's verbs as the record keeps them: each of v, s and c, lit only when the observer gave it, with its
- * note of 2–4 words; v's proposals (at most 2), s's chips (dimensions with levels, at most 3), c's new claims (ids).
+ * The observer's verbs as the record keeps them: each of v and s, lit only when the observer gave it, with its note of
+ * 2–4 words; v's proposals (at most 2), s's chips (dimensions with levels, at most 3).
  * Accepts the observer's short form (a verb present = lit) and the record's own form ({lit, note, ...}).
  */
 export function verbsOf(out) {
@@ -547,7 +547,6 @@ export function verbsOf(out) {
         return { id: str(c.id, 20) || str(c.name, 20).toLowerCase().replace(/[^a-z0-9]+/g, '-') || `d${i + 1}`, name: str(c.name, 24) || `dimension ${i + 1}`, levels, level }
       }).filter(c => c.levels.length >= 2)
     }
-    if (k === 'c') r.claims = (Array.isArray(v.claims) ? v.claims : []).filter(x => typeof x === 'string').slice(0, 60)
     if (!r.note) r.note = k === 'v' ? `${r.proposals.length} view${r.proposals.length === 1 ? '' : 's'} ready` : ''
     // s may carry only where the answer stands on its chips: kept, and not lit
     if (!r.note && k === 's' && r.at && Object.keys(r.at).length) { res[k] = { ...r, lit: false }; continue }
