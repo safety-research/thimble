@@ -109,6 +109,19 @@ def version_of(ws: str, cell: dict[str, Any], entry: str) -> dict[str, Any]:
     return {"entry": entries[at], "version": state}
 
 
+def earlier_outputs(ws: str, cell: dict[str, Any]) -> list[tuple[dict[str, Any], list[Any]]]:
+    """canvas.on_earlier: (edit entry, the outputs the card showed before it) for each of the card's kept edits that
+    changed what it shows, newest first, so a citation written before an edit still finds the value it cited."""
+    recs = _records(ws, str(cell["id"]))
+    out = []
+    for e in reversed([e for e in cell.get("edited") or [] if isinstance(e, dict)]):
+        if e.get("id") in recs and "shown" in recs[e["id"]]:
+            outs = (recs[e["id"]]["shown"] or {}).get("outputs")
+            if isinstance(outs, list):
+                out.append((e, outs))
+    return out
+
+
 def restore(ws: str, cid: str, entry: str) -> dict[str, Any]:
     """Make card `cid` as it stood before its edit `entry`, as an edit of the analyst's, with the outputs it showed
     then, so it shows them without a run. The card."""
@@ -408,6 +421,7 @@ def register(ctx: Any) -> None:
     global _sessions
     _sessions = ctx.sessions
     canvas.on_change(_on_card)
+    canvas.on_earlier(earlier_outputs)
     report.on_save(_on_report)
     app = ctx.app
 

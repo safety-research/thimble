@@ -194,13 +194,13 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
             raise bad(e) from None
 
     @app.get("/api/corpora/{c}/ref")
-    def resolve_ref(c: str, ref: str) -> dict[str, Any]:
+    def resolve_ref(c: str, ref: str, value: str | None = None) -> dict[str, Any]:
         f = folder_of(c)
         try:
             if (fn := tools.resolver(ref)) is not None:
                 return fn(c, ref)
             if ref.startswith(("card:", "cell:")):
-                got = canvas.resolve_card_ref(c, ref)
+                got = canvas.resolve_card_ref(c, ref, value)
                 _, cell = canvas.find(c, ref)
                 got["record"] = cell
                 return got

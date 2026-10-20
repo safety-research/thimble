@@ -223,6 +223,11 @@ body[data-cmd] .refchip-pop {
   white-space: nowrap;
 }
 
+/* a cited value read from the card as it stood before an edit (RefChip versionNote): a sentence, in the body face */
+.refchip-pop-version {
+  font: var(--type-caption);
+}
+
 /* a record's facts over its words (canvas.css .rec-facts), under the head or the view's label */
 .refchip-pop-facts {
   margin-top: 6px;

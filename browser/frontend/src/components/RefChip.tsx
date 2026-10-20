@@ -20,6 +20,7 @@ import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, p
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
+import { hhmm } from '../lib/time'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
 import { glyphOf } from '../lib/fileGlyph'
@@ -187,7 +188,7 @@ const POP_GAP = 6
 
 type Pop =
   | { state: 'loading'; rect: DOMRect }
-  | { state: 'ok'; rect: DOMRect; excerpt: string; kind?: string; cell?: Cell; where?: string; table?: { grid: Grid; at: At }; lines?: CitedLines; parts?: QuotePart[]; facts?: RecordFact[] }
+  | { state: 'ok'; rect: DOMRect; excerpt: string; kind?: string; cell?: Cell; where?: string; note?: string; table?: { grid: Grid; at: At }; lines?: CitedLines; parts?: QuotePart[]; facts?: RecordFact[] }
   | { state: 'error'; rect: DOMRect; message: string; detail?: string; muted?: boolean }
   | { state: 'name'; rect: DOMRect }
 
@@ -205,6 +206,15 @@ function citedTable(r: ResolvedRef, col: string, row: string): { grid: Grid; at:
   const span = r.meta?.span as { col?: unknown; row?: unknown } | undefined
   const at = locateCell(grid, col, row) ?? (typeof span?.col === 'string' && typeof span?.row === 'string' ? locateCell(grid, span.col, span.row) : null)
   return at ? { grid, at } : null
+}
+
+/** Where a cited value was read when the card no longer shows it: the version before the edit that changed it
+ * (meta.version, which the server sets when it read an earlier version). */
+export function versionNote(r: ResolvedRef): string | undefined {
+  const v = r.meta?.version as { ts?: unknown } | undefined
+  if (!v) return undefined
+  const at = typeof v.ts === 'string' ? hhmm(v.ts) : ''
+  return `As the card stood before its edit${at ? ` at ${at}` : ''}`
 }
 
 /** The tables of a card's own output (components/Outputs' html tables), where an in-place citation looks for its cell,
@@ -387,13 +397,13 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
       }
     }
     try {
-      const r = await api.resolveRef(ws, ref)
+      const r = await api.resolveRef(ws, ref, value)
       resolved.current = { ref, r }
       if (seq !== reqSeq.current) return
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
         // a table's cell: the table around it, never its column and row in words
         const table = citedTable(r, parsed.col, parsed.row)
-        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table })
+        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table, note: versionNote(r) })
         return setPop({ state: 'error', rect, message: 'This cell is no longer in the card\'s table' })
       }
       if (parsed.kind === 'cell' && parsed.out != null && parsed.line != null) {
@@ -504,6 +514,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
             )}
             {pop.state === 'ok' && !pop.cell && pop.where && <div className="refchip-pop-where mono">{pop.where}</div>}
             {pop.state === 'ok' && pop.facts?.length ? <RecordFacts facts={pop.facts} className="refchip-pop-facts" /> : null}
+            {pop.state === 'ok' && pop.note && <div className="refchip-pop-where refchip-pop-version">{pop.note}</div>}
             {pop.state === 'ok' && pop.table && <TablePreview grid={pop.table.grid} at={pop.table.at} />}
             {pop.state === 'ok' && pop.lines && <LinesPreview {...pop.lines} value={value} />}
             {pop.state === 'ok' && !pop.table && !pop.lines && (pop.cell ? (

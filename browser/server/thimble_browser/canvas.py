@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import home
-from .cards import frames
+from .cards import cite, frames
 from .hub import hub
 
 MAIN = "main"
@@ -40,6 +40,16 @@ HOOKS: list[Callable[..., None]] = []
 def on_change(fn: Callable[..., None]) -> None:
     if fn not in HOOKS:
         HOOKS.append(fn)
+
+
+# Where a citation looks for a card's earlier outputs (resolve_card_ref): fn(ws, card) -> [(edit entry, outputs)],
+# newest first, the outputs the card showed before each of its edits. The history feature adds one.
+EARLIER: list[Callable[[str, dict[str, Any]], list[tuple[dict[str, Any], list[Any]]]]] = []
+
+
+def on_earlier(fn: Callable[[str, dict[str, Any]], list[tuple[dict[str, Any], list[Any]]]]) -> None:
+    if fn not in EARLIER:
+        EARLIER.append(fn)
 
 
 def _changed(ws: str, op: str, before: dict[str, Any] | None, after: dict[str, Any] | None, by: str,
@@ -330,8 +340,10 @@ def outputs_text(cell: dict[str, Any], limit: int = 6000) -> str:
             parts.append(f"[out{i}] error {e.get('ename')}: {e.get('evalue')}\n{tb}".strip())
         elif frames.FRAME_MIME in o:
             parts.append(f"[out{i}] table (cite a value as card:{cell['id']}#<column>/<row>):\n{o.get('text/plain', '')}")
-        elif "application/vnd.vegalite.v6.json" in o:
-            parts.append(f"[out{i}] chart\n{o.get('text/plain', '')}")
+        elif cite.chart_spec(o) is not None:
+            rows = cite.chart_text(o, cell["id"])
+            own = str(o.get("text/plain") or "")
+            parts.append(f"[out{i}] chart " + (rows or ("" if own.startswith("<VegaLite") else own)))
         elif "image/svg+xml" in o or "image/png" in o:
             parts.append(f"[out{i}] figure {o.get('text/plain', '')}")
         else:
@@ -340,17 +352,41 @@ def outputs_text(cell: dict[str, Any], limit: int = 6000) -> str:
     return text if len(text) <= limit else text[:limit] + f"\n[cut at {limit} characters]"
 
 
-def resolve_card_ref(ws: str, ref: str) -> dict[str, Any]:
-    """What a card ref points at: the card, or one value of its table (`card:<id>#<column>/<row>`)."""
+def resolve_card_ref(ws: str, ref: str, value: str | None = None) -> dict[str, Any]:
+    """What a card ref points at: the card, or one value of its table or chart (`card:<id>#<column>/<row>`).
+
+    A value is read from the card as it stands. When the card no longer shows it (an edit changed its code, so a row or
+    a column went), or `value`, the citation's own words, states another value than the card shows now, the value is
+    read from the newest earlier version of the card that shows it (EARLIER), so a citation keeps pointing at what it
+    cited. `meta.version` then names that version's edit. `meta.table_html` is the rows around the value."""
     nb, cell = find(ws, ref)
     _, _, loc = ref.partition("#")
     out: dict[str, Any] = {"ref": ref, "kind": "cell", "excerpt": f"{cell['title']}\n{cell.get('takeaway') or ''}",
                            "meta": {"card": cell["id"], "notebook": nb["id"], "kind": cell["kind"]}}
-    if loc and "/" in loc:
-        col, row = loc.split("/", 1)
-        frame = frames.frame_in(cell.get("outputs"))
-        if frame:
-            got = frames.locate({frames.FRAME_MIME: frame}, col, row)
-            if got is not None:
-                out.update(kind="value", excerpt=f"{col} for {row}: {got}")
+    if not loc or "/" not in loc:
+        return out
+    col, row = loc.split("/", 1)
+    now = cite.find(cell.get("outputs"), col, row)
+    got, entry = now, None
+    if now is None or (value and not cite.same_value(now[0], value)):
+        for fn in EARLIER:
+            try:
+                earlier = fn(ws, cell)
+            except Exception:  # noqa: BLE001 — a version that cannot be read leaves the card as it stands
+                log.exception("reading a card's earlier outputs failed")
+                continue
+            hits = [(e, f) for e, outs in earlier if (f := cite.find(outs, col, row)) is not None]
+            pick = next(((e, f) for e, f in hits if value and cite.same_value(f[0], value)), None)
+            if pick is None and now is None and hits:
+                pick = hits[0]
+            if pick is not None:
+                entry, got = pick
+                break
+    if got is None:
+        return out
+    shown, html = got
+    out.update(kind="value", excerpt=f"{col} for {row}: {shown}")
+    out["meta"].update(value=shown, table_html=html, span={"col": col, "row": row})
+    if entry is not None:
+        out["meta"]["version"] = {"entry": entry.get("id"), "ts": entry.get("ts"), "by": entry.get("by")}
     return out

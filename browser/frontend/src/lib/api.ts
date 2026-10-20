@@ -382,7 +382,8 @@ export const api = {
     j<{ table: string; columns: string[]; rows: any[][]; pk: string; total: number }>(`${apiBase()}/corpora/${enc(c)}/forge/rows${q({ path, table, offset, limit, order, where })}`),
   forgeQuery: (c: string, path: string, sql: string) =>
     j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${apiBase()}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
-  resolveRef: (c: string, ref: string) => j<ResolvedRef>(`${apiBase()}/corpora/${enc(c)}/ref${q({ ref })}`),
+  /** `value`: a citation's own words, so a card value is read from the version of the card that states it. */
+  resolveRef: (c: string, ref: string, value?: string) => j<ResolvedRef>(`${apiBase()}/corpora/${enc(c)}/ref${q(value ? { ref, value } : { ref })}`),
   /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
    * n the number a row is cited by (`<path>#row=<n>`). */
   csvRows: (c: string, path: string, a: number, b: number) => j<{ rows: [number, number][] }>(`${apiBase()}/corpora/${enc(c)}/csv-rows${q({ path, lines: `${a}-${b}` })}`),
