@@ -156,12 +156,14 @@ export function beganWord(lastKey, ms, typed) {
   return !!lastKey && /^[a-z]$/.test(lastKey) && ms < 700 && typeof typed === 'string' && /^[\p{L}' ]$/u.test(typed)
 }
 
-/** What a field of the ask line reports as typed, joined to the question being typed (`draft`). The field drawn last
- *  (`current`) holds the whole question. One drawn before it still had the ring while the newer one was on its way: the
- *  letters it took after `seen` (what it held when last heard) join the end of the question, in the order they came. */
+/** What a field of the ask line reports as typed, joined to the question being typed (`draft`). The letters a field
+ *  took after `seen` (what it held when drawn, or when last heard) join the end of the question, in the order they
+ *  came: so letters that reached the question at the prompt while the field was drawn again are kept. In the field of
+ *  the question now (`current`) any other change (a letter deleted, the cursor moved back) is the question as it reads.
+ *  A field drawn before it (an earlier question's) changes nothing but by letters it took. */
 export function askMerge(draft, seen, value, current) {
   const v = String(value ?? '')
-  if (current) return { draft: v, seen: v, added: '' }
+  if (current) return v.startsWith(seen) ? { draft: draft + v.slice(seen.length), seen: v, added: '' } : { draft: v, seen: v, added: '' }
   if (!v.startsWith(seen)) return { draft, seen, added: '' }
   const added = v.slice(seen.length)
   return { draft: draft + added, seen: v, added }
