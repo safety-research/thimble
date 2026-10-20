@@ -119,11 +119,11 @@ export function request(ctx, existing) {
     : ctx.reply && ctx.reply.text ? `your reply that begins "${firstLine(ctx.reply.text)}"` : 'your last reply'
   const name = obj ? `explore-${bare(obj.id)}` : 'explore-<a short name>'
   return [
-    `The person pressed x (Explore) on ${what}. Make it a view they can explore: read ${skill} first.`,
-    `Reuse the runs you already made; use \`thimble run\` again only where a mark needs rows you have not kept.`,
+    `The analyst pressed x (Explore) on ${what}. Make it a view they can explore: read ${skill} first.`,
+    `Reuse the queries you already ran; use \`thimble run\` again only where a mark needs rows you have not kept.`,
     `Save it with \`thimble save ${name} --from FILE\`, with "verb": "explore"${obj ? ` and "of": "${obj.id}"` : ''} in the JSON.`,
-    `Check that it draws, as the person will see it, with \`${ctx.check || 'thimble verb explore --text'} ${name}\`.`,
-    `Then say in one line what the person can turn or open. Do not repeat the answer.`,
+    `Check that it draws, as the analyst will see it, with \`${ctx.check || 'thimble verb explore --text'} ${name}\`.`,
+    `Then say in one line what the analyst can turn or open. Do not repeat the answer.`,
   ].filter(Boolean).join(' ')
 }
 const firstLine = s => { const t = String(s).trim().split('\n')[0].replace(/\s+/g, ' '); return t.length > 80 ? t.slice(0, 79) + '…' : t }

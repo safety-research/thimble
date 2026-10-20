@@ -173,7 +173,7 @@ test("s writes one catch-up of everything since the person's last prompt: one ca
   const call = w.calls[0]
   // the person's prompt is the question, never the hand-back; the original is every message since it, in order
   expect(call.system).toBe('THE PROMPT')
-  expect(call.prompt).toContain(`The person asked: ${QUESTION}\n\nClaude's messages since the person's last prompt, in the order it wrote them, as written (the original). Write them as one message:\n<original>\n${NOTE}\n\n---\n\n${ANSWER}\n\n---\n\n${FOLLOW}\n</original>`)
+  expect(call.prompt).toContain(`The analyst asked: ${QUESTION}\n\nClaude's messages since the analyst's last prompt, in the order it wrote them, as written (the original). Write them as one message:\n<original>\n${NOTE}\n\n---\n\n${ANSWER}\n\n---\n\n${FOLLOW}\n</original>`)
   expect(call.prompt).not.toContain('Another Claude session')
   expect(call.prompt).toContain('- Length: short')
   expect(call.prompt).toContain('Corrections in the original. Each stays at every level')
@@ -221,7 +221,7 @@ test("s writes one catch-up of everything since the person's last prompt: one ca
   // the next prompt carries what the person read, as a squeeze's note does
   await $.prompt.submit({ text: 'And the bots?', origin: { kind: 'composer' } } as never)
   const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('The person caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\n' + DIGEST)
+  expect(context).toContain('The analyst caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\n' + DIGEST)
 })
 
 test('the chips work on a catch-up: ] makes it longer with one call, no step lands on its original, [ comes back with none; 0 dismisses it, and two more replies offer a new one', async ($, on) => {
@@ -298,7 +298,7 @@ test('v on a catch-up: its line opens under it, Claude reads the catch-up with t
   const notes = (session.appended() as unknown as { door: string; message: { content: { text?: string }[] } }[]).filter(r => r.door === 'note' && r.message.content.some(b => String(b.text).includes(ask)))
   expect(notes.length).toBe(1)
   // with what the person read: the catch-up, as their own prompt would carry it
-  expect(String(notes[0]!.message.content[0]!.text)).toContain('The person caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short)')
+  expect(String(notes[0]!.message.content[0]!.text)).toContain('The analyst caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short)')
   // Claude's turn for it saves a card: drawn under the catch-up, not under the turn's own words
   await $.turn.start({ turnId: 't3', text: 'visualize another view of this answer' } as never)
   await $.tool.call({ tool: 'Bash', command: 'thimble save empty-label-days --from card.json', tool_use_id: 'tu1' } as never)

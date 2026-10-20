@@ -88,8 +88,7 @@ test("a toolkit read with sed in Bash carries the card guidance too: the thimble
   const r = await $.tool.call({ tool: 'Bash', command: 'sed -n 1,80p /x/../plugin/draw/TOOLKIT.md' } as never) as Any
   expect(r.context.length).toBe(1)
   expect(r.context[0]).toContain('The card guidance (forms:v3)')
-  expect(r.context[0]).toContain('## Cards\n\nTHE CARD SECTION')
-  expect(r.context[0]).toContain('## Making a card\n\nTHE WORKED FORMS')
+  expect(r.context[0]).toContain('# The card guide\n\n## What makes a good card\n\nTHE WORKED FORMS')
   expect(r.context[0]).not.toContain('OLD PRINCIPLES')
   const again = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
   expect(again.context ?? []).toEqual([])

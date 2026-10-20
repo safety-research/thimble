@@ -49,13 +49,13 @@ test('the real fragments compose: every lens of the registry has instructions, a
   const frame = textOf('observer', ROOT, {}).text
   const parts = LENSES.map(lens => ({ lens, text: textOf(lens.feature, ROOT, {}).text }))
   const sys = composeSystem(frame, parts)
-  for (const h of ['## Notes to Claude', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explain marks']) assert.ok(sys.text.includes(h), h)
+  for (const h of ['## Notes to Claude', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explainers']) assert.ok(sys.text.includes(h), h)
   assert.doesNotMatch(sys.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(sys.text, /<!--/)
   const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { QUESTION: 'q', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, ST)
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
   assert.match(turn.text, /Notes Claude already has:\n- a note given/)
-  assert.match(turn.text, /Terms the person already saw explained:\n- p95/)
+  assert.match(turn.text, /Terms the analyst already saw explained:\n- p95/)
 })
 
 test("each lens's share of the pass: its characters in and out, the frame and the turn as the shared part", () => {
@@ -104,7 +104,7 @@ test('the notes, actions, squeeze and explain lenses each put their part where i
 test('the rule of the explain lens holds only when its condition does', () => {
   assert.deepEqual(byName.explain.when({ glossSkip: 1 }), ['backoff'])
   for (const name of ['notes', 'explain']) {
-    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${name === "notes" ? "v1" : "v3"}.md`, import.meta.url), 'utf8')
+    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${name === "notes" ? "v2" : "v3"}.md`, import.meta.url), 'utf8')
     const d = sectionsOf(frag).digest
     assert.ok(d, `lens-${name} has a digest`)
     const keys = [...d.matchAll(/\{\{([A-Z_]+)\}\}/g)].map(m => m[1])

@@ -159,7 +159,7 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   const saved = await $.tool.call({ tool: 'Bash', command: "thimble save saves <<'JSON'\n{}\nJSON" } as never)
   // Claude reads what the person sees of it, after the command's own output
-  expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the person under your reply')
+  expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the analyst under your reply')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   const first = textOf(await reply($))
   expect(first).toContain('the reply')
@@ -191,7 +191,7 @@ test('a save is seen from the kernel\'s change feed, not from what the call prin
   on('tool.call', () => (++call === 1 ? (saving(w.files)(), { result: '  this session has not read 3 of 4 source files\n' }) : { result: 'saved 09-other v1: thimble/objects/09-other.json\n' }))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   const saved = await $.tool.call({ tool: 'Bash', command: 'thimble save saves --from card.json | tail -1' } as never)
-  expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the person under your reply')
+  expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the analyst under your reply')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
@@ -213,9 +213,9 @@ test("a save tries the card's interactions once in the same child: a failure is 
   const preps = w.runs.map((r, i) => (r.some(a => a.endsWith('prep.mjs')) ? JSON.parse(w.stdins[i]!) : null)).filter(Boolean)
   expect(preps.length).toBe(1)
   expect(preps[0].check).toBe(true)
-  expect(ok).toContain('01-saves@1 is drawn for the person under your reply')
-  expect(ok).not.toContain('Tried as the person would')
-  const line = 'Tried as the person would, turning zoom to orient fails: TypeError: data.steps.filter is not a function (line 22) (state {"zoom":"orient"}); 9 more fail the same way. Fix the program or the data it binds and save it again under the same name now, before the person tries it.'
+  expect(ok).toContain('01-saves@1 is drawn for the analyst under your reply')
+  expect(ok).not.toContain('Tried as the analyst would')
+  const line = 'Tried as the analyst would, turning zoom to orient fails: TypeError: data.steps.filter is not a function (line 22) (state {"zoom":"orient"}); 9 more fail the same way. Fix the program or the data it binds and save it again under the same name now, before the analyst tries it.'
   checked = { line, tried: 10, total: 10, failed: 10, cut: 0, ms: 21 }
   try {
     w.files[FILE] = JSON.stringify({ ...OBJECT, version: 2 })
@@ -415,7 +415,7 @@ test('a verb of the message row: v opens its line, a pick runs it on the message
   expect(w.submitted.length).toBe(0)
   await $.prompt.submit({ text: 'and this?' } as never)
   const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('The person ran the verb visualize on the message "June 18 had the most saves."')
+  expect(context).toContain('The analyst ran the verb visualize on the message "June 18 had the most saves."')
   expect(context).toContain('It drew the message as 2 bars.')
   await $.prompt.submit({ text: 'more?' } as never)
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('ran the verb visualize')
@@ -486,7 +486,7 @@ test('an object whose file cannot be read is not drawn in silence: Claude reads 
   on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   const saved = await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
-  expect(String((saved as { context?: string[] }).context)).toContain('The person cannot see the card 01-saves')
+  expect(String((saved as { context?: string[] }).context)).toContain('The analyst cannot see the card 01-saves')
   expect(String((saved as { context?: string[] }).context)).toContain('could not be read')
 })
 

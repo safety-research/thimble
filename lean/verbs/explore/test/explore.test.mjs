@@ -53,7 +53,7 @@ test('x on something with no explore view asks Claude to write one (ask), which 
   assert.match(r.ask, /read \/x\/lean\/verbs\/explore\/SKILL\.md/)
   assert.match(r.ask, /thimble save explore-saves-per-day --from FILE/)
   assert.match(r.ask, /"of": "02-saves-per-day"/)
-  assert.match(r.ask, /Check that it draws, as the person will see it, with `thimble verb explore --text explore-saves-per-day`/)
+  assert.match(r.ask, /Check that it draws, as the analyst will see it, with `thimble verb explore --text explore-saves-per-day`/)
   assert.match((await run(ctxOf(plain, fakeKernel([plain]), { check: 'node cli.mjs --text' }))).ask, /with `node cli\.mjs --text explore-saves-per-day`/)
   const reply = await run(ctxOf(null, fakeKernel(), { reply: { text: 'Jun 18 had the most saves: 6,543 of 14,591.\nMore.' } }))
   assert.match(reply.ask, /your reply that begins "Jun 18 had the most saves: 6,543 of 14,591\."/)

@@ -163,7 +163,7 @@ def test_the_same_definition_keeps_its_values_and_labels_only_new_records(root: 
 def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: Path):
     run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     r = run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
-    assert r.stdout.strip() == "chat/room.jsonl#L5: the person says yes (the label gave no)"
+    assert r.stdout.strip() == "chat/room.jsonl#L5: the analyst says yes (the label gave no)"
     run(root, "label", "sorry", "--check", "chat/room.jsonl#L1", "yes")
     bad = run(root, "label", "sorry", "--check", "chat/room.jsonl#L1", "maybe")
     assert bad.returncode == 1 and "'maybe' is not a value of sorry" in bad.stdout
@@ -171,10 +171,10 @@ def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: P
     s = LB.status(LB.load(st, "sorry"))
     assert s["counts"] == {"yes": 3, "no": 3} and s["checked"] == 2 and s["agree"] == 1 and s["disagree"] == 1
     out = run(root, "label", "sorry").stdout
-    assert "yes        3  r2#sorry=yes@n" in out and "the person checked 2: 1 agree, 1 disagree" in out
+    assert "yes        3  r2#sorry=yes@n" in out and "the analyst checked 2: 1 agree, 1 disagree" in out
     # each record's labels, as the detail view reads them, the check included
     of = json.loads(run(root, "label", "--of", "chat/room.jsonl#L5", "chat/room.jsonl#L2").stdout)
-    assert of["chat/room.jsonl#L5"]["sorry"] == {"value": "yes", "by": "person", "values": ["yes", "no"], "checked": True, "was": "no"}
+    assert of["chat/room.jsonl#L5"]["sorry"] == {"value": "yes", "by": "analyst", "values": ["yes", "no"], "checked": True, "was": "no"}
     assert of["chat/room.jsonl#L2"]["sorry"]["value"] == "no"
     # a resolve says how the rows split by the label, and each record's value
     res = json.loads(run(root, "resolve", "chat/room.jsonl#L1-6", "--json", "-n", "6").stdout)

@@ -15,18 +15,18 @@ session's permission mode and sandbox like any other command.
     thimble coverage [NAME] [--all]            what was read and what was not (of this session, or of a card)
     thimble trace [REF] [--text PASSAGE] [--in GLOB]
                                                where it came from and where it went: the path back to its rows, what
-                                               uses it (runs, cards, answers), and in transcripts who read a
+                                               uses it (queries, cards, answers), and in transcripts who read a
                                                passage and who wrote it after reading it
     thimble label [NAME]                       the labels, or one label's counts per value (each a citation)
     thimble label NAME --in GLOB (--regex RE | --code [FILE] | --prompt "DEFINITION") [--values yes,no]
                   [--where EXPR] [--within LABEL=VALUE] [--limit N] [--reason]
                                                give each record of GLOB one of the values, and draw the counts for the
-                                               person as a card where they check records; a --prompt label's records
+                                               analyst as a card where they check records; a --prompt label's records
                                                wait for the model, which reads each one beside the session
                                                (--wait waits for it; thimble label --help says more)
 
-In a run: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
-group's rows; use("r3") is an earlier run's output; keep(name, x) and use(name) pass a named result or a label on
+In a query: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
+group's rows; use("r3") is an earlier query's output; keep(name, x) and use(name) pass a named result or a label on
 (use of a `thimble label` gives each record's `_ref` and value); rows(glob), sample(df, n), pd, np, re, json. The
 last expression is the output. `thimble run --help` says more.
 
@@ -212,7 +212,7 @@ def cmd_rows(a: argparse.Namespace) -> int:
         if lab is not None:
             u = (lab.get("units") or {}).get(row.ref) or {}
             c = (lab.get("checks") or {}).get(row.ref)
-            how = "the person" if c else (u.get("by") or "")
+            how = "the analyst" if c else (u.get("by") or "")
             if not c and u.get("c") is not None and u.get("by") == "model":
                 how += f" {u['c']:.2f}"
             tag = f"  [{lab['name']}: {LB.value_of(lab, row.ref)} · {how}" + (f": {u['why']}" if u.get("why") and not c else "") + "]"
@@ -246,7 +246,7 @@ def cmd_q(a: argparse.Namespace) -> int:
     if a.rerun:
         old = Q.get(st, a.rerun)
         if not old:
-            print(f"no run {a.rerun}")
+            print(f"no query {a.rerun}")
             return 1
         q = Q.run(st, old.get("about") or "", old["code"], rerun_of=old["id"])
         if a.json:
@@ -475,7 +475,7 @@ def cmd_resolve(a: argparse.Namespace) -> int:
         elif k == "binding":
             print(f"  ← bound from {step['from']} (data{step['at'] or '/'})")
         elif k == "query":
-            print(f"  ← run {step['id']} · {step.get('about')} · rows: {step.get('lineage')}"
+            print(f"  ← query {step['id']} · {step.get('about')} · rows: {step.get('lineage')}"
                   + (f" in `{step['frame']}`" if step.get("frame") else ""))
             code = (step.get("code") or "").strip().splitlines()
             for line in code[:12]:
@@ -589,7 +589,7 @@ def cmd_trace(a: argparse.Namespace) -> int:
 LABEL_HELP = """A label gives every record of a scope one of a few values, and keeps each record's ref.
 
     thimble label                              the labels here, with their counts
-    thimble label NAME                         its counts per value, each a citation; what waits; what the person checked
+    thimble label NAME                         its counts per value, each a citation; what waits; what the analyst checked
     thimble label NAME --in GLOB --regex RE    the first value where the record's text (as the file holds it) matches
     thimble label NAME --in GLOB --code FILE   label(unit) in Python returns a value, (value, confidence) or None; a
                                                unit is the record as a dict, with `_ref` and `_text` (or the code on
@@ -607,11 +607,11 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
     --reason            the model also gives a one-line reason per record
 
-The same definition again keeps the values it has and labels only records it has not seen. The counts are a run, so
-`[38](r12#apology=yes@n)` cites the 38 records. In a run, use("apology") gives each record's `_ref` and value (a
-column named as the label), and `thimble rows GLOB --label apology=yes` reads records with a value. The person sees the
-label as a card under your reply, opens a value's records, and checks a sample of them: what they say a record is
-counts in place of the label's value."""
+The same definition again keeps the values it has and labels only records it has not seen. The counts are a query,
+so `[38](r12#apology=yes@n)` cites the 38 records. In a query, use("apology") gives each record's `_ref` and value
+(a column named as the label), and `thimble rows GLOB --label apology=yes` reads records with a value. The analyst
+sees the label as a card under your reply, opens a value's records, and checks a sample of them: what they say a
+record is counts in place of the label's value."""
 
 
 def _parse_within(s: str | None) -> tuple[str, str] | None:
@@ -649,7 +649,7 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
         out.append(f"  {s['failed']:,} records have no value" + (f" ({why})" if why else "")
                    + (f": `thimble label {lab['name']} --again` asks the model again" if lab.get("kind") == "prompt" else ""))
     if s["checked"]:
-        out.append(f"  the person checked {s['checked']:,}: {s['agree']:,} agree, {s['disagree']:,} disagree")
+        out.append(f"  the analyst checked {s['checked']:,}: {s['agree']:,} agree, {s['disagree']:,} disagree")
     return out
 
 
@@ -675,7 +675,7 @@ def _cite_hint(lab: dict[str, Any]) -> str:
     top = next((v for v in lab["values"] if s["counts"].get(v)), None)
     if not lab.get("query") or not top:
         return ""
-    return (f"Cite a count as [{s['counts'][top]:,}]({LB._cite_value(lab['query'], lab['name'], top)}). In a run, "
+    return (f"Cite a count as [{s['counts'][top]:,}]({LB._cite_value(lab['query'], lab['name'], top)}). In a query, "
             f"use({json.dumps(lab['name'])}) gives each record's `_ref` and value: merge it on `_ref`.")
 
 
@@ -720,7 +720,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         if a.json:
             out_json({"ref": r["ref"], "was": r["was"], "now": r["now"], **LB.status(r["label"])})
             return 0
-        print(f"{r['ref']}: the person says {r['now']}" + (f" (the label gave {r['was']})" if r["was"] is not None else ""))
+        print(f"{r['ref']}: the analyst says {r['now']}" + (f" (the label gave {r['was']})" if r["was"] is not None else ""))
         return 0
     if a.waiting:
         out_json(LB.waiting(st, name))
@@ -823,10 +823,10 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         if s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {calls} call{'s' if calls != 1 else ''} of up to {LB.BATCH_ITEMS} records, "
-                  f"which run beside the session through its own model; the person sees the card fill in. "
+                  f"which run beside the session through its own model; the analyst sees the card fill in. "
                   f"`thimble label {name} --wait` waits for them, then prints the counts.")
         if lab.get("card"):
-            print(f"  card: {lab['card']}, drawn for the person under your reply, where they open each value's records and check them")
+            print(f"  card: {lab['card']}, drawn for the analyst under your reply, where they open each value's records and check them")
         hint = _cite_hint(lab)
         if hint and not s["waiting"]:
             print(hint)
@@ -943,7 +943,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--set", dest="set_values", nargs="*", metavar="REF=VALUE")
     p.add_argument("--wait", nargs="?", type=float, const=600.0, metavar="SECONDS")
     p.add_argument("--again", action="store_true")
-    p.add_argument("--check", nargs=2, metavar=("REF", "VALUE"), help="the person's check of one record (- takes it back)")
+    p.add_argument("--check", nargs=2, metavar=("REF", "VALUE"), help="the analyst's check of one record (- takes it back)")
     p.add_argument("--answers", metavar="FILE", help="the model's answers for waiting records (the label verb writes them)")
     p.add_argument("--waiting", action="store_true", help="the records that wait for the model, with their text, as JSON")
     p.add_argument("--of", nargs="+", metavar="REF", help="the labels of these records, as JSON")

@@ -136,7 +136,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   const call = w.calls[0]
   expect(call.model).toBe('sonnet')
   expect(call.system).toBe('THE PROMPT')
-  expect(call.prompt).toContain('The person asked: when did the agents edit most?')
+  expect(call.prompt).toContain('The analyst asked: when did the agents edit most?')
   expect(call.prompt).toContain(TEXT)
   expect(call.prompt).toContain('- Length: medium, at most 14 words (levels one line · short · medium · full; the original is at full, 18 words)')
   expect(call.prompt).toContain('- Report ↔ Interpret: as the original')
@@ -346,7 +346,7 @@ test('an explain mark stays on a squeezed text: the request names its term, a te
   await press($, clock, edit('s'))
   await press($, clock, edit('['))
   await clock.settle()
-  expect(w.calls[0].prompt).toContain('Terms the person can open an explanation of. Where your text keeps what a term names, use the term in these words:\n- fixture scope')
+  expect(w.calls[0].prompt).toContain('Terms the analyst can open an explainer of. Where your text keeps what a term names, use the term in these words:\n- fixture scope')
   let rec = record(w)
   const g = rec.marks.find((m: Any) => m.kind === 'gloss')
   expect(FORM.slice(g.start, g.end)).toBe('fixture scoped')

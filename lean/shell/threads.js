@@ -50,7 +50,7 @@ export function firstMessage({ text, scope = {}, card = null, refs = [], root = 
   }
   if (refs.length) lines.push(`Its rows: ${refs.slice(0, 6).join(', ')}${refs.length > 6 ? ` and ${refs.length - 6} more` : ''} (\`thimble resolve <ref>\` opens them).`)
   if (root) lines.push(`The data: ${root}`)
-  if (selFile) lines.push(`The part the person has selected now, for a later message that names none: ${selFile}`)
+  if (selFile) lines.push(`The part the analyst has selected now, for a later message that names none: ${selFile}`)
   return lines.join('\n').trim()
 }
 
@@ -136,7 +136,7 @@ export function toMain(thread) {
   const lastA = [...turns].reverse().find(t => t.role === 'claude' && t.text)
   if (!lastA) return ''
   const q = lastQ ? String(lastQ.text).split('\n\n')[0] : ''
-  return [`The person sends you the result of a side thread about ${aboutOf(thread.scope)}${thread.card ? ` on the card "${thread.card}"` : ''}.`, q ? `They asked: ${q}` : '', `The thread answered: ${lastA.text}`].filter(Boolean).join('\n')
+  return [`The analyst sends you the result of a side thread about ${aboutOf(thread.scope)}${thread.card ? ` on the card "${thread.card}"` : ''}.`, q ? `They asked: ${q}` : '', `The thread answered: ${lastA.text}`].filter(Boolean).join('\n')
 }
 
 // The thread subagent's own instructions (its system prompt) are the registry's thread prompt: prompts/thread/.

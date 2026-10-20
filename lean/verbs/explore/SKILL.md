@@ -1,11 +1,11 @@
 ---
 name: explore
-description: Use when the person presses x (Explore) on a reply or a card, or asks to explore, scrub, turn or unfold a result. You write a view of this one answer as a short program they can turn and open, with the real rows one key below, and save it with `thimble save`.
+description: Use when the analyst presses x (Explore) on a reply or a card, or asks to explore, scrub, turn or unfold a result. You write a view of this one answer as a short program they can turn and open, with the real rows one key below, and save it with `thimble save`.
 ---
 
-# Explore: a view of this answer that the person can turn and open
+# Explore: a view of this answer that the analyst can turn and open
 
-The person pressed x on something you made. They want to look into it themselves: see what each number stands on,
+The analyst pressed x on something you made. They want to look into it themselves: see what each number stands on,
 turn what you assumed, and read the real rows. You write a short program for this one answer and save it with
 `thimble save`. There are no view types. Compose what this answer needs from the drawing toolkit (`TOOLKIT.md` in
 `lean/draw`), which you can read for anything this page does not show.
@@ -19,18 +19,18 @@ sentences at the top are enough.
 
 **Every mark leads to its rows.** Bind the data from `thimble run`: `"data": {"days": "r1"}`. Each bound row keeps
 `_rows`, its source rows. Put them in the part's meta: `k.region(id, { label, rows: d._rows, fields: ['user',
-'text'] }, part)`. `fields` names what a person needs to read one row. The person selects the part and reads the
+'text'] }, part)`. `fields` names what an analyst needs to read one row. The analyst selects the part and reads the
 rows under it. If you have only a total, run a query that keeps the rows (`tally`) before you draw it.
 
 **Turn what the answer assumes into a knob.** A threshold, a scale, a split, a window of time, the step of a run:
-`k.knob(id, { values, at, label })` returns the value the person set. Draw what follows from it, words included,
-so the sentence changes as the person turns it. Put the knob where it acts, with `k.dial(id)` or a link
+`k.knob(id, { values, at, label })` returns the value the analyst set. Draw what follows from it, words included,
+so the sentence changes as the analyst turns it. Put the knob where it acts, with `k.dial(id)` or a link
 `[◂ 10 ▸](#min)` in the sentence. One knob is usually enough. Do not add a knob for something the answer does not
 depend on.
 
 **A run is explored by scrubbing.** For a long run, a swarm or a session, make the step a knob. Draw the strip of
 steps, a cursor, and the step under the cursor, with its call and its result as rows. The part under the cursor
-keeps one id (`cursor`), so the selection stays on it while the person scrubs.
+keeps one id (`cursor`), so the selection stays on it while the analyst scrubs.
 
 **A number unfolds into what explains it.** When one number carries the answer, show the splits that explain it
 (by day, by who, by place), each with its rows. A knob can choose the split.
@@ -41,12 +41,12 @@ it better than a sentence. Use this only where the answer depends on the idea.
 
 **Show only what the question needs.** One title. Use color only where it means something, and say what it means in words. Use short
 labels. Fold what is quiet ("17 quiet days") so that what matters stands out. Leave out what the question does not
-need. The person can ask you for more.
+need. The analyst can ask you for more.
 
 **Say what is not in hand.** If a file you did not read could change the answer (`thimble coverage`), draw it with
 `k.unseen()`.
 
-**Change it when the person asks.** A follow-up ("only the en wiki", "split by account") changes the program. Save
+**Change it when the analyst asks.** A follow-up ("only the en wiki", "split by account") changes the program. Save
 it again under the same name and keep the region ids, so the selection survives.
 
 ## How to make one
@@ -56,18 +56,18 @@ it again under the same name and keep the region ids, so the selection survives.
    `{"title": "...", "verb": "explore", "of": "<the card's id, if there is one>", "data": {"days": "r1"}}`.
 3. `thimble save explore-<name> --from spec.json --program view.js`. Fix each problem that its output lists, then save
    again.
-4. Look at it as the person will: `thimble verb explore --text explore-<name>` prints the view, and
+4. Look at it as the analyst will: `thimble verb explore --text explore-<name>` prints the view, and
    `--keys "right enter"` presses keys. A program that throws draws only its error: fix it and save it again under
    the same name, and the fixed version takes its place under your reply.
-5. Tell the person in one line what they can turn or open. Do not repeat the answer.
+5. Tell the analyst in one line what they can turn or open. Do not repeat the answer.
 
-The view shows under your reply. The person opens it, turns knobs (a click on ◂ ▸, or j and k), moves between
+The view shows under your reply. The analyst opens it, turns knobs (a click on ◂ ▸, or j and k), moves between
 parts with tab, and reads each part's rows under it. You see none of this unless they ask you something.
 
 ## Example: saves per day, from a wiki's edit log
 
 The answer was "Jun 18 had the most saves." The view puts every day under that claim, folds the quiet days into one
-row, and lets the person split each day by wiki. Each day leads to its saves.
+row, and lets the analyst split each day by wiki. Each day leads to its saves.
 
 ```js
 const label = day => new Date(day + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
@@ -95,7 +95,7 @@ return k.frame(k.stack(
 
 ## Example: an agent's run, step by step
 
-The answer was "It claimed the PR at step 7, set up the build until step 40, then edited and tested." The person
+The answer was "It claimed the PR at step 7, set up the build until step 40, then edited and tested." The analyst
 scrubs a cursor along the run. Under the strip is the step at the cursor; selecting it opens its call and its result.
 The query that made `data.steps` gave each step `_refs` of two rows: the tool call and its result.
 
@@ -123,7 +123,7 @@ return k.frame(k.stack(
 ## Example: a threshold the answer chose, as a knob in the sentence
 
 The answer was "A few heavy editors made most of the saves," with "heavy" meaning 20 saves or more. That cut is an
-assumption, so it is a knob. The sentence and the part it links to change as the person turns it, and the part
+assumption, so it is a knob. The sentence and the part it links to change as the analyst turns it, and the part
 leads to the saves of the accounts above the cut.
 
 ```js

@@ -30,16 +30,25 @@ export const FEATURES = {
       'v3-low': { about: 'v3 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low' },
     },
   },
-  'observer-turn': { about: "the pass's message: the new turn, its objects and the digest of the state", reads: 'observer/observer.ts', default: 'v1' },
-  'lens-notes': { about: 'lens: notes to Claude', reads: 'the pass', default: 'v1', optional: true },
-  'lens-actions': {
-    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v3', optional: true,
-    versions: { v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" } },
+  'observer-turn': {
+    about: "the pass's message: the new turn, its cards and the digest of the state", reads: 'observer/observer.ts', default: 'v2',
+    versions: { v2: { about: 'the new turn with the analyst for the person' } },
   },
-  'lens-squeeze': { about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v1', optional: true },
+  'lens-notes': {
+    about: 'lens: notes to Claude', reads: 'the pass', default: 'v2', optional: true,
+    versions: { v2: { about: 'written clean in the 0.9 style: two principles and one example, good and bad' } },
+  },
+  'lens-actions': {
+    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v4', optional: true,
+    versions: { v4: { about: "dim by default, lit only for a claim no card shows; written clean in the 0.9 style: two principles and one example, good and bad" } },
+  },
+  'lens-squeeze': {
+    about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v2', optional: true,
+    versions: { v2: { about: 'written clean in the 0.9 style' } },
+  },
   'lens-explain': {
     about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v3', optional: true,
-    versions: { v3: { about: "v2, opened with the 0.9 rule for terms (explain a term the person has not used the first time) as its reason" } },
+    versions: { v3: { about: "written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" } },
   },
   squeeze: {
     about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v6',
@@ -52,8 +61,8 @@ export const FEATURES = {
         parts: [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
       },
       v3: {
-        about: "the 0.9 card guidance adapted to cards that are programs (question, content and takeaway; the four takeaway failures; several cards), with its worked takeaways and three worked programs: the thimble skill's card section (read where it stands) and forms/v3.md's 'Making a card'",
-        parts: [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/v3.md', section: 'Making a card' }],
+        about: "the card guide (skills/thimble/cards.md): what makes a good card, in the 0.9 words, the toolkit's parts, and worked examples",
+        parts: [{ file: 'skills/thimble/cards.md' }],
       },
       v1: { about: 'FORMS.md as v read it: the card forms, for another view' },
       v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },

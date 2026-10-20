@@ -261,7 +261,7 @@ async function look($: Engine, t: Look): Promise<void> {
     }
     const digests: string[] = []
     for (const x of objs) {
-      const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the person cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
+      const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the analyst cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
       digests.push(digest(x.object, { isNew: x.isNew, drawn }))
     }
     const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through thimble)'
@@ -296,7 +296,7 @@ async function look($: Engine, t: Look): Promise<void> {
       STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
       LINES: String(answer.split('\n').length),
       ANSWER: cut(answer, 16000),
-      SHOWN: squeezed ? `\nThe person reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
+      SHOWN: squeezed ? `\nThe analyst reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
       OBJECTS: digests.length ? digests.join('\n\n') : 'No cards yet.',
       COVERAGE: coverage,
       EARLIER: bullets(t.earlier.slice(-6).map(x => cut(x, 300))),
@@ -420,8 +420,8 @@ let carrying: Note[] = []
 function notesText(pending: Note[]): string | null {
   if (!pending.length) return null
   return [
-    'Notes from a side agent that read your last answer, the objects you saved and their lineage. The person does not see these notes.',
-    'Act on them in this reply: if a note shows an error in what you told the person, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
+    'Notes from a side agent that read your last answer, the cards you saved and their lineage. The analyst does not see these notes.',
+    'Act on them in this reply: if a note shows an error in what you told the analyst, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
     ...pending.map(n => `- ${n.note}${n.rests_on ? ` (It rests on: "${cut(n.rests_on, 300)}")` : ''}`),
   ].join('\n')
 }

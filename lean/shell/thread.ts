@@ -156,7 +156,7 @@ async function ensureType($: Engine): Promise<string | null> {
     promptId = p.id
     await $.agent.register({
       name: 'thread',
-      description: "Answers the person's questions about one part of a card, in a side thread of the thimble plugin. Only the plugin starts it.",
+      description: "Answers the analyst's questions about one part of a card, in a side thread of the thimble plugin. Only the plugin starts it.",
       prompt: p.text,
       tools: ['Bash', 'Read', 'Grep', 'Glob'],
       omitClaudeMd: true,

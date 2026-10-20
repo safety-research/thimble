@@ -3,10 +3,10 @@
 
 const STUBS: Record<string, string> = {
   'observer/v3': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
-  'observer-turn/v1': 'TURN {{QUESTION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
-  'lens-notes/v1': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
-  'lens-actions/v3': 'LENS actions',
-  'lens-squeeze/v1': 'LENS squeeze',
+  'observer-turn/v2': 'TURN {{QUESTION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
+  'lens-notes/v2': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
+  'lens-actions/v4': 'LENS actions',
+  'lens-squeeze/v2': 'LENS squeeze',
   'lens-explain/v3': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
   'squeeze/v6': 'THE PROMPT',
   'thread/v2': 'THE THREAD PROMPT',
@@ -19,6 +19,8 @@ export function promptStub(path: string): string | undefined {
   // the card ablation's shared parts: the principles, and a pool of three examples
   const part = /\/prompts\/forms\/parts\/([^/]+)\.md$/.exec(path)
   if (part) return part[1] === 'principles' ? '## What makes a great output\n\nTHE PRINCIPLES' : `## Worked examples\n\nPOOL ${part[1]}\n\n### Alpha\n\nA\n\n### Beta\n\nB\n\n### Gamma\n\nC\n\n### Delta\n\nD\n`
+  // the card guide (forms:v3 reads it whole)
+  if (/\/skills\/thimble\/cards\.md$/.test(path)) return '# The card guide\n\n## What makes a good card\n\nTHE WORKED FORMS'
   const m = /\/prompts\/([^/]+)\/([^/]+)\.md$/.exec(path)
   if (!m) return undefined
   return STUBS[`${m[1]}/${m[2]}`] ?? `PROMPT ${m[1]}:${m[2]}`

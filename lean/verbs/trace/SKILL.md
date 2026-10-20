@@ -1,11 +1,11 @@
 ---
 name: trace
-description: Use when the person asks where a number, a quote or a line came from, or where it went - the query, label and rows behind a value, the answers and cards that use a row, or which agents read a note and which copied it. `thimble trace` gives the facts in both directions; you decide how deep to go and draw it for this case.
+description: Use when the analyst asks where a number, a quote or a line came from, or where it went - the query, label and rows behind a value, the answers and cards that use a row, or which agents read a note and which copied it. `thimble trace` gives the facts in both directions; you decide how deep to go and draw it for this case.
 ---
 
 # Trace: where it came from and where it went
 
-The person presses t on a value, a quote or a line, or asks "where does this number come from?" or "how far did this
+The analyst presses t on a value, a quote or a line, or asks "where does this number come from?" or "how far did this
 spread?". A short path shows at once. When they want more (t again, or a question), you draw the full trace.
 
 `thimble trace REF` gives the facts. REF is a value (`obj:01-uses#/purposes/1/n`, `r2#purpose=message%20to%20agents@n`),
@@ -20,7 +20,7 @@ those words through the transcripts beside it, or through `--in GLOB`. `--json` 
 
 ## Principles
 
-**Answer the question the person has.** "Where does 3,934 come from?" wants the path back, one step per line. "How
+**Answer the question the analyst has.** "Where does 3,934 come from?" wants the path back, one step per line. "How
 far did it spread?" wants the readers and the copiers. Show the steps that could change their answer. Fold the rest
 into counts they can open.
 
@@ -39,12 +39,12 @@ a task prompt. When no agent here wrote them before one read them, say "from out
 **Show what is not behind it.** Files the query did not read and agents that never read the note are part of the
 answer. Draw them with `k.unseen`.
 
-**Make every step a region with its ref.** Then the person can select a step and trace on from it, and the browser
+**Make every step a region with its ref.** Then the analyst can select a step and trace on from it, and the browser
 opens the same step.
 
 ## Example: a number back to its rows and forward to the answers (a wiki dataset)
 
-The person asked what the wiki is used for, then pressed t twice on "1,543 messages to agents". `thimble trace` says:
+The analyst asked what the wiki is used for, then pressed t twice on "1,543 messages to agents". `thimble trace` says:
 the value is bound from r2, which tallies the label "edit-purpose" kept by r1, a rule in code over all 14,591 rows of
 revisions.jsonl; 3 other files are not behind it; one answer cites it. One row per step reads best here.
 
@@ -69,7 +69,7 @@ return k.frame(k.stack(
 
 ## Example: a note through a swarm (agent transcripts)
 
-The person pressed t on a line agent-05 posted, then t again. `thimble trace` says agent-05 read "review wanted #" at
+The analyst pressed t on a line agent-05 posted, then t again. `thimble trace` says agent-05 read "review wanted #" at
 05:28 in what `forge board read 1` showed, agent-01 wrote it first at 05:27, 15 agents wrote it after reading it and
 32 read it and held out. You read the 15 lines and grouped them in your json block:
 `{"groups": [{"label": "posted REVIEW WANTED #n with a summary", "agents": [...]}, {"label": "only mentioned the pending requests", "agents": [...]}]}`.
@@ -99,5 +99,5 @@ return k.frame(k.stack(
 
 A diff line `x = cast(Foo, y)  # type: ignore` was written by agent a31's Edit call. `thimble trace` on that block says
 a31 read "# type: ignore" in SCRATCHPAD.md at 10:03 and a07 wrote it first at 09:42. The short path already answers
-"where did this come from". If the person asks how many others did the same, trace the words forward with
+"where did this come from". If the analyst asks how many others did the same, trace the words forward with
 `--text "# type: ignore"` and draw the spread as above.
