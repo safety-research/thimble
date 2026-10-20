@@ -20,7 +20,7 @@ test('a spec reads as feature:version pairs; aliases name their feature; a word 
 
 test('the index has every feature with its default and the versions on disk', () => {
   const idx = indexOf({ observer: ['v3.md', 'mine.md', 'notes.txt', '.draft.md'] })
-  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['mine', 'v3', 'v3-low'])
+  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['mine', 'v3', 'v3-low', 'v4', 'v4-low'])
   assert.equal(idx.observer.versions.mine.file, 'prompts/observer/mine.md')
   assert.equal(idx.forms.versions.v3.file, 'skills/thimble/cards.md')
   for (const [name, f] of Object.entries(FEATURES)) assert.ok(idx[name].versions[f.default], `${name} has its default`)
@@ -53,7 +53,7 @@ test('a lens can be turned off; a feature that is no lens cannot', () => {
 
 test('the spec of the versions in use names only those that are not the defaults', () => {
   const idx = indexOf({ squeeze: ['v7.md'] })
-  const c = choose(idx, { env: 'squeeze:v7,observer:v3-low,lens-explain:off' })
+  const c = choose(idx, { env: 'squeeze:v7,observer:v4-low,lens-explain:off' })
   assert.equal(specOf(c.active, idx), 'lens-explain:off,squeeze:v7')
   assert.equal(idOf('squeeze', 'v7'), 'squeeze:v7')
 })
@@ -76,8 +76,8 @@ test('every version file on disk is in the index, every default exists and has t
   }
   const { active, problems } = activeNow(ROOT, {})
   assert.deepEqual(problems, [])
-  assert.equal(active.observer.version, 'v3-low')
-  assert.ok(listing(idx, active).some(l => l.startsWith('observer') && l.includes('[v3-low]')))
+  assert.equal(active.observer.version, 'v4-low')
+  assert.ok(listing(idx, active).some(l => l.startsWith('observer') && l.includes('[v4-low]')))
 })
 
 test('textOf reads the active text: the card guide is skills/thimble/cards.md', () => {

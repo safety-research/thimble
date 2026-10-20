@@ -1,7 +1,9 @@
-"""Coverage claims no more than happened: a file is read only when its lines or rows were in front of Claude (Read,
-cat, head, tail, sed, `thimble rows`, a query that loaded it). A file only named, listed or counted (wc, ls, find,
-git ls-files, grep -c) is not read, nor is one a search showed only its matching lines of. The coverage text, the bar's
-share (total.read_share), the object's snapshot and trace use the one rule. Run: python -m pytest plugin/tests"""
+"""Coverage claims no more than happened: a file is seen only when some of its lines or rows entered Claude's context
+(Read, cat, head, tail, sed, `thimble rows`, a search that showed them by line, a query that printed them as rows). A
+query or a rule label that only went over its rows computed over it, and a label's model that read its records is said
+apart; neither is seen. A file only named, listed or counted (wc, ls, find, git ls-files, grep -c) is not seen, nor is
+one a shell search went over. The coverage text, the bar's share (total.seen_share), the object's snapshot and trace
+use the one rule. Run: python -m pytest plugin/tests"""
 from __future__ import annotations
 
 import json
@@ -67,30 +69,31 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     st = Store(code)
     cov = LIN.coverage(st)
     status = {o["path"]: o["status"] for o in cov["files"]}
-    assert {f for f, s in status.items() if s == "read"} == {"src/a.py", "src/b.py", "src/c.py", "src/d.py", "src/j.py"}
+    assert {f for f, s in status.items() if s == "seen"} == {"src/a.py", "src/b.py", "src/c.py", "src/d.py", "src/j.py"}
     assert status["src/e.py"] == "searched"
     assert {f for f, s in status.items() if s == "named"} == {"src/f.py", "src/g.py", "src/h.py", "src/i.py", "src/k.py",
                                                               "src/l.py", "runs.csv"}
-    lines = {o["path"]: o["read_lines"] for o in cov["files"] if o["read"]}
+    lines = {o["path"]: o["seen_lines"] for o in cov["files"] if o["seen"]}
     assert lines == {"src/a.py": 30, "src/b.py": 30, "src/c.py": 5, "src/d.py": 3, "src/j.py": 4}
     t = cov["total"]
-    assert (t["read_files"], t["not_read_files"], t["untouched_files"]) == (5, 8, 0)
-    assert t["read_share"] == pytest.approx(72 / 363)
+    assert (t["seen_files"], t["not_seen_files"], t["untouched_files"], t["touched_files"]) == (5, 8, 0, 13)
+    assert t["seen_share"] == pytest.approx(72 / 363) and t["read_share"] == t["seen_share"]
     text = LIN.coverage_text(cov)
     assert "Every source file" not in text and "touched." not in text
-    assert ("Read 5 of 13 source files, 72 of 363 rows (20%). Not read: 8 files (213 rows): 7 only named, listed or "
-            "counted (runs.csv, src/f.py, src/g.py, src/h.py and 3 more); 1 searched, only matching lines shown (src/e.py).") in text
-    assert "runs.csv  only named, listed or counted (wc); none of its lines shown" in text
+    assert ("Seen: 72 of 363 rows (20%) entered Claude's context, from 5 of 13 source files; 13 were touched in some way. "
+            "Not seen: 8 files (213 rows): 7 only named, listed or counted (runs.csv, src/f.py, src/g.py, src/h.py and 3 "
+            "more); 1 searched, which lines a search showed is not known (src/e.py).") in text
+    assert "runs.csv  only named, listed or counted (wc); none of its lines seen" in text
     assert "src/g.py  only named, listed or counted (find, ls, wc)" in text
     assert "src/h.py  only named, listed or counted (cat > a file, find, ls, wc)" in text
-    assert "src/e.py  searched: only matching lines shown (grep)" in text
+    assert "src/e.py  searched: a search went over it; which lines it showed is not known (grep)" in text
 
 
 def test_reading_every_file_says_so_and_how_much(code: Path, tmp_path: Path) -> None:
     saw(tmp_path, code, [bash("head -3 src/*.py runs.csv", 60)])
     cov = LIN.coverage(Store(code))
-    assert all(o["status"] == "read" for o in cov["files"])
-    assert LIN.coverage_sentence(cov) == "Read all 13 source files, at least in part: 38 of 363 rows (11%)."
+    assert all(o["status"] == "seen" for o in cov["files"])
+    assert LIN.coverage_sentence(cov) == "Seen all 13 source files, at least in part: 38 of 363 rows (11%) entered Claude's context."
 
 
 def test_the_object_snapshot_and_trace_follow_the_same_rule(code: Path, tmp_path: Path) -> None:
@@ -98,11 +101,13 @@ def test_the_object_snapshot_and_trace_follow_the_same_rule(code: Path, tmp_path
     st = Store(code)
     Q.run(st, "runs", 'len(load("runs.csv"))')
     cov = LIN.coverage(st)
-    assert {o["path"] for o in cov["files"] if o["read"]} == {"src/a.py", "runs.csv"}
+    # the query computed over runs.csv and printed a count: none of its rows was seen
+    assert {o["path"] for o in cov["files"] if o["seen"]} == {"src/a.py"}
     obj = O.save(st, "runs", {"title": "Runs", "program": "return k.text('3 runs')", "data": {}})
     snap = obj["lineage"]["coverage"]
-    assert set(snap["not_read"]) == {f"src/{c}.py" for c in NAMES[1:]}
-    assert snap["files"]["src/b.py"] == "named" and snap["total"]["not_read_files"] == 11
+    assert set(snap["not_read"]) == {f"src/{c}.py" for c in NAMES[1:]} | {"runs.csv"}
+    assert snap["files"]["src/b.py"] == "named" and snap["files"]["runs.csv"] == "computed"
+    assert snap["total"]["not_seen_files"] == 12
 
 
 @pytest.mark.parametrize("cmd, want", [
@@ -142,19 +147,20 @@ def test_each_file_says_its_type_pattern_read_lines_and_search_hits(code: Path, 
     ])
     cov = LIN.coverage(Store(code))
     by = {o["path"]: o for o in cov["files"]}
-    assert by["src/a.py"]["ranges"] == [[1, 12], [20, 22]] and by["src/a.py"]["read_lines"] == 15
-    assert by["src/b.py"]["status"] == "searched" and by["src/b.py"]["hit_lines"] == [4, 9]
+    assert by["src/a.py"]["ranges"] == [[1, 12], [20, 22]] and by["src/a.py"]["seen_lines"] == 15
+    # the lines a search showed with their numbers entered Claude's context: seen
+    assert by["src/b.py"]["status"] == "seen" and by["src/b.py"]["hit_lines"] == [4, 9] and by["src/b.py"]["seen_lines"] == 2
     assert by["src/c.py"]["ranges"] == [] and by["src/c.py"]["hit_lines"] == []
     # twelve .py files in one folder read as one pattern; the table stands alone
     assert {o["pattern"] for o in cov["files"]} == {"src/*.py", "runs.csv"}
     assert {p["pattern"]: p["files"] for p in cov["patterns"]} == {"src/*.py": 12, "runs.csv": 1}
     assert (by["src/a.py"]["type"], by["runs.csv"]["type"]) == ("py", "csv")
     types = {t["type"]: t for t in cov["types"]}
-    assert types["py"]["files"] == 12 and types["py"]["rows"] == 360 and types["py"]["read_rows"] == 15
-    assert types["py"]["by_status"] == {"read": 1, "searched": 1, "not read": 10}
+    assert types["py"]["files"] == 12 and types["py"]["rows"] == 360 and types["py"]["seen_rows"] == 17
+    assert types["py"]["by_status"] == {"seen": 2, "not read": 10} and types["py"]["seen_files"] == 2
     assert [t["type"] for t in cov["types"]] == ["py", "csv"]
     g = next(x for x in cov["groups"] if x["group"] == "src/*.py")
-    assert g["read_rows"] == 15 and g["files"] == 12
+    assert g["seen_rows"] == 17 and g["files"] == 12
 
 
 def test_a_pattern_stars_only_folders_that_look_alike() -> None:
@@ -174,3 +180,39 @@ def test_a_pattern_stars_only_folders_that_look_alike() -> None:
     # folders alike in what they hold, though named apart (one per agent), read as one star too
     agents = [f"agents/{a}/{f}" for a in ("wren", "moss", "fern", "sage") for f in ("log.jsonl", "notes.md")]
     assert S.pattern_of(agents)["agents/moss/log.jsonl"] == "agents/*/log.jsonl"
+
+
+def test_a_rule_label_computes_over_a_folder_a_model_label_reads_and_a_query_prints_rows(code: Path, tmp_path: Path) -> None:
+    # a regex label over the code: every line went through the rule, none entered a context; the bar's share stays 0
+    import subprocess
+    import os
+    import sys as _sys
+    lean = Path(__file__).resolve().parents[1] / "bin" / "thimble"
+    env = {**os.environ, "THIMBLE_ROOT": str(code), "THIMBLE_PYTHON": _sys.executable}
+    r = subprocess.run([str(lean), "label", "todo", "--in", "src/*.py", "--regex", "f1"], capture_output=True, text=True, env=env, cwd=code)
+    assert r.returncode == 0, r.stdout + r.stderr
+    st = Store(code)
+    cov = LIN.coverage(st)
+    a = next(o for o in cov["files"] if o["path"] == "src/a.py")
+    assert a["status"] == "computed" and a["computed"] == 30 and a["computed_rows"] == 30 and not a["seen"]
+    t = cov["total"]
+    assert t["seen_rows"] == 0 and t["seen_share"] == 0 and t["computed_rows"] == 360 and t["touched_files"] == 12
+    assert "Seen: none of the 13 source files had a line in Claude's context; 12 were touched in some way." in LIN.coverage_text(cov)
+    # a model's label: the records its model read are said apart, never as seen
+    from kernel import labels as LB
+    LB.define(st, "short", "prompt", "Is the function short?", "runs.csv")
+    with LB.locked(st, "short"):
+        lab = LB.load(st, "short")
+        for ref, u in lab["units"].items():
+            lab["units"][ref] = {"v": "yes", "c": 0.9, "by": "model"}
+        LB.write(st, lab)
+    st.log({"kind": "label", "name": "short", "how": "prompt", "in": "runs.csv", "scanned": ["runs.csv"], "records": 3})
+    cov = LIN.coverage(st)
+    runs = next(o for o in cov["files"] if o["path"] == "runs.csv")
+    assert runs["status"] == "model" and runs["model"] == 3 and not runs["seen"]
+    assert "a label's model read 3 of 3 rows (short)" in LIN.coverage_text(cov)
+    assert cov["total"]["model_rows"] == 3 and cov["total"]["seen_rows"] == 0
+    # a query that prints rows of a file: those rows entered Claude's context
+    Q.run(st, "first two", 'df = load("src/c.py")\ndf.head(2)')
+    c = next(o for o in LIN.coverage(st)["files"] if o["path"] == "src/c.py")
+    assert c["status"] == "seen" and c["seen_lines"] == 2 and c["ranges"] == [[1, 2]]

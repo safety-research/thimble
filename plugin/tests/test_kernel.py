@@ -226,14 +226,17 @@ def test_coverage_merges_queries_rows_and_what_the_hook_saw(root: Path, tmp_path
     (seen / "s-test.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     cov = LIN.coverage(st)
     status = {o["path"]: o["status"] for o in cov["files"]}
-    assert status == {"runs.csv": "computed", "saves.jsonl": "read", "notes.md": "searched", "change.diff": "read",
+    # the query computed over runs.csv (it printed a count, no row of it); the line a search showed is seen
+    assert status == {"runs.csv": "computed", "saves.jsonl": "seen", "notes.md": "seen", "change.diff": "seen",
                       "agent.jsonl": "named", "forge.db": "not read", "report.json": "not read"}
     saves = next(o for o in cov["files"] if o["path"] == "saves.jsonl")
-    assert saves["read_lines"] == 4
-    assert next(o for o in cov["files"] if o["path"] == "change.diff")["read_lines"] == 2
-    # searched and counted files are not read
-    assert cov["total"]["not_read_files"] == 4 and cov["total"]["read_files"] == 3
-    assert "Not read: 4 files" in LIN.coverage_text(cov)
+    assert saves["seen_lines"] == 4
+    assert next(o for o in cov["files"] if o["path"] == "change.diff")["seen_lines"] == 2
+    assert next(o for o in cov["files"] if o["path"] == "notes.md")["hit_lines"] == [4]
+    # computed over and counted files are not seen
+    assert cov["total"]["not_seen_files"] == 4 and cov["total"]["seen_files"] == 3 and cov["total"]["touched_files"] == 5
+    assert cov["total"]["computed_rows"] == 3
+    assert "Not seen: 4 files" in LIN.coverage_text(cov)
 
 
 # ------------------------------------------------------------------ the command

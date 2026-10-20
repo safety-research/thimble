@@ -358,12 +358,12 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   const file = '/home/t/.thimble/lean/events/s-1.jsonl'
   expect(w.events.every(e => e.file === file)).toBe(true)
   const prompts = w.events.find(e => e.kind === 'prompts')!
-  expect((prompts.active as Json).observer).toBe('v3-low')
+  expect((prompts.active as Json).observer).toBe('v4-low')
   expect((prompts.active as Json)['lens-explain']).toBe('v3')
   // one call after the turn: no question step
   expect(w.events.some(e => e.kind === 'call' && e.feature === 'question')).toBe(false)
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
-  expect(pass.prompt).toBe('observer:v3-low')
+  expect(pass.prompt).toBe('observer:v4-low')
   // the default pass runs at low effort: the same frame, less thinking (measured offline on 17 recorded looks: -28%)
   expect(pass.effort).toBe('low')
   expect(w.efforts).toEqual(['low'])
@@ -411,7 +411,7 @@ test('a version that does not exist: the default is read, and one line says so',
   await w.clock.settle()
   expect(w.forks[0]).toContain('FRAME\n')
   expect(w.toasts.length).toBe(1)
-  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v3')
+  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v4')
   expect((w.events.find(e => e.kind === 'prompts')!.problems as string[]).length).toBe(1)
 })
 

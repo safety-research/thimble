@@ -3,6 +3,7 @@
 
 const STUBS: Record<string, string> = {
   'observer/v3': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
+  'observer/v4': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer-turn/v2': 'TURN {{QUESTION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
   'lens-notes/v2': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
   'lens-actions/v4': 'LENS actions',

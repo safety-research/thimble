@@ -63,13 +63,17 @@ def test_a_regex_label_gives_each_record_a_value_and_its_counts_are_citations(ro
     assert "no         4  r1#sorry=no@n" in r.stdout
     assert "Cite a count as [2](r1#sorry=yes@n)" in r.stdout
     st = Store(root)
+    # the rule went over every record and none entered a context: the file is computed over, not seen
+    cov = LIN.coverage(st)
+    f = next(x for x in cov["files"] if x["path"] == "chat/room.jsonl")
+    assert f["status"] == "computed" and f["computed"] == 6 and not f["seen"] and cov["total"]["seen_rows"] == 0
+    assert "Computed over by a query or a rule label, none of them seen: 6 rows (100%)." in LIN.coverage_text(cov)
     res = LIN.resolve(st, "r1#sorry=yes@n", n=5)
     assert res["count"] == 2
     assert [x["ref"] for x in res["records"]] == ["chat/room.jsonl#L1", "chat/room.jsonl#L3"]
-    # the label read every record: coverage counts the file as computed
-    cov = LIN.coverage(st)
-    f = next(x for x in cov["files"] if x["path"] == "chat/room.jsonl")
-    assert f["status"] == "computed" and f["computed"] == 6
+    # the two rows the resolve showed are seen; the rest stays computed over
+    f = next(x for x in LIN.coverage(st)["files"] if x["path"] == "chat/room.jsonl")
+    assert f["status"] == "seen" and f["seen_lines"] == 2 and f["computed_rows"] == 4
     # its card: the counts bound to the query, each value's records as examples, saved to the change feed
     lab = LB.load(st, "sorry")
     obj = O.load(st, lab["card"])

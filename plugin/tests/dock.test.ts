@@ -17,10 +17,10 @@ const DRAWING = { kit: 1, w: 40, h: 2, mode: 'inline', root: { t: 'text', runs: 
 const file = (path: string, type: string, pattern: string, status: string, o: Record<string, unknown> = {}) => ({ path, type, pattern, group: pattern, rows: 300, lines: 300, status, share: 0, read_lines: 0, ranges: [], hit_lines: [], hits: 0, by: [], searched_by: [], queries: [], computed: 0, shown: 0, ...o })
 const COVERAGE = {
   session: 's-1',
-  files: [file('runs/r1.jsonl', 'jsonl', 'runs/*.jsonl', 'read', { share: 0.34, read_lines: 102, ranges: [[1, 102]] }), file('runs/r2.jsonl', 'jsonl', 'runs/*.jsonl', 'named', { by: ['wc'] })],
-  patterns: [{ pattern: 'runs/*.jsonl', files: 2, rows: 600, read_rows: 102, by_status: { read: 1, named: 1 } }],
-  types: [{ type: 'jsonl', files: 2, rows: 600, read_rows: 102, by_status: { read: 1, named: 1 } }],
-  total: { files: 2, rows: 600, read_rows: 102, read_share: 102 / 600 },
+  files: [file('runs/r1.jsonl', 'jsonl', 'runs/*.jsonl', 'seen', { share: 0.34, seen_lines: 102, ranges: [[1, 102]] }), file('runs/r2.jsonl', 'jsonl', 'runs/*.jsonl', 'named', { by: ['wc'] })],
+  patterns: [{ pattern: 'runs/*.jsonl', files: 2, rows: 600, seen_rows: 102, touched: 2, seen_files: 1, by_status: { seen: 1, named: 1 } }],
+  types: [{ type: 'jsonl', files: 2, rows: 600, seen_rows: 102, touched: 2, seen_files: 1, by_status: { seen: 1, named: 1 } }],
+  total: { files: 2, rows: 600, seen_rows: 102, seen_share: 102 / 600, seen_files: 1, touched_files: 2, computed_rows: 0, model_rows: 0 },
 }
 const LABELS = [
   { name: 'apology', kind: 'prompt', rule: 'Does the agent apologize?', values: ['yes', 'no'], in: 'chat/*.jsonl', version: 1, records: 3, waiting: 0, failed: 0, checked: 0, agree: 0, disagree: 0, counts: { yes: 1, no: 2 }, query: 'r1' },
@@ -118,7 +118,7 @@ test('the bar names the coverage with a small bar of its file types and the labe
   const clock = mock.clock(on)
   await turn($, on, clock)
   const bar = await $.ui.render(HINT)
-  expect(textOf(bar)).toContain('r coverage 17% ████████ · l 2 labels')
+  expect(textOf(bar)).toContain('r seen 17% ████████ · l 2 labels')
   // the small bar: the jsonl type's read part bright, the rest pale
   const cells: string[] = []
   walk(bar, x => { if (x.type === 'Text' && /^█+$/.test(textOf(x))) cells.push(String(x.props?.color)) })
@@ -143,7 +143,7 @@ test('the bar names the coverage with a small bar of its file types and the labe
   await panel($, clock)
   await key($, clock, 'return')
   const fileView = await panel($, clock)
-  expect(fileView).toContain('read  rows 1–102')
+  expect(fileView).toContain('seen  rows 1–102')
   expect(fileView).toContain('1 ▌{"n": 1}')
   // the file's lines were the person's read, never Claude's
   expect(w.runs.some(r => r[0] === 'awk' && r.includes('/data/runs/r1.jsonl'))).toBe(true)
@@ -154,8 +154,8 @@ test('the bar names the coverage with a small bar of its file types and the labe
   expect(w.spawns.length).toBe(1)
   const prompt = String(w.spawns[0].prompt)
   expect(prompt).toMatch(/^why only the first 102 rows\?/)
-  expect(prompt).toContain('runs/r1.jsonl: read rows 1 to 102')
-  expect(prompt).toContain('what this session read of the folder, by `thimble coverage`: 2 source files, 102 of 600 rows read (17%)')
+  expect(prompt).toContain('runs/r1.jsonl: seen rows 1 to 102')
+  expect(prompt).toContain("what this session did with the folder's files, by `thimble coverage`: 102 of 600 rows seen (17%), from 1 of 2 source files; 2 files touched")
   expect(prompt).toContain('runs/r1.jsonl#L1-102')
   expect(w.submitted.length).toBe(0)
   // ↵ on the range: its lines as a citation, over the pane in the panel

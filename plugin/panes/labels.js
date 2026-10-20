@@ -17,8 +17,9 @@
 //         the record selected: its row as a citation, over this pane)
 
 const PAGE = 20
-// the rows the side panel takes under a pane (its input bar), so the records that fit show above it
-const CHROME = 5
+// the rows the side panel takes under a pane: its input bar, and its thread's conversation when it has one (up to two
+// fifths of the panel), so the records that fit show above them
+const chromeOf = (k, chat) => 5 + (chat ? Math.floor(k.h * 0.4) : 0)
 // the column the label panel's fields start at, after their names
 const F = 11
 const NO_VALUE = '-'
@@ -90,7 +91,7 @@ export default {
   data(stores, _args, size) {
     const s = stores.labels || {}
     // gen: how many checks the person made, so a page of records is read again after one
-    return { list: Array.isArray(s.list) ? s.list : null, error: s.error || null, gen: Number(s.checks) || 0, refreshing: !!s.loading, w: size.w, h: size.h }
+    return { list: Array.isArray(s.list) ? s.list : null, error: s.error || null, gen: Number(s.checks) || 0, refreshing: !!s.loading, chat: !!s.chat, w: size.w, h: size.h }
   },
   program,
 }
@@ -141,7 +142,7 @@ function listView(k, data, st, W) {
     blocks.push(k.text(`    ${parts.map(p => `{${p.tone}:${p.mark === '█' ? '●' : p.mark}} ${k.escape(p.name)} {dim:${n(p.n)}}`).join('   ')}`, { wrap: false }))
   })
   // two rows a label: as many as fit, from the one selected
-  const room = Math.max(2, Math.floor((k.h - 3 - CHROME) / 2))
+  const room = Math.max(2, Math.floor((k.h - 3 - chromeOf(k, data.chat)) / 2))
   const top = Math.max(0, Math.min(list.length - room, idx - room + 2))
   const shown = blocks.slice(top * 2, (top + room) * 2)
   return k.stack(head, k.text(' '), ...shown, ...(list.length > top + room ? [k.text(`{dim:  ↓ ${n(list.length - top - room)} more}`)] : []))
@@ -255,7 +256,7 @@ function labelView(k, data, st, lab, W) {
   if (!got) { out.push(k.text('{dim:  reading the records…}')); return k.stack(out) }
   if (got.error) { out.push(k.text(`{bad:  × ${k.escape(got.error)}}`)); return k.stack(out) }
   const detail = cur ? recordDetail(k, lab, cur, W) : []
-  const room = Math.max(3, k.h - out.length - detail.length - 1 - CHROME)
+  const room = Math.max(3, k.h - out.length - detail.length - 1 - chromeOf(k, data.chat))
   const i0 = Math.max(0, recs.findIndex(r => r.i === rec))
   const top = Math.max(0, Math.min(recs.length - room, i0 - Math.floor(room / 2)))
   const placeW = Math.min(30, Math.max(8, ...recs.map(r => len(place(r.ref)))))

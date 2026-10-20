@@ -267,7 +267,7 @@ async function look($: Engine, t: Look): Promise<void> {
       const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the analyst cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
       digests.push(digest(x.object, { isNew: x.isNew, drawn }))
     }
-    const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through thimble)'
+    const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: thimble kept no record of what was seen)'
 
     // 2. the pass: the state each lens needs, the lenses enabled, one call
     const glossed = strs(await $.store.get(K.glossed))

@@ -80,7 +80,7 @@ function world(on: any, drawing: unknown = DRAWING, env: Record<string, string> 
     if (prep && realCards && prep.object?.version == null) out = { drawing: { ...DRAWING, w: prep.w, h: 1, root: { t: 'text', runs: [{ s: partWords(prep.object.data), tone: 'ink' }], wrap: false }, regions: [] } }
     else if (prep) out = { drawing, ...(prep.check ? { check: checked } : {}) }
     else if (e.argv.includes('resolve')) out = e.argv.includes('revisions.jsonl#L28') ? QUOTED : RESOLVED
-    else if (e.argv.includes('coverage')) out = { files: [{ path: 'revisions.jsonl', rows: 300, lines: 300, status: 'computed', computed: 102 }, { path: 'events.jsonl', rows: 300, lines: 300, status: 'named', computed: 0 }], total: { files: 2, rows: 600, read_share: 102 / 600 } }
+    else if (e.argv.includes('coverage')) out = { files: [{ path: 'revisions.jsonl', rows: 300, lines: 300, status: 'seen', seen_lines: 102, computed: 0 }, { path: 'events.jsonl', rows: 300, lines: 300, status: 'named', computed: 0 }], total: { files: 2, rows: 600, seen_share: 102 / 600 } }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const submitted: { text: string; context: readonly string[] }[] = []
@@ -477,7 +477,7 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(textOf(await $.ui.render({ ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never))).not.toContain('marks')
   expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
   // the bar above the prompt says how much of the data the session read
-  expect(textOf(await $.ui.render(BAND))).toContain('coverage 17%')
+  expect(textOf(await $.ui.render(BAND))).toContain('seen 17%')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
@@ -655,13 +655,13 @@ test('the bar is one row above the prompt: the verbs in words at its left, a lit
   const bar = textOf(await $.ui.render(HINT))
   expect(bar).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
   // 102 of 600 rows read, as the kernel counts them (events.jsonl was only named): 17%; no zero count shows
-  expect(bar).toContain('coverage 17%')
+  expect(bar).toContain('seen 17%')
   expect(bar).not.toContain('cites')
   expect(bar).not.toContain('card')
   expect(bar).not.toContain('thread')
   expect(bar).not.toMatch(/\d claims?\b/)
   // the counts that just changed are bright, then dim
-  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x).trim() === 'coverage 17%') on = true }); return on }
+  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x).trim() === 'seen 17%') on = true }); return on }
   expect(lit(await $.ui.render(HINT))).toBe(true)
   for (let i = 0; i < 40; i++) await clock.advance(50)
   expect(lit(await $.ui.render(HINT))).toBe(false)

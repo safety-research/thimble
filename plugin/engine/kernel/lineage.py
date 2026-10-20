@@ -1,18 +1,23 @@
 """Lineage read back: resolve any ref (a source row, a query's value, an object's value) to the rows it came from, and
 coverage, what was read and what was not.
 
-Coverage comes from three records: the queries' inputs and the rows `thimble rows` showed (thimble/ledger.jsonl), and the
-Read, Grep and Bash calls the hooks module kept (store.seen). A file's coverage is the strongest of:
+Coverage comes from four records: the queries' inputs and output and the rows `thimble rows` showed
+(thimble/ledger.jsonl), the labels the session made (thimble/labels), and the Read, Grep and Bash calls the hooks module
+kept (store.seen). It keeps apart what entered a model's context and what was only computed over. A file's status is the
+strongest of:
 
-    computed   a query loaded its rows (how many of how many)
-    read       some of its lines or rows were in front of Claude: Read, `thimble rows`, or cat, head, tail or sed
-               printing them (shellcmd.py)
-    searched   a search showed only the lines that matched (Grep, grep, rg, `thimble rows --search`)
+    seen       some of its lines or rows entered Claude's context: Read, cat, head, tail or sed printing them
+               (shellcmd.py), `thimble rows`, a search that showed them with their line numbers (Grep, `thimble rows
+               --search`), or a query printing them as rows of its output
+    model      only a label's model read some of its records (`thimble label --prompt`)
+    searched   a search went over it and which lines it showed is not known (grep or rg in the shell)
+    computed   a query or a rule label (regex, code) went over its rows, and none of them entered a context
     named      it was only named, listed or counted (wc, ls, find, git ls-files, grep -c), or named by a program whose
-               output is not known (python, jq)
+               output is not known (python, jq); the text says "counted"
     not read   nothing touched it (the text says "untouched")
 
-Only computed and read count as read; the bar's share and the observer's "not read" follow the same rule.
+Only seen counts as read: the bar's share (the rows in Claude's context), a card's snapshot and the observer's "not
+seen" follow the same rule. What a label's model read and what was computed over are counted apart.
 """
 from __future__ import annotations
 
@@ -733,15 +738,25 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
 # ------------------------------------------------------------------ coverage
 
 
-# What counts as read: a query loaded its rows, or some of its lines or rows were in front of Claude. Everything else
-# (searched, named, not read) is not read, whatever touched it.
-READ = ("computed", "read")
+# A file's status, strongest first, and how the text says each:
+#   seen       some of its lines entered Claude's context (read, printed, shown by thimble rows or a search, or printed
+#              as rows of a query's output)
+#   model      only a label's model read some of its records (`thimble label --prompt`)
+#   searched   a search went over it, and which matching lines it showed is not known (grep in the shell)
+#   computed   a query or a rule label (regex, code) went over its rows; none of them entered a context
+#   named      it was only named, listed or counted (wc, ls, find, git ls-files, grep -c)
+#   not read   nothing touched it
+# Only seen counts as in Claude's context: the bar's share, a card's snapshot and the observer's "not seen" follow it.
+SEEN = ("seen",)
+ORDER = ["seen", "model", "searched", "computed", "named", "not read"]
+SAID = {"seen": "seen", "model": "model", "searched": "searched", "computed": "computed", "named": "counted",
+        "not read": "untouched"}
 # the line ranges and search hits kept per file for the coverage pane
 RANGES_MAX = 300
 HITS_MAX = 400
-ORDER = ["computed", "read", "searched", "named", "not read"]
-# each status as the coverage text says it
-SAID = {"computed": "computed", "read": "read", "searched": "searched", "named": "named", "not read": "untouched"}
+# a query's output rows printed whole: pandas shows a table of up to this many rows, else its first and last five
+PRINTED_ALL = 60
+PRINTED_ENDS = 5
 
 
 def _ranges_len(ranges: list[tuple[int, int]]) -> int:
@@ -775,16 +790,55 @@ def type_of(path: str) -> str:
     return Path(path).suffix.lower().lstrip(".") or "no extension"
 
 
+def _printed_rows(st: Store, qid: str) -> list[str]:
+    """The source rows a query printed whole: its output rows that each stand for one source row (a listing of rows, not
+    a count), as many as pandas prints of its table. An aggregate's rows stand for many rows, whose text never showed."""
+    try:
+        q = Q.get(st, qid)
+    except Exception:  # noqa: BLE001 — a query that does not read shows no rows
+        return []
+    if not q or q.get("error") or not str(q.get("stdout") or "").strip():
+        return []
+    rows = q.get("rows") or []
+    idx = range(len(rows)) if len(rows) <= PRINTED_ALL else [*range(PRINTED_ENDS), *range(len(rows) - PRINTED_ENDS, len(rows))]
+    out = []
+    for i in idx:
+        sets = rows[i] if isinstance(rows[i], list) else [rows[i]]
+        try:
+            if R.count(sets) == 1:
+                out.extend(R.expand(sets))
+        except Exception:  # noqa: BLE001 — a row set that does not read is no printed row
+            continue
+    return out
+
+
 def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
-    """What this session (or `session`, or all sessions for None) read of every source file, file by file, by group
-    of like files (S.group_of, as the text says them; S.pattern_of, as the coverage pane does) and by file type. Each
-    file also says which of its lines were read
-    (`ranges`) and which lines a search showed (`hit_lines`), for the coverage pane."""
+    """What this session (or `session`, or all sessions for None) did with every source file, file by file, by group of
+    like files (S.group_of, as the text says them; S.pattern_of, as the coverage pane does) and by file type. It keeps
+    apart what entered Claude's context (seen), what a label's model read, and what a query or a rule only computed
+    over; only seen counts as read. Each file also says which of its lines were seen (`ranges`) and which lines a search
+    showed (`hit_lines`), for the coverage pane."""
+    from . import labels as LB
+
     files = S.list_sources(st.root)
     cnt = S.counts(st.root, files, st.cache / "counts.json")
     per: dict[str, dict[str, Any]] = {f: {"computed": 0, "queries": [], "shown": set(), "lines": [], "searched": False,
-                                          "matched": 0, "named": False, "hits": set(), "by": set(), "searched_by": set()}
+                                          "matched": 0, "named": False, "hits": set(), "by": set(), "searched_by": set(),
+                                          "model": 0, "labels": set()}
            for f in files}
+
+    def seen_ref(ref: str) -> None:
+        f = ref.split("#")[0]
+        if f in per:
+            # a row's line, or the lines a row spans (a section of a Markdown file: `#L12-40`)
+            m = re.search(r"#L(\d+)(?:-L?(\d+))?", ref)
+            if m:
+                a = int(m.group(1))
+                per[f]["lines"].append((a, max(a, int(m.group(2) or a))))
+            else:
+                per[f]["shown"].add(ref)
+
+    label_names: set[str] = set()
     for r in st.ledger(session):
         k = r.get("kind")
         if k == "query" and not r.get("error"):
@@ -795,15 +849,43 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                     if not n:
                         per[f]["named"] = True
                         per[f]["by"].add("thimble")
+            # rows of its output printed whole entered Claude's context
+            for ref in _printed_rows(st, str(r.get("id") or "")):
+                seen_ref(ref)
         elif k in ("rows", "resolve"):
             for ref in r.get("shown") or []:
                 f = ref.split("#")[0]
                 if f in per:
-                    # rows a search found are its matches, as grep's lines are
-                    per[f]["hits" if r.get("search") else "shown"].add(ref)
+                    # rows a search found are its matches, as grep's lines are: shown, so seen
+                    if r.get("search"):
+                        per[f]["hits"].add(ref)
+                    seen_ref(ref)
             for f in r.get("scanned") or []:
                 if f in per:
                     per[f]["searched"] = True
+        elif k == "label" and r.get("name"):
+            label_names.add(str(r["name"]))
+    # the labels this session made: a model's reads of a --prompt label's records, a rule's pass over the others
+    for name in sorted(label_names):
+        lab = LB.load(st, name)
+        if not lab:
+            continue
+        model: dict[str, int] = defaultdict(int)
+        ruled: dict[str, int] = defaultdict(int)
+        for ref, u in (lab.get("units") or {}).items():
+            f = ref.split("#")[0]
+            if f not in per:
+                continue
+            if u.get("by") == "model":
+                model[f] += 1
+            elif u.get("by") in ("regex", "code"):
+                ruled[f] += 1
+        for f, n in model.items():
+            per[f]["model"] += n
+            per[f]["labels"].add(name)
+        for f, n in ruled.items():
+            per[f]["computed"] = max(per[f]["computed"], n)
+            per[f]["labels"].add(name)
     root = str(st.root)
     for s in st.seen(session):
         tool = s.get("tool")
@@ -819,7 +901,8 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             if scope is None:
                 continue
             glob = s.get("glob") or ""
-            # a search that showed lines leaves its files searched; one that showed only names or counts, named
+            # a search that showed lines leaves its files searched (the lines it showed are seen); one that showed only
+            # names or counts, named
             lines = s.get("mode") == "content" or (s.get("mode") is None and bool(s.get("lines")))
             for f in files:
                 inside = scope in (".", "") or f == scope or f.startswith(scope.rstrip("/") + "/")
@@ -835,6 +918,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                 f = st.rel(fp)
                 if f in per:
                     per[f]["hits"].update(f"L{n}" for n in ns)
+                    per[f]["lines"].extend((int(n), int(n)) for n in ns)
         elif tool == "Bash":
             cmd = str(s.get("command") or "")
             if re.match(r"^\s*thimble(\s|$)", cmd):
@@ -862,49 +946,73 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     for f in files:
         c, x = cnt.get(f, {}), per[f]
         rows, lines = c.get("rows", 0), c.get("lines", 0)
-        read_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
-        status = ("computed" if x["computed"] else "read" if (read_lines or x["shown"]) else
-                  "searched" if x["searched"] else "named" if x["named"] else "not read")
+        seen_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
+        seen = bool(seen_lines or x["shown"])
+        status = ("seen" if seen else "model" if x["model"] else "searched" if x["searched"] else
+                  "computed" if x["computed"] else "named" if x["named"] else "not read")
         computed = min(x["computed"], rows) if rows else x["computed"]
-        share = 0.0
-        if status in READ and rows:
-            share = min(1.0, max(computed / rows, read_lines / max(1, lines or rows), len(x["shown"]) / rows))
+        model = min(x["model"], rows) if rows else x["model"]
+        share = min(1.0, seen_lines / max(1, lines or rows) + len(x["shown"]) / max(1, rows)) if seen and rows else 0.0
+        seen_rows = share * rows
+        # the parts of its rows, apart, as the pane draws them: seen, then read by a label's model, then only computed
+        # over (each part what the one before it leaves, at most)
+        model_part = max(0.0, min(rows - seen_rows, model - seen_rows)) if rows else 0.0
+        computed_part = max(0.0, min(rows - seen_rows - model_part, computed - seen_rows - model_part)) if rows else 0.0
         out_files.append({"path": f, "kind": c.get("kind"), "rows": rows, "lines": lines, "status": status,
-                          "read": status in READ, "share": share, "computed": computed,
-                          "queries": sorted(set(q for q in x["queries"] if q)), "read_lines": read_lines,
+                          "seen": seen, "read": seen, "touched": status != "not read", "share": share,
+                          "seen_lines": seen_lines, "read_lines": seen_lines, "seen_rows": round(seen_rows),
+                          "model": model, "model_rows": round(model_part), "computed": computed,
+                          "computed_rows": round(computed_part), "labels": sorted(x["labels"]),
+                          "queries": sorted(set(q for q in x["queries"] if q)),
                           "shown": len(x["shown"]), "searched": x["searched"], "matched": x["matched"],
                           "hits": len(x["hits"]), "named": x["named"], "by": sorted(x["by"]),
-                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "group": group.get(f, f), "pattern": pattern.get(f, f),
-                          # which lines reached Claude (a row `thimble rows` showed counts as its line), and which
-                          # lines a search showed
-                          "ranges": _merged(x["lines"] + [(n, n) for n in map(_line_of, x["shown"]) if n]),
+                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "group": group.get(f, f),
+                          "pattern": pattern.get(f, f),
+                          # which lines entered Claude's context, and which of them a search showed
+                          "ranges": _merged(x["lines"]),
                           "hit_lines": sorted({n for n in map(_line_of, x["hits"]) if n})[:HITS_MAX]})
     groups: dict[str, dict[str, Any]] = {}
     patterns: dict[str, dict[str, Any]] = {}
     types: dict[str, dict[str, Any]] = {}
     for e in out_files:
         for key, name, into in ((e["group"], "group", groups), (e["pattern"], "pattern", patterns), (e["type"], "type", types)):
-            G = into.setdefault(key, {name: key, "files": 0, "rows": 0, "read_rows": 0.0, "by_status": defaultdict(int),
-                                      "computed": 0})
+            G = into.setdefault(key, {name: key, "files": 0, "rows": 0, "seen_rows": 0.0, "model_rows": 0, "computed_rows": 0,
+                                      "touched": 0, "seen_files": 0, "by_status": defaultdict(int), "computed": 0})
             G["files"] += 1
             G["rows"] += e["rows"]
-            G["read_rows"] += e["share"] * e["rows"]
+            G["seen_rows"] += e["share"] * e["rows"]
+            G["model_rows"] += e["model_rows"]
+            G["computed_rows"] += e["computed_rows"]
+            G["touched"] += int(e["touched"])
+            G["seen_files"] += int(e["seen"])
             G["by_status"][e["status"]] += 1
             G["computed"] += e["computed"]
     for G in [*groups.values(), *patterns.values(), *types.values()]:
         G["by_status"] = dict(G["by_status"])
-        G["read_rows"] = round(G["read_rows"])
+        G["seen_rows"] = round(G["seen_rows"])
+        G["read_rows"] = G["seen_rows"]
     rows_all = sum(o["rows"] for o in out_files)
-    read_rows = sum(o["share"] * o["rows"] for o in out_files)
-    not_read = [o for o in out_files if not o["read"]]
+    seen_rows = sum(o["share"] * o["rows"] for o in out_files)
+    model_rows = sum(o["model_rows"] for o in out_files)
+    computed_rows = sum(o["computed_rows"] for o in out_files)
+    not_seen = [o for o in out_files if not o["seen"]]
+    total = {"files": len(files), "rows": rows_all,
+             "touched_files": sum(1 for o in out_files if o["touched"]), "seen_files": len(out_files) - len(not_seen),
+             "seen_rows": round(seen_rows), "seen_share": seen_rows / rows_all if rows_all else 0.0,
+             "model_files": sum(1 for o in out_files if o["model"]), "model_rows": model_rows,
+             "model_share": model_rows / rows_all if rows_all else 0.0,
+             "computed_files": sum(1 for o in out_files if o["computed_rows"]), "computed_rows": computed_rows,
+             "computed_share": computed_rows / rows_all if rows_all else 0.0,
+             "not_seen_files": len(not_seen), "not_seen_rows": sum(o["rows"] for o in not_seen),
+             "untouched_files": sum(1 for o in not_seen if o["status"] == "not read")}
+    # the names earlier readers know: read is seen
+    total.update(read_files=total["seen_files"], read_rows=total["seen_rows"], read_share=total["seen_share"],
+                 not_read_files=total["not_seen_files"], not_read_rows=total["not_seen_rows"])
     return {"root": str(st.root), "session": st.session if session == "" else session, "files": out_files,
             "groups": sorted(groups.values(), key=lambda g: -g["rows"]),
             "patterns": sorted(patterns.values(), key=lambda g: (-g["rows"], g["pattern"])),
             "types": sorted(types.values(), key=lambda g: (-g["rows"], g["type"])),
-            "total": {"files": len(files), "rows": rows_all, "read_files": len(out_files) - len(not_read),
-                      "read_rows": round(read_rows), "read_share": read_rows / rows_all if rows_all else 0.0,
-                      "not_read_files": len(not_read), "not_read_rows": sum(o["rows"] for o in not_read),
-                      "untouched_files": sum(1 for o in not_read if o["status"] == "not read")}}
+            "total": total}
 
 
 def _by(o: dict[str, Any]) -> str:
@@ -912,25 +1020,33 @@ def _by(o: dict[str, Any]) -> str:
     return f" ({', '.join(by[:4])})" if by else ""
 
 
+def _n(x: float) -> str:
+    return format(int(round(x)), ",")
+
+
 def file_line(o: dict[str, Any]) -> str:
+    """What happened to one file, in the coverage text's words: what Claude saw of it, what a label's model read, what a
+    query or a rule computed over, or why none of its lines entered a context."""
     s = o["status"]
     rows = o["rows"]
+    unit = "lines" if o["kind"] not in ("jsonl", "transcript") else "rows"
     bits = []
+    if o.get("seen_lines"):
+        bits.append(f"seen {o['seen_lines']:,} of {o['lines']:,} {unit}" + (f" ({o['hits']:,} shown by a search)" if o.get("hits") else ""))
+    if o.get("shown"):
+        bits.append(f"{o['shown']:,} row{'s' if o['shown'] != 1 else ''} seen")
+    if o.get("model"):
+        bits.append(f"a label's model read {o['model']:,} of {rows:,} rows" + (f" ({', '.join(o['labels'][:3])})" if o.get("labels") else ""))
     if o["computed"]:
         whole = o["computed"] >= rows > 0
+        what = [*o["queries"][:4], *(lb for lb in o.get("labels") or [] if not o.get("model"))][:4]
         bits.append(f"computed over {'all ' + format(rows, ',') if whole else format(o['computed'], ',') + ' of ' + format(rows, ',')} rows"
-                    + (f" ({', '.join(o['queries'][:4])})" if o["queries"] else ""))
-    if o["read_lines"]:
-        unit = "lines" if o["kind"] not in ("jsonl", "transcript") else "rows"
-        bits.append(f"read {o['read_lines']:,} of {o['lines']:,} {unit}")
-    if o["shown"]:
-        bits.append(f"{o['shown']:,} row{'s' if o['shown'] != 1 else ''} shown")
+                    + (f" ({', '.join(what)})" if what else "") + ("" if s == "seen" or o.get("model") else ", none of them seen"))
     if s == "searched":
-        hits, by = o.get("hits", 0), o.get("searched_by") or []
-        bits.append("searched: " + (f"only the {hits:,} matching line{'s' if hits != 1 else ''} shown" if hits else
-                                    f"only matching lines shown ({', '.join(by[:4])})" if by else "no matching line shown"))
+        by = o.get("searched_by") or []
+        bits.append("searched: a search went over it; which lines it showed is not known" + (f" ({', '.join(by[:4])})" if by else ""))
     if s == "named":
-        bits.append(f"only named, listed or counted{_by(o)}; none of its lines shown")
+        bits.append(f"only named, listed or counted{_by(o)}; none of its lines seen")
     if not bits:
         bits.append(f"{rows:,} rows")
     return "; ".join(bits)
@@ -957,9 +1073,9 @@ def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
         if others:
             lines.append(f"  {sum(g['files'] for g in others):,} other files ({sum(g['rows'] for g in others):,} rows): "
                          + ", ".join(f"{sum(g['by_status'].get(k, 0) for g in others)} {SAID[k]}" for k in ORDER if any(g['by_status'].get(k) for g in others)))
-        some = [o for o in ranked if o["status"] in ("computed", "read", "searched")]
+        some = [o for o in ranked if o["status"] in ("seen", "model", "searched", "computed")]
         if some:
-            lines.append("  read or searched:")
+            lines.append("  seen, read by a label's model, searched or computed over:")
             for o in some[:15]:
                 lines.append(f"    {SAID[o['status']]:<9} {o['path']}  {file_line(o)}")
             if len(some) > 15:
@@ -984,20 +1100,32 @@ def percent(part: float) -> str:
 
 
 def coverage_sentence(cov: dict[str, Any]) -> str:
-    """What the session read, in words that claim no more than happened: read means some of a file's lines or rows
-    were in front of Claude; a search, a listing or a count is not a read."""
+    """What the session saw, in words that claim no more than happened: a file is seen when some of its lines entered
+    Claude's context; what a label's model read and what a query or a rule computed over are said apart, and a search,
+    a listing or a count is not seen."""
     t = cov["total"]
     if not t["files"]:
         return "There are no source files."
-    share = f"{t.get('read_rows', 0):,} of {t['rows']:,} rows ({percent(t.get('read_share', 0))})"
-    if not t["not_read_files"]:
-        return f"Read all {t['files']:,} source files, at least in part: {share}."
-    read = f"Read {t['read_files']:,} of {t['files']:,} source files, {share}." if t["read_files"] else f"Read none of the {t['files']:,} source files."
-    by = {k: [o["path"] for o in cov["files"] if o["status"] == k] for k in ("searched", "named", "not read")}
-    words = {"searched": "searched, only matching lines shown", "named": "only named, listed or counted", "not read": "untouched"}
-    parts = [f"{len(by[k]):,} {words[k]} ({_few(by[k])})" for k in ("not read", "named", "searched") if by[k]]
-    n = t["not_read_files"]
-    return f"{read} Not read: {n:,} file{'s' if n != 1 else ''} ({t['not_read_rows']:,} rows): " + "; ".join(parts) + "."
+    share = f"{_n(t.get('seen_rows', 0))} of {t['rows']:,} rows ({percent(t.get('seen_share', 0))})"
+    if not t["not_seen_files"]:
+        out = [f"Seen all {t['files']:,} source files, at least in part: {share} entered Claude's context."]
+    elif t["seen_files"]:
+        out = [f"Seen: {share} entered Claude's context, from {t['seen_files']:,} of {t['files']:,} source files; "
+               f"{t['touched_files']:,} were touched in some way."]
+    else:
+        out = [f"Seen: none of the {t['files']:,} source files had a line in Claude's context; {t['touched_files']:,} were touched in some way."]
+    if t.get("model_rows"):
+        out.append(f"Read by a label's model: {_n(t['model_rows'])} rows ({percent(t.get('model_share', 0))}).")
+    if t.get("computed_rows"):
+        out.append(f"Computed over by a query or a rule label, none of them seen: {_n(t['computed_rows'])} rows ({percent(t.get('computed_share', 0))}).")
+    if t["not_seen_files"]:
+        by = {k: [o["path"] for o in cov["files"] if o["status"] == k] for k in ("model", "searched", "computed", "named", "not read")}
+        words = {"model": "read only by a label's model", "searched": "searched, which lines a search showed is not known",
+                 "computed": "only computed over", "named": "only named, listed or counted", "not read": "untouched"}
+        parts = [f"{len(by[k]):,} {words[k]} ({_few(by[k])})" for k in ("not read", "computed", "model", "named", "searched") if by[k]]
+        n = t["not_seen_files"]
+        out.append(f"Not seen: {n:,} file{'s' if n != 1 else ''} ({t['not_seen_rows']:,} rows): " + "; ".join(parts) + ".")
+    return " ".join(out)
 
 
 def object_coverage(st: Store, obj: dict[str, Any]) -> dict[str, Any]:

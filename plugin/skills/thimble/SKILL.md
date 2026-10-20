@@ -65,8 +65,10 @@ The analyst never sees your shell output, so the work your answer rests on has t
   analyst's attention and shows nothing, so one in a message is the most that helps.
 - **Say what you did not read.** Words such as "only", "all", "stopped", "from then on" and "then" are claims about
   every record or about order, and one record the other way makes the answer false and makes the analyst doubt the
-  rest. `thimble coverage` lists the files this session read or computed over, and those it only searched, only named
-  or counted, or never touched: none of these were read. When a file you did not read could change the answer, say so.
+  rest. `thimble coverage` says which files you saw (some of their lines entered your context: read, printed, shown
+  by `thimble rows` or a search, or printed as rows of a query's output) and which you only computed over (a query or a
+  rule label went over their rows, and none reached you), searched, named or counted, or never touched: none of these
+  were seen. What a label's model read is counted apart. When a file you did not see could change the answer, say so.
 
 ```
 Analyst   How many refund requests were approved?

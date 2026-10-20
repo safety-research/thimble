@@ -13,8 +13,9 @@
 //   parseAnswer(text)          -> {notes, verbs, glosses, claims, clusters} from the pass's reply, or null
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
-// the statuses of `thimble coverage` that count as read
-const READ = new Set(['computed', 'read'])
+// the statuses of `thimble coverage` that count as seen (some lines in Claude's context; `read` is a snapshot's from
+// before the name changed). A file a query or a rule only computed over, or a label's model read, is not seen
+const SEEN = new Set(['seen', 'read'])
 const cut = (s, n) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim()
   return t.length <= n ? t : t.slice(0, n - 1) + '…'
@@ -144,21 +145,21 @@ export function digest(object, o = {}) {
   if (rf.length) L.push(`  source rows behind its values: ${rf.slice(0, 6).map(([f, r]) => `${f} ${fmt(r.count)}`).join(', ')}`)
   const cov = lin.coverage || {}
   if (cov.files || cov.not_read) {
-    // read: a query loaded its rows, or some of its lines were in front of Claude (kernel/lineage.py coverage). A file
-    // searched, named or counted is not read (a snapshot saved before kept those out of not_read)
+    // seen: some of its lines entered Claude's context (kernel/lineage.py coverage). A file computed over by a query or a
+    // rule, read by a label's model, searched, named or counted is not seen (a snapshot saved before kept some of those
+    // out of not_read)
     const st = cov.files || {}
-    const by = {}
-    for (const [f, s] of Object.entries(st)) if (READ.has(s)) (by[s] ??= []).push(f)
-    const parts = Object.entries(by).map(([s, fs]) => `${s} ${fs.length > 4 ? `${fs.length} files` : fs.join(', ')}`)
-    const nr = [...new Set([...(cov.not_read || []), ...Object.keys(st).filter(f => !READ.has(st[f]))])]
+    const seen = Object.keys(st).filter(f => SEEN.has(st[f]))
+    const parts = seen.length ? [`seen ${seen.length > 4 ? `${seen.length} files` : seen.join(', ')}`] : []
+    const nr = [...new Set([...(cov.not_read || []), ...Object.keys(st).filter(f => !SEEN.has(st[f]))])]
     const nn = Math.max(cov.not_read_count ?? 0, nr.length)
     if (nn) {
-      const how = { named: 'only named or counted', searched: 'searched' }
+      const how = { computed: 'computed over', model: "read by a label's model", named: 'only named or counted', searched: 'searched' }
       const tag = f => (how[st[f]] ? ` (${how[st[f]]})` : '')
       const kinds = Object.entries(how).map(([k, w]) => [w, nr.filter(f => st[f] === k).length]).filter(([, n]) => n)
       parts.push(nn > 6
-        ? `not read ${fmt(nn)} files${kinds.length ? ` (${kinds.map(([w, n]) => `${fmt(n)} ${w}`).join(', ')})` : ''}, as ${nr.slice(0, 4).join(', ')}`
-        : `not read ${nr.map(f => f + tag(f)).join(', ')}`)
+        ? `not seen ${fmt(nn)} files${kinds.length ? ` (${kinds.map(([w, n]) => `${fmt(n)} ${w}`).join(', ')})` : ''}, as ${nr.slice(0, 4).join(', ')}`
+        : `not seen ${nr.map(f => f + tag(f)).join(', ')}`)
     }
     L.push(`  when it was saved the session had: ${parts.join('; ')}`)
   }

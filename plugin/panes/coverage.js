@@ -1,31 +1,42 @@
-// coverage.js: what Claude read of the folder, a program on the card runtime (draw/kit.js) over `thimble coverage
-// --json` (engine/kernel/lineage.py coverage). It opens in the side panel (shell/side.ts openSide) as a thread: a
-// question typed under it is about the group, file or lines selected, and carries their refs. The bar's `coverage 34%`
-// opens it (a click, or r). Overview first, then zoom, then details on demand:
+// coverage.js: what this session did with the folder's files, a program on the card runtime (draw/kit.js) over
+// `thimble coverage --json` (engine/kernel/lineage.py coverage). It opens in the side panel (shell/side.ts openSide) as
+// a thread: a question typed under it is about the group, file or lines selected, and carries their refs. The bar's
+// `coverage 34%` opens it (a click, or r). It keeps two things apart, in the kernel's words:
 //
-//   overview   a bar of the folder's rows by file type, as GitHub shows a repository's languages, each type's read part
-//              bright and the rest pale; then the files grouped by wildcard pattern (`runs/*.jsonl`, the `*` lit, so it
-//              is clear which files a row stands for), or by file type (t), each group with its files read, searched,
-//              only counted and untouched, and the share of its rows read
-//   a group    its files, each with what reached Claude: the lines read, the lines a search showed, or why none did
-//   a file     a strip of the whole file with the lines read lit, the read ranges and search hits to step through, and
-//              the file's own lines around the one chosen (read lines marked ▌); ↵ on a range opens its lines as a
-//              citation, over this pane (esc comes back)
+//   files      how many were touched in any way, and how many were seen: some of their lines entered Claude's context
+//   content    the share of all rows seen by Claude, which is the bar's number; what a label's model read, and what a
+//              query or a rule label only computed over (none of it in a context), each shown apart and never as seen
+//
+// Overview first, then zoom, then details on demand:
+//
+//   overview   a bar of the folder's rows by file type, as GitHub shows a repository's languages, each type's rows in
+//              four shades: seen █, read by a label's model ▓, computed over ▒, untouched ░; then the files grouped by
+//              wildcard pattern (`runs/*.jsonl`, the `*` lit, so it is clear which files a row stands for), or by file
+//              type (t), each group with its files, those touched and those seen, and its rows in the same shades
+//   a group    its files, each with what happened to it: the lines seen, what a label's model read, what was computed
+//              over, or why none of its lines entered a context
+//   a file     a strip of the whole file with the lines seen lit, the seen ranges to step through, and the file's own
+//              lines around the one chosen (seen lines marked ▌, those a search showed in its color); ↵ on a range opens
+//              its lines as a citation, over this pane (esc comes back)
 //
 //   state: {by: 'pattern' | 'type', group: the group open, file: the file open, at: the part selected, range: the range}
 //   keys: t by type / by pattern · [ ] step · 0 back · esc back (at the top, esc is the panel's: back, or close)
 //   wants: {lines: path, from, to} (the file's lines around a range, read by the host)
-//   asks of the host: open {mark: {kind: 'cite', ref, label}} (a read range or the search hits, as a citation)
+//   asks of the host: open {mark: {kind: 'cite', ref, label}} (a seen range, as a citation)
 
-const STATUS = ['computed', 'read', 'searched', 'named', 'not read']
+const STATUS = ['seen', 'model', 'searched', 'computed', 'named', 'not read']
 // each status as the pane says it, and its tone
-const SAID = { computed: 'read', read: 'read', searched: 'searched', named: 'counted', 'not read': 'untouched' }
-const TONE = { computed: 'accent', read: 'accent', searched: 'warn', named: 'dim', 'not read': 'unseen' }
+const SAID = { seen: 'seen', model: 'model', searched: 'searched', computed: 'computed', named: 'counted', 'not read': 'untouched' }
+const TONE = { seen: 'accent', model: 'good', searched: 'warn', computed: 'dim', named: 'dim', 'not read': 'unseen' }
+// the shades of a file's rows: seen, read by a label's model, computed over, untouched
+export const PARTS = ['seen', 'model', 'computed', 'untouched']
+export const GLYPH = { seen: '█', model: '▓', computed: '▒', untouched: '░' }
 // the file types the bar names by color; the others are `other`
 const TYPE_TONES = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
 const LINES = 400 // characters of one line of a file shown
-// the rows the side panel takes under a pane (its input bar), so a list that fits shows whole above it
-const CHROME = 5
+// the rows the side panel takes under a pane: its input bar, and its thread's conversation when it has one (up to
+// two fifths of the panel), so a list that fits shows whole above them, the overview in view
+const chromeOf = (k, chat) => 5 + (chat ? Math.floor(k.h * 0.4) : 0)
 const n = x => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))
 const cut = (s, k) => (Array.from(String(s)).length <= k ? String(s) : Array.from(String(s)).slice(0, Math.max(0, k - 1)).join('') + '…')
 const pad = (s, k, right = false) => { const t = cut(s, k); const sp = ' '.repeat(Math.max(0, k - Array.from(t).length)); return right ? sp + t : t + sp }
@@ -41,14 +52,26 @@ export function pct(part) {
   return `${Math.min(99, Math.round(p))}%`
 }
 
-/** The file types as the bar draws them: the largest by rows, each with its tone; past six (or any with no rows), one
- *  `other`. Each {type, rows, read, files, tone, types}. */
+/** A group's rows in the four shades, apart: seen, read by a label's model, computed over, untouched. */
+export function partsOf(g) {
+  const rows = Math.max(0, g.rows || 0)
+  const seen = Math.min(rows, g.seen_rows ?? g.read_rows ?? 0)
+  const model = Math.min(rows - seen, g.model_rows || 0)
+  const computed = Math.min(rows - seen - model, g.computed_rows || 0)
+  return { seen, model, computed, untouched: Math.max(0, rows - seen - model - computed) }
+}
+
+/** The file types as the bar draws them: the largest by rows, each with its tone and its rows in the four shades; past
+ *  six (or any with no rows), one `other`. Each {type, rows, files, tone, types, seen, model, computed, untouched}. */
 export function typeMix(types) {
   const all = (types || []).filter(t => t && t.rows > 0)
   const named = all.slice(0, all.length > TYPE_TONES.length ? TYPE_TONES.length - 1 : TYPE_TONES.length)
   const rest = all.slice(named.length)
-  const out = named.map((t, i) => ({ type: t.type, rows: t.rows, read: Math.min(t.rows, t.read_rows || 0), files: t.files, tone: TYPE_TONES[i], types: [t.type] }))
-  if (rest.length) out.push({ type: 'other', rows: rest.reduce((s, t) => s + t.rows, 0), read: rest.reduce((s, t) => s + Math.min(t.rows, t.read_rows || 0), 0), files: rest.reduce((s, t) => s + t.files, 0), tone: 'dim', types: rest.map(t => t.type) })
+  const out = named.map((t, i) => ({ type: t.type, rows: t.rows, files: t.files, tone: TYPE_TONES[i], types: [t.type], ...partsOf(t) }))
+  if (rest.length) {
+    const sum = key => rest.reduce((s, t) => s + partsOf(t)[key], 0)
+    out.push({ type: 'other', rows: rest.reduce((s, t) => s + t.rows, 0), files: rest.reduce((s, t) => s + t.files, 0), tone: 'dim', types: rest.map(t => t.type), seen: sum('seen'), model: sum('model'), computed: sum('computed'), untouched: sum('untouched') })
+  }
   return out
 }
 
@@ -72,22 +95,42 @@ export function shareCells(weights, cells) {
   return out
 }
 
-/** The bar as cells: each type's cells by its rows, its read part first and bright (at least one cell when any of it
- *  was read), the rest pale. [{tone, read, n}] in order: the pane's bar and the small one in thimble's bar. */
+/** The bar as cells: each type's cells by its rows, then within them its seen, model-read, computed and untouched
+ *  rows in that order (each part with rows at least one cell while there is room). [{tone, part, n}] in order: the
+ *  pane's bar and the small one in thimble's bar. */
 export function mixCells(mix, cells) {
   const per = shareCells(mix.map(t => t.rows), cells)
   const out = []
   mix.forEach((t, i) => {
     const c = per[i]
     if (!c) return
-    const r = t.read > 0 ? Math.max(1, Math.min(c, Math.round((c * t.read) / t.rows))) : 0
-    if (r) out.push({ tone: t.tone, read: true, n: r })
-    if (c - r) out.push({ tone: t.tone, read: false, n: c - r })
+    const inner = shareCells(PARTS.map(p => t[p] || 0), c)
+    PARTS.forEach((p, j) => { if (inner[j]) out.push({ tone: t.tone, part: p, n: inner[j] }) })
   })
   return out
 }
 
-/** The strongest status of a set of files (by_status), for ordering groups: read first, untouched last. */
+/** The small bar in thimble's bar: each type's cells by its rows, its seen part bright (at least one cell when any was
+ *  seen) and the rest pale; what was computed over is the pane's to show, not this one's. [{tone, seen, n}]. */
+export function barCells(mix, cells) {
+  const per = shareCells(mix.map(t => t.rows), cells)
+  const out = []
+  mix.forEach((t, i) => {
+    const c = per[i]
+    if (!c) return
+    const r = t.seen > 0 ? Math.max(1, Math.min(c, Math.round((c * t.seen) / t.rows))) : 0
+    if (r) out.push({ tone: t.tone, seen: true, n: r })
+    if (c - r) out.push({ tone: t.tone, seen: false, n: c - r })
+  })
+  return out
+}
+
+/** Cells as markup: each part its glyph, untouched pale. */
+export function cellsMarkup(cells) {
+  return cells.map(c => `{${c.part === 'untouched' ? `${c.tone}-faint` : c.tone}:${GLYPH[c.part].repeat(c.n)}}`).join('')
+}
+
+/** The strongest status of a set of files (by_status), for ordering groups: seen first, untouched last. */
 const rank = by => STATUS.findIndex(s => (by || {})[s] > 0)
 
 /** A wildcard pattern with its `*` lit: the part of the name that stands for many files (in a bold row, bold). */
@@ -105,17 +148,17 @@ export default {
   /** What a question asked under the pane is about, beyond the part selected (side.ts paneSubject). */
   thread(_args, _state, data) {
     const t = (data && data.total) || {}
-    return { about: `what this session read of the folder, by \`thimble coverage\`: ${n(t.files || 0)} source files, ${n(t.read_rows || 0)} of ${n(t.rows || 0)} rows read (${pct(t.read_share || 0)}). A file is read when some of its lines reached Claude; searched when a search showed only its matching lines; counted when it was only named, listed or counted; untouched otherwise` }
+    return { about: `what this session did with the folder's files, by \`thimble coverage\`: ${n(t.seen_rows ?? t.read_rows ?? 0)} of ${n(t.rows || 0)} rows seen (${pct(t.seen_share ?? t.read_share ?? 0)}), from ${n(t.seen_files ?? t.read_files ?? 0)} of ${n(t.files || 0)} source files; ${n(t.touched_files || 0)} files touched; ${n(t.computed_rows || 0)} rows computed over and not seen; ${n(t.model_rows || 0)} rows read by a label's model. A file is seen when some of its lines entered Claude's context; computed over when a query or a rule label went over its rows and none of them did; searched when a shell search went over it; counted when it was only named, listed or counted; untouched otherwise` }
   },
   data(stores, _args, size) {
     const s = stores.coverage || {}
     const cov = s.cov
-    if (!cov) return { loading: s.error ? null : 'reading what this session read…', error: s.error || null, w: size.w, h: size.h }
-    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || '', group: f.pattern || f.group || f.path, rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, read_lines: f.read_lines || 0, computed: f.computed || 0, shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [] }))
-    const groups = (key, list) => list.map(g => ({ key: g[key], files: g.files, rows: g.rows, read: g.read_rows || 0, by: g.by_status || {} }))
+    if (!cov) return { loading: s.error ? null : 'reading what this session saw…', error: s.error || null, w: size.w, h: size.h }
+    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || '', group: f.pattern || f.group || f.path, rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [] }))
+    const groups = (key, list) => list.map(g => ({ key: g[key], files: g.files, rows: g.rows, touched: g.touched ?? 0, seenFiles: g.seen_files ?? 0, ...partsOf(g), by: g.by_status || {} }))
       .sort((a, b) => (rank(a.by) - rank(b.by)) || (b.rows - a.rows) || String(a.key).localeCompare(String(b.key)))
     return {
-      total: cov.total || {}, session: cov.session, files, mix: typeMix(cov.types),
+      total: cov.total || {}, session: cov.session, files, mix: typeMix(cov.types), chat: !!s.chat,
       pattern: cov.patterns ? groups('pattern', cov.patterns) : groups('group', cov.groups || []), type: groups('type', cov.types || []), refreshing: !!s.loading, w: size.w, h: size.h,
     }
   },
@@ -125,7 +168,7 @@ export default {
 export function program(k, data) {
   if (!data.files) {
     if (data.error) return k.text(`{bad:×} the coverage could not be read: ${k.escape(data.error)}`)
-    return k.text(`{dim:◌ ${k.escape(data.loading || 'reading what this session read…')}}`)
+    return k.text(`{dim:◌ ${k.escape(data.loading || 'reading what this session saw…')}}`)
   }
   const st = k.state || {}
   const by = st.by === 'type' ? 'type' : 'pattern'
@@ -154,7 +197,7 @@ export function program(k, data) {
     if (!it) return null
     if (it.g) return { group: it.g.key, file: null, at: 'f-0' }
     if (it.f) return { file: it.f.path, at: 'rg-0' }
-    // a read range or the search hits: their lines as a citation, over this pane
+    // a seen range: its lines as a citation, over this pane
     if (it.r && file) { k.do('open', { mark: { kind: 'cite', ref: rangeRef(file, it.r), label: `${file.path} ${rangeWords(it.r)}` } }); return { at: id } }
     return { at: id }
   }
@@ -163,8 +206,8 @@ export function program(k, data) {
   k.on('focus', e => (e.region ? { at: e.region } : null))
   k.on('press', e => (e.region === at || e.region === 'back' || e.region === 'by-pattern' || e.region === 'by-type' ? open(e.region) : e.region ? { at: e.region } : null))
   k.on('return', () => (at ? open(at) : null))
-  k.on('[', step(-1), level === 'file' ? 'step through what was read' : 'step')
-  k.on(']', step(1), level === 'file' ? 'step through what was read' : 'step')
+  k.on('[', step(-1), level === 'file' ? 'step through what was seen' : 'step')
+  k.on(']', step(1), level === 'file' ? 'step through what was seen' : 'step')
   if (level === 'top') k.on('t', () => ({ by: by === 'type' ? 'pattern' : 'type', group: null, file: null, at: null }), by === 'type' ? 'by pattern' : 'by type')
   if (level !== 'top') k.on('0', back)
   if (level !== 'top') k.on('esc', back, 'back')
@@ -173,18 +216,18 @@ export function program(k, data) {
   const t = data.total
   const head = level === 'top' ? overview(k, data, W) : []
   if (level === 'top') {
-    const rows = Math.max(3, k.h - head.length - 3 - CHROME)
+    const rows = Math.max(3, k.h - head.length - 3 - chromeOf(k, data.chat))
     return k.stack(...head, k.text(' '), toggles(k, by), listOf(k, items, idx, rows, (it, on) => groupRow(k, it.g, by, W, on, it.id), header(k, by === 'type' ? 'type' : 'pattern', W)))
   }
   if (level === 'group') {
-    const share = group.rows ? group.read / group.rows : 0
+    const share = group.rows ? group.seen / group.rows : 0
     const title = k.beside(
       k.region('back', { label: 'back to every group' }, k.text('{accent:‹}', { wrap: false })),
       k.text(`${by === 'type' ? `**${k.escape(group.key)}** files` : patternText(k, group.key, true)}{dim: · ${n(group.files)} file${group.files === 1 ? '' : 's'} · ${n(group.rows)} rows}`, { grow: 1, wrap: false }),
-      k.text(`read ${n(group.read)} rows {dim:(${pct(share)})}`, { wrap: false }),
+      k.text(`seen ${n(Math.round(group.seen))} rows {dim:(${pct(share)})}`, { wrap: false }),
       { gap: 1 },
     )
-    const rows = Math.max(3, k.h - 4 - CHROME)
+    const rows = Math.max(3, k.h - 4 - chromeOf(k, data.chat))
     const pw = pathW(items.map(x => x.f), group, by, W)
     return k.stack(title, statusLine(k, group.by), k.text(' '), listOf(k, items, idx, rows, (it, on) => fileRow(k, it.f, group, by, W, pw, on, it.id), fileHeader(k, pw)))
   }
@@ -198,19 +241,23 @@ export function program(k, data) {
     { gap: 1 },
   )
   const out = [title, k.text(`{dim:${k.escape(fileWords(file, unit))}}`, { wrap: false }), strip(k, file, W), k.text(' ')]
+  if (!ranges.length && file.status === 'model') {
+    out.push(k.text(`{dim:A label's model read ${n(file.model)} of its rows (${k.escape(file.labels.join(', ') || 'a label')}); none of its lines entered Claude's context.}`))
+    return k.stack(out)
+  }
   if (!ranges.length && file.status === 'computed') {
-    out.push(k.text(`{dim:A query computed over its rows (${k.escape(file.queries.slice(0, 4).join(', ') || 'a query')}); Claude read what the query gave, not the rows themselves.}`))
+    out.push(k.text(`{dim:Computed over: ${k.escape([...file.queries, ...file.labels].slice(0, 4).join(', ') || 'a query')} went over its rows, and none of them entered a context. Claude saw what came out, not the rows.}`))
     return k.stack(out)
   }
   if (!ranges.length) {
-    out.push(k.text(`{dim:No line of it reached Claude${file.status === 'named' ? ': it was only named, listed or counted' + (file.by.length ? ` (${k.escape(file.by.join(', '))})` : '') : file.status === 'searched' ? ': a search showed only the lines that matched, and which lines is not known' : ''}.}`))
+    out.push(k.text(`{dim:No line of it entered Claude's context${file.status === 'named' ? ': it was only named, listed or counted' + (file.by.length ? ` (${k.escape(file.by.join(', '))})` : '') : file.status === 'searched' ? ': a search in the shell went over it, and which lines it showed is not known' : ''}.}`))
     return k.stack(out)
   }
   const shown = Math.min(ranges.length, 4)
   out.push(listOf(k, items, idx, shown, (it, on) => rangeRow(k, it.r, on, it.id, unit, file), null))
   out.push(k.text(' '))
   const r = ranges[Math.max(0, idx)] || ranges[0]
-  const room = Math.max(3, k.h - out.length - 1 - CHROME)
+  const room = Math.max(3, k.h - out.length - 1 - chromeOf(k, data.chat))
   const from = Math.max(1, Math.min(r.from - 2, Math.max(1, total - room + 1)))
   const to = Math.min(total || r.to, from + room - 1)
   const got = k.want({ lines: file.path, from, to })
@@ -218,33 +265,40 @@ export function program(k, data) {
   return k.stack(out)
 }
 
-/** The read ranges of a file, then the lines a search showed (several at a time), to step through. */
+/** The seen ranges of a file, to step through: each a range of lines, said as a search's when a search showed them all. */
 export function rangesOf(f) {
-  const out = (f.ranges || []).map(([a, b]) => ({ kind: 'read', from: a, to: b }))
-  const hits = f.hit_lines || []
-  for (let i = 0; i < hits.length && out.length < 60; i += 6) out.push({ kind: 'hit', from: hits[i], to: hits[Math.min(hits.length, i + 6) - 1], lines: hits.slice(i, i + 6) })
-  return out
+  const hits = new Set(f.hit_lines || [])
+  return (f.ranges || []).map(([a, b]) => {
+    let all = b - a < 400
+    for (let i = a; all && i <= b; i++) if (!hits.has(i)) all = false
+    return all ? { kind: 'hit', from: a, to: b, lines: Array.from({ length: b - a + 1 }, (_, i) => a + i) } : { kind: 'read', from: a, to: b }
+  })
 }
 
-/** The overview: the coverage in one line, the type bar, its legend. */
+/** The overview: what was seen in one line, the files touched and seen, what else went over the rows, the type bar in
+ *  its four shades, the legend. */
 function overview(k, data, W) {
   const t = data.total
-  const share = t.read_share || 0
+  const share = t.seen_share ?? t.read_share ?? 0
   const top = k.beside(
     k.text(`**Coverage**{dim: of ${data.session === null ? 'every session' : 'this session'} · ${n(t.files || 0)} files · ${n(t.rows || 0)} rows}${data.refreshing ? '{dim: · ◌}' : ''}`, { grow: 1, wrap: false }),
-    k.text(`read **${n(t.read_rows || 0)}** rows {dim:(}**${pct(share)}**{dim:)}`, { wrap: false }),
+    k.text(`{accent:seen} **${n(t.seen_rows ?? t.read_rows ?? 0)}** rows {dim:(}**${pct(share)}**{dim:)}`, { wrap: false }),
     { gap: 2 },
   )
+  // files: touched in any way, and seen; content: what else went over the rows, apart
+  const files = `{dim:files}  ${n(t.touched_files || 0)} of ${n(t.files || 0)} touched {dim:·} {accent:${n(t.seen_files ?? t.read_files ?? 0)} seen} {dim:(some of their lines in Claude's context)}`
+  const other = [t.model_rows ? `{good:${n(t.model_rows)} read by a label's model}` : '', t.computed_rows ? `${n(t.computed_rows)} computed over, none seen` : ''].filter(Boolean)
   const cells = mixCells(data.mix, W)
-  const bar = k.text(cells.map(c => `{${c.read ? c.tone : `${c.tone}-faint`}:${'█'.repeat(c.n)}}`).join('') || '{dim:no rows}', { wrap: false })
+  const bar = k.text(cellsMarkup(cells) || '{dim:no rows}', { wrap: false })
+  const key = k.text(`{dim:${GLYPH.seen} seen  ${GLYPH.model} read by a label's model  ${GLYPH.computed} computed over  ${GLYPH.untouched} untouched}`, { wrap: false })
   // the legend, each type whole on its row (a row ends where the next type would not fit)
-  const items = data.mix.map(m => ({ s: `{${m.tone}:■} ${k.escape(m.type)} {dim:${pct(m.rows / Math.max(1, t.rows))}${m.read ? ` · ${pct(m.read / m.rows)} read` : ''}}`, n: 2 + k.len(m.type) + 1 + pct(m.rows / Math.max(1, t.rows)).length + (m.read ? 3 + pct(m.read / m.rows).length + 5 : 0) }))
+  const items = data.mix.map(m => ({ s: `{${m.tone}:■} ${k.escape(m.type)} {dim:${pct(m.rows / Math.max(1, t.rows))}${m.seen ? ` · ${pct(m.seen / m.rows)} seen` : ''}}`, n: 2 + k.len(m.type) + 1 + pct(m.rows / Math.max(1, t.rows)).length + (m.seen ? 3 + pct(m.seen / m.rows).length + 5 : 0) }))
   const rows = []
   for (const it of items) {
     const last = rows[rows.length - 1]
     if (last && last.n + 3 + it.n <= W) { last.s += `   ${it.s}`; last.n += 3 + it.n } else rows.push({ ...it })
   }
-  return [top, k.text(' '), bar, ...rows.map(r => k.text(r.s, { wrap: false }))]
+  return [top, k.text(files, { wrap: false }), ...(other.length ? [k.text(`{dim:rows}   ${other.join('{dim: · }')}`, { wrap: false })] : []), k.text(' '), bar, key, ...rows.map(r => k.text(r.s, { wrap: false }))]
 }
 
 function toggles(k, by) {
@@ -252,34 +306,35 @@ function toggles(k, by) {
   return k.beside(one('by-pattern', 'by pattern', by === 'pattern'), k.text('{dim:·}', { wrap: false }), one('by-type', 'by type', by === 'type'), { gap: 1 })
 }
 
-// the columns of a group's row: files, read, searched, counted, untouched, then the rows read
-const COLS = [['files', 5], ['read', 5], ['searched', 8], ['counted', 7], ['untouched', 9]]
-const BAR = 10
+// the columns of a group's row: its files, those touched and those seen, then its rows in the four shades
+const COLS = [['files', 5], ['touched', 7], ['seen', 5]]
+const BAR = 20
 
 function nameW(W) {
   return Math.max(16, W - 3 - COLS.reduce((s, [, w]) => s + w + 1, 0) - (BAR + 8))
 }
 
 function header(k, what, W) {
-  return k.text(`{dim:  ${pad(what, nameW(W))} ${COLS.map(([h, w]) => pad(h, w, true)).join(' ')}  ${pad('rows read', BAR + 5)}}`, { wrap: false })
+  return k.text(`{dim:  ${pad(what, nameW(W))} ${COLS.map(([h, w]) => pad(h, w, true)).join(' ')}  ${pad('rows', BAR)} ${pad('seen', 5, true)}}`, { wrap: false })
 }
 
 function groupRow(k, g, by, W, on, id) {
   const nw = nameW(W)
   const cnt = (v, tone, w) => (v ? `{${tone}:${pad(n(v), w, true)}}` : `{dim:${pad('·', w, true)}}`)
-  const read = (g.by.computed || 0) + (g.by.read || 0)
   const name = by === 'type' ? (on ? `**${k.escape(cut(g.key, nw))}**` : k.escape(cut(g.key, nw))) : patternText(k, cut(g.key, nw), on)
   const len = Array.from(cut(g.key, nw)).length
-  const share = g.rows ? g.read / g.rows : 0
-  const fill = Math.round(share * BAR)
-  const bar = `{accent:${'█'.repeat(share > 0 ? Math.max(1, fill) : 0)}}{dim:${'·'.repeat(BAR - (share > 0 ? Math.max(1, fill) : 0))}}`
-  const line = `${on ? '{accent:**▸**} ' : '  '}${name}${' '.repeat(Math.max(0, nw - len))} ${cnt(g.files, 'ink', 5)} ${cnt(read, 'accent', 5)} ${cnt(g.by.searched, 'warn', 8)} ${cnt(g.by.named, 'dim', 7)} ${cnt(g.by['not read'], 'unseen', 9)}  ${bar} ${pad(pct(share), 5, true)}`
+  const share = g.rows ? g.seen / g.rows : 0
+  // its rows in the four shades, in the pane's colors for them: seen, read by a label's model, computed over, untouched
+  const tone = { seen: 'accent', model: 'good', computed: 'dim', untouched: 'unseen' }
+  const cells = shareCells(PARTS.map(p => g[p] || 0), BAR)
+  const bar = PARTS.map((p, j) => (cells[j] ? `{${tone[p]}:${GLYPH[p].repeat(cells[j])}}` : '')).join('') || ' '.repeat(BAR)
+  const line = `${on ? '{accent:**▸**} ' : '  '}${name}${' '.repeat(Math.max(0, nw - len))} ${cnt(g.files, 'ink', 5)} ${cnt(g.touched, 'ink', 7)} ${cnt(g.seenFiles, 'accent', 5)}  ${bar} ${pad(pct(share), 5, true)}`
   // a pattern's group carries its pattern, which `thimble rows` reads, so a question about it names its files
-  return k.region(id, { label: `${g.key}: ${n(g.files)} files, ${pct(share)} of its rows read`, ...(by === 'pattern' ? { ref: g.key } : {}) }, k.text(line, { wrap: false }))
+  return k.region(id, { label: `${g.key}: ${n(g.files)} files, ${n(g.touched)} touched, ${n(g.seenFiles)} seen; ${pct(share)} of its rows seen`, ...(by === 'pattern' ? { ref: g.key } : {}) }, k.text(line, { wrap: false }))
 }
 
 function statusLine(k, by) {
-  const parts = [['read', (by.computed || 0) + (by.read || 0), 'accent'], ['searched', by.searched || 0, 'warn'], ['only counted', by.named || 0, 'dim'], ['untouched', by['not read'] || 0, 'unseen']]
+  const parts = [['seen', by.seen || 0, 'accent'], ["read by a label's model", by.model || 0, 'good'], ['searched', by.searched || 0, 'warn'], ['only computed over', by.computed || 0, 'dim'], ['only counted', by.named || 0, 'dim'], ['untouched', by['not read'] || 0, 'unseen']]
   return k.text(parts.filter(([, v]) => v).map(([w, v, tone]) => `{${tone}:${n(v)} ${w}}`).join('{dim: · }'), { wrap: false })
 }
 
@@ -299,17 +354,21 @@ function fileHeader(k, pw) {
   return k.text(`{dim:  ${pad('', 10)}${pad('file', pw)}  ${pad('rows', 8, true)}  what reached Claude}`, { wrap: false })
 }
 
-/** What reached Claude of a file, in a few words. */
+/** What happened to a file, in a few words, as the kernel's coverage text says it. */
 export function fileWords(f, unit = 'lines') {
   const total = f.lines || f.rows
-  if (f.status === 'computed') return `a query computed over ${f.computed >= f.rows ? 'all' : n(f.computed) + ' of'} ${n(f.rows)} rows${f.queries.length ? ` (${f.queries.slice(0, 3).join(', ')})` : ''}${f.read_lines ? `; ${n(f.read_lines)} ${unit} read` : ''}`
-  if (f.status === 'read') {
+  const what = [...(f.queries || []), ...(f.labels || [])].slice(0, 3)
+  const computed = f.computed ? `computed over ${f.computed >= f.rows ? 'all' : n(f.computed) + ' of'} ${n(f.rows)} rows${what.length ? ` (${what.join(', ')})` : ''}` : ''
+  if (f.status === 'seen') {
     const r = (f.ranges || []).slice(0, 3).map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(', ')
     const more = (f.ranges || []).length > 3 ? ` and ${(f.ranges || []).length - 3} more` : ''
-    return `read ${n(f.read_lines || f.shown)} of ${n(total)} ${unit} (${pct((f.read_lines || f.shown) / Math.max(1, total))})${r ? `: ${unit} ${r}${more}` : ''}`
+    const seen = f.seen_lines || f.shown
+    return `seen ${n(seen)} of ${n(total)} ${unit} (${pct(seen / Math.max(1, total))})${r ? `: ${unit} ${r}${more}` : ''}${computed ? `; ${computed}` : ''}`
   }
-  if (f.status === 'searched') return f.hits ? `searched: only the ${n(f.hits)} matching line${f.hits === 1 ? '' : 's'} shown` : `searched: only matching lines shown${f.searched_by.length ? ` (${f.searched_by.join(', ')})` : ''}`
-  if (f.status === 'named') return `only named, listed or counted${f.by.length ? ` (${f.by.slice(0, 4).join(', ')})` : ''}; none of its lines shown`
+  if (f.status === 'model') return `a label's model read ${n(f.model)} of ${n(f.rows)} rows${f.labels.length ? ` (${f.labels.join(', ')})` : ''}; none seen`
+  if (f.status === 'searched') return `searched${f.searched_by.length ? ` by ${f.searched_by.join(', ')}` : ''}; which lines it showed is not known`
+  if (f.status === 'computed') return `${computed}; none of them seen`
+  if (f.status === 'named') return `only named, listed or counted${f.by.length ? ` (${f.by.slice(0, 4).join(', ')})` : ''}; none of its lines seen`
   return 'untouched'
 }
 
@@ -321,14 +380,14 @@ function fileRow(k, f, group, by, W, pw, on, id) {
   return k.region(id, { label: `${f.path}: ${words}`, ref: fileRef(f) }, k.text(line, { wrap: false }))
 }
 
-/** A file as a ref: the lines that reached Claude, else the lines a search showed, else the file. */
+/** A file as a ref: the lines that entered Claude's context, else the file. */
 export function fileRef(f) {
   if ((f.ranges || []).length) return `${f.path}#L${f.ranges.slice(0, 40).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(',')}`
   if ((f.hit_lines || []).length) return `${f.path}#L${f.hit_lines.slice(0, 60).join(',')}`
   return f.path
 }
 
-/** A read range, or a run of search hits, as a ref. */
+/** A seen range, or a run of lines a search showed, as a ref. */
 export function rangeRef(f, r) {
   return r.kind === 'read' ? `${f.path}#L${r.from === r.to ? r.from : `${r.from}-${r.to}`}` : `${f.path}#L${r.lines.join(',')}`
 }
@@ -337,25 +396,28 @@ const rangeWords = r => (r.kind === 'read' ? (r.from === r.to ? `line ${r.from}`
 
 function rangeRow(k, r, on, id, unit, f) {
   const words = r.kind === 'read'
-    ? `{accent:read}  ${unit} ${r.from === r.to ? n(r.from) : `${n(r.from)}–${n(r.to)}`}{dim:  (${n(r.to - r.from + 1)})}`
-    : `{warn:a search showed}  ${r.lines.length === 1 ? 'line' : 'lines'} ${r.lines.map(n).join(', ')}`
-  return k.region(id, { label: r.kind === 'read' ? `${f.path}: read ${unit} ${r.from} to ${r.to}` : `${f.path}: search hits at ${r.lines.join(', ')}`, ref: rangeRef(f, r) }, k.text(`${on ? '{accent:**▸**} ' : '  '}${words}`, { wrap: false }))
+    ? `{accent:seen}  ${unit} ${r.from === r.to ? n(r.from) : `${n(r.from)}–${n(r.to)}`}{dim:  (${n(r.to - r.from + 1)})}`
+    : `{accent:seen} {warn:as a search showed them}  ${r.lines.length === 1 ? 'line' : 'lines'} ${r.lines.map(n).join(', ')}`
+  return k.region(id, { label: r.kind === 'read' ? `${f.path}: seen ${unit} ${r.from} to ${r.to}` : `${f.path}: lines a search showed, ${r.lines.join(', ')}`, ref: rangeRef(f, r) }, k.text(`${on ? '{accent:**▸**} ' : '  '}${words}`, { wrap: false }))
 }
 
-/** The whole file in one row: each cell a stretch of its lines, lit where a read range or a search hit falls. */
+/** The whole file in one row: each cell a stretch of its lines, lit where a seen range falls (in a search's color where
+ *  only a search showed it); the rest in the shade of what else went over it: read by a label's model ▓, computed over
+ *  ▒, untouched ░. */
 function strip(k, f, W) {
   const total = Math.max(1, f.lines || f.rows || 1)
   const w = Math.max(10, W - 2)
   const cell = new Array(w).fill('')
   const at = line => Math.min(w - 1, Math.floor(((line - 1) * w) / total))
-  for (const h of f.hit_lines || []) cell[at(h)] = cell[at(h)] || 'hit'
-  for (const [a, b] of f.ranges || []) for (let c = at(a); c <= at(b); c++) cell[c] = 'read'
+  const hits = new Set(f.hit_lines || [])
+  for (const [a, b] of f.ranges || []) for (let c = at(a); c <= at(b); c++) cell[c] = cell[c] === 'seen' || !hits.has(a) ? 'seen' : 'hit'
+  const rest = f.model ? `{good:${GLYPH.model}}` : f.computed ? `{dim:${GLYPH.computed}}` : `{unseen:${GLYPH.untouched}}`
   let s = ''
-  for (const c of cell) s += c === 'read' ? '{accent:█}' : c === 'hit' ? '{warn:▌}' : '{unseen:░}'
+  for (const c of cell) s += c === 'seen' ? `{accent:${GLYPH.seen}}` : c === 'hit' ? `{warn:${GLYPH.seen}}` : rest
   return k.text(s, { wrap: false })
 }
 
-/** The file's own lines, numbered, those that were read marked ▌ and in ink, the rest dim, a search hit marked. */
+/** The file's own lines, numbered, those seen marked ▌ (in a search's color where a search showed them), the rest dim. */
 function linesView(k, f, got, from, to, W) {
   if (!got) return k.text('{dim:   reading the file…}')
   if (got.error) return k.text(`{bad:   × ${k.escape(got.error)}}`)
@@ -367,8 +429,8 @@ function linesView(k, f, got, from, to, W) {
   return k.stack(lines.map((t, i) => {
     const no = from + i
     const text = k.escape(cut(String(t).replace(/\t/g, '  ').slice(0, LINES), W - nw - 4))
-    if (read.has(no)) return k.text(`{accent:${String(no).padStart(nw)} ▌}${text}`, { wrap: false })
     if (hits.has(no)) return k.text(`{warn:${String(no).padStart(nw)} ▌}${text}`, { wrap: false })
+    if (read.has(no)) return k.text(`{accent:${String(no).padStart(nw)} ▌}${text}`, { wrap: false })
     return k.text(`{dim:${String(no).padStart(nw)} │${text}}`, { wrap: false })
   }))
 }
