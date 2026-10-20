@@ -1,11 +1,10 @@
-// The observer's pure parts: what it reads of an object's lineage, how it reads the fork's answer, and the hint row as
-// it ranks it (shell/object.js rankRow). `node --test lean/observer/test/*.test.mjs`
+// The observer's pure parts: what it reads of an object's lineage, and how it reads the pass's answer.
+// `node --test lean/observer/test/*.test.mjs`
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { bareNumbers, digest, fewInputs, hintsFor, isRepeat, parseAnswer, pickHints, rowCount, rowsIn, slim } from '../evidence.js'
-import { rankRow } from '../../shell/object.js'
+import { bareNumbers, digest, fewInputs, isRepeat, parseAnswer, rowCount, rowsIn, slim } from '../evidence.js'
 
 const OBJECT = {
   id: '02-orders-by-region', version: 2, session: 's-1', title: 'Refunds by region', question: 'Which region had the most refunds in March?',
@@ -72,26 +71,17 @@ test('the digest says how many rows stand behind each cited value, how sure the 
   assert.match(d, /as the person sees it under the reply:\n    Refunds by region\n    West ▆▆▆▆ 412\n    12 regions/)
 })
 
-test("the fork's answer is read leniently, and its hints keep only verbs that exist, at most three", () => {
+test("the pass's answer is read leniently: its notes, and nothing of the parts no lens gives", () => {
   const a = parseAnswer('Here: {"notes": [{"note": "412 counts all months.", "rests_on": "groupby"}, {"note": " "}], "line": {"line": "x", "decision": "send it"}, "settled": true, "hints": {"orders-by-region": [{"verb": "trace", "phrase": "trace the 412 to its rows"}, {"verb": "stress"}, {"verb": "t"}, "explore", {"verb": "squeeze"}, {"verb": "x"}]}}')
   assert.equal(a.notes.length, 1)
   assert.equal('line' in a, false)
-  const list = pickHints(hintsFor(a.hints, '02-orders-by-region'), VERBS)
-  assert.deepEqual(list, [{ verb: 'trace', phrase: 'trace the 412 to its rows' }, { verb: 'explore' }, { verb: 'squeeze' }])
+  assert.equal('hints' in a, false)
   assert.equal(parseAnswer('no json'), null)
-  assert.deepEqual(pickHints([{ verb: 'map' }], VERBS), [])
 })
 
 test('a repeat is the same line in other spacing or case', () => {
   assert.equal(isRepeat('Before you send: 3 of 9 never re-ran.', ['before you send 3 of 9 never re-ran']), true)
   assert.equal(isRepeat('Before you send: 4 of 9 never re-ran.', ['before you send 3 of 9 never re-ran']), false)
-})
-
-test("the hint row as the observer ranked it: its verbs first, in its order, with its words; none of its own, the rule's", () => {
-  const row = rankRow(VERBS, { verbs: [{ verb: 'trace', phrase: 'trace the 412' }, { verb: 'squeeze' }] })
-  assert.deepEqual(row.map(v => [v.name, v.picked, v.hint ?? null]), [['trace', true, 'trace the 412'], ['squeeze', true, null], ['explore', false, null]])
-  assert.equal(rankRow(VERBS, null), VERBS)
-  assert.equal(rankRow(VERBS, { verbs: [{ verb: 'map' }] }), VERBS)
 })
 
 test('a slimmed object keeps what the digest reads and drops its data, program and row sets; many inputs read as patterns', () => {

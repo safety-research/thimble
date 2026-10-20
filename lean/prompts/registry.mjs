@@ -3,7 +3,7 @@
 // version `skill`). The table below names each feature, its default and what reads it; a file dropped into a feature's
 // folder is a new version with no change here. Which version is active, per feature, comes from the plugin's Prompts
 // setting and the THIMBLE_PROMPTS environment variable (the variable wins), each a list such as
-// "forms:principles, observer:attention-v1". A lens can be turned off with the version `off`.
+// "forms:principles, lens-explain:off". A lens can be turned off with the version `off`.
 //
 // Pure: no file system. The hooks module reads the files with $.fs (prompts.ts), Node with node:fs (node.mjs).
 
@@ -26,27 +26,24 @@ export const FEATURES = {
     reads: 'observer/observer.ts, after each turn of work',
     default: 'v3-low',
     versions: {
-      v2: { about: 'the frame for the lenses: one call over the new turn and a digest of the state', mode: 'lenses' },
-      'attention-v1': { about: "v2 with the draft principles of when something is worth the person's attention", mode: 'lenses' },
-      'v2-low': { about: 'v2 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v2.md', mode: 'lenses', effort: 'low' },
-      v3: { about: "v2 with thimble's purpose in the 0.9 preamble's words, and cards for objects", mode: 'lenses' },
-      'v3-low': { about: 'v3 at low effort, as v2-low is v2', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low' },
+      v3: { about: "the frame for the lenses (one call over the new turn and a digest of the state), with thimble's purpose in the 0.9 preamble's words, and cards for objects", mode: 'lenses' },
+      'v3-low': { about: 'v3 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low' },
     },
   },
   'observer-turn': { about: "the pass's message: the new turn, its objects and the digest of the state", reads: 'observer/observer.ts', default: 'v1' },
   'lens-notes': { about: 'lens: notes to Claude', reads: 'the pass', default: 'v1', optional: true },
   'lens-actions': {
     about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v3', optional: true,
-    versions: { v1: { about: "observer:v1's words on lit verbs" }, v2: { about: 'v lit with a named card when a claim would be clearer seen than read' }, v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" } },
+    versions: { v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" } },
   },
   'lens-squeeze': { about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v1', optional: true },
   'lens-explain': {
     about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v3', optional: true,
-    versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' }, v3: { about: "v2, opened with the 0.9 rule for terms (explain a term the person has not used the first time) as its reason" } },
+    versions: { v3: { about: "v2, opened with the 0.9 rule for terms (explain a term the person has not used the first time) as its reason" } },
   },
   squeeze: {
     about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v6',
-    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" }, v4: { about: 'v3, with the corrections in the original named in the request and put back when a rewrite leaves one out: a correction may be shortened, never dropped', keep: true }, v5: { about: 'v4, with the terms of the explain marks named in the request and kept in their words where the text keeps what they name', keep: true, terms: true }, v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
+    versions: { v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
   },
   forms: {
     versions: {
@@ -76,11 +73,11 @@ export const FEATURES = {
   },
   thread: {
     about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v2',
-    versions: { v1: { about: 'as before' }, v2: { about: "v1 with thimble's purpose and the 0.9 words on answering and citing" } },
+    versions: { v2: { about: "v1 with thimble's purpose and the 0.9 words on answering and citing" } },
   },
   labels: {
     about: "the classifier a --prompt label's records are read with: one call per batch of up to 50 records", reads: 'verbs/label/run.mjs, for each call of a --prompt label', default: 'v2',
-    versions: { v1: { about: 'as coh-labels wrote it, from the 0.9 classifier' }, v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
+    versions: { v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
   },
   thimble: { about: 'the thimble skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'thimble', versions: { skill: { file: 'skills/thimble/SKILL.md', about: 'as SKILL.md says now' } } },
   map: { about: 'the map skill', reads: 'the skill', default: 'skill', skill: 'map', versions: { skill: { file: 'verbs/map/SKILL.md' } } },

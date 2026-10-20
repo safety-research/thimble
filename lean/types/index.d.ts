@@ -15,8 +15,6 @@ export type Ran = { verb: string; text?: string; note?: string; ask?: string; er
 /** A verb running on an object (the row under it says `<verb>… <text>`, its progress), or what it said last. */
 export type Said = { verb: string; text?: string; error?: string; running?: boolean }
 
-/** The hint row of one object version as the observer ranked it: its 2-3 verbs, each with a few words for this object. */
-export type Ranking = { verbs: { verb: string; phrase?: string }[]; at: number; by: 'observer' }
 
 /** One mark in a message (CONTRACT 1): a citation, a gloss or a sparkline, as offsets into the shown markdown. */
 export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; anchor?: 'form' | 'word' }
@@ -103,8 +101,6 @@ declare module 'claude-code' {
       rows: StateFamily<unknown>
       /** when an object's drawing at a width became ready, by root, id, version and width: a drawing waiting on it redraws */
       ready: StateFamily<number>
-      /** the observer's ranking of an object version's hint row, by root, id and version */
-      ranked: StateFamily<Ranking | null>
       /** the observer's line above the prompt, or none */
       /** each message's record, by its row key */
       msg: StateFamily<MsgRecord | null>

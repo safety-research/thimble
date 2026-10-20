@@ -73,7 +73,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
   // the question step's prompt as blocks, where its cache marks are
   const qblocks: { text: string; cache?: true }[][] = []
   // the question step is a completion with no system prompt; the pass is one with the frame and its lenses as the
-  // system prompt (observer:v2), or a fork of the session (observer:v1)
+  // system prompt
   const pass = async (prompt: string) => {
     if (o.holdPass) await o.holdPass
     forks.push(prompt)
@@ -393,38 +393,20 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves per day, June 18 marked'])
 })
 
-test('the shadow A/B: THIMBLE_PROMPTS_SHADOW runs the same turn again with other versions, recorded apart and never merged', async ($, on) => {
-  const w = world(on, { env: { THIMBLE_PROMPTS_SHADOW: 'observer:v2,lens-actions:v2' }, fork: { notes: [{ note: 'Say the 6,543 counts reverts.' }], line: null, settled: false, verbs: { v: { note: 'saves by day', proposals: ['saves per day, June 18 marked'] } }, glosses: [], claims: [] } })
-  await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
-  await w.clock.settle()
-  await w.clock.advance(100)
-  await w.clock.settle()
-  // two passes on the same turn: the active versions at low effort, then the shadow's at the model's own effort
-  expect(w.forks.length).toBe(2)
-  expect(w.efforts).toEqual(['low', null])
-  const calls = w.events.filter(e => e.kind === 'call' && e.feature === 'observer')
-  expect(calls.map(c => [c.prompt, c.shadow ?? null])).toEqual([['observer:v3-low', null], ['observer:v2', 'observer:v2,lens-actions:v2']])
-  expect((calls[1]!.lens_prompts as Json).actions).toBe('lens-actions:v2')
-  expect(w.events.filter(e => e.kind === 'look').map(e => String(e.shadow ?? '')).sort()).toEqual(['', 'observer:v2,lens-actions:v2'])
-  // the shadow's note is never merged: Claude gets the note once
-  await $.prompt.submit({ text: 'next', origin: { kind: 'composer' } } as never)
-  expect(w.submitted.at(-1)!.context.join('\n').split('Say the 6,543 counts reverts.').length).toBe(2)
-})
-
 test('a lens turned off is neither asked nor merged; another frame version is read in its place', async ($, on) => {
-  const w = world(on, { env: { THIMBLE_PROMPTS: 'lens-explain:off,observer:attention-v1' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
+  const w = world(on, { env: { THIMBLE_PROMPTS: 'lens-explain:off,observer:v3' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
   await w.clock.settle()
   await w.clock.advance(100)
   await w.clock.settle()
-  expect(w.forks[0]).toContain('FRAME ATTENTION')
+  expect(w.forks[0]).toContain('FRAME')
   expect(w.forks[0]).not.toContain('LENS explain')
   expect(w.forks[0]).toContain('REPLY {"notes": [], "verbs": {}}')
   expect(JSON.parse(w.files[MSGPATH]!).glosses).toEqual({})
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
-  expect(pass.prompt).toBe('observer:attention-v1')
+  expect(pass.prompt).toBe('observer:v3')
   expect(Object.keys(pass.lenses as Json)).not.toContain('explain')
-  expect((w.events.find(e => e.kind === 'prompts')!.changed as string)).toBe('observer:attention-v1,lens-explain:off')
+  expect((w.events.find(e => e.kind === 'prompts')!.changed as string)).toBe('observer:v3,lens-explain:off')
 })
 
 test('a version that does not exist: the default is read, and one line says so', async ($, on) => {

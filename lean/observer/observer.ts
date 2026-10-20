@@ -28,17 +28,15 @@
 // Where its output goes:
 // - notes: beside the next prompt of main, whatever sent it (the person, a verb's ask, a notification), as context the
 //   person never sees. Once each: a prompt that never entered gives them back. Deduplicated across the session.
-// - hints: the shell's hint row under each object (shell/object.js rankRow), in place of its own rule, once the
-//   look is done; a ranking that comes while a turn runs waits for that turn's end.
 // A pass that fails says so once, in a toast with its fix, and again only when the reason changes.
 // Off: the Observer row in /config.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ObjRef, Ranking } from '../types'
+import type { ObjRef } from '../types'
 import { answerRow, applyObserver, drawnTextOf, messageRecord, personHere } from '../shell/shell'
 import { glossesOf } from '../shell/message.js'
-import { promptText, promptTextAt, shadowVersions } from '../prompts/prompts'
+import { promptText } from '../prompts/prompts'
 import { FEATURES } from '../prompts/registry.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf } from './compose.mjs'
@@ -54,7 +52,6 @@ type Any = any
 type Note = { note: string; rests_on?: string; from: 'observer' }
 type Answer = {
   notes: { note: string; rests_on?: string }[]
-  hints: Record<string, unknown>
   verbs: Record<string, unknown>
   glosses: unknown[]
 }
@@ -63,7 +60,6 @@ type Answer = {
 type Look = { turnId: string; turnNo: number; steps: number; tools: number; answer: string; question: string; typed: boolean; verb: string; earlier: string[]; since: number }
 type TurnPrompt = { text: string; typed: boolean; verb: string }
 
-const RANKED = { plugin: 'thimble', key: 'ranked' } as const
 const LAST = { plugin: 'thimble', key: 'last' } as const
 const TRAY = { plugin: 'thimble', key: 'tray' } as const
 
@@ -97,8 +93,6 @@ const S = {
   pending: [] as Note[],
   looking: false,
   again: null as Look | null,
-  deferred: [] as { id: string; ranking: Ranking }[],
-  hints: {} as Record<string, Ranking>,
   log: [] as Record<string, unknown>[],
   failedWhy: '', // why the last pass failed, as said in its toast: the same reason is not said again
 }
@@ -139,7 +133,6 @@ async function ensure($: Engine): Promise<void> {
     try {
       if (await $.fs.exists(S.file)) {
         const kept = JSON.parse(String(await $.fs.read(S.file)))
-        S.hints = kept.hints && typeof kept.hints === 'object' ? kept.hints : {}
         S.log = Array.isArray(kept.log) ? kept.log : []
         S.notesGiven = strs(kept.notesGiven)
         // a reload mid-session: the notes not yet delivered wait again, and the person's questions come back
@@ -160,7 +153,7 @@ async function ensure($: Engine): Promise<void> {
 async function save($: Engine): Promise<void> {
   if (!S.file) return
   try {
-    await $.fs.write(S.file, JSON.stringify({ hints: S.hints, notesGiven: S.notesGiven.slice(-200), log: S.log.slice(-400) }, null, 1))
+    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), log: S.log.slice(-400) }, null, 1))
   } catch {
     // the file is memory for a resume and a record for measuring; the observer works without it
   }
@@ -237,19 +230,6 @@ async function coverageNow($: Engine, root: string): Promise<string> {
 
 // ------------------------------------------------------------------------------------------------ the look
 
-async function applyRanking($: Engine, id: string, ranking: Ranking): Promise<void> {
-  S.hints[id] = ranking
-  await $.state.set({ ...RANKED, id }, ranking)
-}
-
-/** Rankings that came while a turn ran: shown now that it has ended. */
-async function flushDeferred($: Engine): Promise<void> {
-  const list = S.deferred
-  S.deferred = []
-  for (const d of list) await applyRanking($, d.id, d.ranking)
-  if (list.length) await save($)
-}
-
 /** One look at a turn. */
 async function look($: Engine, t: Look): Promise<void> {
   if (S.looking) {
@@ -299,8 +279,6 @@ async function look($: Engine, t: Look): Promise<void> {
       if (!pt.off) parts.push({ lens, text: pt.text, id: pt.id })
     }
     const model = S.model || 'opus'
-    let passVals: Record<string, unknown> | null = null
-    let passTmpl: { text: string; id: string } | null = null
     const fork: Record<string, unknown> = { prompt: frame.id, lenses: Object.fromEntries(parts.map(x => [x.lens.name, x.id])) }
     row.fork = fork
     const extra: Record<string, unknown> = { turn: t.turnNo, mode: 'lenses', lens_prompts: fork.lenses }
@@ -312,7 +290,7 @@ async function look($: Engine, t: Look): Promise<void> {
     const atRow = await answerRow($)
     const before = atRow ? await messageRecord($, atRow) : null
     const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
-    passVals = {
+    const vals: Record<string, unknown> = {
       QUESTION: cut(t.question, 4000) || '(none)',
       ROW: inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze',
       STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
@@ -323,8 +301,7 @@ async function look($: Engine, t: Look): Promise<void> {
       COVERAGE: coverage,
       EARLIER: bullets(t.earlier.slice(-6).map(x => cut(x, 300))),
     }
-    passTmpl = tmpl
-    const f: Any = await lensPass($, { frame, parts, tmpl, vals: passVals, st, model, extra, fork })
+    const f: Any = await lensPass($, { frame, parts, tmpl, vals, st, model, extra, fork })
     fork.ms = (await $.clock.now()) - t0
     const out: Answer | null = f.isAnswered ? parseAnswer(f.text) : null
     if (f.isAnswered) {
@@ -400,10 +377,7 @@ async function look($: Engine, t: Look): Promise<void> {
         await $.store.set(K.glossUnopened, n)
         await $.store.set(K.glossSkip, glossSkipsFor(n))
       } else if (glossSkip > 0) await $.store.set(K.glossSkip, glossSkip - 1)
-    }
-    // the shadow A/B (THIMBLE_PROMPTS_SHADOW): the same turn again with other versions, recorded and never merged
-    if (passVals && passTmpl) await shadowPass($, { t, row, frame, parts, tmpl: passTmpl, vals: passVals, st, model })
-  } catch (err) {
+    }  } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
     // the objects saved up to the turn it looked at are looked at; a turn that began since keeps its own start
@@ -435,37 +409,6 @@ async function lensPass($: Engine, o: { frame: { text: string; id: string; versi
     if (r && (r as Any).isAnswered) Object.assign(o.extra, sharesOf({ system, turn, lenses: o.parts.map(x => x.lens), raw: jsonIn((r as Any).text), rawText: (r as Any).text }))
     return r
   })
-}
-
-/** The shadow A/B: the turn's pass again with the versions THIMBLE_PROMPTS_SHADOW names, on the same turn and state. Its
- *  call is in the session's events with `shadow` (thimble stats shows it on its own row), and a look line with `shadow`
- *  says what it would have lit; nothing of it is shown or merged. */
-async function shadowPass($: Engine, o: { t: Look; row: Record<string, unknown>; frame: { text: string; id: string; version: string }; parts: { lens: Any; text: string; id: string }[]; tmpl: { text: string; id: string }; vals: Record<string, unknown>; st: Any; model: string }): Promise<void> {
-  try {
-    const sh = await shadowVersions($)
-    if (!sh || !Object.keys(sh.versions).length) return
-    const sv = sh.versions
-    const frame = sv.observer ? await promptTextAt($, 'observer', sv.observer) : o.frame
-    const parts: { lens: Any; text: string; id: string }[] = []
-    for (const lens of LENSES as Any[]) {
-      const want = sv[lens.feature]
-      const mine = o.parts.find(x => x.lens === lens)
-      if (!want && mine) { parts.push(mine); continue }
-      const pt = want ? await promptTextAt($, lens.feature, want) : await promptText($, lens.feature)
-      if (!pt.off) parts.push({ lens, text: pt.text, id: pt.id })
-    }
-    const tmpl = sv['observer-turn'] ? await promptTextAt($, 'observer-turn', sv['observer-turn']) : o.tmpl
-    const fork: Record<string, unknown> = {}
-    const extra: Record<string, unknown> = { turn: o.t.turnNo, mode: 'lenses', shadow: sh.spec, lens_prompts: Object.fromEntries(parts.map(x => [x.lens.name, x.id])) }
-    const t0 = await $.clock.now()
-    const f = await lensPass($, { frame, parts, tmpl, vals: o.vals, st: o.st, model: o.model, extra, fork })
-    const out = f?.isAnswered ? parseAnswer(f.text) : null
-    const v = out ? ((LENSES as Any[]).find(l => l.name === 'actions')?.read(out) as { note?: string; proposals?: string[] } | null) : null
-    o.row.shadow = { spec: sh.spec, ms: (await $.clock.now()) - t0, usage: f?.usage ?? null, ok: !!out, v: v ?? null, out }
-    await record($, { kind: 'look', turn: o.t.turnNo, shadow: sh.spec, lit: v ? ['v'] : [], v: v ? { note: v.note ?? '', proposals: v.proposals ?? [] } : null, observer: frame.id, prompts: extra.lens_prompts })
-  } catch (err) {
-    o.row.shadow_error = cut(String((err as Error)?.message || err), 300)
-  }
 }
 
 // ------------------------------------------------------------------------------------------------ the next prompt
@@ -519,8 +462,6 @@ export const registerObserver: Register = (on, options) => {
     const r = await next(e)
     try {
       await ensure($)
-      // a resumed session: the hint rows as the observer ranked them
-      for (const [id, ranking] of Object.entries(S.hints)) await $.state.set({ ...RANKED, id }, ranking)
     } catch {
       // the observer stays quiet; the session goes on
     }
@@ -550,7 +491,6 @@ export const registerObserver: Register = (on, options) => {
     if (e.agentId !== undefined) return r
     S.running = false
     try {
-      await flushDeferred($)
       if (!(await isOn($))) return r
       // no look where no person reads it: a `-p` run never, a session of the background service from the person's
       // first prompt (as the shell starts its work)
@@ -572,8 +512,7 @@ export const registerObserver: Register = (on, options) => {
     if (e.agentId === undefined) {
       S.running = false
       try {
-        await flushDeferred($)
-      } catch {
+        } catch {
         // nothing to show is better than a turn that does not end
       }
     }
@@ -624,7 +563,7 @@ export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', enabled: true, model: '', turnId: '', turnNo: 0, steps: 0, tools: 0,
     turnStart: 0, running: false, since: 0, prompt: { text: '', typed: true, verb: '' }, questions: [], notesGiven: [], pending: [], looking: false, again: null,
-    deferred: [], hints: {}, log: [], failedWhy: '',
+    log: [], failedWhy: '',
   })
   carrying = []
   lookEnded()

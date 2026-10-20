@@ -56,11 +56,6 @@ test('the real fragments compose: every lens of the registry has instructions, a
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
   assert.match(turn.text, /Notes Claude already has:\n- a note given/)
   assert.match(turn.text, /Terms the person already saw explained:\n- p95/)
-  // the attention version of the frame holds the draft principles in place of the default-none paragraph
-  const att = textOf('observer', ROOT, { THIMBLE_PROMPTS: 'observer:attention-v1' }).text
-  assert.match(att, /## When something is worth the person's time and attention/)
-  assert.match(att, /\*\*Unasked output costs attention, even when it is ignored\.\*\*/)
-  assert.ok(att.includes('{{LENSES}}'))
 })
 
 test("each lens's share of the pass: its characters in and out, the frame and the turn as the shared part", () => {
@@ -109,7 +104,7 @@ test('the notes, actions, squeeze and explain lenses each put their part where i
 test('the rule of the explain lens holds only when its condition does', () => {
   assert.deepEqual(byName.explain.when({ glossSkip: 1 }), ['backoff'])
   for (const name of ['notes', 'explain']) {
-    const frag = readFileSync(new URL(`../../prompts/lens-${name}/v1.md`, import.meta.url), 'utf8')
+    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${name === "notes" ? "v1" : "v3"}.md`, import.meta.url), 'utf8')
     const d = sectionsOf(frag).digest
     assert.ok(d, `lens-${name} has a digest`)
     const keys = [...d.matchAll(/\{\{([A-Z_]+)\}\}/g)].map(m => m[1])

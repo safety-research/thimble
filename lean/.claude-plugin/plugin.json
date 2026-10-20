@@ -1,7 +1,7 @@
 {
   "name": "thimble",
   "version": "0.0.1",
-  "description": "thimble's kernel and shell: the `thimble` command reads and queries any files, keeps the code, inputs and source rows behind every value, and saves objects as program + data + lineage; each object Claude saves is drawn under its reply with the verbs that fit it, and opens in a detail view that keeps the chat going. Verbs are folders in verbs/. An observer reads each answer and the objects behind it once after the turn: it leaves notes for Claude, lights the verbs that would help, and marks the terms the person may not know.",
+  "description": "thimble for Claude Code: the `thimble` command reads and queries any files and keeps the code, inputs and source rows behind every value. Each card Claude saves is drawn under its reply and opens in a detail view that keeps the chat going; each citation opens the rows it cites. After each turn an observer leaves notes for Claude, lights v when another view would help, and marks the terms the person may not know.",
   "author": {
     "name": "Matthew Joerke"
   },

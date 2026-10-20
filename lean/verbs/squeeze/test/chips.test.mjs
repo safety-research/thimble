@@ -19,7 +19,7 @@ const TEXT = [
   '- The fix is one line.',
   '- The test then [passed 200 times in a row](q3#test=checkout@passes).',
 ].join('\n')
-const PROMPT = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v3.md', import.meta.url)), 'utf8')
+const PROMPT = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v6.md', import.meta.url)), 'utf8')
 
 function record() {
   const rec = newRecord({ row: 'r1', session: 's1', text: TEXT })
@@ -324,13 +324,6 @@ test('the request names the terms of the explain marks, to keep in their words; 
   const q = request(record(), { system: 'S', terms: termsOf(record()) })
   assert.match(q.prompt[1].text, /Terms the person can open an explanation of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test\n/)
   assert.doesNotMatch(request(record(), { system: 'S' }).prompt[1].text, /Terms the person can open/)
-})
-
-test('squeeze:v5 is v4 with the principle of keeping the explain terms, and it is the default', () => {
-  const v4 = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v4.md', import.meta.url)), 'utf8')
-  const v5 = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v5.md', import.meta.url)), 'utf8')
-  assert.match(v5, /\*\*Keep the terms the person can open\.\*\*/)
-  assert.equal(v5.replace(/\*\*Keep the terms the person can open\.\*\*[^\n]*\n\n/, ''), v4)
 })
 
 test('a catch-up is several messages written as one: its original is them in order, its request names them so, and the note tells Claude what the person read', () => {

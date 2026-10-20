@@ -2,21 +2,13 @@
 // templates with the same placeholders and sections as the real ones, so a test sees what the observer composed.
 
 const STUBS: Record<string, string> = {
-  'observer/v2': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
-  'observer/attention-v1': 'FRAME ATTENTION\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer/v3': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer-turn/v1': 'TURN {{QUESTION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
   'lens-notes/v1': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
-  'lens-actions/v2': 'LENS actions',
   'lens-actions/v3': 'LENS actions',
   'lens-squeeze/v1': 'LENS squeeze',
-  'lens-explain/v2': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
   'lens-explain/v3': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
-  'squeeze/v3': 'THE PROMPT',
-  'squeeze/v4': 'THE PROMPT',
-  'squeeze/v5': 'THE PROMPT',
   'squeeze/v6': 'THE PROMPT',
-  'thread/v1': 'THE THREAD PROMPT',
   'thread/v2': 'THE THREAD PROMPT',
   'forms/v2': '# Card forms\n\n## Principles\n\nOLD PRINCIPLES\n\n## Worked examples\n\nTHE WORKED FORMS',
   'forms/v3': '# Card guidance\n\n## Making a card\n\nTHE WORKED FORMS',

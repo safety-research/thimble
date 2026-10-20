@@ -28,7 +28,7 @@ import { paintRegions, selectable } from './cells'
 import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
-import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
+import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import type { Scope as ThreadScope } from './thread'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, pressTaken, readCardState, writeCardState } from './runtime'
@@ -69,7 +69,6 @@ const READY = { plugin: 'thimble', key: 'ready' } as const
 const SAID = { plugin: 'thimble', key: 'said' } as const
 const NOTES = { plugin: 'thimble', key: 'notes' } as const
 const WHERE = { plugin: 'thimble', key: 'where' } as const
-const RANKED = { plugin: 'thimble', key: 'ranked' } as const
 const MSG = { plugin: 'thimble', key: 'msg' } as const
 const MSGROWS = { plugin: 'thimble', key: 'msgrows' } as const
 const TRAY = { plugin: 'thimble', key: 'tray' } as const
@@ -217,16 +216,6 @@ export async function drawnTextOf($: Engine, ref: ObjRef): Promise<string> {
   if (p.error || !p.grid) return `(it cannot be drawn: ${p.error || 'no drawing'})`
   const err = p.drawing?.error ? `\n(its program failed: ${p.drawing.error.name}: ${p.drawing.error.message})` : ''
   return gridText(p.grid) + err
-}
-
-/** The state key of an object version's ranking. */
-export const rankedId = (ref: ObjRef) => `${ref.root}|${ref.id}|${ref.v ?? ''}`
-
-/** The verbs as the hint row shows them: as the observer ranked them for this version, once it has, else the rule's. A
- *  drawing that reads it redraws when the ranking comes. */
-async function rankedVerbs($: Engine, ref: ObjRef, verbs: Verb[]): Promise<Verb[]> {
-  const r = (await $.state.get({ ...RANKED, id: rankedId(ref) })).value
-  return r ? (rankRow(verbs, r) as Verb[]) : verbs
 }
 
 // ------------------------------------------------------------------------------------------------ where objects are drawn
@@ -2614,7 +2603,7 @@ export const registerShell: Register = (on, options) => {
     if (!word || word === '?' || word === 'all') {
       const t = await parseTarget($, rest)
       if (!t.ref) return { text: 'No object yet: the verbs work on an object Claude saved.' }
-      const verbs = await rankedVerbs($, t.ref, await verbsOf($, t.ref))
+      const verbs = await verbsOf($, t.ref)
       const lines = verbs.map(v => `${v.picked ? '●' : ' '} ${v.key || ' '}  ${v.name.padEnd(10)} ${v.phrase || v.line}`)
       return { text: verbs.length ? `The verbs for ${refText(t.ref)} (● picked for it):\n${lines.join('\n')}` : 'No verbs yet: a verb is a folder in lean/verbs/.' }
     }

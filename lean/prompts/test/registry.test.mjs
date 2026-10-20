@@ -28,7 +28,7 @@ test('a spec reads as feature:version pairs; aliases name their feature; a word 
 
 test('the index has every feature with its default, the versions on disk, and a skill in place as `skill`', () => {
   const idx = indexOf({ observer: ['v1.md', 'v2.md', 'mine.md', 'notes.txt', '.draft.md'] })
-  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['attention-v1', 'mine', 'v1', 'v2', 'v2-low', 'v3', 'v3-low'])
+  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['mine', 'v1', 'v2', 'v3', 'v3-low'])
   assert.equal(idx.observer.versions.mine.file, 'prompts/observer/mine.md')
   assert.equal(idx.thimble.versions.skill.file, 'skills/thimble/SKILL.md')
   // a feature that is off by default has no version named off
@@ -115,18 +115,6 @@ test('a version made of parts reads each section where it stands, and can leave 
   const loaded = textOf('cards', ROOT, { THIMBLE_SKILL_LOADED: '1' })
   assert.match(loaded.text, /^## Making a card\n/)
   assert.doesNotMatch(loaded.text, /## Cards\n/)
-})
-
-test("today's texts are the v1 of their features, byte for byte", () => {
-  // the hashes of observer.md, question.md, squeeze's prompt.md and FORMS.md as they stood before the registry (with the
-  // command's name, thimble, in place of lean, and `thimble run` with r1, r2, ... in place of `thimble q` with q1, q2, ...),
-  // and the thread prompt's opening
-  const want = {
-    'squeeze/v1.md': '571cc21c206dd909',
-    'forms/v1.md': '7c84d1a94721d3d6',
-  }
-  for (const [f, h] of Object.entries(want)) assert.equal(sha(readFileSync(join(ROOT, 'prompts', f), 'utf8')), h, f)
-  assert.match(readFileSync(join(ROOT, 'prompts/thread/v1.md'), 'utf8'), /^You answer one person's questions about one part of a card/)
 })
 
 test('every version file on disk is in the index, every default exists, and every lens fragment has its sections', () => {
