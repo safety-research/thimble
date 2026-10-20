@@ -1,17 +1,17 @@
 // term.ts: Claims in the terminal. The session's claims are kept in <root>/thimble/claims/<session>.json (store.js);
 // the observer's pass adds each turn's (its claims lens, lens.mjs); c opens the Claims pane at the right, where the card
-// detail opens (graph.js, a program on the card runtime: the claims as a graph in clusters); the bar counts the claims.
+// detail opens (graph.js, a program on the card runtime: the claims as a graph in clusters); c in the bar counts them.
 //
 //   the store    claimsStore / saveClaims: held in $.state for the drawing, written to the folder for a resumed session
-//   a turn       claimsDigest (what the lens reads: the claims so far that bear on the turn) and turnClaims (the
+//   a turn       claimsDigest (what the lens reads: every claim so far and the clusters) and turnClaims (the
 //                lens's claims placed by their words in the turn's messages, with the citations near them); c lights
 //                under the answer only when a claim was corrected (noteFor)
 //   the pane     c (or /claims) opens the Claims pane in the side panel (shell/side.ts openSide), where the card
 //                detail opens: the panel draws the program, holds its keys (the ring walks its rows), and gives it a side
-//                thread with an input bar like the prompt, each question about the claim selected. Where a claim came
-//                from opens over the pane (the same pane with {source}), as a citation does; esc goes back
-//   the folder   a press on the pane's folder row (or /claims folder) asks Claude, as a turn of main, to have one
-//                subagent map the claims of the whole folder, offered with its estimate (estimate.mjs); the subagent
+//                thread with an input bar like the prompt, each question about the claim selected. Where a claim was
+//                said opens over the pane (the same pane with {source}), as a citation does; esc goes back
+//   the folder   a press on the pane's folder action (or /claims folder) asks Claude, as a turn of main, to have one
+//                subagent map the claims of the whole folder, with its estimate in the request (estimate.mjs); the subagent
 //                saves the map as the card folder-claims (prompts/claims-folder/), and the save brings its claims into
 //                the store (foldInSaves)
 //
@@ -22,7 +22,6 @@ import { ask, recordNow, recount, rootHere, sessionIndex, personPrompt } from '.
 import { openSide } from '../shell/side'
 import { promptFile } from '../prompts/prompts'
 import { sessionKey } from '../hooks/conversation'
-import { turnWords } from '../observer/turn.mjs'
 import { applyTurn, clearGap, emptyStore, grownClusters, isFolderCard, mergeFolder, noteFor, noteGap, readStore } from './store.js'
 
 type Engine = EngineInterface
@@ -116,10 +115,10 @@ async function turnPlaces($: Engine, answer: string): Promise<{ turn: number | n
   return { turn, rows, places }
 }
 
-/** What the claims lens reads of the state: the store, its grown clusters and the turn's own words. */
-export async function claimsDigest($: Engine, msgs: Any[], question: string): Promise<{ store: Store; grown: Any[]; turnText: string }> {
+/** What the claims lens reads of the state: the store and its grown clusters. */
+export async function claimsDigest($: Engine): Promise<{ store: Store; grown: Any[] }> {
   const store = await claimsStore($)
-  return { store, grown: grownClusters(store), turnText: turnWords(msgs, question) }
+  return { store, grown: grownClusters(store) }
 }
 
 /**
@@ -169,13 +168,13 @@ export async function claimsPaneStore($: Engine): Promise<unknown> {
   return { ...store, offer: store.folder ? null : o?.offer ?? null }
 }
 
-/** What the pane's program asks for (k.do) that every pane does not have: where a claim came from (the message that
+/** What the pane's program asks for (k.do) that every pane does not have: where a claim was said (the message that
  *  said it, over the pane, as a citation opens; esc goes back), and the folder's map. False for any other (a citation
  *  opens as any pane's does, over the pane). */
 export async function claimsAction($: Engine, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
   if (name === 'source' && typeof a.id === 'string') {
-    await openSide($, { pane: 'claims', args: { source: a.id, ...(typeof a.row === 'string' ? { row: a.row } : {}) }, title: 'Where it came from' }, { push: true })
+    await openSide($, { pane: 'claims', args: { source: a.id, ...(typeof a.row === 'string' ? { row: a.row } : {}) }, title: 'Where it was said' }, { push: true })
     return
   }
   // the turn is asked outside the press (as v asks for a view)

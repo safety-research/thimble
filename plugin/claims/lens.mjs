@@ -3,7 +3,7 @@
 // clusters. Its fragment is the registry's lens-claims; its digest is every claim so far and the clusters; its merge
 // hands the claims to the observer, which places them in the session's store (claims/term.ts, store.js applyTurn),
 // where the turn's messages are known.
-import { claimless, grownLines, promptLines } from './store.js'
+import { grownLines, promptLines } from './store.js'
 
 export default {
   name: 'claims',
@@ -19,8 +19,8 @@ export default {
     const grown = st.grown || []
     return { CLAIMS: lines.claims, CLUSTERS: lines.clusters, GROWN: grown.length ? `\nGrown clusters, which you can rename or split:\n${grownLines(grown)}\n` : '' }
   },
-  // a turn whose words state nothing that could be true or false: the fragment's `quiet` rule says to give none
-  when: st => (st.turnText != null && claimless(st.turnText) ? ['quiet'] : []),
+  // whether a turn holds a claim is the lens's own judgment (a plan, a step or a question holds none): no rule of code's
+  when: () => [],
   async merge(value, ctx) {
     if (ctx.claims) await ctx.claims(value)
   },

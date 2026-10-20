@@ -18,7 +18,7 @@ import { composeSystem, composeTurn, sectionsOf } from '../../observer/compose.m
 import pane, { layout, messageRows } from '../graph.js'
 import lens from '../lens.mjs'
 import { cost, estimate, looksLikeTranscript, runsOf } from '../estimate.mjs'
-import { applyTurn, claimless, clusterFor, edgesOf, emptyStore, findQuote, grownClusters, isFolderCard, likeness, locate, mergeFolder, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../store.js'
+import { applyTurn, clusterFor, edgesOf, emptyStore, findQuote, grownClusters, isFolderCard, likeness, locate, mergeFolder, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../store.js'
 
 const DK = globalThis.DrawKit
 
@@ -59,26 +59,26 @@ test("the lens's claims are read as given: a quote names a claim that gives no w
   // the links a claim names to others: supports, contradicts or same topic, in the words it gives
   assert.deepEqual(parseClaims([{ quote: 'q', links: [{ to: 'c1', how: 'Supports' }, { to: '#2', how: 'contradiction' }, { to: 'c3', how: 'same topic' }, { to: 'c4', how: 'causes' }, { how: 'supports' }] }])[0].links,
     [{ to: 'c1', how: 'supports' }, { to: '#2', how: 'contradicts' }, { to: 'c3', how: 'same topic' }])
+  // a turn that states many claims keeps every one
+  assert.equal(parseClaims(Array.from({ length: 75 }, (_, i) => ({ quote: `claim number ${i + 1}` }))).length, 75)
   const a = parseAnswer('{"notes": [], "claims": [{"claim": "x", "quote": "y"}], "clusters": [{"id": "k1", "name": "z"}]}')
   assert.deepEqual(lens.read(a), { claims: [{ claim: 'x', quote: 'y' }], clusters: [{ id: 'k1', name: 'z' }] })
 })
 
-test("the lens's text composes: its principles in the system prompt, its digest of the claims so far and its quiet rule in the message", () => {
+test("the lens's text composes: its principles in the system prompt, its digest of the claims so far in the message, and no rule of code's", () => {
   const t = textOf('lens-claims', ROOT, {}).text
   const s = sectionsOf(t)
   assert.match(s.body, /^## The claims of this turn/)
-  assert.ok(s.digest.includes('{{CLAIMS}}') && s.when.quiet)
+  assert.ok(s.digest.includes('{{CLAIMS}}'))
   const { store } = turn1()
-  const st = { store, grown: [], turnText: 'and the bots?' }
+  const st = { store, grown: [] }
   const sys = composeSystem('F {{LENSES}} {{SKELETON}}', [{ lens, text: t }])
   assert.match(sys.text, /"claims": \[\]\}$/)
   const turn = composeTurn('T {{DIGEST}}{{RULES}}', {}, [{ lens, text: t }], st)
   assert.match(turn.text, /- c2 · k2 · Kestrel made 41% of June's edits/)
-  // a turn whose words state nothing true or false gets the quiet rule
-  assert.ok(composeTurn('T {{DIGEST}}{{RULES}}', {}, [{ lens, text: t }], st).text.includes('nothing that could be true or false'))
-  assert.ok(!composeTurn('T {{DIGEST}}{{RULES}}', {}, [{ lens, text: t }], { ...st, turnText: 'June had 41% bots' }).text.includes('nothing that could be true or false'))
-  assert.ok(claimless('Thanks! Can you look at the logs next?'))
-  assert.ok(!claimless('Most runs [failed](r1#x@n).'))
+  // whether a turn holds claims is the lens's own judgment: code adds no rule for it
+  assert.deepEqual(lens.when({ store }), [])
+  assert.deepEqual(Object.keys(s.when), [])
 })
 
 // ------------------------------------------------------------------------------------------------ where it was said
@@ -118,7 +118,7 @@ test('a turn adds its claims with where each was said, its sources and a cluster
   assert.equal(noteFor(res), '')
   assert.ok(!('kind' in c2) && !('precisely' in c2))
   assert.equal(noteFor({ added: ['c1', 'c2'] }), '')
-  assert.equal(noteFor({ added: ['c5'], revised: ['c1'] }), '1 claim corrected')
+  assert.equal(noteFor({ added: ['c5'], revised: ['c1'] }), '1 corrected')
   const r = applyTurn(store, { places: PLACES1, out: { claims: [{ claim: 'Made up', quote: 'words nobody wrote down' }] }, turn: 1 })
   assert.deepEqual(r.added, [])
   assert.match(r.dropped[0].why, /are not in this turn's messages/)
@@ -141,7 +141,7 @@ test('a claim said again adds its place (×N); a correction is linked both ways,
   assert.deepEqual(c1.said.map(p => p.by), ['claude', 'person'])
   assert.equal(viewOf(store).flat.find(c => c.id === 'c3').n, 2)
   assert.equal(c3.said.length, 2)
-  assert.equal(noteFor(res), '1 claim corrected')
+  assert.equal(noteFor(res), '1 corrected')
   assert.match(promptLines(store).claims, /- c1 · k1 · The tilt in the edits is one editor \(corrected by c5, ×2\)/)
   const same = applyTurn(store, { places: [{ row: 'u4', by: 'person', turn: 4, text: 'bots drove it' }, { row: 'r6', by: 'claude', turn: 4, text: 'Bots made only [4%](q5#bot=yes@share) of the edits.' }], turn: 4, out: { claims: [
     { quote: 'bots drove it', claim: 'Bots drove the bias', by: 'analyst', cluster: 'k4' },
@@ -186,7 +186,7 @@ test("the lens's digest holds every claim so far, one line each, with who said i
   for (let i = 0; i < 60; i++) store.claims.push({ id: `x${i}`, text: `Page ${i} was moved twice`, said: [], sources: [], cluster: null })
   store.claims[0].revised_by = 'x1'
   store.claims[1].said.push({ by: 'person' })
-  const d = lens.digest({ store, grown: [], turnText: 'anything' })
+  const d = lens.digest({ store, grown: [] })
   assert.equal(d.CLAIMS.split('\n').length, 64)
   assert.match(d.CLAIMS, /^- c1 · k1 · The tilt in the edits is one editor \(corrected by x1\)$/m)
   assert.match(d.CLAIMS, /^- c2 · k2 · Kestrel made 41% of June's edits \(×2\)$/m)
@@ -257,14 +257,14 @@ test("the graph's edges: a correction, a link one claim names to another, and cl
   assert.deepEqual(edgesOf([{ id: 'a', sources: [{ ref: 'q4#user=K@n' }] }, { id: 'b', sources: [{ ref: 'q4#user=K@share' }] }, { id: 'c', sources: [{ ref: 'q4#user=W@n' }] }]).map(e => `${e.a}-${e.b}`), ['b-a'])
 })
 
-test('the layout: each cluster an island, no two dots touching, each name clear of the dots, the same every time', () => {
+test('the layout: each cluster an island in the order said, no two dots touching, each name clear of the dots, the same every time', () => {
   const nodes = Array.from({ length: 24 }, (_, i) => ({ id: `c${i + 1}`, cluster: `k${(i % 4) + 1}` }))
   const clusters = [1, 2, 3, 4].map(i => ({ id: `k${i}`, name: `cluster number ${i}` }))
-  const edges = [{ a: 'c1', b: 'c5', kind: 'rows' }, { a: 'c2', b: 'c3', kind: 'corrects' }]
-  const lay = layout(nodes, clusters, edges, { w: 80, h: 24 })
+  const lay = layout(nodes, clusters, { w: 80, h: 24 })
+  assert.ok(lay.fits)
   const ps = [...lay.pos.values()]
   assert.equal(ps.length, 24)
-  for (const p of ps) assert.ok(p.x >= 1 && p.x <= 78 && p.y >= 1 && p.y <= 23, JSON.stringify(p))
+  for (const p of ps) assert.ok(p.x >= 0 && p.x <= 78 && p.y >= 1 && p.y <= 23, JSON.stringify(p))
   for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) assert.ok(ps[i].y !== ps[j].y || Math.abs(ps[i].x - ps[j].x) >= 2, `${JSON.stringify(ps[i])} ${JSON.stringify(ps[j])}`)
   assert.equal(lay.names.length, 4)
   for (const n of lay.names) assert.ok(!ps.some(p => p.y === n.y && p.x >= n.x && p.x < n.x + n.name.length), n.name)
@@ -273,7 +273,22 @@ test('the layout: each cluster an island, no two dots touching, each name clear 
   const d = (a, b) => Math.hypot(a[0] - b[0], (a[1] - b[1]) * 2)
   const p1 = lay.pos.get('c1')
   assert.ok(d([p1.x, p1.y], mid('k1')) < d([p1.x, p1.y], mid('k2')))
-  assert.deepEqual([...layout(nodes, clusters, edges, { w: 80, h: 24 }).pos], [...lay.pos])
+  // in the order said: an earlier claim of a cluster stands left of a later one in its row, or in a row above
+  const before = (a, b) => { const p = lay.pos.get(a), q = lay.pos.get(b); return p.y < q.y || (p.y === q.y && p.x < q.x) }
+  assert.ok(before('c1', 'c5') && before('c5', 'c9') && before('c2', 'c22'))
+  assert.deepEqual([...layout(nodes, clusters, { w: 80, h: 24 }).pos], [...lay.pos])
+  // a hundred and fifty claims in twelve clusters fit a side panel's graph
+  const many = Array.from({ length: 150 }, (_, i) => ({ id: `c${i + 1}`, cluster: `k${(i % 12) + 1}` }))
+  const big = layout(many, Array.from({ length: 12 }, (_, i) => ({ id: `k${i + 1}`, name: `question ${i + 1}` })), { w: 100, h: 30 })
+  assert.ok(big.fits)
+  const bp = [...big.pos.values()]
+  assert.equal(new Set(bp.map(p => `${p.x},${p.y}`)).size, 150)
+  // the gap between two clusters' dots is wider than the gap between two dots of one
+  const cl = id => many.find(n => n.id === id).cluster
+  const at = [...big.pos]
+  const gap = (same) => Math.min(...at.flatMap(([a, p]) => at.filter(([b, q]) => a !== b && p.y === q.y && (cl(a) === cl(b)) === same).map(([, q]) => Math.abs(p.x - q.x))))
+  assert.ok(gap(false) > gap(true), `${gap(false)} ${gap(true)}`)
+  for (const p of bp) assert.ok(p.x >= 0 && p.x < 100 && p.y >= 0 && p.y < 30, JSON.stringify(p))
 })
 
 // ------------------------------------------------------------------------------------------------ the pane
@@ -284,34 +299,36 @@ const draw = (data, o = {}) => {
   return { d, text: gridText(renderTerm(d, { w: 90 })) }
 }
 
-test('the pane: the head, the graph with a dot per claim and each cluster named, and the newest claim under it', () => {
+test('the pane: the count, the graph with a dot per claim and each cluster named, and the newest claim under it, with no captions', () => {
   const { store } = turn2()
   const data = pane.data({ claims: { ...store, offer: { what: '3 trials', minutes: 4 } }, threads: [] })
   const { d, text } = draw(data)
-  assert.match(text, /^Claims {2}6 claims · 4 clusters · to turn 2/)
-  assert.match(text, /map the claims of the whole folder · 3 trials · about 4 min/)
-  for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst', 'ruling out bots']) assert.ok(text.includes(name.replace(/ /g, ' ')), name)
+  // the head: the count, and the folder's one action (a press), no estimate
+  assert.match(text, /^6 claims {3}add the whole folder's claims\n/)
+  assert.ok(d.regions.some(r => r.id === 'folder'))
+  for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst', 'ruling out bots']) assert.ok(text.includes(name), name)
   // a dot per claim, each a part of its own: hollow once corrected, heavier when said again
   assert.deepEqual(d.regions.filter(r => /^n-/.test(r.id)).map(r => r.id).sort(), ['n-c1', 'n-c2', 'n-c3', 'n-c4', 'n-c5', 'n-c6'])
   assert.equal((text.match(/○/g) || []).length, 2)
   assert.ok(text.includes('◉'))
-  // at rest: the last turn's correction selected, beside the claim it corrects
+  // no legend, no turn numbers, no "from" or "supported by" lines
+  assert.ok(!/earlier left|related|turn \d|\bfrom\b|supported by|to turn/.test(text), text)
+  // at rest: the last turn's correction selected: its sentence, then the claim it corrects
   assert.equal(d.selected, 'n-c5')
-  assert.match(text, /● The tilt is two editors, not one\n {2}testing for bias · turn 2\n {2}from “Fix one thing: it is two editors, not one\.”\n {2}corrects The tilt in the edits is one editor/)
-  // a claim selected: its words, where it came from and its evidence under the graph
+  assert.match(text, /● The tilt is two editors, not one\.\n {2}cites no rows\n {2}corrects ○ The tilt in the edits is one editor\.$/)
+  // a claim selected: its sentence, then its evidence (read through the kernel)
   const six = draw(data, { state: { claim: 'c6' } })
-  assert.match(six.text, /● Kestrel and Wren made 63% of the tilt\n {2}finding who edited · turn 2\n {2}from “Kestrel and Wren made 63% of it, Kestrel's 41% the larger part\.”/)
-  assert.match(six.text, /1 63% +reading its rows…/)
+  assert.match(six.text, /● Kestrel and Wren made 63% of the tilt\.\n {2}63% reading its rows…/)
   // a selection made before the last turn gives way to what is new
   assert.equal(draw(data, { state: { claim: 'c3', part: 'n-c3', at: 1 } }).d.selected, 'n-c5')
   assert.equal(draw(data, { state: { claim: 'c3', part: 'n-c3', at: 2 } }).d.selected, 'n-c3')
-  // no kinds: no fact, finding, judgment or event anywhere
-  assert.ok(!/judgment|\bfact\b|\bevent\b/.test(text))
-  // its keys, as the side panel's bar names them (esc is the panel's own: back, then close)
-  assert.deepEqual(keysOf(six.d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', '1 2 evidence'])
+  // its keys, as the side panel's bar names them (esc is the panel's own: back, then close): ↵ says what it does there
+  assert.deepEqual(keysOf(six.d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ message'])
+  assert.deepEqual(keysOf(draw(data, { state: { claim: 'c5', part: 'fix-c1' } }).d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ earlier claim'])
+  assert.deepEqual(keysOf(draw(data, { state: { claim: 'c1', part: 'fix-c5' } }).d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ correction'])
 })
 
-test('the pane: the ring on a dot selects its claim; ↵ on it opens where it came from; a correction goes to the other claim', () => {
+test('the pane: the ring on a dot selects its claim; ↵ on it opens where it was said; its evidence is a table of the rows it cites; a correction goes to the other claim', () => {
   const { store } = turn2()
   const data = pane.data({ claims: store, threads: [] })
   const run = (state, event, got) => DK.run(pane.program, data, { w: 90, h: 44, mode: 'pane', state, event, got })
@@ -323,45 +340,52 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   assert.deepEqual(sel.regions.find(r => r.id === 'n-c2').meta.ref, ['q4#user=Kestrel@share'])
   assert.match(pane.thread({}, st, data).about, /the claim selected is "Kestrel made 41% of June's edits" \(turn 1, said as "Kestrel made 41% of June's edits, and 212 of them were reverts\."\)/)
   assert.deepEqual(sel.wants.map(w => w.request.rows[0]), ['q4#user=Kestrel@share'])
-  const got = { [JSON.stringify({ rows: ['q4#user=Kestrel@share'] })]: { chain: [{ step: 'query', id: 'q4', about: 'share by user' }], rows: ['revisions.jsonl#L28'], count: 517, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }] } }
-  assert.match(draw(data, { state: st, got }).text, /1 41% +q4 · share by user ← 517 source rows in revisions\.jsonl/)
-  // a press on the dot selected (↵) opens where it came from; on another dot it selects that one
+  // the row the citation names, read through the kernel: a table under the query's name, the value cited marked
+  const got = { [JSON.stringify({ rows: ['q4#user=Kestrel@share'] })]: { chain: [{ step: 'query', id: 'q4', about: 'share by user', rows: [{ i: 3, user: 'Kestrel', n: 212, share: 0.41 }] }], rows: ['revisions.jsonl#L28'], count: 517 } }
+  const shown = draw(data, { state: st, got })
+  assert.match(shown.text, /● Kestrel made 41% of June's edits\.\n {2}share by user {4}n {2}share\n {2}Kestrel {8}212 {3}0\.41/)
+  // a row of a file reads as its text
+  const file = { [JSON.stringify({ rows: ['q4#user=Kestrel@share'] })]: { chain: [], rows: ['revisions.jsonl#L28'], count: 1, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }] } }
+  assert.match(draw(data, { state: st, got: file }).text, /41% revisions\.jsonl:28 Kestrel saved Lexicon/)
+  // a press on the dot selected (↵) opens where it was said; on another dot it selects that one
   assert.deepEqual(run(st, { type: 'press', region: 'n-c2' }).effects, [{ id: 'c2', row: 'r2', do: 'source' }])
   assert.deepEqual(run(st, { type: 'press', region: 'n-c4' }).state, { claim: 'c4', part: 'n-c4', at: 2 })
   assert.deepEqual(run(st, { type: 'press', region: 'said' }).effects, [{ id: 'c2', row: 'r2', do: 'source' }])
-  // the digits open the evidence as a citation opens (over the pane, in the side panel)
-  assert.deepEqual(run(st, { type: 'key', key: '1' }).effects, [{ mark: { kind: 'cite', ref: 'q4#user=Kestrel@share', label: '41%' }, do: 'open' }])
+  // a press on a row of evidence opens it as a citation opens (over the pane, in the side panel)
+  assert.deepEqual(run(st, { type: 'press', region: 'ev-1' }).effects, [{ mark: { kind: 'cite', ref: 'q4#user=Kestrel@share', label: '41%' }, do: 'open' }])
   // the ring on an evidence row selects that row, the claim kept
   const ev = run(st, { type: 'focus', region: 'ev-1' })
   assert.deepEqual(ev.state, { claim: 'c2', part: 'ev-1', at: 2 })
   assert.equal(run(ev.state).regions.find(r => r.id === 'ev-1').meta.ref, 'q4#user=Kestrel@share')
-  // the claims it is linked to, either way, each a row a press goes to
-  const linked = draw(data, { state: { claim: 'c5' } }).text
-  assert.match(linked, /supported by Kestrel and Wren made 63% of the tilt/)
-  assert.deepEqual(run({ claim: 'c5' }, { type: 'press', region: 'rel-c6' }).state, { claim: 'c6', part: 'n-c6', at: 2 })
+  // the claims it is linked to are drawn bold on a tinted ground, with no line and no row of words
+  const linked = run({ claim: 'c5' })
+  const ops = linked.root.kids.find(n => n.t === 'canvas').ops
+  assert.ok(ops.some(o => o[0] === 'bg' && /-faint/.test(o[5])))
+  assert.ok(!ops.some(o => o[0] === 'link'))
+  assert.ok(!draw(data, { state: { claim: 'c5' } }).text.includes('Kestrel and Wren'))
   // a corrected claim names the claim that corrects it, and a press goes there
   const old = draw(data, { state: { claim: 'c1' } }).text
-  assert.match(old, /○ The tilt in the edits is one editor/)
-  assert.match(old, /corrected in turn 2 by The tilt is two editors, not one/)
+  assert.match(old, /○ The tilt in the edits is one editor\.\n {2}cites no rows\n {2}corrected by ● The tilt is two editors, not one\./)
   assert.deepEqual(run({ claim: 'c1' }, { type: 'press', region: 'fix-c5' }).state, { claim: 'c5', part: 'n-c5', at: 2 })
   // the pane takes no esc (the panel's own)
   assert.ok(!(run(st, { type: 'key', key: 'esc' }).effects || []).length)
   // the dots keep their places while the ring walks them, whatever the claim under the graph
-  const dots = state => draw(data, { state }).text.split('○ corrected')[0]
+  const dots = state => draw(data, { state }).text.split('\n').slice(0, 8).join('\n')
   assert.equal(dots({ claim: 'c1' }), dots({ claim: 'c3' }))
 })
 
-test('where it came from: the message as the person reads it, the claim\'s words marked, and where it was said again', () => {
+test('where it was said: the message as the person reads it, the claim\'s words marked, and where it was said again', () => {
   const { store } = turn2()
   const data = pane.data({ claims: store, 'record:r2': { text: A1 } }, { source: 'c3', row: 'r2' })
-  assert.equal(pane.titleOf({ source: 'c3' }), 'Where it came from')
+  assert.equal(pane.titleOf({ source: 'c3' }), 'Where it was said')
   assert.deepEqual(pane.reads({ source: 'c3', row: 'r2' }), ['claims', 'record:r2'])
   const d = DK.run(pane.program, data, { w: 70, h: 30, mode: 'pane', state: {} })
   assert.equal(d.error, undefined)
   const text = gridText(renderTerm(d, { w: 70 }))
-  assert.match(text, /^Where it came from {2}turn 1 · Claude's message\n\nYes\. The tilt is one editor\./)
+  assert.match(text, /^Where it was said {2}Claude's message\n\nYes\. The tilt is one editor\./)
   assert.match(text, /\n\n• June 18 had 6,543 saves, the busiest day\.\n• Bots made 4% of edits\./)
-  assert.match(text, /said again once\nturn 2 {2}“June 18 was the busiest day\.”/)
+  assert.match(text, /also said\n“June 18 was the busiest day\.”/)
+  assert.ok(!/turn \d/.test(text))
   assert.ok(!d.selected)
   assert.match(pane.thread({ source: 'c3' }, {}, data).about, /where the claim "June 18 had 6,543 saves" was said \(turn 1\)/)
   assert.equal(pane.thread({ source: 'c3' }, {}, data).label, 'where "June 18 had 6,543 saves" was said')
@@ -372,34 +396,56 @@ test('where it came from: the message as the person reads it, the claim\'s words
   assert.equal(messageRows(A1, { quote: 'nothing like it' }, 60), null)
 })
 
-test('the pane: its thread\'s conversation is the panel\'s, under it; with no claims it says how they come; the folder being mapped says so', () => {
+test('the pane: its thread\'s conversation is the panel\'s, under it; with no claims it says how they come; the folder being read says so', () => {
   const { store } = turn1()
   const thread = { key: 'pane-claims-claims', status: 'done', turns: [{ role: 'person', text: 'is this all of June?' }, { role: 'claude', text: 'Yes.' }] }
   const data = pane.data({ claims: store, threads: [thread] })
   assert.equal(data.talk, true)
   assert.ok(!draw(data).text.includes('is this all of June'))
   assert.match(draw(pane.data({ claims: emptyStore('s'), threads: [] })).text, /No claims yet\./)
-  assert.match(draw(pane.data({ claims: { ...store, folderAsked: 'T' }, threads: [] })).text, /Claude is mapping the folder's claims/)
+  assert.match(draw(pane.data({ claims: { ...store, folderAsked: 'T' }, threads: [] })).text, /Claude is reading the whole folder for its claims/)
   const folder = emptyStore('s')
   mergeFolder(folder, MAP, { card: '07-folder-claims', v: 1 })
   const f = draw(pane.data({ claims: folder, threads: [] }))
-  assert.match(f.text, /the folder's map: 3 claims in 2 clusters, from 3 trials/)
-  assert.ok(f.text.includes('belt slips (folder)'))
-  // a claim of the folder's map came from its first evidence row: that opens as a citation does
+  assert.match(f.text, /^3 claims\n\nthe whole folder's map · 3 claims\n/)
+  assert.match(f.text, /the whole folder's map · 3 claims\nbelt slips/)
+  assert.ok(!f.text.includes('(folder)'))
+  // beside the session's own claims, the folder's map stands under its own line
+  const both = turn1().store
+  mergeFolder(both, MAP, { card: '07-folder-claims', v: 1 })
+  const b = draw(pane.data({ claims: both, threads: [] })).text
+  assert.ok(b.indexOf('testing for bias') < b.indexOf("the whole folder's map · 3 claims") && b.indexOf("the whole folder's map") < b.indexOf('belt slips'), b)
+  // a claim of the folder's map: its evidence is its quote, and a press on it opens its first evidence row
   const st = { claim: folder.claims.find(c => c.text === 'The belt skips a slot').id }
+  assert.match(draw(pane.data({ claims: folder, threads: [] }), { state: st }).text, /● The belt skips a slot\. · from the folder's map\n {2}“The belt skips a slot” t1\.jsonl:2/)
   const pr = DK.run(pane.program, pane.data({ claims: folder, threads: [] }), { w: 90, h: 44, mode: 'pane', state: st, event: { type: 'press', region: 'said' } })
   assert.deepEqual(pr.effects, [{ mark: { kind: 'cite', ref: 'trials/t1.jsonl#L2', label: 'The belt skips a slot' }, do: 'open' }])
 })
 
-test('the pane is never taller than its rows: the graph takes the rows the claim under it leaves', () => {
-  const many = emptyStore('s')
-  const t2 = Array.from({ length: 40 }, (_, i) => `Wiki ${i + 1} had [${i + 10} saves](q${i % 7}#n).`).join(' ')
-  applyTurn(many, { places: [{ row: 'r1', by: 'claude', turn: 1, text: t2 }], turn: 1, out: { claims: Array.from({ length: 40 }, (_, i) => ({ quote: `Wiki ${i + 1} had ${i + 10} saves`, cluster: `wiki group ${(i % 8) + 1}` })) } })
+test('the pane is never taller than its rows: the graph takes the rows the claim under it leaves, also with 150 claims', () => {
+  // n claims over turns of 30 claims each, in 12 clusters
+  const build = n => {
+    const st = emptyStore('s')
+    for (let from = 0, turn = 1; from < n; from += 30, turn++) {
+      const ids = Array.from({ length: Math.min(30, n - from) }, (_, i) => from + i + 1)
+      const t = ids.map(i => `Wiki ${i} had [${i + 10} saves](q${i % 7}#n).`).join(' ')
+      applyTurn(st, { places: [{ row: `r${turn}`, by: 'claude', turn, text: t }], turn, out: { claims: ids.map(i => ({ quote: `Wiki ${i} had ${i + 10} saves`, cluster: `wiki group ${(i % 12) + 1}` })) } })
+    }
+    return st
+  }
+  const many = build(40)
   for (const claim of ['c1', 'c20', 'c40']) {
     const { d, text: t } = draw(pane.data({ claims: many, threads: [] }), { h: 24, state: { claim } })
     assert.ok(t.split('\n').length <= 24, `${claim}: ${t.split('\n').length} rows`)
     assert.equal(d.selected, `n-${claim}`)
     assert.equal(d.regions.filter(r => /^n-/.test(r.id)).length, 40)
+  }
+  const lots = build(150)
+  for (const claim of ['c1', 'c75', 'c150']) {
+    const { d, text: t } = draw(pane.data({ claims: lots, threads: [] }), { w: 100, h: 44, state: { claim } })
+    assert.ok(t.split('\n').length <= 44, `${claim}: ${t.split('\n').length} rows`)
+    assert.equal(d.selected, `n-${claim}`)
+    assert.equal(d.regions.filter(r => /^n-/.test(r.id)).length, 150)
   }
   // a conversation under the pane: about two fifths of the rows are its, and the input bar's
   const talk = pane.data({ claims: many, threads: [{ key: 'pane-claims-claims', turns: [{ role: 'person', text: 'q' }] }] })

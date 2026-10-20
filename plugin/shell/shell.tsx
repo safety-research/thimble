@@ -1341,14 +1341,14 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-//   thimble  v visualize · s squeeze · ] cite & explain · 1 open detail                    t 2 threads · r seen 12% ▆▆▃▁
+//   thimble  v visualize · s squeeze · c 11 claims                                          t 2 threads · r seen 12% ▆▆▃▁
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
-// keys act on (a lit one with its note in place of its name), `] cite & explain` when that message has marks, `1 open
-// detail` when a card is under it. While a pane, the tray or the chips have focus, the
-// left side is their keys instead, and it comes back after. At its right, the session's counts that are not zero: a
-// count that changed is drawn bright for a moment, then dims; `t N threads` is a press (and t its key) that lists the
-// threads in the side panel. While the side panel is open its label names the thread it shows, `thimble:main/<it>`.
+// keys act on (a lit one with its note in place of its name; c with how many claims the session holds, bright for a
+// moment when that changed). While a pane, the tray or the chips have focus, the left side is their keys instead, and
+// it comes back after. At its right, the session's counts that are not zero: a count that changed is drawn bright for
+// a moment, then dims; `t N threads` is a press (and t its key) that lists the threads in the side panel. While the
+// side panel is open its label names the thread it shows, `thimble:main/<it>`.
 
 const BRIGHT_MS = 1600
 
@@ -1630,9 +1630,15 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
       left.push({ key: '', words, short: 'card ready', color: keyColor('v', theme), wordsColor: keyColor('v', theme), label: 'go to the card', onPress: () => goToCard($, note.row, note.id) })
     }
     // at rest the bar names the three verbs alone (v s c) and the counts: ] still steps through the marks and the cards,
-    // { } through the replies, and 1 opens the card the keys are on, unnamed until one of them is in use
+    // { } through the replies, and 1 opens the card the keys are on, unnamed until one of them is in use. c says how many
+    // claims the session holds (`c 11 claims`), so the claims are named once, never as a key and a count apart
+    const lc = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
+    const nClaims = lc?.claims ?? 0
+    const claimWords = nClaims === 1 ? '1 claim' : nClaims > 1 ? `${fmtN(nClaims)} claims` : 'claims'
+    const nameOf = (v: { key: string; name: string }) => (v.key === 'c' ? claimWords : v.name)
+    const claimsBright = !!lc && (await $.clock.now()) - (lc.changed.claims ?? 0) < BRIGHT_MS
     if (!row || !rec) {
-      for (const v of rowKeysOn()) left.push({ key: v.key, words: v.name, dim: true })
+      for (const v of rowKeysOn()) left.push({ key: v.key, words: nameOf(v), dim: true })
     } else {
       const verbs = rowKeysOn()
       const sqUi = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
@@ -1648,8 +1654,9 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
         const color = keyColor(v.key, theme)
         const on = lit[v.key]
         if (v.key === 's' && pile) left.push({ key: 's', words: 'catch up', short: 'catch up', color, wordsColor: color, bold: true, label: `catch up on ${pile.n} replies`, onPress: () => catchUpNow($) })
-        else if (on?.lit && on.note) left.push({ key: v.key, words: `● ${on.note}`, short: `● ${v.name}`, color, wordsColor: color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
-        else left.push({ key: v.key, words: v.name, color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
+        // a lit c keeps the count beside its note: `c ● 12 claims, 1 corrected`
+        else if (on?.lit && on.note) left.push({ key: v.key, words: v.key === 'c' ? `● ${claimWords}, ${on.note}` : `● ${on.note}`, short: `● ${nameOf(v)}`, color, wordsColor: color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
+        else left.push({ key: v.key, words: nameOf(v), ...(v.key === 'c' && nClaims ? { short: claimWords } : {}), color, label: v.name, ...(v.key === 'c' && claimsBright ? { bold: true } : {}), onPress: () => pressRowVerb($, row, v.key) })
       }
       // which reply the keys act on, once the person picked an earlier one with { or }: { and } pick another (as ] and
       // [ step through the marks; never < >, which read as the arrow keys)
@@ -1672,9 +1679,8 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   noteBar(now, left)
   // each count: its id, its number, its words, and the key that acts on it (drawn before its words; a click on the
   // count does what the key does)
+  // (the claims are counted by c at the left, never here)
   const items: [string, number, string, string?][] = c ? [
-    // c: the Claims pane in the side panel
-    ['claims', c.claims ?? 0, c.claims === 1 ? '1 claim' : `${fmtN(c.claims ?? 0)} claims`, 'c'],
     // t: the list of them in the side panel
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`, 't'],
     // coverage and the labels open their panes in the side panel (dock.ts): `r seen 12% ▆▆▃▁`, `l 2 labels` (their
@@ -1686,8 +1692,8 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   // so the bar never names one key twice. Unnamed, a click on the count still opens it.
   const named = namedKeys(left)
   const keyed = (k: string | null | undefined) => !!k && !focus && !named.has(k)
-  // a count whose switch is off is not shown: the claims count with Claims, coverage and the labels with their own
-  const shown = (id: string) => (id === 'claims' ? featureOn('claims') : id === 'cov' ? featureOn('coverage') : id === 'labels' ? featureOn('labels') : true)
+  // a count whose switch is off is not shown: coverage and the labels with their own
+  const shown = (id: string) => (id === 'cov' ? featureOn('coverage') : id === 'labels' ? featureOn('labels') : true)
   const counts = items.filter(([id, n]) => n > 0 && shown(id)).map(([id, , words, key]) => {
     const bright = now - (c!.changed[id] ?? 0) < BRIGHT_MS
     // (coverage's and the labels' words begin with their key: dock.ts)
@@ -1739,7 +1745,7 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     const sepEl = i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []
     // coverage and the labels: a press that does what r and l do, their pane docked (dock.ts)
     if (docked(x.id)) return [...sepEl, dockCountEl($, els, x, c!, true)]
-    const press = x.id === 'threads' ? () => listThreads($) : x.id === 'claims' ? () => openClaims($) : x.key ? () => pressBarKey($, x.key!) : barItems.has(x.id) ? () => undefined : null
+    const press = x.id === 'threads' ? () => listThreads($) : x.key ? () => pressBarKey($, x.key!) : barItems.has(x.id) ? () => undefined : null
     return [...sepEl, press ? Button({ key: `bar-item-${x.id}`, plain: true, label: x.text, onPress: press, children: countWords(x) }) : Text({ key: `count-t-${x.id}`, children: countWords(x) })]
   }) }) : null
   return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
