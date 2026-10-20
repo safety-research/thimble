@@ -35,7 +35,7 @@ import type { LineCounts, MsgRecord, ObjRef, Ran, Said, Sel, SqzUi, Tray, TrayFr
 import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
-import { citeCard, explainerCard } from './cards.js'
+import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, followDetail, markOpen, noteDock, noteViewport, openDetailPane, paneColumns, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
@@ -139,6 +139,8 @@ let msgFiles: { session: string; dir: string | null; index: Any[]; pending: Set<
 let keyOpened: { key: string; at: number } | null = null
 // the card key pressed last from the empty prompt, with the card's state before it (a word it began gives it back)
 let cardKeyed: { key: string; at: number; ref: ObjRef; undo: { state: Record<string, unknown>; region: string | null } | null } | null = null
+// the tray's letter key pressed last from the empty prompt (r rows, c code): a letter typed straight after it began a word
+let trayKeyed: { key: string; at: number } | null = null
 
 // ------------------------------------------------------------------------------------------------ objects
 
@@ -1356,24 +1358,14 @@ export async function paneStateChanged($: Engine, name: string, _args: Record<st
   if (next) { await setCardFocus($, null); await pushFocus($, 'tray') } else await popFocus($, 'tray')
 }
 
-/** The card a tray frame shows, as the tray program wants it (panes/tray.js): its parts drawn in the sandbox at `w`. */
+/** The card a tray frame shows, as the tray program wants it (panes/tray.js): its parts and its sections' parts drawn
+ *  in the sandbox at `w` (cards.js drawnCard). */
 async function trayCard($: Engine, req: Any, w: number, h: number): Promise<Any> {
   let spec: Any
   if (req?.kind === 'gloss') spec = explainerCard({ gloss: req.gloss || {} })
   else if (typeof req?.ref === 'string' && req.ref) spec = await sourceSpec($, req.ref, req.kind === 'spark' ? 'sparkline' : String(req.label || req.ref), h)
   else return { problem: 'this mark names no ref, so there are no rows to show', drawings: [], links: [] }
-  if (spec.problem) return { title: spec.title, right: spec.right, problem: spec.problem, drawings: [], links: [] }
-  const drawings: Any[] = []
-  for (const part of spec.parts || []) {
-    try {
-      const d = await drawPart($, part, w, h)
-      if (d.drawing?.error && part.pic) continue // a gloss's drawing that fails: its words stand alone
-      drawings.push(d.drawing)
-    } catch (err) {
-      if (!part.pic) return { title: spec.title, right: spec.right, problem: `the card could not be drawn: ${String((err as Error)?.message || err).slice(0, 160)}`, drawings: [], links: [] }
-    }
-  }
-  return { title: spec.title, right: spec.right, drawings, links: spec.links || [], ...(spec.why ? { why: spec.why } : {}) }
+  return drawnCard(spec, async (part: Any) => (await drawPart($, part, w, h)).drawing)
 }
 
 /** `thimble resolve <ref> --json`, as the person's own read (never counted as Claude's coverage). */
@@ -1386,9 +1378,10 @@ async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: 
 }
 
 /** One part of a card drawn: its program in the drawing contract's sandbox, then as terminal cells. */
-async function drawPart($: Engine, part: { program: string; data: unknown }, w: number, h: number): Promise<Any> {
+async function drawPart($: Engine, part: { program: string; data: unknown; id?: string }, w: number, h: number): Promise<Any> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object: { id: 'card', program: part.program, data: part.data }, w, h, mode: 'inline', noVerbs: true }), timeoutMs: 30000 })
+  // a card drawn whole (a value of a card) keeps its id, so its rows' refs read as the card's own
+  const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object: { id: part.id || 'card', program: part.program, data: part.data }, w, h, mode: 'inline', noVerbs: true }), timeoutMs: 30000 })
   if (r.exitCode !== 0) throw new Error((r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 200) || `exit ${r.exitCode}`)
   const out = JSON.parse(r.stdout)
   return { drawing: out.drawing, grid: renderTerm(out.drawing, { w }) }
@@ -1521,7 +1514,21 @@ async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
   const t = await trayScope($)
   if (t) await $.state.get({ plugin: 'thimble', key: 'thread', id: threadKeyOf(t.scope) })
   const { Box } = $.ui.resolve(e) as Any
-  return Box({ marginLeft: 2, children: [await paneEl($, e, 'tray', {}, { w, h: 14 })] })
+  const link = tray.asking ? null : await trayFileLink($, e, trayTop(tray) as TrayFrame)
+  return Box({ marginLeft: 2, flexDirection: 'column', children: [await paneEl($, e, 'tray', {}, { w, h: 14 }), ...(link ? [link] : [])] })
+}
+
+/** Under a citation of rows of a file, the file as a link that opens it, the way Claude Code links a file in a reply:
+ *  Claude Code's own Markdown draws `[revisions.jsonl:41](file:///…/revisions.jsonl#L41)`, an OSC 8 hyperlink where
+ *  the terminal takes one (else the words, then the address). Null for any other frame, or a file not there. */
+async function trayFileLink($: Engine, e: Any, top: TrayFrame | null): Promise<Any | null> {
+  if (!top || top.kind === 'gloss' || typeof top.ref !== 'string') return null
+  const link = fileLink(top.ref, await rootHere($))
+  if (!link || !(await $.fs.exists(link.path).catch(() => false))) return null
+  const { Markdown } = $.ui.resolve(e) as Any
+  if (!Markdown) return null
+  const words = link.label.replace(/[[\]\\]/g, c => '\\' + c)
+  return Markdown({ key: 'tray-file', text: `↗ [${words}](${link.href})` })
 }
 
 /** A question asked with the tray open: the side thread of its mark (thread.ts), which main does not see. The tray
@@ -1875,8 +1882,9 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   if (kind === 'tray') {
     const tray = (await $.state.get(TRAY)).value as Tray | null
     if (!tray) return undefined
-    // the tray program's keys (panes/tray.js), after what it says while the person asks its thread
-    const d = paneDrawing('tray') ?? (await paneNow($, 'tray'))
+    // the tray program's keys (panes/tray.js), after what it says while the person asks its thread: run now, so the
+    // line names the keys of a card that arrived after the tray was last drawn (its sections', its citations')
+    const d = await paneNow($, 'tray')
     return { status: status(d), keys: barText([d]) || '0 close' }
   }
   if (kind === 'proposals') {
@@ -2120,7 +2128,7 @@ async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
   // nothing then, and never lands in the prompt
   if (!t.box && barNamed(key.key, now, since)) return { box: { text: e.text, cursor: e.cursor }, work: () => { keyOpened = null; cardKeyed = null } }
   // a key from the empty prompt ends what the key before it began (a word after v, or after a card's key)
-  return { ...t, work: async () => { keyOpened = null; cardKeyed = null; await t.work?.() } }
+  return { ...t, work: async () => { keyOpened = null; cardKeyed = null; trayKeyed = null; await t.work?.() } }
 }
 
 /** When the key before this one was decided (keyTurn): a line drawn before it is not what this key answers. */
@@ -2156,7 +2164,9 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     if (replaying && was?.key === 'r' && now - was.at < 700 && /^\S$/.test(k)) {
       return { box: { text: `r${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => paneFire($, 'claims', {}, { type: 'key', key: k }) }
     }
-    if (k !== 'c' && (await paneTakes($, 'claims', {}, { type: 'key', key: k }))) {
+    // the tray opened over the pane takes its own keys first (r its rows, not the replay)
+    const trayFirst = !!tray && k.length === 1 && (await paneTakes($, 'tray', {}, keyEvent(k)))
+    if (k !== 'c' && !trayFirst && (await paneTakes($, 'claims', {}, { type: 'key', key: k }))) {
       return { box: consume, work: async () => {
         await paneFire($, 'claims', {}, { type: 'key', key: k })
         if (k === 'r' && !replaying) keyOpened = { key: 'r', at: now }
@@ -2175,11 +2185,20 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
       } }
     }
   }
-  // the tray open: its program's keys (panes/tray.js: 1 ask, 2–9 open a citation in it, 0 back, ] [ step); a letter
-  // types the question for the mark's thread
+  // the tray open: its program's keys (panes/tray.js: 1 ask, r and c a section of the card, 2–9 open a citation in it,
+  // 0 back, ] [ step); any other letter types the question for the mark's thread
   if (tray) {
+    // a letter typed straight after a section's letter: that letter began a word, so its section closes again and both
+    // letters are typed
+    const was = trayKeyed
+    if (was && now - was.at < 700 && /^\p{L}$/u.test(k)) {
+      return { box: { text: `${was.key}${e.inputText}`, cursor: was.key.length + e.inputText.length }, work: () => paneFire($, 'tray', {}, keyEvent(was.key)) }
+    }
     const ev = k === 'backspace' ? (tray.asking ? null : keyEvent('0')) : k.length === 1 ? keyEvent(k) : null
-    if (ev && (await paneTakes($, 'tray', {}, ev))) return { box: consume, work: () => paneFire($, 'tray', {}, ev) }
+    if (ev && (await paneTakes($, 'tray', {}, ev))) {
+      const letter = /^\p{L}$/u.test(k)
+      return { box: consume, work: async () => { await paneFire($, 'tray', {}, ev); if (letter) trayKeyed = { key: k, at: now } }, ...(letter ? { word: () => paneFire($, 'tray', {}, ev) } : {}) }
+    }
     return { box: null }
   }
   // v's line open under a message: the proposals program's keys (1–9 pick, 0 close)
@@ -3108,6 +3127,7 @@ export function resetShell(): void {
   person = 'now'
   keyOpened = null
   cardKeyed = null
+  trayKeyed = null
   keyDecided = 0
   barSeen.length = 0
   resetKeys(shellKey)

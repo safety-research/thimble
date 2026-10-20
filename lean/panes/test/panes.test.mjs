@@ -273,6 +273,39 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   assert.equal([asking.status?.text, barText([asking])].filter(Boolean).join(' · '), 'type to ask · ↵ asks this thread · 0 back')
 })
 
+test('tray: a citation opens on its most readable form; each section the card names (r rows, c code) is a key away in the same panel, never shown first', async () => {
+  const { markedPart } = await import('../tray.js')
+  const f0 = { row: 'r1', i: 0, kind: 'cite', ref: 'q3#day=2026-06-18@n', label: '6,543' }
+  const data = PANES.tray.data({ threads: [] })
+  const key = run(PANES.tray, data, { state: { stack: [f0] }, w: 70 }).wants[0].key
+  const text = s => globalThis.DrawKit.run(`return k.text(${JSON.stringify(s)})`, {}, { w: 60 })
+  const got = { [key]: { drawings: [text('day 06-18 6,543')], sections: [{ id: 'rows', key: 'r', words: 'rows', drawings: [text('L28 a save')] }, { id: 'code', key: 'c', words: 'code', drawings: [text('tally(df, "day")')] }], links: [] } }
+  const full = run(PANES.tray, data, { state: { stack: [f0] }, w: 70, got })
+  const shown = gridText(renderTerm(full, { w: 70 }))
+  assert.match(shown, /day 06-18 6,543/)
+  assert.doesNotMatch(shown, /tally|L28/)
+  assert.equal(barText([full]), '1 ask · r rows · c code · 0 close · ] next')
+  // c shows the code in place of the card, in the same panel; the frame says which; c again or 0 brings the card back
+  const code = act(PANES.tray, data, { stack: [f0] }, keyEvent('c'), 'terminal', { got, w: 70 })
+  assert.equal(code.state.stack.at(-1).open, 'code')
+  const drawn = run(PANES.tray, data, { state: code.state, w: 70, got })
+  assert.match(gridText(renderTerm(drawn, { w: 70 })), /6,543.*cite · code[\s\S]*tally\(df, "day"\)/)
+  assert.doesNotMatch(gridText(renderTerm(drawn, { w: 70 })), /day 06-18 6,543/)
+  assert.equal(barText([drawn]), '1 ask · r rows · c code · 0 back · ] next')
+  assert.equal(act(PANES.tray, data, code.state, keyEvent('c'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
+  assert.equal(act(PANES.tray, data, code.state, keyEvent('0'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
+  assert.equal(act(PANES.tray, data, code.state, keyEvent('r'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, 'rows')
+  // while the person asks the mark's thread, letters are the question: no section takes them
+  const asking = run(PANES.tray, data, { state: { stack: [f0], asking: true }, w: 70, got })
+  assert.ok(!asking.on.some(h => h.name === 'r' || h.name === 'c'))
+  // a value of a card: the card itself, the part that holds the value selected as a part is
+  const card = globalThis.DrawKit.run("return k.stack(k.region('day-06-17', { ref: 'q1#day=06-17' }, k.text('06-17 870')), k.region('day-06-18', { ref: 'q1#day=06-18' }, k.text('06-18 132')))", {}, { w: 60 })
+  assert.equal(markedPart(card, ['obj:x#/days/1', 'q1#day=06-18']), 'day-06-18')
+  assert.equal(markedPart(card, ['q9']), null)
+  const marked = run(PANES.tray, data, { state: { stack: [f0] }, w: 70, got: { [key]: { drawings: [card], sections: [], mark: ['q1#day=06-18'], links: [] } } })
+  assert.equal(marked.selected, 'day-06-18')
+})
+
 test('proposals: v\'s line is a program on the message\'s record: 1–9 pick (the host runs the verb), 0 closes', async () => {
   const data = PANES.proposals.data({ 'record:r1': { verbs: { v: { lit: true, proposals: ['saves per day around June 18', 'who edited most'] } } } }, { row: 'r1', verb: 'v' })
   const d = run(PANES.proposals, data, { w: 90 })

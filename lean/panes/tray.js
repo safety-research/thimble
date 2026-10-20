@@ -2,19 +2,24 @@
 // the prompt and the browser at the foot of the chat, from this one file; which cards are open is its state, kept for
 // both surfaces (thimble/panes/<session>/tray.json).
 //
-// It shows one card at a time, the top of a stack: a citation's source card (what the value rests on: the query's
-// output around the cited row, a series, a code hunk, or the rows) or an explain card (what a term is, a small drawing,
-// where it mattered here). A citation inside a card opens over it; back returns to the card under it, and back from the
-// first card closes the tray. 1 asks: the question goes to the mark's side thread, which main does not see.
+// It shows one card at a time, the top of a stack: a citation's source card or an explain card (what a term is, a
+// small drawing, where it mattered here). A citation's card opens on the most readable form of what it points to (the
+// cited span of a file, the query's output as a table with the cited cell marked, a series, the card with its part
+// marked: shell/cards.js); what reads less easily is one key away in the same panel, a section the card names (r the
+// rows behind the value, c its code, or a record as the file holds it), shown in place of the card until the same key
+// or 0 closes it. A citation inside a card opens over it; back returns to the card under it, and back from the first
+// card closes the tray. 1 asks: the question goes to the mark's side thread, which main does not see.
 //
 //   state: {stack: [frame, ...], asking: true while the person asks the mark's thread}
-//   frame: {row, i, kind, ref, label, gloss} for a mark of a message (frameOf), {kind: 'cite', ref, label} for a citation
-//          inside a card. A frame carries what it shows, so a surface draws it without the message's record.
+//   frame: {row, i, kind, ref, label, gloss, open} for a mark of a message (frameOf), {kind: 'cite', ref, label, open}
+//          for a citation inside a card; `open` is the section shown. A frame carries what it shows, so a surface draws
+//          it without the message's record.
 //   reads: the session's side threads (the mark's thread, its questions and answers)
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
-//          {title, right, drawings: [drawing], links: [{id, ref, label}], problem}
-//   keys: 1 ask · 2–9 open a citation inside the card · 0 back (or close) · ] [ the next and the one before (the host's
-//         order of marks and cards: k.do('step'))
+//          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
+//          label}], problem} (cards.js drawnCard)
+//   keys: 1 ask · the sections' keys (r rows, c code) · 2–9 open a citation inside the card · 0 back (or close) · ] [ the
+//         next and the one before (the host's order of marks and cards: k.do('step'))
 import { threadKey } from '../shell/threads.js'
 
 /** The rows a card may take in the tray. */
@@ -43,6 +48,15 @@ export function scopeOf(f) {
 export function cardRequest(f) {
   if (f.kind === 'gloss') return { kind: 'gloss', label: f.label, gloss: f.gloss || {} }
   return { kind: f.kind || 'cite', ref: f.ref, label: f.label }
+}
+
+/** The part of a drawing that carries one of `refs` (its region meta's `ref`), or null: a card's part a citation of
+ *  one of its values names. */
+export function markedPart(drawing, refs) {
+  const want = new Set((Array.isArray(refs) ? refs : []).filter(x => typeof x === 'string'))
+  if (!want.size || !drawing) return null
+  const hit = (drawing.regions || []).find(r => [].concat(r && r.meta ? r.meta.ref : []).some(x => want.has(x)))
+  return hit ? hit.id : null
 }
 
 /** Two frames the same (a citation opened twice in a row is not stacked twice). */
@@ -79,23 +93,30 @@ export function program(k, data) {
   const thread = (data.threads || []).find(t => t.key === key) || null
   const links = card && Array.isArray(card.links) ? card.links.slice(0, 8) : []
   const asking = !!st.asking
+  // the sections of the card (the rows behind it, its code), each a key away; the open one shows in place of the card
+  const sections = card && Array.isArray(card.sections) ? card.sections.filter(s => s && s.id && typeof s.key === 'string' && s.key.length === 1) : []
+  const open = sections.find(s => s.id === top.open) || null
+  const withTop = patch => ({ stack: [...stack.slice(0, -1), { ...top, ...patch }], asking: false })
 
   // ---- what the person does
   const back = () => {
     if (asking) return { asking: false }
+    if (open) return withTop({ open: null })
     if (stack.length > 1) return { stack: stack.slice(0, -1) }
     k.do('close')
     return { stack: [], asking: false }
   }
-  const open = l => ({ stack: [...stack, { kind: 'cite', ref: l.ref, label: l.label }].slice(-12), asking: false })
+  const openLink = l => ({ stack: [...stack, { kind: 'cite', ref: l.ref, label: l.label }].slice(-12), asking: false })
   // while the person asks, the bar says how (k.status), and only back besides
   k.on('1', () => {
     // in the browser the question is typed in the tray; in the terminal, in the prompt (the bar says so)
     if (k.surface === 'browser') k.do('input', { label: `ask about ${top.label}…`, event: 'ask' })
     return { asking: true }
   }, asking ? undefined : thread ? 'thread' : 'ask')
-  links.forEach((l, j) => k.on(String(j + 2), () => open(l), asking ? undefined : 'open'))
-  k.on('0', back, asking || stack.length > 1 ? 'back' : 'close')
+  // a section's key opens it in place of the card, and closes it again; while the person asks, letters are the question
+  if (!asking) sections.forEach(s => k.on(s.key, () => withTop({ open: open && open.id === s.id ? null : s.id }), s.words))
+  links.forEach((l, j) => k.on(String(j + 2), () => openLink(l), asking ? undefined : 'open'))
+  k.on('0', back, asking || open || stack.length > 1 ? 'back' : 'close')
   k.on('esc', back)
   k.on(']', () => { k.do('step', { dir: 1 }) }, asking ? undefined : 'next')
   k.on('[', () => { k.do('step', { dir: -1 }) })
@@ -106,7 +127,7 @@ export function program(k, data) {
   })
   k.on('press', e => {
     const l = links.find(x => x.id === e.region)
-    if (l) return open(l)
+    if (l) return openLink(l)
     if (e.region === 'thread') return { asking: true }
     return null
   })
@@ -128,11 +149,20 @@ export function program(k, data) {
     parts.push(k.text(`{dim:${top.kind === 'gloss' ? 'drawing the explainer…' : 'reading it through the kernel…'}}`))
   } else if (card.problem || card.error) {
     parts.push(k.text(`{dim:${k.escape(String(card.problem || card.error))}}`))
+  } else if (open) {
+    if (open.problem) parts.push(k.text(`{dim:${k.escape(String(open.problem))}}`))
+    ;(open.drawings || []).forEach((d, j) => {
+      if (j) parts.push(k.space(1, 1))
+      parts.push(k.embed(d))
+    })
   } else {
     (card.drawings || []).forEach((d, j) => {
       if (j) parts.push(k.space(1, 1))
       parts.push(k.embed(d))
     })
+    // a value of a card: the card's part that holds it, marked as a selection is
+    const marked = markedPart((card.drawings || [])[0], card.mark)
+    if (marked) k.select(marked)
     if (card.why) parts.push(k.text(`{dim:${k.escape(card.why)}}`))
     if (thread && thread.turns.length) {
       const q = (thread.turns.find(t => t.role === 'person') || {}).text || ''
@@ -140,5 +170,9 @@ export function program(k, data) {
     }
   }
   const title = top.label.length > inner - 12 ? top.label.slice(0, Math.max(8, inner - 13)) + '…' : top.label
-  return k.frame(k.size(k.stack(parts), { w: inner }), { title: k.escape(title), right: k.escape(stack.length > 1 ? `${kind} · ${stack.length}` : kind), tone })
+  // the frame's right says what the card is from (the card's own words, `cite · revisions.jsonl`), the section open,
+  // and how deep the stack is
+  const from = card && !card.problem && !card.error && typeof card.right === 'string' && card.right ? card.right : kind
+  const right = [from, open && !asking ? open.words : '', stack.length > 1 ? String(stack.length) : ''].filter(Boolean).join(' · ')
+  return k.frame(k.size(k.stack(parts), { w: inner }), { title: k.escape(title), right: k.escape(right), tone })
 }

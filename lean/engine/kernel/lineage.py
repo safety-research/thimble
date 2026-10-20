@@ -268,6 +268,178 @@ def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
     return shown, f"the words show {words!r}, which only row {i + 1} of {q['id']} holds"
 
 
+# the cited span of a file as a person reads it (resolve's `span`): the cited rows, a few rows around them, and the
+# words a citation quotes marked in place
+SPAN_AROUND = 2
+SPAN_MAX = 6
+_FOLD = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "—": "-", "–": "-"})
+
+
+def _quoted(label: str | None) -> list[str]:
+    """The parts of the words a citation quotes (an ellipsis splits them), or [] when its words quote nothing: a
+    number, or fewer than three letters."""
+    if not label:
+        return []
+    q = " ".join(str(label).replace("**", "").split()).strip().strip("\"'“”‘’").strip()
+    if len(re.findall(r"[^\W\d_]", q)) < 3:
+        return []
+    return [x.strip(" ,;:") for x in re.split(r"\s*(?:\.\.\.|…|\[\.\.\.\]|\[…\])\s*", q) if x.strip(" ,;:")]
+
+
+def quote_at(text: str, label: str | None) -> tuple[int, int] | None:
+    """Where the words a citation quotes stand in `text` (whitespace folded in the quote, case and typographic quotes
+    ignored): the start of their first part and the end of their last, or None."""
+    parts = _quoted(label)
+    if not parts:
+        return None
+    hay = text.translate(_FOLD).lower()
+    at, first, end = 0, None, 0
+    for part in parts:
+        want = " ".join(part.translate(_FOLD).split()).lower()
+        i = hay.find(want, at)
+        if i < 0:
+            return None
+        first = i if first is None else first
+        end = at = i + len(want)
+    return (first, end) if first is not None else None
+
+
+def _strings(v: Any, key: str = "", depth: int = 0) -> list[tuple[str, str]]:
+    """Every string of a value with the field that holds it (`message.content.0.text`), in order."""
+    if depth > 6:
+        return []
+    if isinstance(v, str):
+        return [(key, v)]
+    if isinstance(v, dict):
+        return [x for k, y in v.items() for x in _strings(y, f"{key}.{k}" if key else str(k), depth + 1)]
+    if isinstance(v, list):
+        return [x for i, y in enumerate(v[:200]) for x in _strings(y, f"{key}.{i}" if key else str(i), depth + 1)]
+    return []
+
+
+def _window(text: str, at: tuple[int, int], width: int) -> tuple[str, tuple[int, int]]:
+    """A window of `text` around the span `at`, about `width` characters, with … where it was cut."""
+    a, b = at
+    if len(text) <= width:
+        return text, at
+    lo = max(0, min(a - width // 4, len(text) - width))
+    hi = min(len(text), max(lo + width, b))
+    pre = "…" if lo > 0 else ""
+    return pre + text[lo:hi] + ("…" if hi < len(text) else ""), (a - lo + len(pre), b - lo + len(pre))
+
+
+def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: int) -> dict[str, Any]:
+    """One row of a span: a line of text as written, or a record as its words (with whose and where). A cited row
+    whose words a citation quotes reads as the field that holds them, with the quote's place (`at`)."""
+    out: dict[str, Any] = {"ref": row.ref, "hot": hot}
+    if n is not None:
+        out["n"] = n
+    if isinstance(row.value, str):
+        text = row.value.replace("\t", "    ")
+        at = quote_at(text, label) if hot else None
+        if at:
+            text, at = _window(text, at, width)
+            out["at"] = list(at)
+        out["text"] = text if len(text) <= width + 2 else text[: width - 1] + "…"
+        return out
+    words, meta = words_of(row)
+    at = quote_at(words, label) if hot and words else None
+    if at:
+        out.update({"text": words, "at": list(at)})
+    elif hot:
+        # the quote is not in the row's words: the field that holds it, named
+        for key, s in _strings(row.value):
+            flat = " ".join(s.split())
+            at = quote_at(flat, label)
+            if at:
+                text, at = _window(flat, at, width)
+                out.update({"text": text, "at": list(at), "field": key})
+                break
+    if "text" not in out:
+        out["text"] = words or excerpt(row, width)
+    if meta:
+        out["meta"] = meta
+    return out
+
+
+def span(st: Store, ref: str, label: str | None = None, around: int = SPAN_AROUND, width: int = 480) -> dict[str, Any] | None:
+    """The span of a file a source ref cites, as a person reads it: the cited rows (at most SPAN_MAX) with `around`
+    rows on each side, each a line as written or a record as its words, and where the words a citation quotes stand in
+    the cited row. With the file's path and its absolute path, for a link that opens it, and the first cited row as the
+    file holds it (`raw`, a record's JSON). None for a ref that names no rows (a whole file, a table, a query or an
+    object's value)."""
+    try:
+        p = R.parse(ref)
+    except R.RefError:
+        return None
+    k = p["kind"]
+    if k not in ("lines", "block", "blocks", "csvrows", "dbrows", "pointer"):
+        return None
+    rel = p["path"]
+    path = st.root / rel
+    if not path.is_file():
+        return None
+    kind = S.kind_of_file(st.root, rel)
+    out: dict[str, Any] = {"path": rel, "file": str(path.resolve()), "kind": kind}
+    nums = p.get("nums") or []
+    # one run of rows by number has the rows around it as its context; any other set shows its rows alone
+    run = bool(nums) and nums == list(range(nums[0], nums[0] + len(nums))) and k in ("lines", "csvrows", "dbrows")
+    rows: list[dict[str, Any]] = []
+    try:
+        if k == "lines" and kind in ("markdown", "diff", "text", None):
+            shown = nums[:SPAN_MAX]
+            lo, hi = (max(1, shown[0] - around), shown[-1] + around) if run else (shown[0], shown[-1])
+            want = set(range(lo, hi + 1)) if run else set(shown)
+            with open(path, "r", errors="replace") as f:
+                for i, line in enumerate(f, 1):
+                    if i in want:
+                        text = line.rstrip("\n")
+                        rows.append(_span_row(S.Row(f"{rel}#L{i}", text, text), i, i in shown, label, width))
+                    if i >= hi:
+                        break
+            if not any(r["hot"] for r in rows):
+                return None
+            out["unit"] = "line"
+        else:
+            unit = {"lines": "L", "csvrows": "row=", "dbrows": f"{p.get('table')}/"}.get(k)
+            cited = S.fetch(st.root, ref, limit=SPAN_MAX)
+
+            def num(r: S.Row) -> int | None:
+                m = re.search(r"(\d+)$", r.ref)
+                return int(m[1]) if m and unit else None
+
+            before: list[S.Row] = []
+            after: list[S.Row] = []
+            if run and unit and len(nums) <= SPAN_MAX and around > 0:
+                a, b = nums[0], nums[-1]
+                if a > 1:
+                    try:
+                        before = S.fetch(st.root, f"{rel}#{unit}{max(1, a - around)}-{a - 1}")
+                    except R.RefError:
+                        before = []
+                for i in range(b + 1, b + around + 1):
+                    try:
+                        after.extend(S.fetch(st.root, f"{rel}#{unit}{i}"))
+                    except R.RefError:
+                        break
+            rows = [_span_row(r, num(r), False, label, width) for r in before]
+            rows += [_span_row(r, num(r), True, label, width) for r in cited]
+            rows += [_span_row(r, num(r), False, label, width) for r in after]
+            out["unit"] = {"lines": "line", "csvrows": "row", "dbrows": "row"}.get(k, "value")
+            # the cited row as the file holds it, for the person who wants it whole
+            v = cited[0].value if cited else None
+            raw = json.dumps(v, ensure_ascii=False, indent=1, default=str) if isinstance(v, (dict, list)) else (cited[0].raw if cited else "")
+            lines = raw.split("\n")
+            out["raw"] = "\n".join(x if len(x) <= 400 else x[:399] + "…" for x in lines[:80])
+            if len(lines) > 80:
+                out["raw_more"] = len(lines) - 80
+    except (R.RefError, OSError, ValueError):
+        return None
+    out["rows"] = rows
+    out["cited"] = len(nums) if nums else sum(1 for r in rows if r["hot"])
+    return out
+
+
 def about_rows(chain: list[dict[str, Any]]) -> str:
     """What a resolve's rows are, in words: the query's question and the key of the row they stand behind."""
     for step in chain:
@@ -314,6 +486,10 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     about = about_rows(chain)
     if about:
         out["about"] = about
+    # a citation of rows of a file: the span as a person reads it, with the words its citation quotes marked
+    sp = span(st, ref, label) if p["kind"] not in ("object", "query", "file", "table") else None
+    if sp:
+        out["span"] = sp
     try:
         files_only = all(R.parse(x)["kind"] in ("file", "table") for x in rowsets)
         out["count"] = None if files_only else R.count(rowsets)
@@ -479,6 +655,14 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
     value, holder, holder_ptr = O.walk(obj.get("data"), ptr)
     step["at"] = ptr
     step["value"] = value
+    # the refs a part of the card drawn from this value carries (its row's own ref, or the row's place in the data),
+    # so a surface can mark that part
+    marks = [f"obj:{obj['id']}#{ptr}"]
+    if isinstance(holder, dict):
+        marks.append(f"obj:{obj['id']}#{holder_ptr or '/'}")
+        if isinstance(holder.get("_ref"), str):
+            marks.append(holder["_ref"])
+    step["marks"] = list(dict.fromkeys(marks))
     b = O.binding_for(lin, ptr)
     if b:
         chain.append({"step": "binding", "at": b["at"], "from": b["ref"]})
