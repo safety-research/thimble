@@ -1,9 +1,11 @@
 // graph.js: the Claims pane, a program on the card runtime (draw/kit.js) over the session's claims (store.js). It opens
 // in the side panel (claims/term.ts openSide) and is one view: the graph.
 //
-//   the graph       each claim a dot, the claims of a cluster an island in the cluster's color with its name over it;
-//                   a hollow dot is a claim a later one corrected, a heavier one a claim said twice or more. A dashed
-//                   line joins a correction to the claim it corrects, a thin one two claims that cite the same rows.
+//   the graph       each claim a dot, the claims of a cluster together in the cluster's color under its name (each
+//                   cluster a rectangle of the graph, sized by how many claims it holds); a hollow dot is a claim a
+//                   later one corrected, a heavier one a claim said twice or more. A dashed line joins a correction to
+//                   the claim it corrects, a thin one two claims that cite the same rows. The dots keep their places
+//                   while the ring walks them.
 //   the claim       under the graph, the claim selected: its words, its turn, where it came from (a press, or ↵ on
 //                   its dot, opens the place in the transcript over the pane, as a citation opens), the claim that
 //                   corrects it or that it corrects, and its evidence (each citation with what its rows say; its
@@ -63,93 +65,142 @@ const hash = s => {
 }
 
 /**
- * The graph laid out in cells, w × h: each cluster an island around an anchor (the anchors on an ellipse that fills
- * the area), its claims pushed apart and pulled together along their edges, then snapped to cells so no two dots
- * touch; each cluster's name over its island (else under it), where it crosses no dot and no other name. A cell is
- * about twice as tall as wide, so heights count double. Deterministic for the same input. {pos: Map(id -> {x, y}),
- * names: [{id, name, x, y}]}
+ * Integer sizes proportional to the weights, each at least `min` where there is room, that sum to `total`.
+ */
+export function split(total, weights, min) {
+  const n = weights.length
+  const m = Math.min(min, Math.floor(total / Math.max(1, n)))
+  const rest = total - m * n
+  const sum = weights.reduce((a, b) => a + b, 0) || 1
+  const raw = weights.map(x => m + (rest * x) / sum)
+  const out = raw.map(Math.floor)
+  let left = total - out.reduce((a, b) => a + b, 0)
+  raw.map((v, i) => [v - Math.floor(v), i]).sort((p, q) => q[0] - p[0] || p[1] - q[1]).forEach(([, i]) => { if (left > 0) { out[i]++; left-- } })
+  return out
+}
+
+/**
+ * Each cluster's rectangle of the area, w × h, in rows of rectangles: the clusters in order, a row's width and the
+ * rows' heights shared by how many claims each holds, and the number of rows the one where the rectangles are least
+ * cramped and closest to a pleasant shape. [{g, x, y, w, h}]
+ */
+export function slotsOf(groups, W, H) {
+  const wt = g => g.nodes.length + 1
+  const total = groups.reduce((s, g) => s + wt(g), 0)
+  let best = null
+  for (let r = 1; r <= Math.min(groups.length, 4); r++) {
+    const rows = []
+    let cur = []
+    let acc = 0
+    groups.forEach((g, i) => {
+      cur.push(g)
+      acc += wt(g)
+      const after = groups.length - i - 1
+      const rowsAfter = r - rows.length - 1
+      if (rowsAfter > 0 && (acc >= (total * (rows.length + 1)) / r || after === rowsAfter)) { rows.push(cur); cur = [] }
+    })
+    if (cur.length) rows.push(cur)
+    if (rows.length !== r) continue
+    const hs = split(H, rows.map(row => row.reduce((t, g) => t + wt(g), 0)), 4)
+    const out = []
+    let y = 0
+    let cost = 0
+    rows.forEach((row, ri) => {
+      const ws = split(W, row.map(wt), Math.min(14, Math.floor(W / row.length)))
+      let x = 0
+      row.forEach((g, gi) => {
+        const sl = { g, x, y, w: ws[gi], h: hs[ri] }
+        out.push(sl)
+        // a dot needs about 4 cells of its row; the slot's top row holds the cluster's name
+        const room = Math.max(1, Math.floor((sl.w - 2) / 4) * Math.max(1, sl.h - 1))
+        cost += Math.log(sl.w / Math.max(1, sl.h) / 5) ** 2 + (g.nodes.length > room ? (4 * g.nodes.length) / room : 0) + (Array.from(g.name).length > sl.w - 2 ? 1 : 0)
+        x += ws[gi]
+      })
+      y += hs[ri]
+    })
+    if (!best || cost < best.cost - 1e-9) best = { cost, out }
+  }
+  return best ? best.out : []
+}
+
+/**
+ * The graph laid out in cells, w × h: each cluster a rectangle of the area (slotsOf) with its name on the top row and
+ * its claims under it, pushed apart and pulled together along their edges inside the rectangle, then snapped to
+ * cells so no two dots touch. So a cluster's claims are always together, and apart from another's. A cell is about
+ * twice as tall as wide, so heights count double. Deterministic for the same input. {pos: Map(id -> {x, y}), names:
+ * [{id, name, x, y}]}
  */
 export function layout(nodes, clusters, edges, { w, h }) {
   const W = Math.max(20, w)
-  const H = Math.max(6, h)
-  const used = clusters.filter(c => nodes.some(n => String(n.cluster) === String(c.id)))
-  const m = Math.max(1, used.length)
-  const cx = W / 2, cy = H, rx = W * 0.34, ry = H * 0.62
-  const anchor = new Map()
-  used.forEach((c, i) => {
-    const a = -Math.PI / 2 + (i / m) * Math.PI * 2 + (m % 2 ? 0 : Math.PI / m)
-    anchor.set(String(c.id), m === 1 ? [cx, cy] : [cx + Math.cos(a) * rx, cy + Math.sin(a) * ry])
-  })
-  const P = nodes.map(n => {
-    const [ax, ay] = anchor.get(String(n.cluster)) || [cx, cy]
-    return { id: n.id, cluster: String(n.cluster), x: ax + (hash(n.id) - 0.5) * 10, y: ay + (hash(n.id + '#') - 0.5) * 6, vx: 0, vy: 0 }
-  })
+  const H = Math.max(4, h)
+  const known = new Set(clusters.map(c => String(c.id)))
+  const groups = clusters.map(c => ({ id: String(c.id), name: String(c.name), nodes: nodes.filter(n => String(n.cluster) === String(c.id)) })).filter(g => g.nodes.length)
+  const loose = nodes.filter(n => !known.has(String(n.cluster)))
+  if (loose.length) groups.push({ id: '', name: 'between clusters', nodes: loose })
+  const slots = slotsOf(groups, W, H)
+  const P = []
+  for (const sl of slots) {
+    const x0 = sl.x + 1, x1 = sl.x + Math.max(1, sl.w - 3), y0 = sl.y + 1, y1 = sl.y + Math.max(1, sl.h - 1)
+    for (const n of sl.g.nodes) {
+      P.push({ id: n.id, sl, x0, x1, y0, y1, x: (x0 + x1) / 2 + (hash(n.id) - 0.5) * (x1 - x0) * 0.8, y: (y0 + y1) / 2 + (hash(n.id + '#') - 0.5) * (y1 - y0) * 0.8, vx: 0, vy: 0 })
+    }
+  }
   const at = new Map(P.map((p, i) => [p.id, i]))
-  const springs = edges.map(e => [at.get(e.a), at.get(e.b)]).filter(([i, j]) => i != null && j != null && P[i].cluster === P[j].cluster)
-  for (let it = 0; it < 240; it++) {
-    const a = 1 - it / 280
+  const springs = edges.map(e => [at.get(e.a), at.get(e.b)]).filter(([i, j]) => i != null && j != null && P[i].sl === P[j].sl)
+  for (let it = 0; it < 200; it++) {
+    const a = 1 - it / 240
     for (let i = 0; i < P.length; i++) {
       const p = P[i]
       for (let j = i + 1; j < P.length; j++) {
         const q = P[j]
-        let dx = q.x - p.x, dy = q.y - p.y
+        if (q.sl !== p.sl) continue
+        let dx = q.x - p.x, dy = (q.y - p.y) * 2
         let d2 = dx * dx + dy * dy
-        const same = p.cluster === q.cluster
-        if (d2 > (same ? 64 : 196)) continue
+        if (d2 > 100) continue
         if (d2 < 0.01) { dx = 0.1; dy = 0.1; d2 = 0.02 }
-        const f = ((same ? 7 : 14) * a) / d2
-        p.vx -= dx * f; p.vy -= dy * f; q.vx += dx * f; q.vy += dy * f
+        const f = (8 * a) / d2
+        p.vx -= dx * f; p.vy -= (dy * f) / 2; q.vx += dx * f; q.vy += (dy * f) / 2
       }
-      const [ax, ay] = anchor.get(p.cluster) || [cx, cy]
-      p.vx += (ax - p.x) * 0.05 * a
-      p.vy += (ay - p.y) * 0.05 * a
+      p.vx += ((p.x0 + p.x1) / 2 - p.x) * 0.02 * a
+      p.vy += ((p.y0 + p.y1) / 2 - p.y) * 0.02 * a
     }
     for (const [i, j] of springs) {
       const p = P[i], q = P[j]
-      const dx = q.x - p.x, dy = q.y - p.y
+      const dx = q.x - p.x, dy = (q.y - p.y) * 2
       const d = Math.max(0.1, Math.hypot(dx, dy))
       const f = ((d - 4) * 0.2 * a) / d
-      p.vx += dx * f; p.vy += dy * f; q.vx -= dx * f; q.vy -= dy * f
+      p.vx += dx * f; p.vy += (dy * f) / 2; q.vx -= dx * f; q.vy -= (dy * f) / 2
     }
     for (const p of P) {
       p.vx *= 0.6; p.vy *= 0.6
-      p.x = Math.max(2, Math.min(W - 3, p.x + Math.max(-3, Math.min(3, p.vx))))
-      p.y = Math.max(2, Math.min(2 * H - 3, p.y + Math.max(-3, Math.min(3, p.vy))))
+      p.x = Math.max(p.x0, Math.min(p.x1, p.x + Math.max(-3, Math.min(3, p.vx))))
+      p.y = Math.max(p.y0, Math.min(p.y1, p.y + Math.max(-1.5, Math.min(1.5, p.vy))))
     }
   }
-  // snapped to cells, in the order given: no two dots on one row within 3 cells, nor in the rows above and below
+  // snapped to cells: no two dots on one row within 3 cells, nor in the rows above and below; first inside the
+  // cluster's rectangle, else the nearest free cell anywhere
   const pos = new Map()
   const taken = []
-  const free = (x, y) => x >= 1 && x <= W - 2 && y >= 1 && y <= H - 1 && !taken.some(t => (t.y === y && Math.abs(t.x - x) < 4) || (Math.abs(t.y - y) === 1 && Math.abs(t.x - x) < 2))
-  for (const p of P) {
-    const x0 = Math.round(p.x), y0 = Math.round(p.y / 2)
-    let got = null
-    for (let r = 0; r < Math.max(W, H) && !got; r++) {
-      for (let dy = -r; dy <= r && !got; dy++) {
-        for (const dx of r ? [-r * 2, r * 2, ...Array.from({ length: 4 * r - 1 }, (_, k) => k - 2 * r + 1)] : [0]) {
-          if (Math.abs(dy) !== r && Math.abs(dx) !== 2 * r) continue
-          if (free(x0 + dx, y0 + dy)) { got = { x: x0 + dx, y: y0 + dy }; break }
+  const free = (x, y, b) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && !taken.some(t => (t.y === y && Math.abs(t.x - x) < 4) || (Math.abs(t.y - y) === 1 && Math.abs(t.x - x) < 2))
+  const near = (x0, y0, b) => {
+    for (let r = 0; r <= Math.max(W, H); r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -2 * r; dx <= 2 * r; dx++) {
+          if (Math.abs(dy) !== r && Math.abs(dx) < 2 * r - 1) continue
+          if (free(x0 + dx, y0 + dy, b)) return { x: x0 + dx, y: y0 + dy }
         }
       }
     }
-    got = got || { x: Math.max(1, Math.min(W - 2, x0)), y: Math.max(1, Math.min(H - 1, y0)) }
+    return null
+  }
+  const all = { x0: 0, x1: W - 2, y0: 1, y1: H - 1 }
+  for (const p of P) {
+    const x0 = Math.round(p.x), y0 = Math.round(p.y)
+    const got = near(x0, y0, p) || near(x0, y0, all) || { x: Math.max(0, Math.min(W - 2, x0)), y: Math.max(1, Math.min(H - 1, y0)) }
     taken.push(got)
     pos.set(p.id, got)
   }
-  // each cluster's name over its island, else under it, else beside its middle
-  const names = []
-  for (const c of used) {
-    const mine = nodes.filter(n => String(n.cluster) === String(c.id)).map(n => pos.get(n.id))
-    const mx = mine.reduce((s, p) => s + p.x, 0) / mine.length
-    const top = Math.min(...mine.map(p => p.y)), bottom = Math.max(...mine.map(p => p.y))
-    const name = cut(String(c.name), Math.max(8, Math.floor(W / 2)))
-    const len = Array.from(name).length
-    const x = Math.max(0, Math.min(W - len, Math.round(mx - len / 2)))
-    const clear = y => y >= 0 && y <= H - 1 && ![...pos.values()].some(p => p.y === y && p.x >= x - 1 && p.x <= x + len) &&
-      !names.some(o => o.y === y && x < o.x + Array.from(o.name).length + 2 && o.x < x + len + 2)
-    const y = [top - 1, top - 2, bottom + 1, bottom + 2, Math.round((top + bottom) / 2)].find(clear)
-    if (y != null) names.push({ id: String(c.id), name, x, y })
-  }
+  const names = slots.map(sl => ({ id: sl.g.id, name: cut(sl.g.name, Math.max(4, sl.w - 2)), x: sl.x, y: sl.y }))
   return { pos, names }
 }
 
@@ -304,7 +355,14 @@ export function program(k, data) {
   const legend = k.text('{dim:○ corrected · ◉ said again · ╌ a correction · ─ cite the same rows}', { wrap: false })
   // as tall as the graph needs (about two rows a claim, and room for each cluster's name), at most the rows left
   const need = 4 + Math.ceil(claims.length * 0.8) + 2 * groups.length
-  const gh = Math.max(6, Math.min(need, H - head.length - panel.length - 3))
+  // the rows under the graph are those of the tallest claim's, so the graph keeps its size and its dots their places
+  // while the ring walks them
+  const tallest = Math.max(...claims.map(x => {
+    const other2 = x.revised_by || x.revises ? 1 : 0
+    const from = (x.said || []).some(p => p.sentence || p.quote) || (x.folder && (x.sources || []).length) ? 1 : 0
+    return 2 + Math.min(3, wrap(x.text, W - 2).length) + from + other2 + Math.min(MAX_EVIDENCE, (x.sources || []).length)
+  }))
+  const gh = Math.max(6, Math.min(need, H - head.length - Math.max(tallest, panel.length) - 3))
   const edges = data.edges || []
   const named = groups.map(g => ({ id: g.id, name: g.folder ? `${g.name} (folder)` : g.name }))
   const lay = trim(layout(claims.map(c => ({ id: c.id, cluster: c.cluster })), named, edges, { w: W, h: gh }))
@@ -352,17 +410,12 @@ function sourceView(k, data) {
   const first = said[0] || null
   const who = first ? [first.turn != null ? `turn ${first.turn}` : '', first.by === 'person' ? 'your message' : "Claude's message"].filter(Boolean).join(' · ') : ''
   const lines = [k.text(`{c2:**Where it came from**}  {dim:${k.escape(who)}}`, { wrap: false }), k.text(' ')]
-  const meta = { label: `where "${cut(c.text, 60)}" was said`, ref: (c.sources || []).map(x => x.ref).slice(0, 6) }
   const seg = r => k.text(r.map(x => (x.on ? `{accent:**${k.escape(x.s)}**}` : k.escape(x.s))).join(''), { wrap: false })
+  // the claim's words are marked in their color; the view has no part to select, and the panel's thread is about the
+  // place (thread())
   const msg = first && data.text ? messageRows(data.text, first, W - 1) : null
-  if (msg) {
-    msg.rows.slice(0, msg.at).forEach(r => lines.push(seg(r)))
-    lines.push(k.region('quote', meta, k.stack(msg.rows.slice(msg.at, msg.last + 1).map(seg))))
-    msg.rows.slice(msg.last + 1).forEach(r => lines.push(seg(r)))
-  } else if (first) {
-    lines.push(k.region('quote', meta, k.text(`{accent:**“${k.escape(cut(first.sentence || first.quote, W - 4))}”**}`, { wrap: false })))
-  }
-  k.select('quote')
+  if (msg) msg.rows.forEach(r => lines.push(seg(r)))
+  else if (first) lines.push(k.text(`{accent:**“${k.escape(cut(first.sentence || first.quote, W - 4))}”**}`, { wrap: false }))
   const again = said.slice(1)
   if (again.length) {
     lines.push(k.text(' '))

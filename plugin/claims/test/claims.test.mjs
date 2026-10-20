@@ -305,6 +305,9 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   assert.deepEqual(run({ claim: 'c1' }, { type: 'press', region: 'fix-c5' }).state, { claim: 'c5', part: 'n-c5' })
   // the pane takes no esc (the panel's own)
   assert.ok(!(run(st, { type: 'key', key: 'esc' }).effects || []).length)
+  // the dots keep their places while the ring walks them, whatever the claim under the graph
+  const dots = state => JSON.stringify(draw(data, { state }).text.split('\n').slice(0, 14))
+  assert.equal(dots({ claim: 'c1' }), dots({ claim: 'c3' }))
 })
 
 test('where it came from: the message as the person reads it, the claim\'s words marked, and where it was said again', () => {
@@ -318,7 +321,7 @@ test('where it came from: the message as the person reads it, the claim\'s words
   assert.match(text, /^Where it came from {2}turn 1 · Claude's message\n\nYes\. The tilt is one editor\./)
   assert.match(text, /\n\n• June 18 had 6,543 saves, the busiest day\.\n• Bots made 4% of edits\./)
   assert.match(text, /said again once\nturn 2 {2}“June 18 was the busiest day\.”/)
-  assert.equal(d.selected, 'quote')
+  assert.ok(!d.selected)
   assert.match(pane.thread({ source: 'c3' }, {}, data).about, /where the claim "June 18 had 6,543 saves" was said \(turn 1\)/)
   // the marked words: the quote's, also where the offsets no longer hold them
   const m = messageRows(A1, { quote: 'June 18 had 6,543 saves', start: 0, end: 3 }, 60)
