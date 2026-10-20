@@ -728,8 +728,8 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             return 0
         print(f"{r['ref']}: the analyst says {r['now']}" + (f" (the label gave {r['was']})" if r["was"] is not None else ""))
         return 0
-    if a.waiting:
-        out_json(LB.waiting(st, name))
+    if a.waiting is not None:
+        out_json(LB.waiting(st, name, first=a.waiting or None))
         return 0
     if a.answers:
         raw = Path(a.answers).read_text() if a.answers != "-" else stdin_text(5.0)
@@ -851,6 +851,10 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             if time.time() - t0 > a.wait:
                 print(f"{name}: still {s['waiting']:,} records waiting after {a.wait:.0f}s; the calls go on beside the session")
                 break
+            if run.get("state") == "failed":
+                print(f"{name}: the model's calls stopped: {run.get('error') or 'the session gave no reason'}. "
+                      f"{s['waiting']:,} records still wait; `thimble label {name} --again` asks for them again.")
+                return 1
             if run.get("state") == "asked" and time.time() - float(run.get("asked") or t0) > 45:
                 print(f"{name}: no session has started the model's calls. They run in a Claude Code session with the "
                       "thimble plugin; outside one, label with --regex or --code, or give values with --set.")
@@ -946,7 +950,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--again", action="store_true")
     p.add_argument("--check", nargs=2, metavar=("REF", "VALUE"), help="the analyst's check of one record (- takes it back)")
     p.add_argument("--answers", metavar="FILE", help="the model's answers for waiting records (the shell writes them)")
-    p.add_argument("--waiting", action="store_true", help="the records that wait for the model, with their text, as JSON")
+    p.add_argument("--waiting", nargs="?", type=int, const=0, metavar="BATCHES",
+                   help="the records that wait for the model, with their text, as JSON (those of the first BATCHES calls)")
     p.add_argument("--of", nargs="+", metavar="REF", help="the labels of these records, as JSON")
     # the shell's read: the labels each card or citation rests on (labels.used_by), as JSON
     p.add_argument("--used-by", dest="used_by", nargs="+", metavar="REF", help=argparse.SUPPRESS)

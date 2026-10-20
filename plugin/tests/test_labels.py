@@ -232,6 +232,28 @@ def test_wait_waits_once_the_calls_are_picked_up(root: Path):
     assert r.returncode == 0 and "still 6 records waiting after 2s" in r.stdout
 
 
+def test_waiting_gives_one_wave_of_batches_and_counts_every_waiting_record(root: Path, monkeypatch: pytest.MonkeyPatch):
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    st = Store(root)
+    w = LB.waiting(st, "apology")
+    assert w["waiting"] == 6 and len(w["units"]) == 6 and len(w["batches"]) == 1
+    # in batches of two records: the first two batches only, while `waiting` still counts all six
+    monkeypatch.setattr(LB, "batches", lambda units: [[u["ref"] for u in units[i:i + 2]] for i in range(0, len(units), 2)])
+    first = LB.waiting(st, "apology", first=2)
+    assert first["waiting"] == 6 and len(first["batches"]) == 2
+    assert [u["ref"] for u in first["units"]] == [r for b in first["batches"] for r in b] == [u["ref"] for u in w["units"][:4]]
+    out = json.loads(run(root, "label", "apology", "--waiting", "1").stdout)
+    assert out["waiting"] == 6 and len(out["batches"]) == 1 and len(out["units"]) == 6
+
+
+def test_wait_stops_when_the_reads_stopped_and_says_why(root: Path):
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "running"}}))
+    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "failed", "error": "the label apology could not be read"}}))
+    r = run(root, "label", "apology", "--wait", "30")
+    assert r.returncode == 1 and "the model's calls stopped: the label apology could not be read" in r.stdout and "--again" in r.stdout
+
+
 def test_the_label_viewer_reads_a_page_of_records_with_their_values_and_the_labels_with_their_definitions(root: Path):
     run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     run(root, "label", "sorry", "--check", "chat/room.jsonl#L2", "yes")

@@ -41,7 +41,7 @@ type Any = any
 declare const setTimeout: (fn: (value?: unknown) => void, ms: number) => unknown
 
 /** The label the kernel holds in these tests: its records, which wait for the model until answers come for them. */
-type Kept = { waiting: { ref: string; text: string }[]; batch: number; values: Record<string, string>; failed: Record<string, string>; answers: number }
+type Kept = { waiting: { ref: string; text: string }[]; batch: number; values: Record<string, string>; failed: Record<string, string>; answers: number; broken?: boolean; run?: Any }
 const RECORDS = (n: number) => Array.from({ length: n }, (_, i) => ({ ref: `chat/room.jsonl#L${i + 1}`, text: `message ${i + 1}` }))
 
 function world(on: Any, kept: Kept = { waiting: [], batch: 50, values: {}, failed: {}, answers: 0 }) {
@@ -66,12 +66,18 @@ function world(on: Any, kept: Kept = { waiting: [], batch: 50, values: {}, faile
     const at = e.argv.indexOf('label')
     // the model's reads: the records that wait, and the answers written back (the card saved again when none wait)
     if (at >= 0 && e.argv.includes('--waiting')) {
+      if (kept.broken) return ok('{"name": "apology", "units": [')
       const refs = kept.waiting.map(u => u.ref)
-      const batches = Array.from({ length: Math.ceil(refs.length / kept.batch) }, (_, i) => refs.slice(i * kept.batch, (i + 1) * kept.batch))
-      return ok({ name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: false, units: kept.waiting, batches })
+      const all = Array.from({ length: Math.ceil(refs.length / kept.batch) }, (_, i) => refs.slice(i * kept.batch, (i + 1) * kept.batch))
+      // `--waiting N`: the records of the first N batches, and how many wait in all
+      const first = Number(e.argv[e.argv.indexOf('--waiting') + 1]) || all.length
+      const batches = all.slice(0, first)
+      const keep = new Set(batches.flat())
+      return ok({ name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: false, units: kept.waiting.filter(u => keep.has(u.ref)), waiting: refs.length, batches })
     }
     if (at >= 0 && e.argv.includes('--answers')) {
       const got = JSON.parse(String(e.init?.stdin || '{}'))
+      if (got.run) kept.run = got.run
       if (!e.argv.includes('--json')) return ok('')
       kept.answers++
       Object.assign(kept.values, Object.fromEntries(Object.entries(got.values || {}).map(([r, v]) => [r, (v as Any).value])))
@@ -224,6 +230,36 @@ test('a label written while the command still runs is read then: a chained `--wa
   await $.turn.complete({ turnId: 't1', answer: 'I labeled the messages.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
   expect(JSON.parse(w.files['/home/t/.thimble/lean/shown/s-1.json']!).under[ROW.slice(0, 24)].map((x: Any) => `${x.id}@${x.v}`)).toEqual(['02-label-apology@2'])
+})
+
+test('a large label is read a wave at a time: each read of the waiting records asks for one wave, so its output stays small', async ($, on) => {
+  const w = world(on, { waiting: RECORDS(40), batch: 1, values: {}, failed: {}, answers: 0 })
+  const clock = mock.clock(on)
+  on('model.complete', (_$: unknown, e: Any) => ({ value: yes(e) }) as never)
+  w.files[EVENTS] = asked(Date.now() / 1000 + 5, false)
+  on('tool.call', () => ({ result: '' }))
+  await $.tool.call({ tool: 'Bash', command: 'thimble label apology --again' } as never)
+  for (let i = 0; i < 40 && Object.keys(w.kept.values).length < 40; i++) { await new Promise(r => setTimeout(r, 5)); await clock.settle() }
+  const reads = w.runs.filter(r => r.includes('--waiting'))
+  expect(reads.every(r => r[r.indexOf('--waiting') + 1] === '16')).toBe(true)
+  // 40 records in three waves of 16, 16 and 8 calls, then one read that finds none waiting
+  expect(w.kept.answers).toBe(3)
+  expect(reads.length).toBe(4)
+  expect(Object.keys(w.kept.values).length).toBe(40)
+  expect(w.toasts).toEqual([])
+})
+
+test('reads that stop tell the label why, so a `thimble label NAME --wait` stops too, and the person sees a toast', async ($, on) => {
+  const w = world(on, { waiting: RECORDS(6), batch: 3, values: {}, failed: {}, answers: 0, broken: true })
+  const clock = mock.clock(on)
+  on('model.complete', (_$: unknown, e: Any) => ({ value: yes(e) }) as never)
+  w.files[EVENTS] = asked(Date.now() / 1000 + 5, false)
+  on('tool.call', () => ({ result: '' }))
+  await $.tool.call({ tool: 'Bash', command: 'thimble label apology --again' } as never)
+  for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 5)); await clock.settle() }
+  expect(w.kept.run.state).toBe('failed')
+  expect(w.kept.run.error).toContain('the label apology could not be read')
+  expect(w.toasts.join('\n')).toContain('label apology: the label apology could not be read')
 })
 
 test('a call that fails says so plainly: a toast with what failed, and the label keeps what the other calls gave', async ($, on) => {

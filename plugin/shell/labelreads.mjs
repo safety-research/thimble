@@ -144,12 +144,19 @@ export async function readLabel({ name, kernel, callAll, template, promptId = nu
   let why = ''
   let of = null
   let done = 0
+  // a read that stops tells the label, so `thimble label NAME --wait` stops too and says why
+  const stop = async error => {
+    await kernel(['label', name, '--answers', '-'], JSON.stringify({ run: { state: 'failed', error: String(error).slice(0, 300) } }))
+    return { error }
+  }
   for (;;) {
-    const w = await json(['label', name, '--waiting'])
-    if (w.error) return { error: `the label ${name} could not be read: ${w.error}` }
+    // the records of one wave only: the whole list of a large label is more than a process's output can carry
+    const w = await json(['label', name, '--waiting', String(wave)])
+    if (w.error) return stop(`the label ${name} could not be read: ${w.error}`)
     if (!w.units.length) break
+    const left = Number.isFinite(Number(w.waiting)) ? Number(w.waiting) : w.units.length
     if (of == null) {
-      of = w.units.length
+      of = left
       try { await progress?.({ done: 0, of, failed: 0 }) } catch { /* the reads go on */ }
     }
     const byRef = new Map(w.units.map(u => [u.ref, u]))
@@ -168,9 +175,9 @@ export async function readLabel({ name, kernel, callAll, template, promptId = nu
       Object.assign(payload.failed, got.failed)
     })
     last = await json(['label', name, '--answers', '-'], JSON.stringify(payload))
-    if (last.error) return { error: `the answers could not be written to ${name}: ${last.error}` }
+    if (last.error) return stop(`the answers could not be written to ${name}: ${last.error}`)
     // a wave that settled no record would come back the same: stop rather than ask again
-    if (!(Number(last.waiting) < w.units.length)) return { error: `the answers settled none of the waiting records of ${name}` }
+    if (!(Number(last.waiting) < left)) return stop(`the answers settled none of the waiting records of ${name}`)
   }
   const s = last || await json(['label', name])
   if (s.error) return { error: s.error }

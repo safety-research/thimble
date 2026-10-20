@@ -391,8 +391,9 @@ def check(st: Store, name: str, ref: str, value: str | None) -> dict[str, Any]:
 # ------------------------------------------------------------------ the model's part (prompt labels)
 
 
-def waiting(st: Store, name: str, cut: int = UNIT_CHARS) -> dict[str, Any]:
-    """The records that wait for the model, with the text it reads, and the label's definition."""
+def waiting(st: Store, name: str, cut: int = UNIT_CHARS, first: int | None = None) -> dict[str, Any]:
+    """The records that wait for the model, with the text it reads, and the label's definition. With `first`, only the
+    records of the first `first` batches (a wave of calls), so the answer stays small; `waiting` counts them all."""
     lab = load(st, name)
     if lab is None:
         raise LabelError(f"no label {name!r}")
@@ -411,8 +412,14 @@ def waiting(st: Store, name: str, cut: int = UNIT_CHARS) -> dict[str, Any]:
             continue
     units = [{"ref": r, "text": texts[r]} for r in refs if r in texts]
     gone = [r for r in refs if r not in texts]
+    total = len(units)
+    bs = batches(units)
+    if first:
+        bs = bs[:first]
+        keep = {r for b in bs for r in b}
+        units = [u for u in units if u["ref"] in keep]
     return {"name": lab["name"], "version": lab.get("version"), "definition": lab.get("rule") or "", "values": lab["values"],
-            "reason": bool(lab.get("reason")), "units": units, "gone": gone, "batches": batches(units)}
+            "reason": bool(lab.get("reason")), "units": units, "waiting": total, "gone": gone, "batches": bs}
 
 
 def batches(units: list[dict[str, Any]], items: int = BATCH_ITEMS, chars: int = BATCH_CHARS) -> list[list[str]]:
