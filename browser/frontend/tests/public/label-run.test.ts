@@ -23,8 +23,8 @@ describe('a label run in the chat', () => {
   })
 
   test('says how far a run is and how long it took', () => {
-    expect(runProgress({ done: 2340, total: 14591, seconds: 81 })).toBe('2,340 of 14,591 records · 1 min 21 s')
-    expect(runProgress({ done: 0, total: 300, seconds: 4 })).toBe('0 of 300 records · 4 s')
+    expect(runProgress({ done: 2340, total: 14591, seconds: 81 })).toBe('2,340 done · 1 min 21 s')
+    expect(runProgress({ done: 0, total: 300, seconds: 4 })).toBe('0 done · 4 s')
     expect(runProgress(null)).toBe('')
   })
 })
