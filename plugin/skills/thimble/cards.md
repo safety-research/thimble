@@ -105,25 +105,35 @@ return k.stack(
 ```
 
 ```
-Analyst   Why did refunds jump in March?
-Title     From the shipment to the recall
+Analyst   Why did run 17 take three times as many steps as the other runs?
+Title     Run 17, step by step
 ```
 
-The answer is a sequence of events, so the card puts them in order on one axis, each label on its own row under its tick, built on the canvas.
+The question is about one run, so the card draws that run whole, one cell per stretch of steps, and numbers the moments that explain it. Each note quotes the transcript and opens the lines it quotes.
 
 ```js
-const W = Math.max(30, Math.min(k.w, 96)), n = data.events.length
-const x = day => Math.round((day - data.from) / (data.to - data.from) * (W - 1))
-const c = k.canvas(W, n + 2)
-c.hline(0, 0, W, '─', 'dim')
-c.text(0, n + 1, data.start, { tone: 'dim' })
-c.text(W - 1, n + 1, data.end, { tone: 'dim', align: 'right' })
-// the ticks and their stems first, then the labels over them, so no stem cuts a label
-data.events.forEach((e, i) => { c.put(x(e.day), 0, '●', e.tone); if (i) c.vline(x(e.day), 1, i, '│', 'dim') })
-data.events.forEach((e, i) => {
-  const left = Math.max(0, Math.min(x(e.day), W - e.label.length))
-  c.text(left, i + 1, e.label, { tone: e.tone === 'dim' ? 'ink' : e.tone })
-  c.region('event-' + i, left, i + 1, e.label.length, 1, { label: e.label, ref: e.ref })
+const W = Math.max(40, Math.min(k.w, 110)), n = data.steps.length
+const x = s => Math.min(W - 1, Math.floor(s / n * W))
+const tone = Object.fromEntries(data.kinds.map(d => [d.key, d.tone]))
+const c = k.canvas(W, 3)
+// the run, one cell per stretch of steps: red where a test failed, else what it did most
+for (let i = 0; i < W; i++) {
+  const bin = data.steps.slice(Math.floor(i * n / W), Math.floor((i + 1) * n / W))
+  const most = [...new Set(bin)].sort((a, b) => bin.split(b).length - bin.split(a).length)[0]
+  c.put(i, 1, '▆', tone[bin.includes('f') ? 'f' : most])
+}
+// each note's number over the step it marks, or over the stretch it spans
+data.notes.forEach((m, i) => {
+  if (m.to) { c.hline(x(m.at), 0, x(m.to) - x(m.at), '─', 'dim'); c.put(x(m.to), 0, '┤', 'dim') }
+  c.text(x(m.at), 0, `**${i + 1}**`, { tone: 'accent' })
 })
-return c
+c.text(0, 2, '{dim:step 0}'); c.text(W - 1, 2, `{dim:${n}}`, { align: 'right' })
+const spans = data.notes.map(m => `${m.at}${m.to ? '–' + m.to : ''}`)
+return k.stack(
+  k.text(`Run ${data.run} took **${n}** steps, three times the median of ${data.median}; 410 of them went to one test`),
+  k.stack(c, k.legend(data.kinds)),
+  k.stack(...data.notes.map((m, i) => k.region(m.id, { label: `step ${spans[i]}: ${m.text}`, ref: m.ref },
+    k.beside(k.text(`{accent:**${i + 1}**}`, { w: 2 }), k.text(`{dim:${spans[i]}}`, { w: Math.max(...spans.map(s => s.length)) }),
+      k.text(k.escape(m.text) + (m.quote ? `  {dim:“${k.escape(m.quote)}”}` : ''), { wrap: true }), { gap: 1 })))),
+  { gap: 1 })
 ```
