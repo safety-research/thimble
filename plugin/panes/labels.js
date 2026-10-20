@@ -69,7 +69,9 @@ export function tonesIn(grid, values) {
         const colored = x => x && x.tone && !PLAIN.test(x.tone) && !x.bg
         // the mark before it: one or two cells back, over a space
         const mark = [1, 2].map(b => (i - b >= 0 ? row[at[i - b]] : null)).find(x => x && String(x.ch).trim())
-        const tone = !word || !c || c.bg ? null : colored(c) ? c.tone : mark && SWATCH.test(String(mark.ch)) && colored(mark) ? mark.tone : null
+        // (a mark's gray is a color it gives the value: only ink and paper are no color there)
+        const swatch = x => x && x.tone && !/^(ink|paper)$/.test(x.tone) && !x.bg
+        const tone = !word || !c || c.bg ? null : colored(c) ? c.tone : mark && SWATCH.test(String(mark.ch)) && swatch(mark) ? mark.tone : null
         if (tone) { out[v] = tone; left.delete(v); break }
         i = text.indexOf(v, i + 1)
       }

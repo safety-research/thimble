@@ -249,7 +249,7 @@ test("a label beside a chart says its values in the chart's colors: where a valu
   assert.deepEqual(['agent', 'person', 'unclear'].map(v => toneBeside(l, v)), ['c3', 'c5', 'ink'])
   // a legend's mark in the value's color, before its name in plain words, gives the value that color
   const legend = { rows: [row([['by who: ', 'ink'], ['■', 'c2'], [' agent  ', 'ink'], ['■', 'dim'], [' unclear  ', 'ink'], ['■', 'c4'], [' person', 'ink']])] }
-  assert.deepEqual(tonesIn(legend, ['agent', 'person', 'unclear']), { agent: 'c2', person: 'c4' })
+  assert.deepEqual(tonesIn(legend, ['agent', 'person', 'unclear']), { agent: 'c2', unclear: 'dim', person: 'c4' })
   // a value only on a fill, or inside a longer word, is not the chart's color for it: the label's own colors then
   const none = tonesIn({ rows: [row([['agent 3', 'paper', 'c3'], [' agents', 'c4']])] }, ['agent', 'person'])
   assert.deepEqual(none, {})
