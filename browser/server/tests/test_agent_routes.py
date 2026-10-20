@@ -174,3 +174,13 @@ def test_important_details_read_as_the_terminal_s_heads_up_and_take_surfaces(api
     assert (m["lens"], m["term"], m["title"], m["body"], m["here"]) == (
         "details", "fell 40%", "March is half a month", "- The file ends on Mar 14.", "Quote the per-day drop.")
     assert "## Heads-ups" in seen[0] and "Heads-ups the analyst already saw" in seen[0]
+
+
+def test_the_lenses_read_the_report_without_its_authorship_notes(api, monkeypatch):
+    seen = []
+    monkeypatch.setattr(llm, "client", lambda: ScriptedClient(answer=lambda s, u: seen.append(u) or json.dumps({"heads": None})))
+    report.save(api.ws, "# Title\n\n<!-- by: claude -->\nThe runs always pass.\n", by="main")
+    import asyncio
+    from thimble_browser.features import lenses as lens_mod
+    asyncio.run(lens_mod.read(api.ws, with_report=True))
+    assert seen and "The runs always pass." in seen[0] and "<!--" not in seen[0]

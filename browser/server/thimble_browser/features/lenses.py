@@ -335,7 +335,8 @@ def _texts(ws: str, chat: str | None, answer: str | None, cards: list[str], with
     if with_report:
         md = report.markdown(ws)
         if md and md.strip():
-            out["report"] = md
+            # the report's text as the person reads it: without the notes on who wrote each block
+            out["report"] = re.sub(r"^\s*<!--.*?-->\s*$\n?", "", md, flags=re.M)
     return out
 
 
