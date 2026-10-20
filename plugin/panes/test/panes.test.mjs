@@ -217,7 +217,7 @@ test('the focus stack: a key goes to the top program that takes it, then down; t
 })
 
 // ---------------------------------------------------------------- the bar in the room it has
-test('the bar is always one line: it drops the counts but coverage first, then says each key by its first word, then drops coverage, then its label, then cuts', async () => {
+test('the bar is always one line: it drops the counts but coverage first, then says each key by its first word, cuts a long label to its start, then drops coverage, then its label, then cuts', async () => {
   const { barLine, fitBar } = await import('../host.js')
   const bar = { label: 'thimble', left: [{ key: 'v', words: 'visualize' }, { key: 's', words: '● 6 of 24 lines', short: '● squeeze' }, { key: ']', words: 'cite & explain' }, { key: '1', words: 'open detail' }], counts: [{ id: 'threads', text: '2 threads' }, { id: 'cov', text: 'coverage 34%' }] }
   const at = w => barLine(fitBar(bar, w))
@@ -234,6 +234,10 @@ test('the bar is always one line: it drops the counts but coverage first, then s
   const narrow = fitBar(bar, 30)
   assert.equal(narrow.cut, true)
   assert.ok(!barLine(narrow).includes('\n'))
+  // the side panel's thread names the bar: a long name is cut to its start before coverage goes
+  const thread = { label: 'thimble:main/02-agent-editors-by-wiki', left: [{ key: 'esc', words: 'close' }], counts: [{ id: 'cov', text: 'r seen 0.1% ████████' }] }
+  assert.equal(barLine(fitBar(thread, 80)), 'thimble:main/02-agent-editors-by-wiki  esc close   r seen 0.1% ████████')
+  assert.equal(barLine(fitBar(thread, 50)), 'thimble:main/02…  esc close   r seen 0.1% ████████')
 })
 
 test('a status in the bar is cut at its end, never to its first word, and the keys keep their words longest', async () => {

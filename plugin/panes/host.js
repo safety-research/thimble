@@ -235,6 +235,11 @@ export function barLadder(bar) {
     b = { ...b, left: left.slice() }
     steps.push(b)
   }
+  // a long label (the thread the panel shows) to its start, so coverage keeps its place
+  if (b.label && Array.from(b.label).length > LABEL_SHORT) {
+    b = { ...b, label: cutEnd(b.label, LABEL_SHORT) }
+    steps.push(b)
+  }
   // then coverage
   for (const c of cov) {
     b = { ...b, counts: b.counts.filter(x => x !== c) }
@@ -260,4 +265,6 @@ export function fitBar(bar, width, measure = s => Array.from(String(s)).length) 
   return { ...steps[steps.length - 1], cut: true }
 }
 
+/** How long a label stays once the bar is short of room: `thimble:main/02-…`. */
+const LABEL_SHORT = 16
 const cutEnd = (s, n) => (Array.from(String(s)).length <= n ? String(s) : Array.from(String(s)).slice(0, Math.max(1, n - 1)).join('') + '…')
