@@ -43,7 +43,7 @@ function world(on: any, replies: string[] = []) {
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/queries` }))
   on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(files).filter(f => f.startsWith(`${e.path.replace(/\/+$/, '')}/`) && !f.slice(e.path.length + 1).includes('/')).map(f => ({ name: f.slice(e.path.replace(/\/+$/, '').length + 1), kind: 'file' })) }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
-    if (e.path.endsWith('/squeeze/settings.json')) return { value: '{"model": "sonnet", "effort": "low", "settleMs": 300}' }
+    if (e.path.endsWith('/squeeze/settings.json')) return { value: '{"model": "sonnet", "effort": "low", "cardsEffort": "medium", "settleMs": 300}' }
     return { value: files[e.path] ?? promptStub(e.path) ?? '' }
   })
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
@@ -145,6 +145,8 @@ test('a squeeze may change the cards: an edit is a new version under the same id
   await written(clock)
   expect(w.calls.length).toBe(1)
   const call = w.calls[0]
+  // a request that shows the cards asks for more thought than a rewrite of the text alone
+  expect(call.effort).toBe('medium')
   expect(JSON.stringify(call.system)).toContain('THE PROMPT')
   expect(JSON.stringify(call.system)).toContain('The card guide')
   expect(call.prompt).toContain('The cards drawn under the original, in order:\n<card id="01-days">\n<title>Edits per day</title>')

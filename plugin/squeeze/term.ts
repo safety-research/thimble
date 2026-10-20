@@ -232,7 +232,9 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     const toolkit = answer ? toolkitOf((await registryText($, 'forms').catch(() => ({ text: '' }))).text) : ''
     const req = request(probe, {
       system: sp.text, toolkit, question, keep, terms, cards: answer?.cards ?? [], outputs: answer?.outputs ?? [],
-      model: String(cfg.model || DEFAULTS.model), effort: String(cfg.effort || DEFAULTS.effort),
+      // a request that shows the cards asks for more thought: whether a card changes, and its program, if one does
+      // (settings.json cardsEffort; at low effort the model kept every card as it was)
+      model: String(cfg.model || DEFAULTS.model), effort: String((answer && cfg.cardsEffort) || cfg.effort || DEFAULTS.effort),
       maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
     })
     const t0 = await $.clock.now()
