@@ -110,3 +110,33 @@ JSON
 ```
 
 A label is the same move: a query that gives rows a value, by a rule or by values you wrote after reading them, and keeps it with `keep("name", values)`. A later query reads it with `use("name")`, and its lineage names the query that made that version.
+
+## Labels: a judgment over many records
+
+**A label gives each record a value that takes reading to decide.** Which messages apologize, which runs gave up, which edits undo another's: when no field or pattern settles the question, `thimble label NAME --prompt "DEFINITION"` has the model read every record against your definition, so a count rests on all the records, not on the few you read. When a field or a pattern does settle it, `--code` or `--regex` is exact and makes no model calls.
+
+**Write the definition as one or two sentences that two careful readers would apply the same way.** Say what counts and what does not. Try it on a sample first (`--limit 40`), read a few records of each value with `thimble rows GLOB --label NAME=VALUE`, and fix the definition before you label every record.
+
+**A model's values are a claim the person should check before they trust the counts.** The label is drawn under your reply as a card, where the person opens each value's records and checks a sample. Say that the values come from a model's reading, and how many records the person has checked. Their checks count in place of the label's values.
+
+For example, the person asks "Which of the agents' messages are apologies?":
+
+```bash
+thimble label apology --in "agents/*.jsonl" --where 'r.type == "assistant"' --limit 40 \
+  --prompt "The message apologizes: it says sorry for a mistake its author made, or admits one."
+thimble label apology --wait
+thimble rows "agents/*.jsonl" --label apology=yes -n 5
+```
+
+The five read as apologies, so label every message, then count by agent with the label's values:
+
+```bash
+thimble label apology --in "agents/*.jsonl" --where 'r.type == "assistant"' \
+  --prompt "The message apologizes: it says sorry for a mistake its author made, or admits one."
+thimble label apology --wait
+thimble q "apologies per agent" <<'PY'
+df = load("agents/*.jsonl", fields=["type"]).merge(use("apology")[["_ref", "apology"]], on="_ref")
+df["agent"] = df._file.str.extract(r"(agent-\d+)", expand=False)
+tally(df[df.apology == "yes"], "agent")
+PY
+```

@@ -20,6 +20,16 @@ kernel refs behind the selection), `drawing` (the object as the person sees it),
 `ctx.model` is the session's own model, one quiet call: `complete` as `$.model.complete` (no history), `fork` as
 `$.model.fork` (over the conversation). A verb runs in a Node child, which has no `$`, so the first call stops the run;
 the shell makes the call and runs the verb again with the answer. Call the model the same way each run and it works.
+Calls started together (`Promise.all` over `ctx.model.complete`) are all handed back, and the shell makes them side by
+side, `parallel` at a time (verb.json, default 4), trying again a call the API turned away while busy, then runs the verb
+once more with every answer; a verb runs at most `rounds` times (verb.json, default 8). A request's `units` field (how
+many things the call covers) is shown as progress under the object (`label… 120 of 412 records`) and never sent.
+`verbs/label/` is the example: it asks for a wave of calls, writes what their answers gave, then asks for the next.
+
+A verb whose verb.json says `"feed": true` may also be asked for by the kernel: a `{"kind": "verb", "verb", "object",
+"args"}` line in the session's change feed (`thimble label NAME --prompt …` writes one). The shell runs it once, beside
+the session, on that object, from the moment the line is written (it looks at the feed while a command runs), and draws
+the object it makes in the old one's place.
 
 `run` returns any of these, and any other field is kept:
 

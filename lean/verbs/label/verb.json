@@ -1,0 +1,15 @@
+{
+  "name": "label",
+  "line": "the model reads each record of a --prompt label against its definition and gives it a value; the counts and the card fill in",
+  "order": 4,
+  "feed": true,
+  "requested_by": "`thimble label NAME --prompt ...` (and `--again`) asks for this verb in the session's change feed; the shell runs it on the label's card, beside the session",
+  "model": "sonnet",
+  "effort": "low",
+  "maxTokens": 8000,
+  "timeoutMs": 180000,
+  "parallel": 8,
+  "wave": 16,
+  "rounds": 60,
+  "store": "thimble/labels/<name>.json (engine/kernel/labels.py): the answers go back with `thimble label NAME --answers -`"
+}
