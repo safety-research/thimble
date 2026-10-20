@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import canvas, chats, corpus, home, report, views
+from . import canvas, chats, corpus, home, report, settings, views
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -226,6 +226,7 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     def attached(c: str) -> dict[str, Any]:
         choice = home.read_json(home.workspace_dir(c) / "session.json", {}) or {}
         return {"session": "thimble-browser", "cwd": str(folder_of(c)), "since": started,
+                "model": settings.read()["model"],
                 **({"effort_choice": choice["effort"]} if choice.get("effort") else {})}
 
     @app.put("/api/ws/{c}/session/effort")
@@ -273,13 +274,20 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         title = body.get("title") or (str(body.get("anchor_text") or anchor or "Thread")[:60])
         m = chats.new_meta(cid, kind="thread", title=title, parent=body.get("parent") or "main", anchor=anchor,
                            anchor_text=body.get("anchor_text"))
-        m["fork_of"] = chats.meta(c, "main").get("session_id")
         chats.save_meta(c, m)
+        sessions.fork(c, cid)
         hub.publish(c, {"type": "chat", "chat": cid})
         text = str(body.get("text") or "").strip()
         if text:
-            await sessions.get(c, cid).send(text)
+            await sessions.get(c, cid).send(thread_opening(m, text), shown=text)
         return with_state(c, m)
+
+    def thread_opening(m: dict[str, Any], text: str) -> str:
+        """A thread's first message, as Claude reads it: what the analyst pointed at, then their question."""
+        what = str(m.get("anchor") or "")
+        words = " ".join(str(m.get("anchor_text") or "").split())[:600]
+        about = f"{what}, which reads: {words}" if words else what
+        return f"(The analyst opened this thread about {about}.)\n\n{text}" if about else text
 
     @app.put("/api/ws/{c}/chats/{chat}")
     def chat_rename(c: str, chat: str, body: dict = Body(...)) -> dict[str, Any]:
@@ -320,8 +328,10 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
             raise HTTPException(409, f"thimble browser does not take {kind!r} requests yet")
         if not text:
             raise HTTPException(400, "an empty message")
+        meta = chats.meta(c, chat)
+        first = chat != "main" and not any(r.get("type") == "user" for r in chats.records(c, chat))
         try:
-            await sessions.get(c, chat).send(text)
+            await sessions.get(c, chat).send(thread_opening(meta, text) if first else text, shown=text)
         except RuntimeError as e:
             raise HTTPException(409, str(e)) from None
         return {"id": secrets.token_hex(4), "kind": kind, "delivered": 1, "thread": chat}

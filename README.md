@@ -11,15 +11,17 @@ It keeps the page of thimble 0.8 and puts a new, small server behind it.
 
 ## Start
 
-You need Claude Code, signed in (run `claude` once and sign in), [uv](https://docs.astral.sh/uv/), and Node 20 or
-later. Card code runs in a sandbox, which on Linux is bubblewrap (`apt install bubblewrap`).
+You need [uv](https://docs.astral.sh/uv/), Node 20 or later, and credentials for the Claude API: Workload Identity
+Federation (`--wif ORG`, which reads the org's IDs from `~/.thimble/orgs/org-<org>.env`), or an API key you paste in
+Settings. Card code runs in a sandbox (on Linux, bubblewrap: `apt install bubblewrap`).
 
 ```
-scripts/thimble-browser path/to/folder
+scripts/thimble-browser path/to/folder --wif org-a
 ```
 
 The first run builds the page. The server listens on 127.0.0.1, prints a sign-in link and opens it. Press Enter in
 its window for a new link. To try it on a made-up folder of agent runs: `scripts/thimble-browser samples/agent-runs`.
+From another machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:8420 <host>`).
 
 ## What works
 
@@ -39,9 +41,11 @@ Not yet: labels, the orientation, checks, settings, and card code on macOS.
 
 - `frontend/` is the page (React), from thimble 0.8.
 - `server/` is the server (Python). It serves the page, reads the folder, keeps the workspace in
-  `~/.thimble-browser` (never in the folder), runs card code in the sandbox, and starts the person's own Claude Code,
-  headless, for each chat. Claude gets only Read, Grep and Glob inside the folder and thimble's card tools, so it
-  never asks for a permission.
+  `~/.thimble-browser` (never in the folder), and runs card code in the sandbox. It runs each agent (the chat, its
+  threads, the report writer, the view builder) as its own loop on the Messages API: it streams Claude's reply, runs
+  the tools Claude calls as its own Python functions, and loops until the turn ends. The tools read inside the folder,
+  run Python in the sandbox and change the workspace's cards, report and views; nothing else, so nothing asks for a
+  permission.
 - `prompts/browser/` holds what Claude reads. The parts about writing for the person, citing and explaining terms are
   the terminal plugin's own text, copied into `prompts/terminal/` by `scripts/sync-terminal-prompts` and named in
   `prompts/shared.json`. A test checks that they match.

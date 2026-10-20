@@ -1,159 +1,175 @@
-"""The Claude sessions behind the chats. Each chat (main, or a thread) has one Claude Code process, which the server
-starts through the Claude Agent SDK the first time the person writes in it, and keeps for the next messages.
+"""thimble browser's agents: each is one loop the server runs itself on the Messages API.
 
-Signing in. The process is the person's own Claude Code (`claude` on PATH), so it uses the sign-in Claude Code
-already has: the person's Claude subscription or whatever their Claude Code is set up with. The server reads no key
-and no token, and passes its own environment to the process unchanged.
+An agent is a system prompt and a fixed set of tools (AGENTS). Its turn is a loop:
 
-What the session can do is fixed here and nowhere else:
-- built-in tools: Read, Grep and Glob, and only inside the folder (can_use);
-- thimble's tools (tools.py), which change only the workspace's cards;
-- nothing else: no Bash, no file edits, no web, no subagents. Claude Code's own customizations (the person's
-  CLAUDE.md, hooks, plugins, MCP servers, skills) are not loaded (`setting_sources=[]`, `--safe-mode`,
-  `strict_mcp_config`), so nothing of the person's setup runs in it, and nothing asks the person for a permission.
+1. send the conversation to the Messages API, streaming;
+2. write each piece of the reply into the chat's log as it arrives, so the page shows it;
+3. when Claude calls tools, run them as the server's own Python functions (tools.py), add their results, and go
+   back to 1;
+4. when Claude ends its turn, write a `done` record with the turn's token usage.
 
-Every record the session makes goes into the chat's log (chats.py), and the page reads it from there.
+The conversation is kept, append-only, in `chats/<id>.messages.json`, so a chat goes on where it left off after a
+restart, and a thread starts from a copy of main's. The system prompt and the tool list never change within a chat, and
+both carry a cache breakpoint, so each request reads the conversation so far from the prompt cache.
+
+Stop ends a turn cleanly: the reply in progress is dropped, and a tool call left without its result gets a result that
+says the analyst stopped it, so the conversation stays valid for the next message.
+
+No process is started for an agent, and no tool reaches past what tools.py allows: an agent can read the folder, run
+Python in the sandbox and change the workspace's own store, nothing more.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import re
-import shutil
-import time
+import secrets
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, HookMatcher, PermissionResultAllow,
-                              PermissionResultDeny, ResultMessage, StreamEvent, TextBlock, ToolResultBlock,
-                              ToolUseBlock, UserMessage)
+import anthropic
 
-from . import chats, explain, home, prompts, report, views
-from .tools import PREFIX, Tools
+from . import chats, explain, home, llm, prompts, report, settings, views
+from .tools import Tools, definitions
 
 log = logging.getLogger("thimble_browser.agent")
 
-READ_TOOLS = ("Read", "Grep", "Glob")
-NOTIFY_S = 0.25  # the page hears a chat change at most this often while a reply streams
+MAX_TOKENS = 64000
+NOTIFY_S = 0.25  # the page hears that a chat changed at most this often while a reply streams
+STREAM_RETRIES = 3  # a stream the API breaks off (overloaded, a dropped connection) is sent again this many times
+READ = ("Read", "Grep", "Glob")
+REPO = views.REPO
 
 
-def claude_path() -> str | None:
-    """The person's Claude Code: $THIMBLE_BROWSER_CLAUDE, else `claude` on PATH, else the SDK's own copy (None)."""
-    return os.environ.get("THIMBLE_BROWSER_CLAUDE") or shutil.which("claude")
+@dataclass
+class AgentDef:
+    """What an agent is: its prompt (from the folder) and the tools it may call."""
+    prompt: Callable[[Path], str]
+    tools: tuple[str, ...]
+    extra_roots: tuple[Path, ...] = ()
+    explain: bool = False  # whether its answers get explain marks
 
 
-def system_prompt(folder: Path) -> str:
+def _main_prompt(folder: Path) -> str:
     return prompts.render("browser/main.md", {"workdir": str(folder)})
 
 
-def _inside(folder: Path, p: str | None) -> bool:
-    if not p:
-        return True
-    try:
-        q = Path(p) if os.path.isabs(p) else folder / p
-        q = q.resolve()
-    except OSError:
-        return False
-    root = folder.resolve()
-    return q == root or root in q.parents
+AGENTS: dict[str, AgentDef] = {
+    "main": AgentDef(_main_prompt, READ + ("run_python", "read_ref", "list_cards", "add_card", "edit_card",
+                                           "delete_card", "propose_view"), explain=True),
+    "writer": AgentDef(lambda f: prompts.render("browser/writer.md", {"workdir": str(f)}),
+                       READ + ("run_python", "read_ref", "list_cards", "add_card", "write_document")),
+    "dev": AgentDef(lambda f: views.builder_prompt(f, 3),
+                    READ + ("read_ref", "write_view_file", "view_check", "finish_view"),
+                    extra_roots=(REPO / "docs", REPO / "samples" / "views")),
+}
+
+
+def role_of(meta: dict[str, Any]) -> str:
+    r = meta.get("role")
+    return r if r in AGENTS else "main"
+
+
+# ---- the conversation on disk
+
+def _messages_path(ws: str, chat: str) -> Path:
+    return home.workspace_dir(ws) / "chats" / f"{chat}.messages.json"
+
+
+def load_messages(ws: str, chat: str) -> list[dict[str, Any]]:
+    got = home.read_json(_messages_path(ws, chat), [])
+    return got if isinstance(got, list) else []
+
+
+def save_messages(ws: str, chat: str, messages: list[dict[str, Any]]) -> None:
+    home.write_json(_messages_path(ws, chat), messages)
+
+
+def complete_prefix(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The longest start of `messages` that ends with a finished assistant turn (no tool call left open), which a new
+    user message can follow: what a thread copies from main."""
+    out = list(messages)
+    while out:
+        last = out[-1]
+        open_call = last["role"] == "assistant" and any(
+            isinstance(b, dict) and b.get("type") == "tool_use" for b in last.get("content") or [])
+        if last["role"] == "assistant" and not open_call:
+            break
+        out.pop()
+    return out
+
+
+def _block(b: Any) -> dict[str, Any]:
+    """A content block of a reply as the next request sends it back: unchanged (thinking blocks keep their
+    signatures)."""
+    return b.model_dump(mode="json", exclude_none=True)
+
+
+@dataclass
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    requests: int = 0
+
+    def add(self, u: Any) -> None:
+        self.requests += 1
+        for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+            setattr(self, k, getattr(self, k) + int(getattr(u, k, 0) or 0))
+
+    def record(self) -> dict[str, int]:
+        return dict(self.__dict__)
 
 
 class Session:
-    writer = False
-    view: str | None = None
+    """One agent's loop for one chat."""
 
     def __init__(self, ws: str, chat: str, folder: Path, *, unsandboxed: bool = False,
                  manager: "Sessions | None" = None) -> None:
         self.ws, self.chat, self.folder = ws, chat, folder
         self.manager = manager
-        self.read_roots = [folder]
         self.unsandboxed = unsandboxed
-        self.client: ClaudeSDKClient | None = None
+        meta = chats.meta(ws, chat)
+        self.role = role_of(meta)
+        self.defn = AGENTS[self.role]
         self.task: asyncio.Task | None = None
         self.running = False
+        self.cards: list[str] = []
         self._last_notify = 0.0
         self._pending_notify: asyncio.TimerHandle | None = None
-        self.cards: list[str] = []
+        self.tools = Tools(ws, chat, folder, read_roots=[folder, *self.defn.extra_roots], unsandboxed=unsandboxed,
+                           on_card=self.cards.append, writer=self.role == "writer", view=meta.get("view"),
+                           start_view=(lambda req: manager.start_view(ws, req)) if manager else None)
 
-    # ---- permissions: decided here, never asked of the person
+    # ---- the request
 
-    async def can_use(self, name: str, inp: dict[str, Any], ctx: Any) -> Any:
-        if name.startswith(PREFIX):
-            return PermissionResultAllow()
-        if name in READ_TOOLS:
-            path = inp.get("file_path") or inp.get("path")
-            if any(_inside(r, path) for r in self.read_roots):
-                return PermissionResultAllow()
-            return PermissionResultDeny(message=f"thimble browser reads only the folder {self.folder}")
-        return PermissionResultDeny(message=f"thimble browser has no {name}: use Read, Grep, Glob and thimble's tools")
-
-    async def guard_read(self, data: dict[str, Any], tool_use_id: str | None, ctx: Any) -> dict[str, Any]:
-        """Before every Read, Grep and Glob, even one Claude Code would allow by itself: the path, with its symlinks
-        resolved, must be inside the folder."""
-        inp = data.get("tool_input") or {}
-        path = inp.get("file_path") or inp.get("path")
-        if any(_inside(r, path) for r in self.read_roots):
-            return {}
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": f"thimble browser reads only the folder {self.folder}"}}
-
-    def options(self) -> ClaudeAgentOptions:
-        meta = chats.meta(self.ws, self.chat)
-        tools = Tools(self.ws, self.chat, self.folder, unsandboxed=self.unsandboxed, on_card=self.cards.append,
-                      writer=self.writer, view=self.view,
-                      start_view=(lambda req: self.manager.start_view(self.ws, req)) if self.manager else None)
-        if self.view:
-            from .tools import BUILD_ATTEMPTS  # noqa: PLC0415
-
-            prompt = views.builder_prompt(self.folder, BUILD_ATTEMPTS)
-        elif self.writer:
-            prompt = prompts.render("browser/writer.md", {"workdir": str(self.folder)})
-        else:
-            prompt = system_prompt(self.folder)
-        if self.chat != "main" and meta.get("anchor"):
-            prompt += (f"\n\n## This thread\n\nThe analyst opened this thread about {meta.get('anchor')}"
-                       + (f", which reads: {meta.get('anchor_text')}" if meta.get("anchor_text") else "") + ".")
-        return ClaudeAgentOptions(
-            cwd=str(self.folder),
-            cli_path=claude_path(),
-            tools=list(READ_TOOLS),
-            mcp_servers={"thimble": tools.server()},
-            strict_mcp_config=True,
-            setting_sources=[],
-            can_use_tool=self.can_use,
-            hooks={"PreToolUse": [HookMatcher(matcher="Read|Grep|Glob", hooks=[self.guard_read])]},
-            permission_mode="default",
-            system_prompt={"type": "preset", "preset": "claude_code", "append": prompt},
-            include_partial_messages=True,
-            resume=meta.get("session_id") or meta.get("fork_of") or None,
-            fork_session=bool(not meta.get("session_id") and meta.get("fork_of")),
-            extra_args={"safe-mode": None},
-            effort=self.effort(),
-            stderr=lambda line: log.debug("claude: %s", line),
-        )
-
-    def effort(self) -> Any:
-        """The effort the analyst chose for this workspace's chats (the composer's chip), or Claude Code's default."""
+    def effort(self) -> str:
+        """The analyst's effort: the composer's chip for this workspace, else Settings."""
         e = (home.read_json(home.workspace_dir(self.ws) / "session.json", {}) or {}).get("effort")
-        return {"ultracode": "xhigh"}.get(e, e) or None
+        return {"ultracode": "xhigh"}.get(e, e) if e in settings.EFFORTS + ("ultracode",) else settings.read()["effort"]
+
+    def request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        tools = definitions(self.defn.tools)
+        tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
+        return {"max_tokens": MAX_TOKENS, "thinking": {"type": "adaptive"},
+                "system": [{"type": "text", "text": self.defn.prompt(self.folder), "cache_control": {"type": "ephemeral"}}],
+                "tools": tools, "messages": messages, "cache_control": {"type": "ephemeral"},
+                **llm.request_args(effort=self.effort())}
 
     # ---- the log
 
     def _notify(self) -> None:
-        """Tell the page the chat changed, at most every NOTIFY_S while a reply streams."""
-        now = time.monotonic()
+        loop = asyncio.get_running_loop()
+        now = loop.time()
         if now - self._last_notify >= NOTIFY_S:
             self._last_notify = now
             chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
         elif self._pending_notify is None:
-            loop = asyncio.get_running_loop()
-
             def fire() -> None:
                 self._pending_notify = None
-                self._last_notify = time.monotonic()
+                self._last_notify = loop.time()
                 chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
-
             self._pending_notify = loop.call_later(NOTIFY_S, fire)
 
     def _append(self, rec: dict[str, Any]) -> None:
@@ -162,167 +178,185 @@ class Session:
 
     # ---- a turn
 
-    async def send(self, text: str) -> None:
+    async def send(self, text: str, *, shown: str | None = None) -> None:
+        """Start a turn on the analyst's message `text` (`shown` is what the chat shows of it, when that differs)."""
         if self.running:
             raise RuntimeError("Claude is still answering the last message in this chat")
-        chats.append(self.ws, self.chat, {"type": "user", "text": text, "by": "browser"})
+        chats.append(self.ws, self.chat, {"type": "user", "text": shown if shown is not None else text, "by": "browser"})
+        messages = load_messages(self.ws, self.chat)
+        messages.append({"role": "user", "content": text})
+        save_messages(self.ws, self.chat, messages)
         self.running = True
-        self._set_running(True)
-        self.task = asyncio.create_task(self._turn(text))
-
-    def _set_running(self, on: bool) -> None:
         chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
+        self.task = asyncio.create_task(self._turn())
 
-    async def _turn(self, text: str) -> None:
-        streamed = False
-        self.cards = []
+    async def _stream_once(self, messages: list[dict[str, Any]], usage: Usage) -> Any:
+        """One request, streamed into the log; the final message."""
+        client = llm.client()
+        async with client.beta.messages.stream(**self.request(messages)) as stream:
+            async for ev in stream:
+                t = ev.type
+                if t == "text":
+                    if ev.text:
+                        self._append({"type": "text", "delta": ev.text})
+                elif t == "content_block_stop" and getattr(ev.content_block, "type", "") == "tool_use":
+                    b = ev.content_block
+                    self._append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
+            final = await stream.get_final_message()
+        usage.add(final.usage)
+        return final
+
+    async def _turn(self) -> None:
+        usage = Usage()
         reply: list[str] = []
+        self.cards.clear()
+        result: str | None = None
+        messages = load_messages(self.ws, self.chat)
         try:
-            if self.client is None:
-                self.client = ClaudeSDKClient(self.options())
-                await self.client.connect()
-            await self.client.query(text)
-            async for m in self.client.receive_response():
-                if isinstance(m, StreamEvent):
-                    ev = m.event or {}
-                    if ev.get("type") == "content_block_delta" and (ev.get("delta") or {}).get("type") == "text_delta":
-                        d = ev["delta"].get("text") or ""
-                        if d:
-                            if m.parent_tool_use_id:
-                                continue
-                            streamed = True
-                            reply.append(d)
-                            self._append({"type": "text", "delta": d})
-                    elif ev.get("type") == "message_start":
-                        streamed = False
-                        if reply and not reply[-1].endswith("\n"):
-                            reply.append("\n\n")
-                            self._append({"type": "text", "delta": "\n\n"})
-                elif isinstance(m, AssistantMessage):
-                    for b in m.content:
-                        if isinstance(b, TextBlock) and not streamed and b.text:
-                            reply.append(b.text)
-                            self._append({"type": "text", "delta": b.text})
-                        elif isinstance(b, ToolUseBlock):
-                            self._append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
-                elif isinstance(m, UserMessage):
-                    content = m.content if isinstance(m.content, list) else []
-                    for b in content:
-                        if isinstance(b, ToolResultBlock):
-                            self._append(self._result_record(b))
-                elif isinstance(m, ResultMessage):
-                    meta = chats.meta(self.ws, self.chat)
-                    if m.session_id and meta.get("session_id") != m.session_id:
-                        meta["session_id"] = m.session_id
-                        chats.save_meta(self.ws, meta)
-                    if m.is_error and m.result:
-                        self._append({"type": "error", "message": str(m.result)[:2000], "kind": "claude"})
-                    self._append({"type": "done", "session_id": m.session_id, "cells": self.cards,
-                                  "result": None})
+            retries = 0
+            while True:
+                try:
+                    final = await self._stream_once(messages, usage)
+                except ValueError as e:  # a tool input that streamed in as JSON the SDK could not read
+                    retries += 1
+                    if retries > STREAM_RETRIES:
+                        raise RuntimeError("Claude's tool input could not be read") from e
+                    continue
+                except (anthropic.APIConnectionError, anthropic.InternalServerError) as e:
+                    retries += 1
+                    if retries > STREAM_RETRIES:
+                        raise
+                    self._append({"type": "notice", "kind": "retry", "text": "The connection to Claude broke off; "
+                                  "it starts that step again."})
+                    await asyncio.sleep(2 ** retries)
+                    continue
+                except anthropic.APIStatusError as e:
+                    if e.status_code in (429, 529) and retries < STREAM_RETRIES:
+                        retries += 1
+                        await asyncio.sleep(5 * 2 ** retries)
+                        continue
+                    raise
+                retries = 0
+                for b in final.content:
+                    if b.type == "text":
+                        reply.append(b.text)
+                messages.append({"role": "assistant", "content": [_block(b) for b in final.content]})
+                save_messages(self.ws, self.chat, messages)
+                if final.stop_reason == "refusal":
+                    cat = getattr(getattr(final, "stop_details", None), "category", None)
+                    self._append({"type": "error", "kind": "refusal",
+                                  "message": "Claude declined this request" + (f" ({cat})." if cat else ".")})
+                    result = "refused"
+                    break
+                if final.stop_reason == "pause_turn":
+                    continue
+                calls = [b for b in final.content if b.type == "tool_use"]
+                if not calls:
+                    break
+                if final.stop_reason == "max_tokens":
+                    messages.append({"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": b.id, "is_error": True,
+                         "content": "The reply hit its length limit before this call was complete."} for b in calls]})
+                    save_messages(self.ws, self.chat, messages)
+                    continue
+                results = await asyncio.gather(*(self.tools.call(b.name, b.input) for b in calls))
+                blocks = []
+                for b, r in zip(calls, results):
+                    rec: dict[str, Any] = {"type": "tool_result", "id": b.id, "summary": r.text[:4000],
+                                           "is_error": r.is_error}
+                    if r.cell_id:
+                        rec["cell_id"] = r.cell_id
+                        try:
+                            from . import canvas  # noqa: PLC0415
+
+                            rec["notebook"] = canvas.find(self.ws, r.cell_id)[0]["id"]
+                        except KeyError:
+                            pass
+                    self._append(rec)
+                    blocks.append({"type": "tool_result", "tool_use_id": b.id, "content": r.text,
+                                   **({"is_error": True} if r.is_error else {})})
+                messages.append({"role": "user", "content": blocks})
+                save_messages(self.ws, self.chat, messages)
         except asyncio.CancelledError:
-            self._append({"type": "done", "result": "stopped"})
-            raise
-        except Exception as e:  # noqa: BLE001 — every failure is a row the person sees
-            log.exception("turn failed")
-            self._append({"type": "error", "message": _plain_error(e), "kind": "session"})
-            self._append({"type": "done", "result": "failed"})
-            await self.close()
-        finally:
+            self._close_open_calls(messages)
+            result = "stopped"
+            self._append({"type": "done", "result": "stopped", "usage": usage.record(), "model": self._model()})
             self.running = False
-            self._set_running(False)
+            chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
+            self.finished()
+            raise
+        except Exception as e:  # noqa: BLE001 — every failure is a row the analyst sees
+            log.warning("turn failed: %s", type(e).__name__)
+            self._close_open_calls(messages)
+            self._append({"type": "error", "kind": "api", "message": llm.failure(e)})
+            result = "failed"
+        self._append({"type": "done", "result": result, "cells": list(dict.fromkeys(self.cards)),
+                      "usage": usage.record(), "model": self._model()})
+        self.running = False
+        chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
         self.finished()
         text_out = "".join(reply).strip()
-        if text_out and not self.writer and not self.view:
+        if text_out and self.defn.explain and result is None and settings.read()["explain"]:
             asyncio.create_task(explain.after_turn(self.ws, self.chat, text_out, self.folder))
 
+    def _model(self) -> str:
+        return settings.read()["model"]
+
+    def _close_open_calls(self, messages: list[dict[str, Any]]) -> None:
+        """Give a tool call left without its result a result, so the conversation stays valid."""
+        if messages and messages[-1]["role"] == "assistant":
+            open_calls = [b for b in messages[-1].get("content") or [] if b.get("type") == "tool_use"]
+            if open_calls:
+                messages.append({"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
+                     "content": "The analyst stopped this before it ran."} for b in open_calls]})
+        save_messages(self.ws, self.chat, messages)
+
     def finished(self) -> None:
-        """After a turn: nothing for a chat."""
-
-    def _result_record(self, b: ToolResultBlock) -> dict[str, Any]:
-        content = b.content
-        if isinstance(content, list):
-            text = "\n".join(str(x.get("text", "")) for x in content if isinstance(x, dict))
-        else:
-            text = str(content or "")
-        rec: dict[str, Any] = {"type": "tool_result", "id": b.tool_use_id, "summary": text[:4000],
-                               "is_error": bool(b.is_error)}
-        m = re.match(r"card:([0-9a-f]{8})\b", text)
-        if m and not b.is_error:
-            rec["cell_id"] = m.group(1)
-            try:
-                from . import canvas
-
-                rec["notebook"] = canvas.find(self.ws, m.group(1))[0]["id"]
-            except KeyError:
-                pass
-        return rec
+        """After a turn: a writer or a builder records how it ended."""
 
     async def interrupt(self) -> bool:
-        if not self.running or self.client is None:
+        if not self.running or self.task is None:
             return False
+        self.task.cancel()
         try:
-            await self.client.interrupt()
-        except Exception:  # noqa: BLE001
-            if self.task:
-                self.task.cancel()
+            await self.task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
         return True
 
     async def close(self) -> None:
-        c, self.client = self.client, None
-        if c is not None:
-            try:
-                await c.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
-
-
-def _plain_error(e: Exception) -> str:
-    text = str(e) or type(e).__name__
-    if "CLINotFound" in type(e).__name__ or "not found" in text.lower() and "claude" in text.lower():
-        return ("thimble browser could not start Claude Code. Install it (https://claude.com/claude-code), run "
-                "`claude` once in a terminal to sign in, then send your message again.")
-    if "auth" in text.lower() or "login" in text.lower() or "401" in text:
-        return ("Claude Code is not signed in. Run `claude` once in a terminal and sign in, then send your message "
-                "again.")
-    return f"Claude stopped with an error: {text[:500]}"
+        await self.interrupt()
 
 
 class Writer(Session):
-    """The report's writer: a session of its own, with the read tools, `add_card` (into `Report figures`) and
-    `write_document`. Its chat is an agent thread (kind `agent`, role `writer`), and the Report tab shows it writing."""
-
-    writer = True
+    """The report's writer. Its chat is an agent thread (kind `agent`, role `writer`), and the Report tab shows it
+    writing."""
 
     def finished(self) -> None:
         meta = chats.meta(self.ws, self.chat)
         last = [r for r in chats.records(self.ws, self.chat) if r.get("type") == "done"]
-        failed = bool(last and last[-1].get("result") in ("failed", "stopped"))
+        failed = bool(last and last[-1].get("result") in ("failed", "stopped", "refused"))
         meta.update(status="failed" if failed else "done", ts_end=home.now())
         chats.save_meta(self.ws, meta)
         report.set_status(self.ws, "failed" if failed else "generated")
 
 
 class ViewBuilder(Session):
-    """A view's builder: a session of its own that reads the folder, the view kit's docs and the worked examples, and
-    writes only the view's three files (write_view_file); finish_view marks the view built. Its chat is an agent thread
-    (kind `agent`, role `dev`)."""
-
-    def __init__(self, ws: str, chat: str, folder: Path, **kw: Any) -> None:
-        super().__init__(ws, chat, folder, **kw)
-        self.view = chats.meta(ws, chat).get("view")
-        self.read_roots = [folder, views.REPO / "docs", views.REPO / "samples" / "views"]
+    """A view's builder (kind `agent`, role `dev`): finish_view marks the view built."""
 
     def finished(self) -> None:
         meta = chats.meta(self.ws, self.chat)
-        row = next((r for r in views.proposals(self.ws) if r.get("slug") == self.view), {})
+        slug = meta.get("view")
+        row = next((r for r in views.proposals(self.ws) if r.get("slug") == slug), {})
         built = row.get("status") == "built"
         meta.update(status="done" if built else "failed", ts_end=home.now())
         chats.save_meta(self.ws, meta)
         if not built:
-            views.set_proposal(self.ws, str(self.view), status="failed")
-        chats.append(self.ws, "main", {"type": "chip", "kind": "view", "text": f"{row.get('name') or self.view}: "
-                                       + ("built" if built else "the build failed"), "ref": f"view:{self.view}",
-                                       "view": self.view, "status": "built" if built else "failed"})
+            views.set_proposal(self.ws, str(slug), status="failed")
+        chats.append(self.ws, "main", {"type": "chip", "kind": "view", "text": f"{row.get('name') or slug}: "
+                                       + ("built" if built else "the build failed"), "ref": f"view:{slug}",
+                                       "view": slug, "status": "built" if built else "failed"})
 
 
 def writer_brief(ws: str, request: str) -> str:
@@ -356,15 +390,20 @@ class Sessions:
     def get(self, ws: str, chat: str) -> Session:
         key = (ws, chat)
         if key not in self._s:
-            role = chats.meta(ws, chat).get("role")
-            kind = Writer if role == "writer" else ViewBuilder if role == "dev" else Session
+            role = role_of(chats.meta(ws, chat))
+            kind = {"writer": Writer, "dev": ViewBuilder}.get(role, Session)
             self._s[key] = kind(ws, chat, home.corpus_of(ws), unsandboxed=self.unsandboxed, manager=self)
         return self._s[key]
 
+    def running(self, ws: str) -> set[str]:
+        return {c for (w, c), s in self._s.items() if w == ws and s.running}
+
+    def fork(self, ws: str, chat: str) -> None:
+        """A new thread's conversation: a copy of main's, up to its last finished turn."""
+        save_messages(ws, chat, complete_prefix(load_messages(ws, "main")))
+
     async def start_view(self, ws: str, req: dict[str, Any]) -> str:
         """Start building the view `req` asks for ({name, description, task, claims}); its slug."""
-        import secrets  # noqa: PLC0415
-
         name = str(req.get("name") or "View")
         slug = views.slug_for(ws, name)
         cid = "d" + secrets.token_hex(4)
@@ -378,16 +417,10 @@ class Sessions:
                                                          str(req.get("task") or ""), list(req.get("claims") or [])))
         return slug
 
-    def running(self, ws: str) -> set[str]:
-        return {c for (w, c), s in self._s.items() if w == ws and s.running}
-
     async def restart_idle(self, ws: str) -> None:
-        """Close the idle sessions of `ws`, so their next message starts them again with the new settings, where they
-        left off (the chat's session id)."""
-        for (w, _), s in list(self._s.items()):
-            if w == ws and not s.running:
-                await s.close()
+        """Nothing to restart: each request reads the settings anew."""
 
     async def close_all(self) -> None:
         for s in list(self._s.values()):
             await s.close()
+

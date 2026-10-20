@@ -15,7 +15,7 @@ from pathlib import Path
 
 import uvicorn
 
-from . import home, sandbox_note
+from . import home, llm, sandbox_note, settings
 from .app import build
 
 DEFAULT_PORT = 8420
@@ -39,8 +39,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-open", action="store_true", help="print the link, do not open a browser")
     ap.add_argument("--no-sandbox", action="store_true",
                     help="run card code without a sandbox where none is found (not recommended)")
+    ap.add_argument("--wif", metavar="ORG", choices=settings.WIF_ORGS,
+                    help="sign in to Claude with Workload Identity Federation for this org (saved in Settings)")
+    ap.add_argument("--model", help="the model every agent runs on (saved in Settings), such as claude-opus-5-5")
     a = ap.parse_args(argv)
+    # the credentials are only the ones Settings names: no ANTHROPIC_* variable of this shell may stand in for them
+    llm.scrub_env()
+    if a.wif:
+        settings.write({"credentials": {"source": "wif", "org": a.wif}})
+    if a.model:
+        settings.write({"model": a.model})
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    for noisy in ("httpx", "httpx2", "anthropic", "google"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     folder = Path(a.folder).expanduser().resolve()
     try:
         ws = home.open_folder(folder)
@@ -50,6 +61,9 @@ def main(argv: list[str] | None = None) -> int:
     port = free_port(a.port)
     app, auth, sessions = build(port, unsandboxed=a.no_sandbox)
     print(sandbox_note.line(a.no_sandbox))
+    s = settings.read()
+    print(f"  Claude: {s['model']} at {s['effort']} effort, signed in with {llm.describe()}"
+          + ("" if s["credentials"] else " (choose credentials in Settings, or start with --wif ORG)"))
 
     def link() -> str:
         return f"http://127.0.0.1:{port}/?ws={ws}#p={auth.mint()}"

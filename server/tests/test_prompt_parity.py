@@ -77,6 +77,8 @@ def test_explain_prompt_holds_the_lens_whole():
 def test_tool_schemas_parse():
     from thimble_browser import tools
 
-    for name in tools.NAMES:
-        desc, schema = tools.schema_of(name)
-        assert desc and schema["type"] == "object"
+    from thimble_browser import agent
+
+    for a in agent.AGENTS.values():
+        for t in tools.definitions(a.tools):
+            assert t["description"] and t["input_schema"]["type"] == "object"

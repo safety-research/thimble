@@ -7,8 +7,12 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.132",
   "uvicorn>=0.30",
-  # the chat's Claude sessions: the person's own Claude Code, started headless (agent.py)
-  "claude-agent-sdk>=0.2",
+  # the agents' loops call the Messages API (agent.py, llm.py); Workload Identity Federation takes a Google identity
+  # token from the machine it runs on
+  "anthropic>=1.13",
+  "google-auth>=2.30",
+  "requests>=2.32",
+  "jsonschema>=4.20",
   # what a card's code runs on, in the sandbox (cards/runner.py)
   "ipython>=8",
   "pandas>=2.2",

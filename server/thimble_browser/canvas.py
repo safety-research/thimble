@@ -162,6 +162,12 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
         cell["payload"] = {"refs": refs}
     elif kind == "custom":
         cell["payload"] = {"html": str(args.get("html") or "")}
+    # a card cites itself as card:<id> before it has an id (the add_card tool says so): its own id goes in
+    for k in ("takeaway", "text"):
+        if isinstance(cell.get(k), str):
+            cell[k] = cell[k].replace("card:card:<id>", f"card:{cell['id']}").replace("card:<id>", f"card:{cell['id']}")
+    if isinstance(cell.get("payload"), dict) and isinstance(cell["payload"].get("text"), str):
+        cell["payload"]["text"] = cell["text"]
     with _lock:
         nb = group_for(ws, args.get("group"), chat)
         cell["notebook"] = nb["id"]

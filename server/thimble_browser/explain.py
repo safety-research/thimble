@@ -1,25 +1,27 @@
 """Explain marks: after each answer in the chat, one model call reads the answer and marks the one to three terms the
-person may not know, each with a short explanation that opens in place. The instructions are the terminal plugin's
+analyst may not know, each with a short explanation that opens in place. The instructions are the terminal plugin's
 explain lens, word for word (prompts/shared.json, part `explain`), inside the browser's own short frame
-(prompts/browser/explain.md).
+(prompts/browser/explain.md), and the list of terms already explained is the lens's own digest line.
 
-The call has no tools, and uses the person's Claude Code sign-in like the chat. Its result is a `glosses` record in
-the chat's log; the page draws each term with a teal fill and opens the explanation on a click.
+The call has no tools. Its result is a `glosses` record in the chat's log; the page draws each term with a teal fill and
+opens the explanation on a click. Settings turns the pass off.
 """
 from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
-
-from . import chats, home, prompts
+from . import chats, llm, prompts
 
 log = logging.getLogger("thimble_browser.explain")
 GLOSSED_KEEP = 100
+SCHEMA = {"type": "object", "additionalProperties": False, "required": ["glosses"], "properties": {
+    "glosses": {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                                           "required": ["term", "body", "here"],
+                                           "properties": {"term": {"type": "string"}, "body": {"type": "string"},
+                                                          "here": {"type": "string"}}}}}}
 
 
 def glossed_terms(ws: str, chat: str) -> list[str]:
@@ -39,11 +41,8 @@ def last_question(ws: str, chat: str) -> str:
 
 
 def parse(text: str, answer: str) -> list[dict[str, Any]]:
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        return []
     try:
-        got = json.loads(m.group(0))
+        got = json.loads(text)
     except ValueError:
         return []
     out = []
@@ -57,30 +56,16 @@ def parse(text: str, answer: str) -> list[dict[str, Any]]:
 
 
 async def after_turn(ws: str, chat: str, answer: str, folder: Path) -> None:
-    """Run the explain pass on `answer` and add its marks to the chat; nothing when the setting is off."""
-    settings = home.read_json(home.root() / "settings.json", {}) or {}
-    if settings.get("explain") is False:
-        return
-    from .agent import claude_path  # noqa: PLC0415 — agent imports this module
-
+    """Run the explain pass on `answer` and add its marks to the chat."""
     system = prompts.render("browser/explain.md")
     seen = glossed_terms(ws, chat)
-    # the digest in the terminal's own words (prompts/shared.json, part `explain-digest`)
     digest = prompts.shared("explain-digest").replace("{{GLOSSED}}", "\n".join(seen) if seen else "(none)")
     msg = f"The analyst asked:\n{last_question(ws, chat)}\n\nClaude answered:\n{answer}\n\n{digest}"
-    opts = ClaudeAgentOptions(cwd=str(folder), cli_path=claude_path(), tools=[], setting_sources=[],
-                              strict_mcp_config=True, system_prompt=system, max_turns=1,
-                              extra_args={"safe-mode": None}, permission_mode="default")
-    out = []
     try:
-        async for m in query(prompt=msg, options=opts):
-            if isinstance(m, AssistantMessage):
-                out += [b.text for b in m.content if isinstance(b, TextBlock)]
-            elif isinstance(m, ResultMessage) and m.is_error:
-                log.warning("explain pass failed: %s", m.result)
+        text = await llm.complete(system, msg, schema=SCHEMA, effort="low")
     except Exception as e:  # noqa: BLE001 — a failed pass leaves the answer as it is
-        log.warning("explain pass failed: %s", e)
+        log.warning("explain pass failed: %s", llm.failure(e))
         return
-    glosses = parse("".join(out), answer)
+    glosses = parse(text, answer)
     if glosses:
         chats.append(ws, chat, {"type": "glosses", "glosses": glosses})

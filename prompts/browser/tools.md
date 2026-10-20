@@ -1,8 +1,70 @@
 # thimble browser's tools
 
 Each `## <tool>` section is one tool Claude gets: its description, then its input schema. The server reads this file
-(server/thimble_browser/tools.py). The texts come from thimble 0.8's tools, with citations written as Markdown links,
-as the terminal plugin writes them.
+(server/thimble_browser/tools.py), and each agent gets the ones agent.AGENTS names. The card tools' texts come from
+thimble 0.8's, with citations written as Markdown links, as the terminal plugin writes them.
+
+## Read
+
+Read a text file of the folder: its lines, numbered, up to 2,000 at a time. Use `offset` and `limit` for a part of a long file.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "file_path": {"type": "string", "description": "The file's path in the folder, such as runs/run-07.jsonl."},
+    "offset": {"type": "integer", "minimum": 1, "description": "The first line to read, counting from 1."},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 2000, "description": "How many lines to read."}
+  },
+  "required": ["file_path"]
+}
+```
+
+## Grep
+
+Find the lines that match a regular expression in the folder's files, or in one file or folder of it. Each match comes back as `path:line: text`, up to 200.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "pattern": {"type": "string", "description": "A Python regular expression."},
+    "path": {"type": "string", "description": "A file or folder of the folder to search; the whole folder when left out."},
+    "glob": {"type": "string", "description": "Only the files whose name or path match this glob, such as *.jsonl."},
+    "ignore_case": {"type": "boolean"}
+  },
+  "required": ["pattern"]
+}
+```
+
+## Glob
+
+List the folder's files whose path matches a glob, such as `**/*.jsonl` or `runs/*`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "pattern": {"type": "string", "description": "A glob relative to `path`; `**/*` lists every file."},
+    "path": {"type": "string", "description": "The folder to list from; the whole folder when left out."}
+  },
+  "required": ["pattern"]
+}
+```
+
+## run_python
+
+Run Python over the folder's files to compute a value: a count, a total, a first or last. The code runs in a sandbox, in the folder, which it can read and not change, with no network, and with pandas. It returns what the code prints and the value of its last line, such as a DataFrame. Each run starts fresh, so the code loads what it needs. Put a result the analyst should see in a card.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "code": {"type": "string", "description": "The Python to run."}
+  },
+  "required": ["code"]
+}
+```
 
 ## read_ref
 
