@@ -679,7 +679,10 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   // which part each gutter cell stands for: when that changes (a zoom, the bar opening, a scroll), the ring's cell may
   // stand for another part now, so it is put back on the selected one
   const sig = [...gutter].map(([y, ids]) => `${y}:${ids.join('/')}`).join(',')
-  if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null }
+  // presses added or gone before the ring move it in Claude Code's order (the ring keeps its place in the order, so a
+  // press drawn above it hands it to another element): the input bar asks for it again, and a part's ring goes back
+  // on the selected part
+  if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
   // the pane taking the keyboard back puts the ring where the person last moved it, as the engine kept it, which is
   // another part once the page scrolled: it goes back on the selected part
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
@@ -873,7 +876,10 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   // the ring follows the selection, as on a card
   const want = selectedGutter()
   const sig = [...buttons].map(([id, k]) => `${id}:${k}`).join(',')
-  if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null }
+  // presses added or gone before the ring move it in Claude Code's order (the ring keeps its place in the order, so a
+  // press drawn above it hands it to another element): the input bar asks for it again, and a part's ring goes back
+  // on the selected part
+  if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
   paneFocused = !!e.props.isFocused
   if (want && e.props.isFocused && !isAsk(ringAt) && ringAt !== want && !refocus) {
