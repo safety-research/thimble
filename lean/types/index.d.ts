@@ -66,7 +66,7 @@ export type Squeeze = {
  *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
 export type SqzUi = { focus: string; running: { since: number } | null; error: string | null; tick: number; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
 
-/** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
+/** The bar's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */
 export type LineCounts = { threads: number; cov: number; at: number; changed: Record<string, number> }
 
@@ -85,7 +85,7 @@ declare module 'claude-code' {
       under: StateFamily<ObjRef[]>
       /** the detail view's selection */
       sel: Sel | null
-      /** the latest object drawn, which /obj opens with no argument */
+      /** the latest card drawn, which /card opens with no argument */
       last: ObjRef | null
       /** the object and region a prompt was asked about, by the prompt row's id */
       asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string }>
@@ -125,7 +125,7 @@ declare module 'claude-code' {
       sqz: StateFamily<SqzUi | null>
       /** what Claude reads with the next prompt of the version the person reads now, by row */
       sqznote: Record<string, string>
-      /** the thimble line's counts above the prompt */
+      /** the bar's counts above the prompt */
       counts: LineCounts | null
       /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */
       facts: StateFamily<unknown>
@@ -133,7 +133,7 @@ declare module 'claude-code' {
       thread: StateFamily<unknown>
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
       events: { file: string; n: number; bytes?: number }
-      /** what takes the keys, newest last (the shell's focus stack): the thimble line says the keys of the top one */
+      /** what takes the keys, newest last (the shell's focus stack): the bar says the keys of the top one */
       focus: ('detail' | 'chips' | 'proposals' | 'tray' | 'card')[]
       /** when a card's state file last changed, by root and id: a drawing that reads the card's state draws again */
       cardver: StateFamily<number>

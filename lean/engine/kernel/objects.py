@@ -97,13 +97,13 @@ def walk(data: Any, pointer: str) -> tuple[Any, Any, str]:
             try:
                 v = v[int(part)]
             except (ValueError, IndexError):
-                raise R.RefError(f"the object's data has nothing at {pointer}")
+                raise R.RefError(f"the card's data has nothing at {pointer}")
         elif isinstance(v, dict):
             if part not in v:
-                raise R.RefError(f"the object's data has nothing at {pointer}")
+                raise R.RefError(f"the card's data has nothing at {pointer}")
             v = v[part]
         else:
-            raise R.RefError(f"the object's data has nothing at {pointer}")
+            raise R.RefError(f"the card's data has nothing at {pointer}")
         cur += "/" + part
         if isinstance(v, dict) and (v.get("_rows") or isinstance(v.get("ref"), str)):
             holder, holder_ptr = v, cur
@@ -239,7 +239,7 @@ def _cite(st: Store, ref: str, where: str, ctx: dict[str, Any], quote: str | Non
                 c["rows"] = _merge_rows([q["rows"][i] for i in idx if i < len(q["rows"])])
         elif p["kind"] == "object":
             if not find_id(st, p["object"]):
-                raise R.RefError(f"no object {p['object']}")
+                raise R.RefError(f"no card {p['object']}")
         else:
             got = S.fetch(st.root, ref, limit=1 if p["kind"] in ("file", "table") else None)
             if p["kind"] not in ("file", "table"):
@@ -469,7 +469,7 @@ def update(st: Store, name: str, changes: dict[str, Any], rerun: bool = False, c
     new query) and the object binds the new results. Returns the object and {old query: new query}."""
     obj = load(st, name)
     if not obj:
-        raise KeyError(f"no object {name}")
+        raise KeyError(f"no card {name}")
     spec = copy.deepcopy(obj.get("source") or {})
     for k, v in changes.items():
         if k == "data" and isinstance(v, dict) and isinstance(spec.get("data"), dict):

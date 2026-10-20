@@ -646,7 +646,7 @@ def _merge(rowsets: list[str]) -> list[str]:
 def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> list[str]:
     obj = O.load(st, p["object"])
     if not obj:
-        raise R.RefError(f"no object {p['object']}")
+        raise R.RefError(f"no card {p['object']}")
     ptr = p.get("pointer") or ""
     step: dict[str, Any] = {"step": "object", "id": obj["id"], "version": obj.get("version"), "title": obj.get("title")}
     chain.append(step)
@@ -717,7 +717,7 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
                 now = S.fetch(st.root, holder["ref"], limit=1)
                 if now and S.row_hash(now[0].raw) != cite["hash"]:
                     moved = S.relocate(st.root, holder["ref"], cite["hash"])
-                    notes.append(f"{holder['ref']} changed since the object was saved" + (f"; its row is now at {moved}" if moved else ""))
+                    notes.append(f"{holder['ref']} changed since the card was saved" + (f"; its row is now at {moved}" if moved else ""))
                     if moved:
                         return [moved]
             except R.RefError as e:
@@ -725,7 +725,7 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
         return [holder["ref"]]
     if b and R.parse(b["ref"])["kind"] == "query":
         return _resolve_query(st, R.parse(b["ref"]), chain, notes)
-    notes.append("Claude wrote this value into the object; no query or row stands behind it")
+    notes.append("Claude wrote this value into the card; no query or row stands behind it")
     step["why"] = "Claude wrote this value into the card, and no query or row stands behind it"
     return []
 

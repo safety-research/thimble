@@ -251,7 +251,7 @@ export async function act($: Engine, inst: Inst, eff: Record<string, unknown>): 
   const name = String(eff.do || '')
   try {
     const said = await paneAction($, inst.name, inst.args, eff)
-    if (said === false) $.ui.toast(`× ${paneOf(inst.name).title}: the terminal has no action "${name}". Use the keys in the thimble line instead.`)
+    if (said === false) $.ui.toast(`× ${paneOf(inst.name).title}: the terminal has no action "${name}". Use the keys in the bar instead.`)
     else if (typeof said === 'string' && said) $.ui.toast(said)
   } catch (err) {
     $.ui.toast(`× ${paneOf(inst.name).title}: ${name} failed (${String((err as Error)?.message || err).slice(0, 160)}). Try again, or press esc.`)

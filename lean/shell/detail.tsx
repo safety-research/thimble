@@ -570,7 +570,7 @@ function bodyTop(part: Any): { x: number; y: number } | null {
   return part.rects.reduce((a: Any, q: Any) => (q.w * q.h > a.w * a.h ? q : a), part.rects[0])
 }
 
-/** The detail's keys as the thimble line says them while the detail is open (shell.tsx): the card's own keys, then
+/** The detail's keys as the bar says them while the detail is open (shell.tsx): the card's own keys, then
  *  the detail's, as their programs name them, and where a question goes. */
 export async function detailKeys($: Engine): Promise<string | null> {
   if (!isOpen) return null

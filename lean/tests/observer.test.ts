@@ -175,7 +175,7 @@ test('after a turn that saved an object: one look reads its lineage; its note re
   expect(w.forks[0]).toContain('as the analyst sees it under the reply:\n    Jun 18 6,543')
   expect(w.forks[0]).toContain('Not read: 1 file (9 rows): events.jsonl')
   expect(w.runs.some(a => a.includes('coverage'))).toBe(true)
-  // the verbs in the thimble line above the prompt: v lit with its note in place of its name, s as its name
+  // the verbs in the bar above the prompt: v lit with its note in place of its name, s as its name
   await clock.settle()
   const drawn = textOf(await reply($))
   await clock.settle()

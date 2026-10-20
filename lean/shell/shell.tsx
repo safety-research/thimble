@@ -171,7 +171,7 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
       // a file over the 4 MiB one read takes, or one that is not JSON: Claude hears it at once, so the turn fixes it
       return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `its file could not be read (${String((err as Error)?.message || err).slice(0, 160)}); an object over 4 MiB cannot be drawn, so bind query outputs (r3) in its data rather than writing rows out` }
     }
-    if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
+    if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no card ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
     const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}) }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
@@ -839,7 +839,7 @@ export function personHere(): 'now' | 'later' | 'never' {
   return person
 }
 
-/** The work of a person's session that starts Node children: the verbs of the message row, and the thimble line's
+/** The work of a person's session that starts Node children: the verbs of the message row, and the bar's
  *  counts with the share of the data Claude read. */
 async function startForPerson($: Engine): Promise<void> {
   person = 'now'
@@ -856,7 +856,7 @@ async function startForPerson($: Engine): Promise<void> {
 // The keys act on one of Claude's answers: the last words of a turn that answered (a turn that ended in an error
 // answers nothing: its last row is Claude Code's error). By default the newest; { and } pick an earlier or a later one,
 // so a long answer stays in reach when short replies came after it (a subagent's report, a follow-up), and the
-// thimble line says which reply the keys act on whenever more than one came since the person's last prompt.
+// bar says which reply the keys act on whenever more than one came since the person's last prompt.
 
 /** The session's answers, oldest first: held for this load, rebuilt from the records at a resume. */
 async function answerRows($: Engine): Promise<string[]> {
@@ -1361,7 +1361,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the thimble line
+// ------------------------------------------------------------------------------------------------ the bar
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
@@ -1397,7 +1397,7 @@ export function percent(part: number): string {
   return `${Math.min(99, Math.round(p))}%`
 }
 
-/** This session's counts for the thimble line, counted again: the side threads, and (with `coverage`) the share of the
+/** This session's counts for the bar, counted again: the side threads, and (with `coverage`) the share of the
  *  folder's data Claude has read. A count that changed is stamped, so it brightens. */
 export async function recount($: Engine, o: { coverage?: boolean } = {}): Promise<void> {
   try {
@@ -1448,7 +1448,7 @@ async function threadInFront($: Engine): Promise<string | null> {
 // ------------------------------------------------------------------------------------------------ the focus stack
 
 /** What takes the keys, newest last: each surface pushes itself as it opens and leaves as it closes (the detail, the
- *  squeeze chips, v's proposals, the tray, a card under a reply). The thimble line says the keys of
+ *  squeeze chips, v's proposals, the tray, a card under a reply). The bar says the keys of
  *  the top one alone, read from this one state, so it redraws whenever the stack changes. */
 type FocusKind = 'detail' | 'chips' | 'proposals' | 'tray' | 'card'
 const FSTACK = { plugin: 'thimble', key: 'focus' } as const
@@ -1554,7 +1554,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
 type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown }
 
-/** The keys each thimble line named, oldest first, with when it first showed them. A key the line named a moment ago
+/** The keys each bar named, oldest first, with when it first showed them. A key the line named a moment ago
  *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
  *  person was closing): the person pressed what the line said. */
 const barSeen: { at: number; keys: Set<string> }[] = []
@@ -1594,7 +1594,7 @@ function barNamed(k: string, now: number, since: number): boolean {
   return false
 }
 
-/** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
+/** The bar: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
  *  It is always one line: with less room it drops the counts (coverage last), then says each key's words by their
  *  first word, then drops its label, then cuts its end (panes/host.js fitBar). Beside a docked pane Claude Code gives
  *  the band only the transcript's column, so there it is the narrow form. */
@@ -1738,7 +1738,7 @@ async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
   const since = keyDecided
   keyDecided = now
   const t = await emptyPromptKey($, key.key, e, at)
-  // a key the thimble line named a moment ago is the line's, even when what it named has gone meanwhile: it does
+  // a key the bar named a moment ago is the line's, even when what it named has gone meanwhile: it does
   // nothing then, and never lands in the prompt
   if (!t.box && barNamed(key.key, now, since)) return { box: { text: e.text, cursor: e.cursor }, work: () => { keyOpened = null; cardKeyed = null } }
   // a key from the empty prompt ends what the key before it began (a word after v, or after a card's key)
@@ -2020,10 +2020,10 @@ async function parseTarget($: Engine, words: string[]): Promise<{ ref: ObjRef | 
   const last = (await $.state.get(LAST)).value
   if (!first) {
     const ref = sel && !sel.cite ? sel : last
-    return ref ? { ref: { id: ref.id, v: ref.v, root: ref.root }, region: sel && ref === sel ? sel.region : null } : { ref: null, region: null, problem: 'no object yet' }
+    return ref ? { ref: { id: ref.id, v: ref.v, root: ref.root }, region: sel && ref === sel ? sel.region : null } : { ref: null, region: null, problem: 'no card yet' }
   }
   const m = /^([^@\s]+)(?:@(\d+))?$/.exec(first)
-  if (!m || !m[1] || !ID.test(m[1])) return { ref: null, region: null, problem: `"${first}" is not an object id` }
+  if (!m || !m[1] || !ID.test(m[1])) return { ref: null, region: null, problem: `"${first}" is not a card's id` }
   const here = await rootHere($)
   const hints = [...new Set([sel?.root, last?.root, here].filter(Boolean))] as string[]
   let id: string = m[1]
@@ -2036,7 +2036,7 @@ async function parseTarget($: Engine, words: string[]): Promise<{ ref: ObjRef | 
       if (hit) { id = hit.name.replace(/\.json$/, ''); root = r; break }
     }
   }
-  if (!root) return { ref: null, region: null, problem: `no object ${first} here` }
+  if (!root) return { ref: null, region: null, problem: `no card ${first} here` }
   return { ref: await withVersion($, { id, v: m[2] ? Number(m[2]) : null, root }), region: region && REGION.test(region) ? region : null }
 }
 
@@ -2185,7 +2185,7 @@ export const registerShell: Register = (on, options) => {
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
     const r = await next(e)
     try {
-      await $.command.register({ name: 'obj', description: 'Open an object in the detail view: /obj [object] [region]', argumentHint: '[object] [region]', immediate: true })
+      await $.command.register({ name: 'card', description: "Open a card's detail: /card [card] [part] (no card: the newest)", argumentHint: '[card] [part]', immediate: true })
       await $.command.register({ name: 'verb', description: 'Run a verb on an object: /verb <verb> [object] [region] [words] · /verb ? lists the verbs', argumentHint: '<verb> [object] [region] [words]' })
       const row = (await $.config.list()).find(x => x.key === 'theme')
       theme = String(row?.value ?? 'dark').startsWith('light') ? 'light' : 'dark'
@@ -2350,7 +2350,7 @@ export const registerShell: Register = (on, options) => {
         await $.state.set(ANSWER, row)
         const answers = await answerRows($)
         if (!answers.includes(row)) await $.state.set(ANSWERS, [...answers, row])
-        // the thimble line: what this turn read, saved and cited
+        // the bar: what this turn read, saved and cited
         $.clock.after(0, () => { void recount($, { coverage: true }) })
       }
     } catch {
@@ -2363,7 +2363,7 @@ export const registerShell: Register = (on, options) => {
   // one of Claude's messages drawn from its record: its marks inline (a citation underlined, a gloss on a teal fill, a
   // sparkline in place, each a press that opens the tray), while a squeeze rewrites it its new text writing in from the
   // top, the line a verb opened under it (squeeze's chips, v's proposals), then the objects its turn saved. Its verbs
-  // and keys are in the thimble line above the prompt. A message with none of these is Claude Code's own drawing.
+  // and keys are in the bar above the prompt. A message with none of these is Claude Code's own drawing.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     try {
       const at = rowKey(e.requestId)
@@ -2405,10 +2405,10 @@ export const registerShell: Register = (on, options) => {
         : await next(e))
       if (open === 's') {
         // the chips under the message (panes/chips.js, the browser draws the same program); their keys are in the
-        // thimble line
+        // bar
         parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row: at }, { w: Math.max(30, cols - 2), h: 3 })] }))
       } else if (open) {
-        // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the thimble line
+        // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar
         parts.push(Box({ key: `vl-${at}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row: at, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
       }
       if (list.length) {
@@ -2428,7 +2428,7 @@ export const registerShell: Register = (on, options) => {
 
   // the band above the prompt: the tray when it is open (one small panel, a fixed number of rows, so the transcript
   // scrolls above it; it shows the card on top of its stack: a citation's source card or a gloss's explainer card);
-  // then the thimble line, the one bar: what the keys do now at its left, the session's counts at its right. A blank row stands between the bar and what is above it, at rest as while
+  // then the bar: what the keys do now at its left, the session's counts at its right. A blank row stands between the bar and what is above it, at rest as while
   // Claude works.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     try {
@@ -2553,11 +2553,11 @@ export const registerShell: Register = (on, options) => {
     return context.length ? next({ ...e, context: [...(e.context ?? []), ...context] }) : next(e)
   }).catch(($, e, next) => next(e))
 
-  // /obj [object] [region]
-  on('command.run', { command: 'obj' }, async ($, e) => {
+  // /card [card] [part]: a card's detail (no card: the one selected, else the newest)
+  on('command.run', { command: 'card' }, async ($, e) => {
     const words = e.args.trim().split(/\s+/).filter(Boolean)
     const t = await parseTarget($, words)
-    if (!t.ref) return { text: `Nothing to open: ${t.problem}. An object Claude saves with \`thimble save\` shows under its reply.` }
+    if (!t.ref) return { text: `Nothing to open: ${t.problem}. A card Claude saves with \`thimble save\` shows under its reply.` }
     await openDetail($, t.ref, t.region)
     return {}
   })

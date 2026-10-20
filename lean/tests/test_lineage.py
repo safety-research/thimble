@@ -143,11 +143,11 @@ def test_resolve_json_carries_why(root: Path) -> None:
     st = Store(root)
     q = Q.run(st, "share", 'df = load("edits.jsonl")\n{"share": 0.5}')
     env = {**os.environ, "THIMBLE_ROOT": str(root)}
-    out = subprocess.run([sys.executable, str(ENGINE / "lean.py"), "resolve", f"{q['id']}#key=share@value", "--json"],
+    out = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), "resolve", f"{q['id']}#key=share@value", "--json"],
                          capture_output=True, text=True, env=env, check=True).stdout
     r = json.loads(out)
     assert r["count"] == 12 and r["why"].startswith(f"{q['id']} computed this value over all 12 rows")
-    text = subprocess.run([sys.executable, str(ENGINE / "lean.py"), "resolve", f"{q['id']}#key=share@value"],
+    text = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), "resolve", f"{q['id']}#key=share@value"],
                           capture_output=True, text=True, env=env, check=True).stdout
     assert "  why: " in text
 

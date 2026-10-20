@@ -96,7 +96,7 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   const w = world(on)
   const clock = mock.clock(on)
   await answered($, on, clock)
-  // the verbs are in the thimble line above the prompt, in words; nothing under the answer
+  // the verbs are in the bar above the prompt, in words; nothing under the answer
   expect(await hintOf($)).toContain('thimble  v visualize · s squeeze')
   expect(textOf(await $.ui.render(view(TEXT)))).not.toContain('visualize')
   expect(await press($, clock, edit('s'))).toEqual({ text: '', cursor: 0 })
@@ -106,7 +106,7 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   expect(drawn).toContain(' Report ↔ Interpret ○●○ balanced ')
   expect(drawn).toContain(' Familiarity ○○●○○ working ')
   expect(drawn).not.toContain('+')
-  // nothing under the chips: their keys are in the thimble line, once
+  // nothing under the chips: their keys are in the bar, once
   expect(drawn).not.toContain('change')
   expect(await hintOf($)).toContain('[ ] change · 1–3 chip · 0 close')
   // only the picked chip has a fill: its words, dots and level, and no other chip's
@@ -117,7 +117,7 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   expect(fill).not.toContain('Report')
   // a short answer: nothing was squeezed, no call made
   expect(w.calls.length).toBe(0)
-  // s again closes them, and the thimble line has the verbs back
+  // s again closes them, and the bar has the verbs back
   await press($, clock, edit('s'))
   expect(textOf(await $.ui.render(view(TEXT)))).not.toContain('Length')
   expect(await hintOf($)).toContain('v visualize · s squeeze')
@@ -232,7 +232,7 @@ test('a long answer arrives as Claude wrote it: no call, the bar at rest reads s
   expect(await hintOf($)).toContain('s ● 1 of 44 lines')
 })
 
-test('a key the thimble line named a moment ago is taken, never typed, when what it named has gone meanwhile: a rewrite landing closes the tray the person is closing', async ($, on) => {
+test('a key the bar named a moment ago is taken, never typed, when what it named has gone meanwhile: a rewrite landing closes the tray the person is closing', async ($, on) => {
   let release = () => {}
   const held = new Promise<void>(r => { release = r })
   const SHORT = 'Most runs landed changes: run 1 landed [4 changes](q2#run=1@n).'

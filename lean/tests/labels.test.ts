@@ -241,7 +241,7 @@ test('a call that fails says so plainly: a toast with what failed, and the verb 
 test("the detail of a label's card: each example shows its labels; a number key checks the record shown, which steps on; when the detail closes the card is counted again and Claude hears of the checks", async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  await $.command.run({ command: 'obj', args: '02-label-apology value-0' } as never)
+  await $.command.run({ command: 'card', args: '02-label-apology value-0' } as never)
   await pane($, clock)
   expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   const t = await pane($, clock)
@@ -274,7 +274,7 @@ test("the detail of a label's card: each example shows its labels; a number key 
 test('a label shows on what is drawn: the details of any card\'s part say how its rows split by each label that holds them', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
-  await $.command.run({ command: 'obj', args: '03-per-agent agent-29' } as never)
+  await $.command.run({ command: 'card', args: '03-per-agent agent-29' } as never)
   await pane($, clock)
   expect(await press($, clock, edit('enter'))).toEqual({ text: '', cursor: 0 })
   const t = await pane($, clock)

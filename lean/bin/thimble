@@ -8,4 +8,4 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 case "$1" in prompts|guide) exec node "$here/prompts/node.mjs" "$@";; stats) shift; exec node "$here/telemetry/stats.mjs" "$@";; esac
 py=${THIMBLE_PYTHON:-}
 if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
-exec "${py:-python3}" "$here/engine/lean.py" "$@"
+exec "${py:-python3}" "$here/engine/thimble.py" "$@"
