@@ -1,8 +1,8 @@
 // dock.ts: Coverage (what Claude read of the folder, panes/coverage.js) and the label viewer (panes/labels.js), which
 // open in the side panel (side.ts openSide) as threads: the pane at the top, its thread's conversation under it, the
 // input bar at the bottom, so "why was events.jsonl not read?" is asked from Coverage itself. The bar's right side names
-// them: `r coverage 12%` (the share of the folder's rows that entered Claude's context) with a small bar of the
-// folder's file types, and `l 2 labels` once the folder has labels; a click
+// them: `r coverage 42%` (the share of the folder's files Claude read: some of each entered its context) with a small
+// bar of the folder's file types filled by the same share, and `l 2 labels` once the folder has labels; a click
 // on either, or its key (r, l) from the empty prompt, opens its pane, and the same again closes it. This module is what
 // the side panel does not do for them:
 //
@@ -256,10 +256,10 @@ export function restPane(k: string, named: { cov: boolean; labels: boolean }): D
 type Count = { id: string; text: string; bare?: boolean; bright: boolean }
 type Counts = { cov: number; labels?: number; mix?: { tone: string; seen: boolean; n: number }[] }
 
-/** The bar's counts of the two panes, as fitBar measures them: `r coverage 12% ████████` and `l 2 labels`. The
- *  coverage is its name and one number, the share of the folder's rows that entered Claude's context (what the kernel
- *  calls seen: what a query or a rule only computed over is not in it); what was only computed over, and the files
- *  touched, are the pane's to say. */
+/** The bar's counts of the two panes, as fitBar measures them: `r coverage 42% ████████` and `l 2 labels`. The
+ *  coverage is its name and one number, the share of the folder's files Claude read, each file once whatever its unit
+ *  (read is what the kernel calls seen: some of the file entered Claude's context; a file a query or a rule only
+ *  computed over is not read); how much of each file, and what was only computed over, are the pane's to say. */
 export function dockCounts(c: Counts, percent: (x: number) => string): [string, number, string][] {
   const mix = (c.mix || []).reduce((s, x) => s + x.n, 0)
   return [

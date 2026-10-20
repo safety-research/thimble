@@ -74,11 +74,12 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     assert lines == {"src/a.py": 30, "src/b.py": 30, "src/c.py": 5, "src/d.py": 3, "src/j.py": 4}
     t = cov["total"]
     assert (t["seen_files"], t["not_seen_files"], t["untouched_files"], t["touched_files"]) == (5, 8, 0, 13)
-    assert t["seen_share"] == pytest.approx(72 / 363) and t["read_share"] == t["seen_share"]
+    # the bar's share is of files: each file once, whatever its unit
+    assert t["seen_share"] == pytest.approx(5 / 13) and t["read_share"] == t["seen_share"]
     text = LIN.coverage_text(cov)
     assert "Every source file" not in text and "touched." not in text
-    assert ("Read: 0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's context, from 5 of 13 files; 13 were "
-            "touched in some way. Not read: 8 files (3 rows and 210 lines): 7 only named, listed or counted (runs.csv, "
+    assert ("Read 5 of 13 files (38%), at least in part: 0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's "
+            "context; 13 were touched in some way. Not read: 8 files (3 rows and 210 lines): 7 only named, listed or counted (runs.csv, "
             "src/f.py, src/g.py, src/h.py and 3 more); 1 searched, which lines a search showed is not known (src/e.py).") in text
     assert "  src/c.py  read 5 of 30 lines (17%)\n" in text
     assert "runs.csv  only named, listed or counted (wc); Claude read none of it" in text
@@ -155,7 +156,8 @@ def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: P
     text = LIN.coverage_text(cov)
     assert text.startswith("Coverage of this session · 6 files: 200 records, 40 rows, 7 lines, 5 pages and 2 other files\n")
     assert "  chart.png  seen\n" in text and "  song.mp3  none\n" in text
-    assert ("Read: 3 of 200 records (2%), 4 of 40 rows (10%), 0 of 7 lines (0%), 2 of 5 pages (40%) and 1 of 2 other "
-            "files entered Claude's context, from 4 of 6 files") in text
+    assert ("Read 4 of 6 files (67%), at least in part: 3 of 200 records (2%), 4 of 40 rows (10%), 0 of 7 lines (0%), "
+            "2 of 5 pages (40%) and 1 of 2 other files entered Claude's context") in text
+    assert cov["total"]["seen_share"] == pytest.approx(4 / 6)
     # never which rows: no line or row numbers in the text
     assert "10" not in text.replace("(10%)", "")

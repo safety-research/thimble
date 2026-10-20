@@ -1568,16 +1568,6 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 
 const BRIGHT_MS = 1600
 
-/** The read share of a file as `thimble coverage` reports it: rows computed over, or lines read, or rows shown, of its
- *  rows; a file searched or named counts as not read. */
-function readShare(f: Any): number {
-  if (!f || !f.rows) return 0
-  // (a query or a rule that computed over its rows put none of them in Claude's context)
-  if (f.read_lines) return Math.min(1, f.read_lines / Math.max(1, f.lines || f.rows))
-  if (f.shown) return Math.min(1, f.shown / f.rows)
-  return 0
-}
-
 /** A share as the line says it: `34%`, a decimal under 1%, `<0.01%`, and 100% only when all was read. */
 export function percent(part: number): string {
   if (!(part > 0)) return '0%'
@@ -1590,7 +1580,7 @@ export function percent(part: number): string {
 }
 
 /** This session's counts for the bar, counted again: the side threads, and (with `coverage`) the share of the
- *  folder's data Claude has read. A count that changed is stamped, so it brightens. */
+ *  folder's files Claude has read. A count that changed is stamped, so it brightens. */
 export async function recount($: Engine, o: { coverage?: boolean } = {}): Promise<void> {
   try {
     const old = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
@@ -1598,10 +1588,10 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     const root = await rootHere($)
     let cov = old?.cov ?? 0
     let mix = old?.mix ?? []
-    // the folder's rows: coverage shows from the session's start (seen 0%) once there is a folder of data to see. Before
-    // Claude's first thimble command the folder is the session's own (as the Coverage pane reads it), never the home
-    // folder; the kernel's count writes nothing there
-    let covRows = old?.covRows ?? 0
+    // the folder's files: coverage shows from the session's start (seen 0%) once there is a folder of data to see.
+    // Before Claude's first thimble command the folder is the session's own (as the Coverage pane reads it), never the
+    // home folder; the kernel's count writes nothing there
+    let covFiles = old?.covFiles ?? 0
     const cwd = String(await $.session.cwd()).replace(/\/+$/, '')
     const covRoot = root ?? (cwd && cwd !== String((await $.env.get('HOME')) || '').replace(/\/+$/, '') ? cwd : null)
     if (o.coverage && covRoot && person === 'now' && featureOn('counts')) {
@@ -1610,12 +1600,12 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env: { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
         const got = JSON.parse(r.stdout)
         const files = (got.files || []) as Any[]
-        const rows = files.reduce((n, f) => n + (Number(f.rows) || 0), 0)
-        // the kernel's own share, by the rule its text says (a search, a listing or a count is not a read)
-        covRows = Number(got.total?.rows) || rows
-        if (typeof got.total?.seen_share === 'number') cov = got.total.seen_share
-        else if (typeof got.total?.read_share === 'number') cov = got.total.read_share
-        else if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
+        // the share of files read, each file once whatever its unit, by the rule the kernel's text says: a file is read
+        // when some of it entered Claude's context (seen); a query or a rule that only computed over it, a search, a
+        // listing or a count is not a read
+        covFiles = Number(got.total?.files) || files.length
+        const seen = Number(got.total?.seen_files ?? files.filter(f => f?.seen).length) || 0
+        cov = covFiles ? seen / covFiles : 0
         // the Coverage pane shows it, and the bar's small type bar is made from it (dock.ts)
         mix = noteCoverage(got)
       } catch {
@@ -1623,7 +1613,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
       }
     }
     const claims = await claimCount($).catch(() => old?.claims ?? 0)
-    const next: LineCounts = { claims, threads: threadCount(), cov, covRows, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
+    const next: LineCounts = { claims, threads: threadCount(), cov, covFiles, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
     const keys = ['claims', 'threads', 'cov', 'labels'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : (next[k] ?? 0) > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
@@ -1939,7 +1929,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   // a count whose feature is off is not shown: coverage and the labels with theirs. Coverage shows at 0% too, once
   // the folder has rows: what Claude has seen of it so far
   const shown = (id: string) => (id === 'cov' || id === 'labels' ? on('counts') : true)
-  const counts = items.filter(([id, n]) => (n > 0 || (id === 'cov' && (c?.covRows ?? 0) > 0)) && shown(id)).map(([id, , words, key]) => {
+  const counts = items.filter(([id, n]) => (n > 0 || (id === 'cov' && (c?.covFiles ?? 0) > 0)) && shown(id)).map(([id, , words, key]) => {
     const bright = now - (c!.changed[id] ?? 0) < BRIGHT_MS
     // (coverage's and the labels' words begin with their key: dock.ts)
     const dk = id === 'cov' ? DOCK_KEY.coverage : id === 'labels' ? DOCK_KEY.labels : null
