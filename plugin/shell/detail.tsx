@@ -134,9 +134,10 @@ export function noteDock(e: Any): void {
   if (e?.viewport?.columns && e.props?.placement === 'dock') viewCols = e.viewport.columns + (e.props.bodyColumns ?? 0) + 1
 }
 
-/** The columns a docked pane of ours asks for, leaving the chat its share. */
+/** The columns a docked pane of ours asks for, leaving the chat its share (a narrow strip, for a pane that wants the
+ *  room). */
 export function paneColumns(): number {
-  return detailColumns(viewCols)
+  return dockColumns()
 }
 
 /** The chat's columns beside the docked detail: about two fifths of the terminal, 48 to 80, so its lines read. */
@@ -147,6 +148,27 @@ export function chatColumns(cols: number): number {
 /** The columns the detail asks for: the terminal less the chat's share (a card needs 60 at least). */
 export function detailColumns(cols: number): number {
   return cols > 0 ? Math.max(60, cols - chatColumns(cols)) : 96
+}
+
+/** The columns a pane that wants the room asks for (its module's `wide`, such as the Claims graph): the terminal less a
+ *  narrow strip of the chat, so the pane is nearly the whole terminal wide. */
+export function wideColumns(cols: number): number {
+  return cols > 0 ? Math.max(detailColumns(cols), cols - WIDE_CHAT) : 96
+}
+const WIDE_CHAT = 24
+// whether what the panel shows wants the room (set as it opens)
+let wideDock = false
+const dockColumns = () => (wideDock ? wideColumns(viewCols) : detailColumns(viewCols))
+
+/** Whether a pane wants nearly the whole terminal (its module's `wide`). */
+function wantsRoom(v: SideView | null): boolean {
+  if (!v || v.kind !== 'pane') return false
+  try {
+    const w = paneOf(v.pane).wide
+    return typeof w === 'function' ? !!w(v.args || {}) : !!w
+  } catch {
+    return false
+  }
 }
 
 const GUTTER = (y: number) => `g|pane|${y}`
@@ -194,7 +216,8 @@ export async function openDock($: Engine, title: string): Promise<boolean> {
     if (draft) { draft = ''; askGen++; landed = null }
     if (!isAsk(ringAt)) ringAt = null
   }
-  const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch((err: unknown) => ({ isPlaced: false, reason: String((err as Error)?.message || err).slice(0, 160) }))
+  wideDock = wantsRoom(await sideNow($))
+  const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: dockColumns() }).catch((err: unknown) => ({ isPlaced: false, reason: String((err as Error)?.message || err).slice(0, 160) }))
   // a terminal too narrow for a docked pane a key opened (one a command opens is placed at any width): Claude Code
   // would keep it waiting, undrawn, with the keys still the panel's. It is closed again, and the toast says what opens
   // it; what it would have shown stays, for that command
@@ -314,7 +337,7 @@ function regrab($: Engine): void {
   $.clock.after(0, () => {
     void (async () => {
       if (!isOpen || isAsk(ringAt)) return
-      await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
+      await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: dockColumns() }).catch(() => undefined)
       // taking the keyboard again starts the ring afresh: put it on the selected part, wherever it was
       ringAt = null
       await focusPart($)
@@ -367,7 +390,7 @@ function moveSoon($: Engine): void {
     void (async () => {
       try {
         if (at !== moveGen || !isOpen || !isAsk(ringAt) || landed === askKey()) return
-        await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
+        await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: dockColumns() }).catch(() => undefined)
         if (at !== moveGen || !isOpen || !isAsk(ringAt) || landed === askKey()) return
         const r = await $.ui.focus({ requestId: PANE, key: askKey() }).catch(() => ({ deny: 'failed' }))
         if (!(r as Any)?.deny && at === moveGen && isAsk(ringAt)) landed = askKey()
