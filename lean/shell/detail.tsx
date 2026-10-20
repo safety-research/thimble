@@ -31,7 +31,7 @@ import { barText, hostKeys } from '../panes/host.js'
 import { paintRegions } from './cells'
 import { askMerge, beganWord, examplesView, linkRuns, partsOf, versionsOf } from './carddetail.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { browserOn, citeLabels, currentTheme, keysMoved, loadObject, openBrowser, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { citeLabels, currentTheme, keysMoved, loadObject, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
@@ -232,7 +232,7 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
   return {
     object, drawing: p ? (p.error ? { error: { name: 'Error', message: p.error } } : p.drawing) : null,
     versions: versionsOf(latest), v: sel.v ?? latest?.version ?? null, state: ownState(sel.state),
-    thread: !!threadFor({ object: sel.id }), browser: browserOn(), labelGen: await labelGen($),
+    thread: !!threadFor({ object: sel.id }), labelGen: await labelGen($),
   }
 }
 
@@ -256,12 +256,6 @@ async function mirror($: Engine): Promise<void> {
     }
     await writeCardState($, sel.root, sel.id, { state: next.state, region }, 'terminal')
   }
-}
-
-/** The detail's state changed elsewhere (the browser's run of the same program): the terminal follows it. */
-export async function followDetail($: Engine, id: string): Promise<void> {
-  const sel = (await $.state.get(SEL)).value as Detail | null
-  if (sel && sel.id === id) await mirror($)
 }
 
 /** A key or a press for the detail's program; its state is mirrored. True when the program took it. */
@@ -300,10 +294,6 @@ export async function detailAction($: Engine, a: Record<string, unknown>): Promi
       const t = threadFor({ object: sel.id })
       return t ? await sendToMain($, t.key) : 'This card has no thread yet: type a question to start one.'
     }
-    case 'browser': {
-      const row = ((await $.state.get({ ...WHERE, id: sel.id })).value as string | undefined) ?? null
-      return await openBrowser($, { id: sel.id, v: sel.v, region: (typeof a.region === 'string' ? a.region : sel.region) ?? null, root: sel.root, row })
-    }
     case 'close':
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return
@@ -322,7 +312,7 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
   const cur = await current($)
   if (!cur || !drawn) return
   const { sel, p } = cur
-  const got = await cardEvent($, p.object, sel, event, { w: drawn.w, h: drawn.h, browser: browserOn() })
+  const got = await cardEvent($, p.object, sel, event, { w: drawn.w, h: drawn.h })
   if (!got || got.drawing?.error) {
     $.ui.toast(`× The card could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return

@@ -8,9 +8,9 @@
 //
 //   state: {region: the selected part, bar: null | 'details' | 'examples', ex: the example shown, prog: the program}
 //   keys: ↑↓ part · ↵ details · e examples · [ ] flip · + − zoom · f filter · , . turn · p program · h versions ·
-//         t thread · m send to main · o browser · 0 clear · esc back
+//         t thread · m send to main · 0 clear · esc back
 //   events: focus (the ring on a part), press (a part; the selected one opens its details; a version; a knob's ◂ ▸)
-//   asks of the host: card {state} (a knob of the card turned), version {v}, thread, main, browser, close,
+//   asks of the host: card {state} (a knob of the card turned), version {v}, thread, main, close,
 //         check {label, ref, value} (the person's check of a record's label value)
 //   wants: {rows: refs} (the rows behind the selected part), {facts: id} (where the card's values come from),
 //          {labels: refs, gen} (the labels of the examples shown, read again after each check)
@@ -58,7 +58,7 @@ export default {
       id: o.id, title: o.title || o.id, question: o.question || '', text: o.text || '', program: o.program || '', version: o.version ?? null,
       versions: card.versions || [], v: card.v ?? o.version ?? null, drawing: inner, parts, refs,
       cites: d.cites || {}, examples: d.examples || {}, controls: d.controls || [], cardState: card.state || {},
-      thread: !!card.thread, browser: !!card.browser, w: size.w, h: size.h,
+      thread: !!card.thread, w: size.w, h: size.h,
       // a label's card names its label; the host counts the checks made since it opened, so their labels are read again
       label: typeof o.label === 'string' ? o.label : null, labelGen: card.labelGen || 0,
     }
@@ -157,7 +157,6 @@ export function program(k, data) {
     k.on('t', () => { k.do('thread') }, 'thread')
     k.on('m', () => { k.do('main') }, 'send to main')
   }
-  if (data.browser && k.surface === 'terminal') k.on('o', () => { k.do('browser', { region }) }, 'browser')
   // esc closes what was opened last (the program over the card, else the bar with all it shows), then the detail
   k.on('esc', () => {
     if (prog) return { prog: false }

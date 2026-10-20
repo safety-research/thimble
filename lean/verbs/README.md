@@ -14,7 +14,7 @@ verbs/<name>/
 `ctx` holds `object` (as the kernel keeps it), `region` (the selected part's id, or null), `regionMeta`, `refs` (the
 kernel refs behind the selection), `drawing` (the object as the person sees it), `state` (the knobs' values), `args`
 (words typed after the verb), `root`, `verb` (its verb.json, with `dir`), `skill` (its SKILL.md), `kernel` (`run`,
-`json`, `resolve`, `list`, `objects`, `save`), `draw` (`runProgram`, `renderTerm`, `renderSvg`, `gridText`), `model`
+`json`, `resolve`, `list`, `objects`, `save`), `draw` (`runProgram`, `renderTerm`, `gridText`), `model`
 (`complete`, `fork`) and `w`. `shell/node/verb.mjs` builds it and says what each part is.
 
 `ctx.model` is the session's own model, one quiet call: `complete` as `$.model.complete` (no history), `fork` as

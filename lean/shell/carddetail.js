@@ -95,7 +95,6 @@ export function keyOf(key, ctx = {}) {
     case ',': case '<': return ctx.knob ? { act: 'knob', dir: -1 } : null
     case 'm': return ctx.thread ? { act: 'main' } : null
     case 't': return ctx.thread ? { act: 'thread' } : null
-    case 'o': return ctx.browser ? { act: 'browser' } : null
     case '0': return ctx.bar || ctx.overlay ? { act: 'back' } : null
     case 'esc': return ctx.bar || ctx.overlay ? { act: 'back' } : { act: 'close' }
     default: return null

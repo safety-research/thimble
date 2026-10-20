@@ -1,7 +1,7 @@
 {
   "name": "thimble",
   "version": "0.0.1",
-  "description": "thimble's kernel and shell: the `thimble` command reads and queries any files, keeps the code, inputs and source rows behind every value, and saves objects as program + data + lineage; each object Claude saves is drawn under its reply with the verbs that fit it, opens in a detail view that keeps the chat going, and, with browser mode on, opens in a browser page that mirrors the session. Verbs are folders in verbs/. An observer reads each answer and the objects behind it once after the turn: it leaves notes for Claude, ranks each object's hint row, and, rarely, shows one line above the prompt when a decision of the person's is in view.",
+  "description": "thimble's kernel and shell: the `thimble` command reads and queries any files, keeps the code, inputs and source rows behind every value, and saves objects as program + data + lineage; each object Claude saves is drawn under its reply with the verbs that fit it, and opens in a detail view that keeps the chat going. Verbs are folders in verbs/. An observer reads each answer and the objects behind it once after the turn: it leaves notes for Claude, ranks each object's hint row, and, rarely, shows one line above the prompt when a decision of the person's is in view.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -17,12 +17,6 @@
       "title": "Observer",
       "description": "After each turn of work, a side agent reads the answer and the objects behind it: it leaves notes for Claude, picks the verbs under each object, and, rarely, shows a line above your prompt when a decision is in view.",
       "default": true
-    },
-    "browser": {
-      "type": "boolean",
-      "title": "Browser",
-      "description": "Mirror this session in a browser page: the messages with their marks, the cards, and each card's detail. Off: nothing of it shows and no server runs. On: o and /browser open the page, served on 127.0.0.1 only while a page is open.",
-      "default": false
     },
     "prompts": {
       "type": "string",

@@ -5,7 +5,6 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import '../../draw/kit.js'
-import { renderSvg } from '../../draw/svg.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import PANES from '../index.js'
@@ -40,31 +39,7 @@ test('claims: the ring in the terminal and the pointer in the browser are one ho
   // the state the browser kept, drawn in the terminal: the card of what c2 means
   const t = gridText(renderTerm(run(PANES.claims, data, { state: web.state, surface: 'terminal' }), { w: 90 }))
   assert.match(t, /Kestrel made 41% of June edits/)
-  // and in the browser, from the same program: the same parts
-  const s = renderSvg(run(PANES.claims, data, { state: term.state, surface: 'browser' }), { w: 90 })
-  assert.ok(s.regions.some(r => r.id === 'cl-c2'))
   assert.equal(barText([run(PANES.claims, data)]), 'r replay · esc close')
-})
-
-test('claims in the browser: the same program draws dots and links between cells and the card as an opaque box; the terminal keeps its cells', () => {
-  const data = claimsData()
-  const opsOf = d => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; if (n.t === 'canvas') out.push(...n.ops); (n.kids || []).forEach(walk); if (n.kid) walk(n.kid) }; walk(d.root); return out }
-  const rest = opsOf(run(PANES.claims, data, { surface: 'browser' }))
-  assert.equal(rest.filter(o => o[0] === 'dot').length, 3, 'a dot per claim')
-  assert.ok(rest.filter(o => o[0] === 'dot').every(o => /^cl-/.test(o[4].region)), 'each dot is its claim\'s part')
-  assert.equal(rest.filter(o => o[0] === 'link').length, 0, 'no line at rest')
-  assert.ok(!rest.some(o => o[0] === 'put' && /[●◉○]/.test(o[3])), 'no dot as a glyph')
-  const hov = run(PANES.claims, data, { surface: 'browser', state: { hover: 'c2' } })
-  const ops = opsOf(hov)
-  assert.ok(ops.some(o => o[0] === 'link'), 'the hovered claim\'s links')
-  assert.ok(ops.some(o => o[0] === 'box' && o[7] && o[7].fill), 'its card is an opaque box')
-  const s = renderSvg(hov, { w: 90 })
-  assert.ok(s.marks.some(m => m.k === 'text' && /Kestrel made 41% of June edits/.test(m.s)), 'the card says the claim')
-  assert.ok(s.regions.some(r => r.id === 'cl-c1'))
-  // the terminal draws the same program in cells, as before
-  const t = run(PANES.claims, data, { surface: 'terminal', state: { hover: 'c2' } })
-  assert.ok(!opsOf(t).some(o => o[0] === 'dot' || o[0] === 'link'))
-  assert.match(gridText(renderTerm(t, { w: 90 })), /┌─+┐/)
 })
 
 test('claims: r replays the graph by later events (k.after) in the order made; any key stops it', () => {
@@ -149,7 +124,7 @@ const OBJECT = {
 }
 const detailData = () => {
   const drawing = runProgram(OBJECT, { w: 80, h: 20, mode: 'detail' })
-  return PANES.detail.data({ 'card:01-saves': { object: OBJECT, drawing, versions: [{ v: 1 }, { v: 2 }], v: 2, state: {}, thread: true, browser: true } }, { id: '01-saves' }, { w: 90, h: 30 })
+  return PANES.detail.data({ 'card:01-saves': { object: OBJECT, drawing, versions: [{ v: 1 }, { v: 2 }], v: 2, state: {}, thread: true } }, { id: '01-saves' }, { w: 90, h: 30 })
 }
 
 test('detail: one page on both surfaces; the part selected and the bar are its state, and a state from either surface draws the same', () => {
@@ -170,9 +145,8 @@ test('detail: one page on both surfaces; the part selected and the bar are its s
   assert.deepEqual(ring.state, click.state)
   // a click on the part already selected opens its details (the ring resting on it does not)
   assert.equal(act(PANES.detail, data, click.state, { type: 'press', region: 'day-2026-06-18' }, 'browser').state.bar, 'details')
-  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h versions · t thread · m send to main · o browser · esc back')
+  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h versions · t thread · m send to main · esc back')
   // the browser has no o: it is the browser
-  assert.ok(!barText([run(PANES.detail, data, { surface: 'browser' })]).includes('o browser'))
 })
 
 test('detail: what the card does is the host\'s (k.do): a version, the thread, closing; rows behind a part are wanted (k.want)', () => {
@@ -288,8 +262,8 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   // back from the first card closes the tray; ] asks the host for the next mark or card
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('0'), 'terminal').d.effects, [{ do: 'close' }])
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent(']'), 'terminal').d.effects, [{ dir: 1, do: 'step' }])
-  // 1 asks: in the browser the question is typed in the tray (an input), in the terminal in the prompt
-  assert.equal(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'browser').d.effects[0].do, 'input')
+  // 1 asks: the question is typed in the prompt
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'terminal').state.asking, true)
   const asking = run(PANES.tray, data, { state: { stack: [f0], asking: true }, w: 70, got })
   assert.equal([asking.status?.text, barText([asking])].filter(Boolean).join(' · '), 'type to ask · ↵ asks this thread · 0 back')
 })

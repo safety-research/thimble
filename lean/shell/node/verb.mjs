@@ -18,7 +18,7 @@
 //   ctx.kernel     the `thimble` command: run(args, {input}) -> {code, stdout, stderr}; json(args) parses its --json;
 //                  resolve(ref, n) and list(id) as `thimble resolve`/`thimble list`; objects() every object as saved;
 //                  save(name, spec) saves an object and returns {id, v, out}
-//   ctx.draw       {runProgram, renderTerm, renderSvg, gridText}: the drawing contract, to draw or check an object
+//   ctx.draw       {runProgram, renderTerm, gridText}: the drawing contract, to draw or check an object
 //   ctx.model      {complete(request), fork(request)}: one quiet call to the session's own model, as $.model.complete
 //                  (no history) and $.model.fork (over the conversation) answer it: {isAnswered, text, usage, reason};
 //                  calls started together are made together (below)
@@ -51,7 +51,6 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProgram } from '../../draw/sandbox-node.mjs'
-import { renderSvg } from '../../draw/svg.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import { findVerb, listVerbs } from './registry.mjs'
 
@@ -143,7 +142,7 @@ export async function runVerb(word, input, { dir, lean } = {}) {
     verb: { ...verb },
     skill,
     kernel,
-    draw: { runProgram, renderTerm, renderSvg, gridText },
+    draw: { runProgram, renderTerm, gridText },
     model: modelFor(input.answers, need),
     round: Number(input.round) || 0,
     w: Number(input.w) || 96,

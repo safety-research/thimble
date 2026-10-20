@@ -9,7 +9,6 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { runProgram } from '../../../draw/sandbox-node.mjs'
-import { renderSvg } from '../../../draw/svg.js'
 import { gridText, renderTerm } from '../../../draw/term.js'
 import { applies } from '../hint.mjs'
 import { askFor, filterThreads, isMap, PROGRAM, run } from '../run.mjs'
@@ -189,15 +188,6 @@ test('regions: a strip of groups to scale, then boxes of stations with their cou
   assert.ok(full.text.includes('LIVE pages') && full.text.includes('5,200') && full.text.includes('other 51'), full.text)
   assert.equal(region(full, 'st-live').meta.ref, 'q1#kind=live')
   assert.ok(region(full, 'grp-coord').meta.label.startsWith('coordination pages'))
-})
-
-test('the browser draws the same regions as the terminal', () => {
-  const data = { ...many(12), full: true }
-  const drawing = runProgram({ program: PROGRAM, data }, { w: 100 })
-  const term = renderTerm(drawing, { w: 100 }).regions.filter(r => r.rects.length).map(r => r.id).sort()
-  const svg = renderSvg(drawing, { w: 840 })
-  assert.ok(svg.svg.startsWith('<svg'))
-  assert.deepEqual(svg.regions.filter(r => r.rects.length).map(r => r.id).sort(), term)
 })
 
 test('the verb: m on a calm map saves its full map from the spec Claude gave, once per version', async () => {

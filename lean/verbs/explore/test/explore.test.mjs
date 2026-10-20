@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { runProgram } from '../../../draw/sandbox-node.mjs'
-import { renderSvg } from '../../../draw/svg.js'
 import { gridText, renderTerm } from '../../../draw/term.js'
 import { nodeCtx, toAnsi } from '../cli.mjs'
 import { applies } from '../hint.mjs'
@@ -32,14 +31,14 @@ function fakeKernel(objects = []) {
 }
 const ctxOf = (object, kernel, extra) => Object.assign({ object, kernel, draw: { runProgram }, w: 96, h: 24, verb: { dir: '/x/lean/verbs/explore' } }, extra)
 
-test('the skill\'s worked examples run, in both renderers, each with a knob and parts that lead to rows', () => {
+test('the skill\'s worked examples run, each with a knob and parts that lead to rows', () => {
   assert.equal(PROGRAMS.length, 3)
   PROGRAMS.forEach((program, i) => {
     for (const w of [72, 100, 140]) {
       const d = runProgram({ program, data: DATA[i] }, { w })
       assert.equal(d.error, undefined, `example ${i + 1} at ${w}: ${d.error && d.error.message}`)
       assert.deepEqual(d.warnings, [], `example ${i + 1} at ${w}`)
-      assert.equal(JSON.stringify(renderTerm(d, { w }).marks), JSON.stringify(renderSvg(d, { w }).marks), `example ${i + 1}: the renderers disagree`)
+      assert.ok(renderTerm(d, { w }).marks.length > 0, `example ${i + 1} draws nothing`)
       assert.ok(d.controls.length === 1, `example ${i + 1} has one knob`)
       assert.ok(explorable(d), `example ${i + 1} is explorable`)
     }

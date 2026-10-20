@@ -1,4 +1,4 @@
-// The shell of thimble: it puts the kernel's objects in front of the person, in the terminal and the browser.
+// The shell of thimble: it puts the kernel's objects in front of the person, in the terminal.
 //
 //   inline     when Claude saves an object (`thimble save` in Bash), the object is drawn under the turn's last reply, in
 //              cells (draw/term.js, draw/paint.js), with one quiet row under it: the 2-3 verbs picked for it, `? all`,
@@ -10,12 +10,6 @@
 //              (shell/node/verb.mjs) by a press, a key or /verb. What a verb makes is drawn where the person pressed;
 //              what it says for Claude goes with the next prompt; a call it makes to the model is made here, with
 //              $.model, and handed back to it; a request it has for Claude (`ask`) goes as a prompt, drawn as one line.
-//   browser    off by default: the plugin's `browser` setting (/config) turns it on. While it is off nothing of it
-//              shows and no server starts. While it is on, `o` (the detail view's key, a press on `o browser` under a
-//              card or a reply) and /browser open this session's pages: a server on 127.0.0.1 with a token
-//              (shell/node/serve.mjs), alive while a page is open and ended with the session. What the person does
-//              on a page comes back as one line: an `ask` goes to Claude as a prompt that carries its scope, a `verb`
-//              presses that verb on the message's card.
 //   claims     the session's claims (thimble/claims/<session>.json), which the observer's look adds each turn's to:
 //              c opens the Claims pane, focused (panes/claims.js, a program on the card runtime): the clusters with their claims as a graph; the
 //              claim the ring is on (arrow keys, or a click) shows what it means and its links; r replays the graph
@@ -32,18 +26,18 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { LineCounts, MsgRecord, ObjRef, Ran, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
-import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
+import { knobOf, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
-import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, followDetail, markOpen, noteDock, noteViewport, openDetailPane, paneColumns, registerDetail } from './detail'
-import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
+import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteDock, noteViewport, openDetailPane, paneColumns, registerDetail } from './detail'
+import { linkMarks, newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
-import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadList, threadOf } from './thread'
+import { askThread, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import type { Scope as ThreadScope } from './thread'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
-import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
+import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop } from './tray.js'
 import { catchUpEl, markColors, messageEl, verbColor } from './view'
 import { markNextTurn, record as recordEvent, tracked, turnFeature } from '../telemetry/telemetry'
 import { ownTurn, readAgain } from '../observer/observer'
@@ -55,7 +49,7 @@ import { catchUpStands, endsOf, isCatchUp, revealCut } from '../verbs/squeeze/ch
 import { HEAD_ROWS } from '../panes/claims.js'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
-import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, paneTakes, paneTry, patchPaneState, setPaneState, setTheme } from './panes'
+import { act, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneState, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { mix } from '../draw/palette.js'
@@ -77,7 +71,6 @@ const SEL = { plugin: 'thimble', key: 'sel' } as const
 const LAST = { plugin: 'thimble', key: 'last' } as const
 const ASKED = { plugin: 'thimble', key: 'asked' } as const
 const ROWS = { plugin: 'thimble', key: 'rows' } as const
-const WEB = { plugin: 'thimble', key: 'web' } as const
 const READY = { plugin: 'thimble', key: 'ready' } as const
 const SAID = { plugin: 'thimble', key: 'said' } as const
 const NOTES = { plugin: 'thimble', key: 'notes' } as const
@@ -127,12 +120,6 @@ let cardWork: Promise<void> | null = null
 const forkMade = new Set<string>()
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
-let server: { base: string; root: string } | null = null
-let serverStarting: Promise<{ base: string } | { problem: string }> | null = null
-// the server's stream: leaving it (return()) ends the server
-let serverStream: { return?: (v?: unknown) => unknown } | null = null
-// browser mode: the `browser` setting as the module loaded with it, then as /config changes it
-let browserFlag = false
 
 let shown: { file: string; under: Record<string, Placed[]> } | null = null
 // the message layer's memory: the records' folder and index, the tray's drawn cards, the verb key that opened a line
@@ -181,7 +168,7 @@ export async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
-const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}|${browserFlag ? 'web' : ''}`
+const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}`
 
 /** The object drawn at `w` columns (with the knobs at `state`), with its verbs: the program runs in a Node child, in the
  *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
@@ -204,7 +191,7 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
     }
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}), browser: browserFlag }, mode, ...(check ? { check: true } : {}) }), timeoutMs: 30000 })
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}) }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     // under a reply a card is its title, its chart and its takeaway: the words at the right of its frame (its sources)
@@ -866,292 +853,11 @@ async function quietly(p: Promise<unknown>): Promise<void> {
   try { await p } catch { /* a refusal: the tray shows the mark anyway */ }
 }
 
-// ------------------------------------------------------------------------------------------------ the browser
-
-/** Whether browser mode is on: the plugin's `browser` setting, false at install. */
-export function browserOn(): boolean {
-  return browserFlag
-}
+// ------------------------------------------------------------------------------------------------ the theme
 
 /** The theme the person picked (dark or light): the cards' palette follows it. */
 export function currentTheme(): 'dark' | 'light' {
   return theme
-}
-
-/** The folder whose thimble/ the pages read: the latest object's, else the nearest with a thimble/ folder, else the
- *  session's own. */
-async function webRoot($: Engine): Promise<string> {
-  return (await rootHere($)) || String(await $.session.cwd()).replace(/\/+$/, '')
-}
-
-async function startServer($: Engine, root: string): Promise<{ base: string } | { problem: string }> {
-  if (server && server.root === root) return { base: server.base }
-  if (serverStarting) return serverStarting
-  if (server) stopServer()
-  const dir = $.plugin.root.replace(/\/+$/, '')
-  const session = await sessionKey($)
-  serverStarting = new Promise(resolve => {
-    void (async () => {
-      let buf = ''
-      let ready = false
-      let why = ''
-      try {
-        const child = $.process.spawn({ argv: ['node', `${dir}/shell/node/serve.mjs`, '--root', root, '--session', session, '--lean', `${dir}/bin/thimble`], env: await leanEnv($, root) })
-        serverStream = child as unknown as { return?: (v?: unknown) => unknown }
-        for await (const piece of child) {
-          if (piece.stream !== 'stdout') continue
-          buf += piece.text
-          let nl = buf.indexOf('\n')
-          while (nl >= 0) {
-            const line = buf.slice(0, nl)
-            buf = buf.slice(nl + 1)
-            nl = buf.indexOf('\n')
-            let msg: Any
-            try { msg = JSON.parse(line) } catch { continue }
-            if (msg.ready) {
-              server = { base: `http://127.0.0.1:${msg.ready.port}/${msg.ready.token}`, root }
-              ready = true
-              await $.state.set(WEB, { base: server.base, root, on: true })
-              resolve({ base: server.base })
-            } else if (typeof msg.ask === 'string') {
-              void askFromBrowser($, root, msg.ask, msg.scope || {})
-            } else if (typeof msg.verb === 'string') {
-              void verbFromBrowser($, root, String(msg.verb), String(msg.row || ''), typeof msg.proposal === 'string' ? msg.proposal : null)
-            } else if (msg.squeeze && typeof msg.squeeze === 'object') {
-              // a squeeze chip pressed under a message in the browser: the same rewrite in place as a press here
-              void paneActFromBrowser($, { ...msg.squeeze, pane: 'chips', args: { row: msg.squeeze.row }, do: 'squeeze', ...(msg.squeeze.custom ? { stretch: msg.squeeze.custom } : {}), ...(msg.squeeze.chip != null ? { at: { [msg.squeeze.chip]: msg.squeeze.level } } : {}) })
-            } else if (msg.cardstate) {
-              await stateFromBrowser($, root, msg.cardstate)
-            } else if (msg.panestate && typeof msg.panestate === 'object') {
-              // the browser's run of a pane's program answered with a state: the same pane here shows it
-              await paneFromBrowser($, msg.panestate)
-            } else if (msg.act && typeof msg.act === 'object') {
-              // an action the browser's run of a pane's program asked for, done here as the terminal's run would
-              void paneActFromBrowser($, msg.act)
-            } else if (msg.back) {
-              await backFromBrowser($, root, msg.back)
-            } else if (msg.stopped) {
-              why = String(msg.stopped)
-            }
-          }
-        }
-      } catch (err) {
-        if (!ready) resolve({ problem: String((err as Error)?.message || err).slice(0, 200) })
-      }
-      server = null
-      serverStarting = null
-      serverStream = null
-      if (!ready) resolve({ problem: 'the page server stopped before it was ready' })
-      // it stops on its own once no page is open (`why`), or with the module: the next `o` starts it again
-      await $.state.set(WEB, { on: browserFlag, ...(why ? { stopped: why } : {}) })
-    })()
-  })
-  const r = await serverStarting
-  if ('problem' in r) serverStarting = null
-  return r
-}
-
-/** End the page server, if one runs (browser mode turned off). */
-function stopServer(): void {
-  try { serverStream?.return?.() } catch { /* it ends with the module anyway */ }
-  serverStream = null
-  server = null
-  serverStarting = null
-}
-
-/** The old page's "back to terminal": the detail view opens on the object and part the page had selected. */
-async function backFromBrowser($: Engine, root: string, back: { object: string; v: number | null; region: string | null; state?: Record<string, unknown> }): Promise<void> {
-  if (!ID.test(back.object)) return
-  const region = back.region && REGION.test(back.region) ? back.region : null
-  const ref = await withVersion($, { id: back.object, v: back.v ?? null, root })
-  const state = back.state && typeof back.state === 'object' && !Array.isArray(back.state) ? back.state : undefined
-  await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}) })
-  const o = await loadObject($, ref)
-  await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
-}
-
-/** A card's interaction state the browser's program answered with: kept where both surfaces read it, and the open
- *  detail here follows it (the same selection in the terminal and the browser). */
-async function stateFromBrowser($: Engine, root: string, c: { object: string; region: string | null; state: Record<string, unknown> }): Promise<void> {
-  if (!ID.test(c.object)) return
-  await writeCardState($, root, c.object, { state: c.state, region: c.region }, 'browser')
-  const sel = (await $.state.get(SEL)).value as Sel | null
-  if (sel && sel.id === c.object && sel.root === root && !sel.cite && !sel.cites) await $.state.set(SEL, { ...sel, state: c.state, region: c.region ?? sel.region })
-}
-
-/** A pane's state from the browser's run of its program: kept and drawn here (the same pane, the same state). */
-async function paneFromBrowser($: Engine, q: { pane: string; args?: Record<string, unknown>; state: Record<string, unknown> }): Promise<void> {
-  try {
-    paneOf(q.pane)
-  } catch {
-    return
-  }
-  await setPaneState($, q.pane, q.args || {}, q.state || {}, 'browser')
-  if (q.pane === 'detail' && typeof q.args?.id === 'string' && ID.test(q.args.id)) {
-    // the part selected in the browser's detail is the card's selection everywhere: its card under the reply marks it
-    const root = await webRoot($)
-    const kept = await readCardState($, root, q.args.id)
-    if (typeof q.state?.region === 'string') await writeCardState($, root, q.args.id, { state: kept?.state ?? {}, region: q.state.region }, 'browser')
-    await followDetail($, q.args.id)
-  }
-}
-
-/** An action a pane's program asked for in the browser (k.do), done as the terminal's run would do it. */
-async function paneActFromBrowser($: Engine, q: Record<string, unknown>): Promise<void> {
-  const pane = String(q.pane || '')
-  try {
-    paneOf(pane)
-  } catch {
-    return
-  }
-  await act($, instance(pane, (q.args as Record<string, unknown>) || {}), q)
-}
-
-/** The record of one of Claude's messages in this session (CONTRACT 1), or null. */
-async function recordOf($: Engine, root: string, row: string): Promise<Any | null> {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(row)) return null
-  const file = `${root}/thimble/messages/${safe(await sessionKey($))}/${row}.json`
-  try { return (await $.fs.exists(file)) ? JSON.parse(String(await $.fs.read(file))) : null } catch { return null }
-}
-
-type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; claim?: string; refs?: string[]; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
-
-/** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
-export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
-  const lines = ['The person asked this in the browser page of this session, not in the terminal.']
-  if (scope.object && ID.test(scope.object)) {
-    const ref = await withVersion($, { id: scope.object, v: scope.v ?? null, root })
-    const p = await prepared($, ref, 96)
-    const o = p.object
-    const region = scope.region && REGION.test(scope.region) ? scope.region : null
-    const label = region ? String(regionMeta(p.drawing, region)?.label || scope.label || region) : ''
-    lines.push(`They asked it on the page of ${ref.id}@${o?.version ?? ref.v} "${o?.title || ''}" (${root}/thimble/objects/${ref.id}.json)${region ? `, with its part ${region} ("${label}") selected. "This" may mean that part.` : '.'}`)
-    const refs = o && region ? regionRefs(o, p.drawing, region).refs : o ? objectRefs(o).map((c: Any) => c.ref) : []
-    if (refs.length) lines.push(`${region ? 'That part rests' : 'Its words rest'} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${ref.id}\` the object's lineage.`)
-  }
-  if (scope.claim && /^c\d{1,6}$/.test(scope.claim)) {
-    const store = await claimsStore($)
-    const c = store.claims.find((x: Any) => x.id === scope.claim)
-    if (c) {
-      const first = (c.said || [])[0]
-      const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
-      lines.push(`They asked it about the claim ${c.id} "${c.text}" on the page of this session's claims${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}${first?.quote ? `, first said as "${first.quote}"` : ''}.${refs.length ? ` It rests on ${refs.join(', ')}.` : ''} "This" may mean that claim.`)
-    }
-  }
-  const m = scope.mark
-  if (m && m.kind === 'gloss') {
-    lines.push(`They asked about the term "${m.term || m.label || ''}", which the page explains under your message.`)
-  } else if (m && m.ref && isRef(m.ref)) {
-    lines.push(`They asked about your citation "${m.label || m.ref}" (${m.ref}). \`thimble resolve ${m.ref}\` shows its rows.`)
-  }
-  if (scope.row) {
-    const rec = await recordOf($, root, scope.row)
-    const text = rec ? String(rec.shown ?? rec.text ?? '') : ''
-    if (text && !scope.object) lines.push(`It is about your message that begins: "${cut(text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/\s+/g, ' '), 240)}"`)
-  }
-  return lines.join('\n')
-}
-
-/** A question asked in the browser. About a card or a mark it is a side thread (thread.ts), which main does not see;
- *  about a message as a whole it is a turn the person started, their words as the prompt, what it was asked about
- *  just before it as a row for Claude alone (as a verb's request is). Claude Code labels that prompt's row as the
- *  plugin's. */
-async function askFromBrowser($: Engine, root: string, text: string, scope: WebScope): Promise<void> {
-  try {
-    // a question asked in a thread the page shows (its tree, its column): that thread again, on the part it is about
-    if (scope.thread) {
-      await restoreThreads($, root)
-      const t = threadOf(scope.thread)
-      if (t) {
-        const r = await askThread($, { text, root: t.root || root, scope: t.scope as ThreadScope, card: t.scope.object ? { id: t.scope.object, v: t.scope.v ?? null, title: t.card || undefined, file: `${t.root || root}/thimble/objects/${t.scope.object}.json` } : null })
-        if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
-        return
-      }
-    }
-    if ((scope.object && ID.test(scope.object)) || scope.mark) {
-      const card = scope.object && ID.test(scope.object) ? await withVersion($, { id: scope.object, v: scope.v ?? null, root }) : null
-      const p = card ? await prepared($, card, 96) : null
-      const region = scope.region && REGION.test(scope.region) ? scope.region : null
-      // a selection the card's program asked about (k.ask) names its own rows
-      const picked = Array.isArray(scope.refs) ? scope.refs.filter(x => isRef(x)) : []
-      const refs = picked.length ? picked : p?.object ? (region ? regionRefs(p.object, p.drawing, region).refs : objectRefs(p.object).map((c: Any) => c.ref)) : undefined
-      const r = await askThread($, {
-        text, root, ...(refs ? { refs } : {}),
-        scope: { ...(card ? { object: card.id, v: card.v } : {}), ...(region ? { region, label: scope.label || String(regionMeta(p?.drawing, region)?.label || region) } : picked.length && scope.label ? { label: scope.label } : {}), ...(scope.row ? { row: scope.row } : {}), ...(scope.mark ? { mark: scope.mark } : {}) },
-        card: p?.object ? { id: p.object.id, v: p.object.version, title: p.object.title, file: `${root}/thimble/objects/${p.object.id}.json` } : null,
-      })
-      if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
-      return
-    }
-    // the person's own question, typed in the page
-    await startTurn($, [await webContext($, root, scope)], { text, typed: true, verb: '' })
-  } catch (err) {
-    $.ui.toast(`A question from the browser did not reach Claude${plainWhy(err) ? ` (${plainWhy(err)})` : ''}. Type it here instead.`)
-  }
-}
-
-/** A verb pressed under a message in the browser: run here as the terminal's verb row runs it, on the message. */
-async function verbFromBrowser($: Engine, root: string, key: string, row: string, proposal: string | null): Promise<void> {
-  if (key === 'c') {
-    // the claims are the browser's own tab; pressed on a message there, the list opens under it here too
-    if (await recordNow($, row)) await pressRowVerb($, row, 'c')
-    return
-  }
-  const verb = (await rowVerbs($)).find(v => v.key === key)
-  if (!verb) { $.ui.toast(`The browser pressed ${key}, but no verb of the row is on that key, so nothing ran.`); return }
-  const rec = (await recordNow($, row)) ?? ((await recordOf($, root, row)) as MsgRecord | null)
-  if (!rec) { $.ui.toast(`${verb.name}: the message pressed in the browser is not in this session's records. Press ${key} under it here.`); return }
-  $.clock.after(0, () => { void runOnMessage($, verb.name, key, rec, proposal || '') })
-}
-
-/** Open a page of this session in the browser: the mirror (at a row), or a card's detail (on a part). */
-export async function openBrowser($: Engine, at: { id?: string; v?: number | null; region?: string | null; row?: string | null; root?: string; view?: string; claim?: string | null } = {}): Promise<string> {
-  if (!browserFlag) return 'Browser mode is off. Turn on Browser in /config (thimble), then press o or type /browser.'
-  const root = at.root || (await webRoot($))
-  const s = await startServer($, root)
-  if ('problem' in s) {
-    await $.state.set(WEB, { on: true, problem: s.problem })
-    return `No page: ${s.problem}. Try /browser again; if it fails twice, turn Browser off and on in /config.`
-  }
-  const q = (o: Record<string, unknown>) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
-  // the page opens where the person is: a card's detail on its part, the Claims graph on the claim the ring is on, or
-  // the session at the message the keys act on
-  const url = at.id
-    ? `${s.base}/card/?${q({ o: at.id, v: at.v, from: at.row })}${at.region ? `#r=${encodeURIComponent(at.region)}` : ''}`
-    : at.view
-      ? `${s.base}/app/?${q({ view: at.view, claim: at.claim })}`
-      : `${s.base}/mirror/${at.row ? `#row=${encodeURIComponent(at.row)}` : ''}`
-  const what = at.id ? `${at.id}${at.region ? ' ▸ ' + at.region : ''}` : at.view === 'claims' ? `the claims${at.claim ? ` at ${at.claim}` : ''}` : 'this session'
-  const browser = await $.env.get('BROWSER')
-  const tries = browser ? [[browser, url]] : [['xdg-open', url], ['open', url]]
-  for (const argv of tries) {
-    const r = await $.process.run(argv, { timeoutMs: 15000 }).catch(() => null)
-    if (r && r.exitCode === 0) {
-      await $.state.set(WEB, { on: true, base: s.base, root, opened: url })
-      return `Opened ${what} in the browser.`
-    }
-  }
-  await $.state.set(WEB, { on: true, base: s.base, root, opened: url, problem: 'no browser opened here; open the link yourself' })
-  return `No browser opened here. The page: ${url}`
-}
-
-/** Browser mode turned on or off in /config: on, /browser is there; off, the server ends and nothing of it shows. */
-async function setBrowser($: Engine, on: boolean): Promise<void> {
-  const was = browserFlag
-  browserFlag = on
-  if (on && !was) await registerBrowserCommand($)
-  if (!on) stopServer()
-  await $.state.set(WEB, { on })
-}
-
-async function registerBrowserCommand($: Engine): Promise<void> {
-  await $.command.register({ name: 'browser', description: "Open this session in the browser: /browser · /browser <object> [region] opens a card's page", argumentHint: '[object] [region]', immediate: true })
-}
-
-/** `o browser`, a press that opens a page: under a card (its detail page) or under a reply (the mirror at it). */
-function browserChip(els: Any, key: string, onPress: () => unknown) {
-  const { Button, Text } = els
-  return Button({ key, plain: true, label: 'open in the browser', children: [Text({ color: 'suggestion', children: 'o' }), Text({ dimColor: true, children: ' browser' })], onPress })
 }
 
 // ------------------------------------------------------------------------------------------------ the message layer
@@ -1964,7 +1670,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
 // keys act on (a lit one with its note in place of its name), `] cite & explain` when that message has marks, `1 open
-// detail` when a card is under it, `o browser` in browser mode. While a pane, the tray or the chips have focus, the
+// detail` when a card is under it. While a pane, the tray or the chips have focus, the
 // left side is their keys instead, and it comes back after. At its right, the session's counts that are not zero: a
 // count that changed is drawn bright for a moment, then dims. Inside a thread (the card detail, a mark's thread) its
 // label names the thread the prompt goes to, `thimble:main/<it>`.
@@ -2098,7 +1804,7 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   if (kind === 'claims') {
     // the Claims pane's own keys, as its program names them (panes/claims.js)
     if (!(await $.state.get(CLAIMPANE)).value) return undefined
-    return { keys: [barText([await paneNow($, 'claims')]) || 'esc close', ...(browserFlag ? ['o browser'] : [])].join(' · ') }
+    return { keys: barText([await paneNow($, 'claims')]) || 'esc close' }
   }
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (kind === 'chips') {
@@ -2252,7 +1958,6 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       else if (cardsHere.length) left.push({ key: ']', words: 'card', color: FOCUS[theme], onPress: () => stepMark($, 1) })
       const ref = await focusedCard($)
       if (ref) left.push({ key: '1', words: 'open detail', color: FOCUS[theme], onPress: () => openDetail($, ref) })
-      if (browserFlag) left.push({ key: 'o', words: 'browser', color: FOCUS[theme], onPress: async () => $.ui.toast(await openBrowser($, { row })) })
       // which reply the keys act on, once more than one came since the person's last prompt or an earlier one is
       // picked: { and } pick another (as ] and [ step through the marks; never < >, which read as the arrow keys)
       const place = await answerPlace($, row)
@@ -2493,16 +2198,6 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     const word = k === 'c' ? {} : { word: async () => { keyOpened = null; await setPick($, null) } }
     if (row) return { box: consume, work: async () => { await pressRowVerb($, row, k); keyOpened = { key: k, at: now } }, ...word }
   }
-  // o: this session in the browser, at the message the keys act on (browser mode only; `o browser` on the verb row)
-  if (k === 'o' && browserFlag && !(pick && opened && now - opened.at < 700)) {
-    return { box: consume, work: async () => {
-      if (pick) await setPick($, null)
-      const row = await actingRow($)
-      // from the Claims pane: the graph in the browser, on the claim the ring is on here
-      const claims = (await $.state.get(CLAIMPANE)).value ? { view: 'claims', claim: String((await paneState($, 'claims')).hover || '') || null } : {}
-      $.clock.after(0, () => { void openBrowser($, { row, ...claims }).then(said => $.ui.toast(said)) })
-    } }
-  }
   if (pick && k.length === 1) {
     // typed straight after the verb key: the letter was the start of a word, and the line closes (a catch-up s began is
     // undone)
@@ -2604,7 +2299,7 @@ async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unkno
   if (!o) return
   const kept = await readCardState($, ref.root, ref.id)
   const region = typeof event.region === 'string' ? event.region : kept?.region ?? null
-  const got = await cardEvent($, o, { ...ref, region, ex: 0, all: false, state: kept?.state || {} } as Sel, { ...event, ...(region && !event.region ? { region } : {}) }, { w: inlineCols, h: 24, browser: browserFlag }, 'inline')
+  const got = await cardEvent($, o, { ...ref, region, ex: 0, all: false, state: kept?.state || {} } as Sel, { ...event, ...(region && !event.region ? { region } : {}) }, { w: inlineCols, h: 24 }, 'inline')
   if (!got || got.drawing?.error) {
     $.ui.toast(`× ${o.title || ref.id} could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return
@@ -2827,13 +2522,6 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   if (pane === 'tray') {
     if (name === 'close') { await setTray($, null); return }
     if (name === 'step') { await stepMark($, Number(a.dir) < 0 ? -1 : 1); return }
-    if (name === 'ask' && typeof a.text === 'string') {
-      // a question typed in the browser's tray: the mark's side thread, as one typed here would be
-      const t = await trayScope($)
-      if (!t) return '× The tray has no mark open to ask about.'
-      const r = await askThread($, { text: a.text, root: (await rootHere($)) || String(await $.session.cwd()), scope: t.scope as ThreadScope, refs: t.refs, card: null })
-      return r.problem ? `× ${r.problem}` : undefined
-    }
     if (name === 'input') return
   }
   if (pane === 'proposals') {
@@ -2864,31 +2552,18 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
 
 export const registerShell: Register = (on, options) => {
   setTheme(() => theme)
-  browserFlag = (options as Any)?.browser === true
 
   // the side threads and the card detail first: their hooks sit outside the shell's, so a question for a thread and a
   // thread's report never reach the shell's prompt hooks (or main)
   registerThreads(on, options)
   registerDetail(on)
 
-  // /config turns browser mode on or off: on, /browser is there and `o` shows; off, the server ends
-  on('config.set', { key: /^thimble(@[\w.-]+)?\.browser$/ }, async ($, e, next) => {
-    const r = await next(e)
-    try {
-      if (!(r as Any)?.deny) await setBrowser($, (r as Any)?.value === true || ((r as Any)?.value === undefined && e.value === true))
-    } catch {
-      // the setting is stored whatever the shell makes of it
-    }
-    return r
-  })
-
   // (a matcher, as the kernel's module hooks session.start without one and the engine takes one bare hook per event)
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
     const r = await next(e)
     try {
-      await $.command.register({ name: 'obj', description: browserFlag ? 'Open an object in the detail view: /obj [object] [region] · /obj browser opens it in the browser' : 'Open an object in the detail view: /obj [object] [region]', argumentHint: '[object] [region]', immediate: true })
+      await $.command.register({ name: 'obj', description: 'Open an object in the detail view: /obj [object] [region]', argumentHint: '[object] [region]', immediate: true })
       await $.command.register({ name: 'verb', description: 'Run a verb on an object: /verb <verb> [object] [region] [words] · /verb ? lists the verbs', argumentHint: '<verb> [object] [region] [words]' })
-      if (browserFlag) await registerBrowserCommand($)
       const row = (await $.config.list()).find(x => x.key === 'theme')
       theme = String(row?.value ?? 'dark').startsWith('light') ? 'light' : 'dark'
     } catch {
@@ -3103,7 +2778,6 @@ export const registerShell: Register = (on, options) => {
         const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))
         return Box({ flexDirection: 'column', children: [own, ...drawn] })
       }
-      await $.state.get(WEB)
       const drawnRec = await drawnRecord($, at, e.props.text)
       const rec: MsgRecord = drawnRec.uuid ? drawnRec : { ...drawnRec, uuid: e.requestId }
       // the screen a long message is measured against (Squeeze), a rewrite of this message running, and its new text
@@ -3298,29 +2972,13 @@ export const registerShell: Register = (on, options) => {
     return context.length ? next({ ...e, context: [...(e.context ?? []), ...context] }) : next(e)
   }).catch(($, e, next) => next(e))
 
-  // /obj [object] [region] · /obj browser [object] [region]
+  // /obj [object] [region]
   on('command.run', { command: 'obj' }, async ($, e) => {
     const words = e.args.trim().split(/\s+/).filter(Boolean)
-    const toWeb = words[0] === 'browser'
-    const t = await parseTarget($, toWeb ? words.slice(1) : words)
+    const t = await parseTarget($, words)
     if (!t.ref) return { text: `Nothing to open: ${t.problem}. An object Claude saves with \`thimble save\` shows under its reply.` }
-    if (toWeb) {
-      const cur = (await $.state.get(SEL)).value
-      const sel: Sel = cur && cur.id === t.ref.id && !words[2] ? cur : { ...t.ref, region: t.region, ex: 0, all: false }
-      return { text: await openBrowser($, { id: sel.id, v: sel.v, region: sel.region, root: sel.root }) }
-    }
     await openDetail($, t.ref, t.region)
     return {}
-  })
-
-  // /browser: this session's mirror page · /browser <object> [region]: a card's detail page (browser mode only)
-  on('command.run', { command: 'browser' }, async ($, e) => {
-    const words = e.args.trim().split(/\s+/).filter(Boolean)
-    if (!browserFlag) return { text: await openBrowser($) }
-    if (!words.length) return { text: await openBrowser($) }
-    const t = await parseTarget($, words)
-    if (!t.ref) return { text: `Nothing to open: ${t.problem}. /browser alone opens this session.` }
-    return { text: await openBrowser($, { id: t.ref.id, v: t.ref.v, region: t.region, root: t.ref.root }) }
   })
 
   // /verb <verb> [object] [region] [words] · /verb ? (or /verb alone) lists the verbs for the object
@@ -3424,9 +3082,6 @@ export function resetShell(): void {
   pending.clear()
   turn = null
   pendingAsk = null
-  server = null
-  serverStarting = null
-  serverStream = null
   shown = null
   msgFiles = null
   person = 'now'

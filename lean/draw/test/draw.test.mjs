@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url'
 import { loadExamples } from '../examples/load.mjs'
 import { fromArgs, fromHash, knobOf, objectRef, toCommand, toHash, turn } from '../handoff.js'
 import { runProgram } from '../sandbox-node.mjs'
-import { renderSvg } from '../svg.js'
 import { gridText, len, nextRegion, regionAt, renderTerm } from '../term.js'
 
 const DRAW = fileURLToPath(new URL('..', import.meta.url))
@@ -15,18 +14,14 @@ const examples = loadExamples()
 const WIDTHS = [72, 100, 140]
 const json = v => JSON.stringify(v)
 
-test('one program gives the same regions and values in both renderers', () => {
+test('one program draws every region and value it names, at every width', () => {
   for (const o of examples) for (const w of WIDTHS) {
     const d = runProgram(o, { w, h: 24 })
     assert.equal(d.error, undefined, `${o.id} at ${w}: ${d.error && d.error.message}`)
-    const t = renderTerm(d, { w }), s = renderSvg(d, { w })
-    // values: every text, number, series and row each renderer drew, in the same order
-    assert.equal(json(t.marks), json(s.marks), `${o.id} at ${w}: the marks differ`)
-    // regions: the same ids, in the same order, with the same meaning; each drawn somewhere in both
-    assert.deepEqual(t.regions.map(r => r.id), s.regions.map(r => r.id), `${o.id} at ${w}: region ids differ`)
-    assert.deepEqual(t.regions.map(r => r.meta), s.regions.map(r => r.meta), `${o.id} at ${w}: region meanings differ`)
+    const t = renderTerm(d, { w })
+    // regions: every part the program named is drawn somewhere
+    for (const r of d.regions) assert.ok(t.regions.some(x => x.id === r.id), `${o.id} at ${w}: ${r.id} is not drawn`)
     for (const r of t.regions) assert.ok(r.rects.length > 0, `${o.id} at ${w}: the terminal did not draw ${r.id}`)
-    for (const r of s.regions) assert.ok(r.rects.length > 0, `${o.id} at ${w}: the browser did not draw ${r.id}`)
   }
 })
 
@@ -110,10 +105,10 @@ test('the handoff carries the object and its selection both ways', () => {
   assert.deepEqual(fromArgs('messages-by-day@1 day-06-18'), { object: 'messages-by-day', v: 1, region: 'day-06-18' })
   assert.equal(objectRef(o), 'messages-by-day@1')
   assert.equal(fromHash('#o=<script>&r=x'), null)
-  // the region a terminal selects is a region the browser draws, at its own width
+  // the region selected at one width is a region drawn at another
   const t = renderTerm(runProgram(o, { w: 100 }), { w: 100 })
-  const b = renderSvg(runProgram(o, { w: 140 }), { w: 140 })
-  for (const r of t.regions) assert.ok(b.regions.some(x => x.id === r.id && x.rects.length), `the browser lost ${r.id}`)
+  const b = renderTerm(runProgram(o, { w: 140 }), { w: 140 })
+  for (const r of t.regions) assert.ok(b.regions.some(x => x.id === r.id && x.rects.length), `140 columns lost ${r.id}`)
 })
 
 test('the toolkit doc\'s programs run', () => {
@@ -129,8 +124,7 @@ test('the toolkit doc\'s programs run', () => {
   blocks.forEach((program, i) => {
     const d = runProgram({ program, data: DATA[i] }, { w: 100 })
     assert.equal(d.error, undefined, `TOOLKIT.md block ${i + 1}: ${d.error && d.error.message}`)
-    const t = renderTerm(d, { w: 100 }), s = renderSvg(d, { w: 100 })
-    assert.equal(json(t.marks), json(s.marks), `TOOLKIT.md block ${i + 1}: the renderers disagree`)
+    assert.ok(renderTerm(d, { w: 100 }).marks.length > 0, `TOOLKIT.md block ${i + 1} draws nothing`)
     if (i > 0) assert.ok(d.regions.length > 0, `TOOLKIT.md block ${i + 1} has no regions`)
   })
 })
@@ -215,13 +209,12 @@ test('a knob keeps its value across runs: the host turns it, the program runs ag
   st = turn(d0, st, 'step', 25)
   const d1 = runProgram({ program, data }, { w: 80, state: st })
   assert.equal(d1.controls[1].i, 25)
-  const t = renderTerm(d1, { w: 80 }), s = renderSvg(d1, { w: 80 })
+  const t = renderTerm(d1, { w: 80 })
   assert.match(gridText(t), /gap 28 pts when lr is scaled by ◂ ×1 ▸/)
   assert.match(gridText(t), /step ◂ 25 ▸/)
   // the region follows the knob, with its rows; the knob's link is a part the person can select
   assert.deepEqual(t.regions.find(r => r.id === 'step-25').meta.rows, ['run.jsonl#L26'])
   assert.deepEqual(t.regions.filter(r => r.meta.knob).map(r => r.id), ['scale', 'step'])
-  assert.deepEqual(s.regions.map(r => [r.id, r.meta]), t.regions.map(r => [r.id, r.meta]), 'both renderers mean the same')
   assert.equal(knobOf(d1, 'step').label, 'step')
   // a value that is not one of the knob's goes to the nearest number; a word that is not one keeps the start
   const d2 = runProgram({ program, data }, { w: 80, state: { scale: 7, step: 'x' } })
@@ -241,7 +234,7 @@ test('a knob that is badly made still draws, and says why', () => {
   assert.ok(!d.warnings.some(w => /link points at "#ok"/.test(w)), 'a link to a knob is a known id')
 })
 
-test('a node-link drawing: the browser puts dots and links between cells, the terminal on the nearest cells; both mean the same', () => {
+test('a node-link drawing: the terminal puts dots and links on the nearest cells', () => {
   const program = `const c = k.canvas(30, 8)
     c.link(2, 1, 20.4, 6.3, 'dim')
     c.link(2, 1, 12, 1, 'warn', { dash: true })
@@ -255,9 +248,8 @@ test('a node-link drawing: the browser puts dots and links between cells, the te
   assert.equal(d.error, undefined)
   assert.deepEqual(d.warnings, [])
   assert.deepEqual(d.regions.map(r => r.id), ['a', 'b'], 'a dot with a part is a region')
-  const t = renderTerm(d, { w: 30 }), s = renderSvg(d, { w: 30, cw: 8, lh: 20 })
-  assert.equal(json(t.marks), json(s.marks), 'the renderers disagree')
-  assert.deepEqual(t.regions.map(r => r.id), s.regions.map(r => r.id))
+  const t = renderTerm(d, { w: 30 })
+  assert.deepEqual(t.regions.map(r => r.id), ['a', 'b'])
   // the terminal: each dot's glyph on its nearest cell, a link on the blank cells between its ends, dashed every other
   // cell, and the filled box clears what is under it
   const rows = gridText(t).split('\n')
@@ -269,13 +261,4 @@ test('a node-link drawing: the browser puts dots and links between cells, the te
   assert.equal(rows[3].slice(15, 22), 'over it')
   assert.ok(!/[╲─]/.test(rows[4].slice(15, 23)), 'nothing of the link shows inside the filled box')
   assert.deepEqual(t.regions.find(r => r.id === 'b').rects, [{ x: 20, y: 6, w: 1, h: 1 }])
-  // the browser: a circle exactly where the dot is, its hit area around it; strokes for links; an opaque box
-  const cx = 20.4 * 8 + 4, cy = 6.3 * 20 + 10
-  assert.match(s.svg, new RegExp(`<circle cx="${cx}" cy="${cy}" r="6.4"`))
-  const hit = s.regions.find(r => r.id === 'b').rects[0]
-  assert.ok(Math.abs(hit.x + hit.w / 2 - cx) < 0.01 && Math.abs(hit.y + hit.h / 2 - cy) < 0.01, 'the hit area is the dot')
-  assert.match(s.svg, /<g class="dk-frames"><line [^>]*\/><line [^>]*stroke-dasharray="4 3"/)
-  assert.match(s.svg, /<text [^>]*>×3<\/text>/)
-  assert.match(s.svg, /<g class="dk-marks">.*<rect [^>]*fill="#ffffff" stroke=/)
-  assert.ok(!/>[╲╱─]</.test(s.svg), 'no link drawn as glyphs')
 })

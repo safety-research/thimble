@@ -93,9 +93,6 @@ export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string
 /** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }
 
-/** Browser mode (`on`, the `browser` setting) and its page server: its base URL (token included), the page opened
- *  last, why there is none, or why it stopped on its own (no page open). */
-export type Web = { on?: boolean; base?: string; root?: string; problem?: string; opened?: string; stopped?: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -116,7 +113,6 @@ declare module 'claude-code' {
       where: StateFamily<string>
       /** `thimble resolve --json` of a ref, by root and ref */
       rows: StateFamily<unknown>
-      web: Web
       /** when an object's drawing at a width became ready, by root, id, version and width: a drawing waiting on it redraws */
       ready: StateFamily<number>
       /** the observer's ranking of an object version's hint row, by root, id and version */

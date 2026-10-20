@@ -173,33 +173,3 @@ test('a card whose key is a verb\'s letter: at rest the verb takes it, with the 
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('v visualize')
 })
-
-test('the detail is one program for both surfaces: the browser\'s state draws here, and the terminal\'s is kept where the page reads it', { options: { browser: true } }, async ($, on) => {
-  const w = world(on, [{ panestate: { pane: 'detail', args: { id: '01-saves' }, state: { region: 'day-2026-06-17', bar: 'details' } } }])
-  const clock = mock.clock(on)
-  mock.session(on)
-  await $.command.run({ command: 'obj', args: '01-saves' } as never)
-  await clock.settle()
-  // the card draws, then draws again with the state it was left at (each drawing a child run, settled here)
-  for (let i = 0; i < 3; i++) {
-    await $.ui.render(PANE)
-    await clock.settle()
-  }
-  // the terminal's e: the examples of the part, kept in the pane's state file for the page
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
-  await clock.settle()
-  const kept = JSON.parse(w.files[`${ROOT}/thimble/panes/${SESSION}/detail-01-saves.json`]!)
-  expect(kept).toMatchObject({ pane: 'detail', state: { bar: 'examples' }, by: 'terminal' })
-  // the page's run of the same program selects Jun 17 and shows its details: the terminal's pane draws the same
-  await $.command.run({ command: 'browser', args: '' } as never)
-  await clock.settle()
-  await $.ui.render(PANE)
-  await clock.settle()
-  const t = textOf(await $.ui.render(PANE))
-  expect(t).toContain('Jun 17')
-  expect(t).toContain('from revisions.jsonl')
-  expect(t).not.toContain('examples of')
-  // and the card under the reply marks the same part
-  expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!)).toMatchObject({ region: 'day-2026-06-17', by: 'browser' })
-  expect(textOf(await $.ui.render(HINT))).toContain('j next day · ↑↓ part · e examples · 0 clear')
-})

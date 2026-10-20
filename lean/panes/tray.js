@@ -108,11 +108,8 @@ export function program(k, data) {
   }
   const openLink = l => ({ stack: [...stack, { kind: 'cite', ref: l.ref, label: l.label }].slice(-12), asking: false })
   // while the person asks, the bar says how (k.status), and only back besides
-  k.on('1', () => {
-    // in the browser the question is typed in the tray; in the terminal, in the prompt (the bar says so)
-    if (k.surface === 'browser') k.do('input', { label: `ask about ${top.label}…`, event: 'ask' })
-    return { asking: true }
-  }, asking ? undefined : thread ? 'thread' : 'ask')
+  // the question is typed in the prompt (the bar says so)
+  k.on('1', () => ({ asking: true }), asking ? undefined : thread ? 'thread' : 'ask')
   // a section's key opens it in place of the card, and closes it again; while the person asks, letters are the question
   if (!asking) sections.forEach(s => k.on(s.key, () => withTop({ open: open && open.id === s.id ? null : s.id }), s.words))
   links.forEach((l, j) => k.on(String(j + 2), () => openLink(l), asking ? undefined : 'open'))
