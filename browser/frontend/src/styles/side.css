@@ -157,6 +157,20 @@
   color: var(--text-tertiary);
 }
 .lside-ask { width: 100%; }
+.lside-def-box { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.lside-def {
+  align-self: stretch;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+  font: var(--type-mono-sm);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lside-def.is-code { white-space: pre; overflow-x: auto; }
+.lside-def-more { margin-left: 0; }
 .lside-leaves, .lside-reads { margin: 0; font: var(--type-body-sm); color: var(--text-secondary); }
 .lside-link {
   margin-left: 8px;

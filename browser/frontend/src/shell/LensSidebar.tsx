@@ -4,7 +4,8 @@
 //
 // A row is a label or a check: its color, name, question, Show in (Chat · Cards · Report for a check, Files · Cards ·
 // Report for a label, each with what it found there) and its switch. A row opens its detail in the sidebar: the
-// question (an own check's and a label's editable), what it leaves (a check) or its values (a label), Show in, what it
+// question (an own check's editable), a label's definition (a model label's question, editable; a regex or code shown
+// as it is, the code's first lines with the rest a click away), what it leaves (a check) or its values (a label), Show in, what it
 // found, each drawn as it looks where it is (the passage in the check's highlight, the record with its value's color),
 // a click on which goes straight to that place, and Run again, Turn off and Delete, with Color Files by it for a label.
 // Each list ends in "+ New". A check's scope is set through the lenses' one route (lib/marks lensApi.set).
@@ -16,7 +17,7 @@ import { Icon } from '../components/Icon'
 import { Switch } from '../components/Switch'
 import { useFeature } from '../features'
 import { openLabelEditor } from '../files/LabelEditor'
-import { classesOf, colourVar, isFilesLabel, mainColour, unitWord } from '../files/labels'
+import { classesOf, colourVar, howMade, labelDefinition, isFilesLabel, mainColour, unitWord } from '../files/labels'
 import { labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { lensApi, lensColors, loadLenses, revealMark, SURFACES, SURFACE_WORDS, useLenses, type FoundMark, type Lens, type Surface } from '../lib/marks'
@@ -377,8 +378,11 @@ function LabelRow({ ws, label: k, onOpen }: { ws: string; label: Concept; onOpen
 }
 
 function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onGone: () => void }) {
-  const [question, setQuestion] = useState(k.description)
-  useEffect(() => setQuestion(k.description), [k.description])
+  // a model label's question is its definition
+  const definition = labelDefinition(k)
+  const said = k.kind === 'prompt' ? definition : k.description
+  const [question, setQuestion] = useState(said)
+  useEffect(() => setQuestion(said), [said])
   const [rows, setRows] = useState<{ rows: LabelRowText[]; total: number } | null>(null)
   const [running, setRunning] = useState(false)
   const [asked, setAsked] = useState<LabelAskShown | null>(null)
@@ -394,7 +398,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
       alive = false
     }
   }, [ws, k.id, k.n_labeled, k.rev])
-  const how = k.kind === 'prompt' ? 'a model reads each' : k.kind === 'regex' ? 'a regex matches' : 'code decides'
+  const how = howMade(k.kind)
   const n = k.n_labeled ?? 0
   return (
     <div className="lside-detail" data-label={k.id}>
@@ -405,8 +409,20 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
         <span className="lside-title">{k.name}</span>
         <Switch checked={!!k.shown} onChange={(on) => void setLabel(ws, k.id, { shown: on })} label={`${k.name}: ${k.shown ? 'on' : 'off'}`} />
       </div>
-      <h4 className="lside-label">Question</h4>
-      <TextArea className="lside-ask" value={question} onChange={setQuestion} onBlur={() => question.trim() !== k.description && void setLabel(ws, k.id, { description: question.trim() })} autoGrow rows={2} aria-label="The label's question" />
+      <h4 className="lside-label">Definition</h4>
+      {k.kind === 'prompt' ? (
+        <TextArea className="lside-ask" value={question} onChange={setQuestion} onBlur={() => question.trim() !== said && void setLabel(ws, k.id, { description: question.trim() })} autoGrow rows={2} aria-label="The label's definition" />
+      ) : (
+        <>
+          {definition ? <Definition code={k.kind === 'code'} text={definition} /> : <p className="lside-none">No definition.</p>}
+          {k.description && (
+            <>
+              <h4 className="lside-label">Question</h4>
+              <TextArea className="lside-ask" value={question} onChange={setQuestion} onBlur={() => question.trim() !== k.description && void setLabel(ws, k.id, { description: question.trim() })} autoGrow rows={2} aria-label="The label's question" />
+            </>
+          )}
+        </>
+      )}
       <h4 className="lside-label">
         Values <span className="lside-n">{`${n} ${unitWord(k.unit, n)}`}</span>
       </h4>
@@ -507,6 +523,26 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
           Delete
         </Button>
       </footer>
+    </div>
+  )
+}
+
+/** the lines of a label's code shown before "N more lines" */
+const CODE_SHOWN = 6
+
+/** A regex or code label's definition, as it is: the pattern whole, the code's first lines with the rest a click away. */
+function Definition({ code, text }: { code: boolean; text: string }) {
+  const [whole, setWhole] = useState(false)
+  const lines = text.split('\n')
+  const cut = code && !whole && lines.length > CODE_SHOWN
+  return (
+    <div className="lside-def-box">
+      <pre className={code ? 'lside-def is-code' : 'lside-def'}>{cut ? lines.slice(0, CODE_SHOWN).join('\n') : text}</pre>
+      {code && lines.length > CODE_SHOWN && (
+        <button type="button" className="lside-link lside-def-more" onClick={() => setWhole(!whole)}>
+          {whole ? 'Show less' : `${(lines.length - CODE_SHOWN).toLocaleString('en-US')} more lines`}
+        </button>
+      )}
     </div>
   )
 }

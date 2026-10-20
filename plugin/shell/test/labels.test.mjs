@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url'
 import { answersOf, failedCall, readLabel, summary } from '../labelreads.mjs'
 import { prep } from '../node/prep.mjs'
 import { renderTerm } from '../../draw/term.js'
-import { toneBeside, valueTone } from '../../panes/labels.js'
+import { defLine, howMade, program as labelPanel, toneBeside, valueTone } from '../../panes/labels.js'
+import { gridText } from '../../draw/term.js'
+import '../../draw/kit.js'
 
 const LEAN = fileURLToPath(new URL('../../bin/thimble', import.meta.url))
 const LABEL = { name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: true }
@@ -103,4 +105,33 @@ test('a label\'s values have one color: on a chart made from its rows, in the ro
   const bars = new Set(grid.rows.flat().filter(c => c.ch === '█' || c.ch === '▆' || c.ch === '▇').map(c => c.tone))
   assert.deepEqual([...bars].sort(), Object.values(panel).sort())
   assert.deepEqual(label.values.map(v => toneBeside({ ...label, tones: { no: 'dim' } }, v)), label.values.map(v => panel[v]))
+})
+
+test('a label says what made it in plain names, and its panel shows the definition under its head until it is folded', () => {
+  assert.deepEqual(['regex', 'code', 'prompt'].map(howMade), ['regex', 'code', 'read by Claude'])
+  const code = "def label(unit):\n    t = unit['text']\n    if 'http' in t:\n        return ('yes', 1.0)\n    return ('no', 1.0)\n"
+  // beside a card: one line, cut with … where it does not fit
+  assert.equal(defLine({ kind: 'code', rule: code }, 80), "t = unit['text']; if 'http' in t: return ('yes', 1.0); return ('no', 1.0)")
+  assert.equal(defLine({ kind: 'prompt', rule: 'The message links\nto a web page.' }, 20), 'The message links t…')
+  assert.equal(defLine({ kind: 'regex', rule: 'https?://' }, 20), 'https?://')
+  const lab = { name: 'has-link', kind: 'code', rule: code, in: 'chat/*.jsonl', values: ['yes', 'no'], counts: {}, records: 0 }
+  const draw = state => {
+    const d = globalThis.DrawKit.run(labelPanel, { list: [lab], gen: 0, w: 80, h: 40 }, { w: 80, h: 40, state, mode: 'pane', surface: 'terminal' })
+    assert.equal(d.error, undefined, JSON.stringify(d.error))
+    return { text: gridText(renderTerm(d, { w: 80 })), on: (d.on || []).map(h => h.name) }
+  }
+  // open by default: the code's first lines under the head, the rest a press away
+  const open = draw({ open: 'has-link' })
+  const lines = open.text.split('\n')
+  const head = lines.findIndex(l => l.includes('label over chat/*.jsonl · code ·'))
+  assert.ok(head > 0, open.text)
+  assert.match(lines[head + 1], /def label\(unit\):/)
+  assert.match(lines[head + 4], /return \('yes', 1\.0\)/)
+  assert.match(lines[head + 5], /… 1 more line · show all/)
+  assert.ok(open.on.includes('act:def:on'))
+  // whole, and folded by the Definition action
+  assert.match(draw({ open: 'has-link', whole: true }).text, /return \('no', 1\.0\)[\s\S]*show less/)
+  const folded = draw({ open: 'has-link', fold: true })
+  assert.doesNotMatch(folded.text, /def label/)
+  assert.ok(folded.on.includes('act:def'))
 })
