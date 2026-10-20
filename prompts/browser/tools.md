@@ -88,3 +88,18 @@ Remove a copy of a card, or an attempt another card replaced. Fix a wrong card w
   "required": ["card"]
 }
 ```
+
+## write_document
+
+Save the report whole, as Markdown in the report's form. The result names each citation that does not open, so you can fix it before you end.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "doc": {"type": "string", "description": "report"},
+    "text": {"type": "string", "description": "The whole report: `# ` its title, `## ` each section, cited paragraphs, and figures as `![what to take from it](card:<id>)` on lines of their own."}
+  },
+  "required": ["doc", "text"]
+}
+```

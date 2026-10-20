@@ -56,7 +56,9 @@ def run_events(rng, run_id, task, outcome, cause):
     attempts = 3 if cause == "gave-up" else rng.randint(1, 2)
     for i in range(attempts):
         add("tool_call", tool="run_tests", args={"attempt": i + 1})
-        if cause == "timeout" and i == attempts - 1:
+        if cause == "wrong-file":
+            add("tool_result", tool="run_tests", ok=False, text="FAILED test_" + task.split("-")[0] + " (the change is not in src/)")
+        elif cause == "timeout" and i == attempts - 1:
             add("tool_result", tool="run_tests", ok=False, text="ERROR: timed out after 20 minutes")
         elif cause == "flaky-test" and i == 0:
             add("tool_result", tool="run_tests", ok=False, text="FAILED test_login_redirect (expected 302, got 200)")
@@ -69,6 +71,8 @@ def run_events(rng, run_id, task, outcome, cause):
         add("review", reviewer="Rowan Pike" if rng.random() < .5 else "Ines Okafor", verdict="approved")
     elif cause == "gave-up":
         add("message", role="agent", text="I tried three times and the same two tests fail. I need help to go on.")
+    elif cause == "wrong-file":
+        add("message", role="agent", text="I could not make the tests pass, so I stopped.")
     elif cause == "timeout":
         add("message", role="agent", text="The test run timed out, so I stopped.")
     elif cause == "flaky-test":

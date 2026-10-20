@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import canvas, chats, corpus, home
+from . import canvas, chats, corpus, home, report
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -363,6 +363,51 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
             raise HTTPException(404, "no such output")
         return Response(str(outs[i].get("text/plain", "")), media_type="text/plain")
 
+    # ---- the report (report.py) and its writer (agent.Writer)
+
+    def doc_slug(slug: str) -> str:
+        if slug != report.DOC:
+            raise HTTPException(404, f"thimble browser has one document, the report, not {slug!r}")
+        return slug
+
+    @app.get("/api/ws/{c}/investigations/main/types")
+    def doc_types(c: str) -> dict[str, Any]:
+        return report.types(ws_of(c))
+
+    @app.get("/api/ws/{c}/investigations/main/types/{slug}")
+    def doc_get(c: str, slug: str) -> dict[str, Any]:
+        doc_slug(slug)
+        got = report.writeup(ws_of(c))
+        if got is None:
+            raise HTTPException(404, "the report is not written yet")
+        return got
+
+    @app.get("/api/ws/{c}/investigations/main/types/{slug}/frame")
+    def doc_frame(c: str, slug: str) -> dict[str, Any]:
+        raise HTTPException(404, "thimble browser has no frames yet")
+
+    @app.put("/api/ws/{c}/investigations/main/types/{slug}/blocks")
+    def doc_blocks(c: str, slug: str, body: dict = Body(...)) -> dict[str, Any]:
+        doc_slug(slug)
+        return report.from_blocks(ws_of(c), str(body.get("title") or ""), list(body.get("blocks") or []))
+
+    @app.post("/api/ws/{c}/write")
+    async def write(c: str, body: dict = Body(...)) -> dict[str, Any]:
+        ws_of(c)
+        doc_slug(str(body.get("doc") or report.DOC))
+        running = [m for m in chats.listing(c, sessions.running(c)) if m.get("role") == "writer" and m["running"]]
+        if running:
+            return {"chat": running[0]["id"], "kind": "busy", "reason": "the writer is writing the report already"}
+        from .agent import writer_brief  # noqa: PLC0415
+
+        cid = "w" + secrets.token_hex(4)
+        m = chats.new_meta(cid, kind="agent", title="Report writer", parent="main")
+        m.update(role="writer", doc=report.DOC, status="running", brief=str(body.get("text") or "") or None)
+        chats.save_meta(c, m)
+        report.set_status(c, "generating")
+        await sessions.get(c, cid).send(writer_brief(c, str(body.get("text") or "")))
+        return {"agentId": cid, "chat": cid}
+
     # ---- what thimble browser does not have yet: empty answers the page shows as nothing
 
     empty_list = ["views", "views/proposals", "notices", "concepts", "labels/presence", "checks", "card-checks",
@@ -370,7 +415,7 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     for route in empty_list:
         app.add_api_route(f"/api/ws/{{c}}/{route}", lambda c: [], methods=["GET"])
     for route, value in {"orientation": {}, "undo": {"undo": None, "redo": None}, "filters": {},
-                         "canvas/comments": {"comments": []}, "investigations/main/types": {},
+                         "canvas/comments": {"comments": []},
                          "settings": {"models": {}}}.items():
         app.add_api_route(f"/api/ws/{{c}}/{route}", (lambda v: (lambda c: v))(value), methods=["GET"])
 

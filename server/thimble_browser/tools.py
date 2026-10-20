@@ -13,11 +13,12 @@ from typing import Any, Awaitable, Callable
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from . import canvas, corpus, prompts
+from . import canvas, corpus, prompts, report
 
 SERVER = "thimble"
 PREFIX = f"mcp__{SERVER}__"
 NAMES = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card")
+WRITER_NAMES = ("read_ref", "list_cards", "add_card", "write_document")
 
 
 def schema_of(name: str) -> tuple[str, dict[str, Any]]:
@@ -54,9 +55,10 @@ class Tools:
     """The tools of one chat. `on_card(cell_id)` hears each card a tool made or changed, so the chat row can show it."""
 
     def __init__(self, ws: str, chat: str, folder: Path, *, unsandboxed: bool = False,
-                 on_card: Callable[[str], None] | None = None) -> None:
+                 on_card: Callable[[str], None] | None = None, writer: bool = False) -> None:
         self.ws, self.chat, self.folder, self.unsandboxed = ws, chat, folder, unsandboxed
         self.on_card = on_card or (lambda cid: None)
+        self.writer = writer
 
     async def read_ref(self, args: dict[str, Any]) -> dict[str, Any]:
         ref = str(args.get("ref") or "").strip().strip("[]()")
@@ -93,6 +95,8 @@ class Tools:
         return _ok(text, cell_id=cell["id"])
 
     async def add_card(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.writer:
+            args = {**args, "group": "Report figures"}
         try:
             cell = canvas.new_card(self.ws, args, chat=self.chat)
         except ValueError as e:
@@ -122,9 +126,35 @@ class Tools:
             return _err(str(e))
         return _ok(f"deleted {args.get('card')}")
 
+    def _opens(self, ref: str) -> str | None:
+        """Why `ref` does not open, or None when it does."""
+        try:
+            if ref.startswith(("card:", "cell:")):
+                canvas.resolve_card_ref(self.ws, ref)
+            else:
+                corpus.resolve(self.folder, ref)
+            return None
+        except Exception as e:  # noqa: BLE001
+            return str(e) or type(e).__name__
+
+    async def write_document(self, args: dict[str, Any]) -> dict[str, Any]:
+        text = str(args.get("text") or "").strip()
+        if not text.startswith("# "):
+            return _err("the report starts with its `# ` title")
+        doc = report.save(self.ws, text, by=f"chat:{self.chat}")
+        refs = [r for sec in doc["sections"] for p in sec["paragraphs"] for s in p["sentences"] for r in s["refs"]]
+        figs = [f for sec in doc["sections"] for f in sec.get("figures", [])]
+        broken = [(r, why) for r in dict.fromkeys(refs) if (why := self._opens(r))]
+        broken += [(f"card:{f['cell']}", why) for f in figs if (why := self._opens(f"card:{f['cell']}"))]
+        lines = [f"Saved the report: {len(doc['sections'])} sections, {len(figs)} figures, {len(refs)} citations."]
+        if broken:
+            lines.append("These citations do not open; fix each and save again:")
+            lines += [f"- {r}: {why}" for r, why in broken]
+        return _ok("\n".join(lines))
+
     def server(self) -> Any:
         made = []
-        for name in NAMES:
+        for name in (WRITER_NAMES if self.writer else NAMES):
             desc, schema = schema_of(name)
             fn: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] = getattr(self, name)
             made.append(tool(name, desc, schema)(fn))

@@ -25,11 +25,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, PermissionResultAllow,
+from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, HookMatcher, PermissionResultAllow,
                               PermissionResultDeny, ResultMessage, StreamEvent, TextBlock, ToolResultBlock,
                               ToolUseBlock, UserMessage)
 
-from . import chats, explain, home, prompts
+from . import chats, explain, home, prompts, report
 from .tools import PREFIX, Tools
 
 log = logging.getLogger("thimble_browser.agent")
@@ -60,6 +60,8 @@ def _inside(folder: Path, p: str | None) -> bool:
 
 
 class Session:
+    writer = False
+
     def __init__(self, ws: str, chat: str, folder: Path, *, unsandboxed: bool = False) -> None:
         self.ws, self.chat, self.folder = ws, chat, folder
         self.unsandboxed = unsandboxed
@@ -82,10 +84,22 @@ class Session:
             return PermissionResultDeny(message=f"thimble browser reads only the folder {self.folder}")
         return PermissionResultDeny(message=f"thimble browser has no {name}: use Read, Grep, Glob and thimble's tools")
 
+    async def guard_read(self, data: dict[str, Any], tool_use_id: str | None, ctx: Any) -> dict[str, Any]:
+        """Before every Read, Grep and Glob, even one Claude Code would allow by itself: the path, with its symlinks
+        resolved, must be inside the folder."""
+        inp = data.get("tool_input") or {}
+        path = inp.get("file_path") or inp.get("path")
+        if _inside(self.folder, path):
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": f"thimble browser reads only the folder {self.folder}"}}
+
     def options(self) -> ClaudeAgentOptions:
         meta = chats.meta(self.ws, self.chat)
-        tools = Tools(self.ws, self.chat, self.folder, unsandboxed=self.unsandboxed, on_card=self.cards.append)
-        prompt = system_prompt(self.folder)
+        tools = Tools(self.ws, self.chat, self.folder, unsandboxed=self.unsandboxed, on_card=self.cards.append,
+                      writer=self.writer)
+        prompt = (prompts.render("browser/writer.md", {"workdir": str(self.folder)}) if self.writer
+                  else system_prompt(self.folder))
         if self.chat != "main" and meta.get("anchor"):
             prompt += (f"\n\n## This thread\n\nThe person opened this thread about {meta.get('anchor')}"
                        + (f", which reads: {meta.get('anchor_text')}" if meta.get("anchor_text") else "") + ".")
@@ -93,11 +107,11 @@ class Session:
             cwd=str(self.folder),
             cli_path=claude_path(),
             tools=list(READ_TOOLS),
-            allowed_tools=[f"{PREFIX}{n}" for n in ("read_ref", "list_cards")],
             mcp_servers={"thimble": tools.server()},
             strict_mcp_config=True,
             setting_sources=[],
             can_use_tool=self.can_use,
+            hooks={"PreToolUse": [HookMatcher(matcher="Read|Grep|Glob", hooks=[self.guard_read])]},
             permission_mode="default",
             system_prompt={"type": "preset", "preset": "claude_code", "append": prompt},
             include_partial_messages=True,
@@ -199,9 +213,13 @@ class Session:
         finally:
             self.running = False
             self._set_running(False)
+        self.finished()
         text_out = "".join(reply).strip()
-        if text_out:
+        if text_out and not self.writer:
             asyncio.create_task(explain.after_turn(self.ws, self.chat, text_out, self.folder))
+
+    def finished(self) -> None:
+        """After a turn: nothing for a chat."""
 
     def _result_record(self, b: ToolResultBlock) -> dict[str, Any]:
         content = b.content
@@ -252,6 +270,44 @@ def _plain_error(e: Exception) -> str:
     return f"Claude stopped with an error: {text[:500]}"
 
 
+class Writer(Session):
+    """The report's writer: a session of its own, with the read tools, `add_card` (into `Report figures`) and
+    `write_document`. Its chat is an agent thread (kind `agent`, role `writer`), and the Report tab shows it writing."""
+
+    writer = True
+
+    def finished(self) -> None:
+        meta = chats.meta(self.ws, self.chat)
+        last = [r for r in chats.records(self.ws, self.chat) if r.get("type") == "done"]
+        failed = bool(last and last[-1].get("result") in ("failed", "stopped"))
+        meta.update(status="failed" if failed else "done", ts_end=home.now())
+        chats.save_meta(self.ws, meta)
+        report.set_status(self.ws, "failed" if failed else "generated")
+
+
+def writer_brief(ws: str, request: str) -> str:
+    """The writer's first message: its task and the workspace as it stands."""
+    from . import canvas  # noqa: PLC0415
+
+    parts = [f"Write the report{': ' + request if request else '.'}", "", "## The person's chat", ""]
+    for r in chats.records(ws, "main"):
+        if r.get("type") == "user":
+            parts.append(f"Person: {r.get('text')}")
+        elif r.get("type") == "text":
+            if parts[-1].startswith("Claude: "):
+                parts[-1] += r.get("delta") or ""
+            else:
+                parts.append("Claude: " + (r.get("delta") or ""))
+    parts += ["", "## The cards", ""]
+    for nb in canvas.notebooks(ws):
+        parts.append(f"### {nb.get('title')}")
+        for c in nb["cells"]:
+            parts.append(f"- card:{c['id']} ({c['kind']}) {c['title']} | takeaway: {c.get('takeaway') or '(none)'}")
+    md = report.markdown(ws)
+    parts += ["", "## The report as it stands", "", md if md else "(not written yet)"]
+    return "\n".join(parts)
+
+
 class Sessions:
     def __init__(self, *, unsandboxed: bool = False) -> None:
         self._s: dict[tuple[str, str], Session] = {}
@@ -260,7 +316,8 @@ class Sessions:
     def get(self, ws: str, chat: str) -> Session:
         key = (ws, chat)
         if key not in self._s:
-            self._s[key] = Session(ws, chat, home.corpus_of(ws), unsandboxed=self.unsandboxed)
+            kind = Writer if chats.meta(ws, chat).get("role") == "writer" else Session
+            self._s[key] = kind(ws, chat, home.corpus_of(ws), unsandboxed=self.unsandboxed)
         return self._s[key]
 
     def running(self, ws: str) -> set[str]:
