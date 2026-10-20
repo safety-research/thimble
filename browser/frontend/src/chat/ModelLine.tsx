@@ -2,7 +2,7 @@
 // (Opus 5.5 · medium ▾ ⚡). The model is a menu where the UI can change it (a run's), else text whose tooltip says
 // where it changes (main's through /model in its terminal). The effort menu lists low to max, then ultracode for main,
 // which alone takes it. The bolt switches fast mode where the UI can; otherwise it
-// shows the state and its tooltip says why; thimble's agents have no fast mode, so their line has no bolt (`noFast`).
+// shows the state and its tooltip says why. A line for an agent that runs with no fast mode has no bolt (`noFast`).
 // Its tooltip always opens with "Fast mode" (fastTip). A menu names each model once, without an id's `[1m]` tag
 // (lib/models).
 import { Button } from '../components/Button'
@@ -117,7 +117,7 @@ export function ModelLine({ model, modelTip, models, onModel, effort, efforts = 
   fast?: boolean | null
   /** switches fast mode; without it the bolt shows the state */
   onFast?: (on: boolean) => void
-  /** no bolt: one of thimble's agents, which runs with no fast mode of its own */
+  /** no bolt: an agent that runs with no fast mode, such as a view's builder */
   noFast?: boolean
   /** the session the line names, in its controls' accessible names: "main", "the orientation" */
   label: string

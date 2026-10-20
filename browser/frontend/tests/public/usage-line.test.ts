@@ -16,6 +16,8 @@ describe('the usage line', () => {
     expect(usageLine({ ...usage, model: 'claude-opus-5-5' })).toBe('Opus 5.5 · 4.1k in · 102k cached · 2.8k out')
     expect(usageLine({ ...usage, cache_read_input_tokens: 0 })).toBe('4.1k in · 2.8k out')
     expect(usageTip({ ...usage, model: 'claude-opus-5-5' })).toContain('3 requests to Claude')
+    expect(usageLine({ ...usage, fast_requests: 3, model: 'claude-opus-5-5' })).toBe('Opus 5.5 · fast · 4.1k in · 102k cached · 2.8k out')
+    expect(usageTip({ ...usage, fast_requests: 3 })).toContain('3 requests to Claude, 3 in fast mode')
   })
 
   test("goes on the turn's last text row, not on an earlier turn's", () => {

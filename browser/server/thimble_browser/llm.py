@@ -27,6 +27,7 @@ from . import settings, wif
 
 log = logging.getLogger("thimble_browser.llm")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+FAST_BETA = "fast-mode-2026-02-01"  # fast mode: the same model, with faster output, at a higher price
 MAX_RETRIES = 6  # the SDK retries 408, 409, 429 and 5xx (529 among them) with backoff
 _lock = threading.Lock()
 _cache: dict[str, AsyncAnthropic] = {}
@@ -97,9 +98,17 @@ def client() -> AsyncAnthropic:
         return made
 
 
-def failure(e: BaseException) -> str:
+def failure(e: BaseException, *, fast: bool = False) -> str:
     """A failed call in one plain line for the chat; a 401 names the time and the credentials, as the person who can
-    see the reason on the admin side needs them."""
+    see the reason on the admin side needs them. With `fast` (the call asked for fast mode), an answer that fast mode
+    may cause (400, 403, 429) also says how to turn it off."""
+    line = _failure(e)
+    if fast and isinstance(e, anthropic.APIStatusError) and e.status_code in (400, 403, 429):
+        line += " Fast mode was on: turn it off with the bolt under the message box, then send the message again."
+    return line
+
+
+def _failure(e: BaseException) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     if isinstance(e, NoCredentials):
         return f"Claude is not signed in: {e}."
@@ -124,13 +133,28 @@ def failure(e: BaseException) -> str:
     return f"Claude stopped with an error: {type(e).__name__}: {str(e)[:300]}"
 
 
-def request_args(*, effort: str | None = None, model: str | None = None) -> dict[str, Any]:
-    """What every request carries: the model, the effort, and the server-side fallback on a refusal."""
+def has_fast_mode(model: str) -> bool:
+    """Whether the Messages API runs `model` in fast mode: Opus 5.5, Opus 5 and Opus 4.8 (the page's
+    lib/models hasFastMode)."""
+    m = model.lower()
+    return "opus-5" in m or "opus-4-8" in m
+
+
+def request_args(*, effort: str | None = None, model: str | None = None, fast: bool = False) -> dict[str, Any]:
+    """What every request carries: the model, the effort, and the server-side fallback on a refusal; with `fast`, fast
+    mode, when the model has it (a model without it runs at standard speed)."""
     s = settings.read()
     m = model or s["model"]
     args: dict[str, Any] = {"model": m, "output_config": {"effort": effort or s["effort"]}}
+    betas: list[str] = []
     if not m.startswith("claude-haiku"):
-        args.update(betas=[FALLBACK_BETA], fallbacks="default")
+        betas.append(FALLBACK_BETA)
+        args["fallbacks"] = "default"
+    if fast and has_fast_mode(m):
+        betas.append(FAST_BETA)
+        args["speed"] = "fast"
+    if betas:
+        args["betas"] = betas
     return args
 
 

@@ -125,3 +125,34 @@ async def test_a_refusal_is_a_row_not_a_crash(ws, monkeypatch):
     await s.task
     errs = [r for r in chats.records(ws, "main") if r["type"] == "error"]
     assert errs and "declined" in errs[0]["message"]
+
+
+async def test_fast_mode_is_the_composers_choice_for_main_on_a_model_that_has_it(ws, monkeypatch):
+    from thimble_browser import settings
+    usage_fast = NS(**usage().__dict__, speed="fast")
+    client = FakeClient([NS(content=[text("Two.")], stop_reason="end_turn", usage=usage(), stop_details=None),
+                         NS(content=[text("Two.")], stop_reason="end_turn", usage=usage_fast, stop_details=None),
+                         NS(content=[text("Two.")], stop_reason="end_turn", usage=usage(), stop_details=None)])
+    s = await run_turn(ws, client, monkeypatch)
+    await s.task
+    assert "speed" not in client.requests[0] and llm.FAST_BETA not in client.requests[0]["betas"]
+    assert "fast_requests" not in chats.records(ws, "main")[-1]["usage"]
+    home.write_json(home.workspace_dir(ws) / "session.json", {"fast": True})
+    await s.send("And now?")
+    await s.task
+    assert client.requests[1]["speed"] == "fast" and llm.FAST_BETA in client.requests[1]["betas"]
+    assert chats.records(ws, "main")[-1]["usage"]["fast_requests"] == 1
+    # a model without fast mode runs at standard speed whatever the choice
+    settings.write({"model": "claude-sonnet-5-5"})
+    await s.send("Once more?")
+    await s.task
+    assert "speed" not in client.requests[2] and llm.FAST_BETA not in client.requests[2]["betas"]
+
+
+def test_a_failure_in_fast_mode_says_how_to_turn_it_off():
+    import anthropic
+    import httpx
+    req = httpx.Request("POST", "https://api.example.invalid/v1/messages")
+    e = anthropic.BadRequestError("speed is not available", response=httpx.Response(400, request=req), body=None)
+    assert "turn it off with the bolt" in llm.failure(e, fast=True)
+    assert "bolt" not in llm.failure(e)

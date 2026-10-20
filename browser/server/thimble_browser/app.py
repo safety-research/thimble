@@ -226,7 +226,8 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         choice = home.read_json(home.workspace_dir(c) / "session.json", {}) or {}
         return {"session": "thimble-browser", "cwd": str(folder_of(c)), "since": started,
                 "model": settings.read()["model"], "settings_effort": settings.read()["effort"],
-                **({"effort_choice": choice["effort"]} if choice.get("effort") else {})}
+                **({"effort_choice": choice["effort"]} if choice.get("effort") else {}),
+                "fast_choice": choice.get("fast") is True}
 
     @app.put("/api/ws/{c}/session/effort")
     async def session_effort(c: str, body: dict = Body(...)) -> dict[str, Any]:
@@ -240,8 +241,15 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         return {"effort": effort, "choice": effort}
 
     @app.put("/api/ws/{c}/session/fast")
-    def session_fast(c: str) -> dict[str, Any]:
-        raise HTTPException(409, "thimble browser has no fast mode yet")
+    def session_fast(c: str, body: dict = Body(...)) -> dict[str, Any]:
+        """The composer's bolt: fast mode for main and its threads, from their next request (agent.Session.fast)."""
+        fast = body.get("fast")
+        if not isinstance(fast, bool):
+            raise HTTPException(400, "fast: true or false")
+        p = home.workspace_dir(ws_of(c)) / "session.json"
+        home.write_json(p, {**(home.read_json(p, {}) or {}), "fast": fast})
+        hub.publish(c, {"type": "chat", "chat": "main"})
+        return {"fast": fast, "choice": fast}
 
     def with_state(c: str, m: dict[str, Any]) -> dict[str, Any]:
         m = {**m, "running": m["id"] in sessions.running(c)}
