@@ -12,6 +12,9 @@ from types import ModuleType
 NAMES: list[str] = [
     "files",
     "media",
+    "view_head",
+    "view_builds",
+    "canvas_layout",
 ]
 
 

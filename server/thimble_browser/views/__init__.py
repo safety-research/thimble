@@ -30,6 +30,7 @@ RUNNER = Path(__file__).resolve().parent / "reader_runner.py"
 DIST_KIT = Path(__file__).resolve().parents[3] / "frontend" / "dist" / "kit"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 FILES = ("view.json", "reader.py", "view.html")
+CHECKED = "check.json"  # what the last check found: the claimed files, and those the reader hid with why
 MAX_FILE = 400_000
 SCRIPTS = ["viewer_bridge.js", "viewer_colour.js", "viewer_controls.js", "dist:markdown.js", "viewer_text.js",
            "viewer_side.js", "viewer_transcript.js", "viewer_messages.js", "viewer_search.js", "viewer_table.js",
@@ -115,13 +116,18 @@ def claimed(folder: Path, claims: list[str]) -> list[str]:
 
 
 SINGLE_EXT = re.compile(r"^(?:\*\*/)?\*(\.[A-Za-z0-9_+-]{1,16})$")
+DB_EXT = (".db", ".sqlite", ".sqlite3")
 
 
 def public(ws: str, slug: str, meta: dict[str, Any], folder: Path) -> dict[str, Any]:
     claims = claims_of(meta)
     files = claimed(folder, claims)
     unit = meta.get("unit")
+    # a viewer of one file type sits in that file's modes; the page offers no modes for a database, so a view of
+    # databases alone goes in the views bar
     file_type = unit == "file" or (not unit and bool(claims) and all(SINGLE_EXT.match(c) for c in claims))
+    if file_type and all((m := SINGLE_EXT.match(c)) and m.group(1).lower() in DB_EXT for c in claims):
+        file_type = False
     d = view_dir(ws, slug)
     ok = (d / "reader.py").is_file() and (d / "view.html").is_file() and bool(claims)
     return {"slug": slug, "origin": "workspace", "name": str(meta.get("name") or slug),
@@ -275,6 +281,7 @@ async def check(ws: str, slug: str, folder: Path, *, page: bool = True) -> dict[
             lines.append(f"the reader failed: {got.get('error')}\n{got.get('traceback', '')[-1500:]}")
         else:
             r = got["result"]
+            home.write_json(view_dir(ws, slug) / CHECKED, {"claimed": len(paths), "hidden": r.get("hidden") or []})
             lines += r.get("problems") or []
             lines.append(f"ok: build_index read {r['read']} of {len(paths)} claimed files; records({{}}) answered "
                          f"{r['size']} bytes of JSON: {r['sample']}")

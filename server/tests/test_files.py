@@ -106,6 +106,9 @@ def api(files):
         def post(self, path, **kw):
             return c.post(f"/b/{key}/api{path}", headers={"cookie": cookie, "origin": OWN}, **kw)
 
+        def delete_(self, path, **kw):
+            return c.delete(f"/b/{key}/api{path}", headers={"cookie": cookie, "origin": OWN}, **kw)
+
         def bare(self, path, **kw):
             return c.get(path, **kw)
 
@@ -232,3 +235,44 @@ def test_card_libraries_and_the_trees_stamps(api, files):
     assert stamps["."] == listing["stamp"] and stamps["sessions"] and stamps["gone"] is None
     (files / "new.txt").write_text("x")
     assert api.get(f"/corpora/{api.name}/sources/stamps?path=.").json()["stamps"]["."] != listing["stamp"]
+
+
+def test_a_views_head_lists_what_it_hid_and_derived(api, files):
+    meta = {"name": "Orders", "scope": ["*.jsonl"], "records": [{"name": "event", "fields": [
+        {"name": "time", "derived": "cleaned", "from": "ts", "how": "read in UTC"},
+        {"name": "who", "derived": "computed", "from": "agent_id", "how": "agents.jsonl names it"}, {"name": "text"}]}]}
+    views.write_file(api.name, "orders", "view.json", json.dumps(meta))
+    home.write_json(views.view_dir(api.name, "orders") / views.CHECKED,
+                    {"claimed": 4, "hidden": [{"path": "agents.jsonl", "why": "names only, no events"}]})
+    got = api.get(f"/ws/{api.name}/views/orders/shown").json()
+    assert got["files"] == 4 and [d["field"] for d in got["derived"]] == ["time", "who"]
+    assert got["derived"][1]["kind"] == "inferred"
+    assert got["not_shown"]["files"][0]["why"] == "names only, no events" and got["not_shown"]["count"] == 1
+    one = api.get(f"/ws/{api.name}/views/orders/shown", params={"path": "chat.jsonl"}).json()
+    assert one["files"] == 1 and one["not_shown"]["count"] == 0
+    assert api.get(f"/ws/{api.name}/views/orders/problems").json() == {"count": None, "examples": []}
+    assert api.get(f"/ws/{api.name}/views/nope/shown").status_code == 404
+
+
+def test_a_view_build_retries_takes_a_change_and_is_dropped(api, files, monkeypatch):
+    from thimble_browser import agent
+
+    sent = []
+
+    async def send(self, text, *, shown=None):
+        sent.append((self.chat, text))
+
+    monkeypatch.setattr(agent.Session, "send", send)
+    views.set_proposal(api.name, "late", name="Late orders", description="d", task="t", claims=["*.jsonl"],
+                       status="failed", chat=None, attempts=3)
+    assert api.post(f"/ws/{api.name}/views/proposals/late/message", json={"text": "wider"}).status_code == 409
+    got = api.post(f"/ws/{api.name}/views/late/build").json()
+    assert got["status"] == "building" and got["attempts"] == 0 and sent[-1][0] == got["agentId"]
+    assert "Build the view Late orders" in sent[-1][1]
+    assert api.post(f"/ws/{api.name}/views/proposals/late/stop").json() == {"ok": True}
+    row = api.post(f"/ws/{api.name}/views/proposals/late/message", json={"text": "show the slowest first"}).json()
+    assert row["status"] == "building" and sent[-1] == (got["agentId"], sent[-1][1]) and "slowest first" in sent[-1][1]
+    views.write_file(api.name, "late", "view.json", json.dumps({"name": "Late orders", "scope": ["*.jsonl"]}))
+    assert api.delete_(f"/ws/{api.name}/views/proposals/late").json() == {"ok": True}
+    assert not views.view_dir(api.name, "late").exists() and views.proposals(api.name) == []
+    assert api.post(f"/ws/{api.name}/views/proposals/late/stop").status_code == 404

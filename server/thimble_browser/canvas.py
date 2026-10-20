@@ -149,7 +149,7 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
                             "created_by": by, "created_at_event": None, "edited": [], "created_ts": now, "ts": now,
                             "width": None, "height": None, "pos": None, "starred": False}
     if kind in CODE_KINDS:
-        if not str(args.get("code") or "").strip():
+        if not str(args.get("code") or "").strip() and by != "user":  # the analyst's new card starts empty
             raise ValueError(f"a {kind} card needs `code`: Python that ends in what the card shows")
         cell.update(code=str(args["code"]), exec_count=None, status="idle", outputs=[])
     elif kind == "note":
