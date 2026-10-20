@@ -5,11 +5,14 @@
 // Rows of text are Text lines, one nested Text per run of one style, so bold, links and theme colors work and the
 // text follows the theme a person picked. A band of rows that holds pixels (a plot, a canvas's px and lines) and
 // no bold or link is one Raster: the cells packed as Claude Code's cell-grid leaf wants them, each cell's glyph
-// with its own foreground and background. The selected region's cells get the selection background, and their text
-// the theme's text color (palette.js selectedColor). `painted`: the grid stands on a background Claude Code paints
-// from the theme (a pane), so ink is the theme's text color rather than the terminal's own.
+// with its own foreground and background. A selection marks text one way and marks another (selectionOf): the selected
+// region's text gets the selection background, in the theme's text color (palette.js selectedColor); its marks (a
+// bar's cells, a spark, a plot's dots, term.js `m`) keep their ground and light up in their own color (palette.js
+// selectedMark), so a selected bar is exactly as high as the others, and a selected series is its own dots alone.
+// `painted`: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
+// color rather than the terminal's own.
 // No `$`: the caller resolves the elements and hands them in.
-import { hex, selectedColor, selectedHex, termColor } from './palette.js'
+import { hex, selectedColor, selectedHex, selectedMark, termColor } from './palette.js'
 
 const DEFAULT = 0x01000000
 const rgb = h => parseInt(String(h).slice(1, 7), 16)
@@ -19,14 +22,34 @@ const rgb = h => parseInt(String(h).slice(1, 7), 16)
  * @param {{Box: Function, Text: Function, Raster?: Function}} els
  * @param {{theme?: 'dark'|'light', selected?: string|null, key?: string, raster?: boolean, painted?: boolean}} [opts]
  */
+/**
+ * How the selection marks each cell: (x, y) -> null | 'text' | 'mark'. A cell is selected when it lies in the selected
+ * region. A cell of a mark (term.js `m`) is 'mark'; when the selection is a plot's series, its dots are (`sr`, wherever
+ * they lie), and never the rest of the plot's area.
+ * @param {{w: number, rows: object[][], regions: {id: string, rects: object[]}[]}} grid
+ * @param {string|null|undefined} selected
+ */
+export function selectionOf(grid, selected) {
+  const sel = new Set()
+  const r = selected ? grid.regions.find(x => x.id === selected) : null
+  if (r) for (const q of r.rects) for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) sel.add(y * grid.w + x)
+  const series = !!r && grid.rows.some(row => row.some(c => c.sr === selected))
+  return (x, y) => {
+    const c = grid.rows[y] && grid.rows[y][x]
+    if (!c) return null
+    // a series' dots light up wherever they are (its region may be its legend entry alone)
+    if (series && c.sr === selected) return 'mark'
+    if (!sel.has(y * grid.w + x)) return null
+    if (series && c.m) return null
+    return c.m ? 'mark' : 'text'
+  }
+}
+
 export function paintGrid(grid, els, opts = {}) {
   const { Box, Text, Raster } = els
   const theme = opts.theme || 'dark'
   const key = opts.key || 'draw'
-  const sel = new Set()
-  const r = opts.selected ? grid.regions.find(x => x.id === opts.selected) : null
-  if (r) for (const q of r.rects) for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) sel.add(y * grid.w + x)
-  const isSel = (x, y) => sel.has(y * grid.w + x)
+  const look = selectionOf(grid, opts.selected)
   const pixelRow = y => grid.rows[y].some(c => c.px) && !grid.rows[y].some(c => c.b || c.ref || c.w2)
 
   const out = []
@@ -46,8 +69,8 @@ export function paintGrid(grid, els, opts = {}) {
     let cur = null
     grid.rows[y].forEach((c, x) => {
       if (c.cont) return
-      const s = isSel(x, y)
-      const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${s ? 1 : 0}`
+      const s = look(x, y)
+      const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${s || ''}`
       if (cur && cur.k === k) cur.s += c.ch
       else { cur = { k, s: c.ch, c, sel: s }; segs.push(cur) }
     })
@@ -55,12 +78,12 @@ export function paintGrid(grid, els, opts = {}) {
       wrap: 'truncate-end',
       children: segs.map(g => {
         const p = { children: g.s }
-        const color = g.sel ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
+        const color = g.sel === 'mark' ? selectedMark(g.c.tone, theme) : g.sel ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
         if (color) p.color = color
         if (g.c.b) p.bold = true
         if (g.c.ref) p.underline = true
-        if (g.sel) p.backgroundColor = 'selectionBg'
-        else if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
+        if (g.sel === 'text') p.backgroundColor = 'selectionBg'
+        else if (g.c.bg) p.backgroundColor = g.sel === 'mark' ? selectedMark(g.c.bg, theme) : hex(g.c.bg, theme)
         return Text(p)
       }),
     })
@@ -75,9 +98,9 @@ export function paintGrid(grid, els, opts = {}) {
         const ch = c.cont ? ' ' : c.ch
         const cp = ch.codePointAt(0)
         words[i++] = cp > 0xFFFF || cp < 0x20 ? 0x3F : cp
-        const on = isSel(x, y)
-        words[i++] = on ? rgb(selectedHex(c.tone, theme, !!c.bg)) : c.tone === 'ink' || !c.tone ? (opts.painted ? rgb(hex('ink', theme)) : DEFAULT) : rgb(hex(c.tone, theme))
-        words[i++] = on ? rgb(hex('select', theme)) : c.bg ? rgb(hex(c.bg, theme)) : DEFAULT
+        const on = look(x, y)
+        words[i++] = on === 'mark' ? rgb(selectedMark(c.tone, theme)) : on ? rgb(selectedHex(c.tone, theme, !!c.bg)) : c.tone === 'ink' || !c.tone ? (opts.painted ? rgb(hex('ink', theme)) : DEFAULT) : rgb(hex(c.tone, theme))
+        words[i++] = on === 'text' ? rgb(hex('select', theme)) : c.bg ? rgb(on === 'mark' ? selectedMark(c.bg, theme) : hex(c.bg, theme)) : DEFAULT
       })
     }
     const bytes = new Uint8Array(words.buffer)

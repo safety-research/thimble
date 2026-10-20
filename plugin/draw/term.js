@@ -11,10 +11,13 @@
 //     round values, and the y label and the legend share the top row;
 //   - a table is padded columns, numbers right-aligned, the widest text column shrinking first;
 //   - unseen data is ▒ (a medium shade), never blank, so a gap reads as a gap;
+//   - the cells of a mark (a bar's width, a spark, a plot's area) carry `m`, and a plot's dots the region of their
+//     series (`sr`): a selection recolors a mark's glyph and leaves its cell's ground alone (paint.js), so a selected
+//     bar keeps its height and the gap to the next row, and a selected series is its own dots, not the plot's area;
 //   - a canvas is replayed as the program placed it.
 //
 // renderTerm(drawing, {w}) -> grid {w, h, rows, regions, marks, cut}
-//   rows     h rows of w cells {ch, tone, b?, bg?, ref?, px?, w2?, cont?}; tone is a palette.js tone
+//   rows     h rows of w cells {ch, tone, b?, bg?, ref?, px?, w2?, cont?, m?, sr?}; tone is a palette.js tone
 //   regions  [{id, meta, rects: [{x, y, w, h}]}] in the drawing's order; links ([words](#id)) add rects to `id`
 //   marks    what was drawn, in tree order and renderer-free (text, values, rows, regions)
 //   cut      what did not fit: text cut with …, notes left out, cells clipped
@@ -128,7 +131,7 @@ class Grid {
   }
   put(x, y, ch, tone, o) {
     const c = { ch, tone: tone || 'ink' }
-    if (o) { if (o.b) c.b = true; if (o.bg) c.bg = o.bg; if (o.ref) c.ref = o.ref; if (o.px) c.px = true }
+    if (o) { if (o.b) c.b = true; if (o.bg) c.bg = o.bg; if (o.ref) c.ref = o.ref; if (o.px) c.px = true; if (o.m) c.m = 1 }
     if (cwOf(ch) === 2) {
       if (!this.in(x + 1, y)) { this.set(x, y, Object.assign(c, { ch: '…' })); return 1 }
       c.w2 = true
@@ -174,9 +177,9 @@ class Grid {
       if (e2 <= dx) { err += dx; y0 += sy }
     }
   }
-  // braille dots: x in half cells across, y in quarter cells down. The dots of a cell add up; its tone is the last
-  // one drawn
-  dot4(x2, y4, tone) {
+  // braille dots: x in half cells across, y in quarter cells down. The dots of a cell add up; its tone (and its
+  // series, sr) is the last one drawn
+  dot4(x2, y4, tone, sr) {
     if (this.dry) return
     const x = Math.floor(x2 / 2), y = Math.floor(y4 / 4)
     if (!this.in(x, y)) { this.clipped = true; return }
@@ -184,19 +187,25 @@ class Grid {
     const bit = dy < 3 ? (dx === 0 ? 1 << dy : 1 << (dy + 3)) : (dx === 0 ? 0x40 : 0x80)
     const old = this.rows[y][x]
     const mask = (old.br || 0) | bit
-    this.rows[y][x] = { ch: String.fromCharCode(0x2800 + mask), tone, br: mask, px: true }
+    this.rows[y][x] = { ch: String.fromCharCode(0x2800 + mask), tone, br: mask, px: true, m: 1 }
+    if (sr) this.rows[y][x].sr = sr
   }
-  line4(x0, y0, x1, y1, tone) {
+  line4(x0, y0, x1, y1, tone, sr) {
     x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1)
     const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
     let err = dx + dy, guard = 8000
     for (;;) {
-      this.dot4(x0, y0, tone)
+      this.dot4(x0, y0, tone, sr)
       if ((x0 === x1 && y0 === y1) || !guard--) break
       const e2 = 2 * err
       if (e2 >= dy) { err += dy; x0 += sx }
       if (e2 <= dx) { err += dx; y0 += sy }
     }
+  }
+  // the cells of a mark's area, drawn or blank, as the mark's (m)
+  markArea(x, y, w, h) {
+    if (this.dry) return
+    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (this.in(i, j)) this.rows[j][i].m = 1
   }
   withClip(x0, y0, x1, y1, fn) {
     const prev = this.clip
@@ -465,6 +474,9 @@ function linkRects(line, x, y, cx) {
 
 // ---------------------------------------------------------------- marks drawn with cells
 function drawBar(g, x, y, w, value, max, tone, parts, track) {
+  try { drawBarCells(g, x, y, w, value, max, tone, parts, track) } finally { g.markArea(x, y, w, 1) }
+}
+function drawBarCells(g, x, y, w, value, max, tone, parts, track) {
   if (!isFinite(value) || tone === 'unseen') { g.fill(x, y, w, 1, '▒', 'unseen'); return }
   const m = max > 0 ? max : 1
   if (parts) {
@@ -507,6 +519,7 @@ function drawSpark(g, x, y, w, values, mn, mx, tone, tones) {
     const j = clamp(Math.floor((v - mn) / ((mx - mn) || 1) * 8), 0, 7)
     g.put(x + i, y, SPARK[j], same && tones && tones[i] ? tones[i] : tone)
   })
+  g.markArea(x, y, w, 1)
 }
 
 // ---------------------------------------------------------------- plot: braille lines with an axis
@@ -602,13 +615,14 @@ function paintPlot(n, g, x, y, w, cx, mark) {
           if (p[1] === null) { prev = null; continue }
           const X = (x + ox) * 2 + col2(p[0]), Y = (y + oy) * 4 + row4(p[1])
           // a dot is four braille dots, both across its cell and two down from its own quarter row
-          if (n.dots || lone) { const X0 = X - (X % 2), Y0 = Math.min(Y, (y + oy + ph) * 4 - 2); [0, 1].forEach(i => [0, 1].forEach(j => g.dot4(X0 + i, Y0 + j, s.tone))) }
-          else if (prev) g.line4(prev[0], prev[1], X, Y, s.tone)
-          else g.dot4(X, Y, s.tone)
+          if (n.dots || lone) { const X0 = X - (X % 2), Y0 = Math.min(Y, (y + oy + ph) * 4 - 2); [0, 1].forEach(i => [0, 1].forEach(j => g.dot4(X0 + i, Y0 + j, s.tone, s.region))) }
+          else if (prev) g.line4(prev[0], prev[1], X, Y, s.tone, s.region)
+          else g.dot4(X, Y, s.tone, s.region)
           prev = [X, Y]
         }
       })
     })
+    g.markArea(x + ox, y + oy, pw, ph)
   }
   // legend, one entry per series; a series with an id is a region (its legend entry and the plot area)
   const ly = legendTop ? y : y + h - 1

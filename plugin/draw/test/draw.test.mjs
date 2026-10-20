@@ -262,3 +262,37 @@ test('a node-link drawing: the terminal puts dots and links on the nearest cells
   assert.ok(!/[╲─]/.test(rows[4].slice(15, 23)), 'nothing of the link shows inside the filled box')
   assert.deepEqual(t.regions.find(r => r.id === 'b').rects, [{ x: 20, y: 6, w: 1, h: 1 }])
 })
+
+test('a selected bar lights up in its own color and keeps its ground, so it stays as high as the others; its label takes the selection; a selected series is its own dots', async () => {
+  const { paintGrid, selectionOf } = await import('../paint.js')
+  const { selectedMark, hex } = await import('../palette.js')
+  const el = type => props => ({ type, props })
+  const els = { Box: el('Box'), Text: el('Text'), Raster: el('Raster') }
+  const program = `return k.stack(
+    k.bars([{ id: 'a', label: 'alpha', value: 4 }, { id: 'b', label: 'beta', parts: [{ id: 'b1', value: 2, tone: 'c1', label: 'one' }, { id: 'b2', value: 1, tone: 'dim', label: 'two' }] }], { key: false }),
+    k.plot([{ id: 's1', name: 'first', values: [1, 2, 3] }, { id: 's2', name: 'second', values: [3, 2, 1], tone: 'c2' }], { h: 6 }))`
+  const g = renderTerm(runProgram({ program, data: {} }, { w: 60 }), { w: 60 })
+  const runs = (sel, y) => paintGrid(g, els, { theme: 'dark', selected: sel, raster: false }).props.children[y].props.children
+  // the row a: its words on the selection, its bar's cells in their color lit, with no ground of their own
+  const a = runs('a', 0)
+  assert.ok(a.some(r => /alpha/.test(r.props.children) && r.props.backgroundColor === 'selectionBg'))
+  const bar = a.find(r => /▆/.test(r.props.children))
+  assert.deepEqual([bar.props.color, bar.props.backgroundColor], [selectedMark('accent', 'dark'), undefined])
+  // a part alone: its cells lit in its own color, the other part as it was, no ground anywhere on the bar
+  const b = runs('b1', 1)
+  const parts = b.filter(r => /▆/.test(r.props.children))
+  assert.deepEqual(parts.map(r => [r.props.color, r.props.backgroundColor]), [[selectedMark('c1', 'dark'), undefined], ['inactive', undefined]])
+  assert.notEqual(selectedMark('c1', 'dark'), hex('c1', 'dark'))
+  // the whole row b: both parts lit, each in its own color, so they stay apart
+  const look = selectionOf(g, 'b')
+  const row = g.rows[1]
+  const lit = row.map((c, x) => [c, look(x, 1)]).filter(([c, s]) => s === 'mark' && c.ch === '▆').map(([c]) => c.tone)
+  assert.deepEqual([...new Set(lit)], ['c1', 'dim'])
+  // a series: its own dots only, never the plot's whole area
+  const sel = selectionOf(g, 's2')
+  let mine = 0, other = 0, ground = 0
+  g.rows.forEach((r, y) => r.forEach((c, x) => { const s = sel(x, y); if (s === 'mark' && c.sr === 's2') mine++; if (s && c.sr === 's1') other++; if (s === 'text' && c.m) ground++ }))
+  assert.ok(mine > 0)
+  assert.equal(other, 0)
+  assert.equal(ground, 0)
+})
