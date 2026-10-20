@@ -23,7 +23,7 @@ const RUN_SCRIPT = new vm.Script(
 /**
  * Run `object.program` on `object.data` in a fresh vm context.
  * @param {{program: string, data?: unknown}} object
- * @param {{w?: number, h?: number, mode?: string, limit?: number, state?: object, event?: object, title?: string, id?: string, surface?: string, maxBytes?: number, keys?: object, all?: string | boolean}} [opts]
+ * @param {{w?: number, h?: number, mode?: string, limit?: number, state?: object, event?: object, title?: string, id?: string, surface?: string, maxBytes?: number, keys?: object, all?: string | boolean, labels?: object[]}} [opts]
  *   state: the card's interaction state (its knobs and what its handlers set); event: what the person did, which the
  *   program's k.on handlers answer; title and id default to the object's; all: draw every page of that knob (true: the
  *   page knob) at once, one after another, which may take up to kit.js's ALL_TIME limits
@@ -40,7 +40,7 @@ export function runProgram(object, opts = {}) {
   context.__program = String(object && object.program != null ? object.program : '')
   context.__data = JSON.stringify(object && object.data !== undefined ? object.data : {})
   context.__opts = JSON.stringify({ w: opts.w, h: opts.h, mode: opts.mode, limit, state: opts.state, event: opts.event,
-    title: opts.title ?? object?.title, id: opts.id ?? object?.id, surface: opts.surface || 'terminal', maxBytes: opts.maxBytes, got: opts.got, keys: opts.keys, all: opts.all })
+    title: opts.title ?? object?.title, id: opts.id ?? object?.id, surface: opts.surface || 'terminal', maxBytes: opts.maxBytes, got: opts.got, keys: opts.keys, all: opts.all, labels: opts.labels })
   KIT_SCRIPT.runInContext(context, { timeout: 1000 })
   let text
   try {

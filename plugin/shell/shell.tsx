@@ -174,6 +174,25 @@ export async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
+/** The labels the object's queries read (its lineage), each with its values and the queries that read it: a part made
+ *  from such a query's row is drawn in the label's color (prep.mjs labelKeys). */
+async function labelsRead($: Engine, root: string, object: Any): Promise<{ name: string; values: string[]; queries: string[] }[]> {
+  const by = new Map<string, string[]>()
+  for (const [q, info] of Object.entries((object?.lineage?.queries || {}) as Record<string, Any>)) {
+    for (const name of Array.isArray(info?.labels) ? info.labels : []) if (typeof name === 'string' && /^[\w.-]+$/.test(name)) by.set(name, [...(by.get(name) || []), q])
+  }
+  const out: { name: string; values: string[]; queries: string[] }[] = []
+  for (const [name, queries] of by) {
+    const f = `${root}/thimble/labels/${name}.json`
+    try {
+      if (!(await $.fs.exists(f))) continue
+      const values = JSON.parse(String(await $.fs.read(f)))?.values
+      if (Array.isArray(values) && values.length) out.push({ name, values: values.map(String), queries })
+    } catch { /* a label file that cannot be read leaves the card's own colors */ }
+  }
+  return out
+}
+
 const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, all: string | null = null) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}${all ? '|all=' + all : ''}`
 
 /** The object drawn at `w` columns (with the knobs at `state`): the program runs in a Node child, in the
@@ -198,7 +217,8 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
     }
     if (!object) return { object: null, drawing: null, grid: null, error: `no card ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}), ...(all ? { all } : {}) }), timeoutMs: 30000 })
+    const labels = await labelsRead($, ref.root, object)
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}), ...(all ? { all } : {}), ...(labels.length ? { labels } : {}) }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     // under a reply a card is its title, its chart and its takeaway: the words at the right of its frame (its sources)
