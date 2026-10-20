@@ -1,20 +1,36 @@
 # thimble: notes for Claude Code sessions in this repository
 
+This repository holds two products: the terminal plugin for Claude Code (`plugin/`) and the browser workbench
+(`browser/`).
+
 ## Installing thimble for a user
 
 When the user asks you to install thimble (for example "install thimble from
 https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
 
-1. Check what it needs: `claude --version` (2.1.301 or later), `node --version` (22 or later), and
-   `python3 -c "import pandas"`. Say what is missing, with the command that fixes it, and run that command only when
-   the user agrees.
+1. Ask whether they want the browser workbench too. It takes about 600 MB of disk and needs credentials for the Claude
+   API; the terminal plugin alone needs neither.
 2. If `~/.local/bin/thimble` exists, it is thimble 0.9's launcher. Tell the user, and offer `thimble uninstall` (or
    removing that file) before you go on.
-3. Run `claude plugin marketplace add safety-research/thimble`, then `claude plugin install thimble@thimble`.
-4. End with a short reply: thimble works in a new `claude` session in a folder of data files that they trust; the line
-   above the prompt lists its keys; `/plugin` turns it, or its side agent, off.
+3. Run `scripts/install.sh` in a clone, with `--no-browser` for the plugin alone. It checks what is needed first and
+   says what is missing, one line each. Tell the user what is missing, with the command that fixes it, and run that
+   command only when the user agrees. Then run the script again.
+4. End with a short reply: the plugin works in a new `claude` session in a folder of data files that they trust, and
+   the line above the prompt lists its keys; `/plugin` turns it, or its side agent, off. The browser workbench starts
+   with `thimble-browser FOLDER`, and asks for credentials in its Settings.
 
 ## Working on thimble
 
-The plugin is `plugin/`. [CONTRIBUTING.md](CONTRIBUTING.md) says how it is laid out and how to test it.
-`scripts/check.sh` runs every check CI runs.
+[CONTRIBUTING.md](CONTRIBUTING.md) gives the layout of each product and how to test it. `scripts/check.sh` runs every
+check CI runs, and `scripts/check.sh STEP` one of them.
+
+- A change to a text the plugin's model reads goes in a new version of that prompt (`plugin/prompts/<feature>/`).
+- The browser workbench reads its shared texts from `plugin/`, with the changes `browser/prompts/shared.json` lists.
+  When a plugin text changes, run `scripts/check.sh parity` and fix the pairs it names.
+- The browser's server binds 127.0.0.1 only. Card code and view readers run only in its sandbox
+  (`browser/server/thimble_browser/cards/sandbox.py`), and its agents get only the tools
+  `browser/server/thimble_browser/agent.py` names. Keep both that way.
+- The repository holds code, and what the code needs. Keep notes, screenshots and design documents out of it.
+
+The repository is public. The pre-push hook stops a push whose commits hold private details (CONTRIBUTING.md, "Keep
+private details out of commits"). When it does, fix the commit as it says. Never push with `--no-verify`.

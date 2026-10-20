@@ -1,136 +1,77 @@
-<p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
+# thimble's browser workbench
 
-# thimble browser
+A web page for making sense of a folder of files with Claude. You open a folder, ask a question in the chat, and Claude
+answers with cards that show the evidence: charts, tables and the records themselves. Every number and quote in an
+answer is a link that opens the file at the lines it came from. The page also has a file browser, labels, an
+orientation that explores the folder, generative views, and a report you write from the cards.
 
-A workspace in a web page for making sense of a folder of files with Claude. You open a folder, ask a question in the
-chat, and Claude answers with cards that show the evidence: charts, tables and the records themselves. Every number
-and quote in an answer is a link that opens the file at the lines it came from.
+It runs on your machine. A small server listens on 127.0.0.1, serves the page, and runs Claude's agents itself on the
+Claude API, with your own credentials. It never writes into the folder of files.
 
-This branch is a prototype of thimble browser as a product of its own, apart from the thimble plugin for the terminal.
-It keeps the page of thimble 0.8 and puts a new, small server behind it.
+## Install and start
 
-## Start
-
-You need [uv](https://docs.astral.sh/uv/), Node 22.12 or later, and credentials for the Claude API: an API key you
-paste in Settings, or Workload Identity Federation configured in a file (see below). On a Mac with Homebrew:
-`brew install uv node`. Card code runs in a sandbox, which on Linux also needs bubblewrap (`apt install bubblewrap`);
-see [Sandbox](#sandbox).
+`scripts/install.sh`, at the top of the repository, installs it with the terminal plugin (`--no-plugin` installs the
+browser workbench alone). It needs Node 22.12 or later, [uv](https://docs.astral.sh/uv/), and on Linux bubblewrap for
+the sandbox. Then:
 
 ```
-scripts/thimble-browser path/to/folder
-scripts/thimble-browser path/to/folder --wif path/to/wif.toml
+thimble-browser path/to/folder
+thimble-browser path/to/folder --wif path/to/wif.toml
 ```
 
-The first run builds the page. The server listens on 127.0.0.1, prints a sign-in link and opens it. Press Enter in
-its window for a new link. To try it on a made-up folder of agent runs: `scripts/thimble-browser samples/agent-runs`.
-From another machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:8420 <host>`).
+The server prints a sign-in link and opens it. A link works once, for 15 minutes; press Enter in the server's window
+for a new one. To try it on a made-up folder of agent runs: `thimble-browser browser/samples/agent-runs`. From another
+machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:8420 <host>`). The workspace (chats, cards, report) is
+kept in `~/.thimble-browser`, or in `THIMBLE_BROWSER_HOME`.
 
-### Workload Identity Federation
+## Credentials
 
-With Workload Identity Federation, the server trades an identity token from your platform for a short-lived Claude API
-token, so no API key is stored. Name the config file with `--wif FILE`, or type its path in Settings. The file is TOML
-(or plain `KEY=VALUE` lines) and holds the IDs of your federation rule, as your Claude Console admin gives them:
+The server calls the Claude API with the credentials you name, and reads no `ANTHROPIC_*` variable from its
+environment. There are two kinds:
 
-```toml
-federation_rule_id = "fdrl_..."
-organization_id = "..."
-service_account_id = "svac_..."    # optional
-workspace_id = "wrkspc_..."        # optional
-```
+- **An API key**, pasted in Settings. It is kept in a file only your user can read.
+- **Workload Identity Federation**, configured in a file you name with `--wif FILE` or in Settings. The server trades an
+  identity token from your platform for a short-lived Claude API token, so no API key is stored. The file is TOML (or
+  plain `KEY=VALUE` lines) and holds the IDs of your federation rule, as your Claude Console admin gives them:
 
-It also says where the identity token comes from, in `token_source`:
+  ```toml
+  federation_rule_id = "fdrl_..."
+  organization_id = "..."
+  service_account_id = "svac_..."    # optional
+  workspace_id = "wrkspc_..."        # optional
+  ```
 
-- `google` (the default): a Google identity token for `audience`, which is `https://api.anthropic.com` unless you set
-  another. It comes from the machine's metadata server on Google Cloud, or from a Google service account's Application
-  Default Credentials.
-- `file`: the token in `token_file`, read again each time the server needs a new token. This suits Kubernetes projected
-  service-account tokens, GitHub Actions and other platforms that write a token to a file.
-- `command`: what `token_command` prints, run again each time. It is a command line, such as
-  `"gcloud auth print-identity-token"`, or a list of its words.
-
-The SDK's environment-variable names are accepted as another spelling of the keys: `ANTHROPIC_FEDERATION_RULE_ID`,
-`ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID` and
-`ANTHROPIC_IDENTITY_TOKEN_FILE`. They are read from the file only; the server never reads `ANTHROPIC_*` variables from
-its environment. Keep the file writable by you alone, since it can name a command to run. Settings shows the file's
-path and its token source, never its IDs.
-
-## What works
-
-- **The file browser**: the tree; readers for JSONL, CSV, Markdown and agent transcripts, with a timeline mode; SQLite
-  databases, read-only; PDFs at a cited page; images and other media; search in a file and across the folder; hover
-  previews of citations.
-- **The chat**, with threads: ⌘-click a card, a record or a passage to ask about it. Each reply names its model and its
-  token use.
-- **Cards** on the canvas: plots, tables, diagrams, timelines, examples and notes, whose code runs in the sandbox; each
-  card's history, and Undo and Redo for the canvas and the report; comments on cards.
-- **Citations**: a click opens the file at the cited lines, or the card at the cited value.
-- **Explain marks**: after each answer, terms you may not know get a teal mark that opens what they mean.
-- **Labels**: Claude, or you in the label editor, define a category such as "asks for a refund" and apply it to every
-  record of a scope, by a model's reading (many at once), a regex or code. Marks in the Files tab, Color by, the
-  filter, and a label card with counts.
-- **The orientation**: ask for one in the chat, and an agent explores the folder and leaves a deck of cards in the group
-  Orientation. Before it finishes, a critic reviews its work for files it never opened, rival accounts and claims no
-  call supports, and it revises. A message in its thread continues it.
-- **The card check**: once an agent's card has its takeaway, one model reading checks it against five criteria and can
-  replace it in place, with Undo in the card's details.
-- **The report**: Write drafts it from the chat and the cards, with figures and citations, and you edit it in place.
-  Report checks (Important details, Judgment calls, Unverifiable, or your own) leave comments beside the passages they
-  apply to, and so can you. Export it as Markdown, HTML or PDF.
-- **Generative views**: ask for a view in the chat, and a builder writes one (a reader and a page on thimble's view kit)
-  that appears in the Files tab when it passes its checks. Its reader runs in the sandbox, its page in a frame with no
-  network, and its check draws the page in a headless browser where one can start its own sandbox.
-- **Settings**: the sign-in, the model, the effort, and explain marks on or off.
-
-## How it works
-
-- `frontend/` is the page (React), from thimble 0.8.
-- `server/` is the server (Python). It serves the page, reads the folder, keeps the workspace in
-  `~/.thimble-browser` (never in the folder), and runs card code in the sandbox. It runs each agent (the chat, its
-  threads, the report writer, the view builder, the orientation and its critic, the report checks) as its own loop on the Messages API: it streams Claude's reply, runs
-  the tools Claude calls as its own Python functions, and loops until the turn ends. The tools read inside the folder,
-  run Python in the sandbox and change the workspace's cards, report and views; nothing else, so nothing asks for a
-  permission.
-- `prompts/browser/` holds what Claude reads. The parts about writing for the person, citing and explaining terms are
-  the terminal plugin's own text, copied into `prompts/terminal/` by `scripts/sync-terminal-prompts` and named in
-  `prompts/shared.json`. A test checks that they match.
+  `token_source` says where the identity token comes from: `google` (the default), a Google identity token for
+  `audience` (`https://api.anthropic.com` unless you set another), from the metadata server or Application Default
+  Credentials; `file`, the token in `token_file`, read again for each new token; or `command`, what `token_command`
+  prints. The SDK's environment-variable names (`ANTHROPIC_FEDERATION_RULE_ID` and the others) are accepted as another
+  spelling of the keys, in the file only. Keep the file writable by you alone, since it can name a command to run.
 
 ## Sandbox
 
-Code that Claude writes, a card's code and a view's reader, runs only in a sandbox. Each run is a new process that
-sees the folder of files (read-only), the Python libraries, and an empty folder of its own for temporary files, which
-is deleted when the run ends. It does not see your home folder, thimble browser's own folder (`~/.thimble-browser`),
-the server's environment (no keys, no tokens), or the network, 127.0.0.1 included. A run is stopped when its time is
-up.
+Code that Claude writes, a card's code and a view's reader, runs only in a sandbox: a new process for each run that
+sees the folder (read-only), the Python libraries and an empty folder of its own. It does not see your home folder,
+`~/.thimble-browser`, the server's environment or the network, and it is stopped when its time is up. The sandbox is
+Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime), pinned in `server/sandbox/package.json`,
+on Seatbelt (macOS) or bubblewrap (Linux). If no sandbox works, code does not run, and the card and the server's first
+lines say why. `thimble-browser --check-sandbox` tests it, one line per check.
 
-The sandbox is Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime), pinned to one version in
-`server/sandbox/package.json`. It uses Seatbelt (`sandbox-exec`, part of macOS) on macOS and bubblewrap on Linux.
-`scripts/thimble-browser` installs it the first time (`npm ci` in `server/sandbox`), so all it needs is Node, and on
-Linux bubblewrap. If no sandbox works, code does not run, and the card and the server's first lines say why and what
-to install. `--no-sandbox` runs code without one (not recommended).
+## Layout
 
-To test the sandbox on your machine, with no sign-in:
+| Folder | What it holds |
+|---|---|
+| `frontend/` | the page (React and Vite); `npm run build` writes `frontend/dist`, which the server serves |
+| `server/` | the server (Python, uv): sign-in, the folder's readers, the workspace, the agents' loop and their tools |
+| `server/sandbox/` | the pinned sandbox runtime and how one run starts in it |
+| `prompts/` | the texts Claude reads, and `shared.json`, the parts it reads from the terminal plugin |
+| `docs/`, `samples/views/` | the view kit's guides and worked examples, which the view builder reads |
+| `samples/agent-runs/` | a made-up folder of agent runs to try it on, written by `samples/make_agent_runs.py` |
+| `scripts/thimble-browser` | the launcher: it rebuilds the page and the sandbox runtime when they changed, then starts the server |
 
-```
-scripts/thimble-browser --check-sandbox
-```
-
-It runs a small card, then cards that try to write into the folder, read your home folder and thimble browser's
-folder, reach the network, see the server's environment, keep a file for the next run, and run past their time. It
-prints one line per check, pass or FAIL.
-
-How the two systems differ: on Linux the sandbox shows only the system's libraries, the Python and the folder, and
-every other top folder (`/tmp` among them) is empty. On macOS it shows the system and hides where people's files are:
-`/Users`, `/Volumes` and the temp folders.
+The texts about communicating, citing, explaining terms and labels are the terminal plugin's own: the server reads them
+from `plugin/` when it makes a prompt, with the few exact-string changes `prompts/shared.json` lists.
+`server/tests/test_prompt_parity.py` fails when one of those changes no longer applies to the plugin's text.
 
 ## Tests
 
-```
-cd server && uv run --extra dev pytest
-```
-
-`tests/test_prompt_parity.py` fails when the terminal plugin's text changes on its branch, or when a change that
-`prompts/shared.json` lists no longer applies. Run `scripts/sync-terminal-prompts` and look at the result.
-
-## License
-
-Apache-2.0
+From the top of the repository: `scripts/check.sh parity server page`.
