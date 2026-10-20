@@ -1,7 +1,7 @@
 // A card with pages (a page knob, draw/kit.js) in the shell: under a reply its dial turns where it is clicked and its
 // row says how many pages there are and that 1 reads them all; the detail shows every page at once (or one at a time,
-// a), a part of a page is the card's own part at that page, a card's own key typed as the start of a question gives
-// its letter back, and the versions saved in one turn count as one. `claude plugin test plugin`. The card's program runs
+// a), a part of a page is the card's own part at that page, and a card's own key typed as the start of a question gives
+// its letter back. `claude plugin test plugin`. The card's program runs
 // here in the real kit, as prep.mjs would run it.
 import { expect, mock, test } from 'claude-code/testing'
 import '../draw/kit.js'
@@ -14,7 +14,6 @@ const SESSION = 's-1'
 const ID = '01-orchard'
 const FILE = `${ROOT}/thimble/objects/${ID}.json`
 const STATE = `${ROOT}/thimble/objects/.state/${ID}.json`
-const SEEN = `${ROOT}/thimble/objects/.seen/${ID}.json`
 const EVENTS = '/home/t/.thimble/lean/events/s-1.jsonl'
 // a made-up guide in three chapters, as the guide that started this was written: a chapter knob shown as "2 of 3",
 // its own keys n and p labelled alike, and a part per tree with the rows it stands for. The test's sandbox runs no
@@ -217,26 +216,4 @@ test('in the detail, a card\'s own key that began a question gives its letter ba
   // back at the first chapter, where the card stood before n
   expect(JSON.parse(w.files[STATE]!).state.chapter ?? 1).toBe(1)
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"no"')
-})
-
-test('a card saved three times in one turn was seen once: the header lists no versions, and h reaches the drafts', async ($, on) => {
-  const w = world(on)
-  const clock = mock.clock(on)
-  await turnSaving($, w, clock, [1, 2, 3])
-  expect(JSON.parse(w.files[SEEN]!).seen).toEqual([3])
-  await drawn($, clock, reply)
-  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
-  let t = await drawn($, clock, PANE)
-  expect(t).toContain('card:01-orchard')
-  expect(t).not.toMatch(/v\d/)
-  expect(textOf(await $.ui.render(HINT))).toContain('h drafts')
-  // h: the draft before it, named a draft beside the one the person saw
-  await clock.advance(1000)
-  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
-  await clock.settle()
-  t = await drawn($, clock, PANE)
-  expect(t).toContain('v2 draft · v3')
-  // a later turn that changes it: two versions seen, both listed
-  await turnSaving($, w, clock, [4])
-  expect(JSON.parse(w.files[SEEN]!).seen).toEqual([3, 4])
 })

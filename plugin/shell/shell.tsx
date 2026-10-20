@@ -34,7 +34,7 @@ import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './messag
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
-import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteSeen, pressTaken, readCardState, writeCardState } from './runtime'
+import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteEdit, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop } from './tray.js'
 import { catchUpEl, keyColor, markColors, messageEl } from './view'
@@ -104,7 +104,9 @@ const objects = new Map<string, Any>()
 export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; at?: string | null; saves?: ObjRef[] } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; at?: string | null; saves?: ObjRef[]; typed?: boolean } | null = null
+// the cards each side thread's agent saved in its turn, by agent (a change the analyst asked the thread for: noteEdits)
+const threadSaved = new Map<string, ObjRef[]>()
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
 
@@ -497,22 +499,47 @@ export async function rootHere($: Engine): Promise<string | null> {
 export async function showVersion($: Engine, ref: ObjRef): Promise<void> {
   if (ref.v != null) newestVersion.set(`${ref.root}|${ref.id}`, Math.max(ref.v, newestVersion.get(`${ref.root}|${ref.id}`) ?? 0))
   const where = (await $.state.get({ ...WHERE, id: ref.id })).value as string | undefined
-  // drawn in place now, where the person sees it, or with the turn's other cards when its reply is done
-  if (turn) turn.saves = [...(turn.saves ?? []), ref]
-  else if (where) await noteSeenSaves($, [ref])
+  // (a version a label's reads or the analyst's checks saved is never a change the analyst asked for: noteEdits)
   if (where) { await place($, where, ref); return }
   if (turn) turn.unplaced = turn.unplaced.map(x => (x.id === ref.id && x.root === ref.root ? { ...x, v: ref.v } : x))
 }
 
-/** The cards saved (each once), at their latest versions, noted as seen by the person (runtime.ts noteSeen). */
-async function noteSeenSaves($: Engine, refs: ObjRef[]): Promise<void> {
-  const done = new Set<string>()
-  for (const ref of refs) {
-    const key = `${ref.root}|${ref.id}`
-    if (done.has(key)) continue
-    done.add(key)
-    const o = await loadObject($, { id: ref.id, v: null, root: ref.root })
-    await noteSeen($, ref.root, ref.id, o?.version ?? ref.v)
+/** The versions that could not be drawn as saved (the program failed, a part did not answer when tried, nothing
+ *  drew), by `root|id|v`: a save after one of them fixes it, which is no change the analyst asked for. */
+const brokenAt = new Set<string>()
+
+/** The prompt the analyst typed last (composer or bridge), until a turn of main's starts with it: that turn is theirs. */
+let typedLast: string | null = null
+
+/** Whether a saved version has problems the kernel reported (a binding that does not hold, a citation that does not). */
+function saveProblems(o: Any): boolean {
+  const lin = o?.lineage || {}
+  return (Array.isArray(lin.problems) && lin.problems.length > 0) || (Array.isArray(lin.cites) && lin.cites.some((c: Any) => c && c.problem))
+}
+
+/**
+ * The cards a turn saved: each is a change the analyst asked for (runtime.ts noteEdit) when the analyst asked for the
+ * turn (`asked`: they typed main's prompt, or asked the side thread), the card was there before the turn (its first
+ * version saved in the turn is not its first), and the version the turn began from drew without problems. So a card
+ * made in the turn and saved again before its reply was done, a re-save that fixes what the save reported, a label's
+ * reads, a draft written over, and anything a turn the analyst did not ask for saved (a background job's report, a
+ * key's request) are never edits, and the header never lists them.
+ */
+async function noteEdits($: Engine, refs: ObjRef[], asked: boolean): Promise<void> {
+  if (!asked) return
+  // the first version the turn saved of each card
+  const first = new Map<string, ObjRef>()
+  for (const r of refs) {
+    const k = `${r.root}|${r.id}`
+    const f = first.get(k)
+    if (r.v != null && (!f || f.v == null || r.v < f.v)) first.set(k, r)
+  }
+  for (const r of first.values()) {
+    const v = Number(r.v)
+    if (!(v > 1)) continue
+    const before = await loadObject($, { id: r.id, v: v - 1, root: r.root }).catch(() => null)
+    if (!before || saveProblems(before) || brokenAt.has(`${r.root}|${r.id}|${v - 1}`)) continue
+    await noteEdit($, r.root, r.id, v)
   }
 }
 
@@ -2380,7 +2407,10 @@ export const registerShell: Register = (on, options) => {
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext, saves: [] }
+      // the analyst's turn: it began with the prompt they typed (a background job's report or a key's request did not)
+      const typed = !!typedLast && !!String(e.text || '').trim() && String(e.text).trim() === typedLast.trim()
+      typedLast = null
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext, saves: [], typed }
       placeNext = null
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
@@ -2427,7 +2457,10 @@ export const registerShell: Register = (on, options) => {
         // what the analyst sees of it, for the agent that saved it (so a card that fails to draw is fixed now)
         if (input.agentId) notes.push(drawnNote(await prepared($, ref, 96, null, 'inline', 24, true), ref))
       }
-      if (input.agentId && threadSaves.length) await noteThreadSaves($, input.agentId, threadSaves.map(x => ({ id: x.id, v: x.v ?? null, root: x.root })))
+      if (input.agentId && threadSaves.length) {
+        await noteThreadSaves($, input.agentId, threadSaves.map(x => ({ id: x.id, v: x.v ?? null, root: x.root })))
+        threadSaved.set(input.agentId, [...(threadSaved.get(input.agentId) ?? []), ...threadSaves])
+      }
       if (input.agentId || !saves.length) return notes.length && r.deny === undefined && !r.isError ? { ...r, context: [...(r.context ?? []), notes.join('\n')] } : r
       if (turn) turn.saves = [...(turn.saves ?? []), ...saves]
       for (const ref of saves) {
@@ -2446,6 +2479,7 @@ export const registerShell: Register = (on, options) => {
         await $.state.set(LAST, ref)
         // drawn as under the reply, and its interactions tried once, as the person would, so a failing one is fixed now
         const p = await prepared($, ref, 96, null, 'inline', 24, true)
+        if (p.error || !p.grid || p.drawing?.error || (p.check?.failed ?? 0) > 0) brokenAt.add(`${root}|${id}|${ref.v}`)
         notes.push(drawnNote(p, ref))
         if (p.check) void recordEvent($, { kind: 'check', id, v: p.object?.version ?? null, tried: p.check.tried, total: p.check.total, failed: p.check.failed, cut: p.check.cut, ms: p.check.ms, chars: p.check.line ? p.check.line.length : 0 })
       }
@@ -2550,11 +2584,12 @@ export const registerShell: Register = (on, options) => {
       // nothing drawn is better than a turn that does not end
     }
     try {
-      // the reply is done, and the cards the turn saved stand under it: their latest versions are the ones the person
-      // sees. A card saved several times in the turn was seen once (its header lists that one; the rest are drafts)
-      if (e.agentId === undefined && turn) await noteSeenSaves($, turn.saves ?? [])
+      // the reply is done: a card the analyst asked to change is edited (its header says so); its other saves never count
+      if (e.agentId === undefined && turn) await noteEdits($, turn.saves ?? [], !!turn.typed)
+      // a side thread's turn: the analyst's question started it
+      if (e.agentId !== undefined && threadSaved.has(e.agentId)) { const refs = threadSaved.get(e.agentId)!; threadSaved.delete(e.agentId); await noteEdits($, refs, true) }
     } catch {
-      // the header lists every version of these cards then, as before
+      // the header says nothing of these changes then
     }
     try {
       // the turn's answer: its last words, under which the verb row is drawn. A turn that ended in an error answered
@@ -2752,6 +2787,8 @@ export const registerShell: Register = (on, options) => {
     // the person's first prompt in a session whose start found no person (a pre-warmed spare, a background job)
     if (person === 'later' && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) await startForPerson($)
     if (e.command) return next(e)
+    // a prompt the analyst typed: the turn it starts is theirs (noteEdits)
+    if (!e.isMeta && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) typedLast = String(e.text || '')
     const context: string[] = []
     try {
       context.push(...(await sqNotes($)))
