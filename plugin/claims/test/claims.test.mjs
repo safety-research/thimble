@@ -306,7 +306,7 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   // the pane takes no esc (the panel's own)
   assert.ok(!(run(st, { type: 'key', key: 'esc' }).effects || []).length)
   // the dots keep their places while the ring walks them, whatever the claim under the graph
-  const dots = state => JSON.stringify(draw(data, { state }).text.split('\n').slice(0, 14))
+  const dots = state => draw(data, { state }).text.split('○ corrected')[0]
   assert.equal(dots({ claim: 'c1' }), dots({ claim: 'c3' }))
 })
 

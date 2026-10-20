@@ -140,7 +140,12 @@ export function layout(nodes, clusters, edges, { w, h }) {
   const slots = slotsOf(groups, W, H)
   const P = []
   for (const sl of slots) {
-    const x0 = sl.x + 1, x1 = sl.x + Math.max(1, sl.w - 3), y0 = sl.y + 1, y1 = sl.y + Math.max(1, sl.h - 1)
+    // the island takes the room its claims need, at the rectangle's top left under the name: a cluster of one claim
+    // in a wide rectangle keeps its dot by its name
+    const n = sl.g.nodes.length
+    const x0 = sl.x + 1, y0 = sl.y + 1
+    const x1 = sl.x + Math.max(1, Math.min(sl.w - 3, Math.max(Array.from(sl.g.name).length, 8 * Math.ceil(Math.sqrt(n)) + 2)))
+    const y1 = sl.y + Math.max(1, Math.min(sl.h - 1, 2 * Math.ceil(Math.sqrt(n)) + 1))
     for (const n of sl.g.nodes) {
       P.push({ id: n.id, sl, x0, x1, y0, y1, x: (x0 + x1) / 2 + (hash(n.id) - 0.5) * (x1 - x0) * 0.8, y: (y0 + y1) / 2 + (hash(n.id + '#') - 0.5) * (y1 - y0) * 0.8, vx: 0, vy: 0 })
     }
@@ -391,13 +396,18 @@ export function program(k, data) {
   return k.stack(...head, k.text(' '), c, legend, ...panel)
 }
 
-/** The layout moved up to its first row used (a dot or a name), its height the rows it uses. */
+/** The layout with the rows it leaves blank taken out: none above its first row used (a dot or a name), at most one
+ *  between two rows used, one over each row of names but the first, and its height the rows left. */
 function trim(lay) {
-  const ys = [...[...lay.pos.values()].map(p => p.y), ...lay.names.map(n => n.y)]
-  const top = ys.length ? Math.min(...ys) : 0
-  const h = ys.length ? Math.max(...ys) - top + 1 : 1
-  const pos = new Map([...lay.pos].map(([id, p]) => [id, { x: p.x, y: p.y - top }]))
-  return { pos, names: lay.names.map(n => ({ ...n, y: n.y - top })), h }
+  const used = new Set([...[...lay.pos.values()].map(p => p.y), ...lay.names.map(n => n.y)])
+  const rows = [...used].sort((p, q) => p - q)
+  const to = new Map()
+  let y = 0
+  const named = new Set(lay.names.map(n => n.y))
+  // a blank row stays where the layout left one, and stands over each row of names but the first
+  rows.forEach((r, i) => { if (i && (r - rows[i - 1] > 1 || named.has(r))) y += 1; to.set(r, y); y += 1 })
+  const pos = new Map([...lay.pos].map(([id, p]) => [id, { x: p.x, y: to.get(p.y) }]))
+  return { pos, names: lay.names.map(n => ({ ...n, y: to.get(n.y) })), h: Math.max(1, y) }
 }
 
 /** Where a claim came from: the message that said it as the person reads it, the claim's words marked, and the other
