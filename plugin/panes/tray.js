@@ -13,7 +13,7 @@
 // thread.
 //
 //   state: {stack: [frame, ...]}
-//   frame: {row, i, kind, ref, label, gloss, open, heal?, why?} for a mark of a message (frameOf), {kind: 'cite', ref, label, open}
+//   frame: {row, i, kind, ref, label, gloss, open, heal?, why?, wrote?} for a mark of a message (frameOf), {kind: 'cite', ref, label, open}
 //          for a citation inside a card; `open` is the section shown. A frame carries what it shows, so a surface draws
 //          it without the message's record.
 //   reads: the session's side threads (whether the mark has one)
@@ -50,7 +50,8 @@ export function frameOf(rec, i) {
   // a gloss on words inside the citation's words: a click on those words opens the citation, so its card offers the gloss
   const inner = m.kind === 'cite' ? rec.marks.map((x, j) => (x && x.kind === 'gloss' && x.start >= m.start && x.end <= m.end ? frameOf(rec, j) : null)).filter(Boolean) : []
   // what the healing pass found (message.js healedRecord): the card says it above the place
-  const heal = m.kind === 'cite' && (m.heal === 'bad' || m.heal === 'quiet') ? { heal: m.heal, why: String(m.why || '') } : {}
+  const heal = m.kind === 'cite' && (m.heal === 'bad' || m.heal === 'quiet') ? { heal: m.heal, why: String(m.why || '') }
+    : m.kind === 'cite' && m.heal === 'moved' && m.wrote ? { heal: 'moved', wrote: String(m.wrote) } : {}
   return { row: rec.row, i, kind: m.kind === 'spark' ? 'spark' : 'cite', ref: m.ref, label: m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label || m.ref || ''), ...(inner.length ? { inner } : {}), ...heal }
 }
 
@@ -204,6 +205,8 @@ export function cardBody(k, card, top, open) {
   // a citation the healing pass found wrong: a red × and its reason; one it unwrapped: why, in grey
   if (top && top.heal === 'bad') parts.push(k.text(`{bad:× ${k.escape(top.why || 'the cited place contradicts this value')}}`))
   else if (top && top.heal === 'quiet' && top.why) parts.push(k.text(`{dim:${k.escape(top.why)}}`))
+  // one it re-pointed: where it pointed as written, so the fix is not invisible
+  else if (top && top.heal === 'moved' && top.wrote) parts.push(k.text(`{dim:moved here from ${k.escape(top.wrote)}, which does not show this value}`))
   if (!card) {
     parts.push(k.text(`{dim:${top.kind === 'gloss' ? 'drawing the explainer…' : 'reading it through the kernel…'}}`))
   } else if (card.problem || card.error) {

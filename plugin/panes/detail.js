@@ -29,6 +29,7 @@
 //
 // The card's own keys and presses (its program's k.on) come before these: the host routes them to the card first.
 import { examplesView, exampleSet, linkRuns, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
+import { healLook } from '../shell/cards.js'
 import { toneBeside } from './labels.js'
 import { subjectBlock } from './subject.js'
 import { pageId, pageOf, turn as turnKnob } from '../draw/handoff.js'
@@ -83,6 +84,8 @@ export default {
     } catch { order = null }
     return {
       id: o.id, title: o.title || o.id, question: o.question || '', text: o.text || '', program: o.program || '', version: o.version ?? null,
+      // what the healing pass did to the takeaway's citations (the host's: shell.tsx healOfText)
+      heal: card.heal || null,
       versions: card.versions || [], v: card.v ?? o.version ?? null, drawing: inner, parts, refs, order,
       cites: d.cites || {}, examples: d.examples || {}, controls: d.controls || [], cardState: card.state || {},
       // the card shown with every page at once ({knob, n, at}), and the keys its own program takes (with what they turn)
@@ -202,11 +205,17 @@ export function program(k, data) {
   // the takeaway: its citations of a part select that part (and the selected part's are bold)
   const take = String(data.text || data.question || '').replace(/\s+/g, ' ').trim()
   const refsOf = id => data.refs[id] || []
+  // the healing pass: a citation it unwrapped in grey, one it found contradicted with a red ×, one it re-pointed at its
+  // new place
+  const look = healLook(data.heal)
   const takeaway = take ? k.text(linkRuns(take).map(r => {
     const s = k.escape(r.s)
     if (!r.link) return r.bold ? `**${s}**` : s
-    const to = partOfLink(r.link, parts, refsOf)
-    return to ? (to === region ? `**{cite:[${s}](#${to})}**` : `{cite:[${s}](#${to})}`) : `{cite:${s}}`
+    const c = look ? look(r.s, r.link) : null
+    if (c && c.state === 'quiet') return `{dim:${s}}`
+    const bad = c && c.state === 'contradicted' ? '{bad: ×}' : ''
+    const to = partOfLink(c && c.to && c.state === 'linked' ? c.to : r.link, parts, refsOf)
+    return (to ? (to === region ? `**{cite:[${s}](#${to})}**` : `{cite:[${s}](#${to})}`) : `{cite:${s}}`) + bad
   }).join('')) : false
 
   // what an action opened: the code, else the selected part's rows, in the `side:opened` region the panel draws above the
