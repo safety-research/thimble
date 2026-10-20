@@ -8,12 +8,14 @@
 // and the levels (and, while the call runs, where they go: record.squeeze.want).
 //
 //   state: {focus: chip id, adding: true while the person types a stretch}
-//   keys: [ ] change · 1-9 chip · + new stretch · 0 original (at the original: close) · s done. No key is labelled
+//   keys: [ ] change · 1-9 chip · + new stretch · 0 original (at the original: close) · s done. On a catch-up (a message
+//         the chips wrote of several replies) 0 dismisses it: its original is the replies, in the transcript above, so
+//         no step lands on the original either. No key is labelled
 //         < >: next to Claude Code's `← for agents` it reads as the arrow keys, and ← in an empty prompt leaves the
 //         conversation for the agents view. < > and , . still change, unnamed.
 //   presses: a chip picks it (the picked one steps up); a dot sets that level; + starts a stretch
 //   events: stretch {text} (the two ends the person typed, from the host's input)
-import { chipsOf, glyph, isOriginal, noteOf, stepAt, stretchChip } from '../verbs/squeeze/chips.mjs'
+import { chipsOf, glyph, isCatchUp, isOriginal, noteOf, stepAt, stretchChip } from '../verbs/squeeze/chips.mjs'
 
 const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 
@@ -28,9 +30,10 @@ export default {
     if (!rec) return { row: args.row, rec: null }
     const s = rec.squeeze || {}
     const lean = { text: rec.text, shown: rec.shown ?? null, verbs: rec.verbs ? { s: rec.verbs.s || null } : {}, squeeze: { at: s.at || {}, own: s.own || [], want: s.want || null, running: !!s.running, error: s.error || null, problems: s.problems || [] } }
+    const catchup = isCatchUp(rec) ? { replies: Number(rec.catchup.replies) || 0 } : null
     return {
-      row: args.row, rec: lean,
-      note: typeof rec.shown === 'string' || s.auto ? noteOf(rec, size.w) : null,
+      row: args.row, rec: lean, catchup,
+      note: catchup ? null : typeof rec.shown === 'string' || s.auto ? noteOf(rec, size.w) : null,
       lit: rec.verbs && rec.verbs.s && rec.verbs.s.lit && rec.verbs.s.note ? String(rec.verbs.s.note) : null,
       // the terminal's own: a stretch being typed in its prompt, a call running, a call that failed
       typing: ui && ui.adding ? String(ui.typing || '+') : null,
@@ -53,11 +56,13 @@ export function program(k, data) {
   const pending = !!rec.squeeze.want && !same(rec.squeeze.want, rec.squeeze.at)
 
   // ---- what the person does
+  // a catch-up never stands at its original (the replies above it): a level that would bring it there is not set
+  const toOriginal = to => !!data.catchup && isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at: to } }))
   // a step names the key the bar names for it ([ or ], whichever key made it), so a rewrite that fails says which key
   // tries again
   const step = (id, dir) => {
     const to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, id, dir)
-    if (to) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '[' : ']' })
+    if (to && !toOriginal(to)) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '[' : ']' })
     return { focus: id, adding: false }
   }
   k.on('[', () => step(focus, -1), 'change')
@@ -78,11 +83,15 @@ export function program(k, data) {
     k.do('squeeze', { row: data.row, stretch: String(e.text || '') })
     return { focus: chip.id, adding: false }
   })
-  k.on('0', () => {
-    if (orig && !pending) k.do('close')
-    else k.do('squeeze', { row: data.row, reset: true })
-    return { adding: false }
-  }, orig && !pending ? 'close' : 'original')
+  if (data.catchup) {
+    k.on('0', () => { k.do('dismiss', { row: data.row }); return { adding: false } }, 'dismiss')
+  } else {
+    k.on('0', () => {
+      if (orig && !pending) k.do('close')
+      else k.do('squeeze', { row: data.row, reset: true })
+      return { adding: false }
+    }, orig && !pending ? 'close' : 'original')
+  }
   k.on('s', () => { k.do('close'); return { adding: false } }, 'done')
   k.on('esc', () => { k.do('close'); return { adding: false } })
   k.on('press', e => {
@@ -91,7 +100,7 @@ export function program(k, data) {
     if (dot) {
       const c = chips.find(x => x.id === dot[1])
       const lv = Number(dot[2])
-      if (c && lv !== c.level) k.do('squeeze', { row: data.row, at: { ...at, [c.id]: lv } })
+      if (c && lv !== c.level && !toOriginal({ ...at, [c.id]: lv })) k.do('squeeze', { row: data.row, at: { ...at, [c.id]: lv } })
       return { focus: dot[1], adding: false }
     }
     if (r === 'add') return stretch()
@@ -101,15 +110,18 @@ export function program(k, data) {
     if (c.id !== focus) return { focus: c.id, adding: false }
     // a press on the picked chip steps it up, and from its last level back to its first
     const to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, c.id, 1) || { ...at, [c.id]: 0 }
-    k.do('squeeze', { row: data.row, at: to })
+    if (!toOriginal(to)) k.do('squeeze', { row: data.row, at: to })
     return { focus: c.id, adding: false }
   })
 
   // ---- what the bar says while the chips have the keys
   const problem = (rec.squeeze.problems || [])[0]
+  const of = data.catchup ? `catch-up of ${data.catchup.replies} replies` : null
   if (data.error) k.status(`× ${data.error}`, 'bad')
+  else if (data.catchup && typeof rec.shown !== 'string') k.status(`s ● writing the ${of}…`, 'warn')
   else if (pending || data.running) k.status('s ● rewriting…', 'warn')
   else if (problem && typeof rec.shown === 'string') k.status(`! ${problem}`, 'warn')
+  else if (of) k.status(`s ● ${of}`, 'warn')
   else if (data.note) k.status(`s ● ${data.note}`, 'warn')
   else if (data.lit) k.status(`s ● ${data.lit}`, 'warn')
 

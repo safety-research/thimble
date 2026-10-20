@@ -54,7 +54,16 @@ export type MsgRecord = {
   final?: boolean
   /** the squeeze chips' state (verbs/squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
   squeeze?: Squeeze
+  /** a catch-up's own record (it is no row of the transcript): what it covers, drawn under `host` */
+  catchup?: CatchUp
+  /** the catch-up drawn under this answer: the newest written when this was the newest reply */
+  caughtUp?: string
 }
+
+/** A catch-up: one message the squeeze chips write of Claude's messages since the person's last prompt (`rows`, in
+ *  order; `replies` of them ended a turn), drawn under the newest reply (`host`). `question` is the person's prompt,
+ *  `prompt` its row. A dismissed one is drawn no more; one that showed a version counts as read. */
+export type CatchUp = { host: string; rows: string[]; replies: number; question: string; prompt: string | null; dismissed?: boolean }
 
 /** A message's squeeze: where its chips are, the person's stretches, every version written by its levels, the
  *  original's marks, whether it arrived squeezed, what a rewrite said that the original does not, and each call made. */

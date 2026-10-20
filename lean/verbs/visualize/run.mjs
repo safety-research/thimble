@@ -22,9 +22,13 @@ export function request(ctx) {
   const obj = ctx.object && ctx.object.program ? ctx.object : null
   const choice = String(ctx.args || '').trim()
   const proposals = (msg?.verbs?.v?.proposals || []).filter(p => typeof p === 'string' && p.trim())
-  const what = msg
-    ? `your answer that begins "${firstWords(msg.shown ?? msg.text)}"`
-    : obj ? `the card ${obj.id}${obj.title ? ` ("${obj.title}")` : ''}` : 'your last answer'
+  // a catch-up is no answer of Claude's: the squeeze chips wrote it of its replies since the person's last prompt
+  const n = Number(msg?.catchup?.replies) || 0
+  const what = msg?.catchup
+    ? `the catch-up of your ${n} replies since their last prompt that the squeeze chips wrote, which begins "${firstWords(msg.shown ?? msg.text)}"`
+    : msg
+      ? `your answer that begins "${firstWords(msg.shown ?? msg.text)}"`
+      : obj ? `the card ${obj.id}${obj.title ? ` ("${obj.title}")` : ''}` : 'your last answer'
   const has = [...new Set([...(msg?.objects || []).map(x => String(x).split('@')[0]), ...(obj ? [obj.id] : [])])].filter(Boolean)
   const lines = [`The analyst pressed v (visualize) on ${what}. They want another view of it: a card in the form that shows what it says${choice ? `, as "${choice}"` : ''}.`]
   if (has.length) lines.push(`It has the card${has.length > 1 ? 's' : ''} ${has.join(', ')} already: make a different view, not a copy.`)

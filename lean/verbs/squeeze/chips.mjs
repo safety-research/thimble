@@ -10,10 +10,16 @@
 //   a stretch           between two ends the person types after +, such as "engineer and manager": the original
 //                       stands at the first end (0), and each of 3 steps moves the text toward the second.
 // The observer says where the original stands on Report ↔ Interpret and Familiarity (record.verbs.s.at); until it
-// has, each stands in its middle. A long answer arrives squeezed at Length short before the observer's look ends, and
-// the other chips "as the original", which stays true whatever level the look gives them. A step on one of them made
-// while that look runs waits for it, and then counts from the level it gives (rebaseAt; term.ts). Every chip counts in every rewrite: one $.model.complete call writes the message at
-// all the chips' levels at once, and each version written is kept, so a state seen before comes back with no call.
+// has, each stands in its middle. A message arrives as Claude wrote it; the chips rewrite it on demand. A step on one
+// of them made while that look runs waits for it, and then counts from the level it gives (rebaseAt; term.ts). Every
+// chip counts in every rewrite: one $.model.complete call writes the message at all the chips' levels at once, and each
+// version written is kept, so a state seen before comes back with no call.
+//
+// A catch-up is a message of its own that the chips write of several of Claude's messages: those since the person's
+// last prompt, when replies piled up (shell/shell.tsx). Its record is a message's record with `catchup` set; its text
+// (the original) is the messages as written, one after another (catchUpText); the request names them as several
+// messages to write as one (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves, which
+// stay in the transcript above it, so it never shows its original: 0 dismisses it.
 //
 // The record keeps it (CONTRACT 1, beside `shown`):
 //   squeeze: {
@@ -21,7 +27,7 @@
 //     own:      [{id, kind: 'stretch', from, to, name, levels}]   the person's stretches
 //     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
 //     orig:     {marks}               the original's marks, so a sparkline's values outlive a version that dropped it
-//     auto:     true                  it arrived squeezed (a long message)
+//     auto:     true                  it arrived squeezed (a long message, in sessions before arrival squeezes ended)
 //     problems: ['...']              what a rewrite said that the original does not (a number, a ref): shown, not hidden
 //     made:     [{key, ms, model, usage}]   each call, for its time and cost
 //   }
@@ -34,7 +40,7 @@ export const CHIPS = Object.freeze([
   Object.freeze({ id: 'familiarity', name: 'Familiarity', levels: Object.freeze(['new to the field', 'beginner', 'working', 'fluent', 'expert']), level0: 2, kind: 'fixed' }),
 ])
 export const LENGTH = CHIPS[0]
-/** The level of Length a long message arrives at: short. */
+/** The level of Length a catch-up arrives at, and the one `/verb squeeze` with no words sets: short. */
 export const ARRIVE = 1
 /** The steps of a stretch: 0 is the original, at its first end; 3 is all the way to its second end. */
 export const STRETCH_STEPS = 3
@@ -235,6 +241,16 @@ function chipLine(c, words = 0, keep = 0) {
   return `- ${c.name}: ${c.levels[c.level]} (levels ${levels}; the original is at ${c.known ? c.levels[c.level0] : 'a level not yet known'})`
 }
 
+/** The line that heads the original in a catch-up's request: several messages, written as one. */
+export const CATCHUP_HEAD = "Claude's messages since the person's last prompt, in the order it wrote them, as written (the original). Write them as one message:"
+
+/** A catch-up's original: Claude's messages, in order, one after another. */
+export const catchUpText = texts => (texts || []).map(t => String(t || '').trim()).filter(Boolean).join('\n\n---\n\n')
+
+/** Whether a record is a catch-up, and one that still stands (not dismissed). */
+export const isCatchUp = rec => !!(rec && rec.catchup && typeof rec.catchup === 'object')
+export const catchUpStands = rec => isCatchUp(rec) && !rec.catchup.dismissed
+
 /**
  * The $.model.complete request that writes the message at its chips' levels. `system` is prompt.md's text.
  * The fixed text goes first and is marked for the prompt cache: prompt.md, then the question and the original, so a
@@ -245,7 +261,7 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), keep
   const head = [
     question ? `The person asked: ${question.trim().slice(0, 2000)}` : 'The person\'s question is not known.',
     '',
-    'Claude\'s message, as written (the original):',
+    isCatchUp(rec) ? CATCHUP_HEAD : 'Claude\'s message, as written (the original):',
     '<original>',
     String(rec?.text ?? ''),
     '</original>',
@@ -556,7 +572,12 @@ export function noteOf(rec, cols = 100) {
 /** What Claude reads, with the person's next prompt, of the version they see. */
 export function noteFor(rec) {
   const chips = chipsOf(rec)
-  if (isOriginal(chips)) return 'The person restored your last reply as you wrote it.'
   const set = chips.filter(c => c.level !== c.level0).map(c => `${c.name}: ${c.levels[c.level]}`).join(', ')
+  if (isCatchUp(rec)) {
+    if (typeof rec.shown !== 'string' || !rec.shown.trim()) return ''
+    const n = Number(rec.catchup.replies) || 0
+    return `The person caught up on your ${n === 1 ? 'reply' : `${n} replies`} since their last prompt by reading them rewritten as one message by the squeeze chips (${set}); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\n${rec.shown.slice(0, 8000)}`
+  }
+  if (isOriginal(chips)) return 'The person restored your last reply as you wrote it.'
   return `The person reads your last reply rewritten by the squeeze chips (${set}); what you wrote is unchanged, and they can restore it. "This" may mean the version they read:\n${String(rec.shown || '').slice(0, 1500)}`
 }

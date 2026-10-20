@@ -26,10 +26,9 @@
 //    person's prompt, Claude's words and tool calls cut to fit, the answer), its objects, and each lens's digest. It
 //    never reads the session before the turn. `observer:v1` is the earlier pass: one prompt in a fork of the session.
 //    Every call is a line in the session's events (telemetry), with each lens's share of the pass.
-//    Order with squeeze: a long answer arrives squeezed when the turn ends, beside this look, and never waits for it;
-//    its other chips stay as the original, true whatever level the pass gives. A step the person makes on Report ↔
-//    Interpret or Familiarity before the pass has said where the answer stands waits for the look (lookPending) and
-//    counts from the level it gives.
+//    Order with squeeze: an answer arrives as Claude wrote it. A step the person makes on Report ↔ Interpret or
+//    Familiarity before the pass has said where the answer stands waits for the look (lookPending) and counts from the
+//    level it gives.
 // A lens turned off (THIMBLE_PROMPTS=lens-explain:off) is neither asked nor merged.
 //
 // Where its output goes:
@@ -502,8 +501,8 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
       // the pass over the new turn and a digest of the state: the frame and the lenses' fragments are the system
       // prompt (cached), the turn is the message
       const tmpl = await promptText($, 'observer-turn')
-      // a long answer arrives squeezed: the person reads the squeezed text, which the pass reads beside the original
-      // when that rewrite (which starts as the turn ends, beside this look) is back by now
+      // an answer the person squeezed already (a look read again later): the pass reads the version they read beside
+      // the original
       const atRow = again ? again.row : await answerRow($)
       const before = atRow ? await messageRecord($, atRow) : null
       const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
