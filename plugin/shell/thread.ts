@@ -10,10 +10,14 @@
 //   - Its type is registered once, on the first question (`thimble:thread`: a short system prompt, Bash, Read,
 //     Grep and Glob, no CLAUDE.md), and is offered to no model except while a thread is asked or the panel is open,
 //     since Claude Code checks the offer again when it resumes an agent. So main's agent listing does not name it.
-//   - A later question resumes the same agent ($.session.send), so a thread keeps its context across questions. Its
-//     answers show in the panel, under what it is on, never in the main column.
-//   - Its end never reaches main: Claude Code's hand-back of it (auto mode) and its task notifications are dropped as
-//     they enter main's queue.
+//   - Its end never reaches main. It runs as a fork of main (subagentType 'fork', with the thread's instructions and the
+//     question as its directive): a fork ends quietly, with no hand-back and no task notification in main's queue, so
+//     main's transcript shows no row for it. Where no fork starts, the thread's own type runs, and its hand-back (auto
+//     mode) and task notifications are dropped as they enter main's queue (Claude Code then shows a row saying so).
+//   - A later question asked while the agent still works joins its run ($.session.send). Once the agent has ended, a
+//     later question starts a new fork, told the thread's earlier turns: Claude Code resumes an ended agent in the
+//     background, and the resumed run's end reaches main as a task notification. The answers show in the panel, under
+//     what the thread is on, never in the main column.
 //   - It is written to <root>/thimble/threads/<session>/<id>.json at each turn, which the browser reads:
 //     {id, session, scope, title (its first question, short), at, turns: [{role: 'person' | 'claude', text, at}], ...}
 //     with the agent, the status, the card's title, the questions as asked, and its anchor (what to open to show it
@@ -29,7 +33,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { recount } from './shell'
 import { promptText } from '../prompts/prompts'
 import { claimAgent } from '../telemetry/telemetry'
-import { aboutOf, firstMessage, nameOf, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
+import { aboutOf, firstMessage, forkDirective, nameOf, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
 import { sessionKey } from '../hooks/conversation'
 
 type Engine = EngineInterface
@@ -160,7 +164,7 @@ function display(t: Thread, turns: { role: 'person' | 'claude'; text: string; ca
   let a = 0
   let first = -1
   const now = new Date().toISOString()
-  const matches = (x: { text: string }, ask: Thread['asks'][number]) => x.text === ask.sent || x.text.startsWith(ask.text.trim())
+  const matches = (x: { text: string }, ask: Thread['asks'][number]) => x.text === ask.sent || (!!ask.sent && x.text.endsWith(ask.sent)) || x.text.startsWith(ask.text.trim())
   const fresh: Turn[] = turns.map((x, i) => {
     const at = t.turns[i]?.at ?? now
     if (x.role !== 'person') {
@@ -247,18 +251,23 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
     const last = t.asks.at(-1)?.scope ?? null
     let sent = ''
     let delivered = false
-    if (t.agentId) {
+    if (t.agentId && await stillWorking($, t)) {
       sent = nextMessage({ text, scope, last })
       const r = await $.session.send({ to: { agentId: t.agentId }, text: sent }).catch((err: unknown) => ({ isDelivered: false, reason: String((err as Error)?.message || err) }))
       delivered = !!(r as Any)?.isDelivered
     }
     if (!delivered) {
-      // a first question, or a thread whose agent is gone: a new agent, told the earlier turns
+      // a first question, or a thread whose agent has ended: a new agent, told the earlier turns
       const earlier = t.turns.map(x => `${x.role === 'person' ? 'Q' : 'A'}: ${x.text}`).join('\n').slice(-EARLIER_CHARS)
       const refs = ask.refs ?? t.asks.at(-1)?.refs ?? (scope.mark?.ref ? [scope.mark.ref] : [])
       const selFile = scope.object || scope.pane ? `${dirOf(t)}/sel/${t.id}.json` : ''
       sent = firstMessage({ text, scope, card: ask.card || t.info?.card || null, refs, root, selFile, about: ask.about || t.info?.about || '' }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : '')
-      const r = await $.agent.spawn({ subagentType: TYPE, prompt: sent, description: `thread · ${aboutOf(scope)}`.slice(0, 60), cwd: root } as Any).catch((err: unknown) => ({ deny: String((err as Error)?.message || err) }))
+      const description = `thread · ${aboutOf(scope)}`.slice(0, 60)
+      const spawn = (subagentType: string, prompt: string) => $.agent.spawn({ subagentType, prompt, description, cwd: root } as Any).catch((err: unknown) => ({ deny: String((err as Error)?.message || err) }))
+      // a fork first (it ends quietly: nothing of it reaches main's transcript), else the thread's own type
+      const guide = await promptText($, 'thread').catch(() => null)
+      let r = await spawn('fork', forkDirective(guide?.text ?? '', sent))
+      if ((r as Any)?.deny || !(r as Any)?.model) r = await spawn(TYPE, sent)
       if ((r as Any)?.deny || !(r as Any)?.model) {
         t = { ...t, status: 'failed', error: String((r as Any)?.deny || 'no agent started').slice(0, 300) }
         await keep($, t)
@@ -267,7 +276,7 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
       if (t.agentId) byAgent.delete(t.agentId)
       // the engine names the agent it started; failing that, the newest agent of the thread's type
       let id = (r as Any).agentId ? String((r as Any).agentId) : null
-      if (!id) id = (await $.agent.list().catch(() => [] as Any[])).filter((x: Any) => x.type === TYPE && !byAgent.has(x.id)).at(-1)?.id ?? null
+      if (!id) id = (await $.agent.list().catch(() => [] as Any[])).filter((x: Any) => (x.type === TYPE || x.description === description) && !byAgent.has(x.id)).at(-1)?.id ?? null
       t = { ...t, agentId: id }
       // its turns are filed under the thread in the session's events
       if (id) claimAgent(id, 'thread', promptId)
@@ -280,6 +289,13 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
   } finally {
     inFlight--
   }
+}
+
+/** Whether the thread's agent is still working, so a message joins its run. An ended agent is not resumed: its resumed
+ *  run would end with a task notification in main's queue. */
+async function stillWorking($: Engine, t: Thread): Promise<boolean> {
+  const a = ((await $.agent.list().catch(() => [])) as Any[]).find(x => x?.id === t.agentId)
+  return a ? ['pending', 'running', 'waiting'].includes(String(a.status)) : t.status === 'running'
 }
 
 /** The thread's last answer, for main: appended as a row Claude reads with the next prompt (no turn of its own). */

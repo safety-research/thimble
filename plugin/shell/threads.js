@@ -104,6 +104,15 @@ export function nextMessage({ text, scope = {}, last = null }) {
 const oneLine = s => String(s).replace(/\s+/g, ' ').trim().slice(0, 160)
 const textOf = c => (typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b && b.type === 'text').map(b => b.text).join('\n') : '')
 const HANDBACK = /^(SubagentHandback|SendUserMessage)$/
+// a fork's opening, as Claude Code writes it into the fork's transcript: the call that started it, then its boilerplate
+// and the directive it was given
+const FORK = /<fork-boilerplate>[\s\S]*?<\/fork-boilerplate>\s*(?:Your directive:\s*)?/
+
+/** What a thread's fork is told (thread.ts): the thread's instructions, how it stands beside the conversation, then
+ *  the question as `firstMessage` wrote it. */
+export function forkDirective(guide, sent) {
+  return [String(guide || '').trim(), 'You answer in a side thread beside the conversation above, which is context. The analyst reads your last message in the side panel, and main never sees it. Answer with `thimble` (Bash), Read, Grep and Glob, change no file, and do not restate the question.', String(sent || '')].filter(Boolean).join('\n\n')
+}
 // Claude Code's wrapper of a message sent to an agent while it works, and its reminders
 const REMINDER = /<system-reminder>([\s\S]*?)<\/system-reminder>/g
 const QUEUED = /^[^\n]*sent a message while you were working:\s*([\s\S]*?)\s*(?:Address this before completing your current task\.)?\s*$/
@@ -131,9 +140,14 @@ export function turnsOf(messages) {
   const out = []
   for (const m of messages || []) {
     const c = m?.content
+    // a fork's opening call (the Agent call that started it) is no step of its
+    if (m?.role === 'assistant' && Array.isArray(c) && c.length && c.every(b => b?.type === 'tool_use' && b.name === 'Agent')) continue
     if (m?.role === 'user') {
       const blocks = Array.isArray(c) ? c : [{ type: 'text', text: String(c ?? '') }]
       const texts = blocks.filter(b => b && b.type === 'text').map(b => String(b.text || ''))
+      // a fork's directive (after its boilerplate) is the person's question, beside the result of its opening call
+      const directive = texts.map(x => (FORK.test(x) ? x.replace(FORK, '').trim() : '')).find(Boolean)
+      if (directive) { out.push({ role: 'person', text: directive }); continue }
       // a later question reaches a running agent wrapped as a message "sent while you were working", in or out of a
       // reminder, and may ride with the tool results of the step it interrupts: its words are the person's turn
       const queued = texts.flatMap(x => [...[...x.matchAll(REMINDER)].map(y => y[1].trim()), x.replace(REMINDER, '').trim()])

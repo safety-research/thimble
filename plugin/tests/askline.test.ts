@@ -98,7 +98,7 @@ test('a question typed faster than the prompt takes its answers stays one questi
   await clock.settle()
   expect(String((r as Any).drop)).toContain("asked the card's thread about Row 2")
   expect(w.spawns.length).toBe(1)
-  expect(String(w.spawns[0].prompt)).toMatch(/^why\n\nAbout: the part "Row 2"/)
+  expect(String(w.spawns[0].prompt)).toMatch(/\n\nwhy\n\nAbout: the part "Row 2"/)
   expect(w.submitted).not.toContain('y')
   expect((await askLine($)).value).toBe('')
 })
@@ -122,7 +122,7 @@ test('a field with the ring is never drawn afresh: a letter that came through th
   await ui.input({ key: first, text: 'wy', kind: 'change' })
   await ui.input({ key: first, text: 'wy' })
   await clock.settle()
-  expect(String(w.spawns[0]?.prompt)).toMatch(/^why\n\nAbout/)
+  expect(String(w.spawns[0]?.prompt)).toMatch(/\n\nwhy\n\nAbout/)
 })
 
 test('a question sent or let go gives the keys back to the card, even when the drawing the terminal has still puts the ring on the ask line', async ($, on) => {

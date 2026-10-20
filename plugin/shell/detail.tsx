@@ -91,8 +91,9 @@ const kept = new Map<string, string>()
 const seeded = new Set<string>()
 const askedRegion = new Map<string, string>()
 // the key that acted last: what it changed, so a letter typed straight after it gives it back (it began a word); a
-// card's own key keeps the card's state and part from before it (`card`)
-let lastKey: { key: string; at: number; undo: Record<string, unknown> | null; card?: Undo; pane?: PaneView } | null = null
+// card's own key keeps the card's state and part from before it (`card`), and a key of the detail's program the card
+// as it was opened (`sel`: a key such as h shows another version)
+let lastKey: { key: string; at: number; undo: Record<string, unknown> | null; card?: Undo; pane?: PaneView; sel?: Detail } | null = null
 // a key of the panel's own (t, m) waiting out WORD_MS before it acts
 let pendingHost: { key: string; at: number; cancelled: boolean } | null = null
 const latestSeen = new Map<string, number>()
@@ -947,6 +948,13 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
         if (back.pane) { if (back.undo) await setPaneState($, back.pane.pane, back.pane.args, back.undo, 'terminal'); return }
         if (!sel) return
         if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
+        // the version the key showed (h on "how…"): the card as it was, with its part, so the question is about it
+        if (back.sel) {
+          const now = ((await $.state.get(SEL)).value as Detail | null)
+          if (now && !now.cite && !now.cites && now.id === back.sel.id && now.root === back.sel.root && now.v !== back.sel.v) {
+            await selectSoon($, { ...now, v: back.sel.v, ex: back.sel.ex, all: back.sel.all, region: back.sel.region })
+          }
+        }
         // a card's own key (a page turned on n) goes back too: its state, its part, and the page's selection
         if (back.card) {
           const now = ((await $.state.get(SEL)).value as Detail | null) ?? sel
@@ -982,7 +990,8 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
     return { box: none, work: async () => {
       const before = { ...(await paneState($, prog.name, prog.args)) }
       const took = pane ? await paneFire($, pane.pane, pane.args, ev) : await detailFire($, ev)
-      lastKey = took ? { key: k, at: now, undo: /^[a-z]$/.test(k) ? before : null, ...(pane ? { pane } : {}) } : null
+      const letter = /^[a-z]$/.test(k)
+      lastKey = took ? { key: k, at: now, undo: letter ? before : null, ...(pane ? { pane } : {}), ...(letter && !pane && sel ? { sel } : {}) } : null
       regrab($)
     } }
   }

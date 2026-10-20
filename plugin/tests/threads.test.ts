@@ -1,7 +1,8 @@
 // The side panel as a thread (shell/side.ts, shell/detail.tsx, shell/conversation.ts, shell/thread.ts): whatever opens
 // beside the conversation shows the thing at the top, the thread's conversation under it and an input bar like the
 // prompt at the bottom. A question's answer shows in that conversation, never in place of the thing and never in main;
-// a later question resumes the same agent; a citation in an answer opens over the thing and esc goes back; the bar's
+// a later question joins the run of an agent still working, else starts a new fork told the earlier turns; a citation
+// in an answer opens over the thing and esc goes back; the bar's
 // `t N threads` lists the threads and opening one shows its panel again with its conversation; m sends a thread's last
 // answer to main. `claude plugin test plugin`. The drawing and `thimble resolve` are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
@@ -68,10 +69,16 @@ function world(on: any, open: Any = { isPlaced: true }) {
     transcripts.set(id, [{ role: 'user', content: [{ type: 'text', text: '<system-reminder>env</system-reminder>' }, { type: 'text', text: e.prompt }] }])
     return { model: 'claude-test', agentId: id } as never
   })
-  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble:thread', description: 'thread', status: 'running' })) }))
+  // an agent whose turn ended is completed; a message sent to it while it works joins its run
+  const ended = new Set<string>()
+  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble:thread', description: 'thread', status: ended.has(`agent-${i + 1}`) ? 'completed' : 'running' })) }))
   const sent: Any[] = []
-  // a resumed agent's transcript, as Claude Code gives it, begins where it was resumed
-  on('session.send', (_$: unknown, e: Any) => { sent.push(e); transcripts.set(typeof e.to === 'string' ? e.to : e.to?.agentId, [{ role: 'user', content: e.text }]); return { isDelivered: true } })
+  on('session.send', (_$: unknown, e: Any) => {
+    sent.push(e)
+    const id = typeof e.to === 'string' ? e.to : e.to?.agentId
+    transcripts.get(id)?.push({ role: 'user', content: [{ type: 'text', text: `The coordinator sent a message while you were working:\n${e.text}\n\nAddress this before completing your current task.` }] })
+    return { isDelivered: true }
+  })
   on('session.messages', (_$: unknown, e: Any) => ({ value: transcripts.get(e.agentId) ?? [] }))
   const toasts: string[] = []
   on('ui.toast', (_$: unknown, e: { text?: string }) => { toasts.push(String(e.text ?? '')); return { value: undefined } })
@@ -87,6 +94,7 @@ function world(on: any, open: Any = { isPlaced: true }) {
     transcripts.get(agentId)!.push({ role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'thimble rows "q1#day=2026-06-18@n"' } }] })
     transcripts.get(agentId)!.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'rows' }] })
     transcripts.get(agentId)!.push({ role: 'assistant', content: [{ type: 'text', text }] })
+    ended.add(agentId)
     await $.turn.complete({ turnId: `x-${Math.random()}`, agentId, answer: text, durationMs: 5, reason: 'answer', isAborted: false } as never)
     await clock.settle()
   }
@@ -140,7 +148,7 @@ async function markedTurn($: any, clock: { settle: () => Promise<void> }) {
   await clock.settle()
 }
 
-test("a card's thread with two questions: each answer shows in the panel's conversation under the card, the second resumes the same agent, and main sees nothing", async ($, on) => {
+test("a card's thread with three questions: each answer shows in the panel's conversation under the card; a question after an answer starts a new fork told the earlier turns, one asked while it works joins its run, and main sees nothing", async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
@@ -150,7 +158,7 @@ test("a card's thread with two questions: each answer shows in the panel's conve
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"placeholder":"Ask about Jun 18…"')
   await ask($, clock, 'why so many links?')
   expect(w.spawns.length).toBe(1)
-  expect(w.spawns[0].prompt).toMatch(/^why so many links\?\n\nAbout: the part "Jun 18" \(day-2026-06-18\) of the card "Saves per day"/)
+  expect(w.spawns[0].prompt).toMatch(/\n\nwhy so many links\?\n\nAbout: the part "Jun 18" \(day-2026-06-18\) of the card "Saves per day"/)
   // while it works: the question, and that it is starting
   const working = await pane($, clock)
   expect(working).toContain('main/Saves per day')
@@ -164,18 +172,32 @@ test("a card's thread with two questions: each answer shows in the panel's conve
   expect(one).toContain('● Links peaked that day: 2,994 of the saves.')
   // the card stays at the top: the answer never takes its place
   expect(one).toContain('Jun 17 ▆')
-  // a second question resumes the same agent; both questions and answers show, in order
+  // a second question, after the agent ended: a new fork, told the earlier turns (an ended agent resumed would end
+  // with a task notification in main's queue); both questions and answers show, in order
   await ask($, clock, 'and the day before?')
-  expect(w.spawns.length).toBe(1)
-  expect(JSON.stringify(w.sent.at(-1))).toContain('agent-1')
-  expect(w.sent.at(-1).text).toContain('and the day before?')
-  await w.answer($, clock, 'agent-1', 'The day before had [870](q3#n).')
+  expect(w.spawns.length).toBe(2)
+  expect(w.sent.length).toBe(0)
+  expect(w.spawns[1].subagent_type).toBe('fork')
+  expect(w.spawns[1].prompt).toContain('\n\nand the day before?\n\nAbout: the part "Jun 18"')
+  expect(w.spawns[1].prompt).toContain('Earlier in this thread:\nQ: why so many links?\nA: Links peaked that day: [2,994](q2#n) of the saves.')
+  await w.answer($, clock, 'agent-2', 'The day before had [870](q3#n).')
   const two = await pane($, clock)
-  // (the resumed agent's transcript begins at the second question: the first exchange is kept as the thread had it)
+  // (the new agent's transcript begins at the second question: the first exchange is kept as the thread had it)
   expect(two).toContain('❯ why so many links?')
   expect(two).toContain('Links peaked that day')
   expect(two.indexOf('why so many links?')).toBeLessThan(two.indexOf('and the day before?'))
   expect(two.indexOf('Links peaked that day')).toBeLessThan(two.indexOf('The day before had 870.'))
+  // a third question while the agent still works on it: the message joins its run, and no agent starts
+  await ask($, clock, 'and the week?')
+  await ask($, clock, 'only weekdays?')
+  expect(w.spawns.length).toBe(3)
+  expect(JSON.stringify(w.sent.at(-1))).toContain('agent-3')
+  expect(w.sent.at(-1).text).toContain('only weekdays?')
+  await w.answer($, clock, 'agent-3', 'Weekdays had [5,100](q4#n).')
+  const three = await pane($, clock)
+  expect(three.indexOf('The day before had 870.')).toBeLessThan(three.indexOf('❯ and the week?'))
+  expect(three.indexOf('❯ and the week?')).toBeLessThan(three.indexOf('❯ only weekdays?'))
+  expect(three).toContain('Weekdays had 5,100.')
   // main sees nothing of it: no prompt, no row, no view of the agent
   expect(w.submitted.length).toBe(0)
   expect(w.views.length).toBe(0)
@@ -261,7 +283,8 @@ test('t lists the threads in the side panel (the bar says t N threads); the sele
   // (the question is sent; the keys go back to the citation)
   const ui2 = await mounted($)
   await ui2.input({ key: await askKeyOf($), text: 'the total?' })
-  await w.answer($, clock, 'agent-2', 'About 3,000.')
+  // (agent-2 had ended: a new fork answers)
+  await w.answer($, clock, 'agent-3', 'About 3,000.')
   await pane($, clock)
   // t alone: the list, over the citation, once a moment has passed
   expect(await press($, clock, edit('t'))).toEqual({ text: '', cursor: 0 })
