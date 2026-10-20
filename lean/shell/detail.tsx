@@ -53,6 +53,9 @@ const SEL = { plugin: 'thimble', key: 'sel' } as const
 const ROWS = { plugin: 'thimble', key: 'rows' } as const
 const WHERE = { plugin: 'thimble', key: 'where' } as const
 const THREAD = { plugin: 'thimble', key: 'thread' } as const
+// the ask line drawn again (a letter joined the question, the ring came or went): the pane and the bar read it, so a
+// letter redraws them alone, never every row of the transcript
+const ASKLINE = { plugin: 'thimble', key: 'askline' } as const
 const IND = { dark: '#9a93ff', light: '#4f46e5' }
 const cut = (s: string, k: number) => ([...s].length <= k ? s : [...s].slice(0, Math.max(0, k - 1)).join('') + '…')
 
@@ -115,10 +118,25 @@ export function detailColumns(cols: number): number {
 
 const GUTTER = (y: number) => `g|pane|${y}`
 // the ask line's key: a new one each time text is put in it from outside (a letter typed before it had the keys), so
-// the field is drawn afresh holding that text, and the ring waits for that drawing
+// the field is drawn afresh holding that text (a field already drawn keeps what it holds), and the ring waits for
+// that drawing
 let askGen = 0
 const askKey = () => `ask-${askGen}`
 const isAsk = (k: string | null) => !!k && k.startsWith('ask-')
+// The ring's move to the ask line, and the field that has it. The letters of a question come through the prompt until
+// the ring lands on the field; each draws the field afresh holding the question. One move is on its way at a time,
+// started by a letter, never cancelled by the next: a terminal busy drawing may hand the ring to a field it drew a
+// moment before, which the ring is sent on from to the field drawn last; a move that did not land (the prompt still
+// showed letters, so the pane could not take the keys) is started again by the next letter. A field with the ring is
+// never drawn afresh, since the letters typed into it meanwhile would be lost with it
+let moveGen = 0
+let moving = false
+let landed: string | null = null
+const fields = new Map<string, { seen: string }>()
+let askDrawn = 0
+function askRedraw($: Engine): void {
+  void $.state.set(ASKLINE, ++askDrawn).catch(() => undefined)
+}
 
 // ------------------------------------------------------------------------------------------------ opening
 
@@ -142,6 +160,8 @@ async function closed($: Engine): Promise<void> {
   ringAt = null
   ringY = -1
   draft = ''
+  landed = null
+  moveGen++
   await popFocus($, 'detail')
   if (viewing) { viewing = null; await $.ui.view({}).catch(() => undefined) }
   // the labels the person checked are counted again, their cards drawn again, and Claude hears of the checks
@@ -184,23 +204,43 @@ function selectedGutter(): string | null {
 
 /** The ask line takes the keys, holding what the person has typed so far. The ring belongs to the ask line from this
  *  moment, before the focus lands: a drawing in between must not put it back on the card, or the next letters go to
- *  the prompt and the field is drawn again without them. Letters that come faster than the focus join the question,
- *  and the last of them moves the ring onto the field drawn last. */
+ *  the prompt and the field is drawn again without them. A letter that came through the prompt draws the field afresh
+ *  holding the whole question (the pane and the bar alone draw again, never the transcript), unless the field has the
+ *  ring: then the letter joins the question as it stands, and the field keeps what is typed into it. */
 function toAsk($: Engine, text: string): void {
   draft = text
-  askGen++
-  ringAt = askKey()
-  $.ui.invalidate('ui.render')
-  const gen = askGen
+  if (!(isAsk(ringAt) && landed === askKey())) { askGen++; ringAt = askKey(); landed = null }
+  askRedraw($)
+  moveSoon($)
+}
+
+/** The ring to the ask line's field: the pane takes the keys and the field drawn last takes the ring (see moveGen). */
+function moveSoon($: Engine): void {
+  if (moving || landed === askKey()) return
+  moving = true
+  const at = moveGen
   $.clock.after(0, () => {
     void (async () => {
-      if (!isOpen || gen !== askGen) return
-      await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
-      // a letter that came meanwhile drew another field: its own call moves the ring there
-      if (gen !== askGen || !isAsk(ringAt)) return
-      await $.ui.focus({ requestId: PANE, key: askKey() }).catch(() => undefined)
+      try {
+        if (at !== moveGen || !isOpen || !isAsk(ringAt) || landed === askKey()) return
+        await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
+        if (at !== moveGen || !isOpen || !isAsk(ringAt) || landed === askKey()) return
+        const r = await $.ui.focus({ requestId: PANE, key: askKey() }).catch(() => ({ deny: 'failed' }))
+        if (!(r as Any)?.deny && at === moveGen && isAsk(ringAt)) landed = askKey()
+      } finally {
+        moving = false
+      }
     })()
   })
+}
+
+/** Whether the prompt's text is letters the question took (in their order, among its last letters): what a busy
+ *  terminal still shows of keys whose answers it has not applied yet. */
+function takenTail(question: string, shown: string): boolean {
+  const want = Array.from(shown)
+  let i = 0
+  for (const ch of Array.from(question).slice(-(want.length + 16))) if (ch === want[i]) i++
+  return i === want.length
 }
 
 /** What a field of the ask line reports as typed: the field drawn last holds the whole question. One drawn before it
@@ -209,7 +249,8 @@ function askTyped($: Engine, key: string, base: { seen: string }, v: string): vo
   const current = key === askKey()
   const m = askMerge(draft, base.seen, v, current)
   base.seen = m.seen
-  if (current) draft = m.draft
+  // the field the person types into has the ring
+  if (current) { draft = m.draft; landed = key }
   else if (m.added) toAsk($, m.draft)
 }
 
@@ -446,6 +487,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   noteDock(e)
   viewing = e.props?.view?.agentId ?? null
   const sel = (await $.state.get(SEL)).value as Detail | null
+  await $.state.get(ASKLINE)
   if (!sel) return Text({ dimColor: true, children: 'No card is open. A card Claude saves shows under its reply; open it from there.' })
   const C = Math.max(40, (e.props.bodyColumns ?? 100) - 1)
   const R = Math.max(12, e.props.scroll?.bodyRows ?? 40)
@@ -557,14 +599,19 @@ function askLine($: Engine, els: Any, sel: Detail, part: Any, ind: string): Any 
   const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : ''
   const what = about ? cut(about, 40) : 'this card'
   const key = askKey()
-  const base = { seen: draft }
+  // what the field holds, as it was first drawn and then reported: a field with the ring keeps its own text when drawn
+  // again, so a letter the question took through the prompt meanwhile is not in it
+  let base = fields.get(key)
+  if (!base) { base = { seen: draft }; fields.set(key, base); if (fields.size > 8) fields.delete(fields.keys().next().value!) }
   return Input({
     // what will happen, in plain words: the question is about this part, and its answer shows here, under the card
     key, placeholder: `ask about ${what}${what.endsWith('…') ? '' : '…'} · the answer shows here`, value: draft, submitLabel: 'ask',
     // while a question is being typed, the field takes the ring when the pane takes the keyboard
     ...(isAsk(ringAt) ? { autoFocus: true } : {}),
     onInput: (v: string) => askTyped($, key, base, v),
-    onSubmit: (v: string) => { void askHere($, v) },
+    // the question as the field and the prompt gave it: a letter that reached it through the prompt as the ring landed
+    // is in it, though the field never showed it
+    onSubmit: (v: string) => { askTyped($, key, base, v); void askHere($, key === askKey() ? draft : v) },
   })
 }
 
@@ -578,6 +625,8 @@ async function askHere($: Engine, text: string): Promise<void> {
   draft = ''
   askGen++
   ringAt = null
+  landed = null
+  moveGen++
   $.ui.invalidate('ui.render')
   regrab($)
 }
@@ -642,6 +691,7 @@ export async function detailKeys($: Engine): Promise<string | null> {
   if (!isOpen) return null
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return 'esc back'
+  await $.state.get(ASKLINE)
   // typing a question in the ask line: its own keys
   if (isAsk(ringAt) || draft) return `↵ ask${sel.ask ? ` about ${cut(String(sel.ask.label), 40)}` : ''} · esc back to the card`
   // the program run now (it follows the card's drawing and the detail's state as they change)
@@ -706,17 +756,27 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
   if (!isOpen) return { box: null }
   // a paste (or keys typed faster than the terminal sends them one by one) with no key: a question too
   const paste = !e.key && !!e.inputText
-  if ((!e.key && !paste) || e.key?.ctrl || e.key?.meta || e.text !== '') return { box: null }
+  // a question begun, and the prompt still showing letters it took: when the terminal is busy, the prompt takes the
+  // answers to keys later than the keys come, so a key can come on a prompt that still holds letters of the question.
+  // Those letters and this key are the question's (the answer empties the prompt), never the start of a prompt for main
+  const leftover = e.text !== '' && (isAsk(ringAt) || !!draft) && takenTail(draft, e.text)
+  if ((!e.key && !paste) || e.key?.ctrl || e.key?.meta || (e.text !== '' && !leftover)) return { box: null }
   const none = { text: '', cursor: 0 }
-  if (paste) { const text = draft + String(e.inputText); return { box: none, work: () => toAsk($, text) } }
+  // (the question as it stands when the key's work runs: the work of the keys before it has run by then)
+  if (paste) { const more = String(e.inputText); return { box: none, work: () => toAsk($, draft + more) } }
   const k = e.key!.key
   // the session clock (a test moves it), so a key and the letter after it are timed alike everywhere
   const now = Number(await $.clock.now())
   const typed = String(e.inputText || '')
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return { box: null }
-  // a question already begun: the letter joins it
-  if (isAsk(ringAt) || (draft && typed)) { const text = draft + typed; return { box: none, work: () => toAsk($, text) } }
+  // a question already begun: the letter joins it (⌫ takes its last letter back, while the ask line has no keys)
+  if (isAsk(ringAt) || (draft && typed) || leftover) {
+    if (k === 'backspace' && !typed) return { box: none, work: () => toAsk($, draft.slice(0, -1)) }
+    // ↵ before the ring reached the field (the letters came through the prompt): the question is asked as it stands
+    if ((k === 'return' || k === 'enter') && !typed) return { box: none, work: () => { moveGen++; void askHere($, draft) } }
+    return { box: none, work: () => toAsk($, draft + typed) }
+  }
   // a letter typed straight after a key that acted: that key began a word, and what it changed goes back
   const back = lastKey
   if (back && beganWord(back.key, now - back.at, typed)) {
@@ -786,9 +846,28 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       if (!person || !drawn) {
         // while a question is being typed, a drawing from before it (its autoFocus on the card) never takes the ring
         // from the ask line
-        if (!person && isAsk(ringAt) && el.startsWith('g|')) return next({ ...e, element: askKey() })
+        // nor does a field drawn before the one the question is in now (a busy terminal hands the ring to the drawing it
+        // has): the ring goes to the field drawn last, and the letters typed there are kept
+        if (!person && isAsk(ringAt) && (el.startsWith('g|') || (isAsk(el) && el !== askKey()))) {
+          const r = await next({ ...e, element: askKey() })
+          if (!r.deny) landed = askKey()
+          return r
+        }
+        // and with no question begun (esc let one go), a drawing from before (its autoFocus still on the ask line) never
+        // takes the ring there: the keys are the card's, on the selected part (or a part drawn, while the window comes
+        // back to it)
+        if (!person && drawn && isAsk(el) && !isAsk(ringAt) && !draft) {
+          const to = selectedGutter() ?? (drawn.gutter.size ? GUTTER(Math.min(...drawn.gutter.keys())) : null)
+          if (to) {
+            const r = await next({ ...e, element: to })
+            if (!r.deny) { ringAt = to; ringY = Number(to.split('|')[2]) }
+            return r
+          }
+        }
+        const was = isAsk(ringAt)
         const r = await next(e)
-        if (!r.deny) { ringAt = el || null; if (el.startsWith('g|')) ringY = Number(el.split('|')[2]) }
+        if (!r.deny) { ringAt = el || null; landed = el === askKey() ? el : null; if (el.startsWith('g|')) ringY = Number(el.split('|')[2]) }
+        if (isAsk(ringAt) !== was) askRedraw($)
         return r
       }
       const g = /^g\|pane\|(\d+)$/.exec(el)
@@ -803,7 +882,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       const rows = [...drawn.gutter.keys()].sort((a, b) => a - b)
       const wrap = onRing && !g && !part ? (ringY === rows[rows.length - 1] ? 1 : ringY === rows[0] ? -1 : 0) : 0
       // the ask line, a version or the close mark, reached any other way: the ring goes there and the selection stays
-      if (!g && !part && !wrap) { const r = await next(e); if (!r.deny) ringAt = el || null; return r }
+      if (!g && !part && !wrap) { const was = isAsk(ringAt); const r = await next(e); if (!r.deny) { ringAt = el || null; landed = el === askKey() ? el : null } if (isAsk(ringAt) !== was) askRedraw($); return r }
       const y = g || m ? Number((g ?? m)![1]) : ringY
       const cur = drawn.selected ?? sel.region ?? null
       const dir = wrap || (ringY < 0 ? 1 : y < ringY ? -1 : 1)
@@ -820,6 +899,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       if (!id) return next(e)
       if (id !== cur) await detailFire($, { type: 'focus', region: id })
       const top = bodyTop(drawn.parts.find((x: Any) => x.id === id))
+      landed = null
       if (top && drawn.gutter.has(top.y)) {
         ringAt = GUTTER(top.y)
         ringY = top.y
@@ -855,6 +935,10 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       draft = ''
       askGen++
       ringAt = null
+      landed = null
+      moveGen++
+      win.by = 0
+      win.follow = 'part'
       $.ui.invalidate('ui.render')
       regrab($)
       return { value: undefined } as Any
@@ -879,6 +963,15 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     if (!(await paneShown($))) { await closed($); return next(e) }
     const sel = (await $.state.get(SEL)).value as Sel | null
     if (!sel || sel.cite || sel.cites) return next(e)
+    // ↵ on a question typed through the prompt (its letters came before the ring reached the ask line): the prompt may
+    // still show a few of its letters, the answers to their keys not applied yet; the question is the one typed, whole
+    if (draft.trim() && takenTail(draft, String(e.text))) {
+      const q = draft
+      moveGen++
+      await askHere($, q)
+      $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
+      return { drop: `asked the card's thread about ${cut(lastAbout, 40)}` }
+    }
     const asked = await askCard($, e.text)
     if (asked === NO_CARD) return next(e)
     if (asked) return { drop: `${asked}. Your words are back in the prompt; esc closes the card, and the prompt then goes to Claude here.` }

@@ -154,6 +154,9 @@ declare module 'claude-code' {
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
+      /** the detail's ask line drawn again (shell/detail.tsx): a count the pane and the bar read, so a letter of a
+       *  question redraws them alone */
+      askline: number
       /** the turns whose failed look the observer runs again now (observer.ts readAgain): the Claims pane says so */
       reread: number[]
       /** this session's claims (CONTRACT 7), as held for the drawing; thimble/claims/<session>.json on disk */
