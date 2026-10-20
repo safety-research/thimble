@@ -13,6 +13,7 @@ NAMES: list[str] = [
     "settings_api",
     "comments",
     "history",
+    "exports",
 ]
 
 
