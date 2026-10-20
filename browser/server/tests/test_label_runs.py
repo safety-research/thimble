@@ -155,6 +155,9 @@ def test_the_label_editors_run_asks_first_with_the_same_ask(big, folder, monkeyp
     from thimble_browser.app import build
 
     monkeypatch.setattr(run, "_call", answer_all("no"))
+    heard = []
+    monkeypatch.setattr(store, "notify", lambda ws, cid, what, rows=True: heard.append(
+        {"type": "concepts", "concept": cid, "what": what, "rows": rows}))
     port = 21099
     app, auth, _ = build(port)
     with TestClient(app, base_url=f"http://127.0.0.1:{port}") as c:
@@ -172,6 +175,7 @@ def test_the_label_editors_run_asks_first_with_the_same_ask(big, folder, monkeyp
         assert ask["units"] == 2000 and ask["sample"] == asks.SAMPLE
         assert c.post(f"{base}/concepts/{cid}/apply", json={}).json()["ask"]["id"] == ask["id"]  # one ask, not two
         assert c.get(f"{base}/concepts/{cid}").json()["ask"]["id"] == ask["id"]  # the editor shows it when it opens
+        assert any(e == {"type": "concepts", "concept": cid, "what": "ask", "rows": False} for e in heard)
         assert c.post(f"{base}/label-runs/{ask['id']}", json={"choice": "sample"}).status_code == 200
         for _ in range(200):
             if not run.running(big, cid):
