@@ -10,6 +10,8 @@
 // It also sets THIMBLE_SESSION for the session's commands, so `thimble` files its records under the same session.
 import type { EngineInterface, Register } from 'claude-code'
 
+import { sessionKey } from './conversation'
+
 type Row = Record<string, unknown>
 type Engine = EngineInterface
 
@@ -53,7 +55,7 @@ export function grepHits(text: string): { files: string[]; lines: Record<string,
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
 
 async function bind($: Engine): Promise<void> {
-  const id = String(await $.session.id())
+  const id = await sessionKey($)
   if (id === S.session && S.file) return
   S.session = id
   S.part = 1

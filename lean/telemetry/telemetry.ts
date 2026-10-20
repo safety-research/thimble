@@ -16,6 +16,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { callLine, eventsFile, turnLine } from './events.mjs'
+import { sessionKey } from '../hooks/conversation'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +59,7 @@ export function claimAgent(agentId: string, feature: string, prompt?: string | n
 }
 
 async function where($: Engine): Promise<string> {
-  const id = String(await $.session.id())
+  const id = await sessionKey($)
   if (id !== T.session || !T.home) {
     T.session = id
     T.home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`

@@ -26,6 +26,7 @@ import { recount } from './shell'
 import { promptText } from '../prompts/prompts'
 import { claimAgent } from '../telemetry/telemetry'
 import { aboutOf, firstMessage, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
+import { sessionKey } from '../hooks/conversation'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,7 +80,7 @@ const restored = new Set<string>()
  *  reports must still be told from main's own, and the detail must still show each card's thread. */
 export async function restoreThreads($: Engine, root?: string): Promise<void> {
   const where = (root || String(await $.session.cwd())).replace(/\/+$/, '')
-  const session = String(await $.session.id())
+  const session = await sessionKey($)
   const dir = `${where}/thimble/threads/${session.replace(/[^A-Za-z0-9_-]/g, '-')}`
   if (restored.has(dir)) return
   restored.add(dir)
@@ -185,7 +186,7 @@ export async function askThread($: Engine, ask: Ask, o: { view?: boolean } = {})
     const bad = await ensureType($)
     if (bad) return { thread: null, problem: `the side thread could not start (${bad}); ask Claude here instead` }
     const now = new Date().toISOString()
-    const session = String(await $.session.id())
+    const session = await sessionKey($)
     const title = text.replace(/\s+/g, ' ').slice(0, 60)
     let t: Thread = threads.get(key) ?? { id: key, key, session, agentId: null, scope, title, card: ask.card?.title || '', root, status: 'asking', asks: [], turns: [], at: now }
     const last = t.asks.at(-1)?.scope ?? null

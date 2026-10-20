@@ -7,6 +7,9 @@
 // links bright and draws them as thin lines, and fades the rest. r replays the graph in the order the claims were made,
 // "turn 2 of 4" in the head, its newest claims marked with their links; any key stops it.
 //
+// Under the head, a line for each turn the observer could not read (its call failed: the store's gaps), with why; such
+// a turn is read again when the pane opens, and the line says so while it runs.
+//
 //   state: {hover: claim id | null, replay: {k} | null}
 //   events: focus and hover (the ring, the pointer) on a claim; press; r; tick (the replay's next frame, k.after);
 //           any key while a replay runs; ↑ ↓ ← → move the hover to the nearest claim that way (the browser; in the
@@ -16,6 +19,22 @@ import { LABEL, cardLines, cardSpot, compose, layout, namesOver, neighbours } fr
 
 /** The head's rows (its line and a blank row). */
 export const HEAD_ROWS = 2
+/** The turns not read that the head lists, one line each; more are counted on one line after them. */
+const GAP_LINES = 3
+
+const esc = t => String(t).replace(/([\\*{}[\]])/g, '\\$1')
+
+/** The lines for the turns the observer could not read: why, and whether it reads them again now. */
+export function gapLines(gaps) {
+  const list = (gaps || []).filter(g => g && g.turn != null).sort((a, b) => a.turn - b.turn)
+  const lines = list.slice(0, GAP_LINES).map(g => {
+    const why = esc(String(g.why || 'the observer could not read it').replace(/[.\s]+$/, ''))
+    if (g.reading) return `{dim:Turn ${g.turn} was not read (${why}). Reading it again…}`
+    return `{bad:Turn ${g.turn} was not read: ${why}.}${g.again ? ' {dim:Press c twice to read it again.}' : ''}`
+  })
+  if (list.length > GAP_LINES) lines.push(`{dim:${list.length - GAP_LINES} more turn${list.length - GAP_LINES === 1 ? '' : 's'} not read.}`)
+  return lines
+}
 /** A replay lasts about this long, at most a frame per `tick` ms. */
 export const REPLAY = { ms: 3200, tick: 80, hold: 600 }
 const every = n => Math.max(REPLAY.tick, Math.floor(REPLAY.ms / Math.max(1, n)))
@@ -63,14 +82,16 @@ export default {
   data(stores, args, size) {
     const store = stores.claims && Array.isArray(stores.claims.claims) ? stores.claims : { claims: [], clusters: [] }
     const view = viewOf({ clusters: [], ...store }, { fresh: fresh(args && args.row ? stores[`record:${args.row}`] : null) })
+    const reading = Array.isArray(store.reading) ? store.reading : []
+    const gaps = gapLines((view.gaps || []).map(g => ({ ...g, reading: reading.includes(g.turn) })))
     const w = Math.max(30, Math.floor(size.w || 100))
-    const h = Math.max(6, Math.floor(size.h || 30) - HEAD_ROWS)
+    const h = Math.max(6, Math.floor(size.h || 30) - HEAD_ROWS - gaps.length)
     const groups = view.groups.filter(g => g.id != null)
     const flat = view.flat.map(slim)
     const lay = layout(flat, groups, { w, h })
     const order = madeOrder(store, { order: (stores.index || []).map(x => String(x.row)) })
     return {
-      w, h, total: view.total, clusters: view.clusters, order, claims: flat,
+      w, h, total: view.total, clusters: view.clusters, order, claims: flat, gaps,
       groups: groups.map((g, i) => ({ id: g.id, name: g.name, i })),
       pos: Object.fromEntries([...lay.pos].map(([id, p]) => [id, p])), names: lay.names,
       fine: Object.fromEntries([...lay.fine].map(([id, p]) => [id, p])),
@@ -151,8 +172,10 @@ export function program(k, data) {
 
   // ---- the head: "Claims   31 · 5 clusters", or where a replay is
   const where = replay ? replayWhere(replay, order, claims) : `${data.total} · ${data.clusters} cluster${data.clusters === 1 ? '' : 's'}`
-  const head = k.text(`{c2:**Claims**}   {dim:${k.escape(where)}}`)
-  if (!data.total) return k.stack(head, k.text(' '), k.text('{dim:No claims yet.}'))
+  const head0 = k.text(`{c2:**Claims**}   {dim:${k.escape(where)}}`)
+  // the turns not read, under the head
+  const head = (data.gaps || []).length ? k.stack(head0, ...data.gaps.map(g => k.text(g))) : head0
+  if (!data.total) return k.stack(head, k.text(' '), k.text((data.gaps || []).length ? '{dim:No claims yet from the turns that were read.}' : '{dim:No claims yet.}'))
   if (!data.pos || !data.names) return k.stack(head, k.text(' '), k.text('{bad:The graph could not be laid out. Press esc, then c to open it again.}'))
 
   const { visible, newest } = replayShows(replay, order)

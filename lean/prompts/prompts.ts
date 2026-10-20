@@ -27,6 +27,7 @@ import type { EngineInterface } from 'claude-code'
 import { skillWithCards } from '../shell/cardfork.mjs'
 import { record } from '../telemetry/telemetry'
 import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, partsChoice, specOf } from './registry.mjs'
+import { sessionKey } from '../hooks/conversation'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,7 +78,7 @@ async function resolve($: Engine): Promise<void> {
 
 /** The registry for this session: resolved once, again when the session changes. */
 export async function registry($: Engine): Promise<{ idx: Any; active: Record<string, Active>; problems: string[] }> {
-  const id = String(await $.session.id())
+  const id = await sessionKey($)
   if (id !== R.session || !R.idx) {
     R.session = id
     R.leanLoaded = false

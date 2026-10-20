@@ -44,12 +44,12 @@ function saving(files: Record<string, string>, id = '01-saves', v = 1, root = RO
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Verb = (input: any) => unknown
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), drawing: unknown = DRAWING, env: Record<string, string> = {}) {
+function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), drawing: unknown = DRAWING, env: Record<string, string> = {}, session = 's-1') {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...env })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.cwd', () => ({ value: ROOT }))
-  on('session.id', () => ({ value: 's-1' }))
+  on('session.id', () => ({ value: session }))
   const files: Record<string, string> = { [FILE]: JSON.stringify(OBJECT), [`${ROOT}/thimble/objects/02-trace.json`]: JSON.stringify(TRACE) }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: e.path === `${ROOT}/thimble/objects` ? [{ name: '01-saves.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] : [] }))
@@ -694,7 +694,7 @@ test('a failure reads as plain words, never JSON; a refusal that needs nothing f
   expect(plainWhy('Traceback (most recent call last):\n  File "x"')).toBe('Traceback (most recent call last):')
 })
 
-test('the thimble line is the one bar: the verbs in words at its left, a lit one with its note; the non-zero counts at its right, coverage the share read; a changed count bright for a moment; a blank row above it only while Claude works', async ($, on) => {
+test('the thimble line is the one bar: the verbs in words at its left, a lit one with its note; the non-zero counts at its right, coverage the share read; a changed count bright for a moment; a blank row above it; its label plain', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
@@ -710,15 +710,112 @@ test('the thimble line is the one bar: the verbs in words at its left, a lit one
   expect(lit(await $.ui.render(HINT))).toBe(true)
   for (let i = 0; i < 40; i++) await clock.advance(50)
   expect(lit(await $.ui.render(HINT))).toBe(false)
-  // at rest no blank row stands above the bar (Claude Code's [-] stands beside its first row); while Claude works, one does
+  // a blank row stands between the bar and what is above it (Claude Code's spinner or its last status row), at rest as
+  // while Claude works
   const rest = await $.ui.render(BAND) as Any
-  expect(textOf(rest).startsWith('thimble')).toBe(true)
+  expect(textOf(rest).startsWith(' thimble')).toBe(true)
   const working = await $.ui.render({ ...(BAND as object), props: { ...(BAND as Any).props, isWorking: true } } as never) as Any
   expect(textOf(working).startsWith(' thimble')).toBe(true)
+  // the label is no link and no press: it wears no underline, the citations' look
+  let underlined = false
+  walk(rest, x => { if (x.type === 'Text' && x.props?.underline && textOf(x) === 'thimble') underlined = true })
+  expect(underlined).toBe(false)
   // inside a thread the bar's label names it, and its left side is that thread's keys
   await press($, clock, edit(']'))
   await press($, clock, edit('1'))
   const inThread = textOf(await $.ui.render(HINT))
   expect(inThread).toContain('thimble:main/6,543 saves')
   expect(inThread).toContain('type to ask · ↵ asks this thread · 0 back')
+})
+
+/** One more answer of Claude's: a turn (the person's prompt or not) whose last words are `text`, ended as `reason`. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function answerTurn($: any, clock: { settle: () => Promise<void> }, o: { turn: string; uuid: string; text: string; prompt?: string; reason?: string }) {
+  await $.turn.start({ turnId: o.turn, text: o.prompt ?? '' } as never)
+  if (o.prompt) await $.session.append({ door: 'prompt', uuid: `${o.turn.padEnd(8, 'p')}-0000-0000-0000-000000000000`, origin: { kind: 'composer' }, message: { type: 'user', role: 'user', content: [{ type: 'text', text: o.prompt }] } } as never)
+  await $.session.append({ door: 'response', uuid: o.uuid, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: o.text }] } } as never)
+  await $.turn.complete({ turnId: o.turn, answer: o.text, durationMs: 5, reason: o.reason ?? 'answer', isAborted: false } as never)
+  await clock.settle()
+}
+
+test('the keys act on the newest answer, never on an error; < and > pick another answer, which the bar names and the reply marks', async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  const LONG = 'bbbbbbbb-0000-0000-0000-000000000001'
+  const SHORT = 'cccccccc-0000-0000-0000-000000000002'
+  const ERR = 'dddddddd-0000-0000-0000-000000000003'
+  // the person's question, its long answer, then a subagent's short follow-up, then a turn that ended in an error
+  await answerTurn($, clock, { turn: 't1', uuid: LONG, text: MARKED, prompt: 'when?' })
+  await answerTurn($, clock, { turn: 't2', uuid: SHORT, text: 'The second reader is done too.' })
+  await answerTurn($, clock, { turn: 't3', uuid: ERR, text: 'API Error: 401 Authentication failed', reason: 'error' })
+  // the keys act on the short follow-up (the error answered nothing), and the bar says which of the two replies
+  let bar = await hintOf($)
+  expect(bar).toContain('v visualize')
+  expect(bar).toContain('< > reply 2 of 2')
+  expect(bar).not.toContain('cite & explain')
+  // < picks the long answer: its marks are the keys' now, and its first row shows ▸ in place of its bullet
+  expect(await press($, clock, edit('<'))).toEqual({ text: '', cursor: 0 })
+  bar = await hintOf($)
+  expect(bar).toContain('< > reply 1 of 2')
+  expect(bar).toContain('] cite & explain')
+  const long = textOf(await $.ui.render({ ...(MOUNT as object), requestId: LONG, props: { text: MARKED, isFirstOfReply: true } } as never))
+  expect(long.startsWith('▸')).toBe(true)
+  // > gives the keys back to the newest answer
+  await press($, clock, edit('>'))
+  expect(await hintOf($)).toContain('< > reply 2 of 2')
+  expect(await hintOf($)).not.toContain('cite & explain')
+})
+
+test('a conversation continued in a new session (moved to the background, --fork-session) finds its records: the cards under its replies, its answers and its claims', async ($, on) => {
+  const w = world(on, undefined, undefined, {}, 's-2')
+  const clock = mock.clock(on)
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  // Claude Code keeps the conversation's first launch in every continuation, and the new session carries its transcript
+  on('session.usage', () => ({ value: { startedAt: 1700000000000, context: {}, rateLimits: [] } }))
+  on('session.messages', () => ({ value: [{ role: 'user', text: 'when?', toolUses: [] }, { role: 'assistant', text: 'June 18 had the most saves.', toolUses: [] }] }))
+  const CONV = '/home/t/.thimble/lean/conversations/1700000000000.json'
+  // what the first session (s-1) kept: its conversation, the card under its answer, the answer's record, its claims
+  w.files[CONV] = JSON.stringify({ key: 's-1', sessions: ['s-1'] })
+  w.files[SHOWN] = JSON.stringify({ under: { [AT]: [{ id: '01-saves', v: 1, root: ROOT }] } })
+  const dir = `${ROOT}/thimble/messages/s-1`
+  w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'when?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
+  w.files[`${dir}/${AT}.json`] = JSON.stringify({ v: 1, row: AT, session: 's-1', text: 'June 18 had the most saves.', shown: null, marks: [], glosses: {}, verbs: {}, objects: ['01-saves'], final: true })
+  w.files[`${ROOT}/thimble/claims/s-1.json`] = JSON.stringify({ v: 1, session: 's-1', claims: [{ id: 'c1', text: 'June 18 had the most saves', kind: 'finding', said: [{ row: AT, by: 'claude', turn: 1 }], sources: [] }], clusters: [], gaps: [] })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
+  await clock.settle()
+  // the card is drawn under the same reply (once its drawing is ready), the keys act on its answer, and the line counts
+  // its claim
+  await reply($)
+  await clock.settle()
+  expect(textOf(await reply($))).toContain('6,543')
+  const bar = await hintOf($)
+  expect(bar).toContain('v visualize')
+  expect(bar).toContain('1 claim')
+  // the new session joined the conversation, and its commands file their records under its key
+  expect(JSON.parse(w.files[CONV]!).sessions).toEqual(['s-1', 's-2'])
+})
+
+test('a session of the background service starts no Node child until the person\'s first prompt', async ($, on) => {
+  const w = world(on, undefined, undefined, { CLAUDE_CODE_SESSION_KIND: 'bg' })
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  const clock = mock.clock(on)
+  const children = () => w.runs.filter(r => r.some(a => a.endsWith('verb.mjs')) || r.includes('coverage')).length
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
+  await clock.settle()
+  expect(children()).toBe(0)
+  await $.prompt.submit({ text: 'when?', origin: { kind: 'composer' } } as never)
+  await clock.settle()
+  expect(w.runs.some(r => r.some(a => a.endsWith('verb.mjs')) && r.includes('list'))).toBe(true)
+})
+
+test('a -p run starts no Node child for the line nobody reads', async ($, on) => {
+  const w = world(on)
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  const clock = mock.clock(on)
+  await $.session.start({ cwd: ROOT, surface: null, isInteractive: false } as never)
+  await $.prompt.submit({ text: 'when?', origin: { kind: 'sdk' } } as never)
+  await clock.settle()
+  expect(w.runs.filter(r => r.some(a => a.endsWith('verb.mjs')) || r.includes('coverage')).length).toBe(0)
 })

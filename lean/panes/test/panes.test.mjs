@@ -10,6 +10,7 @@ import { gridText, renderTerm } from '../../draw/term.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import PANES from '../index.js'
 import { barText, keyEvent, keysOf, nextState, route, takes } from '../host.js'
+import { gapLines } from '../claims.js'
 
 const DK = globalThis.DrawKit
 const run = (pane, data, o = {}) => DK.run(pane.program, data, { w: 100, h: 30, mode: 'pane', ...o })
@@ -93,7 +94,8 @@ test('chips: keys pick and change a chip; the rewrite is the host\'s action; the
   const d0 = run(PANES.chips, data)
   assert.equal(barText([d0]), '< > change · ] next chip · + new stretch · 0 close · s done')
   let { d, state } = act(PANES.chips, data, {}, keyEvent('<'), 'terminal')
-  assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, do: 'squeeze' }])
+  // the step names its key, so a rewrite that fails says which key tries again
+  assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, key: '<', do: 'squeeze' }])
   ;({ d, state } = act(PANES.chips, data, state, keyEvent(']'), 'terminal'))
   assert.equal(state.focus, 'interpret')
   // a press on a dot in the browser sets that level at once
@@ -275,4 +277,12 @@ test('proposals: v\'s line is a program on the message\'s record: 1–9 pick (th
   assert.deepEqual(act(PANES.proposals, data, {}, { type: 'press', region: 'opt-0' }, 'browser').d.effects[0].choice, 'saves per day around June 18')
   // none proposed: one option, another view of this answer
   assert.deepEqual(PANES.proposals.data({ 'record:r1': { verbs: {} } }, { row: 'r1', verb: 'v' }).options, ['another view of this answer'])
+})
+
+test('claims: a turn the observer could not read is said under the head, with why and whether it is read again', () => {
+  const lines = gapLines([{ turn: 3, why: "the observer's call failed: the sign-in failed or expired", again: true }, { turn: 1, why: 'old {gap}' }, { turn: 4, why: 'x', again: true, reading: true }, { turn: 5, why: 'y' }])
+  assert.equal(lines[0], '{bad:Turn 1 was not read: old \\{gap\\}.}')
+  assert.equal(lines[1], "{bad:Turn 3 was not read: the observer's call failed: the sign-in failed or expired.} {dim:Press c twice to read it again.}")
+  assert.equal(lines[2], '{dim:Turn 4 was not read (x). Reading it again…}')
+  assert.equal(lines[3], '{dim:1 more turn not read.}')
 })

@@ -13,6 +13,7 @@
 // for Claude.
 import { textOf } from '../../prompts/node.mjs'
 import { remark } from '../../shell/message.js'
+import { modelWhy } from '../../shell/why.js'
 import { FEATURES } from '../../prompts/registry.mjs'
 import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, readReply, request, restore, stretchChip, termsOf, withStretch } from './chips.mjs'
 
@@ -62,7 +63,7 @@ export async function run(ctx) {
   const req = request(probe, { system: sp.text, question: ctx.question || '', terms, model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
   const t0 = Date.now()
   const r = await ctx.model.complete({ ...req, telemetry: { feature: 'squeeze', prompt: sp.id } })
-  if (!r || !r.isAnswered) throw new Error(`the rewrite did not come back: ${r ? r.reason : 'no result'}`)
+  if (!r || !r.isAnswered) throw new Error(`the rewrite failed: ${modelWhy(r)}`)
   const reply = readReply(r.text)
   const checked = checkRewrite(rec.text, reply.text)
   const next = applyRewrite(rec, { text: checked.text, at: want.at, made: { ms: Date.now() - t0, model: req.model, usage: r.usage, prompt: sp.id }, problems: checked.problems }, remark)
