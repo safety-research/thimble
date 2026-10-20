@@ -7,8 +7,8 @@
 //     it carries the precision, and k.bars names the parts' colors in a key above the rows;
 //   - a spark is one cell per value (averaged when there are more values than cells), on eight levels ▁..█;
 //   - a plot's lines are braille dots, two across and four down per cell, so a line stays thin; where two series
-//     share a cell it takes the color of the one listed first. The axis is ┤ └ ┴ with round values, and the y label
-//     and the legend share the top row;
+//     share a cell it takes the color of the one listed first; a dot is four braille dots. The axis is ┤ └ ┴ with
+//     round values, and the y label and the legend share the top row;
 //   - a table is padded columns, numbers right-aligned, the widest text column shrinking first;
 //   - unseen data is ▒ (a medium shade), never blank, so a gap reads as a gap;
 //   - a canvas is replayed as the program placed it.
@@ -548,7 +548,7 @@ function paintPlot(n, g, x, y, w, cx, mark) {
   const bottom = legend && !legendTop ? 1 : 0
   const ph = Math.max(1, h - 2 - top - bottom)
   // round values on y, inside the data's own range (or the one the program set)
-  const yticks = niceTicks(ymin, ymax, Math.max(1, Math.min(4, Math.floor(ph / 2)))).ticks.filter(t => t >= ymin - 1e-9 && t <= ymax + 1e-9)
+  const yticks = niceTicks(ymin, ymax, clamp(Math.floor(ph / 2), 2, 4)).ticks.filter(t => t >= ymin - 1e-9 && t <= ymax + 1e-9)
   const ylabels = yticks.map(fmtTick)
   const yw = Math.max(1, ...ylabels.map(len))
   const ox = yw + 1
@@ -601,7 +601,8 @@ function paintPlot(n, g, x, y, w, cx, mark) {
         for (const p of P) {
           if (p[1] === null) { prev = null; continue }
           const X = (x + ox) * 2 + col2(p[0]), Y = (y + oy) * 4 + row4(p[1])
-          if (n.dots || lone) g.put(Math.floor(X / 2), Math.floor(Y / 4), '•', s.tone, { px: true })
+          // a dot is four braille dots, both across its cell and two down from its own quarter row
+          if (n.dots || lone) { const X0 = X - (X % 2), Y0 = Math.min(Y, (y + oy + ph) * 4 - 2); [0, 1].forEach(i => [0, 1].forEach(j => g.dot4(X0 + i, Y0 + j, s.tone))) }
           else if (prev) g.line4(prev[0], prev[1], X, Y, s.tone)
           else g.dot4(X, Y, s.tone)
           prev = [X, Y]
