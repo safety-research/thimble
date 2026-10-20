@@ -38,6 +38,7 @@ test('a reply gives each record its value; one it leaves out, or gives a value o
   assert.match(got.failed['a.jsonl#L3'], /"maybe", which is not one of yes, no/)
   assert.deepEqual(Object.keys(answersOf('no json here', UNITS, LABEL.values).failed), UNITS.map(u => u.ref))
   assert.equal(failedCall({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error' }, UNITS).failed['a.jsonl#L2'], 'the call failed: api-error 529 (overloaded_error)')
+  assert.equal(failedCall({ isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed' }, UNITS).failed['a.jsonl#L2'], 'the call failed: the sign-in failed or expired; sign in again with /login')
   assert.equal(summary('apology', { valued: 1, records: 3, counts: { yes: 1 }, waiting: 0, failed: 2, why: '1 call failed: api-error 529' }),
     'apology: 1 of 3 records have a value (1 yes). 2 have no value (1 call failed: api-error 529): `thimble label apology --again` asks the model again.')
 })

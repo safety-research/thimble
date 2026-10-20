@@ -94,7 +94,7 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
       inputs.push(input)
       out = verb(input)
     } else if (e.argv.includes('resolve')) out = e.argv.includes('revisions.jsonl#L28') ? QUOTED : RESOLVED
-    else if (e.argv.includes('coverage')) out = { files: [{ path: 'revisions.jsonl', rows: 300, lines: 300, status: 'computed', computed: 102 }, { path: 'events.jsonl', rows: 300, lines: 300, status: 'not read', computed: 0 }] }
+    else if (e.argv.includes('coverage')) out = { files: [{ path: 'revisions.jsonl', rows: 300, lines: 300, status: 'computed', computed: 102 }, { path: 'events.jsonl', rows: 300, lines: 300, status: 'named', computed: 0 }], total: { files: 2, rows: 600, read_share: 102 / 600 } }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const submitted: { text: string; context: readonly string[] }[] = []
@@ -760,7 +760,7 @@ test('the thimble line is the one bar: the verbs in words at its left, a lit one
   await markedTurn($, on, clock)
   const bar = textOf(await $.ui.render(HINT))
   expect(bar).toContain('thimble  v visualize · s squeeze · ] cite & explain')
-  // 102 of 600 rows read: 17%; no zero count shows
+  // 102 of 600 rows read, as the kernel counts them (events.jsonl was only named): 17%; no zero count shows
   expect(bar).toContain('2 cites · coverage 17%')
   expect(bar).not.toContain('card')
   expect(bar).not.toContain('thread')

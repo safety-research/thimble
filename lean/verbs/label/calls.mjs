@@ -5,6 +5,7 @@
 //   answersOf(reply, units, values)         -> {values: {ref: {value, confidence, reason}}, failed: {ref: why}}
 //   failedCall(reply, units)                -> {failed: {ref: why}} for a call that brought no text
 import { fill } from '../../prompts/registry.mjs'
+import { SIGN_IN_AGAIN, signInFailed } from '../../shell/why.js'
 
 const REASON = ', "reason": one short sentence naming the words in the record that decided the value'
 
@@ -79,6 +80,7 @@ export function answersOf(reply, units, values) {
 /** Why a call brought no text, in a few plain words: "api-error 529 (overloaded_error)", "aborted", "refused: …". */
 export function whyNot(reply) {
   if (!reply) return 'no reply'
+  if (signInFailed(reply)) return `the sign-in failed or expired; ${SIGN_IN_AGAIN.toLowerCase()}`
   if (reply.reason === 'api-error') return `api-error${reply.status ? ' ' + reply.status : ''}${reply.error ? ` (${String(reply.error).slice(0, 80)})` : ''}`
   if (reply.reason === 'refused') return `refused: ${String(reply.error || '').slice(0, 120)}`
   return String(reply.reason || 'no text')

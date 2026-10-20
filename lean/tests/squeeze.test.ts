@@ -437,8 +437,22 @@ test('a rewrite that fails says what failed in plain words and which key tries a
   await press($, clock, edit('['))
   await clock.settle()
   const bar = await hintOf($)
-  expect(bar).toContain('The rewrite failed: no reply came from the API (the connection or the sign-in failed). Press [ to try again')
+  expect(bar).toContain('The rewrite failed: no reply came from the API. Check the connection, or sign in again with /login. Press [ to try again')
   expect(bar).not.toContain('unknown')
   // the browser's chips read the same words from the record
   expect(record(w).squeeze.error).toContain('Press [ to try again')
+})
+
+test('a rewrite refused for an expired sign-in says so in plain words, with the fix: sign in again with /login', async ($, on) => {
+  const w = world(on, [{ isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed', usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }])
+  const clock = mock.clock(on)
+  await answered($, on, clock)
+  await press($, clock, edit('s'))
+  await press($, clock, edit('['))
+  await clock.settle()
+  const bar = await hintOf($)
+  expect(bar).toContain('The rewrite failed: the sign-in failed or expired. Sign in again with /login. Press [ to try again')
+  expect(bar).not.toContain('401')
+  expect(bar).not.toContain('authentication_failed')
+  expect(record(w).squeeze.error).toContain('Sign in again with /login')
 })

@@ -338,7 +338,7 @@ test("a turn whose look failed is said in Claims with why, and is read again whe
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   let store = JSON.parse(w.files[STORE]!)
   expect(store.claims).toEqual([])
-  expect(store.gaps).toEqual([{ turn: 1, why: "the observer's call failed: the sign-in failed or expired", again: true }])
+  expect(store.gaps).toEqual([{ turn: 1, why: "the observer's call failed: the sign-in failed or expired. Sign in again with /login", again: true }])
   // the look is kept to run again, in the observer's file (a resumed session reads it back)
   expect(JSON.parse(w.files['/home/t/.thimble/lean/observer/s-1.json']!).failed.map((f: Any) => f.turn)).toEqual([1])
   // c opens the pane, which says the turn was not read, and reads it again
