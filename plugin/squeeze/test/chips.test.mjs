@@ -250,6 +250,9 @@ test("a squeeze's cards: the request shows the original's cards and the outputs 
   const longerText = 'June 17 had 4,210 saves and June 18 had [6,543](q1#day=2026-06-18@n).'
   assert.deepEqual(checkRewrite('Most saves came on June 18.', longerText).problems.length, 2)
   assert.deepEqual(checkRewrite(answerText('Most saves came on June 18.', [drawnCard]), longerText).problems, [])
+  // a value the answer states, rounded or as a percent, is no addition; a value it never states is
+  assert.deepEqual(checkRewrite('Its rate was 0.369 and its mean 36.94 steps.', 'About 37% of them, with 36.9 steps on average.').problems, [])
+  assert.deepEqual(checkRewrite('Its rate was 0.369.', 'About 39% of them.').problems, ['"39" is not in the original'])
   // a record no rewrite touched the cards of: nothing to place
   assert.equal(cardListsAt(applyRewrite({ ...record(), squeeze: {} }, { text: 'S.', at: { length: 1 } }, remark)), null)
 })

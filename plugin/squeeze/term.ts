@@ -272,7 +272,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     ticker.stop()
     await setUi($, row, { running: null })
     await settled($, row, next)
-    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}), ...(answer ? { cards: answer.cards.length, outputs: answer.outputs.length, asked: reply.cards.map(c => `${c.op} ${c.id}`), did: (cards?.did ?? []).map(d => `${d.did} ${d.id}`), card_problems: cardProblems } : {}) })
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}), ...(answer ? { cards: answer.cards.length, outputs: answer.outputs.length, asked: reply.cards.map(c => `${c.op} ${c.id}`), did: (cards?.did ?? []).map(d => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}) })
   } finally {
     ticker.stop()
   }
@@ -428,13 +428,15 @@ async function freshName($: Engine, root: string, name: string): Promise<string>
  * add saved as a new card; each drop only noted. A save that fails, or a card that does not draw after it, is left out
  * with a problem that says why. Returns what held, in order, and the problems.
  */
-async function applyCards($: Engine, answer: Answer, changes: Any[], levels: string): Promise<{ done: Any[]; problems: string[] }> {
+async function applyCards($: Engine, answer: Answer, changes: Any[], levels: string): Promise<{ done: Any[]; problems: string[]; unknown: string[] }> {
   const done: Any[] = []
   const problems: string[] = []
+  const unknown: string[] = []
   const bin = `${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`
   for (const c of changes) {
     const card = answer.cards.find(x => x.id === c.id) ?? null
-    if (c.op !== 'add' && !card) { problems.push(`the reply named a card ${String(c.id).slice(0, 40)} that is not under this answer`); continue }
+    // a card the request never showed: nothing to change, and nothing the person asked for failed (the log keeps it)
+    if (c.op !== 'add' && !card) { unknown.push(String(c.id).slice(0, 60)); continue }
     if (c.op === 'drop') { done.push({ op: 'drop', id: card!.id, title: card!.title }); continue }
     const spec = cardSpec(c, card?.source ?? {})
     const name = c.op === 'edit' ? card!.id : await freshName($, answer.root, String(c.id))
@@ -463,7 +465,7 @@ async function applyCards($: Engine, answer: Answer, changes: Any[], levels: str
     if (c.op === 'edit') await noteEdit($, answer.root, saved.id, saved.v)
     done.push({ op: c.op, id: c.op === 'edit' ? card!.id : saved.id, ref, title: c.op === 'edit' ? card!.title : String(spec.title || saved.id) })
   }
-  return { done, problems }
+  return { done, problems, unknown }
 }
 
 /** The cards a record's version shows, drawn under their rows: the version's when it changed one, else the

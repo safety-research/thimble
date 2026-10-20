@@ -679,6 +679,16 @@ const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
 const norm = s => String(s).replace(/(\d),(?=\d{3}\b)/g, '$1')
 const numbersIn = s => (norm(String(s).replace(LINK, '$1 $2')).match(/\d+(?:\.\d+)?/g) || []).filter(n => n.length > 1 || Number(n) > 9)
 
+/** The forms a stated value may be rounded to in a rewrite: itself, a whole number, one decimal, and a share between
+ *  0 and 1 as a percent. */
+function roundings(n) {
+  const v = Number(n)
+  if (!Number.isFinite(v) || !n.includes('.')) return [n]
+  const forms = [n, String(Math.round(v)), String(Math.round(v * 10) / 10)]
+  if (v > 0 && v < 1) forms.push(String(Math.round(v * 100)), String(Math.round(v * 1000) / 10))
+  return forms
+}
+
 /**
  * A rewrite held to the original: a link to a ref the original never cited loses its link (its words stay), and a
  * number the original never states is named as a problem. Returns the text to show and the problems.
@@ -711,7 +721,9 @@ export function checkRewrite(original, text) {
     }
     return whole
   })
-  const have = new Set(numbersIn(original))
+  // a value the original states counts in the forms a rewrite may round it to: a whole number, one decimal, and a
+  // share (0.369) as a percent (37, 36.9)
+  const have = new Set(numbersIn(original).flatMap(roundings))
   const stray = [...new Set(numbersIn(out.replace(LINK, '$1')).filter(n => !have.has(n)))]
   if (stray.length) problems.push(`${stray.slice(0, 3).map(n => `"${n}"`).join(', ')} ${stray.length === 1 ? 'is' : 'are'} not in the original`)
   return { text: out, problems }
