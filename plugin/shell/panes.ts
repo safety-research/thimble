@@ -12,6 +12,8 @@
 //   paneEl($, e, name, args, o)          the drawing as Claude Code elements: each part a press, the ring a focus event
 //                                         (o.painted: drawn in a pane of Claude Code's, on the theme's background)
 //   paneKeys(name, args)                 its last drawing, for the bar (panes/host.js keysOf)
+//   paneThread(name, args)               what its side thread is about now, as its module says (`thread`), when the
+//                                        side panel shows it (side.ts); paneTitle(name, args) its title there
 //   setPaneState($, name, args, state)   a state another surface answered with (the browser): kept, and drawn here
 //   shell.tsx gives what a pane reads and may ask for, by name: paneStore (each store), paneAction (what k.do asks),
 //   paneWant (what k.want asks) and paneWhere (the session's folder). A hooks module passes `$` only to functions it
@@ -287,6 +289,30 @@ export async function paneState($: Engine, name: string, args: Record<string, un
   const inst = instance(name, args)
   await load($, inst)
   return inst.state
+}
+
+/** What the pane's side thread is about now, as its module's `thread(args, state, data)` says: undefined when the module
+ *  says nothing (the side panel's default: one thread per pane, about the part selected), null for no thread. */
+export function paneThread(name: string, args: Record<string, unknown> = {}): Any | null | undefined {
+  const mod = paneOf(name)
+  if (typeof mod.thread !== 'function') return undefined
+  const inst = instance(name, args)
+  try {
+    return mod.thread(inst.args, inst.state, inst.data?.value ?? null) ?? null
+  } catch {
+    return null
+  }
+}
+
+/** The pane's title in Claude Code's chrome: its module's `titleOf(args)`, else its title. */
+export function paneTitle(name: string, args: Record<string, unknown> = {}): string {
+  const mod = paneOf(name)
+  try {
+    if (typeof mod.titleOf === 'function') return String(mod.titleOf(args) || mod.title || name)
+  } catch {
+    // its plain title
+  }
+  return String(mod.title || name)
 }
 
 /** The ask the program left for the next question (k.ask), taken once. */

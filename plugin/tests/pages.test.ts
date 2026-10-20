@@ -188,7 +188,7 @@ test('the detail shows every chapter at once, from the one the card is at; a par
   t = await drawn($, clock, PANE)
   expect(JSON.parse(w.files[STATE]!).state).toEqual({ chapter: 2 })
   expect(t).toContain('── chapter 2 of 3')
-  expect(JSON.stringify(await $.ui.render(PANE))).toContain('ask about chapter 2 of 3… · the answer shows here')
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about chapter 2 of 3…')
   // a: one chapter at a time, at chapter 2
   await clock.advance(1000)
   expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })

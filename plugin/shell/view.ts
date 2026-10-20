@@ -7,6 +7,8 @@
 //                       as in any reply
 //   catchUpEl(els, o)   a catch-up under the newest reply: a rule down its left side, `thimble  catch-up of …`, then
 //                       its text (a message drawn as above)
+//   messageRows(els, o) a message as rows, one element a row of the terminal, each block laid out here (as the
+//                       catch-up's), so a side thread's answer can be cut to the rows its panel has
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
 //                       rows; its keys are in the bar under it, and its color says cite or explain
 import { blocks, inline, looseOf, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
@@ -46,11 +48,14 @@ export type MessageOpts = {
   lead?: string | null
   /** the color of `lead` (squeeze's amber when none) */
   leadColor?: string | null
+  /** the words' color where the terminal's own may not read (a pane's background: `text`) */
+  ink?: string | null
 }
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
-function runText(els: Any, r: Run, dim = false) {
+function runText(els: Any, r: Run, dim = false, ink: string | null = null) {
   const p: Any = { children: r.s }
+  if (ink) p.color = ink
   if (dim) p.dimColor = true
   if (r.b) p.bold = true
   if (r.it) p.italic = true
@@ -86,7 +91,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
 /** One laid-out line: its runs, each mark a press. */
 function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] = []) {
   const kids: Any[] = [...lead]
-  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, !!o.dim)))
+  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, !!o.dim, o.ink ?? null)))
   if (!runs.some(r => r.mark !== undefined)) return els.Text({ key, wrap: 'truncate-end', children: kids })
   return els.Box({ key, flexDirection: 'row', children: kids.map(k => (typeof k === 'string' ? els.Text({ children: k }) : k)) })
 }
@@ -142,7 +147,7 @@ function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string,
       const pad = widths[c]! - width(runsText(runs))
       const left = k === 0 ? Math.floor(pad / 2) : 0
       kids.push(els.Text({ children: ' ' + ' '.repeat(left) }))
-      runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-t${k}-${c}-${j}`) : runText(els, r)))
+      runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-t${k}-${c}-${j}`) : runText(els, r, false, o.ink ?? null)))
       kids.push(els.Text({ children: ' '.repeat(pad - left) + ' │' }))
     }
     out.push(els.Box({ key: `${key}-r${k}`, flexDirection: 'row', children: kids }))
@@ -234,6 +239,25 @@ export function catchUpEl(els: Any, o: CatchUpOpts): Any {
     })
   }
   return Box({ key: o.key, flexDirection: 'column', marginTop: 1, children: rows })
+}
+
+/** One of Claude's messages as rows, each one row of the terminal: `● ` on its first row (Claude Code's mark of a
+ *  reply), every block laid out here as a catch-up's is, the marks presses. For a side thread's answer in its panel. */
+export function messageRows(els: Any, o: MessageOpts & { mark?: string }): Any[] {
+  const { Box, Text } = els
+  const mo = { ...o, seen: new Set<number>() }
+  const w = Math.max(20, o.cols - 2)
+  const text = shownOf(o.rec)
+  const out: Any[] = []
+  let first = true
+  blocks(text).forEach((b: Any, i: number) => {
+    if (b.gap && i > 0 && out.length) out.push(Text({ key: `${o.key}-g${i}`, children: ' ' }))
+    blockRows(els, mo, text, b, `${o.key}-l${i}`, w).forEach((line: Any, j: number) => {
+      out.push(Box({ key: `${o.key}-l${i}-${j}`, flexDirection: 'row', children: [Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: first ? `${o.mark ?? '●'} ` : '  ' })] }), Box({ flexDirection: 'column', width: w, children: [line] })] }))
+      first = false
+    })
+  })
+  return out
 }
 
 // ------------------------------------------------------------------------------------------------ the tray

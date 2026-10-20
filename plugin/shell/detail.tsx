@@ -1,46 +1,61 @@
-// detail.tsx: the card detail in the terminal. "Overview first, zoom and filter, details on demand."
+// detail.tsx: the side panel in the terminal, and the card detail it shows. "Overview first, zoom and filter, details
+// on demand."
 //
-// The page is a program on the card runtime (panes/detail.js), the same one the browser draws for a card's detail: a
-// header (the title, the card's id, v1 · v2), the takeaway, the card enlarged with its parts, and a bar under it that
-// starts empty and fills on demand with the selected part's details and examples; the program behind p. Its state
-// (the part selected, what the bar shows) is kept in thimble/panes/<session>/detail-<id>.json, so the browser opens the
-// card where the terminal left it, and the other way round. This file is the terminal's host for it:
+// Whatever opens in the side panel is a thread (side.ts): the thing itself at the top, the thread's conversation under
+// it (conversation.ts: each question after ❯, each answer after ● with its citations and the cards it saved), and an
+// input bar at the bottom that looks and acts like Claude Code's prompt. The thing is a card's detail, or a pane of
+// thimble's (a citation or an explainer, the thread list, any pane panes/ has) drawn by its program. This file is the
+// terminal's host for both:
 //
-//   width      the pane docks beside the transcript and leaves the chat about two fifths of the terminal (48 to 80
-//              columns), so the conversation stays readable beside the card and the bar above the prompt stays one line
-//   ask        the pane's last row is the card's ask line (an Input): a letter that is no key starts a question there,
-//              and ↵ asks the card's own thread (thread.ts). It never passes through the prompt, so main's transcript
-//              gets no row for it. The thread's latest exchange shows above the ask line, under the card
-//   keys       the card's own keys (its program's k.on) first, then the detail's (the program's), only while the composer
-//              is empty; a key that began a word gives its letter back to the ask line. While the composer is empty the
-//              pane holds the keys, so ↑↓ walk the parts. One selection, one highlight: the ring stands in the gutter on
-//              the selected part's first row (a ▸), and the part is shaded; a move of the ring is the program's focus
-//              event, and after each drawing the ring is put back on the selected part, so the two never drift apart
-//              when the card scrolls. `0` and `esc` empty the bar and close the program, then `esc` closes the detail.
-//              Claude Code keeps ← and →, so knobs turn on , and .
-//   window     a page taller than the pane shows the rows around the selected part; once the person opens the bar
-//              under the card (↵ details, e examples, a flip) it shows the bar, and the wheel moves it from there
-//   card       the card's drawing, run in its own sandbox with its state (thimble/objects/.state/<id>.json), which the
-//              detail's program embeds; a knob turned, a zoom or a filter is a change of the card's state
+//   card       the card detail is a program on the card runtime (panes/detail.js), the same one the browser draws for
+//              a card's detail: a header (the title, the card's id, v1 · v2), the takeaway, the card enlarged with its
+//              parts, and a bar under it that starts empty and fills on demand with the selected part's details and
+//              examples; the program behind p. Its state (the part selected, what the bar shows) is kept in
+//              thimble/panes/<session>/detail-<id>.json, so the browser opens the card where the terminal left it. The
+//              card's own drawing runs in its own sandbox with its state (thimble/objects/.state/<id>.json)
+//   pane       any other pane's program (shell/panes.ts) at the panel's width: its parts are presses, the ring walks
+//              them, and the part it selected (k.select) is what a question is about
+//   width      the panel docks beside the transcript and leaves the chat about two fifths of the terminal (48 to 80
+//              columns), so the conversation stays readable beside it and the bar above the prompt stays one line. A
+//              terminal too narrow for it when a key opens it gets a toast naming the command that opens it (/card,
+//              /threads), which Claude Code places at any width
+//   ask        the input bar (an Input): a letter that is no key starts a question there, and ↵ asks the thread of
+//              what the panel shows (thread.ts), about the part selected. It never passes through the prompt, so main's
+//              transcript gets no row for it. The answer shows in the conversation, above the input bar
+//   keys       the card's own keys (its program's k.on) first, then the detail's or the pane's program's, then the
+//              panel's own (t the thread list, m the thread's last answer to main), only while the input bar is empty;
+//              a key that began a word gives its letter back to the input bar. While the input bar is empty the panel
+//              holds the keys, so ↑↓ walk the parts. One selection, one highlight: on a card the ring stands in the
+//              gutter on the selected part's first row (a ▸), and the part is shaded; a move of the ring is the
+//              program's focus event, and after each drawing the ring is put back on the selected part. `esc` empties
+//              the input bar, then closes what the program opened, then goes back to what the panel showed before
+//              (a citation opened from an answer goes back to the card), then closes the panel. Claude Code keeps ←
+//              and →, so knobs turn on , and .
+//   window     a page taller than its rows shows the rows around the selected part; once the person opens the bar
+//              under the card (↵ details, e examples, a flip) it shows the bar, and the wheel moves it from there.
+//              While the input bar holds the keys the wheel scrolls the thread's conversation instead
 // A card under a reply shows `1 open detail`; 1 on an empty prompt opens the latest card's detail.
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
 import { barText, hostKeys } from '../panes/host.js'
-import { paintRegions } from './cells'
-import { askMerge, beganWord, examplesView, linkRuns, PAGES_DEFAULT, partsOf, versionsOf } from './carddetail.js'
+import { paintRegions, regionOfKey } from './cells'
+import { askMerge, beganWord, examplesView, PAGES_DEFAULT, partsOf, versionsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { citeLabels, currentTheme, keysMoved, loadObject, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
-import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
+import { citeLabels, currentTheme, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadCount, threadFor, threadOf } from './thread'
 import { cardEvent, cardKey, noteSeen, ownState, pressTaken, readCardState, readSeen, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
 import { type KeyEdit, type KeyTurn } from './keys'
 import { paneFire, paneNow, paneRun, paneState, paneTakes, patchPaneState, setPaneState } from './panes'
 import type { Scope } from './thread'
-import { aboutOf } from './threads.js'
+import { aboutOf, nameOf } from './threads.js'
 import { check as checkLabel, checksDone, labelGen } from './labels'
+import { conversation, entry, ENTRY_ROWS, fitItems, type Item } from './conversation'
+import { openMark, openThreads, paneSubject, sideBack, sideClosed, sideDepth, sideNow, type Subject } from './side'
+import type { SideView } from '../types'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -53,11 +68,15 @@ const SEL = { plugin: 'thimble', key: 'sel' } as const
 const ROWS = { plugin: 'thimble', key: 'rows' } as const
 const WHERE = { plugin: 'thimble', key: 'where' } as const
 const THREAD = { plugin: 'thimble', key: 'thread' } as const
-// the ask line drawn again (a letter joined the question, the ring came or went): the pane and the bar read it, so a
+// the input bar drawn again (a letter joined the question, the ring came or went): the pane and the bar read it, so a
 // letter redraws them alone, never every row of the transcript
 const ASKLINE = { plugin: 'thimble', key: 'askline' } as const
 const IND = { dark: '#9a93ff', light: '#4f46e5' }
 const cut = (s: string, k: number) => ([...s].length <= k ? s : [...s].slice(0, Math.max(0, k - 1)).join('') + '…')
+type PaneView = Extract<SideView, { kind: 'pane' }>
+/** How long a key of the panel's own (t, m) waits before it acts: a letter typed within it makes the key the start of
+ *  a question, as v's does in main. */
+const WORD_MS = 700
 
 // the module's memory of the detail: whether it is open, what it drew last (for the ring and the keys), the key that
 // acted last (for a word it began), the agent in the main view, and the latest version seen of each card
@@ -73,13 +92,23 @@ const seeded = new Set<string>()
 const askedRegion = new Map<string, string>()
 // the key that acted last: what it changed, so a letter typed straight after it gives it back (it began a word); a
 // card's own key keeps the card's state and part from before it (`card`)
-let lastKey: { key: string; at: number; undo: Record<string, unknown> | null; card?: Undo } | null = null
-let viewing: string | null = null
+let lastKey: { key: string; at: number; undo: Record<string, unknown> | null; card?: Undo; pane?: PaneView } | null = null
+// a key of the panel's own (t, m) waiting out WORD_MS before it acts
+let pendingHost: { key: string; at: number; cancelled: boolean } | null = null
 const latestSeen = new Map<string, number>()
+// a pane the panel shows (not a card): what it drew last, for the ring (the button of each part) and the keys
+let paneDrawn: { name: string; args: Record<string, unknown>; selected: string | null; buttons: Map<string, string>; first: string | null; order: string[] } | null = null
+// what the panel draws now, as its latest drawing began (a card's drawing still under way when the panel turned to a
+// pane must not take the ring from the pane's parts)
+let showing: 'card' | 'pane' = 'card'
+// the conversation's window: rows up from its end (the wheel moves it while the input bar holds the keys, or while
+// the thing above it fits its rows), and whether the thing above it is cut to a window of its rows
+let convBy = 0
+let pageCut = false
 // the terminal's columns, as the last drawing measured them: the detail leaves the chat its share of them
 let viewCols = 0
 // the ring: the element it stands on (as the last move or focus left it), its gutter row, and the question being typed
-// in the ask line (kept here, so a redraw never wipes what the person typed)
+// in the input bar (kept here, so a redraw never wipes what the person typed)
 let ringAt: string | null = null
 let ringY = -1
 let draft = ''
@@ -117,13 +146,13 @@ export function detailColumns(cols: number): number {
 }
 
 const GUTTER = (y: number) => `g|pane|${y}`
-// the ask line's key: a new one each time text is put in it from outside (a letter typed before it had the keys), so
+// the input bar's key: a new one each time text is put in it from outside (a letter typed before it had the keys), so
 // the field is drawn afresh holding that text (a field already drawn keeps what it holds), and the ring waits for
 // that drawing
 let askGen = 0
 const askKey = () => `ask-${askGen}`
 const isAsk = (k: string | null) => !!k && k.startsWith('ask-')
-// The ring's move to the ask line, and the field that has it. The letters of a question come through the prompt until
+// The ring's move to the input bar, and the field that has it. The letters of a question come through the prompt until
 // the ring lands on the field; each draws the field afresh holding the question. One move is on its way at a time,
 // started by a letter, never cancelled by the next: a terminal busy drawing may hand the ring to a field it drew a
 // moment before, which the ring is sent on from to the field drawn last; a move that did not land (the prompt still
@@ -140,52 +169,76 @@ function askRedraw($: Engine): void {
 
 // ------------------------------------------------------------------------------------------------ opening
 
-/** Open the detail: the pane docked beside the transcript, leaving the chat its share, holding the keys while the
- *  composer is empty. */
-export async function openDetailPane($: Engine, title: string): Promise<void> {
+/** Open the side panel on what side.ts says it shows: the pane docked beside the transcript, leaving the chat its
+ *  share, holding the keys while the input bar is empty. False when the terminal had no room for it. */
+export async function openDock($: Engine, title: string): Promise<boolean> {
+  const was = isOpen
   isOpen = true
   setThreadWindow(true)
   await pushFocus($, 'detail')
-  const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) })
+  // something else in the panel: its conversation starts at its end, and the ring goes to its selected part (a
+  // question being typed stays in the input bar)
+  if (was) { convBy = 0; win.by = 0; win.follow = 'part'; if (!isAsk(ringAt)) ringAt = null }
+  const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch((err: unknown) => ({ isPlaced: false, reason: String((err as Error)?.message || err).slice(0, 160) }))
   // a terminal too narrow for a docked pane a key opened (one a command opens is placed at any width): Claude Code
-  // would keep it waiting, undrawn, with the keys still the detail's. It is closed again, and the toast says what opens it
+  // would keep it waiting, undrawn, with the keys still the panel's. It is closed again, and the toast says what opens
+  // it; what it would have shown stays, for that command
   if (r && (r as Any).isPlaced === false) {
     await $.ui.close({ id: PANE }).catch(() => undefined)
-    if (isOpen) await closed($)
-    $.ui.toast(waitingWords(String((r as Any).reason || '')))
-    return
+    if (isOpen) await closed($, true)
+    const v = await sideNow($)
+    $.ui.toast(waitingWords(String((r as Any).reason || ''), !v || v.kind === 'card' ? 'card' : 'thread'))
+    return false
   }
   // asked from a key, the open lands while the key is still in the prompt: ask for the keys again once it is gone
   regrab($)
+  return true
 }
 
-/** What the toast says when the detail cannot be placed: the width it needs and what opens it now. */
-export function waitingWords(reason: string): string {
+/** The card's detail opens in the side panel (shell.tsx openDetail). */
+export async function openDetailPane($: Engine, title: string): Promise<boolean> {
+  return openDock($, title)
+}
+
+/** What the toast says when the panel cannot be placed: the width it needs and what opens it now (/card for a card's
+ *  detail, /threads for anything else). */
+export function waitingWords(reason: string, what: 'card' | 'thread' = 'card'): string {
   const m = /(\d+) columns \((\d+) now\)/.exec(reason)
+  const name = what === 'card' ? "The card's detail" : 'The side panel'
+  const cmd = what === 'card' ? '/card' : '/threads'
   return m
-    ? `The card's detail needs ${m[1]} columns when a key opens it (${m[2]} now). Type /card to open it here, or widen the terminal.`
-    : `The card's detail cannot open here${reason ? ` (${reason})` : ''}. Type /card to open it.`
+    ? `${name} needs ${m[1]} columns when a key opens it (${m[2]} now). Type ${cmd} to open it here, or widen the terminal.`
+    : `${name} cannot open here${reason ? ` (${reason})` : ''}. Type ${cmd} to open it.`
 }
 
-async function closed($: Engine): Promise<void> {
+/** The input bar takes the keys now, holding what is typed in it so far (a thread opened to be asked). */
+export function focusEntry($: Engine): void {
+  toAsk($, draft)
+}
+
+async function closed($: Engine, keep = false): Promise<void> {
   isOpen = false
   seeded.clear()
   askedRegion.clear()
   setThreadWindow(false)
   drawn = null
+  paneDrawn = null
   ringAt = null
   ringY = -1
   draft = ''
   landed = null
+  convBy = 0
   moveGen++
+  if (pendingHost) { pendingHost.cancelled = true; pendingHost = null }
   await popFocus($, 'detail')
-  if (viewing) { viewing = null; await $.ui.view({}).catch(() => undefined) }
+  // what the panel showed, and the way back through it, end with it (kept when it could not be placed: /threads opens it)
+  if (!keep) await sideClosed($)
   // the labels the person checked are counted again, their cards drawn again, and Claude hears of the checks
   $.clock.after(0, () => { void checksDone($).catch(() => undefined) })
 }
 
 /** The keys back to the card: the pane takes the keyboard (granted only over an empty composer), the ring on the part.
- *  A question begun since it was asked keeps the keys: the person is typing in the ask line. */
+ *  A question begun since it was asked keeps the keys: the person is typing in the input bar. */
 function regrab($: Engine): void {
   $.clock.after(0, () => {
     void (async () => {
@@ -198,27 +251,30 @@ function regrab($: Engine): void {
   })
 }
 
-/** The ring onto the selected part: the gutter cell of the part's first row (its ▸), when that row is drawn. */
+/** The ring onto the selected part: the gutter cell of the part's first row (its ▸) on a card, the part's first press
+ *  in a pane, when it is drawn. */
 async function focusPart($: Engine): Promise<void> {
   const key = selectedGutter()
   // the wheel moved the selected part out of the window (a long page, every page at once): the window goes back to it,
-  // and the drawing that brings it puts the ring there, so the keys are the card's again and never stay with the ask line
+  // and the drawing that brings it puts the ring there, so the keys are the card's again and never stay with the input bar
   if (!key && drawn?.selected && win.by && !isAsk(ringAt)) { win.by = 0; win.follow = 'part'; $.ui.invalidate('ui.render'); return }
-  // never while the person types in the ask line: a drawing asked for before the first letter would take it back
+  // never while the person types in the input bar: a drawing asked for before the first letter would take it back
   if (!key || ringAt === key || isAsk(ringAt)) return
   const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
-  // a question begun while the ring moved keeps the ask line's claim: its own focus follows
+  // a question begun while the ring moved keeps the input bar's claim: its own focus follows
   if (!(r as Any)?.deny && !isAsk(ringAt)) { ringAt = key; ringY = Number(key.split('|')[2]) }
 }
 
-/** The gutter key of the selected part's first row in the last drawing, or null when it is not drawn. */
+/** Where the ring stands on the selected part in the last drawing: on a card the gutter key of its first row, in a
+ *  pane its first press (else the pane's first part); null when it is not drawn. */
 function selectedGutter(): string | null {
+  if (showing === 'pane') return !paneDrawn ? null : (paneDrawn.selected ? paneDrawn.buttons.get(paneDrawn.selected) : null) ?? paneDrawn.first
   if (!drawn) return null
   for (const [y, ids] of drawn.gutter) if (ids.includes(drawn.selected ?? '')) return GUTTER(y)
   return null
 }
 
-/** The ask line takes the keys, holding what the person has typed so far. The ring belongs to the ask line from this
+/** The input bar takes the keys, holding what the person has typed so far. The ring belongs to the input bar from this
  *  moment, before the focus lands: a drawing in between must not put it back on the card, or the next letters go to
  *  the prompt and the field is drawn again without them. A letter that came through the prompt draws the field afresh
  *  holding the whole question (the pane and the bar alone draw again, never the transcript), unless the field has the
@@ -230,7 +286,7 @@ function toAsk($: Engine, text: string): void {
   moveSoon($)
 }
 
-/** The ring to the ask line's field: the pane takes the keys and the field drawn last takes the ring (see moveGen). */
+/** The ring to the input bar's field: the pane takes the keys and the field drawn last takes the ring (see moveGen). */
 function moveSoon($: Engine): void {
   if (moving || landed === askKey()) return
   moving = true
@@ -259,7 +315,7 @@ function takenTail(question: string, shown: string): boolean {
   return i === want.length
 }
 
-/** What a field of the ask line reports as typed: the field drawn last holds the whole question. One drawn before it
+/** What a field of the input bar reports as typed: the field drawn last holds the whole question. One drawn before it
  *  (it still had the ring while the newer one was on its way) reports the letters it took, which join the question. */
 function askTyped($: Engine, key: string, base: { seen: string }, v: string): void {
   const current = key === askKey()
@@ -320,8 +376,7 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
   }
   return {
     object, drawing: p ? (p.error ? { error: { name: 'Error', message: p.error } } : p.drawing) : null,
-    versions: versionsOf(latest, seen), v, state: ownState(sel.state),
-    thread: !!threadFor({ object: sel.id }), labelGen: await labelGen($),
+    versions: versionsOf(latest, seen), v, state: ownState(sel.state), labelGen: await labelGen($),
   }
 }
 
@@ -364,7 +419,7 @@ async function detailFire($: Engine, event: Record<string, unknown>): Promise<bo
 }
 
 /** What the detail's program asks of the terminal (k.do): a change of the card's state (a knob, the zoom, the filter),
- *  another version, the card's thread in the main view, its answer sent to main, the browser, closing. */
+ *  another version, its thread's answer sent to main, closing. */
 export async function detailAction($: Engine, a: Record<string, unknown>): Promise<string | boolean | void> {
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return '× No card is open in the detail.'
@@ -380,17 +435,14 @@ export async function detailAction($: Engine, a: Record<string, unknown>): Promi
       if (Number.isInteger(v) && v !== sel.v) await selectSoon($, { ...sel, v, ex: 0, all: false })
       return
     }
-    case 'thread': {
-      const t = threadFor({ object: sel.id })
-      if (!t?.agentId) return 'This card has no thread yet: type a question to start one.'
-      if (viewing === t.agentId) { viewing = null; await $.ui.view({}).catch(() => undefined) } else { await $.ui.view({ agentId: t.agentId }).catch(() => undefined); viewing = t.agentId }
-      return
-    }
+    // the card's thread's last answer, to main (m is the panel's own key; the browser's page may ask it)
     case 'main': {
       const t = threadFor({ object: sel.id })
       return t ? await sendToMain($, t.key) : 'This card has no thread yet: type a question to start one.'
     }
+    // esc with nothing open over the card: back to what the panel showed before, else the panel closes
     case 'close':
+      if (await sideBack($)) return
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return
     // the person's check of a record's label value (shell/labels.ts)
@@ -433,7 +485,7 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
   if (ask && ask.text) {
     const o = p.object
     const refs = ask.refs?.length ? ask.refs : ask.region ? regionRefs(o, got.drawing, ask.region).refs : []
-    const r = await askThread($, { text: ask.text, scope: { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label }, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
+    const r = await askThread($, { text: ask.text, scope: { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label }, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` }, anchor: { kind: 'card', id: sel.id, v: null, root: sel.root, region: ask.region ?? null } })
     if (r.problem) $.ui.toast(`× ${r.problem}`)
   } else if (ask) next = { ...next, ask }
   await $.state.set(SEL, next)
@@ -484,19 +536,22 @@ async function selectSoon($: Engine, sel: Sel): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ drawing
 
-/** The detail pane: the page (the detail's program on the card) at the pane's width, the card's thread under it once
- *  the person has asked, and the ask line at the bottom. */
+/** The side panel: what it shows at the top (a card's detail page, or a pane's program) at the panel's width, the
+ *  thread's conversation under it, and the input bar at the bottom. */
 export async function detailPane($: Engine, e: Any): Promise<Any> {
   const els = $.ui.resolve(e) as Any
   const { Box, Text, Button } = els
   // the terminal's width: the conversation's columns beside the dock, the dock's, and its border
   noteDock(e)
-  viewing = e.props?.view?.agentId ?? null
-  const sel = (await $.state.get(SEL)).value as Detail | null
   await $.state.get(ASKLINE)
-  if (!sel) return Text({ dimColor: true, children: 'No card is open. A card Claude saves shows under its reply; open it from there.' })
   const C = Math.max(40, (e.props.bodyColumns ?? 100) - 1)
   const R = Math.max(12, e.props.scroll?.bodyRows ?? 40)
+  const view = await sideNow($)
+  showing = view?.kind === 'pane' ? 'pane' : 'card'
+  if (view?.kind === 'pane') return panePane($, e, els, view, C, R)
+  paneDrawn = null
+  const sel = (await $.state.get(SEL)).value as Detail | null
+  if (!sel) return Text({ dimColor: true, children: 'No card is open. A card Claude saves shows under its reply; open it from there.' })
   if (sel.cites && !sel.cite) return citesList(els, sel, C, R)
   if (sel.cite) return citeView($, els, sel, C)
   syncCardState($, sel)
@@ -513,11 +568,11 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const thread = threadFor({ object: sel.id })
   if (thread) await $.state.get({ ...THREAD, id: thread.key })
 
-  // the rows: the ask line at the bottom (a blank row above it), the thread's latest exchange above that (at most two
-  // fifths of the pane), the page in the rest
-  const tlines = thread ? threadSection(els, thread, C, ind) : []
-  const T = Math.min(tlines.length, Math.max(4, Math.floor(R * 0.4)))
-  const pageRows = Math.max(6, R - 2 - (T ? T + 1 : 0))
+  // the rows: the input bar at the bottom, the thread's conversation above it (two fifths of the panel, three fifths
+  // while the input bar holds the keys), the page in the rest
+  const conv = await convOf($, els, thread, nameOf({ scope: { object: sel.id }, card: latest?.title || sel.id }), C - 1, { id: sel.id, root: sel.root })
+  const T = convRows(conv, R)
+  const pageRows = Math.max(6, R - ENTRY_ROWS - T)
   room = { w: C - 3, h: Math.max(10, pageRows - 8) }
 
   // the page beside its one-cell gutter, where the ring stands on the selected part's first row
@@ -546,6 +601,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     win.by = from - at
   } else win.by = 0
   rows = Math.min(rows, grid.h - from)
+  pageCut = grid.h > pageRows
   const pixel = new Set<number>()
   for (let y = 0; y < grid.h; y++) if (grid.rows[y].some((c: Any) => c.px) && !grid.rows[y].some((c: Any) => c.b || c.ref || c.w2)) pixel.add(y)
   // each part's first row in the window holds a gutter cell the ring can stand on (one per row, in reading order)
@@ -571,7 +627,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     const at = ids.includes(region ?? '') ? region! : ids[0]!
     const label = String(parts.find((x: Any) => x.id === at)?.label || at)
     // the selected part's cell takes the ring whenever the pane takes the keyboard (an open, a key that gave it back),
-    // except while a question is being typed: then the ask line takes it
+    // except while a question is being typed: then the input bar takes it
     return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), children: mark, ...(ids.includes(region ?? '') && !isAsk(ringAt) ? { autoFocus: true } : {}) })
   })
   const kids: Any[] = [Box({ flexDirection: 'row', children: [
@@ -579,10 +635,11 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     // the pane's background is the theme's: its ink is the theme's text color
     paintRegions(grid, els, { theme, selected: region, key: 'pane', from, rows, onPress, painted: true }),
   ] })]
-  if (T) kids.push(Text({ children: ' ' }), ...tlines.slice(tlines.length - T))
-  kids.push(Text({ children: ' ' }), askLine($, els, sel, part, ind))
+  kids.push(...convEls(els, conv, T))
+  const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : 'this card'
+  kids.push(...entryEls($, els, about, C))
   // the ring follows the selection: after a drawing that moved the part (a scroll, a zoom, a key), it is put back on
-  // the selected part's gutter cell, unless the person is typing in the ask line
+  // the selected part's gutter cell, unless the person is typing in the input bar
   const want = selectedGutter()
   // which part each gutter cell stands for: when that changes (a zoom, the bar opening, a scroll), the ring's cell may
   // stand for another part now, so it is put back on the selected one
@@ -599,33 +656,138 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   return Box({ flexDirection: 'column', width: C, children: kids })
 }
 
-/** The ask line: an Input the letters of a question go to; ↵ asks the card's thread about the selected part. */
-function askLine($: Engine, els: Any, sel: Detail, part: Any, ind: string): Any {
-  const { Input } = els
-  const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : ''
-  const what = about ? cut(about, 40) : 'this card'
+/** The conversation's rows: as many as it has, up to two fifths of the panel (three fifths while the input bar holds
+ *  the keys, the person is in the thread), at least 4. */
+function convRows(conv: Item[], R: number): number {
+  if (!conv.length) return 0
+  const total = conv.reduce((n, x) => n + x.h, 0)
+  return Math.min(total, Math.max(4, Math.floor(R * (isAsk(ringAt) || draft ? 0.6 : 0.4))))
+}
+
+/** The conversation cut to its rows: its newest rows, or where the wheel moved it. */
+function convEls(els: Any, conv: Item[], T: number): Any[] {
+  if (!T) return []
+  const fit = fitItems(els, conv, T, convBy)
+  convBy = fit.by
+  return fit.items.map(x => x.el)
+}
+
+/** The thread's conversation as rows (conversation.ts): its citations open in the panel over what it shows, and the
+ *  cards its agent saved are drawn under their answers (the card the panel shows is named, not drawn again). */
+async function convOf($: Engine, els: Any, thread: Any | null, name: string, w: number, shown: { id: string; root: string } | null): Promise<Item[]> {
+  if (!thread?.turns?.length) return []
+  const { Box, Text } = els
+  const theme = currentTheme()
+  const here = (c: { id: string; root: string }) => !!shown && shown.id === c.id && shown.root === c.root
+  // the cards it saved, drawn before the conversation is laid out (a card being drawn says so, and draws again once
+  // it is ready)
+  const cards = new Map<string, Any>()
+  for (const t of thread.turns) {
+    for (const c of (t.cards || []) as { id: string; v: number | null; root: string }[]) {
+      const k = `${c.root}|${c.id}`
+      if (cards.has(k) || here(c)) continue
+      cards.set(k, await preparedNow($, { id: c.id, v: null, root: c.root }, Math.max(30, w - 2), null, 'inline', 14))
+    }
+  }
+  return conversation(els, {
+    thread, name, w, theme, key: 'conv', now: Date.now(),
+    onCite: (ref, label) => { void openMark($, { kind: 'cite', ref, label }, { push: true }) },
+    card: (c, key) => {
+      if (here(c)) return { el: Text({ key, dimColor: true, wrap: 'truncate-end', children: '  ⎿ saved a new version of this card, shown above' }), h: 1 }
+      const p = cards.get(`${c.root}|${c.id}`)
+      if (!p?.grid) return { el: Text({ key, dimColor: true, wrap: 'truncate-end', children: `  ⎿ saved ${c.id} · ${p?.error ? `it cannot be drawn: ${p.error}` : 'drawing it…'}` }), h: 1 }
+      // a press on a part opens the card's detail on it, over what the panel shows
+      const onPress = (id: string) => { void openDetail($, { id: c.id, v: null, root: c.root }, id, { side: 'push' }) }
+      return { el: Box({ key, marginLeft: 2, children: [paintRegions(p.grid, els, { theme, key, onPress, painted: true })] }), h: p.grid.h }
+    },
+  })
+}
+
+/** The input bar: what is typed in it so far, and ↵ asks the thread of what the panel shows about `about`. */
+function entryEls($: Engine, els: Any, about: string, C: number): Any[] {
   const key = askKey()
   // what the field holds, as it was first drawn and then reported: a field with the ring keeps its own text when drawn
   // again, so a letter the question took through the prompt meanwhile is not in it
   let base = fields.get(key)
   if (!base) { base = { seen: draft }; fields.set(key, base); if (fields.size > 8) fields.delete(fields.keys().next().value!) }
-  return Input({
-    // what will happen, in plain words: the question is about this part, and its answer shows here, under the card
-    key, placeholder: `ask about ${what}${what.endsWith('…') ? '' : '…'} · the answer shows here`, value: draft, submitLabel: 'ask',
-    // while a question is being typed, the field takes the ring when the pane takes the keyboard
-    ...(isAsk(ringAt) ? { autoFocus: true } : {}),
-    onInput: (v: string) => askTyped($, key, base, v),
+  const what = cut(about, 40)
+  const b = base
+  return entry(els, {
+    key, w: C - 1, value: draft,
+    // what it is about, in a few words, as Claude Code's prompt says what it takes
+    placeholder: `Ask about ${what}${what.endsWith('…') ? '' : '…'}`,
+    // while a question is being typed, the field takes the ring when the panel takes the keyboard
+    autoFocus: isAsk(ringAt),
+    onInput: (v: string) => askTyped($, key, b, v),
     // the question as the field and the prompt gave it: a letter that reached it through the prompt as the ring landed
     // is in it, though the field never showed it
-    onSubmit: (v: string) => { askTyped($, key, base, v); void askHere($, key === askKey() ? draft : v) },
+    onSubmit: (v: string) => { askTyped($, key, b, v); void askHere($, key === askKey() ? draft : v) },
   })
 }
 
-/** A question typed in the ask line: the card's thread is asked about the selected part (or the selection the card's
- *  program named), and the ring goes back to the card. */
+/** A pane of thimble's in the panel: its program at the panel's width (its parts presses the ring walks, the part it
+ *  selected shaded), its thread's conversation under it, and the input bar, unless the pane has no thread now. */
+async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, R: number): Promise<Any> {
+  const { Box } = els
+  drawn = null
+  const theme = currentTheme()
+  // the program first, at every row it needs (its window is cut below), so the part it selected names the thread's
+  // subject in this same drawing
+  const d = await paneRun($, view.pane, view.args, { w: C - 1, h: R })
+  await restoreThreads($)
+  const subject = paneSubject(view)
+  const thread = subject ? threadOf(subject.key) : null
+  if (subject) await $.state.get({ ...THREAD, id: subject.key })
+  const conv = subject ? await convOf($, els, thread, subject.name, C - 1, null) : []
+  const T = convRows(conv, R)
+  const rows0 = Math.max(4, R - (subject ? ENTRY_ROWS : 0) - T)
+  const grid = renderTerm(d, { w: C - 1 })
+  const region = typeof d?.selected === 'string' ? d.selected : null
+  if (region !== win.region) { win.region = region; win.by = 0; win.follow = 'part' }
+  // a program taller than its rows: the rows around the part selected; the wheel moves the window from there
+  let rows = Math.min(grid.h, rows0)
+  let from = 0
+  const tops = new Map<string, number>()
+  for (const r of grid.regions as Any[]) if (r.rects?.length && !r.link) tops.set(r.id, Math.min(...r.rects.map((q: Any) => q.y)))
+  if (grid.h > rows) {
+    const end = grid.h - rows
+    const at = Math.max(0, Math.min(end, (region && tops.has(region) ? tops.get(region)! : 0) - Math.floor(rows / 3)))
+    from = Math.max(0, Math.min(end, at + win.by))
+    win.by = from - at
+  } else win.by = 0
+  rows = Math.min(rows, grid.h - from)
+  pageCut = grid.h > rows0
+  // the press each part's first row in the window holds, where the ring stands on it
+  const buttons = new Map<string, string>()
+  let first: string | null = null
+  for (const [id, y] of [...tops].sort((a, b) => a[1] - b[1])) {
+    if (y < from || y >= from + rows) continue
+    buttons.set(id, `r|side|${y}|${id}`)
+    first = first ?? `r|side|${y}|${id}`
+  }
+  paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].sort((a, b) => a[1] - b[1]).map(([id]) => id) }
+  const onPress = (id: string, dir?: number) => { void paneFire($, view.pane, view.args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) }
+  const kids: Any[] = [paintRegions(grid, els, { theme, selected: region, key: 'side', from, rows, onPress, painted: true })]
+  kids.push(...convEls(els, conv, T))
+  if (subject) kids.push(...entryEls($, els, subject.label, C))
+  // the ring follows the selection, as on a card
+  const want = selectedGutter()
+  const sig = [...buttons].map(([id, k]) => `${id}:${k}`).join(',')
+  if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null }
+  if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
+  paneFocused = !!e.props.isFocused
+  if (want && e.props.isFocused && !isAsk(ringAt) && ringAt !== want && !refocus) {
+    refocus = true
+    $.clock.after(0, () => { void focusPart($).finally(() => { refocus = false }) })
+  }
+  return Box({ flexDirection: 'column', width: C, children: kids })
+}
+
+/** A question typed in the input bar: the thread of what the panel shows is asked about the part selected, and the
+ *  ring goes back to the thing. */
 async function askHere($: Engine, text: string): Promise<void> {
   if (!String(text || '').trim()) return
-  const problem = await askCard($, text)
+  const problem = await askSide($, text)
   if (problem) { $.ui.toast(`× ${problem}`); return }
   // the line empties: a field drawn afresh, so no word of the question stays in it
   draft = ''
@@ -633,56 +795,9 @@ async function askHere($: Engine, text: string): Promise<void> {
   ringAt = null
   landed = null
   moveGen++
+  convBy = 0
   $.ui.invalidate('ui.render')
   regrab($)
-}
-
-/** The card's thread, under the card: its latest exchange (the question with its part, the steps, the answer with its
- *  citations), cut from the top to the rows it has. Its words are in the theme's text color (`text`), which reads on
- *  the pane's background, as the terminal's own text color may not. */
-function threadSection(els: Any, thread: Any, C: number, ind: string): Any[] {
-  const { Text } = els
-  const w = C - 1
-  const lines: Any[] = []
-  const say = (runs: Any[], first: Any, rest = '  ') => wrapRuns(runs, w - 2).forEach((l, i) => lines.push(Text({ wrap: 'truncate-end', color: 'text', children: [i ? Text({ children: rest }) : first, ...l.map(styled)] })))
-  const styled = (r: Any) => (r.link ? Text({ color: ind, underline: true, children: r.s }) : Text({ color: 'text', bold: r.bold || undefined, dimColor: r.dim || undefined, children: r.s }))
-  const turns: Any[] = thread?.turns || []
-  const last = turns.map((t: Any) => t.role).lastIndexOf('person')
-  const asked = thread?.asks?.length || 0
-  if (asked > 1) lines.push(Text({ dimColor: true, children: `thread · ${asked} questions` }))
-  for (const t of last >= 0 ? turns.slice(last) : []) {
-    if (t.role === 'person') {
-      lines.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: '❯ ' }), Text({ color: 'text', bold: true, children: cut(String(t.text), w - 4) }), ...(t.about ? [Text({ dimColor: true, children: `  about ${cut(String(t.about), 40)}` })] : [])] }))
-      continue
-    }
-    const calls: string[] = t.calls || []
-    if (calls.length > 1) lines.push(Text({ dimColor: true, children: `  ${calls.length - 1} earlier step${calls.length - 1 === 1 ? '' : 's'}` }))
-    for (const c of calls.slice(-1)) lines.push(Text({ dimColor: true, wrap: 'truncate-end', children: `⏺ ${cut(c, w - 2)}` }))
-    // the answer keeps its lines (a list stays a list); code marks are dropped, citations read as their words
-    String(t.text || '').replace(/`/g, '').split(/\n+/).map(x => x.trim()).filter(Boolean).forEach((para, i) =>
-      say(linkRuns(para), Text({ color: 'text', children: i ? '  ' : '⏺ ' })))
-  }
-  if (thread?.status === 'running') lines.push(Text({ color: 'warning', children: '✻ answering…' }))
-  if (thread?.status === 'failed') lines.push(Text({ color: 'error', wrap: 'truncate-end', children: `× ${cut(String(thread.error || 'the thread stopped'), w - 2)}` }))
-  return lines
-}
-
-/** Runs wrapped at word boundaries into lines of at most `w` characters. */
-function wrapRuns(runs: Any[], w: number): Any[][] {
-  const out: Any[][] = [[]]
-  let len = 0
-  for (const r of runs) {
-    for (const word of String(r.s).split(/(\s+)/)) {
-      if (!word) continue
-      const n = [...word].length
-      if (/^\s+$/.test(word)) { if (len && len < w) { out[out.length - 1]!.push({ ...r, s: ' ' }); len++ } continue }
-      if (len + n > w && len) { out.push([]); len = 0 }
-      const piece = n > w ? [...word].slice(0, w - 1).join('') + '…' : word
-      out[out.length - 1]!.push({ ...r, s: piece })
-      len += Math.min(n, w)
-    }
-  }
-  return out.filter((l, i) => l.length || i === 0)
 }
 
 /** Where a part's body starts: its biggest rect (a citation of it in the takeaway is a rect of it too, a small one). */
@@ -691,15 +806,37 @@ function bodyTop(part: Any): { x: number; y: number } | null {
   return part.rects.reduce((a: Any, q: Any) => (q.w * q.h > a.w * a.h ? q : a), part.rects[0])
 }
 
-/** The detail's keys as the bar says them while the detail is open (shell.tsx): the card's own keys, then
- *  the detail's, as their programs name them, and where a question goes. */
+/** The panel's own keys, as the bar says them: t the thread list (while there is a thread and the list is not shown),
+ *  m the thread's last answer to main (once it has one). */
+async function hostKeyWords($: Engine, view: SideView | null, subject: { key: string } | null): Promise<string[]> {
+  const out: string[] = []
+  if (threadCount() > 0 && !(view?.kind === 'pane' && view.pane === 'threads')) out.push('t threads')
+  const t = subject ? threadOf(subject.key) : null
+  if (t && t.turns.some(x => x.role === 'claude' && x.text)) out.push('m send to main')
+  return out
+}
+
+/** The panel's keys as the bar says them while it is open (shell.tsx): the card's own keys, then the detail's or the
+ *  pane's, then the panel's own, and what typing does. */
 export async function detailKeys($: Engine): Promise<string | null> {
   if (!isOpen) return null
+  await $.state.get(ASKLINE)
+  const view = await sideNow($)
+  if (view?.kind === 'pane') {
+    const subject = paneSubject(view)
+    const it = view.pane === 'mark' ? 'the citation' : view.pane === 'threads' ? 'the list' : 'the panel'
+    if (draft) return subject ? `↵ ask about ${cut(subject.label, 40)} · esc back to ${it}` : 'esc back'
+    const d = await paneNow($, view.pane, view.args)
+    const parts = barText([d]).split(' · ').filter(Boolean).filter(x => !/^esc\b/.test(x))
+    parts.push(...(await hostKeyWords($, view, subject)))
+    if (subject) parts.push(`type to ask about ${cut(subject.label, 40)}`)
+    parts.push(`esc ${await backWord($)}`)
+    return parts.join(' · ')
+  }
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return 'esc back'
-  await $.state.get(ASKLINE)
-  // typing a question in the ask line: its own keys
-  if (isAsk(ringAt) || draft) return `↵ ask${sel.ask ? ` about ${cut(String(sel.ask.label), 40)}` : ''} · esc back to the card`
+  // typing a question in the input bar: its own keys
+  if (draft) return `↵ ask${sel.ask ? ` about ${cut(String(sel.ask.label), 40)}` : ''} · esc back to the card`
   // the program run now (it follows the card's drawing and the detail's state as they change)
   const d = await paneNow($, 'detail', { id: sel.id })
   // the card's keys that reach it here (Claude Code keeps ← and →, so the bar never names them), then the detail's
@@ -713,9 +850,15 @@ export async function detailKeys($: Engine): Promise<string | null> {
   const ask = `type to ask about ${cut(about, 40)}`
   const parts = keys.split(' · ').filter(Boolean)
   const esc = parts.findIndex(x => x.startsWith('esc '))
-  if (esc >= 0) parts.splice(esc, 0, ask)
-  else parts.push(ask)
+  const own = await hostKeyWords($, view, threadFor({ object: sel.id }))
+  if (esc >= 0) parts.splice(esc, 0, ...own, ask)
+  else parts.push(...own, ask)
   return parts.join(' · ')
+}
+
+/** What esc does last: back to what the panel showed before, or close it. */
+async function backWord($: Engine): Promise<string> {
+  return (await sideDepth($)) ? 'back' : 'close'
 }
 
 // ------------------------------------------------------------------------------------------------ citations (a reply's)
@@ -753,11 +896,11 @@ async function citeView($: Engine, els: Any, sel: Sel, C: number): Promise<Any> 
 
 // ------------------------------------------------------------------------------------------------ keys
 
-/** What a key pressed in the prompt comes to while the detail is open (keys.ts; shell.tsx's one prompt.edit hook asks
- *  it first): the card's own keys (its program's k.on), then the detail's program's. A letter that is no key starts a
- *  question in the ask line (it never types into the prompt), and a letter typed straight after a key that acted
- *  gives the key's letter back there (it began a word). Letters that arrive before the ask line has the keys join the
- *  question. It types while the detail is closed. */
+/** What a key pressed in the prompt comes to while the side panel is open (keys.ts; shell.tsx's one prompt.edit hook
+ *  asks it first): on a card its own keys (its program's k.on), then the detail's program's; in a pane its program's;
+ *  then the panel's own (t, m). A letter that is no key starts a question in the input bar (it never types into the
+ *  prompt), and a letter typed straight after a key that acted gives the key's letter back there (it began a word).
+ *  Letters that arrive before the input bar has the keys join the question. It types while the panel is closed. */
 export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
   if (!isOpen) return { box: null }
   // a paste (or keys typed faster than the terminal sends them one by one) with no key: a question too
@@ -774,14 +917,23 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
   // the session clock (a test moves it), so a key and the letter after it are timed alike everywhere
   const now = Number(await $.clock.now())
   const typed = String(e.inputText || '')
+  const view = await sideNow($)
+  const pane = view?.kind === 'pane' ? view : null
   const sel = (await $.state.get(SEL)).value as Detail | null
-  if (!sel || sel.cite || sel.cites) return { box: null }
-  // a question already begun: the letter joins it (⌫ takes its last letter back, while the ask line has no keys)
+  if (!pane && (!sel || sel.cite || sel.cites)) return { box: null }
+  // a question already begun: the letter joins it (⌫ takes its last letter back, while the input bar has no keys)
   if (isAsk(ringAt) || (draft && typed) || leftover) {
     if (k === 'backspace' && !typed) return { box: none, work: () => toAsk($, draft.slice(0, -1)) }
     // ↵ before the ring reached the field (the letters came through the prompt): the question is asked as it stands
     if ((k === 'return' || k === 'enter') && !typed) return { box: none, work: () => { moveGen++; void askHere($, draft) } }
     return { box: none, work: () => toAsk($, draft + typed) }
+  }
+  // a letter typed while a key of the panel's own waits (t, m): that key began a question, and it does nothing
+  const held = pendingHost
+  if (held && !held.cancelled && now - held.at < WORD_MS && /^[\p{L}' ]$/u.test(typed)) {
+    held.cancelled = true
+    pendingHost = null
+    return { box: none, work: () => { lastKey = null; toAsk($, `${held.key}${typed}`) } }
   }
   // a letter typed straight after a key that acted: that key began a word, and what it changed goes back
   const back = lastKey
@@ -792,6 +944,8 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
       // own work (the next key waits for that work)
       toAsk($, `${back.key}${typed}`)
       $.clock.after(0, () => { void (async () => {
+        if (back.pane) { if (back.undo) await setPaneState($, back.pane.pane, back.pane.args, back.undo, 'terminal'); return }
+        if (!sel) return
         if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
         // a card's own key (a page turned on n) goes back too: its state, its part, and the page's selection
         if (back.card) {
@@ -805,34 +959,62 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
     } }
   }
   // the card's own keys (its program's k.on) come before the detail's
-  const cur = await current($)
-  const own = cur ? cardKey(cur.p.drawing, k) : null
-  if (own) {
-    const region = cur!.sel.region
-    // what it changes goes back when a letter follows at once: the key began a question ("now…" on a card with n)
-    const undo: Undo = { state: cur!.sel.state, region: cur!.sel.region, pane: { ...(await paneState($, 'detail', { id: sel.id })) } }
-    return { box: none, work: async () => {
-      lastKey = null
-      await cardAct($, { type: 'key', key: own, ...(region ? { region } : {}) })
-      if (/^[a-z]$/.test(k)) lastKey = { key: k, at: now, undo: null, card: undo }
-      regrab($)
-    } }
+  if (!pane && sel) {
+    const cur = await current($)
+    const own = cur ? cardKey(cur.p.drawing, k) : null
+    if (own) {
+      const region = cur!.sel.region
+      // what it changes goes back when a letter follows at once: the key began a question ("now…" on a card with n)
+      const undo: Undo = { state: cur!.sel.state, region: cur!.sel.region, pane: { ...(await paneState($, 'detail', { id: sel.id })) } }
+      return { box: none, work: async () => {
+        lastKey = null
+        await cardAct($, { type: 'key', key: own, ...(region ? { region } : {}) })
+        if (/^[a-z]$/.test(k)) lastKey = { key: k, at: now, undo: null, card: undo }
+        regrab($)
+      } }
+    }
   }
-  // esc, ↑ and the like never reach here: Claude Code keeps them (the pane's close and ring do them)
+  // the program's keys: the detail's, or the pane's. esc, ↑ and the like never reach here: Claude Code keeps them (the
+  // panel's close and ring do them)
   const ev = { type: 'key', key: k === 'enter' ? 'return' : k }
-  if (await paneTakes($, 'detail', { id: sel.id }, ev)) {
+  const prog = pane ? { name: pane.pane, args: pane.args } : { name: 'detail', args: { id: sel!.id } as Record<string, unknown> }
+  if (await paneTakes($, prog.name, prog.args, ev)) {
     return { box: none, work: async () => {
-      const before = { ...(await paneState($, 'detail', { id: sel.id })) }
-      lastKey = (await detailFire($, ev)) ? { key: k, at: now, undo: /^[a-z]$/.test(k) ? before : null } : null
+      const before = { ...(await paneState($, prog.name, prog.args)) }
+      const took = pane ? await paneFire($, pane.pane, pane.args, ev) : await detailFire($, ev)
+      lastKey = took ? { key: k, at: now, undo: /^[a-z]$/.test(k) ? before : null, ...(pane ? { pane } : {}) } : null
       regrab($)
     } }
   }
-  // a letter (or a paste) that is no key begins a question in the ask line
+  // the panel's own keys, each acting once WORD_MS has passed with no letter after it: t the thread list, m the
+  // thread's last answer to main
+  if (k === 't' && threadCount() > 0 && pane?.pane !== 'threads') return hostKey($, 't', now, async () => { await openThreads($, { push: true }) })
+  if (k === 'm') {
+    const key = pane ? paneSubject(pane)?.key ?? null : threadFor({ object: sel!.id })?.key ?? null
+    const t = key ? threadOf(key) : null
+    if (t && t.turns.some(x => x.role === 'claude' && x.text)) return hostKey($, 'm', now, async () => { $.ui.toast(await sendToMain($, t.key)) })
+  }
+  // a letter (or a paste) that is no key begins a question in the input bar
   if (typed.trim()) return { box: none, work: () => { lastKey = null; toAsk($, typed) } }
   return { box: null, work: () => { lastKey = null } }
 }
 
-/** A key typed while the detail is open, as it landed: a prompt emptied gives the keys back to the card. */
+/** A key of the panel's own: taken now, acting once WORD_MS has passed with no letter typed after it (a letter makes
+ *  it the start of a question instead). */
+function hostKey($: Engine, key: string, now: number, run: () => Promise<void>): KeyTurn {
+  return { box: { text: '', cursor: 0 }, work: () => {
+    lastKey = null
+    const p = { key, at: now, cancelled: false }
+    pendingHost = p
+    $.clock.after(WORD_MS, () => {
+      if (p.cancelled || pendingHost !== p) return
+      pendingHost = null
+      void run().catch(() => undefined)
+    })
+  } }
+}
+
+/** A key typed while the side panel is open, as it landed: a prompt emptied gives the keys back to the card or pane. */
 export function detailTyped($: Engine, e: KeyEdit, out: { text: string }): void {
   const plain = e.key ? !e.key.ctrl && !e.key.meta : !!e.inputText
   if (isOpen && plain && out.text === '' && e.text !== '') regrab($)
@@ -849,9 +1031,56 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     try {
       const el = String(e.element || '')
       const person = (e.origin as { kind?: string }).kind === 'person'
+      // a pane in the panel: the ring on one of its parts is the program's focus event (the part is selected); the
+      // input bar keeps the ring while a question is typed, as on a card
+      if (showing === 'pane') {
+        if (!paneDrawn) return next(e)
+        if (!person && isAsk(ringAt) && (el.startsWith('r|side|') || (isAsk(el) && el !== askKey()))) {
+          const r = await next({ ...e, element: askKey() })
+          if (!r.deny) landed = askKey()
+          return r
+        }
+        if (!person && isAsk(el) && !isAsk(ringAt) && !draft) {
+          const to = selectedGutter()
+          if (to) {
+            const r = await next({ ...e, element: to })
+            if (!r.deny) { ringAt = to; ringY = Number(to.split('|')[2]) }
+            return r
+          }
+        }
+        const part = el.startsWith('r|side|') ? regionOfKey(el) : null
+        if (person && part) {
+          // a part of several rows is one stop of the ring: a move onto another of its rows goes on to the next part
+          // that way, and the ring stands on the first row of the part it selects
+          const y = Number(el.split('|')[2])
+          let to = part
+          if (part === paneDrawn.selected && !!ringAt && ringAt.startsWith('r|side|') && y !== ringY) {
+            const i = paneDrawn.order.indexOf(part)
+            to = paneDrawn.order[i + (y > ringY ? 1 : -1)] ?? part
+          }
+          if (to !== paneDrawn.selected) await paneFire($, paneDrawn.name, paneDrawn.args, { type: 'focus', region: to })
+          const key = paneDrawn.buttons.get(to)
+          landed = null
+          if (key) {
+            const r = await next({ ...e, element: key })
+            if (!r.deny) { ringAt = key; ringY = Number(key.split('|')[2]) }
+            return r
+          }
+          // not drawn (out of the window): the window goes back to it, and the drawing that brings it puts the ring there
+          ringAt = null
+          win.by = 0
+          $.ui.invalidate('ui.render')
+          return {}
+        }
+        const was = isAsk(ringAt)
+        const r = await next(e)
+        if (!r.deny) { ringAt = el || null; landed = el === askKey() ? el : null; if (el.startsWith('r|')) ringY = Number(el.split('|')[2]) }
+        if (isAsk(ringAt) !== was) askRedraw($)
+        return r
+      }
       if (!person || !drawn) {
         // while a question is being typed, a drawing from before it (its autoFocus on the card) never takes the ring
-        // from the ask line
+        // from the input bar
         // nor does a field drawn before the one the question is in now (a busy terminal hands the ring to the drawing it
         // has): the ring goes to the field drawn last, and the letters typed there are kept
         if (!person && isAsk(ringAt) && (el.startsWith('g|') || (isAsk(el) && el !== askKey()))) {
@@ -859,7 +1088,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
           if (!r.deny) landed = askKey()
           return r
         }
-        // and with no question begun (esc let one go), a drawing from before (its autoFocus still on the ask line) never
+        // and with no question begun (esc let one go), a drawing from before (its autoFocus still on the input bar) never
         // takes the ring there: the keys are the card's, on the selected part (or a part drawn, while the window comes
         // back to it)
         if (!person && drawn && isAsk(el) && !isAsk(ringAt) && !draft) {
@@ -887,14 +1116,14 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       // outside them: from the ring that is a step around the parts (the program wraps), never a jump to the header
       const rows = [...drawn.gutter.keys()].sort((a, b) => a - b)
       const wrap = onRing && !g && !part ? (ringY === rows[rows.length - 1] ? 1 : ringY === rows[0] ? -1 : 0) : 0
-      // the ask line, a version or the close mark, reached any other way: the ring goes there and the selection stays
+      // the input bar, a version or the close mark, reached any other way: the ring goes there and the selection stays
       if (!g && !part && !wrap) { const was = isAsk(ringAt); const r = await next(e); if (!r.deny) { ringAt = el || null; landed = el === askKey() ? el : null } if (isAsk(ringAt) !== was) askRedraw($); return r }
       const y = g || m ? Number((g ?? m)![1]) : ringY
       const cur = drawn.selected ?? sel.region ?? null
       const dir = wrap || (ringY < 0 ? 1 : y < ringY ? -1 : 1)
       const step = () => { const i = cur ? ids.indexOf(cur) : -1; return ids.length ? ids[i < 0 ? 0 : (i + dir + ids.length) % ids.length]! : null }
       let id: string | null
-      // back from the ask line: the selected part
+      // back from the input bar: the selected part
       if (isAsk(ringAt)) id = cur ?? step()
       else if (wrap) id = step()
       // a move from the ring: along its own row it is a click on a part there (or stays); up or down it steps one part
@@ -923,21 +1152,26 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     }
   }).catch(($, e, next) => next(e))
 
-  // the wheel over the pane (or its scroll keys) moves the page's window: the pane draws its own rows of the page, so
-  // the engine has none to move
+  // the wheel over the panel (or its scroll keys) moves the page's window, or the conversation's while the input bar
+  // holds the keys: the panel draws its own rows of each, so the engine has none to move
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
-    if ((e.origin as { kind?: string }).kind !== 'person' || !drawn || !isOpen) return next(e)
-    win.by += Number(e.by) || 0
+    if ((e.origin as { kind?: string }).kind !== 'person' || (showing === 'pane' ? !paneDrawn : !drawn) || !isOpen) return next(e)
+    if (isAsk(ringAt) || draft || !pageCut) convBy -= Number(e.by) || 0
+    else win.by += Number(e.by) || 0
     $.ui.invalidate('ui.render')
     return {}
   }).catch(($, e, next) => next(e))
 
-  // esc in the ask line empties it and gives the keys back to the card; then esc empties the bar and closes the program
-  // (the program's esc), then the detail; closing gives the main view back
+  // esc in the input bar empties it and gives the keys back to the card or pane (with nothing typed in it, esc goes on);
+  // then esc closes what its program opened
+  // (the detail's bar and program, a citation's section), then goes back to what the panel showed before, then closes
+  // the panel
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const person = (e.origin as { kind?: string }).kind === 'person'
     if (person) keysMoved(await $.clock.now())
-    if (person && isOpen && (isAsk(ringAt) || draft)) {
+    // (the input bar holding the keys with nothing typed in it: esc goes on, as if the card or pane had them)
+    if (person && isOpen && isAsk(ringAt) && !draft) { askGen++; ringAt = null; landed = null; moveGen++ }
+    if (person && isOpen && draft) {
       draft = ''
       askGen++
       ringAt = null
@@ -949,10 +1183,21 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       regrab($)
       return { value: undefined } as Any
     }
+    const view = await sideNow($)
     const sel = (await $.state.get(SEL)).value as Detail | null
-    if (sel && !sel.cite && !sel.cites && (sel.prog || sel.bar) && person) {
+    if (person && isOpen && view?.kind === 'pane' && (await paneTakes($, view.pane, view.args, { type: 'key', key: 'esc' }))) {
+      await paneFire($, view.pane, view.args, { type: 'key', key: 'esc' })
+      regrab($)
+      return { value: undefined } as Any
+    }
+    if (view?.kind !== 'pane' && sel && !sel.cite && !sel.cites && (sel.prog || sel.bar) && person) {
       await detailFire($, { type: 'key', key: 'esc' })
       // a refused close gives the keys back to the prompt: the pane takes them again, so the next esc reaches it
+      regrab($)
+      return { value: undefined } as Any
+    }
+    // back to what the panel showed before (a citation opened from an answer goes back to the card)
+    if (person && isOpen && (await sideBack($))) {
       regrab($)
       return { value: undefined } as Any
     }
@@ -960,34 +1205,56 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     return next(e)
   })
 
-  // a prompt typed in the composer while the detail is open (rare: letters normally go to the ask line) asks the card's
-  // thread too. It never reaches main: Claude Code shows it as dropped, with where it went.
+  // a prompt typed in the composer while the panel is open (rare: letters normally go to the input bar) asks the
+  // panel's thread too. It never reaches main: Claude Code shows it as dropped, with where it went.
   on('prompt.submit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     if (!isOpen || e.command || e.isMeta || !String(e.text || '').trim()) return next(e)
     // the pane may have gone without its close reaching this module (a re-render marked it open again): a prompt goes
-    // to the card's thread only while the pane is really there, else to Claude as always
+    // to the panel's thread only while the pane is really there, else to Claude as always
     if (!(await paneShown($))) { await closed($); return next(e) }
+    const view = await sideNow($)
     const sel = (await $.state.get(SEL)).value as Sel | null
-    if (!sel || sel.cite || sel.cites) return next(e)
-    // ↵ on a question typed through the prompt (its letters came before the ring reached the ask line): the prompt may
+    if (view?.kind !== 'pane' && (!sel || sel.cite || sel.cites)) return next(e)
+    // ↵ on a question typed through the prompt (its letters came before the ring reached the input bar): the prompt may
     // still show a few of its letters, the answers to their keys not applied yet; the question is the one typed, whole
     if (draft.trim() && takenTail(draft, String(e.text))) {
       const q = draft
       moveGen++
       await askHere($, q)
       $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-      return { drop: `asked the card's thread about ${cut(lastAbout, 40)}` }
+      return { drop: `asked the ${lastWhose} thread about ${cut(lastAbout, 40)}` }
     }
-    const asked = await askCard($, e.text)
+    const asked = await askSide($, e.text)
     if (asked === NO_CARD) return next(e)
-    if (asked) return { drop: `${asked}. Your words are back in the prompt; esc closes the card, and the prompt then goes to Claude here.` }
+    if (asked) return { drop: `${asked}. Your words are back in the prompt; esc closes the panel, and the prompt then goes to Claude here.` }
     $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-    return { drop: `asked the card's thread about ${cut(lastAbout, 40)}` }
+    return { drop: `asked the ${lastWhose} thread about ${cut(lastAbout, 40)}` }
   }).catch(($, e, next) => next(e))
 }
 
 const NO_CARD = 'no card'
 let lastAbout = ''
+// whose thread was asked last, in the words of the row Claude Code shows for a dropped prompt: `the card's thread`
+let lastWhose = "card's"
+
+/** Ask the thread of what the panel shows: a pane's (its subject, side.ts), else the card's. Null when asked, else the
+ *  problem in a few words (NO_CARD: nothing to ask). */
+async function askSide($: Engine, text: string): Promise<string | null> {
+  const view = await sideNow($)
+  if (view?.kind !== 'pane') { lastWhose = "card's"; return askCard($, text) }
+  const subject: Subject | null = paneSubject(view)
+  if (!subject) return NO_CARD
+  const root = subject.root ?? (await paneWhereRoot($))
+  const r = await askThread($, { text, scope: subject.scope, refs: subject.refs, root, anchor: subject.anchor, ...(subject.about ? { about: subject.about } : {}), ...(subject.card ? { card: subject.card } : {}) })
+  lastAbout = aboutOf(subject.scope)
+  lastWhose = view.pane === 'mark' ? 'citation\'s' : view.pane === 'threads' ? 'selected' : `${view.pane}'s`
+  return r.problem ?? null
+}
+
+/** The folder the session's data is in (where a pane's thread keeps its file). */
+async function paneWhereRoot($: Engine): Promise<string> {
+  return (await paneWhere($)).root || String(await $.session.cwd())
+}
 
 /** Ask the open card's thread: about the selection the card's program named (k.ask: a brushed range, several runs),
  *  else the selected part, else the whole card. Null when asked, else the problem in a few words. */
@@ -1013,7 +1280,7 @@ async function askCard($: Engine, text: string): Promise<string | null> {
   const rowsOf = (id: string) => { const a = regionRefs(o, shown, id).refs; return a.length ? a : regionRefs(o, p.drawing, region ?? id).refs }
   const refs = ask?.refs?.length ? ask.refs : ask?.region ? regionRefs(o, p.drawing, ask.region).refs : region ? rowsOf(raw!) : objectRefs(o).map((c: Any) => c.ref)
   if (ask) await $.state.set(SEL, { ...sel, ask: null } as Detail)
-  const r = await askThread($, { text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
+  const r = await askThread($, { text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` }, anchor: { kind: 'card', id: sel.id, v: null, root: sel.root, region: region ?? null } })
   lastAbout = aboutOf(scope)
   return r.problem ?? null
 }
@@ -1028,7 +1295,7 @@ async function paneShown($: Engine): Promise<boolean> {
   }
 }
 
-/** Whether the detail is open (for the shell and the tests). */
+/** Whether the side panel is open (for the shell and the tests). */
 export function detailIsOpen(): boolean {
   return isOpen
 }
@@ -1043,8 +1310,11 @@ export function markOpen(open: boolean): void {
 export function resetDetail(): void {
   isOpen = false
   drawn = null
+  paneDrawn = null
+  showing = 'card'
+  convBy = 0
+  pendingHost = null
   lastKey = null
-  viewing = null
   ringY = -1
   ringAt = null
   draft = ''

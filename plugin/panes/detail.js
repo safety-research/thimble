@@ -3,19 +3,20 @@
 // "Overview first, zoom and filter, details on demand": a header (the title, the card's id, v1 · v2), the takeaway with
 // its citations, the card enlarged with its parts, and a bar under it that starts empty and fills on demand with the
 // selected part's details (its claim and where it comes from) and its examples, labelled with what they are examples
-// of. The program the card is behind p. The card's thread is the host's: the terminal's column at the left, the
-// browser's chat.
+// of. The program the card is behind p. The card's thread is the host's: in the terminal the side panel draws it under
+// this page with its input bar (shell/side.ts), and its keys (t threads, m send to main) are the panel's; the browser's
+// chat.
 //
 //   state: {region: the selected part, bar: null | 'details' | 'examples', ex: the example shown, prog: the program,
 //          pages: 'all' | 'one' (a card with pages: every page at once, or one at a time)}
 //   keys: ↑↓ part · ↵ details · e examples · [ ] flip · + − zoom · f filter · , . turn · a all at once / one at a time ·
-//         p program · h versions · t thread · m send to main · 0 clear · esc back
+//         p program · h versions · 0 clear · esc back
 //
 // Pages: a card with a page knob (kit.js) is shown with every page at once, one after another, each under its own
 // heading, when the person chose so (a) or PAGES_DEFAULT says (carddetail.js); the host draws it so (shell/detail.tsx).
 // Its parts are then its pages' (`pg3~~x`, handoff.js), the headings among them; , and . go a page back or on.
 //   events: focus (the ring on a part), press (a part; the selected one opens its details; a version; a knob's ◂ ▸)
-//   asks of the host: card {state} (a knob of the card turned), version {v}, thread, main, close,
+//   asks of the host: card {state} (a knob of the card turned), version {v}, close,
 //         check {label, ref, value} (the person's check of a record's label value)
 //   wants: {rows: refs} (the rows behind the selected part), {facts: id} (where the card's values come from),
 //          {labels: refs, gen} (the labels of the examples shown, read again after each check)
@@ -74,7 +75,7 @@ export default {
       cites: d.cites || {}, examples: d.examples || {}, controls: d.controls || [], cardState: card.state || {},
       // the card shown with every page at once ({knob, n, at}), and the keys its own program takes (with what they turn)
       pages: d.pages || null, cardOn: d.on || [],
-      thread: !!card.thread, w: size.w, h: size.h,
+      w: size.w, h: size.h,
       // a label's card names its label; the host counts the checks made since it opened, so their labels are read again
       label: typeof o.label === 'string' ? o.label : null, labelGen: card.labelGen || 0,
     }
@@ -203,10 +204,6 @@ export function program(k, data) {
   const versions = data.versions || []
   // h steps back through every version, drafts included (named so while the header lists only the one shown)
   if (versions.length > 1) k.on('h', () => { k.do('version', { v: stepVersion(versions, data.v) }); return { ex: 0 } }, shownVersions(versions, data.v).length > 1 ? 'versions' : 'drafts')
-  if (data.thread) {
-    k.on('t', () => { k.do('thread') }, 'thread')
-    k.on('m', () => { k.do('main') }, 'send to main')
-  }
   // esc closes what was opened last (the program over the card, else the bar with all it shows), then the detail
   k.on('esc', () => {
     if (prog) return { prog: false }

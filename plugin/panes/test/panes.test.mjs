@@ -101,7 +101,7 @@ test('detail: one page on both surfaces; the part selected and the bar are its s
   assert.deepEqual(ring.state, click.state)
   // a click on the part already selected opens its details (the ring resting on it does not)
   assert.equal(act(PANES.detail, data, click.state, { type: 'press', region: 'day-2026-06-18' }, 'browser').state.bar, 'details')
-  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h versions · t thread · m send to main · esc back')
+  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h versions · esc back')
   // the browser has no o: it is the browser
 })
 
@@ -219,10 +219,13 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   // back from the first card closes the tray; ] asks the host for the next mark or card
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('0'), 'terminal').d.effects, [{ do: 'close' }])
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent(']'), 'terminal').d.effects, [{ dir: 1, do: 'step' }])
-  // 1 asks: the question is typed in the prompt
-  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'terminal').state.asking, true)
-  const asking = run(PANES.tray, data, { state: { stack: [f0], asking: true }, w: 70, got })
-  assert.equal([asking.status?.text, barText([asking])].filter(Boolean).join(' · '), 'type to ask · ↵ asks this thread · 0 back')
+  // 1 asks: the host opens the card in the side panel as the mark's thread (the question is typed in its input bar)
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'terminal').d.effects, [{ do: 'thread', frame: { ...f0, open: null } }])
+  // a mark with a thread says so, and 1 opens it
+  const withThread = PANES.tray.data({ threads: [{ key: 'mark-r1-q3-day-2026-06-18-n', turns: [{ role: 'person', text: 'why so high?' }] }] })
+  const t = run(PANES.tray, withThread, { state: { stack: [f0] }, w: 70, got })
+  assert.match(gridText(renderTerm(t, { w: 70 })), /↳ thread: why so high\? · 1 opens it/)
+  assert.equal(barText([t]), '1 thread · 2 3 open · 0 close · ] next')
 })
 
 test('tray: a citation opens on its most readable form; each section the card names (r rows, c code) is a key away in the same panel, never shown first', async () => {
@@ -247,9 +250,6 @@ test('tray: a citation opens on its most readable form; each section the card na
   assert.equal(act(PANES.tray, data, code.state, keyEvent('c'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('0'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('r'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, 'rows')
-  // while the person asks the mark's thread, letters are the question: no section takes them
-  const asking = run(PANES.tray, data, { state: { stack: [f0], asking: true }, w: 70, got })
-  assert.ok(!asking.on.some(h => h.name === 'r' || h.name === 'c'))
   // a value of a card: the card itself, the part that holds the value selected as a part is
   const card = globalThis.DrawKit.run("return k.stack(k.region('day-06-17', { ref: 'q1#day=06-17' }, k.text('06-17 870')), k.region('day-06-18', { ref: 'q1#day=06-18' }, k.text('06-18 132')))", {}, { w: 60 })
   assert.equal(markedPart(card, ['obj:x#/days/1', 'q1#day=06-18']), 'day-06-18')
@@ -276,4 +276,54 @@ test('the keys Claude Code keeps never reach a program in the terminal: ← and 
     // the browser's page gets them
     assert.ok(!('left' in hostKeys(mode, 'browser')), mode)
   }
+})
+
+// ---------------------------------------------------------------- the side panel's panes
+test('threads: the list is a tree under main, the newest first; the selected thread is the pane\'s thread; ↵ or a press on the selected row opens it', async () => {
+  const { rowsOf, selectedOf, ago } = await import('../threads.js')
+  const now = Date.parse('2026-10-20T12:00:00Z')
+  const list = [
+    { key: 'mark-r1-q3', name: 'main/6,543 saves', status: 'running', asks: 1, at: '2026-10-20T11:59:30Z', turns: [{ role: 'person', text: 'why so high?' }] },
+    { key: 'card-01-saves', name: 'main/Saves per day', status: 'done', asks: 2, at: '2026-10-20T11:40:00Z', turns: [{ role: 'person', text: 'why?' }, { role: 'claude', text: 'x' }, { role: 'person', text: 'and the day before?' }] },
+  ]
+  assert.equal(ago('2026-10-20T11:40:00Z', now), '20m')
+  const data = { rows: rowsOf(list, now) }
+  assert.deepEqual(data.rows.map(r => [r.name, r.asks, r.last]), [['main/6,543 saves', 1, 'why so high?'], ['main/Saves per day', 2, 'and the day before?']])
+  // nothing chosen yet: the newest is selected, and the pane's thread is it
+  assert.equal(selectedOf({}, data), 'mark-r1-q3')
+  assert.deepEqual(PANES.threads.thread({}, {}, data), { key: 'mark-r1-q3' })
+  assert.equal(PANES.threads.thread({}, {}, { rows: [] }), null)
+  const d = run(PANES.threads, data, { w: 70 })
+  const text = gridText(renderTerm(d, { w: 70 }))
+  assert.match(text, /main\n[\s\S]*├─ main\/6,543 saves +answering…[\s\S]*why so high\?[\s\S]*└─ main\/Saves per day +2 questions · 20m/)
+  assert.equal(d.selected, 't0')
+  // the ring onto the second row selects it; a press on the selected row (or ↵) opens it
+  const moved = act(PANES.threads, data, {}, { type: 'focus', region: 't1' }, 'terminal', { w: 70 })
+  assert.equal(moved.state.sel, 'card-01-saves')
+  assert.deepEqual(act(PANES.threads, data, moved.state, { type: 'press', region: 't1' }, 'terminal', { w: 70 }).d.effects, [{ do: 'open', thread: 'card-01-saves' }])
+  assert.deepEqual(act(PANES.threads, data, moved.state, keyEvent('return'), 'terminal', { w: 70 }).d.effects, [{ do: 'open', thread: 'card-01-saves' }])
+  assert.match(gridText(renderTerm(run(PANES.threads, { rows: [] }, { w: 70 }), { w: 70 })), /No threads yet/)
+})
+
+test('mark: a citation in the side panel is the tray\'s card at the panel\'s width; its thread is the mark\'s own; ] [ step a message\'s marks, a citation inside opens over it', async () => {
+  const { scopeOf } = await import('../tray.js')
+  const { threadKey } = await import('../../shell/threads.js')
+  const f0 = { row: 'r1', i: 0, kind: 'cite', ref: 'q3#day=2026-06-18@n', label: '6,543' }
+  // one thread per mark: the same as the tray's
+  assert.deepEqual(PANES.mark.thread({ frame: f0 }), { scope: scopeOf(f0), label: '6,543', refs: ['q3#day=2026-06-18@n'] })
+  assert.equal(threadKey(PANES.mark.thread({ frame: f0 }).scope), 'mark-r1-q3-day-2026-06-18-n')
+  assert.equal(PANES.mark.titleOf({ frame: f0 }), 'Cite · 6,543')
+  const data = PANES.mark.data({}, { frame: f0 })
+  const d = run(PANES.mark, data, { w: 70 })
+  assert.equal(d.wants[0].request.card.ref, 'q3#day=2026-06-18@n')
+  const inner = globalThis.DrawKit.run('return k.text("Jun 18 **6,543**")', {}, { w: 60 })
+  const got = { [d.wants[0].key]: { drawings: [inner], links: [{ id: 'n1', ref: 'q1#user=A@n', label: 'A' }] } }
+  const full = run(PANES.mark, data, { w: 70, got })
+  assert.match(gridText(renderTerm(full, { w: 70 })), /6,543[\s\S]*Jun 18 6,543/)
+  assert.equal(barText([full]), '2 open · ] next')
+  assert.deepEqual(act(PANES.mark, data, {}, keyEvent(']'), 'terminal', { got, w: 70 }).d.effects, [{ dir: 1, do: 'step' }])
+  assert.deepEqual(act(PANES.mark, data, {}, keyEvent('2'), 'terminal', { got, w: 70 }).d.effects, [{ do: 'open', mark: { kind: 'cite', ref: 'q1#user=A@n', label: 'A' } }])
+  // a citation opened from an answer (no message): no stepping
+  const loose = run(PANES.mark, PANES.mark.data({}, { frame: { kind: 'cite', ref: 'q2#n', label: '2,994' } }), { w: 70 })
+  assert.ok(!loose.on.some(h => h.name === ']'))
 })
