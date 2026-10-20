@@ -21,6 +21,8 @@ DOC = "report"
 SENTENCE_END = re.compile(r"(?<=[.!?])[\"”’)]?\s+(?=[A-Z0-9\"“(\[])")
 FIGURE = re.compile(r"^!\[([^\]]*)\]\((?:card|cell):([A-Za-z0-9_-]+)\)\s*$")
 TOKEN = re.compile(r"\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]")
+# what feature modules add to the document as the page reads it, such as its comments (checks.py): fn(ws, doc)
+DECORATE: list[Any] = []
 
 
 def _path(ws: str, ext: str) -> Any:
@@ -53,7 +55,8 @@ def types(ws: str) -> dict[str, Any]:
     doc = writeup(ws) if md is not None else None
     return {DOC: {"exists": md is not None, "renderer": "document", "name": "Report", "frame": False,
                   "generation": st.get("generation"), "generated_at": st.get("generated_at"),
-                  "title": doc["title"] if doc else None, "open_comments": 0,
+                  "title": doc["title"] if doc else None,
+                  "open_comments": sum(1 for c in (doc or {}).get("comments") or [] if c.get("status") == "open"),
                   **({"status": "generating"} if st.get("status") == "generating" else {})}}
 
 
@@ -155,8 +158,11 @@ def writeup(ws: str) -> dict[str, Any] | None:
         return None
     st = _state(ws)
     doc = parse(md)
-    return {"id": DOC, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
-            "frame": False, "comments": []}
+    out = {"id": DOC, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
+           "frame": False, "comments": []}
+    for fn in DECORATE:
+        fn(ws, out)
+    return out
 
 
 def save(ws: str, md: str, *, by: str) -> dict[str, Any]:

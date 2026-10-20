@@ -10,6 +10,10 @@ import importlib
 from types import ModuleType
 
 NAMES: list[str] = [
+    "calls",
+    "orient",
+    "card_check",
+    "checks",
 ]
 
 
