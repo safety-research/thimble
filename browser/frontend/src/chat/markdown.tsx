@@ -10,7 +10,7 @@ import { MarkdownCode } from '../components/Code'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
-import { splitValueRef } from '../lib/refs'
+import { mapLinks, splitValueRef } from '../lib/refs'
 import { LensMark } from '../components/LensMark'
 import type { Lens, Mark } from '../lib/marks'
 import { useFeature } from '../features'
@@ -43,17 +43,15 @@ const utf8d = new TextDecoder()
 const toHex = (s: string) => Array.from(utf8.encode(s), (b) => b.toString(16).padStart(2, '0')).join('')
 const fromHex = (h: string) => (h ? utf8d.decode(new Uint8Array((h.match(/../g) ?? []).map((x) => parseInt(x, 16)))) : '')
 
-/** A Markdown link whose target is a ref rather than a web page, as Claude writes a citation in thimble browser and in
- * the terminal plugin alike: `[31](card:<id>#outcome/merged)`, `["quote"](runs/x.jsonl#L4)`, `[↗](<ref>)`. A ref may
- * hold spaces (a column's name), written as they are or as %20. */
-const CITE_LINK_RE = /(?<!!)\[([^\[\]\n]*)\]\(([^()\n]+?)\)/g
 const WEB_TARGET = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|#|\/)/i
 
 /** `text` with each citation written as a Markdown link turned into the `[[value|ref]]` token the chips read; a link to
- * a web page stays a link. Pure. */
+ * a web page stays a link. Claude writes a citation so in thimble browser and in the terminal plugin alike:
+ * `[31](card:<id>#outcome/merged)`, `["quote"](runs/x.jsonl#L4)`, `[↗](<ref>)`. A ref may hold spaces (a column's
+ * name), written as they are or as %20, and balanced brackets (a row named "(no name)"), as linkSpans reads it. Pure. */
 export function citeLinks(text: string): string {
   if (!text.includes('](')) return text
-  return text.replace(CITE_LINK_RE, (whole, words: string, target: string) => {
+  return mapLinks(text, ({ words, target }, whole) => {
     if (WEB_TARGET.test(target.trim())) return whole
     const ref = target.trim().replace(/%20/g, ' ')
     const shown = words.trim()
