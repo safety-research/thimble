@@ -8,6 +8,7 @@
 // marked `terminal`, naming the agent's chat (backend events._hold), until the backend sees it answered. While it does,
 // each place that shows that agent's state says TERMINAL_WAIT in place of its working state (terminalWaits).
 import { useEffect, useState } from 'react'
+export { useChatMetas } from './useChat'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { newest, STALE } from '../lib/newest'
@@ -126,32 +127,3 @@ export function useTerminalWaits(ws: string, enabled = true): ReadonlySet<string
   return value
 }
 
-/** The workspace's chat metas, read again on the stream's `chat` records, for a surface outside the chat panel; none
- * read while `enabled` is off. */
-export function useChatMetas(ws: string, enabled = true): ChatMeta[] {
-  const [metas, setMetas] = useState<ChatMeta[]>([])
-  useEffect(() => {
-    if (!enabled) {
-      setMetas([])
-      return
-    }
-    let alive = true
-    let timer: number | null = null
-    const fresh = newest<ChatMeta[]>()
-    const load = () =>
-      fresh(api.chats(ws))
-        .then((l) => alive && l !== STALE && setMetas(Array.isArray(l) ? l : []))
-        .catch(() => undefined)
-    void load()
-    const off = bus.on('chat', () => {
-      if (timer != null) window.clearTimeout(timer)
-      timer = window.setTimeout(() => void load(), REFETCH_DEBOUNCE_MS)
-    })
-    return () => {
-      alive = false
-      off()
-      if (timer != null) window.clearTimeout(timer)
-    }
-  }, [ws, enabled])
-  return metas
-}

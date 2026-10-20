@@ -16,10 +16,11 @@ import { invalidateSettings, loadSettings, onSettingsChange } from '../lib/model
 import { refreshProposals, useProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import type { Proposal } from '../lib/types'
-import { ARM_MS } from './PermissionCard'
 
 /** The card's head. */
 export const PROPOSAL_HEAD = 'View proposal'
+/** How long a new proposal ignores clicks, so a double click never answers it unread (ms). */
+export const ARM_MS = 600
 /** The toast after Don't ask again (and a notice's Turn off view proposals). */
 export const PROPOSALS_OFF_LINE = 'View proposals are off. Settings turns them on again.'
 

@@ -1,7 +1,10 @@
 """The server: the page's files and the API it reads, on 127.0.0.1 only.
 
-The routes are the ones thimble 0.8's page calls, so its components work unchanged (frontend/). A feature of 0.8 that
-thimble browser does not have yet answers with an empty list, which the page shows as nothing to show.
+The core is here: the sign-in, the workspaces and the folder of files, the chats and their agents, the event stream and
+the page. Each feature (features/: cards, citations, lenses, labels, report, views) adds its own routes, tools and
+prompt part in one place, features.register_all. The routes are the ones thimble 0.8's page calls, so its components
+work unchanged (frontend/). A route the page calls that no part answers yet answers with an empty list, which the page
+shows as nothing to show.
 """
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ from typing import Any, Callable
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import canvas, chats, corpus, features, home, report, settings, tools, views
+from . import chats, corpus, features, files, home, settings, settings_api
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -193,26 +196,6 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         except Exception as e:  # noqa: BLE001
             raise bad(e) from None
 
-    @app.get("/api/corpora/{c}/ref")
-    def resolve_ref(c: str, ref: str, value: str | None = None) -> dict[str, Any]:
-        f = folder_of(c)
-        try:
-            if (fn := tools.resolver(ref)) is not None:
-                return fn(c, ref)
-            if ref.startswith(("card:", "cell:")):
-                got = canvas.resolve_card_ref(c, ref, value)
-                _, cell = canvas.find(c, ref)
-                got["record"] = cell
-                return got
-            got = corpus.resolve(f, ref)
-            if got["kind"] in ("record", "range"):
-                end = got.get("meta", {}).get("end", got["line"])
-                page = corpus.page(f, got["path"], got["line"], end - got["line"] + 1)
-                got.update(end_line=end, records=page["records"])
-            return got
-        except Exception as e:  # noqa: BLE001
-            raise bad(e) from None
-
     # ---- the event stream (hub.py)
 
     @app.get("/api/ws/{c}/events")
@@ -352,173 +335,17 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
             raise HTTPException(409, str(e)) from None
         return {"id": secrets.token_hex(4), "kind": kind, "delivered": 1, "thread": chat}
 
-    # ---- the canvas (canvas.py)
-
-    @app.get("/api/ws/{c}/canvas")
-    def get_canvas(c: str) -> dict[str, Any]:
-        return canvas.canvas(ws_of(c))
-
-    @app.get("/api/ws/{c}/cells/names")
-    def cell_names(c: str) -> list[dict[str, Any]]:
-        return [{"id": x["id"], "notebook": x["notebook"], "title": x["title"], "slug": x.get("slug"),
-                 "exec_count": x.get("exec_count"), "ts": x.get("ts"), "status": x.get("status")}
-                for x in canvas.canvas(ws_of(c))["cells"]]
-
-    @app.get("/api/ws/{c}/cells/{cid}")
-    def cell_get(c: str, cid: str) -> dict[str, Any]:
-        try:
-            return canvas.find(ws_of(c), cid)[1]
-        except KeyError:
-            raise HTTPException(404, cid) from None
-
-    @app.put("/api/ws/{c}/cells/{cid}")
-    def cell_put(c: str, cid: str, body: dict = Body(...)) -> dict[str, Any]:
-        args = dict(body)
-        if "title" in args:
-            args["question"] = args.pop("title")
-        if isinstance(args.get("payload"), dict):
-            args.update(args.pop("payload"))
-        try:
-            return canvas.update_card(ws_of(c), cid, args, by="analyst")
-        except Exception as e:  # noqa: BLE001
-            raise bad(e) from None
-
-    @app.delete("/api/ws/{c}/cells/{cid}")
-    def cell_delete(c: str, cid: str) -> dict[str, bool]:
-        try:
-            canvas.delete_card(ws_of(c), cid, by="analyst")
-        except Exception as e:  # noqa: BLE001
-            raise bad(e) from None
-        return {"ok": True}
-
-    @app.post("/api/ws/{c}/cells/{cid}/run")
-    async def cell_run(c: str, cid: str) -> dict[str, Any]:
-        try:
-            return await canvas.run_card(ws_of(c), cid, folder_of(c), unsandboxed=sessions.unsandboxed)
-        except KeyError:
-            raise HTTPException(404, cid) from None
-
-    @app.get("/api/ws/{c}/notebooks/{nb}/cells/{cid}/outputs/{i}/full")
-    def output_full(c: str, nb: str, cid: str, i: int) -> Response:
-        _, cell = canvas.find(ws_of(c), cid)
-        outs = cell.get("outputs") or []
-        if not 0 <= i < len(outs):
-            raise HTTPException(404, "no such output")
-        return Response(str(outs[i].get("text/plain", "")), media_type="text/plain")
-
-    # ---- the report (report.py) and its writer (agent.Writer)
-
-    def doc_slug(slug: str) -> str:
-        if slug != report.DOC:
-            raise HTTPException(404, f"thimble browser has one document, the report, not {slug!r}")
-        return slug
-
-    @app.get("/api/ws/{c}/investigations/main/types")
-    def doc_types(c: str) -> dict[str, Any]:
-        return report.types(ws_of(c))
-
-    @app.get("/api/ws/{c}/investigations/main/types/{slug}")
-    def doc_get(c: str, slug: str) -> dict[str, Any]:
-        doc_slug(slug)
-        got = report.writeup(ws_of(c))
-        if got is None:
-            raise HTTPException(404, "the report is not written yet")
-        return got
-
-    @app.get("/api/ws/{c}/investigations/main/types/{slug}/frame")
-    def doc_frame(c: str, slug: str) -> dict[str, Any]:
-        raise HTTPException(404, "thimble browser has no frames yet")
-
-    @app.put("/api/ws/{c}/investigations/main/types/{slug}/blocks")
-    def doc_blocks(c: str, slug: str, body: dict = Body(...)) -> dict[str, Any]:
-        doc_slug(slug)
-        return report.from_blocks(ws_of(c), str(body.get("title") or ""), list(body.get("blocks") or []))
-
-    @app.post("/api/ws/{c}/write")
-    async def write(c: str, body: dict = Body(...)) -> dict[str, Any]:
-        ws_of(c)
-        doc_slug(str(body.get("doc") or report.DOC))
-        running = [m for m in chats.listing(c, sessions.running(c)) if m.get("role") == "writer" and m["running"]]
-        if running:
-            return {"chat": running[0]["id"], "kind": "busy", "reason": "the writer is writing the report already"}
-        from .agent import writer_brief  # noqa: PLC0415
-
-        cid = "w" + secrets.token_hex(4)
-        m = chats.new_meta(cid, kind="agent", title="Report writer", parent="main")
-        m.update(role="writer", doc=report.DOC, status="running", brief=str(body.get("text") or "") or None)
-        chats.save_meta(c, m)
-        report.set_status(c, "generating")
-        await sessions.get(c, cid).send(writer_brief(c, str(body.get("text") or "")))
-        return {"agentId": cid, "chat": cid}
-
-    # ---- generative views (views/)
-
-    def view_of(c: str, slug: str) -> Path:
-        try:
-            d = views.view_dir(ws_of(c), slug)
-        except KeyError:
-            raise HTTPException(404, f"no such view: {slug}") from None
-        if not (d / "view.html").is_file():
-            raise HTTPException(404, f"no such view: {slug}")
-        return d
-
-    @app.get("/api/ws/{c}/views")
-    def views_list(c: str, path: str | None = None) -> list[dict[str, Any]]:
-        return views.list_views(ws_of(c), folder_of(c), path)
-
-    @app.get("/api/ws/{c}/views/proposals")
-    def views_proposals(c: str) -> list[dict[str, Any]]:
-        return [p for p in views.proposals(ws_of(c)) if p.get("status") != "built"]
-
-    @app.get("/api/ws/{c}/views/{slug}/frame")
-    def view_frame(c: str, slug: str, request: Request) -> Response:
-        view_of(c, slug)
-        # the Host header is one of `hosts` (Guard), so the frame's media URLs name this server as the browser reaches it
-        doc = views.frame(c, slug, origin=f"http://{request.headers.get('host', '')}",
-                          browser=request.scope.get("browser") or "")
-        return Response(doc, media_type="text/html", headers={"cache-control": "no-cache"})
-
-    @app.post("/api/ws/{c}/views/{slug}/records")
-    async def view_records(c: str, slug: str, body: dict = Body(...)) -> Any:
-        view_of(c, slug)
-        got = await views.run_reader(c, slug, folder_of(c), "records", body.get("query"))
-        if not got.get("ok"):
-            return JSONResponse({"detail": {"message": got.get("error"), "traceback": got.get("traceback", "")}},
-                                status_code=502)
-        return {"data": got["result"]}
-
-    @app.get("/api/ws/{c}/views/{slug}/resolve")
-    async def view_resolve(c: str, slug: str, ref: str) -> Any:
-        view_of(c, slug)
-        path, _, frag = ref.partition("#")
-        loc = {"key": ref.split("/", 1)[1]} if ref.startswith("view:") else {"path": path, "fragment": frag}
-        got = await views.run_reader(c, slug, folder_of(c), "resolve", loc)
-        if not got.get("ok") or not got.get("result"):
-            raise HTTPException(404, f"the view does not know {ref}")
-        return {"ref": ref, **got["result"]}
-
-    @app.get("/api/ws/{c}/views/{slug}/calls/{call}")
-    def view_call(c: str, slug: str, call: str) -> dict[str, bool]:
-        return {"running": False}
-
-    @app.post("/api/ws/{c}/views/{slug}/calls/{call}/cancel")
-    def view_cancel(c: str, slug: str, call: str) -> dict[str, bool]:
-        return {"cancelled": False}
-
-    @app.delete("/api/ws/{c}/views/{slug}")
-    def view_delete(c: str, slug: str) -> dict[str, Any]:
-        import shutil  # noqa: PLC0415
-
-        d = view_of(c, slug)
-        shutil.rmtree(d)
-        hub.publish(c, {"type": "view", "slug": slug, "status": "deleted"})
-        return {"deleted": slug}
-
-    # ---- the features (features.py): each module adds its own routes, tools and agents
+    # ---- the core's own modules, then the features (features/): each adds its own routes, tools and agents
 
     ctx = Ctx(app=app, auth=auth, sessions=sessions, folder_of=folder_of, ws_of=ws_of, bad=bad)
-    for mod in features.load():
-        mod.register(ctx)
+    settings_api.register(ctx)
+    files.register(ctx)
+    features.register_all(ctx)
+
+    @app.get("/api/ws/{c}/features")
+    def feature_list(c: str) -> list[dict[str, Any]]:
+        ws_of(c)
+        return features.listing()
 
     # ---- what thimble browser does not have yet: empty answers the page shows as nothing. A stub never shadows a
     # route a feature registered (FastAPI takes the first route that matches, so stubs go last and skip taken paths).
@@ -530,16 +357,10 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         if (path, "GET") not in taken:
             app.add_api_route(path, (lambda v: (lambda c: v))(value), methods=["GET"])
 
-    for route in ("notices", "concepts", "labels/presence", "checks", "card-checks", "card-libs"):
+    for route in ("notices", "concepts", "labels/presence"):
         stub(route, [])
-    for route, value in {"orientation": {}, "undo": {"undo": None, "redo": None}, "filters": {},
-                         "report-types/presets": [], "canvas/comments": {"comments": []},
-                         "settings": {"models": {}}}.items():
+    for route, value in {"undo": {"undo": None, "redo": None}, "filters": {}}.items():
         stub(route, value)
-
-    @app.put("/api/ws/{c}/canvas/active-group")
-    def active_group(c: str) -> Response:
-        return Response(status_code=204)
 
     @app.post("/api/ws/{c}/telemetry")
     def telemetry(c: str) -> Response:

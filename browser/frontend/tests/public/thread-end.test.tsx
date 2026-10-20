@@ -37,7 +37,7 @@ describe('a side thread whose run ended with an answer', () => {
   test('ends on its answer, with nothing under it that sends the answer to main', async () => {
     // a meta as 0.7.0's server gave it, which offered the answer to main
     const m = { ...meta('t1'), hand_back: 'offer' } as ChatMeta
-    const el = await mount(<ThreadView ws="w" meta={m} chat={chat(m, answered)} main={chat(meta('main'), [])} skip={new Set()} branches={[]} detached={false} />)
+    const el = await mount(<ThreadView ws="w" meta={m} chat={chat(m, answered)} main={chat(meta('main'), [])} branches={[]} />)
     await settle()
     expect(el.textContent).toContain('Agent 3 ran 31 of the 40 runs')
     expect(el.textContent).not.toMatch(/hand(ed)? back/i)

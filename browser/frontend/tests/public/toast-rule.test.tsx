@@ -5,7 +5,7 @@
 // for either.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
+import { ARM_MS } from '../../src/chat/ProposalCard.tsx'
 import { ProposalCard } from '../../src/chat/ProposalCard.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'

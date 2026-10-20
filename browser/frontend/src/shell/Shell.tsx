@@ -3,14 +3,14 @@
 // its surface in the pane that holds it, else in the focused pane (panes.show). The layout and the chat column's width
 // and fold state are kept per workspace in browser storage (App clears it first when the workspace was replaced by a new
 // one of the same name, lib/workspace.ts syncInstance); a new workspace opens on Files. A folded chat column opens when
-// something asks for a thread. When the workspace is replaced (the stream's `reset`), the page reloads. With no Claude
-// Code session attached the shell is inert under SessionGone, except on a demo page (lib/demo, `data-session` static).
+// something asks for a thread. When the workspace is replaced (the stream's `reset`), the page reloads.
+// A demo page (lib/demo) is static (`data-session`).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '../canvas/Canvas'
 import { ChatPanel } from '../chat/ChatPanel'
 import { holdForChat } from '../chat/pending'
 import { isUnread, readSeen } from '../chat/seen'
-import { useChatMetas, waitingChats } from '../chat/waiting'
+import { useChatMetas } from '../chat/useChat'
 import { Button } from '../components/Button'
 import type { IconName } from '../components/Icon'
 import { FilesTab } from '../files/FilesTab'
@@ -57,7 +57,6 @@ import {
 } from './panes'
 import { Resizer } from './Resizer'
 import { ServerDown } from './ServerDown'
-import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
 import { TopBar } from './TopBar'
 import { TourHost } from './TourHost'
@@ -240,7 +239,6 @@ export function Shell({ ws }: { ws: string }) {
       alive = false
     }
   }, [ws, firstOpen])
-  const gone = useSessionGone(ws)
   const demo = useDemo()
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
@@ -302,7 +300,7 @@ export function Shell({ ws }: { ws: string }) {
   const signals = tabSignals(dots, writing(metas))
 
   return (
-    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : demo ? 'static' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
+    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={demo ? 'static' : undefined} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
         ws={ws}
         tabs={BASE.map((t) => ({
@@ -373,24 +371,21 @@ export function Shell({ ws }: { ws: string }) {
       <LabelEditorHost ws={ws} />
       <Toasts />
       <TourHost />
-      {!gone && <ServerDown />}
+      <ServerDown />
       <NewVersion />
-      {gone && <SessionGone gone={gone} ws={ws} />}
     </div>
   )
 }
 
-/** The folded chat column's button, with the accent dot while main or a thread holds a reply the analyst has not read
- * and the warning dot while a permission prompt waits for them. */
+/** The folded chat column's button, with the accent dot while main or a thread holds a reply the analyst has not read. */
 function ChatStripButton({ ws, onOpen }: { ws: string; onOpen: () => void }) {
   const metas = useChatMetas(ws)
   const seen = readSeen(ws)
-  const waiting = waitingChats(metas).length > 0 || metas.some((m) => m.kind === 'main' && (m.permissions?.length ?? 0) > 0)
   const unread = metas.some((m) => (m.kind === 'main' || m.kind === 'thread') && isUnread(seen, m.id, m.n_messages))
   return (
     <span className="shell-strip-chat">
       <Button variant="icon" icon="chat" title="Chat" aria-label="Chat" onClick={onOpen} />
-      {(waiting || unread) && <span className={`dot shell-strip-dot${waiting ? ' tt-waiting' : ''}`} role="img" aria-label={waiting ? 'Waiting for you' : 'Unread'} />}
+      {unread && <span className="dot shell-strip-dot" role="img" aria-label="Unread" />}
     </span>
   )
 }

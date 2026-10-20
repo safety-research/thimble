@@ -1,10 +1,10 @@
 // The chat as the browser folds it from a session's records (src/chat/model.ts): streamed text coalesces, a subagent's
 // records nest under the call that started it, and results attach to their calls. The tool names the chat reads must
 // match the plugin's MCP server.
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { callLineText, callTarget, foldRecords, leadText, madeBy, mainSkips, MCP_PREFIXES, type CallsRow, type ToolGroup, type UserRow } from '../../src/chat/model.ts'
+import { callLineText, callTarget, foldRecords, madeBy, MCP_PREFIXES, type CallsRow, type ToolGroup } from '../../src/chat/model.ts'
 import { shownRows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
@@ -56,15 +56,9 @@ describe('the fold', () => {
   })
 })
 
-test('an extension\'s orientation instructions lead its follow-up as a line naming the extension', () => {
-  const [row] = foldRecords(records([{ type: 'user', text: 'Read every record in `*.jsonl`.', by: 'extension', extension: 'swarm-orient', run: 1 }]))
-  expect(leadText(row as UserRow)).toBe('swarm-orient added: its orientation instructions')
-  expect(leadText({ kind: 'user', index: 0, text: ' Count them. ', by: 'browser' })).toBe('Count them.')
-})
-
 describe('tool names', () => {
   test("thimble browser's tools reach the chat by their own names, which carry no MCP prefix to strip", () => {
-    const names = [...readFileSync(path.join(ROOT, 'prompts/tools.md'), 'utf8').matchAll(/^## (\S+)$/gm)].map((m) => m[1])
+    const names = [...readdirSync(path.join(ROOT, 'prompts')).filter((f) => f.startsWith('tools')).map((f) => readFileSync(path.join(ROOT, 'prompts', f), 'utf8')).join('\n').matchAll(/^## (\S+)$/gm)].map((m) => m[1])
     expect(names).toContain('add_card')
     for (const n of names) expect(MCP_PREFIXES.some((p) => n.startsWith(p))).toBe(false)
   })
@@ -140,15 +134,3 @@ describe("a writer's saves of its document in main", () => {
   })
 })
 
-describe("main's look at the agent tray", () => {
-  test('a list_agents call and its result are left out of main, and a call with no input never reads as {}', () => {
-    const log = records([
-      { type: 'user', ts: '2026-08-30T14:00:00Z', text: 'What is running?' },
-      { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id: 'l1', name: `${P}list_agents`, input: {} },
-      { type: 'tool_result', ts: '2026-08-30T14:00:02Z', id: 'l1', summary: 'orientation: running' },
-      { type: 'text', delta: 'The orientation is running.' },
-    ])
-    expect([...mainSkips(log, { spawned: new Set(), summaries: [], runs: [] })].sort()).toEqual([1, 2])
-    expect(callLineText(`${P}some_new_tool`, {}, '')).toBe('some_new_tool')
-  })
-})

@@ -11,7 +11,6 @@ own; its row in views/proposals.json says how it stands.
 """
 from __future__ import annotations
 
-import secrets
 import shutil
 from typing import Any
 
@@ -40,19 +39,14 @@ def register(ctx: Any) -> None:
         return bool(row.get("chat")) and row["chat"] in sessions.running(ws)
 
     async def build_again(c: str, slug: str) -> dict[str, Any]:
+        from .features.views import start_build  # noqa: PLC0415
+
         ws = ctx.ws_of(c)
         row = _row(ws, slug)
         if running(ws, row):
             raise HTTPException(409, "this view is being built already")
-        name = str(row.get("name") or slug)
-        cid = "d" + secrets.token_hex(4)
-        m = chats.new_meta(cid, kind="agent", title=f"View: {name}", parent="main")
-        m.update(role="dev", view=slug, status="running", asked=True)
-        chats.save_meta(ws, m)
-        row = views.set_proposal(ws, slug, status="building", chat=cid, attempts=0)
-        await sessions.get(ws, cid).send(views.builder_brief(name, slug, str(row.get("description") or ""),
-                                                             str(row.get("task") or ""), list(row.get("claims") or [])))
-        return {**row, "agentId": cid}
+        cid = await start_build(sessions, ws, slug)
+        return {**_row(ws, slug), "agentId": cid}
 
     @app.post("/api/ws/{c}/views/{slug}/build")
     async def build(c: str, slug: str) -> dict[str, Any]:

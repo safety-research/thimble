@@ -118,7 +118,7 @@ The browser workbench:
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).
-- **The browser workbench's Settings**, in the page: the credentials, the model, the effort, and explain marks on or
+- **The browser workbench's Settings**, in the page: the credentials, the model, the effort, and each feature on or
   off. `THIMBLE_BROWSER_HOME` sets where it keeps its workspaces (default `~/.thimble-browser`).
 
 ## Update and uninstall

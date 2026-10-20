@@ -185,7 +185,7 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
     cell: dict[str, Any] = {"id": secrets.token_hex(4), "kind": kind, "title": question,
                             "slug": _slug(question, taken),
                             "takeaway": to_canvas_links(str(args.get("takeaway") or "")),
-                            "takeaway_author": by if args.get("takeaway") else None, "labels": [], "locked": False,
+                            "takeaway_author": by if args.get("takeaway") else None, "labels": [],
                             "created_by": by, "created_at_event": None, "edited": [], "created_ts": now, "ts": now,
                             "width": None, "height": None, "pos": None, "starred": False}
     if kind in CODE_KINDS:
@@ -222,8 +222,6 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
 def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -> dict[str, Any]:
     with _lock:
         nb, cell = find(ws, card)
-        if cell.get("locked") and by != "analyst":
-            raise PermissionError("the person locked this card")
         before = copy.deepcopy(cell)
         if args.get("question"):
             cell["title"] = str(args["question"])
@@ -244,7 +242,7 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
             cell["payload"] = {"refs": args["refs"]}
         if "html" in args and cell["kind"] == "custom":
             cell["payload"] = {"html": str(args["html"] or "")}
-        for k in ("locked", "starred", "width", "height", "pos"):
+        for k in ("starred", "width", "height", "pos"):
             if k in args and by == "analyst":
                 cell[k] = args[k]
         cell["ts"] = home.now()
@@ -272,8 +270,6 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
 def delete_card(ws: str, card: str, *, by: str = "main") -> None:
     with _lock:
         nb, cell = find(ws, card)
-        if cell.get("locked") and by != "analyst":
-            raise PermissionError("the person locked this card")
         prior = _prior(nb, cell["id"])
         nb["cells"] = [c for c in nb["cells"] if c["id"] != cell["id"]]
         save(ws, nb)

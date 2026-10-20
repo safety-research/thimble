@@ -14,7 +14,7 @@ import { bus } from '../lib/bus'
 import { modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { ChatMeta, Refusal, RefusalKind, StartAnswer, SubagentRequest } from '../lib/types'
-import { useChatMetas } from './waiting'
+import { useChatMetas } from './useChat'
 
 /** The buttons a refused start offers, by its kind (plan section 2, "A start that does not happen"). */
 export type RefusedAction = 'start-it' | 'try-again' | 'dismiss'

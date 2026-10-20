@@ -459,10 +459,7 @@ export interface CardFilterParts {
   groups?: string[]
   /** who made the cards, as their top row names them (layout.ts cellThread) */
   makers?: string[]
-  /** what the card check found (lib/cardCheck.ts CheckFilterState) */
-  checks?: string[]
   starred?: boolean
-  locked?: boolean
   /** words, each of which starts a word of a kept card's question or takeaway */
   text?: string
 }

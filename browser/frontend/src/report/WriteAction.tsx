@@ -3,8 +3,7 @@
 // with Stop beside it (StopWriter); while Claude Code asks that writer a permission prompt in the terminal, the words
 // TERMINAL_WAIT with a still dot in the button's place, since the writer does nothing until the analyst answers there.
 import { useEffect, useRef, useState } from 'react'
-import { stopSession } from '../chat/AgentCard'
-import { STOP_HOLD_MS } from '../chat/ChatPanel'
+import { STOP_HOLD_MS, stopRun } from '../chat/ChatPanel'
 import { Button } from '../components/Button'
 import { Popover } from '../components/Menu'
 import { TERMINAL_WAIT } from '../chat/waiting'
@@ -22,7 +21,7 @@ export function StopWriter({ ws, chat }: { ws: string; chat: string }) {
   const stop = () => {
     if (stopping) return
     setStopping(true)
-    void stopSession(ws, chat, 'writer').then((ok) => ok || setStopping(false))
+    void stopRun(ws, { kind: 'chat', chat, label: '' }).then((ok) => ok || setStopping(false))
   }
   return (
     <Button variant="ghost" icon="stop" className="wu-stop" busy={stopping} onClick={stop}>

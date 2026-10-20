@@ -1,11 +1,15 @@
 """The tools of thimble browser's agents, as Python functions the agent loop (agent.py) calls. Their descriptions and
-input schemas are the `## <name>` sections of prompts/tools.md; each agent gets a fixed set (agent.AGENTS).
+input schemas are the `## <name>` sections of prompts/tools*.md; each agent gets a fixed set (agent.AGENTS).
+
+The core's tools are here: Read, Grep and Glob, and run_python. Each feature adds its own (features/, register), such
+as the cards' add_card or the report's write_document, as functions fn(tools, args) -> Result.
 
 What a tool can touch:
 - Read, Grep and Glob read files under the agent's read roots (the folder; for the view builder also the view kit's
   docs and the worked examples), each path resolved, symlinks included, and checked to be inside one of them.
 - run_python runs code in the sandbox (cards/sandbox.py), as a card's code does.
-- The card tools, write_document and write_view_file change the workspace's own store, never the folder of files.
+- A feature's tools change the workspace's own store (its cards, its report, a view's files), never the folder of
+  files.
 """
 from __future__ import annotations
 
@@ -19,9 +23,8 @@ from typing import Any, Awaitable, Callable
 
 import jsonschema
 
-from . import canvas, corpus, prompts, report, views
+from . import canvas, corpus, prompts
 
-BUILD_ATTEMPTS = 3
 READ_LINES = 2000
 LINE_CHARS = 2000
 GREP_MAX = 200
@@ -39,9 +42,6 @@ REF_RESOLVERS: dict[str, Callable[[str, str], dict[str, Any]]] = {}
 def resolver(ref: str) -> Callable[[str, str], dict[str, Any]] | None:
     """The feature's resolver of `ref`, or None for a ref of the core's own (a card, a file)."""
     return next((fn for prefix, fn in REF_RESOLVERS.items() if ref.startswith(prefix)), None)
-# what a feature module does after each tool call that worked, such as checking a card that got its takeaway:
-# fn(tools, name, args, result), which must not raise and must not wait (start a task for work that takes time)
-AFTER: list[Callable[["Tools", str, dict[str, Any], "Result"], None]] = []
 # what read_ref reads for a ref of a feature's own form, by its prefix, such as `call:` (calls.py): fn(tools, ref)
 REFS: dict[str, Callable[["Tools", str], "Result"]] = {}
 
@@ -86,33 +86,16 @@ def definitions(names: tuple[str, ...]) -> list[dict[str, Any]]:
     return out
 
 
-def describe(cell: dict[str, Any]) -> str:
-    head = f"card:{cell['id']} ({cell['kind']}) {cell['title']}"
-    if cell.get("takeaway"):
-        head += f"\ntakeaway: {cell['takeaway']}"
-    if cell["kind"] in canvas.CODE_KINDS:
-        head += f"\nstatus: {cell.get('status')}\n\n{canvas.outputs_text(cell)}"
-    elif cell["kind"] == "note":
-        head += f"\n{cell.get('text', '')}"
-    elif cell["kind"] == "example":
-        head += "\nrefs: " + json.dumps(cell.get("payload", {}).get("refs", []), ensure_ascii=False)
-    return head
-
-
 class Tools:
     """The tools of one agent. `on_card(cell_id)` hears each card a tool made or changed."""
 
     def __init__(self, ws: str, chat: str, folder: Path, *, read_roots: list[Path] | None = None,
-                 unsandboxed: bool = False, on_card: Callable[[str], None] | None = None, writer: bool = False,
-                 group: str | None = None, view: str | None = None,
-                 start_view: Callable[[dict[str, Any]], Awaitable[str]] | None = None) -> None:
+                 unsandboxed: bool = False, on_card: Callable[[str], None] | None = None,
+                 view: str | None = None) -> None:
         self.ws, self.chat, self.folder, self.unsandboxed = ws, chat, folder.resolve(), unsandboxed
         self.read_roots = [p.resolve() for p in (read_roots or [folder])]
         self.on_card = on_card or (lambda cid: None)
-        self.writer = writer
-        self.group = group  # the group every card this agent adds or moves goes to (AgentDef.group)
         self.view = view  # the slug of the view this agent builds
-        self.start_view = start_view
         self.session: Any = None  # the agent.Session these tools serve, which a feature's tool may read
 
     async def call(self, name: str, args: Any) -> Result:
@@ -136,12 +119,6 @@ class Tools:
             return _err(f"{type(e).__name__}: {e}")
         if len(got.text) > RESULT_CHARS:
             got.text = got.text[:RESULT_CHARS] + f"\n[cut at {RESULT_CHARS} characters]"
-        if not got.is_error:
-            for fn_after in AFTER:
-                try:
-                    fn_after(self, name, args, got)
-                except Exception:  # noqa: BLE001 — a feature's follow-up never fails the call
-                    pass
         return got
 
     # ---- reading
@@ -236,91 +213,12 @@ class Tools:
         text = canvas.outputs_text(cell, limit=RESULT_CHARS).replace("(cite a value as card:run#<column>/<row>)", "")
         return Result(text, res.get("status") != "ok")
 
-    # ---- cards
-
-    async def t_read_ref(self, args: dict[str, Any]) -> Result:
-        ref = str(args.get("ref") or "").strip().strip("[]()")
-        for prefix, reader in REFS.items():
-            if ref.startswith(prefix):
-                return reader(self, ref)
-        try:
-            if (fn := resolver(ref)) is not None:
-                got = fn(self.ws, ref)
-                return _ok(f"{ref} ({got['kind']})\n{got.get('excerpt', '')}")
-            if ref.startswith(("card:", "cell:")):
-                _, cell = canvas.find(self.ws, ref)
-                got = canvas.resolve_card_ref(self.ws, ref)
-                return _ok(describe(cell) + ("" if got["kind"] == "cell" else f"\n\n{got['excerpt']}"))
-            got = corpus.resolve(self.folder, ref)
-            return _ok(f"{got.get('path')} ({got['kind']})\n{got.get('excerpt', '')}")
-        except (KeyError, FileNotFoundError, IndexError, corpus.OutsideFolder, ValueError) as e:
-            return _err(f"no such place: {ref} ({e})")
-
-    async def t_list_cards(self, args: dict[str, Any]) -> Result:
-        group = str(args.get("group") or "all")
-        lines = []
-        for nb in canvas.notebooks(self.ws):
-            if group not in ("all", nb["id"], nb.get("title")):
-                continue
-            lines.append(f"## {nb.get('title')} ({nb['id']})")
-            for c in nb["cells"]:
-                lines.append(f"card:{c['id']}  {c['kind']}  {c['title']}  |  {(c.get('takeaway') or '')[:120]}")
-        return _ok("\n".join(lines) or "no cards yet")
-
-    async def _run_and_describe(self, cell: dict[str, Any]) -> Result:
-        if cell["kind"] in canvas.CODE_KINDS:
-            cell = await canvas.run_card(self.ws, cell["id"], self.folder, unsandboxed=self.unsandboxed)
-        self.on_card(cell["id"])
-        text = describe(cell)
-        if cell.get("status") == "error":
-            text += "\n\nThe code failed. Fix it with edit_card on this card rather than adding a new one."
-        elif not cell.get("takeaway"):
-            text += "\n\nRead the output, then give the card its takeaway with edit_card."
-        return _ok(text, cell_id=cell["id"])
-
     def maker(self) -> str:
-        """Who a card this agent makes or changes is by, as the page reads it (frontend canvas/layout.cellThread): main,
-        or `chat:<id>` of a thread or one of thimble's agents, which the card's face names and opens."""
+        """Who a card or a save this agent makes is by, as the page reads it (frontend canvas/layout.cellThread): main,
+        or `chat:<id>` of a thread or of a view's builder, which the card's face names and opens."""
         return "main" if self.chat in ("main", "-") else f"chat:{self.chat}"
 
-    async def t_add_card(self, args: dict[str, Any]) -> Result:
-        if self.writer:
-            args = {**args, "group": "Report figures"}
-        elif self.group:
-            args = {**args, "group": self.group}
-        try:
-            cell = canvas.new_card(self.ws, args, by=self.maker(), chat=self.chat)
-        except ValueError as e:
-            return _err(str(e))
-        return await self._run_and_describe(cell)
-
-    async def t_edit_card(self, args: dict[str, Any]) -> Result:
-        if self.group and args.get("group"):
-            args = {**args, "group": self.group}
-        try:
-            before = canvas.find(self.ws, str(args.get("card") or ""))[1]
-            cell = canvas.update_card(self.ws, str(args["card"]), args, by=self.maker())
-        except KeyError:
-            return _err(f"no card {args.get('card')}: list_cards names them")
-        except (ValueError, PermissionError) as e:
-            return _err(str(e))
-        if cell["kind"] in canvas.CODE_KINDS and args.get("code") is not None and args["code"] != before.get("code"):
-            return await self._run_and_describe(cell)
-        self.on_card(cell["id"])
-        return _ok(describe(cell), cell_id=cell["id"])
-
-    async def t_delete_card(self, args: dict[str, Any]) -> Result:
-        try:
-            canvas.delete_card(self.ws, str(args.get("card") or ""))
-        except KeyError:
-            return _err(f"no card {args.get('card')}")
-        except PermissionError as e:
-            return _err(str(e))
-        return _ok(f"deleted {args.get('card')}")
-
-    # ---- the report
-
-    def _opens(self, ref: str) -> str | None:
+    def opens(self, ref: str) -> str | None:
         """Why `ref` does not open, or None when it does."""
         try:
             if (fn := resolver(ref)) is not None:
@@ -332,58 +230,3 @@ class Tools:
             return None
         except Exception as e:  # noqa: BLE001
             return str(e) or type(e).__name__
-
-    async def t_write_document(self, args: dict[str, Any]) -> Result:
-        text = str(args.get("text") or "").strip()
-        if not text.startswith("# "):
-            return _err("the report starts with its `# ` title")
-        doc = report.save(self.ws, text, by=f"chat:{self.chat}")
-        refs = [r for sec in doc["sections"] for p in sec["paragraphs"] for s in p["sentences"] for r in s["refs"]]
-        figs = [f for sec in doc["sections"] for f in sec.get("figures", [])]
-        broken = [(r, why) for r in dict.fromkeys(refs) if (why := self._opens(r))]
-        broken += [(f"card:{f['cell']}", why) for f in figs if (why := self._opens(f"card:{f['cell']}"))]
-        lines = [f"Saved the report: {len(doc['sections'])} sections, {len(figs)} figures, {len(refs)} citations."]
-        if broken:
-            lines.append("These citations do not open; fix each and save again:")
-            lines += [f"- {r}: {why}" for r, why in broken]
-        return _ok("\n".join(lines))
-
-    # ---- views: main proposes one, the builder writes and checks it
-
-    async def t_propose_view(self, args: dict[str, Any]) -> Result:
-        if self.start_view is None:
-            return _err("this agent cannot start a view build")
-        slug = await self.start_view({k: args.get(k) for k in ("name", "description", "task", "claims")})
-        return _ok(f"Building the view {args.get('name')} (view:{slug}). It appears in the Files tab when it passes its "
-                   "checks; the builder works on its own.")
-
-    async def t_write_view_file(self, args: dict[str, Any]) -> Result:
-        try:
-            p = views.write_file(self.ws, str(self.view), str(args.get("name") or ""), str(args.get("text") or ""))
-        except (ValueError, KeyError) as e:
-            return _err(str(e))
-        return _ok(f"wrote {p.name} ({p.stat().st_size} bytes)")
-
-    async def t_view_check(self, args: dict[str, Any]) -> Result:
-        got = await views.check(self.ws, str(self.view), self.folder)
-        text = ("The checks pass.\n" if got["ok"] else "Fix these:\n") + "\n".join(f"- {x}" for x in got["lines"])
-        shot = Path(got["shot"]) if got.get("shot") else None
-        if shot is not None and shot.is_file():
-            text += "\n\nThe picture below is the page as the analyst first sees it. Look at it as they would."
-        return Result(text, images=[shot] if shot is not None and shot.is_file() else None)
-
-    async def t_finish_view(self, args: dict[str, Any]) -> Result:
-        row = next((r for r in views.proposals(self.ws) if r.get("slug") == self.view), {})
-        attempts = int(row.get("attempts") or 0) + 1
-        got = await views.check(self.ws, str(self.view), self.folder)
-        if got["ok"]:
-            views.mark_built(self.ws, str(self.view))
-            return _ok("The view passed its checks and is in the analyst's Files tab. End with your one-line message.")
-        views.set_proposal(self.ws, str(self.view), attempts=attempts,
-                           status="failed" if attempts >= BUILD_ATTEMPTS else "building")
-        left = BUILD_ATTEMPTS - attempts
-        lines = "\n".join(f"- {x}" for x in got["lines"])
-        if left <= 0:
-            return _err(f"The checks failed on the last attempt, so the build has failed:\n{lines}\nEnd with one line "
-                        "saying what failed.")
-        return _err(f"The checks failed ({left} attempts left). Fix these, then call finish_view again:\n{lines}")

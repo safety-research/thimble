@@ -11,7 +11,7 @@ import { threadRetry } from '../../src/chat/ChatPanel.tsx'
 import { foldRecords, withApiErrors, type NoticeRow as NoticeRowT, type Row } from '../../src/chat/model.ts'
 import { NoticeStrip } from '../../src/chat/Notice.tsx'
 import { PROPOSALS_OFF_LINE } from '../../src/chat/ProposalCard.tsx'
-import { ThreadRows } from '../../src/chat/ThreadRows.tsx'
+import { Rows } from '../../src/chat/Rows.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import { CODE_GONE_TEXT, noticeActions, parseNotice, setBrowserId, showCodeGone, withNotice, withoutNotice } from '../../src/lib/notices.ts'
@@ -253,7 +253,7 @@ describe('the strip above the composer, and the rows', () => {
     const records = [record('d1', DOWNGRADE, { key: 'safeguards-fallback' }), record('b0', BUILD, { key: 'build' })]
     const el = await mount(
       <>
-        <ThreadRows rows={foldRecords(records)} edits={new Map()} ws="nt-rows" chat="t1" />
+        <Rows rows={foldRecords(records)} ws="nt-rows" chat="t1" />
         <NoticeStrip ws="nt-rows" current="t1" onOpen={() => undefined} />
       </>,
     )
@@ -289,7 +289,7 @@ describe('the strip above the composer, and the rows', () => {
     ]
     const el = await mount(
       <>
-        <ThreadRows rows={foldRecords(records)} edits={new Map()} ws="nt-again" chat="t2" />
+        <Rows rows={foldRecords(records)} ws="nt-again" chat="t2" />
         <NoticeStrip ws="nt-again" current="t2" onOpen={() => undefined} />
       </>,
     )

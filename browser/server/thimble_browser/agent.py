@@ -17,6 +17,10 @@ says the analyst stopped it, so the conversation stays valid for the next messag
 
 No process is started for an agent, and no tool reaches past what tools.py allows: an agent can read the folder, run
 Python in the sandbox and change the workspace's own store, nothing more.
+
+There are two agents. The chat agent, `main`, answers in main and in each thread; its tools and its prompt are the
+core's and those of the features that are on (features/). The views feature adds a view's builder, which starts only
+when the analyst asks for a view. Nothing else runs an agent.
 """
 from __future__ import annotations
 
@@ -29,7 +33,7 @@ from typing import Any, Callable
 
 import anthropic
 
-from . import chats, explain, home, llm, prompts, report, settings, views
+from . import chats, features, home, llm, prompts, settings
 from .tools import Tools, definitions
 
 log = logging.getLogger("thimble_browser.agent")
@@ -38,42 +42,45 @@ MAX_TOKENS = 64000
 NOTIFY_S = 0.25  # the page hears that a chat changed at most this often while a reply streams
 STREAM_RETRIES = 3  # a stream the API breaks off (overloaded, a dropped connection) is sent again this many times
 READ = ("Read", "Grep", "Glob")
-REPO = views.REPO
 
 
 @dataclass
 class AgentDef:
-    """What an agent is: its prompt (from the folder) and the tools it may call. `finished(session, result)` runs after
-    each of its turns (result: None when the turn ended normally, else stopped, failed or refused). A feature module
-    adds its agents to AGENTS, and starts one with Sessions.start_agent."""
+    """What an agent is: its prompt (from the folder) and the tools it may call, each a value or a function read at each
+    request (the chat agent's change with the features that are on). `finished(session, result)` runs after each of its
+    turns (result: None when the turn ended normally, else stopped, failed or refused). The views feature adds its
+    builder to AGENTS."""
     prompt: Callable[[Path], str]
-    tools: tuple[str, ...]
+    tools: tuple[str, ...] | Callable[[], tuple[str, ...]]
     extra_roots: tuple[Path, ...] = ()
-    explain: bool = False  # whether its answers get explain marks
     finished: Callable[["Session", str | None], None] | None = None
-    effort: str | None = None  # an effort of its own, else the analyst's
-    group: str | None = None  # the group every card it adds goes to, whatever group its call names
-    call_refs: bool = False  # each tool result it reads starts with the call's ref, call:<chat>/<n> (calls.py)
+
+    def tool_names(self) -> tuple[str, ...]:
+        return self.tools() if callable(self.tools) else self.tools
+
+
+CORE_TOOLS = READ + ("run_python",)
 
 
 def _main_prompt(folder: Path) -> str:
-    return prompts.render("main.md", {"workdir": str(folder)})
+    """The chat agent's prompt: its core (prompts/main.md), then the part of each feature that is on."""
+    parts = "\n\n".join(prompts.render(name, {"workdir": str(folder)}) for name in features.main_prompt_parts())
+    return prompts.render("main.md", {"workdir": str(folder), "features": parts})
 
 
 AGENTS: dict[str, AgentDef] = {
-    "main": AgentDef(_main_prompt, READ + ("run_python", "read_ref", "list_cards", "add_card", "edit_card",
-                                           "delete_card", "propose_view"), explain=True),
-    "writer": AgentDef(lambda f: prompts.render("writer.md", {"workdir": str(f)}),
-                       READ + ("run_python", "read_ref", "list_cards", "add_card", "write_document")),
-    "dev": AgentDef(lambda f: views.builder_prompt(f, 3),
-                    READ + ("read_ref", "write_view_file", "view_check", "finish_view"),
-                    extra_roots=(REPO / "docs", REPO / "samples" / "views")),
+    "main": AgentDef(_main_prompt, lambda: CORE_TOOLS + features.main_tools()),
 }
+
+# what runs after each turn of the chat agent, in main or a thread: fn(session, answer, result), `answer` the turn's
+# text and `result` None when the turn ended normally. A feature adds its own (the lenses' one look after a turn); it
+# must not wait (start a task for work that takes time) and must not raise.
+AFTER_TURN: list[Callable[["Session", str, str | None], None]] = []
 
 
 def role_of(meta: dict[str, Any]) -> str:
-    """The agent a chat runs: its meta's `agent` when the role the page reads differs (a step of the orientation is role
-    `step` and agent `critic`), else its `role`; main for any other."""
+    """The agent a chat runs: its meta's `role` when it names one of AGENTS (a view's builder), else main (main and its
+    threads)."""
     r = meta.get("agent") or meta.get("role")
     return r if r in AGENTS else "main"
 
@@ -163,27 +170,24 @@ class Session:
         self.defn = AGENTS[self.role]
         self.task: asyncio.Task | None = None
         self.running = False
+        self.started_at: str | None = None  # when the turn running now, or the last one, started
         self.cards: list[str] = []
         self._last_notify = 0.0
         self._pending_notify: asyncio.TimerHandle | None = None
         self.meta = meta
         self.tools = Tools(ws, chat, folder, read_roots=[folder, *self.defn.extra_roots], unsandboxed=unsandboxed,
-                           on_card=self.cards.append, writer=self.role == "writer", group=self.defn.group,
-                           view=meta.get("view"),
-                           start_view=(lambda req: manager.start_view(ws, req)) if manager else None)
+                           on_card=self.cards.append, view=meta.get("view"))
         self.tools.session = self
 
     # ---- the request
 
     def effort(self) -> str:
-        """The agent's own effort, else the analyst's: the composer's chip for this workspace, else Settings."""
-        if self.defn.effort:
-            return self.defn.effort
+        """The analyst's effort: the composer's chip for this workspace, else Settings."""
         e = (home.read_json(home.workspace_dir(self.ws) / "session.json", {}) or {}).get("effort")
         return {"ultracode": "xhigh"}.get(e, e) if e in settings.EFFORTS + ("ultracode",) else settings.read()["effort"]
 
     def request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        tools = definitions(self.defn.tools)
+        tools = definitions(self.defn.tool_names())
         tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
         return {"max_tokens": MAX_TOKENS, "thinking": {"type": "adaptive"},
                 "system": [{"type": "text", "text": self.defn.prompt(self.folder), "cache_control": {"type": "ephemeral"}}],
@@ -213,7 +217,7 @@ class Session:
 
     async def send(self, text: str, *, shown: str | None = None, record: dict[str, Any] | None = None) -> None:
         """Start a turn on the analyst's message `text` (`shown` is what the chat shows of it, when that differs, and
-        `record` more fields of its row, such as the follow-up of the orientation it starts)."""
+        `record` more fields of its row)."""
         if self.running:
             raise RuntimeError("Claude is still answering the last message in this chat")
         chats.append(self.ws, self.chat, {"type": "user", "text": shown if shown is not None else text, "by": "browser",
@@ -223,6 +227,7 @@ class Session:
         messages.append({"role": "user", "content": text})
         save_messages(self.ws, self.chat, messages)
         self.running = True
+        self.started_at = home.now()
         chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
         self.task = asyncio.create_task(self._turn())
 
@@ -299,8 +304,7 @@ class Session:
                     continue
                 results = await asyncio.gather(*(self.tools.call(b.name, b.input) for b in calls))
                 blocks = []
-                first = count_calls(messages) - len(calls)
-                for i, (b, r) in enumerate(zip(calls, results)):
+                for b, r in zip(calls, results):
                     rec: dict[str, Any] = {"type": "tool_result", "id": b.id, "summary": r.text[:4000],
                                            "is_error": r.is_error}
                     if r.extra:
@@ -314,8 +318,7 @@ class Session:
                         except KeyError:
                             pass
                     self._append(rec)
-                    text = f"[call:{self.chat}/{first + i + 1}]\n{r.text}" if self.defn.call_refs else r.text
-                    blocks.append({"type": "tool_result", "tool_use_id": b.id, "content": _result_content(r, text),
+                    blocks.append({"type": "tool_result", "tool_use_id": b.id, "content": _result_content(r),
                                    **({"is_error": True} if r.is_error else {})})
                 messages.append({"role": "user", "content": blocks})
                 save_messages(self.ws, self.chat, messages)
@@ -337,9 +340,13 @@ class Session:
         self.running = False
         chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
         self.finished(result)
-        text_out = "".join(reply).strip()
-        if text_out and self.defn.explain and result is None and settings.read()["explain"]:
-            asyncio.create_task(explain.after_turn(self.ws, self.chat, text_out, self.folder))
+        if self.role == "main":
+            text_out = "".join(reply).strip()
+            for fn in AFTER_TURN:
+                try:
+                    fn(self, text_out, result)
+                except Exception:  # noqa: BLE001 — a feature's follow-up never fails the turn
+                    log.exception("an after-turn hook failed")
 
     def _model(self) -> str:
         return settings.read()["model"]
@@ -355,7 +362,7 @@ class Session:
         save_messages(self.ws, self.chat, messages)
 
     def finished(self, result: str | None) -> None:
-        """After a turn: the agent's own `finished`, such as a writer's or a builder's record of how it ended."""
+        """After a turn: the agent's own `finished`, such as a view builder's record of how it ended."""
         if self.defn.finished:
             try:
                 self.defn.finished(self, result)
@@ -376,58 +383,6 @@ class Session:
         await self.interrupt()
 
 
-def _writer_finished(session: Session, result: str | None) -> None:
-    """The report's writer (kind `agent`, role `writer`): the Report tab shows how it ended."""
-    meta = chats.meta(session.ws, session.chat)
-    failed = result in ("failed", "stopped", "refused")
-    meta.update(status="failed" if failed else "done", ts_end=home.now())
-    chats.save_meta(session.ws, meta)
-    report.set_status(session.ws, "failed" if failed else "generated")
-
-
-def _builder_finished(session: Session, result: str | None) -> None:
-    """A view's builder (kind `agent`, role `dev`): finish_view marked the view built, or the build failed."""
-    ws = session.ws
-    meta = chats.meta(ws, session.chat)
-    slug = meta.get("view")
-    row = next((r for r in views.proposals(ws) if r.get("slug") == slug), {})
-    built = row.get("status") == "built"
-    meta.update(status="done" if built else "failed", ts_end=home.now())
-    chats.save_meta(ws, meta)
-    if not built:
-        views.set_proposal(ws, str(slug), status="failed")
-    chats.append(ws, "main", {"type": "chip", "kind": "view", "text": f"{row.get('name') or slug}: "
-                              + ("built" if built else "the build failed"), "ref": f"view:{slug}",
-                              "view": slug, "status": "built" if built else "failed"})
-
-
-AGENTS["writer"].finished = _writer_finished
-AGENTS["dev"].finished = _builder_finished
-
-
-def writer_brief(ws: str, request: str) -> str:
-    """The writer's first message: its task and the workspace as it stands."""
-    from . import canvas  # noqa: PLC0415
-
-    parts = [f"Write the report{': ' + request if request else '.'}", "", "## The analyst's chat", ""]
-    for r in chats.records(ws, "main"):
-        if r.get("type") == "user":
-            parts.append(f"Analyst: {r.get('text')}")
-        elif r.get("type") == "text":
-            if parts[-1].startswith("Claude: "):
-                parts[-1] += r.get("delta") or ""
-            else:
-                parts.append("Claude: " + (r.get("delta") or ""))
-    parts += ["", "## The cards", ""]
-    for nb in canvas.notebooks(ws):
-        parts.append(f"### {nb.get('title')}")
-        for c in nb["cells"]:
-            parts.append(f"- card:{c['id']} ({c['kind']}) {c['title']} | takeaway: {c.get('takeaway') or '(none)'}")
-    md = report.markdown(ws)
-    parts += ["", "## The report as it stands", "", md if md else "(not written yet)"]
-    return "\n".join(parts)
-
-
 class Sessions:
     def __init__(self, *, unsandboxed: bool = False) -> None:
         self._s: dict[tuple[str, str], Session] = {}
@@ -439,40 +394,12 @@ class Sessions:
             self._s[key] = Session(ws, chat, home.corpus_of(ws), unsandboxed=self.unsandboxed, manager=self)
         return self._s[key]
 
-    async def start_agent(self, ws: str, role: str, title: str, brief: str, *, shown: str | None = None,
-                          prefix: str = "a", **meta: Any) -> str:
-        """Start one of thimble's agents (AGENTS[role]) on `brief`, in a chat of its own (kind `agent`) that the chat
-        column lists under main; its chat id. `meta` goes into the chat's meta, such as the document a writer writes."""
-        if role not in AGENTS:
-            raise KeyError(role)
-        cid = prefix + secrets.token_hex(4)
-        m = chats.new_meta(cid, kind="agent", title=title, parent="main")
-        m.update(role=role, status="running", **meta)
-        chats.save_meta(ws, m)
-        await self.get(ws, cid).send(brief, shown=shown)
-        return cid
-
     def running(self, ws: str) -> set[str]:
         return {c for (w, c), s in self._s.items() if w == ws and s.running}
 
     def fork(self, ws: str, chat: str) -> None:
         """A new thread's conversation: a copy of main's, up to its last finished turn."""
         save_messages(ws, chat, complete_prefix(load_messages(ws, "main")))
-
-    async def start_view(self, ws: str, req: dict[str, Any]) -> str:
-        """Start building the view `req` asks for ({name, description, task, claims}); its slug."""
-        name = str(req.get("name") or "View")
-        slug = views.slug_for(ws, name)
-        cid = "d" + secrets.token_hex(4)
-        m = chats.new_meta(cid, kind="agent", title=f"View: {name}", parent="main")
-        m.update(role="dev", view=slug, status="running", asked=True)
-        chats.save_meta(ws, m)
-        views.set_proposal(ws, slug, name=name, description=str(req.get("description") or ""),
-                           task=str(req.get("task") or ""), claims=list(req.get("claims") or []), status="building",
-                           chat=cid, asked=True, proposed_by="main", attempts=0)
-        await self.get(ws, cid).send(views.builder_brief(name, slug, str(req.get("description") or ""),
-                                                         str(req.get("task") or ""), list(req.get("claims") or [])))
-        return slug
 
     async def restart_idle(self, ws: str) -> None:
         """Nothing to restart: each request reads the settings anew."""

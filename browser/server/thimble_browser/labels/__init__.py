@@ -12,15 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import agent, tools
-from . import api, chat, define, run
+from .. import tools
+from . import api, define, run
 
 
 def register(ctx: Any) -> None:
+    """The routes and the `concept:` refs; the feature (features/labels.py) registers the chat's tools."""
     run.SETTINGS["unsandboxed"] = bool(ctx.sessions.unsandboxed)
     api.register_routes(ctx)
-    for name, fn in chat.HANDLERS.items():
-        tools.register(name, fn)
     tools.REF_RESOLVERS["concept:"] = define.resolve_ref
-    main = agent.AGENTS["main"]
-    main.tools = main.tools + tuple(t for t in chat.TOOLS if t not in main.tools)

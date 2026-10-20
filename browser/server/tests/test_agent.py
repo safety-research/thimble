@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from thimble_browser import agent, llm, settings, tools
+from thimble_browser import agent, features, llm, settings, tools
 
 
 def test_a_thread_copies_main_up_to_its_last_finished_turn():
@@ -16,11 +16,26 @@ def test_a_thread_copies_main_up_to_its_last_finished_turn():
 
 
 def test_every_agent_has_a_fixed_tool_set_and_no_shell():
+    from thimble_browser.features import views  # noqa: F401  (adds the view builder)
+
+    given = {name for f in features.all_features() for name in f.tools}
+    assert set(agent.AGENTS) == {"main", "dev"}
     for name, a in agent.AGENTS.items():
-        for t in a.tools:
-            assert hasattr(tools.Tools, f"t_{t}") or t in tools.EXTRA, (name, t)
+        for t in a.tool_names():
+            assert hasattr(tools.Tools, f"t_{t}") or t in given, (name, t)
             tools.schema_of(t)
-        assert not {"Bash", "Write", "Edit", "WebFetch"} & set(a.tools)
+        assert not {"Bash", "Write", "Edit", "WebFetch"} & set(a.tool_names())
+
+
+def test_the_chat_agent_has_the_tools_and_prompt_of_the_features_that_are_on(tmp_path):
+    main = agent.AGENTS["main"]
+    assert {"add_card", "read_ref", "write_document", "propose_view", "apply_label"} <= set(main.tool_names())
+    assert "## Cards" in main.prompt(tmp_path) and "## Report" in main.prompt(tmp_path)
+    settings.write({"features": {"cards": False, "report": False}})
+    assert not {"add_card", "write_document"} & set(main.tool_names())
+    assert {"read_ref", "propose_view"} <= set(main.tool_names())
+    assert "## Cards" not in main.prompt(tmp_path) and "## Report" not in main.prompt(tmp_path)
+    assert "## Citing" in main.prompt(tmp_path)
 
 
 def test_the_environment_gives_no_credentials(monkeypatch):

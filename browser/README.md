@@ -2,11 +2,12 @@
 
 A web page for making sense of a folder of files with Claude. You open a folder, ask a question in the chat, and Claude
 answers with cards that show the evidence: charts, tables and the records themselves. Every number and quote in an
-answer is a link that opens the file at the lines it came from. The page also has a file browser, labels, an
-orientation that explores the folder, generative views, and a report you write from the cards.
+answer is a link that opens the file at the lines it came from. The page also has a file browser, labels, views built
+for the folder when you ask for one, and a report you write with Claude from your notes and cards.
 
-It runs on your machine. A small server listens on 127.0.0.1, serves the page, and runs Claude's agents itself on the
-Claude API, with your own credentials. It never writes into the folder of files.
+It runs on your machine. A small server listens on 127.0.0.1, serves the page, and runs Claude itself on the Claude
+API, with your own credentials. Claude works in the chat, and starts nothing in the background unless you ask: the only
+other agent is a view's builder, which starts when you accept a view. It never writes into the folder of files.
 
 ## Install and start
 

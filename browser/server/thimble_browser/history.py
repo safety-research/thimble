@@ -9,7 +9,7 @@ of the first later edit that kept them, else the card's own.
     GET  /api/ws/{c}/cells/{id}/versions/{entry}           the card as it stood before edit `entry`
     POST /api/ws/{c}/cells/{id}/versions/{entry}/restore   make it so again, as an edit of the analyst's
 
-Undo. A step is one change to a card (added, deleted, edited, moved, resized, starred, locked) or one save of the report,
+Undo. A step is one change to a card (added, deleted, edited, moved, resized, starred) or one save of the report,
 by the analyst or by Claude. The two stacks are `undo.json` in the workspace, each kept to MAX_STEPS. Claude's edit of a
 card it added, with no other step on that card since, joins the step that added it, so a card Claude makes and then
 gives its takeaway is one step; a run of a card's code is no step, but its outputs join the step that changed that code,
@@ -43,7 +43,7 @@ CONTENT = ("title", "kind", "code", "payload", "takeaway", "text")  # what a ver
 RUN = ("outputs", "status")  # what a run changes, kept with the edit of the code it ran
 # the fields a card's step restores, by what the step is
 EDIT_FIELDS = ("title", "slug", "kind", "code", "payload", "text", "takeaway", "takeaway_author")
-TOGGLE_FIELDS = ("locked", "starred")
+TOGGLE_FIELDS = ("starred",)
 PLACE_FIELDS = ("pos", "width", "height")
 ANALYST = "analyst"
 _lock = threading.RLock()
@@ -181,8 +181,6 @@ def _card_label(op: str, fields: set[str], card: dict[str, Any]) -> str:
         return f"delete card {name}"
     if fields == {"starred"}:
         return f"{'star' if card.get('starred') else 'unstar'} card {name}"
-    if fields == {"locked"}:
-        return f"{'lock' if card.get('locked') else 'unlock'} card {name}"
     if fields <= {"pos"}:
         return f"move card {name}"
     if fields <= {"width", "height", "pos"}:
@@ -449,7 +447,7 @@ def register(ctx: Any) -> None:
             return restore(ws, cid, entry)
         except KeyError as e:
             raise HTTPException(404, str(e).strip("'")) from None
-        except (ValueError, PermissionError) as e:
+        except ValueError as e:
             raise HTTPException(400, str(e)) from None
 
     @app.get("/api/ws/{c}/undo")

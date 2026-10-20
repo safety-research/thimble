@@ -1,5 +1,5 @@
-"""The report: one document per workspace, written by the writer (a Claude session, agent.Writer) and edited by the
-person in the page.
+"""The report: one document per workspace, which the person writes in the page and Claude writes or revises when they
+ask (features/report.py).
 
 It is kept as Markdown, `docs/report.md` in the workspace, and given to the page as the 0.8 report's shape (sections
 of paragraphs of sentences, each sentence with its citations, and figures that show a card): `writeup()`. The page's
@@ -42,7 +42,7 @@ def on_save(fn: Callable[[str, str | None, str, str], None]) -> None:
     if fn not in SAVED:
         SAVED.append(fn)
 
-# what feature modules add to the document as the page reads it, such as its comments (checks.py): fn(ws, doc)
+# what feature modules add to the document as the page reads it, such as the marks of the lenses: fn(ws, doc)
 DECORATE: list[Any] = []
 
 
@@ -63,8 +63,12 @@ def _state(ws: str) -> dict[str, Any]:
     return home.read_json(_path(ws, "state.json"), {}) or {}
 
 
+def state(ws: str) -> dict[str, Any]:
+    return _state(ws)
+
+
 def set_status(ws: str, status: str, **extra: Any) -> None:
-    """The writer's state, which the Report tab shows (generating, generated, failed)."""
+    """Whether Claude is writing the report, which the Report tab shows (generating, generated, failed, idle)."""
     st = {**_state(ws), "status": status, **extra}
     home.write_json(_path(ws, "state.json"), st)
     hub.publish(ws, {"type": "report", "slug": DOC, "status": status})
