@@ -1,7 +1,8 @@
 """Which files read as a transcript, and the turns of a whole-file JSON transcript.
 
 sniff(path, rel) reads only the head of one file (HEAD_BYTES) and answers whether it looks even close to a transcript,
-in any format: a Claude Code stream, JSON lines of messages or of whole conversations, a JSON file holding message lists
+in any format: a Claude Code stream, JSON lines of messages or of whole conversations, an agent's event log (its
+task, messages, tool calls and results as records keyed by what each is, `kind` or `type`), a JSON file holding message lists
 (a chat export, an eval log, a plain list of messages) or a store of messages by id that its conversations list (an
 agent harness's), read by the parse that reads the whole file (a large file's head cut after its last whole item and
 closed, _json_prefix), a CSV or TSV file with a speaker column and a text column, or a
@@ -92,6 +93,13 @@ TIME_AT = frozenset({"created", "sent", "posted", "published", "written", "updat
 # keys whose value names who speaks only when it is a role word, such as LangChain's {"type": "human", "data": {...}}
 # or an ATIF trajectory's steps' {"source": "user"}
 ROLE_TYPE_KEYS = ("type", "role", "kind", "source")
+# keys whose value says what a record is, in an event log as much as in a list of content blocks: `{"kind":
+# "tool_call", "tool": "grep", "args": {...}}` is a tool call, as `{"type": "tool_call", ...}` is
+KIND_KEYS = ("type", "kind", "event", "event_type")
+# what a record of an event log is when it holds the person's words, such as an agent run's `{"kind": "task", "text":
+# "..."}`: the person's turn, with no role word of its own
+PROMPT_KINDS = frozenset({"task", "prompt", "instruction", "instructions", "goal", "query", "request", "question",
+                          "user_message", "user_input", "input", "issue", "problem", "problem_statement"})
 WRAP_KEYS = ("message", "data", "msg", "payload")  # where a record nests its message (payload: Codex CLI's logs)
 # where a record that holds no message of its own may nest one, or nest a Claude Code stream record (the Agent SDK's
 # messages kept under `content` beside a database row's own columns)
@@ -411,8 +419,18 @@ def _text_key(obj: dict[str, Any]) -> str | None:
 
 
 def _role_key(obj: dict[str, Any]) -> str | None:
-    """The key of ROLE_TYPE_KEYS whose value is a role word, such as `"type": "human"`."""
-    return next((k for k in ROLE_TYPE_KEYS if isinstance(obj.get(k), str) and obj[k].strip().lower() in ROLE_WORDS), None)
+    """The key of ROLE_TYPE_KEYS whose value is a role word, such as `"type": "human"`, else the key of KIND_KEYS whose
+    value names the person's words in an event log (PROMPT_KINDS), such as `"kind": "task"`."""
+    got = next((k for k in ROLE_TYPE_KEYS if isinstance(obj.get(k), str) and obj[k].strip().lower() in ROLE_WORDS), None)
+    return got or next((k for k in KIND_KEYS if isinstance(obj.get(k), str)
+                        and obj[k].strip().lower() in PROMPT_KINDS), None)
+
+
+def kind_of(obj: Any) -> str | None:
+    """What a record says it is, under one of KIND_KEYS (`"kind": "tool_call"`), or None."""
+    if not isinstance(obj, dict):
+        return None
+    return next((v for k in KIND_KEYS if isinstance(v := obj.get(k), str) and v.strip()), None)
 
 
 def _class_key(obj: dict[str, Any]) -> str | None:
@@ -487,7 +505,7 @@ def tool_item(obj: Any) -> tuple[str, dict[str, Any], str] | None:
         return None
     for wrap in ("", *WRAP_KEYS):
         src = obj.get(wrap) if wrap else obj
-        if isinstance(src, dict) and not src.get("role") and isinstance(t := src.get("type"), str):
+        if isinstance(src, dict) and not src.get("role") and isinstance(t := kind_of(src), str):
             if t in CALL_TYPES or t in THINK_TYPES or t.endswith(CALL_TAILS):
                 return "assistant", src, wrap
             if t in RESULT_TYPES or t.endswith(RESULT_TAILS):
@@ -591,7 +609,7 @@ def _part_block(b: Any, name: str | None = None) -> dict[str, Any] | None:
         return {"kind": "text", "text": b} if b.strip() else None
     if not isinstance(b, dict):
         return None
-    t = b.get("type") or b.get("content_type")
+    t = b.get("type") or b.get("content_type") or kind_of(b)
     if isinstance(fc := b.get("functionCall"), dict):
         return _call_block(fc)
     if isinstance(fr := b.get("functionResponse"), dict):
@@ -1634,8 +1652,7 @@ def _role(speaker: str) -> str:
             if low.startswith(("function", "tool")) and low.endswith(("result", "response", "output", "execution")):
                 return "tool"
             break
-    if low in ("user", "human", "me", "customer", "client", "student", "patient", "interviewee", "prompt", "question",
-               "instruction", "input"):
+    if low in ("user", "human", "me", "customer", "client", "student", "patient", "interviewee") or low in PROMPT_KINDS:
         return "user"
     if low in ("assistant", "ai", "bot", "model", "claude", "chatgpt", "gpt", "gemini", "llm", "copilot", "agent",
                "response", "completion", "answer", "output", "function_call", "tool_call"):
@@ -1954,6 +1971,7 @@ def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
                 meta["turn"] = t
                 meta["fields"] = {"speaker": t["speaker"]}
     elif hint["format"] in ("stream", "messages", "conversations"):
+        agent = _agent_name(records, hint) if hint["format"] == "messages" else None
         for rec in records:
             obj = rec.get("record")
             if hint.get("lines") and isinstance(obj, dict) and isinstance(obj.get("text"), str):
@@ -1965,12 +1983,30 @@ def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
                 continue
             if fields := record_fields(obj):
                 rec.setdefault("meta", {})["fields"] = fields
-            if hint["format"] == "messages" and (turn := message_of(obj)) and turn.get("blocks"):
-                meta = rec.setdefault("meta", {})
-                meta["blocks"] = _page_turn(turn)["blocks"]
-                if message_keys(obj) is None:
-                    meta["speaker"] = turn["speaker"]
+            if hint["format"] == "messages" and (turn := message_of(obj)):
+                if turn.get("blocks"):
+                    rec.setdefault("meta", {})["blocks"] = _page_turn(turn)["blocks"]
+                # who speaks where the file's speaker key holds no one: a tool call or its output of its own
+                # (tool_item) is a block of the agent's turn, so it stands under the agent's name; an event log's task
+                # is the person's turn, under what the log calls it
+                own = _name_of(_get(obj, hint["keys"]["speaker"])) if hint.get("keys") else None
+                if not own and turn["speaker"]:
+                    rec.setdefault("meta", {})["speaker"] = agent if agent and tool_item(obj) else turn["speaker"]
     return page
+
+
+def _agent_name(records: list[dict[str, Any]], hint: dict[str, Any]) -> str | None:
+    """The name a page of JSON lines gives the agent: the commonest speaker of its turns whose role is the assistant's
+    (`agent`, `assistant`, a model's name), or None."""
+    key = (hint.get("keys") or {}).get("speaker")
+    if not key:
+        return None
+    counts: dict[str, int] = {}
+    for rec in records[:200]:
+        obj = rec.get("record")
+        if isinstance(obj, dict) and (who := _name_of(_get(obj, key))) and _role(who) == "assistant":
+            counts[who] = counts.get(who, 0) + 1
+    return max(counts, key=counts.__getitem__) if counts else None
 
 
 def _page_turn(t: dict[str, Any]) -> dict[str, Any]:

@@ -399,13 +399,13 @@ const FIELD_MAX = 300
  * that would hold them, but for who speaks and the time, each value as a line, nested ones compacted. The first field
  * that holds `quote` (the words a citation quotes) comes whole, a nested one as indented JSON, with the words' place in
  * it. Pure. */
-export function restFields(r: unknown, keys: MessageKeys, quote: string | null = null): ([string, string] | [string, string, [number, number]])[] {
+export function restFields(r: unknown, keys: MessageKeys, quote: string | null = null, also: string | null = null): ([string, string] | [string, string, [number, number]])[] {
   const dot = keys.body?.lastIndexOf('.') ?? -1
   const prefix = dot > 0 ? keys.body!.slice(0, dot) : ''
   const box = prefix ? pick(r, prefix) : r
   if (!box || typeof box !== 'object' || Array.isArray(box)) return []
   const own = (k: string) => (prefix && k.startsWith(`${prefix}.`) ? k.slice(prefix.length + 1) : k)
-  const skip = new Set([...(keys.author ?? '').split('|'), keys.time ?? ''].map(own))
+  const skip = new Set([...(keys.author ?? '').split('|'), keys.time ?? '', also ?? ''].map(own))
   let found = !quote
   return Object.entries(box as Record<string, unknown>)
     .filter(([k, v]) => !skip.has(k) && v != null && v !== '')
@@ -551,7 +551,7 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
         // points at it, says it is empty
         const empty = !made && typeof body === 'string' && !body.trim()
         if (empty && rec.line !== asked) return note
-        const fields = !made && value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys, cite) : null
+        const fields = !made && value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys, cite, kind ? recordKindKey(r) : null) : null
         const own = !derived && rec.blocks.length > 0 && !rec.blocks.every((b) => b.kind === 'raw' && body != null)
         const fold = empty ? undefined : made ? blocksFold(made) : fields?.length ? textFold(fields.map(([k, v]) => `${k} ${v}`).join('  '), true) : own ? blocksFold(rec.blocks) : textFold(body ?? JSON.stringify(value ?? r))
         // a record headed by what it is folds to one line (Codex CLI's events repeat its messages)
@@ -592,11 +592,19 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
   )
 }
 
-/** What a record that names no speaker is: its own `type` and that of the object it nests (a Codex CLI line's
- * `event_msg · token_count`); null when it says none. Pure. */
+/** What a record that names no speaker is: its own `type` (or `kind`, `event`, `event_type`, as an event log names its
+ * records: `review`) and that of the object it nests (a Codex CLI line's `event_msg · token_count`); null when it says
+ * none. Pure. */
 export function recordKind(r: any): string | null {
-  const parts = [r?.type, ...['payload', 'data', 'msg', 'event'].map((k) => r?.[k]?.type)].filter((x): x is string => typeof x === 'string' && !!x)
+  const key = recordKindKey(r)
+  const own = key ? r[key] : undefined
+  const parts = [own, ...['payload', 'data', 'msg', 'event'].map((k) => r?.[k]?.type)].filter((x): x is string => typeof x === 'string' && !!x)
   return parts.length ? [...new Set(parts)].join(' · ') : null
+}
+
+/** The key under which a record says what it is (`type`, `kind`, `event`, `event_type`), or null. Pure. */
+export function recordKindKey(r: any): string | null {
+  return ['type', 'kind', 'event', 'event_type'].find((k) => typeof r?.[k] === 'string' && !!r[k]) ?? null
 }
 
 function PostText({ text, line, target, hit, quote }: { text: string; line: number; target: Target | null; hit: boolean; quote: string | null }) {
