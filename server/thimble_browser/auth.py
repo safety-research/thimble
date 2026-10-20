@@ -27,7 +27,7 @@ from typing import Any, Callable
 from . import home
 
 CODE_TTL_S = 15 * 60
-COOKIE_AGE_S = 400 * 24 * 3600
+COOKIE_AGE_S = 30 * 24 * 3600  # a month; a new link signs the browser in again
 OPEN_PATHS = {("GET", "/api/health"), ("POST", "/api/ui/key"), ("GET", "/api/ui/paired")}
 BROWSER_PATH = re.compile(r"^/b/([A-Za-z0-9_-]{16,128})(/api(?:/.*)?)$")
 
