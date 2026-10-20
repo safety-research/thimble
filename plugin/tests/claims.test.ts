@@ -238,6 +238,28 @@ test('c opens the Claims pane in the side panel: the count, the graph of claims 
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about claim: The tilt is two editors')
 })
 
+test('the Claims pane opens with the ring on the selected dot, not on the input bar: the first ↑ walks the claims from it; a letter still starts a question', async ($, on) => {
+  const w = await twoTurns($, on)
+  await press($, w.clock, key('c'))
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  const drawn = JSON.stringify(await $.ui.render(PANE))
+  // the input bar is there, without the ring
+  expect(drawn).toContain('Ask about claim: The tilt is two editors')
+  expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  // the ring stands on the selected dot (the newest claim's): the first ↑ moves it to the dot before, which is selected
+  const dots = [...drawn.matchAll(/"key":"(r\|side\|\d+\|n-c\d+)"/g)].map(m => m[1]!)
+  const sel = await rowKey($, 'n-c4')
+  const before = dots[dots.indexOf(sel) - 1]!
+  await $.ui.focus({ requestId: 'object', element: before, origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(PANE))).not.toContain('The tilt is two editors, Kestrel and Wren, not one.')
+  // a letter starts a question in the input bar
+  expect(await press($, w.clock, key('w'))).toEqual({ text: '', cursor: 0 })
+  await w.clock.settle()
+  expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/"key":"ask-\d+"[^}]*"value":"w"|"value":"w"[^}]*"key":"ask-\d+"/)
+})
+
 test('the ring on a dot selects its claim; e opens its evidence above the input bar, read through the kernel; a press on a row of evidence opens it over the pane', async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))

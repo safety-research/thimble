@@ -232,8 +232,23 @@ export function waitingWords(reason: string, what: 'card' | 'thread' = 'card'): 
  *  list). */
 async function takeKeys($: Engine): Promise<void> {
   const v = await sideNow($)
-  if (v?.kind === 'pane' && !paneSubject(v)) regrab($)
-  else focusEntry($)
+  if (v?.kind === 'pane' && (!paneSubject(v) || ringOnPart(v))) {
+    // (a question begun about what the panel showed before is gone with it: the ring is the part's)
+    if (isAsk(ringAt) && !draft) { ringAt = null; landed = null }
+    regrab($)
+  } else focusEntry($)
+}
+
+/** Whether the pane's ring starts on the part its program selected, rather than on the input bar (its module's
+ *  `ringStart`): a pane whose parts the person walks first, such as the Claims graph, where the first ↑ or ↓ moves on
+ *  from the selected dot. A letter typed there still starts a question in the input bar. */
+function ringOnPart(view: PaneView): boolean {
+  try {
+    const r = paneOf(view.pane).ringStart
+    return (typeof r === 'function' ? r(view.args || {}) : r) === 'part'
+  } catch {
+    return false
+  }
 }
 
 /** The input bar takes the keys now, holding what is typed in it so far (a thread opened to be asked, a question typed
