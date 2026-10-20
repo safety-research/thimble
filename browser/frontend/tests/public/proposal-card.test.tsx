@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 // The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal (a `suggested` row
 // with `offered`), with its name and what it shows in view, never behind a click, and not the task it names; Accept and
-// Reject are clicks of their own routes, each tracked; Don't ask again turns view proposals off and says where to turn them on
-// again; nothing shows while view proposals are off; a click in the first ARM_MS does nothing; an Accept that cannot
-// start says why under the buttons.
+// Reject are clicks of their own routes, each tracked; nothing shows while the views feature is off; a click in the first
+// ARM_MS does nothing; an Accept that cannot start says why under the buttons.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ARM_MS } from '../../src/chat/ProposalCard.tsx'
-import { offerFor, openOffer, PROPOSAL_HEAD, PROPOSALS_OFF_LINE, ProposalCard } from '../../src/chat/ProposalCard.tsx'
+import { offerFor, openOffer, PROPOSAL_HEAD, ProposalCard } from '../../src/chat/ProposalCard.tsx'
+import { setFeatureRows } from '../../src/features.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { track } from '../../src/lib/telemetry.ts'
@@ -84,7 +84,7 @@ describe('the card', () => {
   }
   const click = (el: HTMLElement, sel: string) => act(async () => el.querySelector<HTMLButtonElement>(sel)!.click())
 
-  test('the head, the name in bold and what it shows are in view, with Accept, Reject and Don’t ask again, and no task', async () => {
+  test('the head, the name in bold and what it shows are in view, with Accept and Reject, and no task', async () => {
     const el = await card('pc-look', false)
     const c = el.querySelector('.chat-offer')!
     expect(c.getAttribute('aria-label')).toBe(PROPOSAL_HEAD)
@@ -93,7 +93,7 @@ describe('the card', () => {
     expect(c.querySelector('.chat-offer-desc')?.textContent?.trim()).toBe('What agent-timeline shows.')
     expect(c.querySelector('.chat-offer-files')).toBeNull()
     expect(c.textContent).not.toMatch(/task|compare how the agents coordinated/i)
-    expect([...c.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Accept', 'Reject', 'Don’t ask again'])
+    expect([...c.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Accept', 'Reject'])
     expect(c.textContent).not.toMatch(/offer/i)
     expect(document.activeElement).toBe(document.body)
   })
@@ -118,28 +118,17 @@ describe('the card', () => {
     const el = await card('pc-arm', false)
     await click(el, '.chat-offer-accept')
     await click(el, '.chat-offer-reject')
-    await click(el, '.chat-offer-off')
     await settle()
     expect(sent).toEqual([])
     expect(el.querySelector('.chat-offer')).not.toBeNull()
   })
 
-  test('Don’t ask again turns view proposals off, the card goes, and a toast says Settings turns them on again', async () => {
-    const el = await card('pc-off')
-    await click(el, '.chat-offer-off')
-    await settle()
-    await settle()
-    expect(sent).toEqual([{ method: 'PUT', url: '/api/ws/pc-off/settings', body: { propose_views: false } }])
-    expect(el.querySelector('.chat-offer')).toBeNull()
-    expect(toasts).toEqual([PROPOSALS_OFF_LINE])
-  })
-
-  test('nothing shows while view proposals are off, nor once the proposal is dropped', async () => {
-    settings = { models: {}, propose_views: false }
+  test('nothing shows while the views feature is off, nor once the proposal is dropped', async () => {
+    setFeatureRows([{ name: 'views', title: 'Views', does: '', on: false }])
     let el = await card('pc-hidden', false)
     expect(el.querySelector('.chat-offer')).toBeNull()
     unmountAll()
-    settings = { models: {}, propose_views: true }
+    setFeatureRows([])
     el = await card('pc-dropped', false)
     expect(el.querySelector('.chat-offer')).not.toBeNull()
     await act(async () => bus.emit('view', { slug: 'agent-timeline', status: 'dropped' }))

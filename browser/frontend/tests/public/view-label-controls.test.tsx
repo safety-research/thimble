@@ -63,31 +63,11 @@ const sidebar = (el: HTMLElement) => el.querySelector('aside.files-side-labels')
 const offer = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('.files-labels-note button')
 
 describe('the Labels sidebar beside a view', () => {
-  test('beside a view built without label controls it shows while a label is on, with the offer to add them', async () => {
-    const el = await mount(<Side own={false} labels={labelsWith([asks])} />)
-    await settle()
-    expect(sidebar(el)).not.toBeNull()
-    expect(offer(el)?.textContent).toBe('Add label controls to the view')
-    await act(async () => offer(el)!.click())
-    await settle()
-    const ask = sent.find((s) => s.url.endsWith('/views/proposals/board/message'))
-    expect(ask && JSON.parse(ask.body)).toEqual({ text: ADD_LABEL_CONTROLS })
-    expect(offer(el)).toBeNull()
-    expect(el.querySelector('.files-labels-note')?.textContent).toBe('Adding label controls to the view')
-  })
-
   test('beside a view with label controls of its own it stays closed, with a label on and one marking its files', async () => {
     const el = await mount(<Side own labels={labelsWith([asks], ['board.jsonl'])} />)
     await settle()
     expect(sidebar(el)).toBeNull()
     expect(offer(el), 'no offer beside a view that has them').toBeNull()
-  })
-
-  test('beside a view built without label controls, turning the last label off keeps the sidebar while a label marks its files', async () => {
-    const el = await mount(<Side own={false} labels={labelsWith([], ['board.jsonl'])} />)
-    await settle()
-    expect(sidebar(el)).not.toBeNull()
-    expect(offer(el)).not.toBeNull()
   })
 
   test('with no label on and none marking its files, nothing shows beside a view built without label controls', async () => {

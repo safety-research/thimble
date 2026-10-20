@@ -2,9 +2,11 @@
 // Sign in is Workload Identity Federation, configured in a file the analyst names (the page shows its path and where its
 // identity token comes from, never its IDs), or an API key the analyst pastes in a password field; once saved, the key
 // is never shown again, only that one is saved. Then the one model every agent
-// runs on (the known ids, or another typed in), its effort, and whether explainers mark terms in Claude's answers.
-// Save sends only what changed; a choice applies from Claude's next request. Check asks the Models API once with the
-// saved sign-in and says whether it works.
+// runs on (the known ids, or another typed in), its effort, and thimble's features, each with its switch (features.ts:
+// cards, citations, explainers and checks, labels, report, views). A feature turned off takes its part of Claude's
+// prompt, its tools and its surfaces on the page with it, and leaves the others as they are. Save sends only what
+// changed; a choice applies from Claude's next request. Check asks the Models API once with the saved sign-in and says
+// whether it works.
 import { useEffect, useState } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -16,6 +18,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { invalidateSettings, loadSettings, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, type BrowserSettings, type Credentials } from '../lib/types'
+import { loadFeatures } from '../features'
 
 /** The efforts a role's menu offers (chat/RoleChip): Claude's levels. */
 export function roleEfforts(_role?: string): string[] {
@@ -27,8 +30,7 @@ export const SOURCES: { value: 'wif' | 'key'; label: string }[] = [
   { value: 'wif', label: 'Workload Identity' },
   { value: 'key', label: 'API key' },
 ]
-export const EXPLAIN_LABEL = 'Explainers'
-export const EXPLAIN_NOTE = 'Claude marks terms in its answers that you may not know; a click on one explains it.'
+export const FEATURES_LABEL = 'Features'
 export const APPLY_LINE = 'A change applies from Claude’s next request.'
 /** What the key's row shows once a key is saved: never the key. */
 export const KEY_SAVED = 'saved'
@@ -40,7 +42,8 @@ export interface SettingsForm {
   file: string
   model: string
   effort: string
-  explain: boolean
+  /** each feature's switch, by name (features.ts) */
+  features: Record<string, boolean>
 }
 
 /** The form for settings as the server answered them. Pure. */
@@ -51,7 +54,7 @@ export function formOf(s: BrowserSettings): SettingsForm {
     file: c.file ?? '',
     model: s.model,
     effort: s.effort,
-    explain: s.explain !== false,
+    features: Object.fromEntries((s.features ?? []).map((f) => [f.name, f.on])),
   }
 }
 
@@ -63,7 +66,8 @@ export function changedSettings(loaded: BrowserSettings, now: SettingsForm): Rec
   if (credsChanged) out.credentials = (now.source === 'wif' ? { source: 'wif', file: now.file.trim() } : { source: 'key' }) satisfies Credentials
   if (now.model.trim() && now.model.trim() !== was.model) out.model = now.model.trim()
   if (now.effort !== was.effort) out.effort = now.effort
-  if (now.explain !== was.explain) out.explain = now.explain
+  const features = Object.fromEntries(Object.entries(now.features).filter(([name, on]) => was.features[name] !== on))
+  if (Object.keys(features).length) out.features = features
   return out
 }
 
@@ -125,6 +129,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const patch = changedSettings(settings, form)
       if (Object.keys(patch).length) await api.putSettings(ws, patch)
       invalidateSettings(ws)
+      if (patch.features) void loadFeatures(ws)
       bus.emit('toast', { text: `Settings saved. ${APPLY_LINE}`, kind: 'info' })
       onClose()
     } catch (e) {
@@ -283,18 +288,20 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             </div>
           </div>
         )}
-        {settings && form && (
-          <div className="settings-grid settings-modes settings-claude" role="table" aria-label={EXPLAIN_LABEL}>
+        {settings && form && (settings.features ?? []).length > 0 && (
+          <div className="settings-grid settings-modes settings-claude settings-features" role="table" aria-label={FEATURES_LABEL}>
             <div className="settings-row settings-headrow" role="row">
-              <span className="label">answers</span>
+              <span className="label">features</span>
             </div>
-            <div className="settings-row" role="row" data-setting="explain">
-              <span className="settings-role">{EXPLAIN_LABEL}</span>
-              <span className="settings-web" data-on={form.explain}>
-                <Switch checked={form.explain} onChange={(on) => set({ explain: on })} aria-label={EXPLAIN_LABEL} />
-              </span>
-              <span className="settings-agent-line">{EXPLAIN_NOTE}</span>
-            </div>
+            {(settings.features ?? []).map((f) => (
+              <div key={f.name} className="settings-row" role="row" data-setting={`feature-${f.name}`}>
+                <span className="settings-role">{f.title}</span>
+                <span className="settings-web" data-on={form.features[f.name]}>
+                  <Switch checked={!!form.features[f.name]} onChange={(on) => set({ features: { ...form.features, [f.name]: on } })} aria-label={f.title} />
+                </span>
+                <span className="settings-agent-line">{f.does}</span>
+              </div>
+            ))}
           </div>
         )}
         {settings && (

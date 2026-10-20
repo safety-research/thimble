@@ -60,6 +60,7 @@ export type ChatRecord =
   | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
   | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
+  | { type: 'marks'; ts?: string; marks: import('./marks').Mark[] }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
@@ -74,12 +75,11 @@ export interface TurnUsage {
   requests: number
 }
 
-/** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
- * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
- * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+/** What a notice's button does: open Settings (`settings`), build the failed view `slug` again (`view-retry`), or sign
+ * out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  do: 'settings' | 'view-retry' | 'sign-out' | (string & {})
   slug?: string
 }
 
@@ -1322,7 +1322,8 @@ export interface BrowserSettings extends Settings {
   has_api_key: boolean
   model: string
   effort: string
-  explain: boolean
+  /** each feature with its switch (server features.listing, features.ts) */
+  features?: import('../features').FeatureRow[]
   choices: { models: string[]; efforts: string[] }
 }
 

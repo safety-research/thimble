@@ -39,6 +39,7 @@ import { FolderPane } from './FolderPane'
 import { AddLabelControls, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
 import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
+import { useFeature } from '../features'
 import { markOpened, useOpenAskedViews } from './viewReady'
 import { fitTabs } from './viewsFit'
 
@@ -614,10 +615,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   useEffect(
     () =>
       bus.on('editLabel', ({ id }) => {
-        if (shownSlug) setViewSideChoice(true)
-        else showSide()
-        setLabelsOpen(true)
-        setEditing(id)
+        // a label opens in the Labels and Checks sidebar, where its detail offers Edit (shell/LensSidebar.tsx)
+        bus.emit('openLens', { tab: 'labels', id })
       }),
     [shownSlug, showSide, setViewSideChoice, setLabelsOpen],
   )
@@ -689,13 +688,15 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     [sideShown, showSide, tabs, current, closeTab, isDir],
   )
 
+  const viewsOn = useFeature('views')
   const openPath = open?.path ?? null
   const openRefAt = open?.ref
   const openInEnd = useMemo(
     () => (openPath ? <OpenIn ws={ws} path={openPath} current={null} onOpen={(slug) => openIn(openPath, openRefAt, slug)} /> : null),
     [ws, openPath, openRefAt, openIn],
   )
-  const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView || waitingView ? bar : BROWSER} onChange={pickBar} views={views} compact={compact} />
+  // the views bar is the views feature's (features.ts): none while it is off
+  const viewsBar = (compact: boolean) => (viewsOn ? <ViewsBar ws={ws} value={shownView || waitingView ? bar : BROWSER} onChange={pickBar} views={views} compact={compact} /> : null)
   return (
     <div className="files-tab" data-panel="files" ref={rootRef}>
       {viewsSlot ? createPortal(viewsBar(true), viewsSlot) : viewsBar(false)}
