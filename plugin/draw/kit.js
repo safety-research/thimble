@@ -2284,12 +2284,11 @@
     best.forEach((ly, l) => { layers[l] = ly })
     index()
 
-    // the first plan that fits the width: across, with boxes narrower step by step, then down, then the narrowest
+    // the first plan that fits the width: across, else down, with boxes narrower step by step
     const dirs = o.dir === 'down' || o.dir === 'right' ? [o.dir] : ['right', 'down']
     const wide = clamp(int(o.nodeW, 18), 6, 60)
     const tries = []
-    for (const dir of dirs) for (const nw of [wide, Math.min(wide, 14)]) tries.push([dir, nw])
-    for (const dir of dirs) tries.push([dir, Math.min(wide, 10)])
+    for (const nw of [wide, Math.min(wide, 14), Math.min(wide, 10)]) for (const dir of dirs) tries.push([dir, nw])
     let plan = null, narrowest = null
     for (const [dir, nw] of tries) {
       const p = graphPlan(dir, nw)
@@ -2308,7 +2307,7 @@
         const n = v.node
         v.lines = wrapWords(clean(String(n.raw.label != null ? n.raw.label : n.id)).replace(/\n/g, ' '), nw, 2)
         v.extra = []
-        if (n.raw.note != null && String(n.raw.note).trim()) v.extra.push(cut(clean(String(n.raw.note)).replace(/\n/g, ' '), nw))
+        if (n.raw.note != null && String(n.raw.note).trim()) v.extra.push(...wrapWords(clean(String(n.raw.note)).replace(/\n/g, ' '), nw, 2))
         if (n.loops.length) v.extra.push(cut('↻' + (n.loops.some(Boolean) ? ' ' + n.loops.filter(Boolean).join(', ') : ''), nw))
         let bw = Math.max(1, ...v.lines.concat(v.extra).map(s => k.len(s))) + 4
         let bh = 2 + v.lines.length + v.extra.length
