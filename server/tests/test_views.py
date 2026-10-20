@@ -59,7 +59,7 @@ async def test_the_reader_runs_in_the_sandbox(folder):
     ws = make(folder)
     got = await views.run_reader(ws, "runs", folder, "records", {})
     assert got["ok"] and got["result"]["rows"][1]["outcome"] == "merged"
-    checked = await views.check(ws, "runs", folder)
+    checked = await views.check(ws, "runs", folder, page=False)
     assert checked["ok"], checked["lines"]
 
 

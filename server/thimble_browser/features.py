@@ -10,6 +10,8 @@ import importlib
 from types import ModuleType
 
 NAMES: list[str] = [
+    "files",
+    "media",
 ]
 
 

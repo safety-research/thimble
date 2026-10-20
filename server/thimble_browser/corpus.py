@@ -1,15 +1,13 @@
 """The folder of files: listing it, reading pages of a file, searching, and what a file ref points at.
 
 Every path the page or Claude names is checked to be inside the folder (inside()), so nothing outside it is read.
-Files are read as lines: a .jsonl line is parsed as JSON, any other line is text. Binary files show no lines.
+Files are read as lines: a .jsonl line is parsed as JSON, any other line is text. Binary files show no lines. A page of
+lines is read through a line index (readers/base.py), and carries what the readers (readers/) find in the file: whether
+it reads as a transcript, the key of its records' time, and each record's blocks.
 """
 from __future__ import annotations
 
-import csv
-import io
-import json
 import os
-import re
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -85,12 +83,23 @@ def walk(corpus: Path) -> list[dict[str, Any]]:
     return out
 
 
+def stamp(corpus: Path, rel: str) -> str | None:
+    """A folder's modification time, which a file added, removed or renamed in it changes; None for no folder. The
+    Files tree lists a folder again when its stamp changes."""
+    try:
+        d = inside(corpus, rel.strip("/") or ".")
+        return str(d.stat().st_mtime_ns) if d.is_dir() else None
+    except (OSError, OutsideFolder):
+        return None
+
+
 def folder(corpus: Path, rel: str) -> dict[str, Any] | None:
-    """One folder's own files and subfolders (the Files tree opens folders one at a time)."""
+    """One folder's own files and subfolders (the Files tree opens folders one at a time), with its stamp."""
     rel = rel.strip("/")
     d = inside(corpus, rel or ".")
     if not d.is_dir():
         return None
+    mark = stamp(corpus, rel)
     files, folders = [], []
     for e in sorted(os.scandir(d), key=lambda e: e.name):
         if _hidden(e.name) or e.name in SKIP_DIRS:
@@ -106,7 +115,7 @@ def folder(corpus: Path, rel: str) -> dict[str, Any] | None:
         except OSError:
             continue
     files.sort(key=lambda s: (KIND_ORDER.get(s["kind"], 9), s["path"]))
-    return {"path": rel, "files": files, "folders": folders, "n_files": len(files)}
+    return {"path": rel, "files": files, "folders": folders, "n_files": len(files), "stamp": mark}
 
 
 def is_binary(p: Path) -> bool:
@@ -132,41 +141,30 @@ def _lines(p: Path) -> list[str]:
 
 
 def line_count(p: Path) -> int:
-    return len(_lines(p))
+    from .readers import base  # noqa: PLC0415 — the readers import this module
 
-
-def _text(v: Any) -> str:
-    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+    return base.line_count(p)
 
 
 def blocks(record: Any, kind: str) -> list[dict[str, str]]:
-    """The record as the reader shows it: {kind, text} blocks."""
-    if isinstance(record, dict) and set(record) == {"text"}:
-        return [{"kind": "text", "text": _text(record["text"])}]
-    if isinstance(record, dict) and record.get("type") in ("assistant", "user"):
-        msg = record.get("message")
-        if isinstance(msg, dict) and isinstance(msg.get("content"), str):
-            return [{"kind": "text", "text": msg["content"]}]
-    return [{"kind": "raw", "text": json.dumps(record, ensure_ascii=False)}]
+    """The record as the reader shows it: {kind, text} blocks (a Claude Code transcript's text, tool_use, tool_result
+    and thinking blocks; a post; an event's parameters; else the record's JSON)."""
+    from .readers import refs  # noqa: PLC0415
+
+    return refs.record_blocks(record, kind)
 
 
 def records(rel: str, lines: list[str], start: int) -> list[dict[str, Any]]:
-    k = kind_of(rel)
-    jsonl = rel.endswith(".jsonl") or k in ("agent", "board", "events")
-    out = []
-    for n, text in enumerate(lines, start):
-        if jsonl:
-            try:
-                rec: Any = json.loads(text)
-            except ValueError:
-                rec = {"_raw": text}
-        else:
-            rec = {"text": text}
-        out.append({"line": n, "record": rec, "blocks": blocks(rec, k), "meta": {}})
-    return out
+    from .readers import base  # noqa: PLC0415
+
+    return base.records_from_lines(lines, rel, kind_of(rel), start)
 
 
 def page(corpus: Path, rel: str, start: int, count: int) -> dict[str, Any]:
+    """Lines start.. of a file as records, with what the readers find in it: `transcript` when it reads as one (and its
+    records' turns and fields), and on the first page `time`, the key of its records' time."""
+    from .readers import base, source_events, transcripts  # noqa: PLC0415
+
     p = inside(corpus, rel)
     if not p.is_file():
         raise FileNotFoundError(rel)
@@ -174,11 +172,11 @@ def page(corpus: Path, rel: str, start: int, count: int) -> dict[str, Any]:
     if is_binary(p):
         return {"path": rel, "kind": k, "total_lines": 0, "start": start, "records": [], "binary": True,
                 "size_bytes": p.stat().st_size}
-    lines = _lines(p)
     start = max(1, start)
     count = max(1, min(count, PAGE_MAX))
-    return {"path": rel, "kind": k, "total_lines": len(lines), "start": start,
-            "records": records(rel, lines[start - 1:start - 1 + count], start)}
+    got = {"path": rel, "kind": k, "total_lines": base.line_count(p), "start": start,
+           "records": base.load_records(p, rel, k, start, start + count - 1)}
+    return source_events.dress(transcripts.dress(got, p, rel), p, rel)
 
 
 def around(corpus: Path, rel: str, line: int, before: int, after: int, clamp: bool) -> dict[str, Any]:
@@ -248,8 +246,6 @@ def grep(corpus: Path, q: str) -> Iterator[dict[str, Any]]:
 
 # ---- file refs
 
-LINE_REF = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
-
 
 def split_ref(ref: str) -> tuple[str, str]:
     path, _, loc = ref.partition("#")
@@ -257,47 +253,19 @@ def split_ref(ref: str) -> tuple[str, str]:
 
 
 def resolve(corpus: Path, ref: str) -> dict[str, Any]:
-    """What a file ref points at, as GET /ref answers: {ref, kind, path, line, record, blocks, excerpt, meta}."""
-    path, loc = split_ref(ref)
-    p = inside(corpus, path)
-    if not p.exists():
-        raise FileNotFoundError(path)
-    if p.is_dir():
-        return {"ref": ref, "kind": "dir", "path": path, "excerpt": f"folder {path}"}
-    if not loc:
-        lines = _lines(p) if not is_binary(p) else []
-        return {"ref": ref, "kind": "file", "path": path, "line": 1, "excerpt": "\n".join(lines[:5])[:2000],
-                "meta": {"total_lines": len(lines)}}
-    m = LINE_REF.match(loc)
-    if m:
-        a = int(m.group(1))
-        b = int(m.group(2) or a)
-        lines = _lines(p)
-        if a < 1 or a > len(lines):
-            raise IndexError(f"{path} has {len(lines)} lines, not line {a}")
-        b = min(max(a, b), len(lines))
-        recs = records(path, lines[a - 1:b], a)
-        out = {"ref": ref, "kind": "record" if a == b else "range", "path": path, "line": a,
-               "excerpt": "\n".join(lines[a - 1:b])[:4000], "meta": {"end": b}}
-        if a == b:
-            out["record"], out["blocks"] = recs[0]["record"], recs[0]["blocks"]
-        return out
-    if loc.startswith("row=") and loc[4:].isdigit():
-        n = int(loc[4:])
-        text = p.read_text(encoding="utf-8", errors="replace")
-        rows = list(csv.reader(io.StringIO(text)))
-        if n < 1 or n >= len(rows):
-            raise IndexError(f"{path} has {len(rows) - 1} rows, not row {n}")
-        rec = dict(zip(rows[0], rows[n]))
-        return {"ref": ref, "kind": "row", "path": path, "line": n + 1, "record": rec,
-                "excerpt": json.dumps(rec, ensure_ascii=False), "meta": {}}
-    if loc.startswith("/"):
-        data: Any = json.loads(p.read_text(encoding="utf-8"))
-        for part in [x.replace("~1", "/").replace("~0", "~") for x in loc[1:].split("/") if x]:
-            data = data[int(part)] if isinstance(data, list) else data[part]
-        return {"ref": ref, "kind": "value", "path": path, "record": data,
-                "excerpt": json.dumps(data, ensure_ascii=False)[:4000], "meta": {}}
-    return {"ref": ref, "kind": "file", "path": path, "line": 1, "excerpt": "", "meta": {"locator": loc}}
+    """What a file ref points at, as GET /ref answers (readers/refs.py): {ref, kind, path, line, record, blocks,
+    excerpt, meta}. FileNotFoundError for a place that is not there, ValueError (OutsideFolder for a path that leaves the
+    folder) for a ref that is malformed."""
+    from .readers import refs  # noqa: PLC0415
+
+    path, loc = split_ref(ref.strip())
+    inside(corpus, path)  # OutsideFolder before anything is read
+    try:
+        return refs.resolve(corpus, f"{path}#{loc}" if loc else path)
+    except refs.RefError as e:
+        if e.status == 404:
+            raise FileNotFoundError(e.detail) from None
+        raise ValueError(e.detail) from None
 
 
 def csv_rows(corpus: Path, rel: str, a: int, b: int) -> list[list[int]]:

@@ -9,7 +9,7 @@ The request gives the view's name, what the analyst sees in it and does with it,
 {{guide}}
 ## Checking
 
-Check the view with `view_check` as often as you want: it checks the three files, runs the reader on the folder in thimble's sandbox (`build_index` over the claimed files, then `records(index, {})`), and says what failed. The page is not drawn by the checks, so read your view.html again for errors before you finish. When the view is done, call `finish_view`, which runs the same checks and, when they pass, shows the view to the analyst. You have {{attempts}} attempts.
+Check the view with `view_check` as often as you want: it checks the three files, runs the reader on the folder in thimble's sandbox (`build_index` over the claimed files, then `records(index, {})`), then draws the page in a headless browser as the analyst's browser does, and says what failed: an error the page throws, a load its policy refuses, a page that shows nothing. Its result has a picture of the page as the analyst first sees it, so look at it and fix what looks wrong. Where the server cannot draw the page, the result says so; then read your view.html again for errors before you finish. When the view is done, call `finish_view`, which runs the same checks and, when they pass, shows the view to the analyst. You have {{attempts}} attempts.
 
 ## Your last message
 
