@@ -8,6 +8,7 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
 import { CardBody } from '../canvas/bodies'
+import { kitRunOf } from '../kit/KitBody'
 import { useConceptDetail, useConcepts } from '../canvas/concepts'
 import { CanvasContext } from '../canvas/context'
 import { Button } from '../components/Button'
@@ -303,8 +304,10 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   }, [box])
 
   const art = cell ? primaryArtifact(cell.outputs) : null
-  // a card type's graphic is drawn in the type's frame by the card's own body (CardFigure), and elsewhere is its listing
-  const shown = art && art.kind !== 'error' && !(CARD_MIME in art.bundle) ? art.bundle : null
+  // a card type's graphic is drawn in the type's frame by the card's own body (CardFigure), and elsewhere is its listing;
+  // a card drawn by a program is drawn by the canvas's own body too (kit/KitBody), never as its text
+  const kit = !!cell && !!kitRunOf(cell)
+  const shown = art && art.kind !== 'error' && !(CARD_MIME in art.bundle) && !kit ? art.bundle : null
   // a bare figure stands in a box its page scales it to fit (a slide's, a scene's)
   const wide = !bare && shown && width < FIGURE_CHART_MIN && isVegaLite(pickMime(shown) ?? '') ? FIGURE_CHART_MIN : undefined
   const body = pending ? (
@@ -319,7 +322,7 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
     <FigureOutput table={art?.kind === 'table'} wide={wide} out={outIndex(cell?.outputs, shown)}>
       <Output bundle={shown} fitWidth={wide ?? width} maxLines={30} maxRows={FIGURE_TABLE_ROWS} labels={chartLabels(cell?.labels, concepts)} />
     </FigureOutput>
-  ) : cell && (!art || CARD_MIME in art.bundle) && width > 0 ? (
+  ) : cell && (!art || kit || CARD_MIME in art.bundle) && width > 0 ? (
     <CardFigure ws={ws} cell={cell} width={width} />
   ) : null
   if (bare) {
