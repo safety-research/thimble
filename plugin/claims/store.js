@@ -21,7 +21,7 @@
 // (revises / revised_by), keeps the links a claim names to others, and puts each new claim in a cluster: one named so
 // far, or a new one. The folder's map (a
 // card Claude saved, mergeFolder) adds its claims beside the session's.
-import { blocks, linkMarks } from '../shell/message.js'
+import { blocks, linkMarks, linkSpans } from '../shell/message.js'
 const MAX_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
@@ -90,8 +90,8 @@ export function plainOf(md) {
     }
     lineStart = c === '\n'
     if (c === '[') {
-      const m = /^\[([^\]\n]+)\]\(([^)\n]+)\)/.exec(s.slice(i))
-      if (m) {
+      const m = linkSpans(s.slice(i))[0]
+      if (m && m.index === 0) {
         for (let k = 0; k < m[1].length; k++) if (!'*_`'.includes(m[1][k])) put(m[1][k], i + 1 + k)
         i += m[0].length
         continue
@@ -160,7 +160,7 @@ export function likeness(a, b) {
  *  line break ends a sentence too (a list item, a table row); a link's words never do. */
 export function sentenceAt(md, start, end = start) {
   const s = String(md || '')
-  const links = [...s.matchAll(/\[[^\]\n]+\]\([^)\n]+\)/g)].map(m => [m.index, m.index + m[0].length])
+  const links = linkSpans(s).map(m => [m.index, m.index + m[0].length])
   const inLink = i => links.some(([a, b]) => i > a && i < b)
   const stop = i => {
     const c = s[i]

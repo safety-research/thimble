@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { checkRewrite, readReply } from '../chips.mjs'
+import { checkRewrite, readReply, revealCut } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -15,12 +15,11 @@ const TEXT = [
   '- The test then [passed 200 times in a row](q3#test=checkout@passes).',
 ].join('\n')
 
-test('a rewrite is held to the original: a ref it never cited loses its link, and a number it never states is named', () => {
+test('a rewrite is held to the original: a ref it never cited is kept for the healing pass, and a number it never states is named', () => {
   const out = checkRewrite(TEXT, 'Fixed in [2 tries](q9#x@n); it failed [1 run in 9](q2#test=checkout@fail_rate), 12% of runs.')
-  assert.equal(out.text, 'Fixed in 2 tries; it failed [1 run in 9](q2#test=checkout@fail_rate), 12% of runs.')
-  assert.equal(out.problems.length, 2)
-  assert.match(out.problems[0], /q9#x@n is not in the original/)
-  assert.match(out.problems[1], /"12" is not in the original/)
+  assert.equal(out.text, 'Fixed in [2 tries](q9#x@n); it failed [1 run in 9](q2#test=checkout@fail_rate), 12% of runs.')
+  assert.equal(out.problems.length, 1)
+  assert.match(out.problems[0], /"12" is not in the original/)
   assert.deepEqual(checkRewrite(TEXT, 'It failed about [1 in 9](q2#test=checkout@fail_rate); now it [passed 200 times](q3#test=checkout@passes).').problems, [])
   // a kept ref whose words state another number of the text: the words stay, the link goes
   const moved = checkRewrite(TEXT, 'The fix held [200 times](tests/conftest.py#L14); it [passed 200 times](q3#test=checkout@passes).')
@@ -59,5 +58,22 @@ test('readReply takes the text from its tags, or the whole reply when it gave no
   assert.match(got.cardProblems[1], /card 03-x gave data that is no JSON object/)
   // a reply with no text tags: the card blocks are no part of the text
   assert.equal(readReply('Plain.\n<card drop="02-old"/>').text, 'Plain.')
+})
+
+test('a ref with brackets in a key value stays one link through the check, a new one too, and nothing of it is left as words', () => {
+  const orig = 'Of the boys, [21](r4#age=child%20(0-12)&group=a@kept) of 37 stayed; of the girls, 19 of 32.'
+  const text = 'Boys: [21](r4#age=child%20(0-12)&group=a@kept) of 37. Girls: [19](r4#age=child%20(0-12)&group=b@kept) of 32.'
+  const out = checkRewrite(orig, text)
+  assert.equal(out.text, text)
+  assert.deepEqual(out.problems, [])
+  // one cited at a value its place does not hold loses its link whole: its words, never part of its ref
+  const moved = checkRewrite(orig, 'Girls: [37](r4#age=child%20(0-12)&group=a@kept) in all.')
+  assert.equal(moved.text, 'Girls: 37 in all.')
+  // the text writing in never stops inside such a link
+  const links = ['[21](', '[19]('].map(w => [text.indexOf(w), text.indexOf('@kept)', text.indexOf(w)) + 6])
+  for (let n = 8; n < text.length; n += 5) {
+    const end = revealCut(text, n).length
+    assert.ok(!links.some(([a, b]) => end > a && end < b), `cut at ${end} falls inside a link`)
+  }
 })
 

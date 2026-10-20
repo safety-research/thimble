@@ -23,8 +23,6 @@
 //   tableOf(text, block, marks)      -> a table block's cells as runs
 import { citeRef, isRef } from './object.js'
 
-const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
-
 /**
  * Each `[words](target)` of a text, as the regex's matches read ({index, 0: whole, 1: words, 2: target}). A target may
  * hold balanced brackets, and a query ref may hold spaces up to its closing bracket, so a ref Claude wrote with a key's
@@ -58,6 +56,16 @@ export function linkSpans(text) {
     } else i = a + 1
   }
   return out
+}
+
+/** The text with each link (linkSpans) replaced by `fn(whole, words, target)`: a target with brackets in it is
+ *  replaced whole, as the kernel reads it. */
+export function mapLinks(text, fn) {
+  const s = String(text ?? '')
+  let out = ''
+  let at = 0
+  for (const m of linkSpans(s)) { out += s.slice(at, m.index) + fn(m[0], m[1], m[2]); at = m.index + m[0].length }
+  return out + s.slice(at)
 }
 const SPARK_LABEL = /^\s*~\s*$/
 
@@ -468,9 +476,8 @@ export function inline(text, from, to, marks = []) {
       if (close > i + 1 && close < to && !/\s/.test(s[i + 1]) && s[close + 1] !== c) { style.it = true; i++; continue }
     }
     if (c === '[') {
-      LINK.lastIndex = 0
-      const m = /^\[([^\]\n]+)\]\(([^)\n]+)\)/.exec(s.slice(i, to))
-      if (m) {
+      const m = linkSpans(s.slice(i, to))[0]
+      if (m && m.index === 0) {
         if (!linkWords(i + 1, i + 1 + m[1].length, { link: true }, { link: true })) push(m[1], { link: true })
         if (!/^(https?|file):/i.test(m[2])) push(` (${m[2]})`, { dim: true })
         i += m[0].length
