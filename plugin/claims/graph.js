@@ -269,7 +269,7 @@ export default {
   thread(args, state, data) {
     if (args && args.source) {
       const c = data && data.source
-      return { about: c ? `where the claim "${cut(c.text, 200)}" was said (${whenOf(c) || 'this session'})` : 'where a claim was said' }
+      return c ? { about: `where the claim "${cut(c.text, 200)}" was said (${whenOf(c) || 'this session'})`, label: `where "${cut(c.text, 60)}" was said` } : { about: 'where a claim was said' }
     }
     const c = ((data && data.claims) || []).find(x => x.id === (state && state.claim))
     if (!c) return { about: 'the claims of this session as a graph, in clusters' }

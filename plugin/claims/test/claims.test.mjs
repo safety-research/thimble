@@ -364,6 +364,7 @@ test('where it came from: the message as the person reads it, the claim\'s words
   assert.match(text, /said again once\nturn 2 {2}“June 18 was the busiest day\.”/)
   assert.ok(!d.selected)
   assert.match(pane.thread({ source: 'c3' }, {}, data).about, /where the claim "June 18 had 6,543 saves" was said \(turn 1\)/)
+  assert.equal(pane.thread({ source: 'c3' }, {}, data).label, 'where "June 18 had 6,543 saves" was said')
   // the marked words: the quote's, also where the offsets no longer hold them
   const m = messageRows(A1, { quote: 'June 18 had 6,543 saves', start: 0, end: 3 }, 60)
   const marked = m.rows[m.at].filter(x => x.on).map(x => x.s).join('')
