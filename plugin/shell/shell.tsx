@@ -104,7 +104,7 @@ const objects = new Map<string, Any>()
 export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; at?: string | null; saves?: ObjRef[]; typed?: boolean } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; at?: string | null; saves?: ObjRef[]; typed?: boolean; began?: number } | null = null
 // the cards each side thread's agent saved in its turn, by agent (a change the analyst asked the thread for: noteEdits)
 const threadSaved = new Map<string, ObjRef[]>()
 let theme: 'dark' | 'light' = 'dark'
@@ -519,15 +519,16 @@ function saveProblems(o: Any): boolean {
 
 /**
  * The cards a turn saved: each is a change the analyst asked for (runtime.ts noteEdit) when the analyst asked for the
- * turn (`asked`: they typed main's prompt, or asked the side thread), the card was there before the turn (its first
- * version saved in the turn is not its first), and the version the turn began from drew without problems. So a card
- * made in the turn and saved again before its reply was done, a re-save that fixes what the save reported, a label's
- * reads, a draft written over, and anything a turn the analyst did not ask for saved (a background job's report, a
- * key's request) are never edits, and the header never lists them.
+ * turn (`asked`: they typed main's prompt, or asked the side thread), the card was there before the turn (the first
+ * version saved since the turn began, `began` in seconds, by the card's own history, is not its first), the version
+ * the turn began from drew without problems, and it is no label's card. So a card made in the turn and saved again
+ * before its reply was done, a re-save that fixes what the save reported, a label's reads and checks, a save made
+ * before the turn began, a draft written over, and anything a turn the analyst did not ask for saved (a background
+ * job's report, a key's request) are never edits, and the header never lists them.
  */
-async function noteEdits($: Engine, refs: ObjRef[], asked: boolean): Promise<void> {
+async function noteEdits($: Engine, refs: ObjRef[], asked: boolean, began?: number): Promise<void> {
   if (!asked) return
-  // the first version the turn saved of each card
+  // each card the turn saved, at the first version it saved (the feed's, where the turn's start is not known)
   const first = new Map<string, ObjRef>()
   for (const r of refs) {
     const k = `${r.root}|${r.id}`
@@ -535,7 +536,15 @@ async function noteEdits($: Engine, refs: ObjRef[], asked: boolean): Promise<voi
     if (r.v != null && (!f || f.v == null || r.v < f.v)) first.set(k, r)
   }
   for (const r of first.values()) {
-    const v = Number(r.v)
+    const now = await loadObject($, { id: r.id, v: null, root: r.root }).catch(() => null)
+    // a label's card is saved by the label (its reads, the analyst's checks, a new definition), never edited
+    if (!now || now.label) continue
+    let v = Number(r.v)
+    if (began != null) {
+      // the first version saved since the turn began (the history's times are whole seconds)
+      const since = (Array.isArray(now.history) ? now.history : []).find((h: Any) => Date.parse(String(h?.at)) / 1000 >= Math.floor(began))
+      v = Number(since?.v)
+    }
     if (!(v > 1)) continue
     const before = await loadObject($, { id: r.id, v: v - 1, root: r.root }).catch(() => null)
     if (!before || saveProblems(before) || brokenAt.has(`${r.root}|${r.id}|${v - 1}`)) continue
@@ -2410,7 +2419,7 @@ export const registerShell: Register = (on, options) => {
       // the analyst's turn: it began with the prompt they typed (a background job's report or a key's request did not)
       const typed = !!typedLast && !!String(e.text || '').trim() && String(e.text).trim() === typedLast.trim()
       typedLast = null
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext, saves: [], typed }
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext, saves: [], typed, began: Date.now() / 1000 }
       placeNext = null
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
@@ -2585,7 +2594,7 @@ export const registerShell: Register = (on, options) => {
     }
     try {
       // the reply is done: a card the analyst asked to change is edited (its header says so); its other saves never count
-      if (e.agentId === undefined && turn) await noteEdits($, turn.saves ?? [], !!turn.typed)
+      if (e.agentId === undefined && turn) await noteEdits($, turn.saves ?? [], !!turn.typed, turn.began)
       // a side thread's turn: the analyst's question started it
       if (e.agentId !== undefined && threadSaved.has(e.agentId)) { const refs = threadSaved.get(e.agentId)!; threadSaved.delete(e.agentId); await noteEdits($, refs, true) }
     } catch {

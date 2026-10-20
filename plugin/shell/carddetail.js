@@ -12,7 +12,7 @@
 //   editsOf(object, edits)        [{v, n}]: the card as first made and after each change the analyst asked for, which
 //                                 h steps back through (runtime.ts readEdits)
 //   PAGES_DEFAULT                 how a card with pages opens: 'all' (every page, one after another) or 'one'
-//   stepVersion(versions, v)      the version `h` goes to: the one before, and from v1 the latest
+//   stepVersion(versions, v)      the version `h` goes to: the one before, and from the first the latest
 //   keyOf(key, ctx)               what a key does in the detail, or null; keys act only while the composer is empty
 //   exampleSet(drawing, meta)     the examples the program attached to a part, or null
 //   recordWords(rec, o)           a record as the person reads it: {words, meta}, never a dump of field: value

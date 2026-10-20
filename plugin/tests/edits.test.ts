@@ -1,7 +1,8 @@
 // A card's versions (shell/shell.tsx noteEdits, runtime.ts readEdits): the kernel keeps every version, but the detail
 // lists none by number. Only a change the analyst asked for, in a later turn, is an edit: the header says "edited", and
 // h steps back through the card after each such change and as first made. A card made and saved again in one turn, a
-// re-save that fixes what its save reported, and what a turn the analyst did not ask for saved are never listed.
+// re-save that fixes what its save reported, a save made before the turn began, a label's card, and what a turn the
+// analyst did not ask for saved are never listed.
 // `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 import { press, promptStub } from './stubs'
@@ -15,11 +16,14 @@ const EDITS = `${ROOT}/thimble/objects/.edits/${ID}.json`
 const EVENTS = '/home/t/.thimble/lean/events/s-1.jsonl'
 const region = (id: string, label: string) => ({ t: 'region', id, meta: { label }, kid: { t: 'text', runs: [{ s: label, tone: 'ink' }], wrap: false, w: 30 } })
 const DRAWING = { kit: 1, w: 98, h: 24, mode: 'detail', root: { t: 'stack', kids: [region('row-1', 'Row 1'), region('row-2', 'Row 2')] }, cites: {}, examples: {}, regions: [{ id: 'row-1', meta: { label: 'Row 1' } }, { id: 'row-2', meta: { label: 'Row 2' } }], warnings: [], ms: 1 }
-/** Version `v` of the card, its title saying which; `cites` with a problem is a citation the save said does not hold. */
-const objectAt = (v: number, broken = false) => ({
-  id: ID, version: v, title: `Trees per row (v${v})`, program: 'drawn here', data: {}, text: 'Row 2 has 3 trees.',
-  lineage: { cites: broken ? [{ ref: 'q1#row=2@n', problem: 'no output row row=2' }] : [], problems: [] },
-  history: Array.from({ length: v }, (_, i) => ({ v: i + 1, at: `t${i + 1}`, change: i ? 'changed' : 'made' })),
+type Save = { v: number; broken?: boolean; label?: boolean }
+/** Version `v` of the card, its title saying which; `broken`: a citation the save said does not hold; `label`: a
+ *  label's card. Its history's times are the kernel's, in whole seconds (`at`: each version's, in seconds). */
+const objectAt = (s: Save, at: Record<number, number>) => ({
+  id: ID, version: s.v, title: `Trees per row (v${s.v})`, program: 'drawn here', data: {}, text: 'Row 2 has 3 trees.',
+  ...(s.label ? { label: 'kind' } : {}),
+  lineage: { cites: s.broken ? [{ ref: 'q1#row=2@n', problem: 'no output row row=2' }] : [], problems: [] },
+  history: Array.from({ length: s.v }, (_, i) => ({ v: i + 1, at: new Date(Math.floor(at[i + 1]!) * 1000).toISOString().slice(0, 19) + '+00:00', change: i ? 'changed' : 'made' })),
 })
 
 const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -63,24 +67,37 @@ function world(on: any) {
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['Here.'] }) as never)
-  // a Bash call that saves the card at version `v` as the kernel would: the card, the version before it kept for its
-  // lineage, and a line in the change feed
-  const queue: { v: number; broken?: boolean }[] = []
+  // a save as the kernel writes it: the card, the version before it kept for its lineage, and a line in the change feed
+  const at: Record<number, number> = {}
+  const made: Save[] = []
+  const save = (s: Save) => {
+    if (files[FILE]) files[`${ROOT}/thimble/objects/.versions/${ID}/v${s.v - 1}.json`] = files[FILE]
+    at[s.v] = Date.now() / 1000
+    made.push(s)
+    files[FILE] = JSON.stringify(objectAt(s, at))
+    files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: ID, version: s.v }) + '\n'
+  }
+  /** Time passes: what was saved so far was saved a minute earlier, as its history says. */
+  const later = () => {
+    for (const v of Object.keys(at)) at[Number(v)]! -= 60
+    if (made.length) files[FILE] = JSON.stringify(objectAt(made[made.length - 1]!, at))
+  }
+  // a Bash call that saves the card at the next version queued
+  const queue: Save[] = []
   on('tool.call', () => {
     const s = queue.shift() ?? { v: 1 }
-    if (files[FILE]) files[`${ROOT}/thimble/objects/.versions/${ID}/v${s.v - 1}.json`] = files[FILE]
-    files[FILE] = JSON.stringify(objectAt(s.v, s.broken))
-    files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: ID, version: s.v }) + '\n'
+    save(s)
     return { result: `saved ${ID} v${s.v}: thimble/objects/${ID}.json\n` }
   })
-  return { files, queue }
+  return { files, queue, save, later }
 }
 
 let turns = 0
 /** One turn of main's that saves the card as `saves` say; `typed` is the prompt the analyst typed for it, else none
  *  (a background job's report starts the turn). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function turnSaving($: any, w: ReturnType<typeof world>, clock: { settle: () => Promise<void> }, saves: { v: number; broken?: boolean }[], typed: string | null) {
+async function turnSaving($: any, w: ReturnType<typeof world>, clock: { settle: () => Promise<void> }, saves: Save[], typed: string | null) {
+  w.later()
   w.queue.push(...saves)
   const turnId = `t${++turns}`
   if (typed) await $.prompt.submit({ text: typed, origin: { kind: 'composer' } } as never)
@@ -98,7 +115,7 @@ async function drawn($: any, clock: { settle: () => Promise<void> }, what: unkno
 }
 const edits = (w: ReturnType<typeof world>) => (w.files[EDITS] ? JSON.parse(w.files[EDITS]).edits : [])
 
-test('a card made and saved again in one turn, a re-save after a citation that did not hold, and a turn the analyst did not ask for list no versions', async ($, on) => {
+test('a card made and saved again in one turn, a re-save after a citation that did not hold, a turn the analyst did not ask for, and a save made between turns list no versions', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   // made in the turn the analyst asked for, and saved twice more before the reply was done
@@ -107,6 +124,10 @@ test('a card made and saved again in one turn, a re-save after a citation that d
   await turnSaving($, w, clock, [{ v: 4 }], 'thanks, and the oldest tree?')
   // a background job's report: Claude saves it again
   await turnSaving($, w, clock, [{ v: 5 }], null)
+  // a job left running saves it between turns, and the analyst's next turn reads the save
+  w.later()
+  w.save({ v: 6 })
+  await turnSaving($, w, clock, [], 'and the youngest?')
   expect(edits(w)).toEqual([])
   await drawn($, clock, reply)
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
@@ -145,4 +166,18 @@ test('a change the analyst asked for is an edit: the header says edited, and h s
   t = await drawn($, clock, PANE)
   expect(t).toContain('Trees per row (v5)')
   expect(t).toContain('edited')
+})
+
+test("a label's card, saved again in a turn the analyst asked for, lists no versions", async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await turnSaving($, w, clock, [{ v: 1, label: true }], 'label each tree by kind')
+  // the analyst asks for a new definition: the label's reads save its card again
+  await turnSaving($, w, clock, [{ v: 2, label: true }, { v: 3, label: true }], 'count pears apart from apples')
+  expect(edits(w)).toEqual([])
+  await drawn($, clock, reply)
+  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
+  const t = await drawn($, clock, PANE)
+  expect(t).toContain('Trees per row (v3)')
+  expect(t).not.toMatch(/edited/)
 })

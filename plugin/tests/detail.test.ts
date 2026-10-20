@@ -145,7 +145,7 @@ test('overview first: the card enlarged under its title, takeaway and "edited"; 
   expect(w.opened.at(-1)).toMatchObject({ id: 'object', focus: true, closeOnEscape: true })
   const t = await pane($, clock)
   expect(t).toContain('Saves per day')
-  // the card's id shows here only, in the header, beside its versions
+  // the card's id shows here only, in the header, beside "edited" once the analyst asked for a change
   expect(t).toContain('card:01-saves')
   expect(t).toContain('edited')
   expect(t).not.toContain('v1 · v2')
