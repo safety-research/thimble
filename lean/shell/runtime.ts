@@ -39,10 +39,14 @@ export function cardKey(drawing: Any, key: string): string | null {
   return on.some((h: Any) => h.name === k || h.name === 'key') ? k : null
 }
 
-/** Whether a press on part `region` reaches the program. */
+/** Whether a press on part `region` reaches the program (a part of one page of a card drawn all at once, `pg3~~x`, as
+ *  the part `x`; a page's heading never). */
 export function pressTaken(drawing: Any, region: string): boolean {
   const on = Array.isArray(drawing?.on) ? drawing.on : []
-  return on.some((h: Any) => h.name === `press:${region}` || h.name === 'press')
+  const page = /^pg\d+~~(.*)$/.exec(String(region))
+  if (page && !page[1]) return false
+  const own = page ? page[1] : region
+  return on.some((h: Any) => h.name === `press:${own}` || h.name === 'press')
 }
 
 /** The card's own keys, as the bar says them: "j next run · k previous run". */
@@ -59,11 +63,12 @@ export function ownState(state: Record<string, unknown> | null | undefined): Rec
 }
 
 /** The program run once more with an event: it learns its handlers, the one the event reaches patches the state, and
- *  it draws again with it. */
-export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<string, unknown>, size: { w: number; h: number }, mode = 'detail'): Promise<{ drawing: Any; state: Record<string, unknown>; ask: CardAsk | null } | null> {
+ *  it draws again with it. `size.all`: the card is drawn with every page of that knob at once (its parts' ids are its
+ *  pages', and the kit reads them back). */
+export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<string, unknown>, size: { w: number; h: number; all?: string | null }, mode = 'detail'): Promise<{ drawing: Any; state: Record<string, unknown>; ask: CardAsk | null } | null> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], {
-    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}) }, mode, event }),
+    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}) }, mode, event, ...(size.all ? { all: size.all } : {}) }),
     timeoutMs: 30000,
   })
   if (r.exitCode !== 0) return null
@@ -104,5 +109,39 @@ export async function writeCardState($: Engine, root: string, id: string, st: { 
     await $.state.set({ ...CARDVER, id: `${root}|${id}` }, Date.now())
   } catch {
     // the other surface opens the card where it was; this one keeps its own
+  }
+}
+
+// ---------------------------------------------------------------- the versions the person saw
+// A card saved several times in one turn (Claude fixing it before its reply was done) was seen once, at the version
+// drawn under the finished reply. thimble/objects/.seen/<id>.json lists the versions the person could see: the one a
+// turn of main's left under its reply, a label's new version drawn in place, the latest the detail drew. The detail's
+// header lists those; the others are drafts, still a key away (carddetail.js versionsOf).
+
+export const seenFile = (root: string, id: string) => `${root.replace(/\/+$/, '')}/thimble/objects/.seen/${id}.json`
+
+/** The versions of a card the person could see, oldest first; null for a card with no record (one saved before the
+ *  record was kept), whose versions all count. */
+export async function readSeen($: Engine, root: string, id: string): Promise<number[] | null> {
+  if (!ID.test(id)) return null
+  try {
+    const f = seenFile(root, id)
+    if (!(await $.fs.exists(f))) return null
+    const v = JSON.parse(String(await $.fs.read(f)))
+    return Array.isArray(v?.seen) ? v.seen.map(Number).filter((x: number) => Number.isInteger(x)) : null
+  } catch {
+    return null
+  }
+}
+
+/** Version `v` of a card was where the person could see it. */
+export async function noteSeen($: Engine, root: string, id: string, v: number | null | undefined): Promise<void> {
+  if (!ID.test(id) || v == null || !Number.isInteger(Number(v))) return
+  const was = (await readSeen($, root, id)) ?? []
+  if (was.includes(Number(v))) return
+  try {
+    await $.fs.write(seenFile(root, id), JSON.stringify({ seen: [...was, Number(v)].sort((a, b) => a - b), at: new Date().toISOString() }, null, 1))
+  } catch {
+    // the header lists every version then, as before
   }
 }

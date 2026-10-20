@@ -20,7 +20,8 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { LineCounts, MsgRecord, ObjRef, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
-import { knobOf, turn as turnKnob } from '../draw/handoff.js'
+import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
+import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
@@ -29,7 +30,7 @@ import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './messag
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import type { Scope as ThreadScope } from './thread'
-import { cardEvent, cardKey as cardTakesKey, cardStateNow, pressTaken, readCardState, writeCardState } from './runtime'
+import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteSeen, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop } from './tray.js'
 import { catchUpEl, keyColor, markColors, messageEl } from './view'
@@ -94,7 +95,7 @@ const objects = new Map<string, Any>()
 export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; at?: string | null } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; at?: string | null; saves?: ObjRef[] } | null = null
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
 
@@ -145,15 +146,16 @@ export async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
-const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}`
+const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, all: string | null = null) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}${all ? '|all=' + all : ''}`
 
 /** The object drawn at `w` columns (with the knobs at `state`): the program runs in a Node child, in the
  *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
  *  a program may show more, in the `h` rows the detail gives it (k.h). Kept per object version, width, state, mode and
  *  rows; a failed one stays failed until the module reloads. `check` (a save) also tries the card's interactions once
- *  (draw/exercise.mjs), in the same child. */
-export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, check = false): Promise<Prepared> {
-  const key = prepKey(ref, w, state, mode, h)
+ *  (draw/exercise.mjs), in the same child. `all` (the detail's "all at once") draws every page of that knob, one after
+ *  another. */
+export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, check = false, all: string | null = null): Promise<Prepared> {
+  const key = prepKey(ref, w, state, mode, h, all)
   const hit = preps.get(key)
   if (hit && (!check || hit.check || hit.error || hit.drawing?.error)) return Promise.resolve(hit)
   const running = pending.get(key)
@@ -168,7 +170,7 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
     }
     if (!object) return { object: null, drawing: null, grid: null, error: `no card ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}) }), timeoutMs: 30000 })
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}), ...(all ? { all } : {}) }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     // under a reply a card is its title, its chart and its takeaway: the words at the right of its frame (its sources)
@@ -184,12 +186,12 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
 
 /** For a drawing hook: the object if it is ready; else null, with the work started outside the drawing (a render's
  *  dispatch may be abandoned, which would stop the child) and the drawing subscribed to its end. */
-export async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24): Promise<Prepared | null> {
-  const key = prepKey(ref, w, state, mode, h)
+export async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, all: string | null = null): Promise<Prepared | null> {
+  const key = prepKey(ref, w, state, mode, h, all)
   const hit = preps.get(key)
   if (hit) return hit
   await $.state.get({ ...READY, id: key })
-  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode, h).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
+  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode, h, false, all).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
   return null
 }
 
@@ -436,12 +438,22 @@ export async function select($: Engine, sel: Sel): Promise<void> {
   await resolveRefs($, sel.root, refs)
 }
 
-export async function openDetail($: Engine, at: ObjRef, region: string | null = null): Promise<void> {
+/** `1`: a card's detail, a card with pages showing them as PAGES_DEFAULT says (all at once, or one at a time). */
+async function openCard($: Engine, ref: ObjRef): Promise<void> {
+  const pk = pageKnob(await inlineDrawing($, ref))
+  await openDetail($, ref, null, pk ? { pages: PAGES_DEFAULT } : {})
+}
+
+/** Open a card's detail, on a part (`region`), with its pages all at once or one at a time when `how.pages` says. */
+export async function openDetail($: Engine, at: ObjRef, region: string | null = null, how: { pages?: 'all' | 'one' } = {}): Promise<void> {
   const ref = await withVersion($, at)
   const cur = (await $.state.get(SEL)).value
-  // the knobs stay where the person turned them while it is the same object
-  const state = cur && cur.id === ref.id && cur.root === ref.root ? cur.state : undefined
-  await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}) })
+  // the knobs stay where the person turned them, here or under the reply or in the browser (the card's kept state),
+  // else where the detail last had them while it is the same object
+  const kept = await readCardState($, ref.root, ref.id)
+  const state = keptState(kept) ?? (cur && cur.id === ref.id && cur.root === ref.root ? cur.state : undefined)
+  if (how.pages) await patchPaneState($, 'detail', { id: ref.id }, { pages: how.pages })
+  await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}), ...(how.pages ? { pages: how.pages } : {}) })
   const o = await loadObject($, ref)
   await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
 }
@@ -466,8 +478,23 @@ async function rootHere($: Engine): Promise<string | null> {
 export async function showVersion($: Engine, ref: ObjRef): Promise<void> {
   if (ref.v != null) newestVersion.set(`${ref.root}|${ref.id}`, Math.max(ref.v, newestVersion.get(`${ref.root}|${ref.id}`) ?? 0))
   const where = (await $.state.get({ ...WHERE, id: ref.id })).value as string | undefined
+  // drawn in place now, where the person sees it, or with the turn's other cards when its reply is done
+  if (turn) turn.saves = [...(turn.saves ?? []), ref]
+  else if (where) await noteSeenSaves($, [ref])
   if (where) { await place($, where, ref); return }
   if (turn) turn.unplaced = turn.unplaced.map(x => (x.id === ref.id && x.root === ref.root ? { ...x, v: ref.v } : x))
+}
+
+/** The cards saved (each once), at their latest versions, noted as seen by the person (runtime.ts noteSeen). */
+async function noteSeenSaves($: Engine, refs: ObjRef[]): Promise<void> {
+  const done = new Set<string>()
+  for (const ref of refs) {
+    const key = `${ref.root}|${ref.id}`
+    if (done.has(key)) continue
+    done.add(key)
+    const o = await loadObject($, { id: ref.id, v: null, root: ref.root })
+    await noteSeen($, ref.root, ref.id, o?.version ?? ref.v)
+  }
 }
 
 /** Words for Claude alone, given with the next prompt (prompt.submit's context): no row of the transcript. */
@@ -1304,7 +1331,10 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   // a key the host keeps never reaches the card here (Claude Code's ← → ↑ ↓ ↵ among them), so the bar never names it
   const taken = hostKeys('inline', 'terminal')
   const own = keysOf(d ? { ...d, on: (d.on || []).filter((h: Any) => !(String(h?.name) in taken)) } : d)
-  return { keys: [...own.map(g => `${g.key} ${g.words}`), '1 open detail', '] next', '0 back'].join(' · ') }
+  // a card with pages: , and . turn them when its own keys do not, and 1 opens them to read
+  const pk = pageKnob(d)
+  const open = pk ? (PAGES_DEFAULT === 'all' ? `1 read all ${pagesWord(pk)}` : `1 open ${pagesWord(pk)}`) : '1 open detail'
+  return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), open, '] next', '0 back'].join(' · ') }
 }
 
 /** The keys of what has focus now: the top of the focus stack that is still there; a surface whose state is set but
@@ -1330,10 +1360,12 @@ function keySegments(keys: string): { key: string; words: string; color?: string
     const lit = /^([a-z]) ● (.*)$/.exec(seg)
     if (lit) return { key: lit[1]!, words: `● ${lit[2]}`, color: keyColor(lit[1]!, theme), short: `● ${lit[2]!.split(/\s+/)[0]}` }
     const t = seg.split(' ')
-    // a phrase with no key (`type to ask`): words alone
-    if (t[0]!.length > 3 && /^[a-z]+$/.test(t[0]!)) return { key: '', words: seg }
+    // a phrase with no key (`type to ask about the part`): words alone, which a narrow bar cuts to the word that says
+    // what it is for (`ask`; the ask line in the pane says the rest)
+    if (t[0]!.length > 3 && /^[a-z]+$/.test(t[0]!)) return { key: '', words: seg, ...(/^type to ask\b/.test(seg) ? { short: 'ask' } : {}) }
+    // the key, and the keys after it that share its words: symbols (`[ ]`, `↑ ↓`) and single letters (`n p`)
     let n = 1
-    while (n < t.length && /^[^\p{L}\p{N}]+$/u.test(t[n]!)) n++
+    while (n < t.length && (/^[^\p{L}\p{N}]+$/u.test(t[n]!) || (n < t.length - 1 && [...t[n - 1]!].length === 1 && [...t[n]!].length === 1))) n++
     return { key: t.slice(0, n).join(' '), words: t.slice(n).join(' ') }
   })
 }
@@ -1420,7 +1452,12 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       if (rec.marks.length) left.push({ key: ']', words: 'cite & explain', color: markColors(theme).cite, onPress: () => stepMark($, 1) })
       else if (cardsHere.length) left.push({ key: ']', words: 'card', color: FOCUS[theme], onPress: () => stepMark($, 1) })
       const ref = await focusedCard($)
-      if (ref) left.push({ key: '1', words: 'open detail', color: FOCUS[theme], onPress: () => openDetail($, ref) })
+      if (ref) {
+        // a card with pages: 1 opens them to read (`1 read all 9 chapters`)
+        const pk = pageKnob(await inlineDrawing($, ref))
+        const words = pk ? (PAGES_DEFAULT === 'all' ? `read all ${pagesWord(pk)}` : `open ${pagesWord(pk)}`) : 'open detail'
+        left.push({ key: '1', words, short: pk ? (PAGES_DEFAULT === 'all' ? 'read all' : 'open') : 'open', color: FOCUS[theme], onPress: () => openCard($, ref) })
+      }
       // which reply the keys act on, once more than one came since the person's last prompt or an earlier one is
       // picked: { and } pick another (as ] and [ step through the marks; never < >, which read as the arrow keys)
       const place = await answerPlace($, row)
@@ -1591,7 +1628,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   if (cf && !pick) {
     if (k === '0' || k === 'backspace') return { box: consume, work: () => setCardFocus($, null) }
-    if (k === '1') return { box: consume, work: async () => { await setCardFocus($, null); await openDetail($, cf) } }
+    if (k === '1') return { box: consume, work: async () => { await setCardFocus($, null); await openCard($, cf) } }
     if (k === ']' || k === '[') return { box: consume, work: () => stepMark($, k === ']' ? 1 : -1) }
     const d = await inlineDrawing($, cf)
     const own = d ? cardTakesKey(d, k) : null
@@ -1602,6 +1639,8 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
         cardKeyed = { key: k, at: now, ref: cf, undo: before }
       } }
     }
+    // , and . turn the card's page knob (else its only knob) a step, here where it is drawn
+    if ((k === ',' || k === '.') && d && turnable(d)) return { box: consume, work: () => inlineTurn($, cf, null, k === '.' ? 1 : -1) }
     return { box: null, work: () => setCardFocus($, null) }
   }
   if (k === ']' || k === '[') return { box: consume, work: async () => { await setPick($, null); await stepMark($, k === ']' ? 1 : -1) } }
@@ -1614,7 +1653,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   if (/^[1-9]$/.test(k)) {
     // 1 under a card: its detail view (the bar says `1 open detail`)
     const ref = k === '1' ? await focusedCard($) : null
-    return ref ? { box: consume, work: () => openDetail($, ref) } : { box: null }
+    return ref ? { box: consume, work: () => openCard($, ref) } : { box: null }
   }
   // s with replies piled up (the bar says `s catch up on N replies`): the catch-up, its chips open; a letter typed at once
   // after it makes s the start of a word, and the catch-up is undone
@@ -1665,14 +1704,35 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   // calm: under a reply an object takes at most about half a screen; the rest waits in the detail view
   const rows = Math.min(p.grid.h, inlineRows(e.viewport?.rows ?? 48))
   // a click on a part its program answers is the program's (k.on('press:<id>')), here as in the detail; on any other
-  // part it opens the detail view on it; on a knob's ◂ ▸, opens it and turns the knob there
-  const onPress = fullscreen ? (id: string, dir?: number) => (dir ? openTurned($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
+  // part it opens the detail view on it; on a knob's dial it turns the knob here, a step back on its left half and a
+  // step on on its right half
+  const onPress = fullscreen ? (id: string, dir?: number) => (dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
   const run = runningRow(els, said)
   const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
+  // the card the keys act on: its own frame in the keys' color, or, for a card with no frame, a bar down its left side
+  const ring = focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null
+  const framed = p.grid.rows[0]?.[0]?.ch === '╭'
+  const cells = paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: ring })
+  // a card with pages: how many, and the key that opens them to read (`9 chapters · 1 read all`)
+  const pk = pageKnob(p.drawing)
+  const pages = pk ? pagesRow(els, pk, !!focus, fullscreen ? () => openDetail($, ref, null, { pages: PAGES_DEFAULT }) : null) : null
+  const body = ring && !framed
+    ? Box({ flexDirection: 'row', children: [Box({ flexDirection: 'column', width: 2, flexShrink: 0, children: Array.from({ length: Math.min(rows, p.grid.h) }, (_, i) => Text({ key: `bar${i}`, color: ring, children: '▎' })) }), cells] })
+    : cells
   return Box({
-    flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
-    children: [paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null }), ...(run ? [run] : [])],
+    flexDirection: 'column', marginTop: 1, marginLeft: ring && !framed ? 0 : 2, width: Math.max(p.grid.w, 40) + (ring && !framed ? 2 : 0),
+    children: [body, ...(pages ? [Box({ marginLeft: ring && !framed ? 2 : 0, children: [pages] })] : []), ...(run ? [run] : [])],
   })
+}
+
+/** The row under a card with pages: how many there are and how to read them, `9 chapters · 1 read all` (the key only
+ *  where 1 opens this card), a press that opens them where a click reaches. */
+function pagesRow(els: Any, pk: Any, keyed: boolean, open: (() => unknown) | null): Any {
+  const { Button, Text } = els
+  const what = pagesWord(pk)
+  const act = PAGES_DEFAULT === 'all' ? 'read all' : 'open'
+  const kids = [Text({ key: 'pg-n', dimColor: true, children: `${what} · ` }), ...(keyed ? [Text({ key: 'pg-k', color: FOCUS[theme], children: '1 ' })] : []), Text({ key: 'pg-w', dimColor: true, children: act })]
+  return open ? Button({ key: 'pages', plain: true, label: `${act}: ${what}`, onPress: open, children: kids }) : Text({ children: kids })
 }
 
 /**
@@ -1754,21 +1814,39 @@ async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unkno
 const inlineRows = (screen: number) => Math.max(12, Math.min(30, Math.floor(screen * 0.55)))
 const FOCUS = { dark: '#9a93ff', light: '#4f46e5' }
 
-async function openTurned($: Engine, ref: ObjRef, knob: string, dir: number): Promise<void> {
-  await openDetail($, ref)
-  await turnSel($, knob, dir)
+/** A knob of a card under a reply turned one step where the card is drawn (a click on its dial's half, or , and . while
+ *  the card has the keys): `knob`, else its page knob, else its first. The new state is kept for every surface, and an
+ *  open detail of the same card follows it. */
+async function inlineTurn($: Engine, ref: ObjRef, knob: string | null, dir: number): Promise<void> {
+  const kept = await readCardState($, ref.root, ref.id)
+  const d = (await inlineDrawing($, ref)) ?? (await prepared($, ref, inlineCols, keptState(kept))).drawing
+  const c = (knob && knobOf(d, knob)) || turnable(d)
+  if (!c) return
+  const state = turnKnob(d, kept?.state || {}, c.id, dir)
+  await writeCardState($, ref.root, ref.id, { state, region: kept?.region ?? null }, 'terminal')
+  const sel = (await $.state.get(SEL)).value as Sel | null
+  if (sel && sel.id === ref.id && sel.root === ref.root && !sel.cite && !sel.cites) await $.state.set(SEL, { ...sel, state: { ...(sel.state || {}), ...state }, knob: c.id })
 }
 
-/** Turn a knob of the open object: `knob`, else the one turned last, else its first. */
-async function turnSel($: Engine, knob: string | null, dir: number): Promise<void> {
-  const cur = (await $.state.get(SEL)).value as Sel | null
-  if (!cur || cur.cite) return
-  const p = await prepared($, cur, 96, cur.state)
-  if (!p.drawing?.controls?.length) return
-  const id = knob && knobOf(p.drawing, knob) ? knob : cur.knob && knobOf(p.drawing, cur.knob) ? cur.knob : p.drawing.controls[0].id
-  const state = turnKnob(p.drawing, cur.state || {}, id, dir)
-  const now = (await $.state.get(SEL)).value as Sel | null
-  if (now && now.id === cur.id) await $.state.set(SEL, { ...now, state, knob: id })
+/** The knob , and . turn on a card: its page knob, else its only knob, else none. */
+export function turnable(drawing: Any): Any | null {
+  const cs = (drawing?.controls || []) as Any[]
+  return pageKnob(drawing) ?? (cs.length === 1 ? cs[0] : null)
+}
+
+/** The words , and . get in the bar for a card's knob, when its own keys do not turn it already: `, previous chapter`. */
+export function turnKeys(drawing: Any): string[] {
+  const c = turnable(drawing)
+  if (!c || ((drawing?.on || []) as Any[]).some(h => h?.turn?.knob === c.id && h.turn.dir)) return []
+  return [`, previous ${c.label || c.id}`, `. next ${c.label || c.id}`]
+}
+
+/** A page knob's pages in words: `9 chapters` (a label of one word), else `9 pages`. */
+export function pagesWord(c: Any): string {
+  const n = c.values.length
+  const w = String(c.label || c.id).trim()
+  if (!/^[a-z]+$/i.test(w)) return `${n} pages`
+  return `${n} ${/s$/i.test(w) ? w : /[^aeiou]y$/i.test(w) ? w.slice(0, -1) + 'ies' : w + 's'}`
 }
 
 /** What the person sees of an object Claude just saved, in a few lines for Claude: how big it is, how many parts they
@@ -1976,7 +2054,7 @@ export const registerShell: Register = (on, options) => {
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext }
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext, saves: [] }
       placeNext = null
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
@@ -2008,6 +2086,7 @@ export const registerShell: Register = (on, options) => {
       // a subagent's saves (a side thread's) are read and left where its card is
       const saves = await newSaves($)
       if (input.agentId || !saves.length) return r
+      if (turn) turn.saves = [...(turn.saves ?? []), ...saves]
       notes = []
       for (const ref of saves) {
         const id = ref.id
@@ -2090,7 +2169,7 @@ export const registerShell: Register = (on, options) => {
     const done = await next(e)
     try {
       // a save the turn's last Bash call did not see (one run in the background): the feed read once more
-      if (e.agentId === undefined && turn) for (const ref of await newSaves($)) turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]
+      if (e.agentId === undefined && turn) for (const ref of await newSaves($)) { turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]; turn.saves = [...(turn.saves ?? []), ref] }
     } catch {
       // the next call reads the feed again
     }
@@ -2102,6 +2181,13 @@ export const registerShell: Register = (on, options) => {
       }
     } catch {
       // nothing drawn is better than a turn that does not end
+    }
+    try {
+      // the reply is done, and the cards the turn saved stand under it: their latest versions are the ones the person
+      // sees. A card saved several times in the turn was seen once (its header lists that one; the rest are drafts)
+      if (e.agentId === undefined && turn) await noteSeenSaves($, turn.saves ?? [])
+    } catch {
+      // the header lists every version of these cards then, as before
     }
     try {
       // the turn's answer: its last words, under which the verb row is drawn. A turn that ended in an error answered

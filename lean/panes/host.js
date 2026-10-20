@@ -19,13 +19,14 @@ const ARROW = /^[↑↓←→]$/
 
 const SKIP = /^(press|brush|hover|focus|key|tick|input)(:|$)/
 
-/** The keys a program takes, as the bar says them. */
+/** The keys a program takes, as the bar says them. A key that turns a knob one step (kit.js probes each key: `turn`)
+ *  says which way, in plain words: two keys a program labelled `chapter` read `n next chapter · p previous chapter`. */
 export function keysOf(drawing) {
   const on = Array.isArray(drawing?.on) ? drawing.on : []
   const out = []
   for (const h of on) {
     const name = String(h?.name || '')
-    const words = String(h?.label || '').trim()
+    const words = turnWords(h, drawing)
     if (!name || !words || SKIP.test(name)) continue
     const key = KEY_SHOW[name] || name
     const hit = out.find(x => x.words === words)
@@ -37,16 +38,31 @@ export function keysOf(drawing) {
   return out.map(x => ({ key: x.keys.every(k => ARROW.test(k)) ? x.keys.join('') : digits(x.keys) ? `${x.keys[0]}–${x.keys[x.keys.length - 1]}` : x.keys.join(' '), words: x.words }))
 }
 
-/** The keys of a focus stack, top first, as one line of the bar; a key the top takes is not said again below it. */
+/** A key's words in the bar: its label, and for a key that turns a knob one step, which way (`next chapter`), unless
+ *  the label says so already. */
+function turnWords(h, drawing) {
+  const label = String(h?.label || '').trim()
+  const t = h?.turn
+  if (!label || !t || !t.dir || /\b(next|previous|prev|back|forward|earlier|later|up|down|more|less|in|out)\b/i.test(label)) return label
+  const knob = ((drawing && drawing.controls) || []).find(c => c.id === t.knob)
+  return `${t.dir > 0 ? 'next' : 'previous'} ${label || knob?.label || t.knob}`
+}
+
+/** The keys of a focus stack, top first, as one line of the bar; a key the top takes is not said again below it, even
+ *  in a group (`p` of `p program` goes when the card above takes `p`). */
 export function barText(drawings) {
   const seen = new Set()
   const segs = []
   for (const d of drawings || []) {
+    const mine = []
     for (const k of keysOf(d)) {
-      if (seen.has(k.key)) continue
-      seen.add(k.key)
-      segs.push(`${k.key} ${k.words}`)
+      const keys = /^\d–\d$/.test(k.key) || [...k.key].length <= 2 || !k.key.includes(' ') ? [k.key] : k.key.split(' ')
+      const left = keys.filter(x => !seen.has(x))
+      if (!left.length) continue
+      mine.push(...left)
+      segs.push(`${left.join(' ')} ${k.words}`)
     }
+    mine.forEach(x => seen.add(x))
   }
   return segs.join(' · ')
 }

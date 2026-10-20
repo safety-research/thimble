@@ -6,9 +6,14 @@
 // of. The program the card is behind p. The card's thread is the host's: the terminal's column at the left, the
 // browser's chat.
 //
-//   state: {region: the selected part, bar: null | 'details' | 'examples', ex: the example shown, prog: the program}
-//   keys: ↑↓ part · ↵ details · e examples · [ ] flip · + − zoom · f filter · , . turn · p program · h versions ·
-//         t thread · m send to main · 0 clear · esc back
+//   state: {region: the selected part, bar: null | 'details' | 'examples', ex: the example shown, prog: the program,
+//          pages: 'all' | 'one' (a card with pages: every page at once, or one at a time)}
+//   keys: ↑↓ part · ↵ details · e examples · [ ] flip · + − zoom · f filter · , . turn · a all at once / one at a time ·
+//         p program · h versions · t thread · m send to main · 0 clear · esc back
+//
+// Pages: a card with a page knob (kit.js) is shown with every page at once, one after another, each under its own
+// heading, when the person chose so (a) or PAGES_DEFAULT says (carddetail.js); the host draws it so (shell/detail.tsx).
+// Its parts are then its pages' (`pg3~~x`, handoff.js), the headings among them; , and . go a page back or on.
 //   events: focus (the ring on a part), press (a part; the selected one opens its details; a version; a knob's ◂ ▸)
 //   asks of the host: card {state} (a knob of the card turned), version {v}, thread, main, close,
 //         check {label, ref, value} (the person's check of a record's label value)
@@ -21,8 +26,8 @@
 // beside the value the label gave, counts in its place, and the examples step on to the next record.
 //
 // The card's own keys and presses (its program's k.on) come before these: the host routes them to the card first.
-import { barAfter, cycleKnob, examplesView, exampleSet, fromLine, linkRuns, namedKnob, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
-import { turn as turnKnob } from '../draw/handoff.js'
+import { barAfter, cycleKnob, examplesView, exampleSet, fromLine, linkRuns, namedKnob, partOfLink, programLines, shownVersions, stepVersion } from '../shell/carddetail.js'
+import { pageId, pageOf, turn as turnKnob } from '../draw/handoff.js'
 import { chainWords, regionRefs } from '../shell/object.js'
 
 const EXR = 6
@@ -58,6 +63,8 @@ export default {
       id: o.id, title: o.title || o.id, question: o.question || '', text: o.text || '', program: o.program || '', version: o.version ?? null,
       versions: card.versions || [], v: card.v ?? o.version ?? null, drawing: inner, parts, refs,
       cites: d.cites || {}, examples: d.examples || {}, controls: d.controls || [], cardState: card.state || {},
+      // the card shown with every page at once ({knob, n, at}), and the keys its own program takes (with what they turn)
+      pages: d.pages || null, cardOn: d.on || [],
       thread: !!card.thread, w: size.w, h: size.h,
       // a label's card names its label; the host counts the checks made since it opened, so their labels are read again
       label: typeof o.label === 'string' ? o.label : null, labelGen: card.labelGen || 0,
@@ -72,7 +79,19 @@ export function program(k, data) {
   const st = k.state || {}
   const parts = data.parts || []
   const ids = parts.map(p => p.id)
-  const region = ids.includes(st.region) ? st.region : (ids[0] ?? null)
+  const all = data.pages
+  // the part selected: the one the state names; a part of a page (`pg3~~x`) while the card shows one page is `x`, and a
+  // card's own part (`x`, named from outside) while it shows every page is `x` on the page the card is at, else on the
+  // first page that has it. At rest: the heading of the page the card is at, else the first part
+  const resolve = r => {
+    if (r == null) return null
+    if (ids.includes(r)) return r
+    const pg = pageOf(r)
+    if (pg && !all) return ids.includes(pg.id) ? pg.id : null
+    if (!pg && all) return ids.includes(pageId(all.at, r)) ? pageId(all.at, r) : ids.find(x => pageOf(x)?.id === r) ?? null
+    return null
+  }
+  const region = resolve(st.region) ?? (all && ids.includes(pageId(all.at, '')) ? pageId(all.at, '') : ids[0] ?? null)
   const part = parts.find(p => p.id === region) || null
   const bar = st.bar || null
   const prog = !!st.prog
@@ -144,15 +163,30 @@ export function program(k, data) {
     k.on('-', () => { k.do('card', { state: { ...data.cardState, [zoom.id]: zoom.values[0] }, knob: zoom.id }); return { region: null, ex: 0 } }, zoomed ? 'zoom' : undefined)
   }
   if (filter) k.on('f', () => { k.do('card', { state: cycleKnob(filter, data.cardState), knob: filter.id }); return { region: null, ex: 0 } }, 'filter')
-  if (part && part.knob) {
-    k.on(',', () => turnCard(part.knob, -1), 'turn')
-    k.on('.', () => turnCard(part.knob, 1), 'turn')
-    k.on('<', () => turnCard(part.knob, -1))
-    k.on('>', () => turnCard(part.knob, 1))
+  // , and . turn a knob a step: the one selected, else the card's page knob, else its only knob. With every page shown,
+  // they go to the heading of the page before or after. Named in the bar when the card's own keys do not turn it
+  const pk = (data.controls || []).find(c => c.pages) || null
+  const knob = part && part.knob ? control(part.knob) : pk || ((data.controls || []).length === 1 ? data.controls[0] : null)
+  if (knob) {
+    const own = (data.cardOn || []).some(h => h.turn && h.turn.knob === knob.id && h.turn.dir)
+    const go = dir => () => {
+      if (all && all.knob === knob.id) {
+        const at = pageOf(region)?.page || all.at
+        return { region: pageId(Math.max(1, Math.min(all.n, at + dir)), ''), ex: 0 }
+      }
+      return turnCard(knob.id, dir)
+    }
+    k.on(',', go(-1), own ? undefined : `previous ${knob.label || knob.id}`)
+    k.on('.', go(1), own ? undefined : `next ${knob.label || knob.id}`)
+    k.on('<', go(-1))
+    k.on('>', go(1))
   }
+  // a: every page at once, or one at a time (the place kept: the part selected, on its page)
+  if (pk) k.on('a', () => ({ pages: all ? 'one' : 'all' }), all ? `${pageOne(pk)} by ${pageOne(pk)}` : `all ${pagesOf(pk)}`)
   k.on('p', () => ({ prog: !prog }), prog ? 'closes the program' : 'program')
   const versions = data.versions || []
-  if (versions.length > 1) k.on('h', () => { k.do('version', { v: stepVersion(versions, data.v) }); return { ex: 0 } }, 'versions')
+  // h steps back through every version, drafts included (named so while the header lists only the one shown)
+  if (versions.length > 1) k.on('h', () => { k.do('version', { v: stepVersion(versions, data.v) }); return { ex: 0 } }, shownVersions(versions, data.v).length > 1 ? 'versions' : 'drafts')
   if (data.thread) {
     k.on('t', () => { k.do('thread') }, 'thread')
     k.on('m', () => { k.do('main') }, 'send to main')
@@ -169,10 +203,13 @@ export function program(k, data) {
 
   // ---- the header: the title, the card's id and its versions
   const W = Math.max(30, k.w)
-  // each version a part of the header: a press shows it
-  const vs = versions.length > 1 ? versions.flatMap((x, i) => [
+  // each version the person saw a part of the header (the one shown too): a press shows it. Versions saved before the
+  // person saw the card (Claude fixing it within one turn) are drafts: not listed, h steps to them
+  const listed = shownVersions(versions, data.v)
+  const vs = listed.length > 1 ? listed.flatMap((x, i) => [
     ...(i ? [k.text('{dim: · }', { wrap: false })] : []),
-    k.region(`ver-${x.v}`, { label: `v${x.v}${x.change ? ': ' + x.change : ''}` }, k.text(x.v === data.v ? `{accent:**v${x.v}**}` : `{dim:v${x.v}}`, { wrap: false })),
+    k.region(`ver-${x.v}`, { label: `v${x.v}${x.change ? ': ' + x.change : ''}${x.seen === false ? ' (a draft)' : ''}${x.drafts ? ` (${x.drafts} draft${x.drafts === 1 ? '' : 's'} before it)` : ''}` },
+      k.text(x.v === data.v ? `{accent:**v${x.v}${x.seen === false ? ' draft' : ''}**}` : `{dim:v${x.v}}`, { wrap: false })),
   ]) : []
   const head = k.beside(
     k.text(`**${k.escape(data.title)}**`, { grow: 1, wrap: false }),
@@ -192,6 +229,16 @@ export function program(k, data) {
 
   if (prog) return k.stack(head, takeaway, k.text(' '), programView(k, data, part, W))
   return k.stack(head, takeaway, k.text(' '), k.embed(data.drawing), barView(k, data, part, bar, ex, W))
+}
+
+/** A page knob's page in one word: `chapter` (its label, when one word), else `page`; and its pages: `chapters`. */
+function pageOne(c) {
+  const w = String(c.label || c.id).trim()
+  return /^[a-z]+$/i.test(w) ? w.replace(/s$/i, '') : 'page'
+}
+function pagesOf(c) {
+  const w = pageOne(c)
+  return /[^aeiou]y$/i.test(w) ? w.slice(0, -1) + 'ies' : w + 's'
 }
 
 /** The records the examples bar shows for a part: those the program attached, else the rows behind the part. */

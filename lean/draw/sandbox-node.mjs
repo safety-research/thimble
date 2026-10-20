@@ -23,9 +23,10 @@ const RUN_SCRIPT = new vm.Script(
 /**
  * Run `object.program` on `object.data` in a fresh vm context.
  * @param {{program: string, data?: unknown}} object
- * @param {{w?: number, h?: number, mode?: string, limit?: number, state?: object, event?: object, title?: string, id?: string, surface?: string, maxBytes?: number, keys?: object}} [opts]
+ * @param {{w?: number, h?: number, mode?: string, limit?: number, state?: object, event?: object, title?: string, id?: string, surface?: string, maxBytes?: number, keys?: object, all?: string | boolean}} [opts]
  *   state: the card's interaction state (its knobs and what its handlers set); event: what the person did, which the
- *   program's k.on handlers answer; title and id default to the object's
+ *   program's k.on handlers answer; title and id default to the object's; all: draw every page of that knob (true: the
+ *   page knob) at once, one after another, which may take up to kit.js's ALL_TIME limits
  * @returns {object} the drawing
  */
 export function runProgram(object, opts = {}) {
@@ -39,11 +40,12 @@ export function runProgram(object, opts = {}) {
   context.__program = String(object && object.program != null ? object.program : '')
   context.__data = JSON.stringify(object && object.data !== undefined ? object.data : {})
   context.__opts = JSON.stringify({ w: opts.w, h: opts.h, mode: opts.mode, limit, state: opts.state, event: opts.event,
-    title: opts.title ?? object?.title, id: opts.id ?? object?.id, surface: opts.surface || 'terminal', maxBytes: opts.maxBytes, got: opts.got, keys: opts.keys })
+    title: opts.title ?? object?.title, id: opts.id ?? object?.id, surface: opts.surface || 'terminal', maxBytes: opts.maxBytes, got: opts.got, keys: opts.keys, all: opts.all })
   KIT_SCRIPT.runInContext(context, { timeout: 1000 })
   let text
   try {
-    text = RUN_SCRIPT.runInContext(context, { timeout: limit + 500 })
+    // every page at once may take ALL_TIME (kit.js: 4) limits, and the one page it starts from one more
+    text = RUN_SCRIPT.runInContext(context, { timeout: limit * (opts.all ? 5 : 1) + 500 })
   } catch (e) {
     // a vm timeout, or a program that broke the kit itself: report it as a drawing that says so
     return stopped(object, opts, limit, e)

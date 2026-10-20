@@ -157,7 +157,7 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   // the empty bar is whitespace: no frame, no words; its keys are in the hint line
   expect(t).not.toContain('details')
   expect(t).not.toContain('esc back')
-  expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h versions · type to ask this card · esc back')
+  expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h versions · type to ask about Jun 18 · esc back')
   // ↵ on the selected part (the ring's press) fills the bar with its details: where it comes from, and its examples one key away
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()
@@ -352,7 +352,7 @@ test('typing in the ask line is never interrupted: the ask line keeps the ring w
   expect(JSON.stringify(await ui.drawn())).not.toContain('"value":"which')
   expect(await askKeyOf($)).not.toBe(last)
   expect(await ringer()).toMatch(/^g\|pane\|\d+$/)
-  expect(await hintOf($)).toContain('type to ask this card')
+  expect(await hintOf($)).toContain('type to ask about Jun 18')
 })
 
 test('with no detail open, a prompt goes to Claude as always', async ($, on) => {
@@ -400,7 +400,7 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   expect(String(w.spawns[0]?.prompt)).toContain('the selection "2 days from Jun 17" in the card')
   expect(String(w.spawns[0]?.prompt)).toContain('q1#day=2026-06-17, q1#day=2026-06-18')
   // the selection was for that question: the next one is about the part again
-  expect(await hintOf($)).toContain('type to ask this card')
+  expect(await hintOf($)).toContain('type to ask about Jun 18')
 })
 
 test('a prompt after the pane has gone goes to Claude, even when the module still marks the detail open', async ($, on) => {
