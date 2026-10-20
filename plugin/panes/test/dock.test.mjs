@@ -12,7 +12,7 @@ import '../../draw/kit.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import PANES from '../index.js'
 import { barCells, mixCells, typeMix } from '../coverage.js'
-import { toneBeside, tonesIn } from '../labels.js'
+import { howMade, spotsIn, toneBeside, tonesIn } from '../labels.js'
 import { actionsOf, backOf, barText, keyEvent, nextState, takes } from '../host.js'
 
 const DK = globalThis.DrawKit
@@ -43,54 +43,51 @@ const COV = {
 }
 const covData = (cov = COV) => PANES.coverage.data({ coverage: { cov } }, {}, SIZE)
 
-test('coverage: files touched and files seen apart; the rows seen, apart from those only computed over; the type bar in shades of seen, computed over and untouched; the groups are wildcard patterns, the * lit', () => {
+test('coverage: one sentence says what Claude read, a legend always in view names the three parts of each group\'s bar, no type bar; the groups are wildcard patterns, the * lit', () => {
   const { after, text } = turn(PANES.coverage, covData(), {}, null)
-  assert.match(text, /^▎ Coverage\n▎ what this session read of the folder · 5 files · 1,500 rows · seen 60 rows \(4%\)/)
-  assert.match(text, /files  4 of 5 touched · 1 seen \(some of their lines in Claude's context\)/)
-  assert.match(text, /rows   300 computed over, none seen/)
-  assert.match(text, /█ seen  ▓ read by a label's model  ▒ computed over  ░ untouched/)
-  assert.match(text, /■ jsonl 80% · 5% seen   ■ py 20%/)
-  // the bar: each type's cells in its shades, seen first, then computed over, then untouched (pale)
-  const bar = text.split('\n').find(l => /^[█▓▒░]+$/.test(l.trim()) && l.trim().length > 20).trim()
-  assert.match(bar, /^█+▒+░+$/)
-  assert.equal(bar.length, SIZE.w)
-  assert.equal(bar.match(/▒/g).length, Math.round(SIZE.w * 0.8 * 300 / 1200))
-  // by pattern: its files, those touched, those seen
-  assert.match(text, /▸ runs\/\*\.jsonl\s+4\s+4\s+1/)
-  const star = after.root.kids.flatMap(k => k.kids || []).flatMap(k => k.kid?.runs || []).find(r => r.s === '*')
-  assert.equal(star.tone, 'accent')
+  assert.match(text, /^▎ Coverage\n▎ Claude read 60 of the folder's 1,500 rows \(4%\), from 1 of its 5 files\./)
+  assert.match(text, /■ read into Claude's context   ■ only counted or computed over   ■ not touched/)
+  // no jargon pairs, no unexplained type bar
+  assert.doesNotMatch(text, /touched ·|seen \(|[█▓▒░]/)
+  // by pattern: its files, its rows with their unit, its bar, the share read
+  assert.match(text, /▸ runs\/\*\.jsonl\s+4\s+1,200 rows\s+▆+\s+5%/)
+  // the bar is a bar in the legend's colors, in order: read, only counted or computed over, not touched
+  const parts = []
+  ;(function walk(x) { if (!x || typeof x !== 'object') return; if (x.t === 'bar' && x.parts) parts.push(x.parts.map(p => `${p.tone} ${p.value}`)); for (const v of Object.values(x)) if (v && typeof v === 'object') walk(v) })(after.root)
+  assert.deepEqual(parts[0], ['accent 60', 'dim 300', 'dim-faint 840'])
+  const star = after.root.kids.flatMap(k => k.kids || []).flatMap(k => k.kid?.kids || k.kids || []).flatMap(k => k.runs || k.kid?.runs || []).find(r => r.s === '*')
+  assert.equal(star && star.tone, 'accent')
   // no key of its own; at the top esc is the panel's (back to what it showed, or close)
   assert.equal(barText([after]), '')
   assert.equal(takes(after, keyEvent('esc')), false)
   // the group selected carries its pattern, and the pane's thread says what the pane shows, in the kernel's words
   assert.equal(after.regions.find(r => r.id === 'g-0').meta.ref, 'runs/*.jsonl')
   const about = PANES.coverage.thread({}, {}, covData()).about
-  assert.match(about, /what this session did with the folder's files, by `thimble coverage`: 60 of 1,500 rows seen \(4%\), from 1 of 5 source files; 4 files touched; 300 rows computed over and not seen/)
+  assert.match(about, /what this session did with the folder's files, by `thimble coverage`: Claude read 60 of the folder's 1,500 rows \(4%\), from 1 of its 5 files\. 300 more rows were only computed over/)
 })
 
 test('coverage: by type and by pattern are presses; a press on a group opens its files with what happened to each, a file its seen lines, which the host reads; esc goes back, and the way back names where', () => {
   assert.equal(takes(turn(PANES.coverage, covData(), {}, null).after, keyEvent('g')), false)
   let { state, text } = turn(PANES.coverage, covData(), {}, { type: 'press', region: 'by-type' })
   assert.equal(state.by, 'type')
-  assert.match(text, /type\s+files touched\s+seen[^\n]*\n\s+jsonl\s+4/)
+  assert.match(text, /type\s+files\s+rows[^\n]*\n\s+jsonl\s+4/)
   ;({ state, text } = turn(PANES.coverage, covData(), state, { type: 'press', region: 'by-pattern' }))
-  assert.match(text, /pattern\s+files touched\s+seen[^\n]*\n\s+runs\/\*\.jsonl/)
+  assert.match(text, /pattern\s+files\s+rows[^\n]*\n\s+runs\/\*\.jsonl/)
   // a press on a group opens it: each file by its name (the pattern in the subject names its folder)
   ;({ state, text } = turn(PANES.coverage, covData(), state, { type: 'press', region: 'g-0' }))
   assert.equal(state.group, 'runs/*.jsonl')
-  assert.match(text, /^▎ runs\/\*\.jsonl\n▎ files of the folder · 4 files · 1,200 rows · seen 60 rows \(5%\)/)
-  assert.match(text, /1 seen · 1 searched · 1 only computed over · 1 only counted/)
-  assert.match(text, /seen      r1\.jsonl\s+300  seen 60 of 300 rows \(20%\): rows 1–40, 100–119/)
-  assert.match(text, /searched  r2\.jsonl\s+300  searched by grep; which lines it showed is not known/)
-  assert.match(text, /computed  r4\.jsonl\s+300  computed over all 300 rows \(q1\); none of them seen/)
-  assert.match(text, /counted   r3\.jsonl\s+300  only named, listed or counted \(wc\); none of its lines seen/)
+  assert.match(text, /^▎ runs\/\*\.jsonl\n▎ Claude read 60 of their 1,200 rows \(5%\), from 1 of 4 files\./)
+  assert.match(text, /read        r1\.jsonl\s+300  read 60 of 300 rows \(20%\): rows 1–40, 100–119/)
+  assert.match(text, /searched    r2\.jsonl\s+300  searched by grep; which lines it showed is not known/)
+  assert.match(text, /computed    r4\.jsonl\s+300  computed over all 300 rows \(q1\); Claude read none of them/)
+  assert.match(text, /counted     r3\.jsonl\s+300  only named, listed or counted \(wc\); Claude read none of its/)
   // esc goes back to every group, which the way back names
   assert.equal(backOf(turn(PANES.coverage, covData(), state, null).after), 'Coverage')
   // the ring on a file selects it; a press (↵ with the ring on it) opens it
   ;({ state } = turn(PANES.coverage, covData(), state, { type: 'focus', region: 'f-0' }))
   const opened = turn(PANES.coverage, covData(), state, { type: 'press', region: 'f-0' })
   assert.equal(opened.state.file, 'runs/r1.jsonl')
-  assert.match(opened.text, /▸ seen  rows 1–40  \(40\)/)
+  assert.match(opened.text, /▸ read  rows 1–40  \(40\)/)
   assert.equal(backOf(opened.after), 'runs/*.jsonl')
   const want = opened.after.wants[0]
   assert.deepEqual(want.request, { lines: 'runs/r1.jsonl', from: 1, to: want.request.to })
@@ -172,7 +169,7 @@ test('labels: one label opens on its values over its records and the records, sa
   const lines = t.text.split('\n')
   // the subject: the label, and how far it is, in plain words with its counts
   assert.match(lines[0], /^▎ ● apology/)
-  assert.match(lines[1], /^▎ label over chat\/\*\.jsonl · labeled 5 of 6 records · 1 waiting for the model · you checked 1/)
+  assert.match(lines[1], /^▎ label over chat\/\*\.jsonl · read by Claude · labeled 5 of 6 records · 1 waiting for the model/)
   // then its values, each a bar and a count, before anything else
   assert.match(lines[3], /^● yes\s+█+\s+2\s+33%/)
   assert.match(lines[4], /^● no\s+█+\s+3\s+50%/)
@@ -229,7 +226,7 @@ test('labels: a rule label says it was a rule, its pattern under Definition; one
   const t = turn(PANES.labels, labData(), { open: 'fails', def: true }, null)
   assert.match(t.text, /made by a rule: text that matches the pattern is fail, the rest pass/)
   assert.match(t.text, /▎ \(\?i\)fail\|error/)
-  assert.match(t.text, /label over runs\/\*\.log · 40 records, all labeled/)
+  assert.match(t.text, /label over runs\/\*\.log · a rule over the text · 40 records, all labeled/)
   const one = turn(PANES.labels, PANES.labels.data({ labels: { list: [LABELS[1]] } }, {}, SIZE), {}, null)
   assert.match(one.text, /▎ ● fails/)
   const none = turn(PANES.labels, PANES.labels.data({ labels: { list: [] } }, {}, SIZE), {}, null)
@@ -250,6 +247,11 @@ test("a label beside a chart says its values in the chart's colors: where a valu
   // a legend's mark in the value's color, before its name in plain words, gives the value that color
   const legend = { rows: [row([['by who: ', 'ink'], ['■', 'c2'], [' agent  ', 'ink'], ['■', 'dim'], [' unclear  ', 'ink'], ['■', 'c4'], [' person', 'ink']])] }
   assert.deepEqual(tonesIn(legend, ['agent', 'person', 'unclear']), { agent: 'c2', unclear: 'dim', person: 'c4' })
+  // where the legend names each value, from its mark to its last letter: the shell makes each one a press that opens
+  // the label on that value, in place of a row under the card
+  assert.deepEqual(spotsIn(legend, ['agent', 'person']), { agent: { tone: 'c2', y: 0, x: 8, w: 7 }, person: { tone: 'c4', y: 0, x: 28, w: 8 } })
+  // how a label was made, in the words the row and the panel's head say it
+  assert.deepEqual(['regex', 'code', 'prompt', 'set'].map(howMade), ['a rule over the text', 'a rule over the text', 'read by Claude', 'read by Claude'])
   // a value only on a fill, or inside a longer word, is not the chart's color for it: the label's own colors then
   const none = tonesIn({ rows: [row([['agent 3', 'paper', 'c3'], [' agents', 'c4']])] }, ['agent', 'person'])
   assert.deepEqual(none, {})

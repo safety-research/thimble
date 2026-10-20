@@ -137,7 +137,7 @@ test('the bar names the coverage with a small bar of its file types and the labe
   expect(titled(w)).toMatchObject({ id: 'object', title: 'Coverage', focus: true })
   const drawn = await panel($, clock)
   expect(drawn).toContain('▎ Coverage')
-  expect(drawn).toContain('▎ what this session read of the folder · 2 files · 600 rows · seen 102 rows (17%)')
+  expect(drawn).toContain("▎ Claude read 102 of the folder's 600 rows (17%), from 1 of its 2 files.")
   expect(drawn).toContain('runs/*.jsonl')
   // the panel's input bar is under it, about the group selected
   expect(JSON.stringify(await $.ui.render(PANEL))).toContain('Ask about runs/*.jsonl')
@@ -155,7 +155,7 @@ test('the bar names the coverage with a small bar of its file types and the labe
   const ui = await $.ui.mount({ ...(PANEL as Any) } as never)
   await ui.press({ key: await sideKey($, 'by-type') })
   await clock.settle()
-  expect(await panel($, clock)).toMatch(/type\s+files touched/)
+  expect(await panel($, clock)).toMatch(/type\s+files\s+rows/)
   await ui.press({ key: await sideKey($, 'by-pattern') })
   await clock.settle()
   // a press on the group opens it, then one on its first file: the file's read lines, and the way back names the group
@@ -163,7 +163,7 @@ test('the bar names the coverage with a small bar of its file types and the labe
   await panel($, clock)
   await ui.press({ key: await sideKey($, 'f-0') })
   const fileView = await panel($, clock)
-  expect(fileView).toContain('seen  rows 1–102')
+  expect(fileView).toContain('read  rows 1–102')
   expect(fileView).toContain('1 ▌{"n": 1}')
   expect(fileView).toContain('‹ runs/*.jsonl')
   // the file's lines were the person's read, never Claude's
@@ -175,7 +175,7 @@ test('the bar names the coverage with a small bar of its file types and the labe
   const prompt = String(w.spawns[0].prompt)
   expect(prompt).toMatch(/\n\nwhy only the first 102 rows\?/)
   expect(prompt).toContain('runs/r1.jsonl: seen rows 1 to 102')
-  expect(prompt).toContain("what this session did with the folder's files, by `thimble coverage`: 102 of 600 rows seen (17%), from 1 of 2 source files; 2 files touched")
+  expect(prompt).toContain("what this session did with the folder's files, by `thimble coverage`: Claude read 102 of the folder's 600 rows (17%), from 1 of its 2 files.")
   expect(prompt).toContain('runs/r1.jsonl#L1-102')
   expect(w.submitted.length).toBe(0)
   // a press on the range: its lines as a citation, over the pane in the panel
@@ -269,7 +269,7 @@ test("a label beside what counts by it: an answer that cites a label's count sho
   const drawn = await $.ui.render(REPLY)
   expect(w.runs.filter(r => r.includes('--used-by')).length).toBe(1)
   expect(w.runs.find(r => r.includes('--used-by'))).toContain('r1#apology=yes@n')
-  expect(textOf(drawn)).toContain('label apology  ● yes  ● no')
+  expect(textOf(drawn)).toContain('label apology · read by Claude  ● yes  ● no')
   // each value in its color, the label card's: the first value the accent
   const colors: string[] = []
   walk(drawn, x => { if (x.type === 'Text' && /^● (yes|no)$/.test(textOf(x))) colors.push(String(x.props?.color)) })

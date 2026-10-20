@@ -65,3 +65,15 @@ export function selectedHex(tone, theme = 'dark', onFill = false) {
   if (onFill || !tone || NEUTRAL.test(tone)) return hex('ink', theme)
   return hex(tone, theme)
 }
+
+/**
+ * The color of a selected mark (a bar's cells, a spark, a plot's dots): its own color halfway to the theme's text, so
+ * it lights up (paler on the dark theme, deeper on the light one) and keeps its hue, and the parts of a stacked bar stay
+ * apart. A mark is selected by its color alone: its cell's ground stays as it was, so the gap between bars on
+ * neighboring rows stays (paint.js). A track (`rule`) keeps its color.
+ */
+export function selectedMark(tone, theme = 'dark') {
+  const t = tone || 'ink'
+  if (t === 'rule') return hex(t, theme)
+  return mix(hex(t, theme), hex('ink', theme), 0.5)
+}

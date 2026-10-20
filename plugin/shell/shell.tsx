@@ -58,8 +58,9 @@ import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
-import { labelsRow } from './labeluse'
-import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, registerDock, resetDock, restPane, toggleDock } from './dock'
+import { cardLegend, cardsLabels, labelsRow } from './labeluse'
+import { howMade } from '../panes/labels.js'
+import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, openLabel, registerDock, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
 import { flushEngaged, resetEngaged, tellOpened } from './engaged'
@@ -2232,13 +2233,18 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   // examples; on a knob's dial (or a link to a knob) it turns the knob here, a step back on its left half and a step
   // on on its right half
   const linkBar = (id: string) => { const m = (p.grid.regions || []).find((r: Any) => r.id === id && r.link)?.meta; return m?.examples ? 'examples' as const : m?.cite ? 'details' as const : undefined }
-  const onPress = fullscreen ? (id: string, dir?: number) => (dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id, { bar: linkBar(id) })) : undefined
+  // a legend that names a label's values opens the label on the value pressed (labeluse.ts), in place of a row under it
+  const labelKey = `card-${ref.id}-${p.object?.version ?? ref.v ?? ''}`
+  const spots = await cardLegend($, labelKey, ref.id, ref.root, p.grid)
+  const grid = spots.length ? legendPresses(p.grid, spots) : p.grid
+  const spotOf = (id: string) => spots.find(x => legendRegion(x) === id)
+  const onPress = fullscreen ? (id: string, dir?: number) => (spotOf(id) ? openLabel($, spotOf(id)!.name, spotOf(id)!.value) : dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id, { bar: linkBar(id) })) : undefined
   const run = runningRow(els, said)
   const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
   // the card the keys act on: its own frame in the keys' color, or, for a card with no frame, a bar down its left side
   const ring = focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null
   const framed = p.grid.rows[0]?.[0]?.ch === '╭'
-  const cells = paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: ring })
+  const cells = paintRegions(grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: ring })
   // a card with pages: how many, and the key that opens them to read (`9 chapters · 1 read all`)
   const pk = pageKnob(p.drawing)
   const pages = pk ? pagesRow(els, pk, focus === 'focus', fullscreen ? () => openDetail($, ref, null, { pages: PAGES_DEFAULT }) : null) : null
@@ -2246,11 +2252,28 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const fw = frameWidth(outer, p.grid.w, o.title)
   const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: Math.min(rows, p.grid.h), color: ring })
   // the labels its data came through, beside it (labeluse.ts)
-  const used = await labelsRow($, els, `card-${ref.id}-${p.object?.version ?? ref.v ?? ''}`, [ref.id], ref.root, { grid: p.grid })
+  const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id })
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
     children: [body, ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
   })
+}
+
+/** The region a legend's value is drawn as, a press that opens its label on it. */
+const legendRegion = (s: { name: string; value: string }) => `label:${s.name}=${s.value}`
+
+/** A card's cells with each legend value that names a label's value a press of its own, its words underlined as a link
+ *  is, its name saying what it opens and how the label was made. */
+function legendPresses(grid: Any, spots: { name: string; value: string; kind?: string; rect: { x: number; y: number; w: number; h: number } }[]): Any {
+  const rows = grid.rows.map((r: Any[]) => r.slice())
+  const regions = [...grid.regions]
+  for (const s of spots) {
+    const id = legendRegion(s)
+    for (let x = s.rect.x; x < s.rect.x + s.rect.w; x++) { const c = rows[s.rect.y]?.[x]; if (c && String(c.ch).trim() && !/^[■●▪◼█▆▇▌◆▲]$/u.test(c.ch)) rows[s.rect.y][x] = { ...c, ref: id } }
+    const how = howMade(s.kind)
+    regions.push({ id, meta: { label: `open the label ${s.name}${how ? ` (${how})` : ''}: ${s.value}` }, rects: [s.rect] })
+  }
+  return { ...grid, rows, regions }
 }
 
 type CardNotes = { marks: Record<string, string>; left: string[] }
@@ -2994,7 +3017,9 @@ export const registerShell: Register = (on, options) => {
           : await next(e))
       }
       // the labels its citations rest on, beside it (labeluse.ts)
-      const used = rec.marks.length && !hidden ? await labelsRow($, els, `msg-${at}`, rec.marks.map(m => String((m as Any).ref || '')).filter(Boolean), null, { marginLeft: 2 }) : null
+      // (not those a card of this answer shows: null while the cards' labels are read)
+      const shownByCards = rec.marks.length && !hidden ? await cardsLabels($, list) : []
+      const used = rec.marks.length && !hidden && shownByCards ? await labelsRow($, els, `msg-${at}`, rec.marks.map(m => String((m as Any).ref || '')).filter(Boolean), null, { marginLeft: 2, except: shownByCards }) : null
       if (used) parts.push(used)
       if (open && open !== 's') {
         // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar

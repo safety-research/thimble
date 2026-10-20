@@ -7,19 +7,21 @@
 //   paintRegions(grid, els, {theme, selected, key, from, rows, onPress, painted}) -> one Box of rows
 //   from, rows: the window of rows to draw (default all), so a tall object fits a pane
 //   painted: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
-//   color; in the transcript it is the terminal's own. The selected region's text reads in the theme's text color.
+//   color; in the transcript it is the terminal's own. The selected region's text reads in the theme's text color on
+//   the selection background, and its marks (a bar's cells) light up in their own color on their own ground
+//   (paint.js selectionOf), so a selected bar keeps its height.
 //   frame: a color for the card's own frame (its outer ╭─╮ │ ╰─╯ cells), as the card the keys act on is drawn
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
 //   a knob's dial (`label ◂ value ▸`, k.dial) is two Buttons, its halves: a click on the left half calls onPress(id, -1),
 //   on the right half onPress(id, 1), so a click anywhere on the dial turns it
 //   nothing is drawn as a link that a click does not answer: a link's underline only where there is a press
 //   (`onPress`), and a link to an id nothing defines (no region, cite, examples or knob) is plain words
-import { paintGrid } from '../draw/paint.js'
-import { hex, selectedColor, termColor } from '../draw/palette.js'
+import { paintGrid, selectionOf } from '../draw/paint.js'
+import { hex, selectedColor, selectedMark, termColor } from '../draw/palette.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Cell = { ch: string; tone?: string; b?: boolean; bg?: string; ref?: string; px?: boolean; w2?: boolean; cont?: boolean }
+type Cell = { ch: string; tone?: string; b?: boolean; bg?: string; ref?: string; px?: boolean; w2?: boolean; cont?: boolean; m?: number; sr?: string }
 type Rect = { x: number; y: number; w: number; h: number }
 type Region = { id: string; meta?: Record<string, unknown>; rects: Rect[]; link?: boolean }
 type Grid = { w: number; h: number; rows: Cell[][]; regions: Region[] }
@@ -59,6 +61,7 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
   const to = Math.min(grid.h, from + (opts.rows ?? grid.h))
   const owner = regionMap(grid)
   const sel = opts.selected || ''
+  const look = selectionOf(grid, sel)
   const pixelRow = (y: number) => grid.rows[y]!.some(c => c.px) && !grid.rows[y]!.some(c => c.b || c.ref || c.w2)
   const out: Any[] = []
   let y = from
@@ -78,7 +81,7 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
   return Box({ flexDirection: 'column', children: out })
 
   function line(y: number) {
-    type Seg = { k: string; s: string; c: Cell; region: string; edge: boolean }
+    type Seg = { k: string; s: string; c: Cell; region: string; edge: boolean; on: 'text' | 'mark' | null }
     const segs: Seg[] = []
     let cur: Seg | null = null
     const framed = !!opts.frame && isFramed(grid)
@@ -86,20 +89,23 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       if (c.cont) return
       const region = owner[y * grid.w + x] || ''
       const edge = framed && (y === 0 || y === grid.h - 1 || x === 0 || x === grid.w - 1) && EDGE.test(c.ch)
-      const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${region}|${edge ? 1 : 0}`
+      // a mark lights up wherever it lies in the selection (a stacked bar's parts with its row); text only where the
+      // selection is its own region
+      const at = sel ? look(x, y) as 'text' | 'mark' | null : null
+      const on = at === 'mark' || (at === 'text' && region === sel) ? at : null
+      const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${region}|${edge ? 1 : 0}|${on || ''}`
       if (cur && cur.k === k) cur.s += c.ch
-      else { cur = { k, s: c.ch, c, region, edge }; segs.push(cur) }
+      else { cur = { k, s: c.ch, c, region, edge, on }; segs.push(cur) }
     })
     const text = (g: Seg) => {
       const p: Any = { children: g.s }
-      const on = !!g.region && g.region === sel
-      const color = g.edge ? opts.frame : on ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
+      const color = g.edge ? opts.frame : g.on === 'mark' ? selectedMark(g.c.tone, theme) : g.on ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
       if (color) p.color = color
       if (g.c.b) p.bold = true
       // a link is underlined only where a click answers it
       if (g.c.ref && opts.onPress && g.region) p.underline = true
-      if (on) p.backgroundColor = 'selectionBg'
-      else if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
+      if (g.on === 'text') p.backgroundColor = 'selectionBg'
+      else if (g.c.bg) p.backgroundColor = g.on === 'mark' ? selectedMark(g.c.bg, theme) : hex(g.c.bg, theme)
       return Text(p)
     }
     if (!opts.onPress || !segs.some(g => g.region)) return Text({ wrap: 'truncate-end', children: segs.map(text) })
