@@ -5,10 +5,14 @@ Coverage comes from three records: the queries' inputs and the rows `thimble row
 Read, Grep and Bash calls the hooks module kept (store.seen). A file's coverage is the strongest of:
 
     computed   a query loaded its rows (how many of how many)
-    read       Claude read some of its lines or rows (which)
-    searched   a search ran over it (Grep, `thimble rows --search`), which shows only what matched
-    named      a shell command named it (cat, head, jq, python...); what the command read is not known
-    not read   nothing touched it
+    read       some of its lines or rows were in front of Claude: Read, `thimble rows`, or cat, head, tail or sed
+               printing them (shellcmd.py)
+    searched   a search showed only the lines that matched (Grep, grep, rg, `thimble rows --search`)
+    named      it was only named, listed or counted (wc, ls, find, git ls-files, grep -c), or named by a program whose
+               output is not known (python, jq)
+    not read   nothing touched it (the text says "untouched")
+
+Only computed and read count as read; the bar's share and the observer's "not read" follow the same rule.
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from typing import Any
 from . import objects as O
 from . import query as Q
 from . import refs as R
+from . import shellcmd as SH
 from . import sources as S
 from .store import Store
 
@@ -728,28 +733,12 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
 # ------------------------------------------------------------------ coverage
 
 
-_FILE_TOKEN = re.compile(r"[\w./*?\[\]{}~+-]+")
-
-
-def files_named_in(text: str, known: list[str], root: str) -> set[str]:
-    """Source files a shell command names, by path or by a glob over them (from thimble-lite)."""
-    hit: set[str] = set()
-    text = text.replace(root.rstrip("/") + "/", "")
-    for t in set(_FILE_TOKEN.findall(text)):
-        t = t.strip("'\"")
-        if len(t) < 3:
-            continue
-        if "*" in t or "?" in t:
-            for f in known:
-                if fnmatch.fnmatch(f, t) or fnmatch.fnmatch(f, "*/" + t.lstrip("/")):
-                    hit.add(f)
-        elif "." in t or "/" in t:
-            for f in known:
-                if f == t or f.endswith("/" + t) or (t.endswith("/" + f)):
-                    hit.add(f)
-                elif t.endswith("/") or ("." not in Path(t).name and f.startswith(t.rstrip("/") + "/")):
-                    hit.add(f)
-    return hit
+# What counts as read: a query loaded its rows, or some of its lines or rows were in front of Claude. Everything else
+# (searched, named, not read) is not read, whatever touched it.
+READ = ("computed", "read")
+ORDER = ["computed", "read", "searched", "named", "not read"]
+# each status as the coverage text says it
+SAID = {"computed": "computed", "read": "read", "searched": "searched", "named": "named", "not read": "untouched"}
 
 
 def _ranges_len(ranges: list[tuple[int, int]]) -> int:
@@ -767,9 +756,9 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     group of like files."""
     files = S.list_sources(st.root)
     cnt = S.counts(st.root, files, st.cache / "counts.json")
-    known = set(files)
     per: dict[str, dict[str, Any]] = {f: {"computed": 0, "queries": [], "shown": set(), "lines": [], "searched": False,
-                                          "matched": 0, "named": False} for f in files}
+                                          "matched": 0, "named": False, "hits": set(), "by": set(), "searched_by": set()}
+           for f in files}
     for r in st.ledger(session):
         k = r.get("kind")
         if k == "query" and not r.get("error"):
@@ -779,11 +768,13 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                     per[f]["queries"].append(r.get("id"))
                     if not n:
                         per[f]["named"] = True
+                        per[f]["by"].add("thimble")
         elif k in ("rows", "resolve"):
             for ref in r.get("shown") or []:
                 f = ref.split("#")[0]
                 if f in per:
-                    per[f]["shown"].add(ref)
+                    # rows a search found are its matches, as grep's lines are
+                    per[f]["hits" if r.get("search") else "shown"].add(ref)
             for f in r.get("scanned") or []:
                 if f in per:
                     per[f]["searched"] = True
@@ -802,36 +793,60 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             if scope is None:
                 continue
             glob = s.get("glob") or ""
+            # a search that showed lines leaves its files searched; one that showed only names or counts, named
+            lines = s.get("mode") == "content" or (s.get("mode") is None and bool(s.get("lines")))
             for f in files:
                 inside = scope in (".", "") or f == scope or f.startswith(scope.rstrip("/") + "/")
                 if inside and (not glob or fnmatch.fnmatch(Path(f).name, glob) or fnmatch.fnmatch(f, glob)):
-                    per[f]["searched"] = True
+                    per[f]["searched" if lines else "named"] = True
+                    if not lines:
+                        per[f]["by"].add("Grep")
             for fp in s.get("files") or []:
                 f = st.rel(fp)
                 if f in per:
                     per[f]["matched"] += 1
-            for fp, lines in (s.get("lines") or {}).items():
+            for fp, ns in (s.get("lines") or {}).items():
                 f = st.rel(fp)
                 if f in per:
-                    for n in lines:
-                        per[f]["lines"].append((int(n), int(n)))
+                    per[f]["hits"].update(f"L{n}" for n in ns)
         elif tool == "Bash":
             cmd = str(s.get("command") or "")
             if re.match(r"^\s*thimble(\s|$)", cmd):
                 continue
-            for f in files_named_in(cmd, list(known), root):
-                per[f]["named"] = True
+            # what reached Claude is at most the lines the command printed (a long output is cut)
+            left = s.get("out_lines")
+            for f, how, span, prog in SH.shows(cmd, files, root, s.get("cwd"), lambda f: cnt.get(f, {}).get("lines") or 0):
+                x = per.get(f)
+                if x is None:
+                    continue
+                if how == "read" and span:
+                    a, b = span
+                    if left is not None:
+                        b = min(b, a + int(left) - 1)
+                        left = max(0, int(left) - max(0, b - a + 1))
+                    if a <= b:
+                        x["lines"].append((a, b))
+                        continue
+                    how = "named"
+                x["searched" if how == "searched" else "named"] = True
+                x["searched_by" if how == "searched" else "by"].add(prog)
     out_files = []
     for f in files:
         c, x = cnt.get(f, {}), per[f]
         rows, lines = c.get("rows", 0), c.get("lines", 0)
-        read_lines = _ranges_len(x["lines"])
+        read_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
         status = ("computed" if x["computed"] else "read" if (read_lines or x["shown"]) else
                   "searched" if x["searched"] else "named" if x["named"] else "not read")
+        computed = min(x["computed"], rows) if rows else x["computed"]
+        share = 0.0
+        if status in READ and rows:
+            share = min(1.0, max(computed / rows, read_lines / max(1, lines or rows), len(x["shown"]) / rows))
         out_files.append({"path": f, "kind": c.get("kind"), "rows": rows, "lines": lines, "status": status,
-                          "computed": min(x["computed"], rows) if rows else x["computed"],
-                          "queries": sorted(set(q for q in x["queries"] if q)), "read_lines": min(read_lines, lines or read_lines),
-                          "shown": len(x["shown"]), "searched": x["searched"], "matched": x["matched"], "named": x["named"]})
+                          "read": status in READ, "share": share, "computed": computed,
+                          "queries": sorted(set(q for q in x["queries"] if q)), "read_lines": read_lines,
+                          "shown": len(x["shown"]), "searched": x["searched"], "matched": x["matched"],
+                          "hits": len(x["hits"]), "named": x["named"], "by": sorted(x["by"]),
+                          "searched_by": sorted(x["searched_by"])})
     groups: dict[str, dict[str, Any]] = {}
     for f, g in S.group_of(files).items():
         e = next(o for o in out_files if o["path"] == f)
@@ -842,11 +857,20 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
         G["computed"] += e["computed"]
     for G in groups.values():
         G["by_status"] = dict(G["by_status"])
-    not_read = [o for o in out_files if o["status"] == "not read"]
+    rows_all = sum(o["rows"] for o in out_files)
+    read_rows = sum(o["share"] * o["rows"] for o in out_files)
+    not_read = [o for o in out_files if not o["read"]]
     return {"root": str(st.root), "session": st.session if session == "" else session, "files": out_files,
             "groups": sorted(groups.values(), key=lambda g: -g["rows"]),
-            "total": {"files": len(files), "rows": sum(o["rows"] for o in out_files),
-                      "not_read_files": len(not_read), "not_read_rows": sum(o["rows"] for o in not_read)}}
+            "total": {"files": len(files), "rows": rows_all, "read_files": len(out_files) - len(not_read),
+                      "read_rows": round(read_rows), "read_share": read_rows / rows_all if rows_all else 0.0,
+                      "not_read_files": len(not_read), "not_read_rows": sum(o["rows"] for o in not_read),
+                      "untouched_files": sum(1 for o in not_read if o["status"] == "not read")}}
+
+
+def _by(o: dict[str, Any]) -> str:
+    by = o.get("by") or []
+    return f" ({', '.join(by[:4])})" if by else ""
 
 
 def file_line(o: dict[str, Any]) -> str:
@@ -862,48 +886,79 @@ def file_line(o: dict[str, Any]) -> str:
         bits.append(f"read {o['read_lines']:,} of {o['lines']:,} {unit}")
     if o["shown"]:
         bits.append(f"{o['shown']:,} row{'s' if o['shown'] != 1 else ''} shown")
-    if o["searched"] and s != "computed":
-        bits.append("searched" + (f" ({o['matched']} hits)" if o["matched"] else ""))
-    if o["named"] and not bits:
-        bits.append("named in a shell command (what it read is not known)")
+    if s == "searched":
+        hits, by = o.get("hits", 0), o.get("searched_by") or []
+        bits.append("searched: " + (f"only the {hits:,} matching line{'s' if hits != 1 else ''} shown" if hits else
+                                    f"only matching lines shown ({', '.join(by[:4])})" if by else "no matching line shown"))
+    if s == "named":
+        bits.append(f"only named, listed or counted{_by(o)}; none of its lines shown")
     if not bits:
-        bits.append(f"not read ({rows:,} rows)")
+        bits.append(f"{rows:,} rows")
     return "; ".join(bits)
+
+
+def _few(paths: list[str], n: int = 4) -> str:
+    return ", ".join(paths[:n]) + (f" and {len(paths) - n:,} more" if len(paths) > n else "")
 
 
 def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
     t = cov["total"]
     head = f"Coverage of {'every session' if cov['session'] is None else 'this session'} · {t['files']:,} source files, {t['rows']:,} rows"
     lines = [head]
-    many = len(cov["files"]) > max_lines
-    if not many:
-        for o in sorted(cov["files"], key=lambda o: (["computed", "read", "searched", "named", "not read"].index(o["status"]), o["path"])):
-            lines.append(f"  {o['status']:<9} {o['path']}  {file_line(o)}")
+    ranked = sorted(cov["files"], key=lambda o: (ORDER.index(o["status"]), o["path"]))
+    if len(cov["files"]) <= max_lines:
+        for o in ranked:
+            lines.append(f"  {SAID[o['status']]:<9} {o['path']}  {file_line(o)}")
     else:
-        order = ["computed", "read", "searched", "named", "not read"]
         shown = [g for g in cov["groups"] if g["files"] > 1 or set(g["by_status"]) != {"not read"}][:12]
         for g in shown:
-            st = g["by_status"]
-            parts = [f"{n} {k}" for k, n in sorted(st.items(), key=lambda kv: order.index(kv[0]))]
+            parts = [f"{n} {SAID[k]}" for k, n in sorted(g["by_status"].items(), key=lambda kv: ORDER.index(kv[0]))]
             lines.append(f"  {g['group']}  {g['files']:,} file{'s' if g['files'] != 1 else ''}, {g['rows']:,} rows: {', '.join(parts)}")
         others = [g for g in cov["groups"] if g not in shown]
         if others:
             lines.append(f"  {sum(g['files'] for g in others):,} other files ({sum(g['rows'] for g in others):,} rows): "
-                         + ", ".join(f"{sum(g['by_status'].get(k, 0) for g in others)} {k}" for k in order if any(g['by_status'].get(k) for g in others)))
-        touched = [o for o in cov["files"] if o["status"] != "not read"]
-        if touched:
-            lines.append("  touched:")
-            for o in touched[:15]:
-                lines.append(f"    {o['status']:<9} {o['path']}  {file_line(o)}")
-            if len(touched) > 15:
-                lines.append(f"    … and {len(touched) - 15} more")
-    nr = [o for o in cov["files"] if o["status"] == "not read"]
-    if nr:
-        names = ", ".join(o["path"] for o in nr[:6]) + (f" and {len(nr) - 6} more" if len(nr) > 6 else "")
-        lines.append(f"Not read: {len(nr):,} file{'s' if len(nr) != 1 else ''} ({t['not_read_rows']:,} rows): {names}")
-    else:
-        lines.append("Every source file was touched.")
+                         + ", ".join(f"{sum(g['by_status'].get(k, 0) for g in others)} {SAID[k]}" for k in ORDER if any(g['by_status'].get(k) for g in others)))
+        some = [o for o in ranked if o["status"] in ("computed", "read", "searched")]
+        if some:
+            lines.append("  read or searched:")
+            for o in some[:15]:
+                lines.append(f"    {SAID[o['status']]:<9} {o['path']}  {file_line(o)}")
+            if len(some) > 15:
+                lines.append(f"    … and {len(some) - 15} more")
+    lines.append(coverage_sentence(cov))
     return "\n".join(lines)
+
+
+def percent(part: float) -> str:
+    """A share as the thimble line says it (shell.tsx percent): 34%, a decimal under 1%, and 100% only when all."""
+    if not part > 0:
+        return "0%"
+    if part >= 1:
+        return "100%"
+    p = 100 * part
+    if p < 0.01:
+        return "<0.01%"
+    if p < 1:
+        d = 2 if p < 0.1 else 1
+        return f"{int(p * 10 ** d) / 10 ** d:.{d}f}%"
+    return f"{min(99, int(p + 0.5))}%"
+
+
+def coverage_sentence(cov: dict[str, Any]) -> str:
+    """What the session read, in words that claim no more than happened: read means some of a file's lines or rows
+    were in front of Claude; a search, a listing or a count is not a read."""
+    t = cov["total"]
+    if not t["files"]:
+        return "There are no source files."
+    share = f"{t.get('read_rows', 0):,} of {t['rows']:,} rows ({percent(t.get('read_share', 0))})"
+    if not t["not_read_files"]:
+        return f"Read all {t['files']:,} source files, at least in part: {share}."
+    read = f"Read {t['read_files']:,} of {t['files']:,} source files, {share}." if t["read_files"] else f"Read none of the {t['files']:,} source files."
+    by = {k: [o["path"] for o in cov["files"] if o["status"] == k] for k in ("searched", "named", "not read")}
+    words = {"searched": "searched, only matching lines shown", "named": "only named, listed or counted", "not read": "untouched"}
+    parts = [f"{len(by[k]):,} {words[k]} ({_few(by[k])})" for k in ("not read", "named", "searched") if by[k]]
+    n = t["not_read_files"]
+    return f"{read} Not read: {n:,} file{'s' if n != 1 else ''} ({t['not_read_rows']:,} rows): " + "; ".join(parts) + "."
 
 
 def object_coverage(st: Store, obj: dict[str, Any]) -> dict[str, Any]:

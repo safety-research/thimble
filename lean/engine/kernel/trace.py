@@ -824,7 +824,7 @@ def trace(st: Store, ref: str | None = None, text: str | None = None, within: st
         if kind in ("query", "object"):
             out["files"] = {"used": sorted(f for f in used if f),
                             "not_used": [o["path"] for o in cov["files"] if o["path"] not in used][:40],
-                            "not_read_this_session": [o["path"] for o in cov["files"] if o["status"] == "not read"][:40]}
+                            "not_read_this_session": [o["path"] for o in cov["files"] if not o["read"]][:40]}
         out["forward"] = uses(st, ref, answers=answers)
     if text and "spread" not in out:
         files = S.expand_glob(st.root, within) if within else (siblings(st, R.parse(ref)["path"]) if ref and kind in ("block", "lines") else [])

@@ -2017,9 +2017,12 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
         const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
-        const files = (JSON.parse(r.stdout).files || []) as Any[]
+        const got = JSON.parse(r.stdout)
+        const files = (got.files || []) as Any[]
         const rows = files.reduce((n, f) => n + (Number(f.rows) || 0), 0)
-        if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
+        // the kernel's own share, by the rule its text says (a search, a listing or a count is not a read)
+        if (typeof got.total?.read_share === 'number') cov = got.total.read_share
+        else if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
       } catch {
         // the line keeps the last share it had
       }

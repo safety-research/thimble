@@ -4,8 +4,10 @@
 // one JSON line per call in $THIMBLE_HOME/lean/seen/<session>.jsonl (default ~/.thimble), never the file's content:
 //
 //   Read  {tool, file, from, to}        the first and last line the result showed (none for a picture or a PDF)
-//   Grep  {tool, path, glob, files, lines}  the search's scope, the files it matched, and the lines it showed
-//   Bash  {tool, command}               the command (the `thimble` command keeps its own record)
+//   Grep  {tool, path, glob, mode, files, lines}  the search's scope, its output mode, the files it matched, and the
+//                                       lines it showed
+//   Bash  {tool, command, out_lines}    the command and how many lines its output had as Claude read it (the
+//                                       `thimble` command keeps its own record)
 //
 // It also sets THIMBLE_SESSION for the session's commands, so `thimble` files its records under the same session.
 import type { EngineInterface, Register } from 'claude-code'
@@ -124,9 +126,12 @@ export const register: Register = on => {
         await keep($, { tool, file: input.file_path, ...(range ?? { from: null, to: null }), ...agent })
       } else if (tool === 'Grep' && !r.isError) {
         const hits = grepHits(resultText(r))
-        await keep($, { tool, path: input.path ?? null, glob: input.glob ?? input.type ?? null, ...hits, ...agent })
+        await keep($, { tool, path: input.path ?? null, glob: input.glob ?? input.type ?? null, mode: input.output_mode ?? 'files_with_matches', ...hits, ...agent })
       } else if (tool === 'Bash') {
-        await keep($, { tool, command: String(input.command ?? '').slice(0, 2000), ...agent })
+        // a file the command printed counts as read for no more lines than reached Claude (a long output is cut)
+        const res = r.result as { stdout?: unknown; stderr?: unknown } | undefined
+        const out = resultText(r) || (res && typeof res === 'object' ? [res.stdout, res.stderr].filter(x => typeof x === 'string' && x).join('\n') : '')
+        await keep($, { tool, command: String(input.command ?? '').slice(0, 2000), out_lines: out ? out.replace(/\n+$/, '').split('\n').length : 0, ...agent })
       }
     } catch {
       // never let watching change a call's result
