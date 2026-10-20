@@ -87,6 +87,34 @@ test('every part of a stacked bar has one height, k.bars names the parts once in
   }
 })
 
+test('a stacked bar keeps one height whatever its parts are: wide or narrow, labelled, unlabelled, or with a note beside', () => {
+  // lived and died per class, as a Titanic card draws them: one part wide enough for its label, one too narrow for it,
+  // one with no label, a sliver under one cell, and a row with a note beside the bar; and a lone k.bar outside k.bars
+  const program = `return k.stack(
+    k.bars([
+      { id: 'first', label: '1st', parts: [{ value: 136, label: 'lived', tone: 'c1' }, { value: 80, label: 'died', tone: 'dim' }], note: '216 aboard' },
+      { id: 'second', label: '2nd', parts: [{ value: 87, label: 'lived', tone: 'c1' }, { value: 97, tone: 'dim' }] },
+      { id: 'third', label: '3rd', parts: [{ value: 3, label: 'lived', tone: 'c1' }, { value: 372, label: 'died', tone: 'dim' }, { value: 1, label: 'unknown', tone: 'c4' }] },
+    ]),
+    k.bar([{ value: 40, label: 'lived', tone: 'c1' }, { value: 60, tone: 'dim' }], { max: 100 }))`
+  for (const w of [50, 80, 120]) {
+    const d = runProgram({ program, data: {} }, { w, h: 12 })
+    assert.equal(d.error, undefined, d.error && d.error.message)
+    const g = renderTerm(d, { w })
+    const text = gridText(g).split('\n')
+    const first = text.findIndex(l => l.includes('▆'))
+    for (let y = first; y < g.h; y++) {
+      const cells = g.rows[y].filter(c => c.tone === 'c1' || c.tone === 'dim' || c.tone === 'c4')
+      const bar = cells.filter(c => c.ch !== ' ' && !/[0-9a-z]/i.test(c.ch))
+      // every cell of a part is the bar glyph or, for a part under one cell, the sliver; none sits on a fill
+      assert.ok(bar.every(c => (c.ch === '▆' || c.ch === '▏') && !c.bg), `${w}, row ${y}: ${bar.map(c => c.ch).join('')}`)
+      assert.ok(g.rows[y].every(c => !c.bg), `${w}, row ${y}: no part fills its whole cell`)
+    }
+    // the parts' names are in the key above, each once
+    for (const name of ['lived', 'died', 'unknown']) assert.equal(text.slice(0, first).join(' ').split(name).length - 1, 1, `${w}: ${text.slice(0, first).join(' ')}`)
+  }
+})
+
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
   const d = run(`
     const rust = data.runs.filter(r => r.lang === 'Rust')
