@@ -120,6 +120,27 @@ test('chips: a change on its way shows at once from the record (squeeze.want), a
   assert.equal(d.status.text, 's ● rewriting…')
 })
 
+test('chips on a catch-up: 0 dismisses it, no step lands on its original (the replies above it), and the bar names its replies, never lines', () => {
+  const CU = { ...REC, shown: 'Mostly [6,543 saves](q1#day=2026-06-18@n).', catchup: { host: 'r0', rows: ['r0'], replies: 3, question: 'when?', prompt: 'p0' }, squeeze: { at: { length: 1 } } }
+  const data = chipsData(CU)
+  const d0 = run(PANES.chips, data)
+  assert.equal(barText([d0]), '[ ] change · 1–3 chip · + new stretch · 0 dismiss · s done')
+  assert.equal(d0.status.text, 's ● catch-up of 3 replies')
+  assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: ']', do: 'squeeze' }])
+  // at medium, a step up would be its original: none, and a press on full's dot neither
+  const medium = chipsData({ ...CU, squeeze: { at: { length: 2 } } })
+  assert.deepEqual(act(PANES.chips, medium, {}, keyEvent(']'), 'terminal').d.effects || [], [])
+  assert.deepEqual(act(PANES.chips, medium, {}, { type: 'press', region: 'lvl-length-3' }, 'browser').d.effects || [], [])
+  // with another chip moved, full is a rewrite like any other
+  const moved = chipsData({ ...CU, squeeze: { at: { length: 2, familiarity: 1 } } })
+  assert.deepEqual(act(PANES.chips, moved, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 3, familiarity: 1 }, key: ']', do: 'squeeze' }])
+  assert.deepEqual(act(PANES.chips, data, {}, keyEvent('0'), 'terminal').d.effects, [{ row: 'r1', do: 'dismiss' }])
+  // its first version on its way
+  const writing = run(PANES.chips, chipsData({ ...CU, shown: null, squeeze: { at: {}, want: { length: 1 } } }))
+  assert.equal(writing.status.text, 's ● writing the catch-up of 3 replies…')
+  assert.match(gridText(renderTerm(writing, { w: 100 })), /Length ○●○○ short/)
+})
+
 // ---------------------------------------------------------------- the card detail
 const OBJECT = {
   id: '01-saves', version: 2, title: 'Saves per day', text: 'June 18 had [6,543](#day-2026-06-18) saves.', history: [{ v: 1 }, { v: 2 }],

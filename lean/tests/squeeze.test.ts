@@ -2,7 +2,7 @@
 // as its label, its dots and its level, with their keys in the hint line under the prompt; a chip's change rewrites
 // the message in place with one model call, its marks placed again, and the new text writes itself in from the top; a
 // stretch is typed after a + as two ends and combines with the others; 0 restores the original; a state seen before
-// comes back with no call; a long answer arrives squeezed. `claude plugin test lean`.
+// comes back with no call; a long answer arrives as Claude wrote it. `claude plugin test lean`.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { press } from './stubs'
@@ -264,42 +264,44 @@ test('a stretch: + then two ends and ↵ make a chip that stands at the original
   expect(textOf(await $.ui.render(view(TEXT)))).toContain(' engineer ●○○○ manager ')
 })
 
-test('a long answer arrives squeezed: one call at Length short, the verb row says how much of it shows, and the original is one key away', async ($, on) => {
+test('a long answer arrives as Claude wrote it: no call, the bar at rest reads s squeeze, and s rewrites it on demand', async ($, on) => {
   const SHORT = 'Most runs landed changes: run 1 landed [4 changes](q2#run=1@n).'
   const w = world(on, [`<text>${SHORT}</text>`])
   const clock = mock.clock(on)
   await answered($, on, clock, LONG)
   await clock.settle()
-  expect(w.calls.length).toBe(1)
-  expect(w.calls[0].prompt).toContain('- Length: short')
+  await clock.advance(1000)
+  expect(w.calls.length).toBe(0)
   const rec = record(w)
-  expect(rec.shown).toBe(SHORT)
-  expect(rec.squeeze.auto).toBe(true)
-  expect(rec.marks.map((m: Any) => m.ref)).toEqual(['q2#run=1@n'])
-  await writtenIn(clock)
-  const drawn = textOf(await $.ui.render(view(LONG)))
-  expect(await hintOf($)).toContain('s ● 1 of 44 lines')
-  expect(drawn).not.toContain('Run 30 landed')
-  // the message drawn narrow beside a docked pane, then the pane closes: the band, drawn first at the whole width,
-  // counts at that width, never at the width the pane left
-  await $.ui.render({ ...(view(LONG) as Any), viewport: { columns: 40, rows: 48, isFullscreen: true } } as never)
-  expect(await hintOf($)).toContain('s ● 1 of 44 lines')
+  expect(rec.shown).toBe(null)
+  expect(rec.squeeze).toBe(undefined)
+  expect(textOf(await $.ui.render(view(LONG)))).toContain('Run 30 landed')
+  expect(await hintOf($)).toContain('v visualize · s squeeze')
+  expect(await hintOf($)).not.toContain('lines')
+  // s, then [ : one call, and the bar says how much of it shows
   await press($, clock, edit('s'))
-  expect(textOf(await $.ui.render(view(LONG)))).toContain('Length ○●○○ short')
-  await press($, clock, edit('0'))
+  expect(textOf(await $.ui.render(view(LONG)))).toContain('Length ○○○● full')
+  await press($, clock, edit('['))
   await clock.settle()
-  expect(record(w).shown).toBe(null)
-  expect(await hintOf($)).toContain('0 close')
+  expect(w.calls.length).toBe(1)
+  expect(w.calls[0].prompt).toContain('- Length: medium')
+  expect(record(w).shown).toBe(SHORT)
+  await press($, clock, edit('s'))
+  expect(await hintOf($)).toContain('s ● 1 of 44 lines')
 })
 
-test('a key the thimble line named a moment ago is taken, never typed, when what it named has gone meanwhile: a long answer arriving squeezed closes the tray the person is closing', async ($, on) => {
+test('a key the thimble line named a moment ago is taken, never typed, when what it named has gone meanwhile: a rewrite landing closes the tray the person is closing', async ($, on) => {
   let release = () => {}
   const held = new Promise<void>(r => { release = r })
   const SHORT = 'Most runs landed changes: run 1 landed [4 changes](q2#run=1@n).'
   const w = world(on, [`<text>${SHORT}</text>`], held)
   const clock = mock.clock(on)
   await answered($, on, clock, LONG)
-  // the squeeze is on its way; ] opens the tray on the answer's first mark, and the line says 0 closes it
+  // a rewrite to short is on its way (the chips closed meanwhile); ] opens the tray on the answer's first mark, and
+  // the line says 0 closes it
+  await press($, clock, edit('s'))
+  await press($, clock, edit('['))
+  await press($, clock, edit('s'))
   await press($, clock, edit(']'))
   expect(await hintOf($)).toContain('0 close')
   // the squeezed text arrives: its marks moved, so the tray closes, and the line no longer names 0

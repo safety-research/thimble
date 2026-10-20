@@ -1,5 +1,5 @@
 // term.ts: Squeeze in the terminal: the one call per change that rewrites the message in place, the new text writing
-// itself in from the top, the stretch typed in the prompt, and the long message that arrives squeezed. The chips
+// itself in from the top, the stretch typed in the prompt, and the catch-up of replies that piled up. The chips
 // themselves, their keys and presses, are a pane program (panes/chips.js) that both surfaces run; what it asks for
 // (k.do('squeeze', {at | reset | stretch})) is done here. The shell (shell/shell.tsx) calls it; it imports the message
 // layer's record functions from the shell (a cycle the module system resolves at call time).
@@ -16,13 +16,14 @@ import type { EngineInterface } from 'claude-code'
 
 import type { MsgRecord, SqzUi, Tray } from '../../types'
 import { promptText as registryText } from '../../prompts/prompts'
-import { remark as remarkAny } from '../../shell/message.js'
+import { newRecord, remark as remarkAny } from '../../shell/message.js'
 import { modelWhy } from '../../shell/why.js'
 import { tracked } from '../../telemetry/telemetry'
 import { FEATURES } from '../../prompts/registry.mjs'
 import { lookPending } from '../../observer/observer'
 import { answerRow, claimsStore, closeTray, questionBefore, recordNow, saveRecord } from '../../shell/shell'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, stretchChip, termsOf, unplacedMoves, withStretch } from './chips.mjs'
+import { sessionKey } from '../../hooks/conversation'
+import { ARRIVE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, stretchChip, termsOf, unplacedMoves, withStretch } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,17 +49,15 @@ const BLANK: SqzUi = { focus: 'length', adding: false, running: null, error: nul
 const inflight = new Map<string, { want: Want | null }>()
 const revealing = new Map<string, number>()
 // `key`: the key the bar names for it ([ or ]), which presses it again after a failure; none for a press of the
-// pointer or a message that arrived squeezed
+// pointer or a catch-up's first version
 type Want = { at: At; key?: string | null }
 let cfg: Record<string, unknown> = {}
 let view = { cols: 100, rows: 48 }
 
-/** The screen the transcript draws on, as the last message drawn saw it: a long message takes more than half of it. */
+/** The screen the transcript draws on, as the last message drawn saw it: `6 of 33 lines` counts at its width. */
 export function seeView(cols: number, rows: number): void {
   if (cols > 0 && rows > 0) view = { cols, rows }
 }
-// half a screen, the room an object under a reply takes before the rest waits in its detail view (lean's calm rule)
-const roomNow = () => ({ cols: Math.max(20, view.cols - 3), room: Math.max(16, Math.floor(view.rows * 0.55)) })
 
 async function uiOf($: Engine, row: string): Promise<SqzUi> {
   return (((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null) ?? { ...BLANK }
@@ -78,12 +77,12 @@ async function ensure($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the verb row
 
-/** What the verb row shows for s: lit with `6 of 33 lines` while the message is squeezed, `33 lines` for a long
- *  original; else what the observer gave (dim when nothing). */
+/** What the verb row shows for s: lit with `6 of 33 lines` while the person has the message squeezed; else what the
+ *  observer gave (dim when nothing), so a message as Claude wrote it reads `s squeeze`, however long. A catch-up is
+ *  squeezed by what it is, and says no line counts. */
 export function sLit(rec: MsgRecord, _ui: SqzUi | null): { lit: boolean; note: string } | null {
-  const cols = view.cols
-  if (typeof rec.shown === 'string') return { lit: true, note: noteOf(rec, cols) }
-  if ((rec as Any).squeeze?.auto || isLong(rec.text, roomNow())) return { lit: true, note: `${rowsOf(rec.text, cols)} lines` }
+  if (isCatchUp(rec)) return null
+  if (typeof rec.shown === 'string') return { lit: true, note: noteOf(rec, view.cols) }
   const own = rec.verbs?.s
   return own?.lit && own.note ? { lit: true, note: String(own.note) } : null
 }
@@ -240,12 +239,15 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   if (wait > 0) {
     await new Promise<void>(done => { $.clock.after(wait, () => done()) })
     if (inflight.get(row)?.want) return
+    // a catch-up undone meanwhile (its s began a word) is written by no call
+    if ((await recordNow($, row))?.catchup?.dismissed) return
   }
   revealing.delete(row)
   await setUi($, row, { running: { since: await $.clock.now() }, error: null, reveal: null })
   const ticker = tick($, row)
   try {
-    const question = await questionBefore($, row).catch(() => '')
+    // a catch-up answers the person's last prompt, whatever notification or hand-back came after it
+    const question = isCatchUp(rec) ? String(rec.catchup!.question || '') : await questionBefore($, row).catch(() => '')
     const sp = await registryText($, 'squeeze')
     // a version that keeps corrections (squeeze:v4): the corrections in the original are named in the request, and one
     // the rewrite left out is put back after it
@@ -289,7 +291,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     ticker.stop()
     await setUi($, row, { running: null })
     await settled($, row, next)
-    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}) })
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}) })
   } finally {
     ticker.stop()
   }
@@ -302,7 +304,9 @@ async function settled($: Engine, row: string, rec: MsgRecord): Promise<void> {
   await saveRecord($, rec)
   await closeTrayOn($, row)
   const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
-  await $.state.set(SQZNOTE, { ...notes, [row]: noteFor(rec) })
+  // a catch-up dismissed while it was being written was never read: Claude hears nothing of it
+  const note = rec.catchup?.dismissed ? '' : noteFor(rec)
+  await $.state.set(SQZNOTE, { ...notes, [row]: note })
   const was = before ? (typeof before.shown === 'string' ? before.shown : before.text) : ''
   const now = typeof rec.shown === 'string' ? rec.shown : rec.text
   if (now !== was) await writeIn($, row, now.length)
@@ -372,19 +376,55 @@ async function log($: Engine, row: Record<string, unknown>): Promise<void> {
   }
 }
 
-// ------------------------------------------------------------------------------------------------ arriving squeezed
+// ------------------------------------------------------------------------------------------------ the catch-up
 
 /**
- * The turn's answer, once the turn has ended: a message taller than half the screen arrives squeezed, at Length short,
- * at once, beside the observer's look and never waiting for it. Its other chips are "as the original", which holds
- * whatever level the look then gives them, so the version stays the same version.
+ * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt, drawn under the newest reply
+ * (`host`): a record of its own whose original is those messages as written, one after another, first written at
+ * Length short (one call, as any chip change is). The host names it, so its drawing and a resumed session find it.
+ * Returns its row; the first version is on its way (the chips show it is being written).
  */
-export async function arrive($: Engine, row: string): Promise<void> {
+export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null }): Promise<string | null> {
+  const texts: string[] = []
+  for (const r of o.rows) {
+    const rec = await recordNow($, r)
+    if (rec?.text?.trim()) texts.push(rec.text)
+  }
+  const host = await recordNow($, o.host)
+  if (!texts.length || !host) return null
+  const now = await $.clock.now()
+  const row = `cu-${o.host.slice(0, 8)}-${Math.floor(now).toString(36)}`
+  const made = newRecord({ row, session: await sessionKey($), text: catchUpText(texts), at: new Date(now).toISOString() }) as MsgRecord
+  await saveRecord($, { ...made, catchup: { host: o.host, rows: [...o.rows], replies: o.replies, question: o.question, prompt: o.prompt }, squeeze: { at: {} } } as MsgRecord)
+  await saveRecord($, { ...host, caughtUp: row } as MsgRecord)
+  void setLevels($, row, { length: ARRIVE }).catch(() => undefined)
+  return row
+}
+
+/**
+ * A catch-up dismissed: drawn no more. One that never showed a version (`undo`: its key began a word; or its call
+ * failed) is as if never made, so the replies it would have covered still count as not caught up on; one the person
+ * read keeps its note for Claude unless `quiet`.
+ */
+export async function dismissCatchUp($: Engine, row: string, o: { undo?: boolean; quiet?: boolean } = {}): Promise<void> {
   const rec = await recordNow($, row)
-  if (!rec || rec.shown != null || (rec as Any).squeeze) return
-  if (!isLong(rec.text, roomNow())) return
-  await saveRecord($, { ...rec, squeeze: { at: {}, auto: true } } as MsgRecord)
-  await setLevels($, row, { length: ARRIVE })
+  if (!rec || !isCatchUp(rec)) return
+  const read = typeof rec.shown === 'string' && !o.undo
+  await saveRecord($, { ...rec, catchup: { ...rec.catchup!, dismissed: true } } as MsgRecord)
+  if (!read) {
+    const host = await recordNow($, rec.catchup!.host)
+    if (host && host.caughtUp === row) {
+      const { caughtUp: _gone, ...rest } = host
+      await saveRecord($, rest as MsgRecord)
+    }
+  }
+  if (!read || o.quiet) {
+    const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
+    if (row in notes) {
+      const { [row]: _drop, ...keep } = notes
+      await $.state.set(SQZNOTE, keep)
+    }
+  }
 }
 
 /** For tests: the module's memory, cleared. */

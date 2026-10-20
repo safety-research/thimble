@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
-import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, glyph, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, unplacedMoves, withStretch } from '../chips.mjs'
+import { ARRIVE, CATCHUP_HEAD, CHIPS, applyRewrite, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, unplacedMoves, withStretch } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
@@ -341,4 +341,32 @@ test('squeeze:v5 is v4 with the principle of keeping the explain terms, and it i
   const v5 = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v5.md', import.meta.url)), 'utf8')
   assert.match(v5, /\*\*Keep the terms the person can open\.\*\*/)
   assert.equal(v5.replace(/\*\*Keep the terms the person can open\.\*\*[^\n]*\n\n/, ''), v4)
+})
+
+test('a catch-up is several messages written as one: its original is them in order, its request names them so, and the note tells Claude what the person read', () => {
+  const first = 'I will start the reader first.'
+  const second = 'The empty label has [741 IPs](q4#label=@ips) for [899 revisions](q4#label=@n).'
+  const third = 'The reader is back: 3,104 lines.\n\nI also need to correct something I told you: I wrote that it starts at the first write; it does not.'
+  const text = catchUpText([first, `${second}\n`, '', third])
+  assert.equal(text, `${first}\n\n---\n\n${second}\n\n---\n\n${third}`)
+  const cu = { text, shown: null, marks: [], glosses: {}, verbs: {}, objects: [], catchup: { host: 'r3', rows: ['r1', 'r2', 'r3'], replies: 2, question: 'What does labels.jsonl say about the empty label?', prompt: 'p1' }, squeeze: { at: { length: ARRIVE } } }
+  assert.ok(isCatchUp(cu) && catchUpStands(cu))
+  assert.ok(!catchUpStands({ ...cu, catchup: { ...cu.catchup, dismissed: true } }))
+  assert.ok(!isCatchUp(record()))
+  const keep = mustKeep(text)
+  assert.deepEqual(keep, ['I also need to correct something I told you: I wrote that it starts at the first write; it does not.'])
+  const req = request(cu, { system: 'P', question: cu.catchup.question, keep })
+  const head = req.prompt[0].text
+  // one header line differs from a single message's request; the rest is the same request
+  assert.equal(head, `The person asked: What does labels.jsonl say about the empty label?\n\n${CATCHUP_HEAD}\n<original>\n${text}\n</original>`)
+  assert.equal(CATCHUP_HEAD, "Claude's messages since the person's last prompt, in the order it wrote them, as written (the original). Write them as one message:")
+  assert.match(req.prompt[1].text, /- Length: short, at most \d+ words/)
+  assert.match(req.prompt[1].text, /Corrections in the original\. Each stays at every level/)
+  assert.equal(request(record(), { system: 'P' }).prompt[0].text.split('\n')[2], "Claude's message, as written (the original):")
+  // nothing for Claude until a version shows; then the version, as the person reads it
+  assert.equal(noteFor(cu), '')
+  const shown = applyRewrite(cu, { text: 'The empty label: [741 IPs](q4#label=@ips). The reader counted 3,104 lines; it does not start at the first write.', at: { length: ARRIVE } }, remark)
+  assert.equal(noteFor(shown), 'The person caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\nThe empty label: [741 IPs](q4#label=@ips). The reader counted 3,104 lines; it does not start at the first write.')
+  // its citations are placed on the version, as any message's
+  assert.deepEqual(shown.marks.filter(m => m.kind === 'cite').map(m => m.ref), ['q4#label=@ips'])
 })

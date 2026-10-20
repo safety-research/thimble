@@ -5,6 +5,8 @@
 //                       mark a press (a cite underlined, a gloss on a teal fill, a sparkline in place), and every other
 //                       run of blocks drawn by Claude Code's own Markdown, so paragraphs, lists, code and tables look
 //                       as in any reply
+//   catchUpEl(els, o)   a catch-up under the newest reply: a rule down its left side, `thimble  catch-up of …`, then
+//                       its text (a message drawn as above)
 //   verbRowEl(els, o)   the verbs as keys (kept for the bar's words; the bar above the prompt draws them)
 //   verbLineEl(els, o)  the line a verb opens under its message: v's proposals (squeeze's chips are term.ts's; c opens
 //                       the Claims pane, claimsview.ts)
@@ -126,15 +128,18 @@ function blockLines(els: Any, o: MessageOpts, text: string, b: Any, key: string,
   return out
 }
 
-/** A table that holds marks, drawn as Claude Code draws a table: a box of light rules, its header bold. */
-function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number): Any[] {
+/** A table that holds marks, drawn as Claude Code draws a table: a box of light rules, its header bold. One too wide to
+ *  draw whole is Claude Code's Markdown, or (`lines`) its rows as written, each cut at the width. */
+function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number, lines = false): Any[] {
   const rows: Run[][][] = tableOf(text, b, o.rec.marks)
   const n = Math.max(...rows.map(r => r.length))
   const widths = Array.from({ length: n }, (_, c) => Math.max(1, ...rows.map(r => width(runsText(r[c] || [])))))
   const total = widths.reduce((s, x) => s + x + 3, 1)
   if (total > w) {
     // too wide to draw whole: Claude Code's Markdown, with each mark as its words
-    return [els.Markdown({ text: text.slice(b.start, b.end).replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1') })]
+    const plain = text.slice(b.start, b.end).replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1')
+    if (lines) return plain.split('\n').map((l, k) => els.Text({ key: `${key}-r${k}`, wrap: 'truncate-end', children: l }))
+    return [els.Markdown({ text: plain })]
   }
   const rule = (l: string, m: string, r: string) => els.Text({ children: l + widths.map(x => '─'.repeat(x + 2)).join(m) + r })
   const out: Any[] = [rule('┌', '┬', '┐')]
@@ -195,6 +200,48 @@ export function messageEl(els: Any, given: MessageOpts): Any {
     push([Box({ flexDirection: 'row', flexWrap: 'wrap', children: kids })], true)
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
+}
+
+// ------------------------------------------------------------------------------------------------ the catch-up
+
+export type CatchUpOpts = MessageOpts & {
+  /** what it covers, after `thimble`: `catch-up of 3 replies since your last message` */
+  head: string
+  /** a line in place of its text: while its first version is written, or why that failed */
+  note?: { text: string; error?: boolean } | null
+}
+
+/** One block of a catch-up as rows, each one row of the terminal: every kind laid out here, none left to Claude Code's
+ *  Markdown, whose wrapping cannot be counted. */
+function blockRows(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number): Any[] {
+  const cutRow = (s: string, k: number, p: Any = {}) => els.Text({ key: `${key}-${k}`, wrap: 'truncate-end', ...p, children: s || ' ' })
+  if (b.type === 'code') return text.slice(b.start, b.end).split('\n').slice(1, -1).map((l, k) => cutRow(l, k, { color: 'permission', ...(o.dim ? { dimColor: true } : {}) }))
+  if (b.type === 'rule') return [cutRow('─'.repeat(Math.min(w, 40)), 0, { dimColor: true })]
+  if (b.type === 'table') return tableLines(els, o, text, b, key, w, true)
+  return blockLines(els, o, text, b, key, w)
+}
+
+/**
+ * A catch-up under the newest reply: its head line (`thimble  catch-up of …`) and its text, each row of it after a rule
+ * in thimble's color, so the rule runs down its left side as tall as the text. Its text is drawn as a message's is (the
+ * marks presses, a citation underlined), every block laid out here so each row can carry the rule.
+ */
+export function catchUpEl(els: Any, o: CatchUpOpts): Any {
+  const { Box, Text } = els
+  const color = o.theme === 'light' ? '#4f46e5' : '#9a93ff'
+  const mo = { ...o, seen: new Set<number>() }
+  const w = Math.max(20, o.cols - 2)
+  const ruled = (key: string, kids: Any[]) => Box({ key, flexDirection: 'row', children: [Text({ color, children: '▎ ' }), Box({ flexDirection: 'column', width: w, children: kids })] })
+  const rows: Any[] = [ruled(`${o.key}-head`, [Text({ children: [Text({ color, bold: true, children: 'thimble' }), Text({ dimColor: true, children: `  ${o.head}` })] })])]
+  if (o.note) rows.push(ruled(`${o.key}-note`, [Text({ wrap: 'truncate-end', ...(o.note.error ? { color: 'error' } : { dimColor: true }), children: o.note.text })]))
+  else {
+    const text = shownOf(o.rec)
+    blocks(text).forEach((b: Any, i: number) => {
+      if (b.gap && i > 0) rows.push(ruled(`${o.key}-g${i}`, [Text({ children: ' ' })]))
+      blockRows(els, mo, text, b, `${o.key}-l${i}`, w).forEach((line: Any, j: number) => rows.push(ruled(`${o.key}-l${i}-${j}`, [line])))
+    })
+  }
+  return Box({ key: o.key, flexDirection: 'column', marginTop: 1, children: rows })
 }
 
 // ------------------------------------------------------------------------------------------------ the verb row
