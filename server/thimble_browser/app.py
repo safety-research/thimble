@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import canvas, chats, corpus, home, report
+from . import canvas, chats, corpus, home, report, views
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -408,10 +408,69 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         await sessions.get(c, cid).send(writer_brief(c, str(body.get("text") or "")))
         return {"agentId": cid, "chat": cid}
 
+    # ---- generative views (views/)
+
+    def view_of(c: str, slug: str) -> Path:
+        try:
+            d = views.view_dir(ws_of(c), slug)
+        except KeyError:
+            raise HTTPException(404, f"no such view: {slug}") from None
+        if not (d / "view.html").is_file():
+            raise HTTPException(404, f"no such view: {slug}")
+        return d
+
+    @app.get("/api/ws/{c}/views")
+    def views_list(c: str, path: str | None = None) -> list[dict[str, Any]]:
+        return views.list_views(ws_of(c), folder_of(c), path)
+
+    @app.get("/api/ws/{c}/views/proposals")
+    def views_proposals(c: str) -> list[dict[str, Any]]:
+        return [p for p in views.proposals(ws_of(c)) if p.get("status") != "built"]
+
+    @app.get("/api/ws/{c}/views/{slug}/frame")
+    def view_frame(c: str, slug: str) -> Response:
+        view_of(c, slug)
+        return Response(views.frame(c, slug), media_type="text/html", headers={"cache-control": "no-cache"})
+
+    @app.post("/api/ws/{c}/views/{slug}/records")
+    async def view_records(c: str, slug: str, body: dict = Body(...)) -> Any:
+        view_of(c, slug)
+        got = await views.run_reader(c, slug, folder_of(c), "records", body.get("query"))
+        if not got.get("ok"):
+            return JSONResponse({"detail": {"message": got.get("error"), "traceback": got.get("traceback", "")}},
+                                status_code=502)
+        return {"data": got["result"]}
+
+    @app.get("/api/ws/{c}/views/{slug}/resolve")
+    async def view_resolve(c: str, slug: str, ref: str) -> Any:
+        view_of(c, slug)
+        path, _, frag = ref.partition("#")
+        loc = {"key": ref.split("/", 1)[1]} if ref.startswith("view:") else {"path": path, "fragment": frag}
+        got = await views.run_reader(c, slug, folder_of(c), "resolve", loc)
+        if not got.get("ok") or not got.get("result"):
+            raise HTTPException(404, f"the view does not know {ref}")
+        return {"ref": ref, **got["result"]}
+
+    @app.get("/api/ws/{c}/views/{slug}/calls/{call}")
+    def view_call(c: str, slug: str, call: str) -> dict[str, bool]:
+        return {"running": False}
+
+    @app.post("/api/ws/{c}/views/{slug}/calls/{call}/cancel")
+    def view_cancel(c: str, slug: str, call: str) -> dict[str, bool]:
+        return {"cancelled": False}
+
+    @app.delete("/api/ws/{c}/views/{slug}")
+    def view_delete(c: str, slug: str) -> dict[str, Any]:
+        import shutil  # noqa: PLC0415
+
+        d = view_of(c, slug)
+        shutil.rmtree(d)
+        hub.publish(c, {"type": "view", "slug": slug, "status": "deleted"})
+        return {"deleted": slug}
+
     # ---- what thimble browser does not have yet: empty answers the page shows as nothing
 
-    empty_list = ["views", "views/proposals", "notices", "concepts", "labels/presence", "checks", "card-checks",
-                  "card-libs"]
+    empty_list = ["notices", "concepts", "labels/presence", "checks", "card-checks", "card-libs"]
     for route in empty_list:
         app.add_api_route(f"/api/ws/{{c}}/{route}", lambda c: [], methods=["GET"])
     for route, value in {"orientation": {}, "undo": {"undo": None, "redo": None}, "filters": {},

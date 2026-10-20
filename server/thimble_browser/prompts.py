@@ -141,6 +141,10 @@ def source_part(name: str) -> str:
         if spec["until"] not in text:
             raise PromptError(f"shared part '{name}': the terminal's text no longer has {spec['until']!r}")
         text = text.split(spec["until"], 1)[0]
+    if spec.get("after"):
+        if spec["after"] not in text:
+            raise PromptError(f"shared part '{name}': the terminal's text no longer has {spec['after']!r}")
+        text = text.split(spec["after"], 1)[1]
     if spec.get("section"):
         text = section(text, spec["section"])
     if "bullets" in spec:

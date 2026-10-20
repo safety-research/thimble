@@ -24,34 +24,35 @@
         2,
         4
       ],
+      "tail": true,
       "replace": [
         [
           "never sees your shell output",
           "never sees your tools' output"
         ],
         [
-          "`[31](r3#outcome=merged@n)` makes the number the link",
-          "`[31](card:<id>#outcome/merged)` makes the number the link"
+          "(r3#outcome=approved@n)",
+          "(card:<id>#outcome/approved)"
         ],
         [
-          "run `thimble resolve` on it before you use it",
-          "read it with `read_ref` before you use it"
+          "run `thimble rows` on its ref before you use it",
+          "read its ref with `read_ref` before you use it"
         ]
       ],
       "drop": [
-        "`thimble coverage` shows what this session computed over, read, searched and did not touch."
+        "`thimble coverage` lists the files this session read or computed over, and those it only searched, only named or counted, or never touched: none of these were read."
       ]
     },
     "explain": {
       "file": "terminal/lens-explain/v3.md",
       "replace": [
         [
-          "When the person reads the answer squeezed, mark words that stand in the squeezed text, since that is what they read.",
+          " (the squeezed text, when they read it squeezed)",
           ""
         ],
         [
-          " in thimble's drawing toolkit, at most six lines, such as `return k.beside(k.text('**scope=\"module\"** {dim:one cart per file}'), k.text('**default** {dim:a fresh cart per test}'), { gap: 4 })`",
-          " in thimble's drawing toolkit; thimble browser does not draw it yet, so leave it out"
+          "; and an optional \"program\" of at most six lines on thimble's drawing toolkit, only when a tiny drawing says it better than words.",
+          ". thimble browser draws no \"program\", so give none."
         ],
         [
           "[6 of 9 hosts](r2#over=800ms@hosts)",
@@ -59,6 +60,11 @@
         ]
       ],
       "until": "<!-- digest -->"
+    },
+    "explain-digest": {
+      "file": "terminal/lens-explain/v3.md",
+      "after": "<!-- digest -->",
+      "until": "<!-- when backoff -->"
     }
   }
 }

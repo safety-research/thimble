@@ -65,8 +65,9 @@ async def after_turn(ws: str, chat: str, answer: str, folder: Path) -> None:
 
     system = prompts.render("browser/explain.md")
     seen = glossed_terms(ws, chat)
-    msg = (f"The person asked:\n{last_question(ws, chat)}\n\nClaude answered:\n{answer}\n\n"
-           f"Terms the person already saw explained:\n{chr(10).join(seen) if seen else '(none)'}")
+    # the digest in the terminal's own words (prompts/shared.json, part `explain-digest`)
+    digest = prompts.shared("explain-digest").replace("{{GLOSSED}}", "\n".join(seen) if seen else "(none)")
+    msg = f"The analyst asked:\n{last_question(ws, chat)}\n\nClaude answered:\n{answer}\n\n{digest}"
     opts = ClaudeAgentOptions(cwd=str(folder), cli_path=claude_path(), tools=[], setting_sources=[],
                               strict_mcp_config=True, system_prompt=system, max_turns=1,
                               extra_args={"safe-mode": None}, permission_mode="default")

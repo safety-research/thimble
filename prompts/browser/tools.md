@@ -6,7 +6,7 @@ as the terminal plugin writes them.
 
 ## read_ref
 
-Read anything thimble can cite, as the person sees it, such as a card with its outputs or a record of a file. The person may edit a card at any time, so read it again before you rely on it. Read a plain file with Read.
+Read anything thimble can cite, as the analyst sees it, such as a card with its outputs or a record of a file. The analyst may edit a card at any time, so read it again before you rely on it. Read a plain file with Read.
 
 ```json
 {
@@ -102,4 +102,52 @@ Save the report whole, as Markdown in the report's form. The result names each c
   },
   "required": ["doc", "text"]
 }
+```
+
+## propose_view
+
+Start building a view: a page in the Files tab that shows the folder's records in a form their files hide, such as a timeline, a network or a forge's pull requests. thimble's view builder builds it on its own from these fields and reads the files itself, and the view appears in the Files tab when it passes its checks. Call it only when the analyst asks for a view.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
+    "description": {"type": "string", "description": "What the analyst sees, in one sentence, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "task": {"type": "string", "description": "What the analyst wants to accomplish, in their words, not how."},
+    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, relative to the folder, by pattern rather than one file, such as runs/*.jsonl."}
+  },
+  "required": ["name", "description", "task", "claims"]
+}
+```
+
+## write_view_file
+
+Write one of the view's three files whole: `view.json`, `reader.py` or `view.html`. It writes only into the view's own folder.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": {"type": "string", "enum": ["view.json", "reader.py", "view.html"]},
+    "text": {"type": "string"}
+  },
+  "required": ["name", "text"]
+}
+```
+
+## view_check
+
+Check the view: its three files, the files its `scope` claims, and its reader run on the folder in thimble's sandbox. It says what to fix.
+
+```json
+{"type": "object", "properties": {}}
+```
+
+## finish_view
+
+Run the checks as the record of the build. When they pass, the view appears in the analyst's Files tab.
+
+```json
+{"type": "object", "properties": {}}
 ```
