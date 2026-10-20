@@ -359,7 +359,7 @@ test('tray: a gloss on a citation\'s words rides on the citation\'s frame, offer
   const got = { [d.wants[0].key]: { drawings: [DK.run('return k.text("Jun 18 **6,543**")', {}, { w: 60 })], links: [] } }
   const full = run(PANES.tray, data, { state: { stack: [f0] }, w: 70, got })
   assert.match(gridText(renderTerm(full, { w: 70 })), /▲ heads up Only the last editor counts/)
-  assert.equal(barText([full]), 'a open · 0 close · ] next · h heads up')
+  assert.equal(barText([full]), 'a ask · 0 close · ] next · h heads up')
   // h, or a press on its line, opens the heads-up over the citation; back returns to the citation
   const byKey = act(PANES.tray, data, { stack: [f0] }, keyEvent('h'), 'terminal', { got, w: 70 })
   assert.equal(byKey.state.stack.at(-1).gloss.kind, 'heads')
