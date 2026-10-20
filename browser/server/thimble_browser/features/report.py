@@ -27,7 +27,7 @@ from typing import Any
 
 from fastapi import Body, HTTPException
 
-from .. import agent, chats, exports, report
+from .. import agent, chats, exports, prompts, report
 from ..tools import Result
 from . import Feature
 
@@ -49,15 +49,36 @@ def _no_doc(t: Any, slug: Any) -> Result:
     return Result(f"no document {slug!r}: the documents are {names}", True)
 
 
+GUIDE_HEAD = "# Writing a report"
+
+
+def _guide_given(t: Any) -> bool:
+    """Whether this chat's conversation holds the writing guide already: a thread holds what main was given before it
+    branched."""
+    for m in agent.load_messages(t.ws, t.chat):
+        for b in m.get("content") or [] if isinstance(m.get("content"), list) else []:
+            c = b.get("content") if isinstance(b, dict) and b.get("type") == "tool_result" else None
+            text = c if isinstance(c, str) else " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
+            if GUIDE_HEAD in text:
+                return True
+    return False
+
+
 async def read_document(t: Any, args: dict[str, Any]) -> Result:
+    """The report as it stands; the first time a chat reads one, the guide to writing a report (prompts/report-guide.md)
+    comes after it, so the guide is read when it is used and not with every request."""
     try:
         slug, what = _doc(t, args)
     except KeyError as e:
         return _no_doc(t, e.args[0])
     md = report.markdown(t.ws, slug)
     if md is None or not md.strip().strip("#").strip():
-        return Result(f"{what[0].upper()}{what[1:]} is empty: the analyst has written nothing in it yet.")
-    return Result(md)
+        text = f"{what[0].upper()}{what[1:]} is empty: the analyst has written nothing in it yet."
+    else:
+        text = md
+    if not _guide_given(t):
+        text += "\n\n---\n\n" + prompts.render("report-guide.md")
+    return Result(text)
 
 
 def _saved(t: Any, doc: dict[str, Any], what: str) -> Result:

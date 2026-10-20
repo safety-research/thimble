@@ -125,3 +125,19 @@ def test_new_makes_another_document_that_write_and_the_tools_reach(api, monkeypa
     assert api("DELETE", "/report-types/team-update").status_code == 200
     assert list(api("GET", "/investigations/main/types").json()) == ["report"]
     assert api("GET", "/investigations/main/types/team-update").status_code == 404
+
+
+def test_the_writing_guide_comes_with_the_first_read_of_a_chat(api, monkeypatch):
+    import asyncio
+
+    from thimble_browser import agent, tools
+    from thimble_browser.features import report as feature
+
+    t = tools.Tools(api.ws, "main", home.corpus_of(api.ws))
+    first = asyncio.run(feature.read_document(t, {}))
+    assert "is empty" in first.text and feature.GUIDE_HEAD in first.text and "## A good document" in first.text
+    agent.save_messages(api.ws, "main", [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x",
+                                                                       "content": first.text}]}])
+    again = asyncio.run(feature.read_document(t, {}))
+    assert feature.GUIDE_HEAD not in again.text
+    assert "## A good document" not in agent.AGENTS["main"].prompt(home.corpus_of(api.ws))
