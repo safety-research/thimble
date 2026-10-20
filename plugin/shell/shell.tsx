@@ -41,6 +41,8 @@ import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop 
 import { catchUpEl, keyColor, messageEl } from './view'
 import { markNextTurn, record as recordEvent } from '../telemetry/telemetry'
 import { ownTurn } from '../observer/observer'
+import { featureOn } from '../settings/features.mjs'
+import { openSettings, settingsAction, settingsStore } from '../settings/term'
 
 
 import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, markChanged as sqChanged, setLevels as sqSetLevels, sLit, tellSettled, wantLevels as sqWant } from '../squeeze/term'
@@ -791,6 +793,8 @@ async function drawnRecord($: Engine, at: string, text: string): Promise<MsgReco
 
 /** The keys of the row: v and s, and c, which opens the Claims pane in the side panel. */
 const ROW_KEYS = [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }, { key: 'c', name: 'claims' }]
+/** The keys of the row as the switches leave them: c only while Claims is on (settings/features.mjs). */
+const rowKeysOn = () => ROW_KEYS.filter(v => v.key !== 'c' || featureOn('claims'))
 
 /** Whether a person is at this session: `now` (an interactive session), `later` (one Claude Code's background service
  *  runs, a pre-warmed spare or a background job, until the person's first prompt), `never` (a `-p` run, the SDK). */
@@ -853,6 +857,7 @@ async function sinceLastPrompt($: Engine): Promise<{ prompt: { row: string; text
  * prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
  */
 async function pileUp($: Engine): Promise<{ n: number; prompt: { row: string; text: string } | null; rows: string[]; replies: string[] } | null> {
+  if (!featureOn('catchup')) return null
   const since = await sinceLastPrompt($)
   let from = 0
   for (let i = since.replies.length - 1; i >= 0; i--) {
@@ -1376,7 +1381,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     const root = await rootHere($)
     let cov = old?.cov ?? 0
     let mix = old?.mix ?? []
-    if (o.coverage && root && person === 'now') {
+    if (o.coverage && root && person === 'now' && featureOn('coverage')) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
         const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
@@ -1626,11 +1631,13 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     // at rest the bar names the three verbs alone (v s c) and the counts: ] still steps through the marks and the cards,
     // { } through the replies, and 1 opens the card the keys are on, unnamed until one of them is in use
     if (!row || !rec) {
-      for (const v of ROW_KEYS) left.push({ key: v.key, words: v.name, dim: true })
+      for (const v of rowKeysOn()) left.push({ key: v.key, words: v.name, dim: true })
     } else {
-      const verbs = ROW_KEYS
+      const verbs = rowKeysOn()
       const sqUi = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
       const lit: Record<string, { lit?: boolean; note?: string }> = { ...(rec.verbs || {}) }
+      // v lit by the observer, while its v proposals are on
+      if (!featureOn('visualize')) delete lit.v
       const sv = sLit(rec, sqUi)
       if (sv) lit.s = sv
       else delete lit.s
@@ -1678,7 +1685,9 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   // so the bar never names one key twice. Unnamed, a click on the count still opens it.
   const named = namedKeys(left)
   const keyed = (k: string | null | undefined) => !!k && !focus && !named.has(k)
-  const counts = items.filter(([, n]) => n > 0).map(([id, , words, key]) => {
+  // a count whose switch is off is not shown: the claims count with Claims, coverage and the labels with their own
+  const shown = (id: string) => (id === 'claims' ? featureOn('claims') : id === 'cov' ? featureOn('coverage') : id === 'labels' ? featureOn('labels') : true)
+  const counts = items.filter(([id, n]) => n > 0 && shown(id)).map(([id, , words, key]) => {
     const bright = now - (c!.changed[id] ?? 0) < BRIGHT_MS
     // (coverage's and the labels' words begin with their key: dock.ts)
     const dk = id === 'cov' ? DOCK_KEY.coverage : id === 'labels' ? DOCK_KEY.labels : null
@@ -1690,7 +1699,9 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   const fit = fitBar({ label: where ?? 'thimble', left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bare?: boolean; bright: boolean }[]; cut: boolean }
   // the label names whose keys these are; it is no link and no press, so it is drawn plain (an underline is a
   // citation's look)
-  const label = fit.label ? [Text({ key: 'bar-label', color: FOCUS[theme], bold: !where, children: fit.label }), Text({ key: 'bar-gap', children: '  ' })] : []
+  // in main, a click on it opens thimble's settings in the side panel
+  const labelText = Text({ key: 'bar-label', color: FOCUS[theme], bold: !where, children: fit.label })
+  const label = fit.label ? [where || fit.cut ? labelText : Button({ key: 'bar-label-press', plain: true, label: 'thimble settings', onPress: () => openSettings($), children: [labelText] }), Text({ key: 'bar-gap', children: '  ' })] : []
   const segText = (g: BarSeg, i: number) => [
     ...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []),
     ...(g.tone ? [Text({ key: `kt${i}`, color: g.tone, children: g.words })] : g.dim ? [Text({ key: `kd${i}`, dimColor: true, children: [g.key, g.words].filter(Boolean).join(' ') })] : [
@@ -1950,7 +1961,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // with no letter after them (a letter makes them the start of a word, as after t)
   if (!pick && (k === DOCK_KEY.coverage || k === DOCK_KEY.labels)) {
     const counts = (await $.state.get(COUNTS)).value as LineCounts | null
-    const pane = restPane(k, { cov: (counts?.cov ?? 0) > 0, labels: (counts?.labels ?? 0) > 0 })
+    const pane = restPane(k, { cov: featureOn('coverage') && (counts?.cov ?? 0) > 0, labels: featureOn('labels') && (counts?.labels ?? 0) > 0 })
     if (pane) {
       const wait = { cancelled: false }
       const undo = () => { wait.cancelled = true; if (pendingT === wait) pendingT = null; keyOpened = null }
@@ -1973,7 +1984,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     }, word: undo }
   }
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
-  if (k.length === 1 && ROW_KEYS.some(v => v.key === k)) {
+  if (k.length === 1 && rowKeysOn().some(v => v.key === k)) {
     const row = await actingRow($)
     // a letter typed at once after it (before its answer came) makes it the start of a word: its line closes again
     const word = { word: async () => { keyOpened = null; if (pendingV) { pendingV.cancelled = true; pendingV = null }; await setPick($, null) } }
@@ -2379,6 +2390,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'threads': return threadList()
     // the session's claims, with the folder's offer (claims/term.ts)
     case 'claims': return claimsPaneStore($)
+    // thimble's switches (settings/term.ts)
+    case 'settings': return settingsStore($)
     default: return paneStoreMore($, kind, arg)
   }
 }
@@ -2561,6 +2574,8 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   // the Claims pane's own actions (claims/term.ts); its citations open as any pane's do (open, below)
   if (pane === 'claims') { const said = await claimsAction($, a); if (said !== false) return said }
   if (pane === 'detail') return detailAction($, a)
+  // a switch turned on or off in the settings panel (settings/term.ts)
+  if (pane === 'settings') return settingsAction($, a)
   // a label value checked in the label viewer (dock.ts); what a pane opens is the panel's, below
   if ((pane === 'coverage' || pane === 'labels') && name === 'check') return dockAction($, pane, a)
   if (name === 'open') {

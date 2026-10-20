@@ -1,4 +1,5 @@
-// thimble's plugin: its one hooks module. The kernel's watching hook (kernel.ts: which files Claude's own calls
+// thimble's plugin: its one hooks module. The switches (../settings/term.ts: the plugin's options, /thimble settings),
+// the kernel's watching hook (kernel.ts: which files Claude's own calls
 // read, for `thimble coverage`), the shell (../shell/shell.tsx: objects drawn under replies, the detail view, verb
 // hints, the browser handoff), Claims (../claims/term.ts: the session's claims, the Claims pane at the right, the
 // folder's map), the observer (../observer/observer.ts: one quiet look after each turn of work, notes
@@ -13,12 +14,15 @@ import type { Register } from 'claude-code'
 import { registerClaims } from '../claims/term'
 import { registerObserver } from '../observer/observer'
 import { registerPrompts } from '../prompts/prompts'
+import { registerSettings } from '../settings/term'
 import { registerShell } from '../shell/shell'
 import { registerTelemetry } from '../telemetry/telemetry'
 import { register as registerKernel } from './kernel'
 import { registerPath } from './path'
 
 export const register: Register = (on, options) => {
+  // the switches first: every module asks them when it acts (settings/features.mjs)
+  registerSettings(on, options)
   registerTelemetry(on, 'first')
   registerPath(on, options)
   registerPrompts(on, options)

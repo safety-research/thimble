@@ -97,6 +97,20 @@ export async function promptText($: Engine, feature: string): Promise<{ text: st
   return { text: R.texts.get(key)!, version: a.version, id: key, off: false }
 }
 
+/** One version of a feature, whichever is active (a frame names its turn template; a shadow pass reads another frame):
+ *  {text, version, id, off}. A version that does not exist gives the active one. */
+export async function promptAt($: Engine, feature: string, version: string): Promise<{ text: string; version: string; id: string; off: boolean }> {
+  const { idx } = await registry($)
+  const v = idx[feature]?.versions?.[version]
+  if (!v?.file) return promptText($, feature)
+  const key = `${feature}:${version}`
+  if (!R.texts.has(key)) {
+    const raw = String(await $.fs.read(`${$.plugin.root.replace(/\/+$/, '')}/${v.file}`))
+    R.texts.set(key, v.file.endsWith('SKILL.md') ? bodyOf(raw) : raw)
+  }
+  return { text: R.texts.get(key)!, version, id: key, off: false }
+}
+
 /** The file of a feature's active version, for a text a model reads by its path (a subagent's guide): {file, id}. */
 export async function promptFile($: Engine, feature: string): Promise<{ file: string; id: string }> {
   const { idx, active } = await registry($)

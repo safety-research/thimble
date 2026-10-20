@@ -18,7 +18,8 @@ import detail from './detail.js'
 import labels from './labels.js'
 import mark from './mark.js'
 import proposals from './proposals.js'
+import settings from './settings.js'
 import threads from './threads.js'
 import tray from './tray.js'
 
-export default { chips, claims, coverage, detail, labels, mark, proposals, threads, tray }
+export default { chips, claims, coverage, detail, labels, mark, proposals, settings, threads, tray }

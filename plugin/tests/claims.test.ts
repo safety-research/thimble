@@ -95,6 +95,8 @@ function world(on: Any, forks: Record<string, unknown>[]) {
     return { value: { isAnswered: true, text: JSON.stringify(fork), usage: USAGE } }
   }
   on('model.complete', (_$: unknown, e: { prompt: string; system?: string }) => pass(`${e.system ?? ''}\n${e.prompt}`))
+  // the observer's look: a fork of the session with its frame and lenses as the prompt
+  on('model.fork', (_$: unknown, e: { prompt: string }) => pass(e.prompt))
   const submitted: { text: string; context: readonly string[] }[] = []
   on('prompt.submit', (_$: unknown, e: { text: string; context?: readonly string[] }) => {
     submitted.push({ text: e.text, context: e.context ?? [] })

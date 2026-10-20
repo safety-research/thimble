@@ -1,7 +1,7 @@
 {
   "name": "thimble",
   "version": "0.10.0",
-  "description": "thimble for Claude Code: the `thimble` command reads and queries any files and keeps the code, inputs and source rows behind every value. Each card Claude saves is drawn under its reply and opens in a detail view that keeps the chat going; each citation opens the rows it cites. After each turn an observer leaves notes for Claude, lights v when another view would help, and marks the terms the person may not know.",
+  "description": "thimble for Claude Code: the `thimble` command reads and queries any files and keeps the code, inputs and source rows behind every value. Each card Claude saves is drawn under its reply and opens in a detail view that keeps the chat going; each citation opens the rows it cites. After each of Claude's messages an observer reads it with the whole session: it leaves notes for Claude, lights v when another view would help, and marks the terms the person may not know. Each part can be turned off in /thimble-settings or /config.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -16,7 +16,61 @@
     "observer": {
       "type": "boolean",
       "title": "Observer",
-      "description": "After each turn of work, a side agent reads the answer and the objects behind it: it leaves notes for Claude, lights v when another view would help, and marks the terms you may not know.",
+      "description": "After each of Claude's messages, a side agent reads it with the whole session and gives the parts that are on. One call per message, over the session Claude already has cached.",
+      "default": true
+    },
+    "notes": {
+      "type": "boolean",
+      "title": "Observer: notes to Claude",
+      "description": "Up to two notes Claude reads with your next prompt, such as a number that counts the wrong months. You do not see them. A small part of each look.",
+      "default": true
+    },
+    "visualize": {
+      "type": "boolean",
+      "title": "Observer: v proposals",
+      "description": "Lights v with a named view when a view would show what the answer only tells. A small part of each look.",
+      "default": true
+    },
+    "explain": {
+      "type": "boolean",
+      "title": "Observer: explainers",
+      "description": "Marks the terms of an answer you may not know; ] opens what each one means here. A small part of each look.",
+      "default": true
+    },
+    "details": {
+      "type": "boolean",
+      "title": "Observer: important details",
+      "description": "Marks the details of an answer that are easy to miss and change what it means. A small part of each look.",
+      "default": true
+    },
+    "squeeze": {
+      "type": "boolean",
+      "title": "Observer: squeeze levels",
+      "description": "Says where each answer stands on squeeze's chips, so your first change with s starts from the right level. A few words of each look.",
+      "default": true
+    },
+    "claims": {
+      "type": "boolean",
+      "title": "Observer: claims",
+      "description": "Keeps the session's claims in the Claims pane, with c and the claims count on the bar. The largest part of each look.",
+      "default": true
+    },
+    "catchup": {
+      "type": "boolean",
+      "title": "Catch-up",
+      "description": "When two or more replies came since your last prompt, s offers to catch up on all of them in one. Nothing until you press s: then one rewrite of the replies.",
+      "default": true
+    },
+    "coverage": {
+      "type": "boolean",
+      "title": "Coverage count on the bar",
+      "description": "Shows on the bar how much of the data Claude read (seen 12%); r opens Coverage. No model call: thimble counts the files after each turn.",
+      "default": true
+    },
+    "labels": {
+      "type": "boolean",
+      "title": "Labels count on the bar",
+      "description": "Shows on the bar how many labels the folder has; l opens them. No model call.",
       "default": true
     }
   }

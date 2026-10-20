@@ -109,8 +109,11 @@ The browser workbench:
 
 ## Settings
 
-- **The plugin's side agent** (Observer) reads each reply after Claude writes it. It makes one model call per reply. To
-  turn it off: run `/plugin configure thimble@thimble` in Claude Code and set Observer to off.
+- **The plugin's switches.** The side agent (Observer) reads each reply after Claude writes it, with the whole
+  session; it makes one model call per reply. It and each of its parts (notes to Claude, `v` proposals, explainers,
+  important details, squeeze levels, claims), catch-up and the bar's coverage and labels counts can each be turned off:
+  click `thimble` at the left of the bar or run `/thimble-settings`, or use `/config` or
+  `/plugin configure thimble@thimble`.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).

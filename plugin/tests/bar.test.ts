@@ -95,8 +95,8 @@ test('the bar is there from the start of a session: its keys dim while there is 
   expect(textOf(bar)).toContain('thimble  v visualize · s squeeze · c claims')
   expect(textOf(bar)).not.toContain('cite & explain')
   expect(dimText(bar)).toContain('v visualize| · |s squeeze| · |c claims')
-  // nothing to act on: no key of it is a press, and v types
-  expect(buttons(bar).length).toBe(0)
+  // nothing to act on: no key of it is a press, and v types; the label at its left opens thimble's settings
+  expect(buttons(bar).map((b: Any) => b.props.label)).toEqual(['thimble settings'])
   expect(await press($, clock, edit('v'))).toEqual({ text: 'v', cursor: 1 })
   // while the first turn runs, the same
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)

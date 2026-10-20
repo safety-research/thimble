@@ -52,10 +52,15 @@ test('the real fragments compose: every lens of the registry has instructions, a
   for (const h of ['## Notes to Claude', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explainers', '## Heads-ups', '## The claims of this turn']) assert.ok(sys.text.includes(h), h)
   assert.doesNotMatch(sys.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(sys.text, /<!--/)
-  const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { QUESTION: 'q', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, ST)
+  // the fork's template (observer-turn:v3, the default): the messages to read, the evidence, the digests, the skeleton
+  const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { MESSAGES: 'Read this message of Claude\'s', ROW: 'v visualize', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', SKELETON: skeletonOf(LENSES) }, parts, ST)
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
   assert.match(turn.text, /Notes Claude already has:\n- a note given/)
   assert.match(turn.text, /Terms the analyst already saw explained:\n- p95/)
+  assert.match(turn.text, /\{"notes": \[\], "verbs": \{\}, "glosses": \[\], "heads": null, "claims": \[\]\}\s*$/)
+  // the earlier pass's template (observer-turn:v2) still composes
+  const old = composeTurn(textOf('observer-turn', ROOT, { THIMBLE_PROMPTS: 'observer-turn:v2' }).text, { QUESTION: 'q', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, ST)
+  assert.doesNotMatch(old.text, /\{\{[A-Z_]+\}\}/)
 })
 
 test("each lens's share of the pass: its characters in and out, the frame and the turn as the shared part", () => {
