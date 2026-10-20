@@ -2338,6 +2338,19 @@
       const minC = Math.min(...V.map(v => v.c))
       V.forEach(v => { v.c = Math.round(v.c - minC) })
       layers.forEach(ly => { for (let i = 1; i < ly.length; i++) ly[i].c = Math.max(ly[i].c, ly[i - 1].c + ly[i - 1].cw + gapC) })
+      // a long edge runs straight where it can: its pass-throughs move to one place across every layer they cross, the
+      // first of their own places that is free in all of them, keeping each layer's order
+      G.edges.forEach(e => {
+        const ds = e.segs.slice(1).map(s => s.from)
+        if (ds.length < 2) return
+        const free = (d, c) => {
+          const ly = layers[d.layer], i = ly.indexOf(d)
+          const prev = ly[i - 1], next = ly[i + 1]
+          return (!prev || prev.c + prev.cw + gapC <= c) && (!next || c + 1 + gapC <= next.c)
+        }
+        const at = ds.map(d => d.c).find(c => ds.every(d => free(d, c)))
+        if (at != null) ds.forEach(d => { d.c = at })
+      })
       // ports: where each segment leaves a vertex (pc) and enters the next (qc), ordered by where the other end sits
       V.forEach(v => {
         v.down.sort((a, b) => mid(a.to) - mid(b.to))
