@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stops a push whose commits hold private details: home and mount paths, keys and tokens, and the patterns and values
+# of your private lists. scripts/scan.sh says what it checks. Git runs this hook once the checkout has
+# `git config core.hooksPath scripts/hooks`. When it stops a push, it says what to do. Never push with --no-verify.
+scan="$(dirname "$0")/../scan.sh"
+if [ ! -f "$scan" ]; then
+  echo "pre-push: $scan is missing, so the push is stopped." >&2
+  exit 1
+fi
+exec sh "$scan" --pre-push "$1"

@@ -1,4 +1,5 @@
-# The checks every push and pull request runs, which can also be run by hand from the Actions tab. Each step is one step
+# The checks every push and pull request runs, which can also be run by hand from the Actions tab. The first step scans
+# the new commits with scripts/scan.sh's generic patterns (CI has no private lists). Each step after it is one step
 # of scripts/check.sh, the command a contributor runs locally, so CI and a local run check the same things.
 #
 # Claude Code comes from npm (@anthropic-ai/claude-code), pinned to a version the plugin was tested with. Its
@@ -27,6 +28,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false  # the steps after it run a pull request's code, which needs no token
+          fetch-depth: 0  # the scan reads the history of the pushed commits
+
+      - name: Scan the new commits for private paths and secrets
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            scripts/scan.sh --generic "$BASE..$HEAD_SHA"
+          else  # a new branch, a force push or a manual run: the commits no other branch has
+            scripts/scan.sh --generic "$HEAD_SHA" --not --exclude="origin/$GITHUB_REF_NAME" --remotes=origin
+          fi
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
