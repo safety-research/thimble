@@ -41,9 +41,9 @@ You ask Claude questions as usual. thimble adds three things:
 - **Citations.** Numbers in Claude's replies link to the rows they were counted from. You can open each one and read
   those rows.
 - **A second reader.** After each of Claude's replies, a side agent reads it with the whole session and the work
-  behind it. It leaves notes for Claude about anything that needs a fix, suggests another view when one would help,
-  and explains terms you may not know. A click on `thimble` at the bar's left (or `/thimble-settings`) turns each of
-  its parts on or off.
+  behind it. It suggests another view when one would help, explains terms you may not know, marks the details that
+  are easy to miss, and keeps the session's claims. A click on `thimble` at the bar's left (or `/thimble-settings`)
+  turns each feature on or off, and shows how the bar changes as you do.
 
 ### Use
 
@@ -86,9 +86,9 @@ If you type a word that starts with one of these letters, thimble gives the lett
 The side agent makes one model call after each of Claude's replies, with your session's model. It is a fork of the
 session, so the prompt cache serves the conversation it reads; replies that come while it reads wait and are read
 together in one call. A `--prompt` label makes one call per 50 records. A rewrite with `s` makes one call. All calls
-go through your Claude Code login and show in your usage like any other. To turn the side agent or one of its parts
-off, click `thimble` at the left of the bar (or run `/thimble-settings`); the same switches are in `/config` and in
-`/plugin configure thimble@thimble`.
+go through your Claude Code login and show in your usage like any other. To turn a feature off, click `thimble` at
+the left of the bar (or run `/thimble-settings`). The features that read Claude's replies share the side agent's call:
+with all of them off, it makes none.
 
 ### What it stores
 

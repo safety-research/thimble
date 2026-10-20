@@ -16,7 +16,8 @@ https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
    says what is missing, one line each. Tell the user what is missing, with the command that fixes it, and run that
    command only when the user agrees. Then run the script again.
 4. End with a short reply: the plugin works in a new `claude` session in a folder of data files that they trust, and
-   the line above the prompt lists its keys; `/plugin` turns it, or its side agent, off. The browser workbench starts
+   the line above the prompt lists its keys; a click on `thimble` in that line (or `/thimble-settings`) turns each of
+   its features on or off, and `/plugin` turns thimble off. The browser workbench starts
    with `thimble-browser` in a folder of files (or `thimble-browser FOLDER`), and asks for credentials in its Settings.
 
 ## Working on thimble
