@@ -1,7 +1,7 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
-import type { ChatRecord } from '../lib/types'
+import type { ChatRecord, TurnUsage } from '../lib/types'
 import { shortStepNames, stepParts } from './threads'
 
 export interface UserRow {
@@ -37,6 +37,8 @@ export interface TextRow {
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
+  /** the model and token use of the turn this row ends (its `done` record), on the turn's last text row */
+  usage?: { model?: string } & TurnUsage
 }
 export interface ToolResult {
   summary: string
@@ -251,6 +253,18 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
       case 'error':
         rows.push({ kind: 'error', index, message: e.message, errorKind: e.kind, detail: e.detail })
         return
+      case 'done': {
+        // the turn's model and token use go under its last text row, the reply's end
+        if (!e.usage || parent) return
+        for (let k = rows.length - 1; k >= 0 && rows[k].kind !== 'user'; k--) {
+          const r = rows[k]
+          if (r.kind === 'text' && !r.apiError) {
+            r.usage = { ...e.usage, ...(e.model ? { model: e.model } : {}) }
+            return
+          }
+        }
+        return
+      }
       case 'glosses': {
         // each mark goes to the first text row of the turn that holds its words
         let from = rows.length

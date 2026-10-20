@@ -66,7 +66,7 @@ export type Events = {
   /** A toast (shell/Toasts) only confirms or fails the analyst's own click, or reports news with a link to it: `ref`
    * puts a chip of what it names on it, `thread` the chip of a thread (chat/Notes ThreadChip). A state that lasts, such
    * as a refused start or a write that failed, shows once next to what it concerns and is never also a toast. */
-  toast: { text: string; kind?: 'info' | 'error'; ref?: string; thread?: { id: string; label: string } }
+  toast: { text: string; kind?: 'info' | 'error'; ref?: string; thread?: { id: string; label: string }; action?: ToastAction }
   /** open Report a problem under the top bar's bug, with what failed written in and the chats it concerns */
   reportProblem: ProblemPrefill
   /** a ⌘-click inside a view's frame (files/ViewerFrame): the pointer's box opens on that element, at `rect`; `view`
@@ -125,4 +125,10 @@ export const bus = {
       }
     }
   },
+}
+
+/** A toast's one button, such as Reopen after a comment is resolved: its words and what it does. */
+export interface ToastAction {
+  label: string
+  run: () => void
 }

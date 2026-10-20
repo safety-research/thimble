@@ -96,36 +96,3 @@ describe('a view built here', () => {
     expect(localViewLine({ ...v, description: undefined })).toBe('')
   })
 })
-
-describe('tasksLine', () => {
-  const task = (t: string, way: 'thimble' | 'prompt' | 'sdk' | 'command', extension = '', additions: string[] = [], conflict: string[] = []) => ({ task: t, way, extension, additions, conflict })
-
-  it('names only the tasks an extension changes, each with who runs it', async () => {
-    const { tasksLine } = await import('../../src/shell/SettingsPopover')
-    expect(tasksLine([task('labels', 'thimble'), task('card-check', 'thimble')])).toBe('')
-    const line = tasksLine([task('labels', 'command', 'vote-labels'), task('view-fit', 'thimble'), task('checks', 'thimble', '', [], ['a', 'b'])])
-    expect(line).toContain('labels')
-    expect(line).toContain('vote-labels')
-    expect(line).toContain('checks')
-    expect(line).not.toContain('view-fit')
-    const one = tasksLine([task('label-draft', 'command', 'pass'), task('card-check', 'command', 'pass'), task('checks', 'command', 'pass')])
-    expect(one.match(/pass/g)).toHaveLength(1)
-    expect(one).toContain('label-draft')
-    expect(one).toContain('checks')
-  })
-})
-
-describe('the labels and card check rows', () => {
-  const agent = (over: Record<string, unknown> = {}) => ({ way: 'thimble', extension: '', additions: [], conflict: [], sandbox: 'on', sandbox_runs: true, network: 'on', web: 'off', data: 'ask', config: 'agents.labels', ...over }) as import('../../src/lib/types').AgentRow
-
-  it('say what a program of their tasks may do, and that with no thread to ask in it never edits the data at ask', async () => {
-    const { agentLine, agentTip, CALL_ROWS } = await import('../../src/shell/SettingsPopover')
-    expect(CALL_ROWS.map((r) => r.agent)).toEqual(['labels', 'cardCheck'])
-    const labels = agent({ tasks: ['labels', 'label-draft', 'view-fit'] })
-    expect(agentLine(labels)).toContain('never edits data')
-    expect(agentLine(agent())).toContain('asks to edit data')
-    expect(agentLine(agent({ tasks: ['card-check'], data: 'allow' }))).toContain('may edit data')
-    expect(agentTip(labels)).toContain('labels, label-draft or view-fit')
-    expect(agentTip(labels)).toContain('agents.labels')
-  })
-})

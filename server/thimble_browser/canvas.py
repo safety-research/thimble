@@ -10,11 +10,13 @@ in the chat and in a takeaway alike, as the terminal plugin does. A takeaway is 
 """
 from __future__ import annotations
 
+import copy
+import logging
 import re
 import secrets
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import home
 from .cards import frames
@@ -25,6 +27,34 @@ CODE_KINDS = ("plot", "table", "code", "diagram", "timeline")
 DATA_KINDS = ("note", "example", "custom")
 KINDS = CODE_KINDS + DATA_KINDS
 _lock = threading.RLock()
+log = logging.getLogger("thimble_browser.canvas")
+# the fields an edit that the card's history keeps changes (the `fields` of its `edited` entry)
+VERSION_FIELDS = ("title", "kind", "code", "payload", "takeaway")
+
+# Feature modules hear each change to a card (on_change): fn(ws, op, before, after, by=..., prior=...), `op` created,
+# edited, ran or deleted, `before`/`after` copies of the card (None for none), `prior` the id of the card before it in
+# its group (where an undo puts a deleted card back). A hook's failure is logged and never stops the change.
+HOOKS: list[Callable[..., None]] = []
+
+
+def on_change(fn: Callable[..., None]) -> None:
+    if fn not in HOOKS:
+        HOOKS.append(fn)
+
+
+def _changed(ws: str, op: str, before: dict[str, Any] | None, after: dict[str, Any] | None, by: str,
+             prior: str | None = None) -> None:
+    for fn in list(HOOKS):
+        try:
+            fn(ws, op, copy.deepcopy(before), copy.deepcopy(after), by=by, prior=prior)
+        except Exception:  # noqa: BLE001
+            log.exception("a hook on the change to a card failed")
+
+
+def _prior(nb: dict[str, Any], cid: str) -> str | None:
+    ids = [c["id"] for c in nb["cells"]]
+    i = ids.index(cid) if cid in ids else -1
+    return ids[i - 1] if i > 0 else None
 
 MD_LINK = re.compile(r"(?<!!)\[([^\[\]\n]*)\]\(([^()\n]+?)\)")
 
@@ -173,7 +203,9 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
         cell["notebook"] = nb["id"]
         nb["cells"].append(cell)
         save(ws, nb)
+        prior = _prior(nb, cell["id"])
     emit(ws, cell, "added")
+    _changed(ws, "created", None, cell, by, prior)
     return cell
 
 
@@ -182,6 +214,7 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
         nb, cell = find(ws, card)
         if cell.get("locked") and by != "analyst":
             raise PermissionError("the person locked this card")
+        before = copy.deepcopy(cell)
         if args.get("question"):
             cell["title"] = str(args["question"])
         if "takeaway" in args and args["takeaway"] is not None:
@@ -205,7 +238,10 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
             if k in args and by == "analyst":
                 cell[k] = args[k]
         cell["ts"] = home.now()
-        cell.setdefault("edited", []).append({"by": by, "ts": cell["ts"]})
+        fields = [k for k in VERSION_FIELDS if before.get(k) != cell.get(k)]
+        if fields:  # an edit of what the card says, which its history keeps (a move or a star is no edit)
+            cell.setdefault("edited", []).append({"by": by, "ts": cell["ts"], "id": secrets.token_hex(4),
+                                                  "fields": fields})
         if args.get("group") and by != "analyst":
             target = group_for(ws, args["group"])
             if target["id"] != nb["id"]:
@@ -219,6 +255,7 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
             nb["cells"] = [cell if c["id"] == cell["id"] else c for c in nb["cells"]]
         save(ws, nb)
     emit(ws, cell, "edited")
+    _changed(ws, "edited", before, cell, by)
     return cell
 
 
@@ -227,18 +264,23 @@ def delete_card(ws: str, card: str, *, by: str = "main") -> None:
         nb, cell = find(ws, card)
         if cell.get("locked") and by != "analyst":
             raise PermissionError("the person locked this card")
+        prior = _prior(nb, cell["id"])
         nb["cells"] = [c for c in nb["cells"] if c["id"] != cell["id"]]
         save(ws, nb)
     emit(ws, cell, "deleted")
+    _changed(ws, "deleted", cell, None, by, prior)
 
 
 def set_run(ws: str, cid: str, **fields: Any) -> dict[str, Any]:
     with _lock:
         nb, cell = find(ws, cid)
+        before = copy.deepcopy(cell)
         cell.update(fields)
         nb["cells"] = [cell if c["id"] == cell["id"] else c for c in nb["cells"]]
         save(ws, nb)
     emit(ws, cell, "ran")
+    if "outputs" in fields:
+        _changed(ws, "ran", before, cell, "run")
     return cell
 
 

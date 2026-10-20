@@ -31,11 +31,11 @@ export const MAIN_DEFAULT_EFFORT: MainEffort = 'high'
 /** The orientation's effort while Settings are not read yet (config.ORIENT_DEFAULT_EFFORT). */
 export const ORIENT_DEFAULT_EFFORT: OrientEffort = 'xhigh'
 
-/** Main's model's tip: a running session's model changes only by /model in its terminal. */
-export const MODEL_TIP = 'Run /model in the Claude Code terminal to change the model'
+/** Main's model's tip: thimble browser's one model is picked in Settings. */
+export const MODEL_TIP = 'Pick the model in Settings (the gear at the top right)'
 
-/** What a change to main's effort or fast mode does: it is kept for main's next launch (backend events.effort_route). */
-export const NEXT_LAUNCH = 'Main runs with it from your next `thimble` launch'
+/** What a change to main's effort does in thimble browser: the next request takes it. */
+export const NEXT_LAUNCH = 'Claude uses it from your next message'
 
 /** Why a model's bolt cannot switch: it has no fast mode. */
 export const noFastTip = (model: string): string => `${modelLabel(model)} has no fast mode`

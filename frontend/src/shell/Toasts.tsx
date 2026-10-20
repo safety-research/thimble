@@ -3,11 +3,12 @@
 // view that is ready, a thread that got its answer). A state that lasts (a refused start, a write that failed, the
 // server down) shows once, next to what it concerns, and is never also a toast. An error has a negative edge and ✕;
 // news has the accent dot and a chip to where it landed, and news of a thread stays longer (its chip opens it). A span
-// in backticks (a command such as `thimble up`) is drawn as code, as a notice draws it.
+// in backticks (a command such as `thimble up`) is drawn as code, as a notice draws it. A toast may carry one button
+// (`action`), such as Reopen after the analyst resolved a comment; a click on it acts and closes the toast.
 import { useEffect, useState } from 'react'
 import { Mark } from '../components/Marks'
 import { RefChip } from '../components/RefChip'
-import { bus } from '../lib/bus'
+import { bus, type ToastAction } from '../lib/bus'
 import { ThreadChip } from '../chat/Notes'
 import { noticeText } from '../chat/Notice'
 
@@ -17,6 +18,7 @@ interface Toast {
   kind: 'info' | 'error'
   ref?: string
   thread?: { id: string; label: string }
+  action?: ToastAction
 }
 const SHOW_MS = 5000
 const THREAD_SHOW_MS = 15000
@@ -35,7 +37,7 @@ export function Toasts() {
         const id = ++seq
         const text = t.kind === 'error' ? toastText(t.text) : t.text
         const same = (x: Toast) => x.text === text && x.thread?.id === t.thread?.id
-        setToasts((ts) => (ts.some(same) ? ts : [...ts, { id, text, kind: t.kind ?? 'info', ref: t.ref, thread: t.thread }]))
+        setToasts((ts) => (ts.some(same) ? ts : [...ts, { id, text, kind: t.kind ?? 'info', ref: t.ref, thread: t.thread, action: t.action }]))
         window.setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), t.thread ? THREAD_SHOW_MS : SHOW_MS)
       }),
     [],
@@ -49,6 +51,11 @@ export function Toasts() {
           <span className="shell-toast-text">{noticeText(t.text)}</span>
           {t.ref && <RefChip ref={t.ref} compact />}
           {t.thread && <ThreadChip id={t.thread.id} label={t.thread.label} />}
+          {t.action && (
+            <button type="button" className="shell-toast-action" onClick={() => t.action!.run()}>
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>

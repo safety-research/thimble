@@ -660,9 +660,34 @@ button.settings-ext-name:hover .settings-ext-caret {
   background: var(--overlay-bg);
   border-top: 1px solid var(--border-subtle);
 }
-.settings-foot .settings-tour {
+.settings-foot .settings-tour,
+.settings-foot .settings-check {
   margin-right: auto;
   margin-left: -6px;
+}
+/* thimble browser's Claude table (shell/SettingsPopover): a name, then its control */
+.settings-claude .settings-row {
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+.settings-source,
+.settings-org {
+  justify-self: start;
+}
+.field.settings-key {
+  width: 100%;
+  font: var(--type-mono);
+}
+.settings-key-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+}
+.settings-check-ok {
+  color: var(--text-secondary);
+}
+.settings-check-failed {
+  color: var(--status-negative);
 }
 
 /* -------- Report a problem (shell/ProblemReport, inside a glass Popover): the form, then where the bundle is and where
@@ -783,6 +808,21 @@ button.settings-ext-name:hover .settings-ext-caret {
 }
 .shell-toast-text code {
   font: var(--type-mono-sm);
+}
+/* a toast's one button (Toasts `action`), such as Reopen: accent text, no frame */
+.shell-toast-action {
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: none;
+  color: var(--accent);
+  font: var(--type-ui-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.shell-toast-action:hover {
+  background: var(--surface-hover);
 }
 
 /* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */

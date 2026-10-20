@@ -34,6 +34,7 @@ import { NoticeRow } from './Notice'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { autoModeRefusal } from './permissions'
+import { UsageLine } from './usage'
 
 /** The working mark while a reply streams and no tool is pending: the spinner, the one thing that loops. */
 export function Working() {
@@ -168,6 +169,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
                   <ChatMarkdown text={r.text} streaming={r === lastText} glosses={r.glosses} />
                 </div>
+                {r.usage && <UsageLine usage={r.usage} />}
               </div>
             )
           case 'tools':

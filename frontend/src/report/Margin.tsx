@@ -2,7 +2,7 @@
 // with its passage and stacked so no two meet (checkComments.ts stackCards). Each is the comment card the canvas draws
 // too (CommentCard.tsx): its check's name and its statement, its details on request and ✓, and, while it is active, a
 // field that opens a thread on the passage. A new comment from the toolbar is a card with a field until Enter stores it.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { TextArea } from '../components/Field'
 import { bus } from '../lib/bus'
 import { CommentCard } from './CommentCard'
@@ -119,8 +119,9 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
   )
 }
 
-/** The analyst's new comment, at its passage until Enter stores it; Escape, or leaving it empty, drops it. */
-function DraftCard({ top, cardRef, onSave, onCancel }: { top: number | undefined; cardRef: (el: HTMLDivElement | null) => void; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
+/** The analyst's new comment, at its passage until Enter stores it; Escape, or leaving it empty, drops it. The canvas
+ * places one beside a card (canvas/CommentLayer) with its own `style` and `className`. */
+export function DraftCard({ top, style, className = '', attrs, onMouseDown, cardRef, onSave, onCancel }: { top: number | undefined; style?: CSSProperties; className?: string; attrs?: Record<string, string>; onMouseDown?: (e: MouseEvent<HTMLDivElement>) => void; cardRef: (el: HTMLDivElement | null) => void; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   // the field takes the caret once the card stands at its passage, without scrolling the page to it
@@ -151,7 +152,7 @@ function DraftCard({ top, cardRef, onSave, onCancel }: { top: number | undefined
     }
   }
   return (
-    <div ref={cardRef} className="wu-cm wu-cm-active wu-cm-draft" style={{ top: top ?? 0, visibility: top == null ? 'hidden' : undefined }} onClick={(e) => e.stopPropagation()}>
+    <div ref={cardRef} className={`wu-cm wu-cm-active wu-cm-draft${className ? ` ${className}` : ''}`} style={{ top: top ?? 0, visibility: top == null ? 'hidden' : undefined, ...style }} {...attrs} onClick={(e) => e.stopPropagation()} onMouseDown={onMouseDown}>
       <div className="wu-cm-head">
         <span className="wu-cm-sq" style={{ background: NOTE_COLOR }} />
         <span className="wu-cm-name" style={{ color: NOTE_COLOR }}>

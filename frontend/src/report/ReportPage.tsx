@@ -132,6 +132,17 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
       const saved = await commentsApi.resolve(ws, slug, cm.id)
       track('ui-click', { target: `report:${slug}#${cm.sid}`, detail: { action: 'comment-resolve', check: cm.check } })
       onSaved(saved as Writeup)
+      bus.emit('toast', {
+        text: 'Comment resolved.',
+        action: {
+          label: 'Reopen',
+          run: () =>
+            void commentsApi.reopen(ws, slug, cm.id).then(
+              (doc) => onSaved(doc as Writeup),
+              (e: Error) => bus.emit('toast', { text: `Could not reopen the comment. ${e.message}`, kind: 'error' }),
+            ),
+        },
+      })
     } catch (e) {
       bus.emit('toast', { text: `Could not resolve the comment. ${(e as Error).message}`, kind: 'error' })
     }

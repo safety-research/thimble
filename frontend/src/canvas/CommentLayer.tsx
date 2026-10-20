@@ -11,13 +11,16 @@
 // active, a field that opens a thread anchored to its card or step. A comment hides with its check, when its card is
 // not drawn (a collapsed frame) or when the filters leave its card out. The box the comments cover goes to the canvas,
 // whose Fit and minimap take it in. A comment opened is looked at, so its run no longer marks the toolbar's Comments
-// button with the new comments' dot (report/newComments.ts).
+// button with the new comments' dot (report/newComments.ts). A card's Comment button opens a draft beside the card (the
+// Report's DraftCard): Enter stores the analyst's comment there, Escape or leaving it empty drops it. Done on a comment
+// shows a toast whose Reopen opens it again.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { CanvasComment } from '../lib/types'
 import { evidenceRefs, type CheckLook } from '../report/checkComments'
 import { CommentCard } from '../report/CommentCard'
+import { DraftCard } from '../report/Margin'
 import { canvasCommentsApi } from '../report/commentsApi'
 import { useLookedAt } from '../report/newComments'
 import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, extentOf, type Board, type CommentPlace, type CommentSpot, type Layout, type Rect } from './layout'
@@ -25,7 +28,7 @@ import { COMMENT_LIFT, COMMENT_STEP_LIFT, COMMENT_W, commentPlaces, extentOf, ty
 const REFETCH_DEBOUNCE_MS = 200
 
 /** The workspace's open comments on the cards, read again when the stream says they or the cards changed. */
-export function useCanvasComments(ws: string): { comments: CanvasComment[]; resolve: (c: CanvasComment) => Promise<void> } {
+export function useCanvasComments(ws: string): { comments: CanvasComment[]; resolve: (c: CanvasComment) => Promise<void>; add: (card: string, text: string) => Promise<CanvasComment> } {
   const [comments, setComments] = useState<CanvasComment[]>([])
   useEffect(() => {
     let live = true
@@ -56,6 +59,14 @@ export function useCanvasComments(ws: string): { comments: CanvasComment[]; reso
       try {
         setComments(await canvasCommentsApi.resolve(ws, c.id))
         track('ui-click', { target: c.ref, detail: { action: 'comment-resolve', check: c.check } })
+        bus.emit('toast', {
+          text: 'Comment resolved.',
+          action: {
+            label: 'Reopen',
+            run: () =>
+              void canvasCommentsApi.reopen(ws, c.id).then(setComments, (e: Error) => bus.emit('toast', { text: `Could not reopen the comment. ${e.message}`, kind: 'error' })),
+          },
+        })
       } catch (e) {
         bus.emit('toast', { text: `Could not resolve the comment. ${(e as Error).message}`, kind: 'error' })
         canvasCommentsApi.list(ws).then(setComments, () => undefined)
@@ -63,7 +74,17 @@ export function useCanvasComments(ws: string): { comments: CanvasComment[]; reso
     },
     [ws],
   )
-  return { comments, resolve }
+  // the analyst's comment beside a card; a failure is the caller's to show, so the draft keeps its words
+  const add = useCallback(
+    async (card: string, text: string) => {
+      const r = await canvasCommentsApi.add(ws, card, text)
+      setComments(r.comments)
+      track('ui-click', { target: `card:${card}`, detail: { action: 'comment-add' } })
+      return r.comment
+    },
+    [ws],
+  )
+  return { comments, resolve, add }
 }
 
 /** The comments the board shows: main's always, a check's while it is on, each on a card that is drawn and that the
@@ -120,9 +141,17 @@ export interface CommentLayerProps {
   /** the box the placed comments cover on the plane, or null for none, whenever it changes: Fit and the minimap take it
    * in with the cards */
   onExtent?: (box: Rect | null) => void
+  /** the card the analyst is writing a comment beside (a card's Comment button), or null */
+  draft?: string | null
+  /** stores the draft's words beside its card */
+  onDraft?: (card: string, text: string) => Promise<void>
+  onDraftCancel?: () => void
 }
 
-export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve, titleOf, onExtent }: CommentLayerProps) {
+/** The draft's place among the comments (DraftCard), a key no stored comment has. */
+const DRAFT = 'draft:'
+
+export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve, titleOf, onExtent, draft = null, onDraft, onDraftCancel }: CommentLayerProps) {
   const els = useRef(new Map<string, HTMLDivElement>())
   const extent = useRef<Rect | null>(null)
   const [places, setPlaces] = useState<Map<string, CommentPlace>>(new Map())
@@ -142,7 +171,9 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
   // that stands level with its step: the one the keyboard is on, else the open one, never the hovered one
   const shown = (id: string | null) => id != null && comments.some((c) => c.id === id)
   const hotId = [hovered, focused, active].find(shown) ?? null
-  const anchor = [focused, active].find(shown) ?? null
+  // the draft stands level with its card's top, as an open comment does
+  const draftId = draft != null && onDraft ? DRAFT + draft : null
+  const anchor = draftId ?? [focused, active].find(shown) ?? null
 
   // every step or card a shown comment is on is highlighted in its check's color, as the Report highlights a commented
   // passage (report.css .wu-flag: the color of the hot comment there, else of the first check in the pane's order), and
@@ -197,6 +228,8 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
       if (!el) continue
       spots.push({ id: c.id, card: c.card, dy: pointOf(cardEl(c.card), c), h: el.offsetHeight })
     }
+    const draftEl = draftId ? els.current.get(draftId) : undefined
+    if (draftId && draft && draftEl) spots.push({ id: draftId, card: draft, dy: COMMENT_LIFT, h: draftEl.offsetHeight })
     const next = commentPlaces(board, lay, spots, anchor)
     const same = (a: CommentPlace | undefined, b: CommentPlace) => !!a && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.ax - b.ax) < 0.5 && Math.abs(a.ay - b.ay) < 0.5
     setPlaces((prev) => (prev.size === next.size && [...next].every(([k, v]) => same(prev.get(k), v)) ? prev : next))
@@ -217,9 +250,26 @@ export function CommentLayer({ ws, board, lay, comments, look, cardEl, onResolve
     return () => document.removeEventListener('mousedown', onDown)
   }, [active])
 
-  if (!comments.length) return null
+  if (!comments.length && !draftId) return null
+  const draftPlace = draftId ? places.get(draftId) : undefined
   return (
     <>
+      {draftId && draft && onDraft && (
+        <DraftCard
+          key={draftId}
+          top={draftPlace?.y}
+          style={{ left: draftPlace?.x ?? 0, width: COMMENT_W }}
+          className="ccm"
+          attrs={{ 'data-canvas-comment': draftId, 'data-comment-ref': `card:${draft}` }}
+          onMouseDown={(e) => e.stopPropagation()}
+          cardRef={(el) => {
+            if (el) els.current.set(draftId, el)
+            else els.current.delete(draftId)
+          }}
+          onSave={(text) => onDraft(draft, text)}
+          onCancel={() => onDraftCancel?.()}
+        />
+      )}
       {comments.map((c) => {
         const place = places.get(c.id)
         return (

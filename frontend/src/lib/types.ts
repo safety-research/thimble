@@ -57,13 +57,22 @@ export type ChatRecord =
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
   | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
-  | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null }
+  | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
   | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
+
+/** A turn's token use, summed over its requests (backend agent.Usage), on its `done` record. */
+export interface TurnUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  requests: number
+}
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
  * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
@@ -1295,6 +1304,27 @@ export interface AgentRow {
 /** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
  * `permission_modes` merges per agent, null putting an agent back on the session's mode; `web` sets a subagent's web
  * off, or back on main's rule with null. */
+/** How thimble browser signs in to Claude (backend settings.py): Workload Identity Federation with an org, or an API key
+ * the analyst pasted; {} before either is chosen. */
+export interface Credentials {
+  source?: 'wif' | 'key'
+  org?: string
+}
+
+/** `GET /ws/{c}/settings` in thimble browser (backend settings_api.view): the sign-in, the one model and effort every
+ * agent runs on, explainers, and the choices the popover offers. The API key itself is never sent: `has_api_key` says
+ * whether one is saved. `models` holds the 0.8 page's role rows, each the one model and effort. */
+export interface BrowserSettings extends Settings {
+  credentials: Credentials
+  /** the sign-in in words, never an id or a key: "Workload Identity Federation (org-a)" */
+  signed_in: string
+  has_api_key: boolean
+  model: string
+  effort: string
+  explain: boolean
+  choices: { models: string[]; efforts: string[]; orgs: string[] }
+}
+
 export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
