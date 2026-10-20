@@ -1,7 +1,8 @@
 """Settings in the page: the gear's popover reads and changes settings.py.
 
     GET  /api/ws/{c}/settings           the settings, with the choices the popover offers
-    PUT  /api/ws/{c}/settings           change some of them: credentials, model, effort, explain
+    PUT  /api/ws/{c}/settings           change some of them: credentials, model, effort, explain (a WIF config file
+                                        that cannot be used is refused, in words that hold none of its values)
     PUT  /api/ws/{c}/settings/api-key   keep an API key the analyst pasted (never sent back, never logged)
     DELETE /api/ws/{c}/settings/api-key remove it
     POST /api/ws/{c}/settings/check     one Models API call with the credentials now saved: are they good?
@@ -18,7 +19,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from . import home, llm, settings
+from . import home, llm, settings, wif
 
 log = logging.getLogger("thimble_browser.settings_api")
 
@@ -26,18 +27,31 @@ KEY_MAX = 512  # characters of an API key, which is far shorter
 ROLES = ("main", "writer", "dev")  # the 0.8 page's roles that thimble browser runs, all on the one model
 
 
+def wif_view(c: dict[str, Any]) -> dict[str, Any] | None:
+    """The Workload Identity Federation config as the page shows it: its path and where the token comes from, or why
+    it cannot be used. Never an ID."""
+    if c.get("source") != "wif" or not c.get("file"):
+        return None
+    try:
+        return {"file": c["file"], "token": wif.load(str(c["file"])).describe(), "error": None}
+    except wif.WifError as e:
+        return {"file": c["file"], "token": None, "error": str(e)}
+
+
 def view() -> dict[str, Any]:
-    """The settings as the page reads them. The API key itself is never in it: only whether one is saved."""
+    """The settings as the page reads them. The API key itself is never in it: only whether one is saved. Of a WIF
+    config, only its path and token source."""
     s = settings.read()
     conf = {"model": s["model"], "effort": s["effort"], "fast": False}
     return {
         "credentials": s["credentials"],
+        "wif": wif_view(s["credentials"]),
         "signed_in": llm.describe(),
         "has_api_key": settings.has_api_key(),
         "model": s["model"],
         "effort": s["effort"],
         "explain": s["explain"],
-        "choices": {"models": list(settings.MODELS), "efforts": list(settings.EFFORTS), "orgs": settings.wif_orgs()},
+        "choices": {"models": list(settings.MODELS), "efforts": list(settings.EFFORTS)},
         "models": {r: dict(conf) for r in ROLES},
     }
 

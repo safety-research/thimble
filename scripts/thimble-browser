@@ -28,8 +28,10 @@ for arg in "$@"; do
   [ "$arg" != "--check-sandbox" ] || exec uv run --quiet --project "$root/server" thimble-browser --check-sandbox
 done
 
-if [ ! -f "$root/frontend/dist/index.html" ]; then
-  echo "thimble browser: building the page (once)..."
+# the page is built the first time, and again when its sources are newer than the build (after a pull, say)
+if [ ! -f "$root/frontend/dist/index.html" ] || [ -n "$(find "$root/frontend/src" "$root/frontend/index.html" \
+     "$root/frontend/package-lock.json" -newer "$root/frontend/dist/index.html" -print -quit 2>/dev/null)" ]; then
+  echo "thimble browser: building the page..."
   [ -d "$root/frontend/node_modules" ] || npm --prefix "$root/frontend" ci --no-audit --no-fund
   npm --prefix "$root/frontend" run build >/dev/null
 fi

@@ -39,8 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-open", action="store_true", help="print the link, do not open a browser")
     ap.add_argument("--no-sandbox", action="store_true",
                     help="run card code without a sandbox where none is found (not recommended)")
-    ap.add_argument("--wif", metavar="ORG",
-                    help="sign in to Claude with Workload Identity Federation for this org (saved in Settings)")
+    ap.add_argument("--wif", metavar="FILE",
+                    help="sign in to Claude with Workload Identity Federation, configured in FILE (saved in Settings)")
     ap.add_argument("--model", help="the model every agent runs on (saved in Settings), such as claude-opus-5-5")
     ap.add_argument("--check-sandbox", action="store_true",
                     help="test the sandbox card code runs in, print one line per check, and exit")
@@ -51,10 +51,14 @@ def main(argv: list[str] | None = None) -> int:
         from . import sandbox_check
 
         return sandbox_check.main()
-    if a.wif:
-        settings.write({"credentials": {"source": "wif", "org": a.wif}})
-    if a.model:
-        settings.write({"model": a.model})
+    try:
+        if a.wif:
+            settings.write({"credentials": {"source": "wif", "file": a.wif}})
+        if a.model:
+            settings.write({"model": a.model})
+    except ValueError as e:
+        print(f"thimble browser: {e}", file=sys.stderr)
+        return 2
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     for noisy in ("httpx", "httpx2", "anthropic", "google"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
@@ -69,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     print(sandbox_note.line(a.no_sandbox))
     s = settings.read()
     print(f"  Claude: {s['model']} at {s['effort']} effort, signed in with {llm.describe()}"
-          + ("" if s["credentials"] else " (choose credentials in Settings, or start with --wif ORG)"))
+          + ("" if s["credentials"] else " (choose credentials in Settings, or start with --wif FILE)"))
 
     def link() -> str:
         return f"http://127.0.0.1:{port}/?ws={ws}#p={auth.mint()}"

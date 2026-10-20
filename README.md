@@ -11,18 +11,48 @@ It keeps the page of thimble 0.8 and puts a new, small server behind it.
 
 ## Start
 
-You need [uv](https://docs.astral.sh/uv/), Node 22.12 or later, and credentials for the Claude API: Workload Identity
-Federation (`--wif ORG`, which reads the org's IDs from `~/.thimble/orgs/org-<org>.env`), or an API key you paste in
-Settings. On a Mac with Homebrew: `brew install uv node`. Card code runs in a sandbox, which on Linux also needs
-bubblewrap (`apt install bubblewrap`); see [Sandbox](#sandbox).
+You need [uv](https://docs.astral.sh/uv/), Node 22.12 or later, and credentials for the Claude API: an API key you
+paste in Settings, or Workload Identity Federation configured in a file (see below). On a Mac with Homebrew:
+`brew install uv node`. Card code runs in a sandbox, which on Linux also needs bubblewrap (`apt install bubblewrap`);
+see [Sandbox](#sandbox).
 
 ```
-scripts/thimble-browser path/to/folder --wif ORG
+scripts/thimble-browser path/to/folder
+scripts/thimble-browser path/to/folder --wif path/to/wif.toml
 ```
 
 The first run builds the page. The server listens on 127.0.0.1, prints a sign-in link and opens it. Press Enter in
 its window for a new link. To try it on a made-up folder of agent runs: `scripts/thimble-browser samples/agent-runs`.
 From another machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:8420 <host>`).
+
+### Workload Identity Federation
+
+With Workload Identity Federation, the server trades an identity token from your platform for a short-lived Claude API
+token, so no API key is stored. Name the config file with `--wif FILE`, or type its path in Settings. The file is TOML
+(or plain `KEY=VALUE` lines) and holds the IDs of your federation rule, as your Claude Console admin gives them:
+
+```toml
+federation_rule_id = "fdrl_..."
+organization_id = "..."
+service_account_id = "svac_..."    # optional
+workspace_id = "wrkspc_..."        # optional
+```
+
+It also says where the identity token comes from, in `token_source`:
+
+- `google` (the default): a Google identity token for `audience`, which is `https://api.anthropic.com` unless you set
+  another. It comes from the machine's metadata server on Google Cloud, or from a Google service account's Application
+  Default Credentials.
+- `file`: the token in `token_file`, read again each time the server needs a new token. This suits Kubernetes projected
+  service-account tokens, GitHub Actions and other platforms that write a token to a file.
+- `command`: what `token_command` prints, run again each time. It is a command line, such as
+  `"gcloud auth print-identity-token"`, or a list of its words.
+
+The SDK's environment-variable names are accepted as another spelling of the keys: `ANTHROPIC_FEDERATION_RULE_ID`,
+`ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID` and
+`ANTHROPIC_IDENTITY_TOKEN_FILE`. They are read from the file only; the server never reads `ANTHROPIC_*` variables from
+its environment. Keep the file writable by you alone, since it can name a command to run. Settings shows the file's
+path and its token source, never its IDs.
 
 ## What works
 

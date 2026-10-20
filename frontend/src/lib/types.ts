@@ -1304,11 +1304,12 @@ export interface AgentRow {
 /** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
  * `permission_modes` merges per agent, null putting an agent back on the session's mode; `web` sets a subagent's web
  * off, or back on main's rule with null. */
-/** How thimble browser signs in to Claude (backend settings.py): Workload Identity Federation with an org, or an API key
- * the analyst pasted; {} before either is chosen. */
+/** How thimble browser signs in to Claude (backend settings.py): Workload Identity Federation configured in a file, or an
+ * API key the analyst pasted; {} before either is chosen. */
 export interface Credentials {
   source?: 'wif' | 'key'
-  org?: string
+  /** the Workload Identity Federation config file's path */
+  file?: string
 }
 
 /** `GET /ws/{c}/settings` in thimble browser (backend settings_api.view): the sign-in, the one model and effort every
@@ -1316,13 +1317,16 @@ export interface Credentials {
  * whether one is saved. `models` holds the 0.8 page's role rows, each the one model and effort. */
 export interface BrowserSettings extends Settings {
   credentials: Credentials
-  /** the sign-in in words, never an id or a key: "Workload Identity Federation (an org)" */
+  /** the sign-in in words, never an id or a key: "Workload Identity Federation from /path/wif.toml (...)" */
   signed_in: string
+  /** the Workload Identity Federation config: its path, and where its identity token comes from or why it cannot be
+   * used; never its IDs. null when the sign-in is not WIF */
+  wif?: { file: string; token: string | null; error: string | null } | null
   has_api_key: boolean
   model: string
   effort: string
   explain: boolean
-  choices: { models: string[]; efforts: string[]; orgs: string[] }
+  choices: { models: string[]; efforts: string[] }
 }
 
 export interface SettingsPatch {

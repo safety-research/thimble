@@ -1,6 +1,7 @@
 // The settings gear's popover: how thimble browser signs in to Claude and how Claude runs (backend settings_api.py).
-// Sign in is Workload Identity Federation with one of the orgs this machine has, or an API key the analyst pastes in a
-// password field; once saved, the key is never shown again, only that one is saved. Then the one model every agent
+// Sign in is Workload Identity Federation, configured in a file the analyst names (the page shows its path and where its
+// identity token comes from, never its IDs), or an API key the analyst pastes in a password field; once saved, the key
+// is never shown again, only that one is saved. Then the one model every agent
 // runs on (the known ids, or another typed in), its effort, and whether explainers mark terms in Claude's answers.
 // Save sends only what changed; a choice applies from Claude's next request. Check asks the Models API once with the
 // saved sign-in and says whether it works.
@@ -35,7 +36,8 @@ export const KEY_SAVED = 'saved'
 /** The form as the popover holds it. */
 export interface SettingsForm {
   source: 'wif' | 'key'
-  org: string
+  /** the Workload Identity Federation config file's path */
+  file: string
   model: string
   effort: string
   explain: boolean
@@ -46,7 +48,7 @@ export function formOf(s: BrowserSettings): SettingsForm {
   const c = s.credentials ?? {}
   return {
     source: c.source === 'key' ? 'key' : 'wif',
-    org: c.org ?? s.choices?.orgs?.[0] ?? '',
+    file: c.file ?? '',
     model: s.model,
     effort: s.effort,
     explain: s.explain !== false,
@@ -57,8 +59,8 @@ export function formOf(s: BrowserSettings): SettingsForm {
 export function changedSettings(loaded: BrowserSettings, now: SettingsForm): Record<string, unknown> {
   const was = formOf(loaded)
   const out: Record<string, unknown> = {}
-  const credsChanged = !loaded.credentials?.source || was.source !== now.source || (now.source === 'wif' && was.org !== now.org)
-  if (credsChanged) out.credentials = (now.source === 'wif' ? { source: 'wif', org: now.org } : { source: 'key' }) satisfies Credentials
+  const credsChanged = !loaded.credentials?.source || was.source !== now.source || (now.source === 'wif' && was.file !== now.file.trim())
+  if (credsChanged) out.credentials = (now.source === 'wif' ? { source: 'wif', file: now.file.trim() } : { source: 'key' }) satisfies Credentials
   if (now.model.trim() && now.model.trim() !== was.model) out.model = now.model.trim()
   if (now.effort !== was.effort) out.effort = now.effort
   if (now.explain !== was.explain) out.explain = now.explain
@@ -68,6 +70,7 @@ export function changedSettings(loaded: BrowserSettings, now: SettingsForm): Rec
 /** Why the form cannot be saved yet, or null. Pure. */
 export function blockedWhy(s: BrowserSettings, form: SettingsForm, typedKey: string): string | null {
   if (form.source === 'key' && !s.has_api_key && !typedKey.trim()) return 'Paste an API key, or sign in with Workload Identity.'
+  if (form.source === 'wif' && !form.file.trim()) return 'Name the Workload Identity Federation config file.'
   if (!/^claude-/.test(form.model.trim())) return 'The model is a Claude model id, such as claude-opus-5-5.'
   return null
 }
@@ -178,18 +181,29 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               <Segmented className="settings-source" size="sm" track label="Sign in with" options={SOURCES} value={form.source} onChange={(v) => set({ source: v })} />
             </div>
             {form.source === 'wif' ? (
-              <div className="settings-row" role="row" data-setting="org">
-                <span className="settings-role">Org</span>
-                <Menu
-                  label="Org"
-                  items={(settings.choices?.orgs ?? []).map((o) => ({ id: o, label: o, checked: o === form.org, onSelect: () => set({ org: o }) }))}
-                  trigger={
-                    <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-org" aria-label="Org" data-org={form.org}>
-                      {form.org}
-                    </Chip>
-                  }
-                />
-              </div>
+              <>
+                <div className="settings-row" role="row" data-setting="wif">
+                  <span className="settings-role">Config file</span>
+                  <TextInput
+                    bare
+                    mono
+                    block
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="settings-wif"
+                    value={form.file}
+                    onChange={(v) => set({ file: v })}
+                    placeholder="/path/to/wif.toml"
+                    aria-label="Workload Identity Federation config file"
+                  />
+                </div>
+                {settings.wif && settings.wif.file === form.file.trim() && (
+                  <div className="settings-row" role="row" data-setting="token">
+                    <span className="settings-role">Token</span>
+                    <span className={settings.wif.error ? 'settings-agent-line settings-check-failed' : 'settings-agent-line'}>{settings.wif.error ?? settings.wif.token}</span>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="settings-row" role="row" data-setting="key">
                 <span className="settings-role">API key</span>

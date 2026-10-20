@@ -669,11 +669,11 @@ button.settings-ext-name:hover .settings-ext-caret {
 .settings-claude .settings-row {
   grid-template-columns: 84px minmax(0, 1fr);
 }
-.settings-source,
-.settings-org {
+.settings-source {
   justify-self: start;
 }
-.field.settings-key {
+.field.settings-key,
+.field.settings-wif {
   width: 100%;
   font: var(--type-mono);
 }

@@ -1,7 +1,8 @@
 """The analyst's settings, kept in the server's home (`settings.json`), and the API key file.
 
-    credentials   {"source": "wif", "org": "<org>"} (Workload Identity Federation) or {"source": "key"} (an API key
-                  the analyst pasted in Settings, kept in `api-key` with mode 0600), or {} for none yet
+    credentials   {"source": "wif", "file": "<path>"} (Workload Identity Federation, with the IDs and the identity
+                  token's source in that config file: wif.py) or {"source": "key"} (an API key the analyst pasted in
+                  Settings, kept in `api-key` with mode 0600), or {} for none yet
     model         the model every agent runs on, claude-opus-5-5 unless the analyst picks another
     effort        low | medium | high | xhigh | max, for the chat, its threads and thimble's agents
     explain       whether the explain pass runs after each answer
@@ -11,28 +12,12 @@ Nothing here is read from or written to the environment.
 from __future__ import annotations
 
 import os
-import re
-from pathlib import Path
 from typing import Any
 
-from . import home
+from . import home, wif
 
 DEFAULTS: dict[str, Any] = {"credentials": {}, "model": "claude-opus-5-5", "effort": "high", "explain": True}
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-ORG_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
-WIF_DIR = "~/.thimble/orgs"  # where a machine set up for Workload Identity Federation keeps org-<org>.env, one per org
-
-
-def wif_orgs() -> list[str]:
-    """The orgs this machine has Workload Identity Federation files for (WIF_DIR/org-<org>.env)."""
-    d = Path(WIF_DIR).expanduser()
-    try:
-        names = [p.name[4:-4] for p in d.glob("org-*.env")]
-    except OSError:
-        return []
-    return sorted(n for n in names if ORG_RE.match(n))
-
-
 MODELS = ("claude-opus-5-5", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5-5", "claude-haiku-5-5")
 
 
@@ -50,10 +35,13 @@ def write(patch: dict[str, Any]) -> dict[str, Any]:
     for k, v in patch.items():
         if k == "credentials":
             if not isinstance(v, dict) or v.get("source") not in ("wif", "key", None):
-                raise ValueError("credentials: {source: wif, org} or {source: key}")
-            if v.get("source") == "wif" and not ORG_RE.match(str(v.get("org") or "")):
-                raise ValueError("credentials: name the WIF org, as in org-<org>.env")
-            cur[k] = {kk: v[kk] for kk in ("source", "org") if kk in v}
+                raise ValueError("credentials: {source: wif, file} or {source: key}")
+            if v.get("source") == "wif":
+                try:
+                    v = {"source": "wif", "file": str(wif.load(v.get("file")).path)}
+                except wif.WifError as e:
+                    raise ValueError(f"Workload Identity Federation: {e}") from None
+            cur[k] = {kk: v[kk] for kk in ("source", "file") if kk in v}
         elif k == "model":
             if not isinstance(v, str) or not v.startswith("claude-"):
                 raise ValueError("model: a Claude model id, such as claude-opus-5-5")

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx) of thimble browser: sign in with Workload Identity Federation
-// and an org, or a pasted API key that is never shown again; the one model (a known id or one typed in), its effort,
+// from a config file (its path and token source shown, never its IDs), or a pasted API key that is never shown again; the one model (a known id or one typed in), its effort,
 // and explainers. A save sends only what changed, the key first by its own route.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -11,13 +11,14 @@ import { mount, settle, unmountAll } from './mount.tsx'
 
 const BASE: BrowserSettings = {
   models: { main: { model: 'claude-opus-5-5', effort: 'high', fast: false } },
-  credentials: { source: 'wif', org: 'team-a' },
-  signed_in: 'Workload Identity Federation (team-a)',
+  credentials: { source: 'wif', file: '/made/up/wif.toml' },
+  wif: { file: '/made/up/wif.toml', token: 'a Google identity token for https://api.anthropic.com', error: null },
+  signed_in: 'Workload Identity Federation from /made/up/wif.toml (a Google identity token for https://api.anthropic.com)',
   has_api_key: false,
   model: 'claude-opus-5-5',
   effort: 'high',
   explain: true,
-  choices: { models: ['claude-opus-5-5', 'claude-sonnet-5-5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], orgs: ['team-a', 'team-b'] },
+  choices: { models: ['claude-opus-5-5', 'claude-sonnet-5-5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
 }
 
 let calls: [string, string, unknown][] = []
@@ -39,14 +40,14 @@ afterEach(() => {
 })
 
 describe('the rules', () => {
-  test('a save sends only what changed; credentials whole when the source or the org changed', () => {
+  test('a save sends only what changed; credentials whole when the source or the config file changed', () => {
     const form = formOf(BASE)
     expect(changedSettings(BASE, form)).toEqual({})
-    expect(changedSettings(BASE, { ...form, org: 'team-b' })).toEqual({ credentials: { source: 'wif', org: 'team-b' } })
+    expect(changedSettings(BASE, { ...form, file: ' /made/up/other.toml ' })).toEqual({ credentials: { source: 'wif', file: '/made/up/other.toml' } })
     expect(changedSettings(BASE, { ...form, source: 'key' })).toEqual({ credentials: { source: 'key' } })
     expect(changedSettings(BASE, { ...form, model: ' claude-sonnet-5-5 ', effort: 'max', explain: false })).toEqual({ model: 'claude-sonnet-5-5', effort: 'max', explain: false })
     // settings with no credentials yet: the choice shown is sent, so it is saved
-    expect(changedSettings({ ...BASE, credentials: {} }, formOf({ ...BASE, credentials: {} }))).toEqual({ credentials: { source: 'wif', org: 'team-a' } })
+    expect(changedSettings({ ...BASE, credentials: {} }, { ...formOf({ ...BASE, credentials: {} }), file: '/made/up/wif.toml' })).toEqual({ credentials: { source: 'wif', file: '/made/up/wif.toml' } })
   })
 
   test('an API key is needed before a save that signs in with one; a model is a Claude id', () => {
@@ -55,6 +56,7 @@ describe('the rules', () => {
     expect(blockedWhy(BASE, form, 'sk-test')).toBeNull()
     expect(blockedWhy({ ...BASE, has_api_key: true }, form, '')).toBeNull()
     expect(blockedWhy(BASE, { ...formOf(BASE), model: 'gpt' }, '')).toMatch(/Claude model id/)
+    expect(blockedWhy(BASE, { ...formOf(BASE), file: ' ' }, '')).toMatch(/config file/)
   })
 })
 
@@ -74,14 +76,15 @@ const click = async (el: Element | null | undefined) => {
 }
 
 describe('the popover', () => {
-  test('shows the sign-in, the org, the model, the effort and explainers', async () => {
+  test('shows the sign-in, the config file and its token source, the model, the effort and explainers', async () => {
     const doc = await open()
     expect(doc.querySelector('[data-setting="source"] [aria-checked="true"]')?.textContent).toBe('Workload Identity')
-    expect(doc.querySelector('[data-setting="org"] .settings-org')?.textContent).toBe('team-a')
+    expect(doc.querySelector<HTMLInputElement>('[data-setting="wif"] input')?.value).toBe('/made/up/wif.toml')
+    expect(doc.querySelector('[data-setting="token"]')?.textContent).toMatch(/a Google identity token for https:\/\/api\.anthropic\.com/)
     expect(doc.querySelector('[data-setting="model"] .settings-model')?.textContent).toBe('Opus 5.5')
     expect(doc.querySelector('[data-setting="effort"] .settings-effort')?.textContent).toBe('high')
     expect(doc.querySelector('[data-setting="explain"] [role="switch"]')?.getAttribute('aria-checked')).toBe('true')
-    expect(doc.querySelector('.settings-signed-in')?.textContent).toMatch(/Workload Identity Federation \(team-a\)/)
+    expect(doc.querySelector('.settings-signed-in')?.textContent).toMatch(/Workload Identity Federation from \/made\/up\/wif\.toml/)
   })
 
   test('a pasted key goes to its own route first, then the settings; the key is in no other request', async () => {
@@ -100,6 +103,12 @@ describe('the popover', () => {
     expect(writes[0][2]).toEqual({ key: 'sk-made-up-key' })
     expect(writes[1][2]).toEqual({ credentials: { source: 'key' } })
     expect(JSON.stringify(writes[1][2])).not.toContain('sk-made-up-key')
+  })
+
+  test('a config file that cannot be used says why in its token row', async () => {
+    answer = { ...BASE, wif: { file: '/made/up/wif.toml', token: null, error: 'there is no file /made/up/wif.toml' } }
+    const doc = await open()
+    expect(doc.querySelector('[data-setting="token"] .settings-check-failed')?.textContent).toBe('there is no file /made/up/wif.toml')
   })
 
   test('a saved key shows only that it is saved', async () => {

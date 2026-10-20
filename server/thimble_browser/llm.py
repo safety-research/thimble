@@ -1,8 +1,7 @@
 """The Messages API client, built only from explicit credentials (settings.py):
 
-- Workload Identity Federation: the org's IDs are read from `~/.thimble/orgs/org-<org>.env` and passed to
-  `WorkloadIdentityCredentials`, with a Google identity token from this machine's metadata server as the identity
-  token. Nothing goes through the environment.
+- Workload Identity Federation: a config file the analyst names (wif.py) gives the IDs and where the identity token
+  comes from, and both go to `WorkloadIdentityCredentials`. Nothing goes through the environment.
 - An API key the analyst pasted in Settings, passed as `api_key=`.
 
 The server clears every ANTHROPIC_* name from its own environment when it starts (scrub_env), without reading the
@@ -18,13 +17,13 @@ import os
 import re
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import anthropic
 from anthropic import AsyncAnthropic
+from anthropic.lib.credentials import WorkloadIdentityError
 
-from . import settings
+from . import settings, wif
 
 log = logging.getLogger("thimble_browser.llm")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -45,30 +44,17 @@ def scrub_env() -> list[str]:
     return names
 
 
-def _wif_ids(org: str) -> dict[str, str]:
-    ids: dict[str, str] = {}
-    if not settings.ORG_RE.match(org):
-        raise OSError(org)
-    with open(Path(settings.WIF_DIR).expanduser() / f"org-{org}.env") as f:
-        for line in f:
-            if "=" in line and not line.startswith("#"):
-                k, v = line.strip().split("=", 1)
-                ids[k] = v
-    return ids
-
-
-def _google_token() -> str:
-    import google.auth.transport.requests  # noqa: PLC0415
-    import google.oauth2.id_token  # noqa: PLC0415
-
-    return google.oauth2.id_token.fetch_id_token(google.auth.transport.requests.Request(), "https://api.anthropic.com")
-
-
 def describe() -> str:
     """The credentials in words, for the page and the log; never an id or a key."""
     c = settings.read()["credentials"]
     if c.get("source") == "wif":
-        return f"Workload Identity Federation ({c.get('org')})"
+        if not c.get("file"):
+            return "Workload Identity Federation (no config file named yet)"
+        try:
+            how = f" ({wif.load(str(c.get('file'))).describe()})"
+        except wif.WifError:
+            how = " (which cannot be used now)"
+        return f"Workload Identity Federation from {c.get('file')}{how}"
     if c.get("source") == "key":
         return "an API key" if settings.has_api_key() else "an API key (none saved yet)"
     return "none"
@@ -77,8 +63,11 @@ def describe() -> str:
 def client() -> AsyncAnthropic:
     """The client for the credentials Settings names; NoCredentials when there are none."""
     c = settings.read()["credentials"]
-    sig = json.dumps(c, sort_keys=True) + (str(settings._key_path().stat().st_mtime) if c.get("source") == "key"
-                                           and settings.has_api_key() else "")
+    sig = json.dumps(c, sort_keys=True)
+    if c.get("source") == "key" and settings.has_api_key():
+        sig += str(settings._key_path().stat().st_mtime_ns)
+    elif c.get("source") == "wif":
+        sig += wif.stamp(str(c.get("file") or ""))
     with _lock:
         if sig in _cache:
             return _cache[sig]
@@ -86,16 +75,15 @@ def client() -> AsyncAnthropic:
             from anthropic import WorkloadIdentityCredentials  # noqa: PLC0415
 
             try:
-                ids = _wif_ids(str(c.get("org")))
-            except OSError:
-                raise NoCredentials(f"no Workload Identity Federation file for the org {c.get('org')!r} on this "
-                                    "machine") from None
+                conf = wif.load(str(c.get("file") or ""))
+            except wif.WifError as e:
+                raise NoCredentials(f"the Workload Identity Federation config cannot be used: {e}") from None
             made = AsyncAnthropic(credentials=WorkloadIdentityCredentials(
-                identity_token_provider=_google_token,
-                federation_rule_id=ids["ANTHROPIC_FEDERATION_RULE_ID"],
-                organization_id=ids["ANTHROPIC_ORGANIZATION_ID"],
-                service_account_id=ids["ANTHROPIC_SERVICE_ACCOUNT_ID"],
-                workspace_id=ids["ANTHROPIC_WORKSPACE_ID"],
+                identity_token_provider=conf.token_provider(),
+                federation_rule_id=conf.ids["federation_rule_id"],
+                organization_id=conf.ids["organization_id"],
+                service_account_id=conf.ids.get("service_account_id"),
+                workspace_id=conf.ids.get("workspace_id"),
             ), max_retries=MAX_RETRIES)
         elif c.get("source") == "key":
             key = settings.api_key()
@@ -115,6 +103,12 @@ def failure(e: BaseException) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     if isinstance(e, NoCredentials):
         return f"Claude is not signed in: {e}."
+    if isinstance(e, wif.WifError):
+        return f"No identity token at {now} for {describe()}: {e}."
+    if isinstance(e, WorkloadIdentityError):
+        code = f" ({e.status_code})" if e.status_code else ""
+        return (f"The identity token was not exchanged{code} at {now} with {describe()}. Check the IDs and the token "
+                "source in the config file; the reason is visible to whoever manages the federation rule.")
     if isinstance(e, anthropic.AuthenticationError):
         return (f"Sign-in failed (401) at {now} with {describe()}. Check the credentials in Settings; the reason is "
                 "visible to whoever manages them.")
