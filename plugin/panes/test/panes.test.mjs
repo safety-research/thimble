@@ -25,8 +25,9 @@ const chipsData = (rec = REC, w = 100) => PANES.chips.data({ 'record:r1': rec, '
 test('chips: keys pick and change a chip; the rewrite is the host\'s action; the same presses in both surfaces', () => {
   const data = chipsData()
   const d0 = run(PANES.chips, data)
-  // no key reads as an arrow key: [ ] change, a digit picks a chip
-  assert.equal(barText([d0]), '[ ] change · 1–3 chip · 0 close · s done')
+  // no key reads as an arrow key: [ ] move the picked chip, in its words, and a digit picks a chip (drawn before it)
+  assert.equal(barText([d0]), '[ ] shorter / longer · 1–3 pick chip · 0 close · s done')
+  assert.match(gridText(renderTerm(d0, { w: 100 })), /1 Length ○○○● full\s+2 Report ↔ Interpret ○●○ balanced\s+3 Familiarity/)
   let { d, state } = act(PANES.chips, data, {}, keyEvent('['), 'terminal')
   // the step names the key the bar names, so a rewrite that fails says which key tries again
   assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
@@ -34,6 +35,7 @@ test('chips: keys pick and change a chip; the rewrite is the host\'s action; the
   assert.deepEqual(act(PANES.chips, data, {}, keyEvent('<'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
   ;({ d, state } = act(PANES.chips, data, state, keyEvent('2'), 'terminal'))
   assert.equal(state.focus, 'interpret')
+  assert.equal(barText([d]), '[ ] more report / more interpret · 1–3 pick chip · 0 close · s done')
   // a press on a dot in the browser sets that level at once
   const web = act(PANES.chips, data, state, { type: 'press', region: 'lvl-familiarity-4' }, 'browser')
   assert.deepEqual(web.d.effects, [{ row: 'r1', at: { familiarity: 4 }, do: 'squeeze' }])
@@ -53,7 +55,7 @@ test('chips on a catch-up: 0 dismisses it, no step lands on its original (the re
   const CU = { ...REC, shown: 'Mostly [6,543 saves](q1#day=2026-06-18@n).', catchup: { host: 'r0', rows: ['r0'], replies: 3, question: 'when?', prompt: 'p0' }, squeeze: { at: { length: 1 } } }
   const data = chipsData(CU)
   const d0 = run(PANES.chips, data)
-  assert.equal(barText([d0]), '[ ] change · 1–3 chip · 0 dismiss · s done')
+  assert.equal(barText([d0]), '[ ] shorter / longer · 1–3 pick chip · 0 dismiss · s done')
   assert.equal(d0.status.text, 's ● catch-up of 3 replies')
   assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: ']', do: 'squeeze' }])
   // at medium, a step up would be its original: none, and a press on full's dot neither

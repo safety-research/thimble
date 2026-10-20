@@ -64,6 +64,14 @@ export type Squeeze = {
  *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
 export type SqzUi = { focus: string; running: { since: number } | null; error: string | null; tick: number; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
 
+/** Work a key asked of Claude beside the conversation (shell/aside.ts): a fork of main making v's card, by the message
+ *  the key was pressed on. Its line under the message says how far it is (`steps`, `secs`); `cmds` are its commands,
+ *  which tell its saves from main's; `saves` the cards it saved, drawn under the message. */
+export type Aside = {
+  row: string; verb: string; what: string; about: string; agentId: string; status: 'running' | 'done' | 'failed'
+  at: number; secs: number; steps: number; last?: string; cmds: string[]; saves: ObjRef[]; error?: string
+}
+
 /** The bar's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */
 export type LineCounts = { threads: number; cov: number; at: number; changed: Record<string, number> }
@@ -116,6 +124,10 @@ declare module 'claude-code' {
       cardfocus: (ObjRef & { row: string }) | null
       /** the squeeze chips' line of a message, by its row */
       sqz: StateFamily<SqzUi | null>
+      /** work a key asked of Claude beside the conversation (shell/aside.ts), by the message it was asked on */
+      aside: StateFamily<Aside | null>
+      /** the message each such agent works for, by the agent's id */
+      asideof: Record<string, string>
       /** what Claude reads with the next prompt of the version the person reads now, by row */
       sqznote: Record<string, string>
       /** the bar's counts above the prompt */

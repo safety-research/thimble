@@ -124,7 +124,9 @@ function textOf(n: Any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  return textOf(n.props?.children) + textOf(n.children) + (typeof n.props?.label === 'string' && !n.props?.children ? n.props.label : '')
+  // a Button's label stands for its words only where it draws no children of its own
+  const kids = n.props?.children ?? (Array.isArray(n.children) && n.children.length ? n.children : null)
+  return textOf(n.props?.children) + textOf(n.children) + (typeof n.props?.label === 'string' && !kids ? n.props.label : '')
 }
 
 /** One model request of main's turn, with `tools` tool calls. */

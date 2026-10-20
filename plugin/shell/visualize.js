@@ -17,7 +17,7 @@ const firstWords = s => {
 }
 
 /** The request that asks Claude for the card. */
-export function viewRequest({ message, choice = '', guide }) {
+export function viewRequest({ message, choice = '', guide, aside = false }) {
   const msg = message || null
   const picked = String(choice || '').trim()
   const proposals = (msg?.verbs?.v?.proposals || []).filter(p => typeof p === 'string' && p.trim())
@@ -32,6 +32,16 @@ export function viewRequest({ message, choice = '', guide }) {
   const others = proposals.filter(p => p !== picked)
   if (others.length) lines.push(`${picked ? 'Also proposed' : 'Proposed'} for it: ${others.join('; ')}.`)
   lines.push(`Read the card guide first, unless you have it from earlier in this session: ${guide}. Reuse the queries you ran, and use \`thimble run\` again only for values you have not kept, so each part keeps its ref.`)
-  lines.push('Save it with `thimble save <name> --from FILE`. Then say in one line what it shows; the analyst has read the answer, so do not repeat it.')
+  if (aside) lines.push('You work in the background, beside the conversation: the analyst sees none of your messages, only the card, drawn under that answer, so ask them nothing. Save it with `thimble save <name> --from FILE`. End with one line that names the card.')
+  else lines.push('Save it with `thimble save <name> --from FILE`. Then say in one line what it shows; the analyst has read the answer, so do not repeat it.')
   return lines.join(' ')
+}
+
+/** What main reads once the fork in the background saved the card for v: the answer it is for, and each card, with its
+ *  file, so a later turn knows the card exists and where the analyst sees it. */
+export function viewMade({ about = '', cards = [] }) {
+  const named = cards.map(c => `${c.id}${c.v != null ? `@${c.v}` : ''} (${String(c.root || '').replace(/\/+$/, '')}/thimble/objects/${c.id}.json)`)
+  if (!named.length) return ''
+  const what = about ? `your answer that begins "${firstWords(about)}"` : 'your last answer'
+  return `The analyst pressed v (visualize) on ${what}. A copy of you that worked in the background made the card${named.length > 1 ? 's' : ''} ${named.join(', ')} for it, drawn under that answer. The analyst may ask about ${named.length > 1 ? 'them' : 'it'}.`
 }

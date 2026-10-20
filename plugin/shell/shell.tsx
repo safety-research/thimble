@@ -5,9 +5,11 @@
 //   detail     one pane, the card detail (detail.tsx): header, the card with its parts, one "from" line, the
 //              examples of the selected part, the program behind p, and a side thread (thread.ts): while it is open,
 //              a prompt is a question for the card's thread, which main does not see.
-//   keys       the bar under the prompt names them: v asks Claude for another view of the answer (visualize.js), as
-//              a turn whose row reads as the press; s opens the squeeze chips (squeeze/); ] steps through the marks
-//              and cards; 1 opens the card in focus.
+//   keys       the bar above the prompt names them, from the session's start (dim while there is no answer to act
+//              on) and while Claude works (they act on the last finished answer), each a click too: v asks for another
+//              view of the answer (visualize.js), made by a fork of the conversation in the background and drawn
+//              under the answer (aside.ts); s opens the squeeze chips (squeeze/); ] steps through the marks and cards;
+//              1 opens the card in focus.
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
 //              `claude -c` and `--resume` draw the objects under the same replies again. <session> is the
 //              conversation's key (hooks/conversation.ts): a conversation Claude Code continues under a new session id
@@ -49,7 +51,8 @@ import { mix } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
-import { viewRequest } from './visualize.js'
+import { viewMade, viewRequest } from './visualize.js'
+import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -445,7 +448,7 @@ async function openCard($: Engine, ref: ObjRef): Promise<void> {
 }
 
 /** Open a card's detail, on a part (`region`), with its pages all at once or one at a time when `how.pages` says. */
-export async function openDetail($: Engine, at: ObjRef, region: string | null = null, how: { pages?: 'all' | 'one' } = {}): Promise<void> {
+export async function openDetail($: Engine, at: ObjRef, region: string | null = null, how: { pages?: 'all' | 'one'; bar?: 'details' | 'examples' } = {}): Promise<void> {
   const ref = await withVersion($, at)
   const cur = (await $.state.get(SEL)).value
   // the knobs stay where the person turned them, here or under the reply or in the browser (the card's kept state),
@@ -453,6 +456,8 @@ export async function openDetail($: Engine, at: ObjRef, region: string | null = 
   const kept = await readCardState($, ref.root, ref.id)
   const state = keptState(kept) ?? (cur && cur.id === ref.id && cur.root === ref.root ? cur.state : undefined)
   if (how.pages) await patchPaneState($, 'detail', { id: ref.id }, { pages: how.pages })
+  // a click on a link to a cite or to examples: the detail opens on what it points at
+  if (how.bar && region) await patchPaneState($, 'detail', { id: ref.id }, { region, ex: 0, bar: how.bar })
   await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}), ...(how.pages ? { pages: how.pages } : {}) })
   const o = await loadObject($, ref)
   await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
@@ -1039,15 +1044,24 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   void recordEvent($, { kind: 'press', verb: key, row, lit: !!v?.lit })
   await setTray($, null)
   await setCardFocus($, null)
+  if (key === 'v') {
+    // v while its card is being made under this message: the line under it says how far it is
+    if ((await asideOn($, row))?.status === 'running') { $.ui.toast('v is still making a view of this answer: its line under the answer says how far it is.'); return }
+    await clearAside($, row)
+  }
   if (key === 'v' && rec && !(v?.lit && Array.isArray(v.proposals) && v.proposals.length)) {
     await setPick($, null)
     const wait = { row, cancelled: false }
     pendingV = wait
-    $.clock.after(WORD_MS, () => {
+    const go = async () => {
       if (wait.cancelled || pendingV !== wait) return
       pendingV = null
-      void (async () => { const now = (await recordNow($, row)) ?? rec; await askForView($, now, ANOTHER_VIEW) })()
-    })
+      const now = (await recordNow($, row)) ?? rec
+      await askForView($, now, ANOTHER_VIEW)
+    }
+    // the wait runs on from the key's own work, not from a timer: an agent v starts there is one whose calls this
+    // plugin's hooks still hear (a timer's would not), so its card is drawn as it saves it
+    void $.clock.sleep(WORD_MS).then(go, () => { $.clock.after(WORD_MS, () => { void go() }) }).catch(() => undefined)
     return
   }
   await setPick($, { row, verb: key })
@@ -1062,7 +1076,8 @@ async function pickOption($: Engine, row: string, key: string, choice: string): 
   const rec = await recordNow($, row)
   if (!rec || key !== 'v') return false
   await setPick($, null)
-  $.clock.after(0, () => { void askForView($, rec, choice) })
+  // outside the press, but from its own work (not a timer), so this plugin's hooks hear the calls of the agent it starts
+  void askForView($, rec, choice).catch(() => undefined)
   return true
 }
 
@@ -1071,7 +1086,12 @@ async function pickOption($: Engine, row: string, key: string, choice: string): 
 async function askForView($: Engine, rec: MsgRecord, choice: string): Promise<void> {
   try {
     const guide = `${$.plugin.root.replace(/\/+$/, '')}/skills/thimble/cards.md`
-    const request = viewRequest({ message: rec, choice: choice !== ANOTHER_VIEW ? choice : '', guide })
+    const picked = choice !== ANOTHER_VIEW ? choice : ''
+    // a fork of the conversation makes the card in the background, drawn under the message (aside.ts); only where no
+    // fork can start does v ask main, as a turn of its own
+    const what = picked || 'another view of this answer'
+    if (await askAside($, { row: rec.row, verb: 'visualize', what, about: shownOf(rec), request: viewRequest({ message: rec, choice: picked, guide, aside: true }) })) return
+    const request = viewRequest({ message: rec, choice: picked, guide })
     placeNext = isCatchUp(rec) ? rec.row : null
     await ask($, request, 'visualize', choice || 'another view of this answer')
   } catch (err) {
@@ -1371,7 +1391,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 }
 
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
-type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown }
+type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown; dim?: boolean }
 
 /** The keys each bar named, oldest first, with when it first showed them. A key the line named a moment ago
  *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
@@ -1384,6 +1404,8 @@ const BAR_SEEN_MS = 1000
 function namedKeys(left: BarSeg[]): Set<string> {
   const out = new Set<string>()
   for (const g of left) {
+    // a key named dim has nothing to act on: it types
+    if (g.dim) continue
     for (const k of g.key.split(' ')) {
       const range = /^(\d)–(\d)$/.exec(k)
       if (range) for (let d = Number(range[1]); d <= Number(range[2]); d++) out.add(String(d))
@@ -1413,11 +1435,11 @@ function barNamed(k: string, now: number, since: number): boolean {
   return false
 }
 
-/** The bar: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
+/** The bar: its label, what the keys do now at its left, the counts at its right. Always there while thimble is on.
  *  It is always one line: with less room it drops the counts (coverage last), then says each key's words by their
  *  first word, then drops its label, then cuts its end (panes/host.js fitBar). Beside a docked pane Claude Code gives
  *  the band only the transcript's column, so there it is the narrow form. */
-async function barEl($: Engine, els: Any, w: number, working = false): Promise<Any | null> {
+async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   const { Box, Button, Text } = els
   const left: BarSeg[] = []
   const focus = await focusKeys($)
@@ -1425,13 +1447,19 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
     // what the focused surface says now, cut at its end when the line is short (never to its first word), then its keys
     if (focus.status) left.push({ key: '', words: focus.status.text, tone: focus.status.tone, status: true })
     for (const g of keySegments(focus.keys)) {
-      if (g.key || g.words) left.push({ key: g.key, words: g.words, ...(g.color ? { color: g.color, wordsColor: g.color } : {}), ...(g.short ? { short: g.short } : {}), ...(g.onPress ? { onPress: g.onPress } : {}) })
+      // a click on one key does what the key does (pressBarKey); keys that share their words are pressed one by one
+      const press = g.onPress ?? (g.key && pressable(g.key) ? () => pressBarKey($, g.key) : undefined)
+      if (g.key || g.words) left.push({ key: g.key, words: g.words, ...(g.color ? { color: g.color, wordsColor: g.color } : {}), ...(g.short ? { short: g.short } : {}), ...(press ? { onPress: press } : {}) })
     }
-  } else if (!working) {
-    // (while Claude works the verbs wait: they act on its answer, which is not there yet)
+  } else {
+    // at rest and while Claude works alike: the keys act on the last answer that finished (while a turn runs, the one
+    // before it); with none yet, they are named dim and type as letters
     const row = await actingRow($)
     const rec = row ? await recordNow($, row) : null
-    if (row && rec) {
+    if (!row || !rec) {
+      for (const v of ROW_KEYS) left.push({ key: v.key, words: v.name, dim: true })
+      left.push({ key: ']', words: 'cite & explain', dim: true })
+    } else {
       const verbs = ROW_KEYS
       const sqUi = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
       const lit: Record<string, { lit?: boolean; note?: string }> = { ...(rec.verbs || {}) }
@@ -1451,6 +1479,8 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       const cardsHere = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]
       if (rec.marks.length) left.push({ key: ']', words: 'cite & explain', color: markColors(theme).cite, onPress: () => stepMark($, 1) })
       else if (cardsHere.length) left.push({ key: ']', words: 'card', color: FOCUS[theme], onPress: () => stepMark($, 1) })
+      // an answer with neither: named dim (] still steps through the marks of the session's other replies)
+      else left.push({ key: ']', words: 'cite & explain', dim: true })
       const ref = await focusedCard($)
       if (ref) {
         // a card with pages: 1 opens them to read (`1 read all 9 chapters`)
@@ -1488,7 +1518,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   const label = fit.label ? [Text({ key: 'bar-label', color: FOCUS[theme], bold: !where, children: fit.label }), Text({ key: 'bar-gap', children: '  ' })] : []
   const segText = (g: BarSeg, i: number) => [
     ...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []),
-    ...(g.tone ? [Text({ key: `kt${i}`, color: g.tone, children: g.words })] : [
+    ...(g.tone ? [Text({ key: `kt${i}`, color: g.tone, children: g.words })] : g.dim ? [Text({ key: `kd${i}`, dimColor: true, children: [g.key, g.words].filter(Boolean).join(' ') })] : [
       ...(g.key ? [Text({ key: `kk${i}`, ...(g.color && g.wordsColor ? { color: g.color } : {}), ...(g.bold ? { bold: true } : {}), children: g.key })] : []),
       ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), ...(g.bold ? { bold: true } : {}), children: `${g.key ? ' ' : ''}${g.words}` })] : []),
     ]),
@@ -1498,14 +1528,55 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
     // narrower than the shortest form: one line, cut at its end (no presses: the keys still work)
     return Box({ width: w, children: [Text({ key: 'bar-cut', wrap: 'truncate-end', children: [...label, ...fit.left.flatMap(segText), ...(countEls.length ? [Text({ children: '   ' }), ...countEls] : [])] })] })
   }
-  // one row: each key a press, the counts at its right
-  const leftEls = fit.left.flatMap((g, i) => g.onPress
-    ? [...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []), Button({ key: `bar-${g.key || i}-${i}`, plain: true, label: g.label || g.words, onPress: g.onPress, children: segText(g, 0) })]
-    : segText(g, i))
+  // one row: each key a press (a click does what the key does), the counts at its right, each a press where a module
+  // made it one (pressableBarItem)
+  const sep = (i: number) => (i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : [])
+  const leftEls = fit.left.flatMap((g, i) => {
+    if (g.onPress) return [...sep(i), Button({ key: `bar-${g.key || i}-${i}`, plain: true, label: g.label || g.words, onPress: g.onPress, children: segText(g, 0) })]
+    // keys that share their words (`[ ] shorter / longer`): each key its own press, the words after them
+    const keys = g.key.split(' ')
+    if (g.dim || g.tone || !g.key || keys.length < 2 || !keys.every(k => pressable(k))) return segText(g, i)
+    const color = g.color && g.wordsColor ? { color: g.color } : {}
+    return [...sep(i), ...keys.flatMap((k, j) => [...(j ? [Text({ key: `kg${i}-${j}`, children: ' ' })] : []), Button({ key: `bar-${k}-${i}-${j}`, plain: true, label: `${k} ${g.words}`, onPress: () => pressBarKey($, k), children: [Text({ key: `kk${i}-${j}`, ...color, children: k })] })]),
+      ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), children: ` ${g.words}` })] : [])]
+  })
+  const pressed = fit.counts.some(x => barItems.has(x.id))
+  const right = pressed
+    ? Box({ key: 'bar-counts', flexDirection: 'row', flexShrink: 0, children: fit.counts.flatMap((x, i) => {
+      const t = Text({ key: `count-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.text })
+      // the click is the module's: its ui.press hook on this element answers it
+      return [...(i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []), barItems.has(x.id) ? Button({ key: `bar-item-${x.id}`, plain: true, label: x.text, onPress: () => undefined, children: [t] }) : t]
+    }) })
+    : countEls.length ? Box({ key: 'bar-counts', flexShrink: 0, children: [Text({ key: 'bar-right', wrap: 'truncate-end', children: countEls })] }) : null
   return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [...label, ...leftEls] }),
-    ...(countEls.length ? [Box({ key: 'bar-counts', flexShrink: 0, children: [Text({ key: 'bar-right', wrap: 'truncate-end', children: countEls })] })] : []),
+    ...(right ? [right] : []),
   ] })
+}
+
+/** The items at the right of the bar a click presses, by id (`cov`, `threads`): each is drawn as a Button keyed
+ *  `bar-item-<id>`, and what a click does is the ui.press hook of the module that made it pressable. An item no module
+ *  made pressable is words alone, so nothing looks clickable that does nothing. */
+const barItems = new Set<string>()
+
+/**
+ * Make the bar's item `id` a press. The module says what a click does with a hook on its element, as it registers:
+ *   pressableBarItem('cov')
+ *   on('ui.press', { component: 'AbovePrompt', element: 'bar-item-cov' }, async ($, e) => { await openPane($); return { element: e.element } })
+ */
+export function pressableBarItem(id: string): void {
+  barItems.add(id)
+}
+
+/** A key the bar names that a click can press: one character (`[`, `0`, `s`), or ⌫. */
+const pressable = (k: string) => [...k].length === 1
+
+/** A click on a key the bar names: what the key does from the empty prompt, as if it were typed there. */
+async function pressBarKey($: Engine, k: string): Promise<void> {
+  const name = k === '⌫' ? 'backspace' : k
+  const e: KeyEdit = { key: { key: name }, text: '', cursor: 0, start: 0, end: 0, inputText: [...name].length === 1 ? name : '' }
+  const t = await keyTurn($, e, await $.clock.now())
+  if (t.box) await t.work?.()
 }
 
 /** A key that types whatever the shell holds: one with ctrl or meta, an edit with no one key (a paste, keys sent
@@ -1594,7 +1665,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   if (pendingV && opened && opened.key === 'v' && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
     return { box: { text: `v${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingV) { pendingV.cancelled = true; pendingV = null } } }
   }
-  // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-3 chip,
+  // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] move the picked chip, 1-3 pick a chip,
   // 0 original, s done)
   if (pick && pick.verb === 's' && !tray && (await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k }))) {
     return { box: consume, work: () => paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k }).then(() => undefined) }
@@ -1687,6 +1758,12 @@ function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
 }
 
+/** The line under a message while a key's work runs beside the conversation (`visualize… another view of this answer ·
+ *  3 steps · 24s`), or why it made nothing. */
+function asideRowEl(els: Any, line: { text: string; error: boolean }, key: string): Any {
+  return els.Box({ key, marginTop: 1, marginLeft: 2, children: [els.Text({ wrap: 'truncate-end', ...(line.error ? { color: 'error' } : { dimColor: true }), children: line.text })] })
+}
+
 /** One object inline: its cells, or one red line saying why it cannot be drawn. The card the keys act on (`1` opens
  *  it) has its frame in the keys' color. */
 async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus: 'focus' | 'rest' | boolean | null = null): Promise<Any> {
@@ -1704,9 +1781,11 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   // calm: under a reply an object takes at most about half a screen; the rest waits in the detail view
   const rows = Math.min(p.grid.h, inlineRows(e.viewport?.rows ?? 48))
   // a click on a part its program answers is the program's (k.on('press:<id>')), here as in the detail; on any other
-  // part it opens the detail view on it; on a knob's dial it turns the knob here, a step back on its left half and a
-  // step on on its right half
-  const onPress = fullscreen ? (id: string, dir?: number) => (dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
+  // part it opens the detail view on it, and on a link to a cite or to examples the detail opens on its rows or its
+  // examples; on a knob's dial (or a link to a knob) it turns the knob here, a step back on its left half and a step
+  // on on its right half
+  const linkBar = (id: string) => { const m = (p.grid.regions || []).find((r: Any) => r.id === id && r.link)?.meta; return m?.examples ? 'examples' as const : m?.cite ? 'details' as const : undefined }
+  const onPress = fullscreen ? (id: string, dir?: number) => (dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id, { bar: linkBar(id) })) : undefined
   const run = runningRow(els, said)
   const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
   // the card the keys act on: its own frame in the keys' color, or, for a card with no frame, a bar down its left side
@@ -1766,6 +1845,8 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
   const parts: Any[] = [catchUpEl(els, { rec: shown, key: `cu-${row}`, cols, first: false, theme, head, note, focus: base && base.row === row ? base.i ?? null : null, onMark: (i: number) => openMark($, row, i, cu), dim: !!busy })]
   if (open === 's') parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row }, { w: Math.max(30, cols - 2), h: 3 })] }))
   else if (open) parts.push(Box({ key: `vl-${row}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
+  const aside = asideLine(await asideOn($, row))
+  if (aside) parts.push(asideRowEl(els, aside, `as-${row}`))
   const list = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]
   if (list.length) {
     const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
@@ -2022,6 +2103,10 @@ export const registerShell: Register = (on, options) => {
   // thread's report never reach the shell's prompt hooks (or main)
   registerThreads(on, options)
   registerDetail(on)
+  // work a key asks of Claude beside the conversation (v's card): its agent's steps, its end, its reports kept out of
+  // main; main reads one row naming the cards it made
+  registerAside(on, options)
+  onAsideMade('visualize', a => viewMade({ about: a.about, cards: a.saves }))
 
   // (a matcher, as the kernel's module hooks session.start without one and the engine takes one bare hook per event)
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
@@ -2083,11 +2168,23 @@ export const registerShell: Register = (on, options) => {
       const text = typeof r.text === 'string' ? r.text : typeof r.result === 'string' ? r.result : ''
       if (r.deny !== undefined) return r
       // the saves this call made, from the kernel's change feed (never from what the call printed, which a pipe cuts);
-      // a subagent's saves (a side thread's) are read and left where its card is
-      const saves = await newSaves($)
-      if (input.agentId || !saves.length) return r
-      if (turn) turn.saves = [...(turn.saves ?? []), ...saves]
+      // a subagent's saves (a side thread's) are read and left where its card is; a key's agent's (v's card, aside.ts)
+      // are drawn under the message the key was pressed on
+      const read = await newSaves($)
+      if (!read.length) return r
+      const saves: ObjRef[] = []
       notes = []
+      for (const ref of read) {
+        const at = await asideFor($, input.agentId, ref.id)
+        if (!at) { if (!input.agentId) saves.push(ref); continue }
+        await place($, at, ref)
+        await asideSaved($, at, ref)
+        await $.state.set(LAST, ref)
+        // what the analyst sees of it, for the agent that saved it (so a card that fails to draw is fixed now)
+        if (input.agentId) notes.push(drawnNote(await prepared($, ref, 96, null, 'inline', 24, true), ref))
+      }
+      if (input.agentId || !saves.length) return notes.length && r.deny === undefined && !r.isError ? { ...r, context: [...(r.context ?? []), notes.join('\n')] } : r
+      if (turn) turn.saves = [...(turn.saves ?? []), ...saves]
       for (const ref of saves) {
         const id = ref.id
         const root = ref.root
@@ -2168,8 +2265,29 @@ export const registerShell: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     try {
+      // the end of a key's agent (v's card, aside.ts): the saves its calls left in the change feed go under the message
+      // the key was pressed on (its calls may not reach this plugin's hooks); one main saved meanwhile stays main's
+      const row = e.agentId !== undefined ? await asideRowOf($, e.agentId) : null
+      if (row && e.agentId) {
+        for (const ref of await newSaves($)) {
+          if (await asideMade($, e.agentId, ref.id, !turn)) { await place($, row, ref); await asideSaved($, row, ref); await $.state.set(LAST, ref) }
+          else if (turn) { turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]; turn.saves = [...(turn.saves ?? []), ref] }
+        }
+      }
+    } catch {
+      // the agent's line says it made no card
+    }
+    try {
       // a save the turn's last Bash call did not see (one run in the background): the feed read once more
-      if (e.agentId === undefined && turn) for (const ref of await newSaves($)) { turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]; turn.saves = [...(turn.saves ?? []), ref] }
+      if (e.agentId === undefined && turn) {
+        for (const ref of await newSaves($)) {
+          // a card a key's agent saved meanwhile (aside.ts) goes under its message
+          const at = await asideFor($, undefined, ref.id)
+          if (at) { await place($, at, ref); await asideSaved($, at, ref); continue }
+          turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]
+          turn.saves = [...(turn.saves ?? []), ref]
+        }
+      }
     } catch {
       // the next call reads the feed again
     }
@@ -2244,7 +2362,9 @@ export const registerShell: Register = (on, options) => {
       const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
       // the catch-up under it, when replies piled up and the person caught up on them here
       const caught = await catchUpParts($, e, at, cols)
-      if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null && !caught.length) return next(e)
+      // work a key asked of Claude on this message (v's card, aside.ts): one line while it runs, or why it made none
+      const aside = asideLine(await asideOn($, at))
+      if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null && !caught.length && !aside) return next(e)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       await $.state.get(CARDFOCUS)
       const base = trayBase(tray) as TrayFrame | null
@@ -2260,6 +2380,7 @@ export const registerShell: Register = (on, options) => {
         // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar
         parts.push(Box({ key: `vl-${at}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row: at, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
       }
+      if (aside) parts.push(asideRowEl(els, aside, `as-${at}`))
       if (list.length) {
         // the card with the focus (] reached it) has its frame in the keys' color; at rest the newest card under the
         // message the keys act on (the one 1 opens) has it faint
@@ -2289,7 +2410,7 @@ export const registerShell: Register = (on, options) => {
       // draws first when a docked pane closes, so the verb row never counts at the width the pane left
       if (e.viewport?.columns) seeView(e.viewport.columns, e.viewport.rows ?? 48)
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
-      const line = await barEl($, els, bw, !!e.props.isWorking)
+      const line = await barEl($, els, bw)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       const above = trayTop(tray) ? await trayBand($, e, tray!) : null
       if (!line) return above ?? next(e)
@@ -2442,6 +2563,7 @@ export function resetShell(): void {
   keyDecided = 0
   barSeen.length = 0
   resetKeys(shellKey)
+  resetAside()
   graphLayout = null
 }
 

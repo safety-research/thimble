@@ -130,6 +130,8 @@ function walk(n: Node, f: (x: Node) => void): void {
   walk(n.children, f)
 }
 const buttons = (t: Node) => { const out: Node[] = []; walk(t, x => { if (x.type === 'Button') out.push(x) }); return out }
+/** The words a drawn tree shows dim, joined: the bar's keys that have nothing to act on. */
+const dimText = (t: Node) => { const out: string[] = []; walk(t, x => { if (x.type === 'Text' && x.props?.dimColor) out.push(textOf(x)) }); return out.join('|') }
 const markdowns = (t: Node) => { const out: string[] = []; walk(t, x => { if (x.type === 'Markdown') out.push(x.props.text) }); return out }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const reply = ($: any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
@@ -709,11 +711,12 @@ test('the keys act on the newest answer, never on an error; { and } pick another
   await answerTurn($, clock, { turn: 't1', uuid: LONG, text: MARKED, prompt: 'when?' })
   await answerTurn($, clock, { turn: 't2', uuid: SHORT, text: 'The second reader is done too.' })
   await answerTurn($, clock, { turn: 't3', uuid: ERR, text: 'API Error: 401 Authentication failed', reason: 'error' })
-  // the keys act on the short follow-up (the error answered nothing), and the bar says which of the two replies
+  // the keys act on the short follow-up (the error answered nothing), and the bar says which of the two replies; it has
+  // no marks, so ] is named dim
   let bar = await hintOf($)
   expect(bar).toContain('v visualize')
   expect(bar).toContain('{ } reply 2 of 2')
-  expect(bar).not.toContain('cite & explain')
+  expect(dimText(await $.ui.render(HINT))).toContain('] cite & explain')
   // { picks the long answer: its marks are the keys' now, and its first row shows ▸ in place of its bullet
   expect(await press($, clock, edit('{'))).toEqual({ text: '', cursor: 0 })
   bar = await hintOf($)
@@ -725,7 +728,7 @@ test('the keys act on the newest answer, never on an error; { and } pick another
   await press($, clock, edit('}'))
   expect(await hintOf($)).toContain('{ } reply 2 of 2')
   expect(await hintOf($)).not.toMatch(/[<>←→]/)
-  expect(await hintOf($)).not.toContain('cite & explain')
+  expect(dimText(await $.ui.render(HINT))).toContain('] cite & explain')
 })
 
 test('a conversation continued in a new session (moved to the background, --fork-session) finds its records: the cards under its replies and its answers', async ($, on) => {

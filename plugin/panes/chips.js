@@ -7,7 +7,9 @@
 // and the levels (and, while the call runs, where they go: record.squeeze.want).
 //
 //   state: {focus: chip id}
-//   keys: [ ] change · 1-3 chip · 0 original (at the original: close) · s done. On a catch-up (a message
+//   keys: [ ] shorter / longer (the picked chip's two ways, in its words) · 1-3 pick chip (each chip drawn after its
+//         digit) · 0 original (at the original: close) · s done. Claude Code keeps tab, shift+tab and the arrow keys
+//         in its prompt, so the chips cannot move on them. On a catch-up (a message
 //         the chips wrote of several replies) 0 dismisses it: its original is the replies, in the transcript above, so
 //         no step lands on the original either. No key is labelled
 //         < >: next to Claude Code's `← for agents` it reads as the arrow keys, and ← in an empty prompt leaves the
@@ -16,6 +18,8 @@
 import { chipsOf, glyph, isCatchUp, isOriginal, noteOf, stepAt } from '../squeeze/chips.mjs'
 
 const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {})
+/** What [ and ] do to each chip, in its words: the way down, then the way up. */
+const WAYS = { length: 'shorter / longer', interpret: 'more report / more interpret', familiarity: 'newer reader / more expert' }
 
 export default {
   name: 'chips',
@@ -62,13 +66,15 @@ export function program(k, data) {
     if (to && !toOriginal(to)) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '[' : ']' })
     return { focus: id }
   }
-  k.on('[', () => step(focus, -1), 'change')
-  k.on(']', () => step(focus, 1), 'change')
+  // [ and ] say which way they move the picked chip, in its words: `[ ] shorter / longer`
+  const ways = WAYS[focus] || 'change'
+  k.on('[', () => step(focus, -1), ways)
+  k.on(']', () => step(focus, 1), ways)
   k.on('<', () => step(focus, -1))
   k.on('>', () => step(focus, 1))
   k.on(',', () => step(focus, -1))
   k.on('.', () => step(focus, 1))
-  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id }), 'chip'))
+  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id }), 'pick chip'))
   if (data.catchup) {
     k.on('0', () => { k.do('dismiss', { row: data.row }); return {} }, 'dismiss')
   } else {
@@ -116,7 +122,8 @@ export function program(k, data) {
   chips.forEach(c => {
     const picked = c.id === focus
     const bg = picked ? 'warn-faint' : null
-    const parts = [[' ', 'dim'], [c.name, picked ? 'warn' : 'dim', picked], [' ', 'dim'], ['dots'], [' ', 'dim'], [c.levels[c.level] || '', 'ink', picked], [' ', 'dim']]
+    // the chip's digit first, the key that picks it
+    const parts = [[' ', 'dim'], [`${items.length + 1}`, picked ? 'warn' : 'dim'], [' ', 'dim'], [c.name, picked ? 'warn' : 'dim', picked], [' ', 'dim'], ['dots'], [' ', 'dim'], [c.levels[c.level] || '', 'ink', picked], [' ', 'dim']]
     const width = parts.reduce((n, p) => n + (p[0] === 'dots' ? c.levels.length : k.len(p[0])), 0)
     items.push({ c, parts, width, bg, picked })
   })

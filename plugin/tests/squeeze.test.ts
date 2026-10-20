@@ -107,7 +107,7 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   expect(drawn).not.toContain('+')
   // nothing under the chips: their keys are in the bar, once
   expect(drawn).not.toContain('change')
-  expect(await hintOf($)).toContain('[ ] change · 1–3 chip · 0 close')
+  expect(await hintOf($)).toContain('[ ] shorter / longer · 1–3 pick chip · 0 close')
   // only the picked chip has a fill: its words, dots and level, and no other chip's
   const filled = (t: Any): string => (Array.isArray(t) ? t.map(filled).join('') : t && typeof t === 'object' ? (t.props?.backgroundColor ? textOf(t) : filled(t.children ?? t.props?.children)) : '')
   const fill = filled(await $.ui.render(view(TEXT)))
@@ -153,7 +153,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(drawn).not.toContain('from this one')
   expect(drawn).toContain('Length ○○●○ medium')
   expect(drawn).not.toContain('rewriting')
-  expect(await hintOf($)).toContain('[ ] change · 1–3 chip · 0 original · s done')
+  expect(await hintOf($)).toContain('[ ] shorter / longer · 1–3 pick chip · 0 original · s done')
   await ui.unmount()
   await press($, clock, edit('0'))
   await clock.settle()

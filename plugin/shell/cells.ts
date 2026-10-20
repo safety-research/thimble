@@ -12,6 +12,8 @@
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
 //   a knob's dial (`label ◂ value ▸`, k.dial) is two Buttons, its halves: a click on the left half calls onPress(id, -1),
 //   on the right half onPress(id, 1), so a click anywhere on the dial turns it
+//   nothing is drawn as a link that a click does not answer: a link's underline only where there is a press
+//   (`onPress`), and a link to an id nothing defines (no region, cite, examples or knob) is plain words
 import { paintGrid } from '../draw/paint.js'
 import { hex, selectedColor, termColor } from '../draw/palette.js'
 
@@ -22,11 +24,15 @@ type Rect = { x: number; y: number; w: number; h: number }
 type Region = { id: string; meta?: Record<string, unknown>; rects: Rect[]; link?: boolean }
 type Grid = { w: number; h: number; rows: Cell[][]; regions: Region[] }
 
+/** A link to an id the card does not define (draw/term.js gives it a region of its words alone): no click answers it. */
+export const deadLink = (r: Region) => !!r.link && !r.meta?.cite && !r.meta?.examples && !r.meta?.knob
+
 /** For each cell, the id of the smallest region that holds it (links to an id included), or ''. */
 export function regionMap(grid: Grid): string[] {
   const at: string[] = new Array(grid.w * grid.h).fill('')
   const area: number[] = new Array(grid.w * grid.h).fill(Infinity)
   for (const r of grid.regions) {
+    if (deadLink(r)) continue
     for (const q of r.rects) {
       const a = q.w * q.h
       for (let y = q.y; y < q.y + q.h && y < grid.h; y++) {
@@ -90,7 +96,8 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       const color = g.edge ? opts.frame : on ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
       if (color) p.color = color
       if (g.c.b) p.bold = true
-      if (g.c.ref) p.underline = true
+      // a link is underlined only where a click answers it
+      if (g.c.ref && opts.onPress && g.region) p.underline = true
       if (on) p.backgroundColor = 'selectionBg'
       else if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
       return Text(p)

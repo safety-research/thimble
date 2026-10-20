@@ -57,6 +57,15 @@ export default {
       const m = g.meta || {}
       parts.push({ id: g.id, label: String(m.label || g.id), ...(m.knob ? { knob: m.knob } : {}), cite: typeof m.cite === 'string' ? m.cite : null, examples: typeof m.examples === 'string' ? m.examples : null, fields: m.fields || null })
     }
+    // a link in the card's words to a cite, an examples set or a knob that no part draws is a part too, so a click on it
+    // does what selecting it does: the cite's rows, the examples, or the knob turned
+    for (const id of linkTargets(inner.root)) {
+      if (parts.some(p => p.id === id || p.cite === id || p.examples === id)) continue
+      const c = d.cites && d.cites[id], e = d.examples && d.examples[id], knob = (d.controls || []).find(x => x.id === id)
+      if (c) parts.push({ id, label: String(c.text || id), cite: id, examples: null, fields: null, link: true })
+      else if (e) parts.push({ id, label: String(e.label || id), cite: null, examples: id, fields: null, link: true })
+      else if (knob) parts.push({ id, label: String(knob.label || id), knob: id, cite: null, examples: null, fields: null, link: true })
+    }
     const refs = {}
     for (const p of parts) refs[p.id] = regionRefs(o, d, p.id).refs
     return {
@@ -99,10 +108,12 @@ export function program(k, data) {
 
   // ---- what the person does: each a new state, or an action of the host
   const pick = id => (ids.includes(id) ? { region: id, ex: 0 } : null)
+  // the keys walk the parts the card draws; a link's target (a part only a click reaches) is not on the way
+  const walk = parts.filter(p => !p.link).map(p => p.id)
   const step = dir => () => {
-    if (!ids.length) return null
-    const i = ids.indexOf(region)
-    return pick(ids[i < 0 ? 0 : (i + dir + ids.length) % ids.length])
+    if (!walk.length) return null
+    const i = walk.indexOf(region)
+    return pick(walk[i < 0 ? 0 : (i + dir + walk.length) % walk.length])
   }
   k.on('up', step(-1), 'part')
   k.on('down', step(1), 'part')
@@ -122,6 +133,11 @@ export function program(k, data) {
     const r = e.region
     const ver = /^ver-(\d+)$/.exec(String(r || ''))
     if (ver) { k.do('version', { v: Number(ver[1]) }); return { ex: 0 } }
+    // a link to a knob (its dial, or words that point at it): the knob turns, a step back on its left half, on on its right
+    const linked = parts.find(p => p.id === r && p.link)
+    if (linked && linked.knob) return turnCard(linked.knob, e.dir || 1)
+    // a link to a cite or to examples opens what it points at: the cite's rows, the examples
+    if (linked && r !== region) return { region: r, ex: 0, bar: linked.examples ? 'examples' : 'details' }
     if (!r || !ids.includes(r)) return null
     if (e.dir) return turnCard(r, e.dir)
     // a press on the selected part fills the bar with its details (and empties it again)
@@ -229,6 +245,23 @@ export function program(k, data) {
 
   if (prog) return k.stack(head, takeaway, k.text(' '), programView(k, data, part, W))
   return k.stack(head, takeaway, k.text(' '), k.embed(data.drawing), barView(k, data, part, bar, ex, W))
+}
+
+/** The ids the links in a drawing's words point at (`[words](#id)`), each once, in the order drawn. */
+export function linkTargets(root) {
+  const out = []
+  const runs = rs => { if (Array.isArray(rs)) for (const r of rs) if (r && r.ref && !out.includes(r.ref)) out.push(r.ref) }
+  const walk = x => {
+    if (!x || typeof x !== 'object') return
+    if (x.t === 'text') runs(x.runs)
+    if (x.t === 'frame') { runs(x.title); runs(x.right); runs(x.bottom) }
+    if (x.t === 'table') (x.rows || []).forEach(r => (r.cells || []).forEach(runs))
+    if (x.t === 'canvas') (x.ops || []).forEach(op => { if (op[0] === 'text') runs(op[3]); else if (op[0] === 'box') runs(op[6]) })
+    ;(x.kids || []).forEach(walk)
+    if (x.kid) walk(x.kid)
+  }
+  walk(root)
+  return out
 }
 
 /** A page knob's page in one word: `chapter` (its label, when one word), else `page`; and its pages: `chapters`. */

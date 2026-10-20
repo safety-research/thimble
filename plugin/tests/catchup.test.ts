@@ -134,7 +134,8 @@ test("the bar at rest reads s squeeze; two or more replies since the person's la
   // a hand-back answered: two replies since the prompt (the note of progress ended no turn)
   await turnOf($, clock, { turn: 't2', prompt: { uuid: H2, text: HANDBACK, kind: 'peer' }, says: [{ uuid: A2, text: FOLLOW }] })
   let bar = await hintOf($)
-  expect(bar).toContain('thimble  v visualize · s catch up on 2 replies · { } reply 2 of 2')
+  // (the newest reply has no marks: ] is named dim)
+  expect(bar).toContain('thimble  v visualize · s catch up on 2 replies · ] cite & explain · { } reply 2 of 2')
   expect(bar).not.toContain('lines')
   const lit = texts(await $.ui.render(HINT)).filter(t => t.text === 's' || t.text.includes('catch up on'))
   expect(lit.length).toBe(2)
@@ -197,7 +198,7 @@ test("s writes one catch-up of everything since the person's last prompt: one ca
   expect(textOf(await $.ui.render(view(A1, ANSWER)))).not.toContain('catch-up')
   let bar = await hintOf($)
   expect(bar).toContain('s ● catch-up of 2 replies')
-  expect(bar).toContain('[ ] change · 1–3 chip · 0 dismiss · s done')
+  expect(bar).toContain('[ ] shorter / longer · 1–3 pick chip · 0 dismiss · s done')
   expect(bar).not.toContain('lines')
   // s: done; the keys act on the catch-up, and the bar says so
   await press($, clock, edit('s'))
