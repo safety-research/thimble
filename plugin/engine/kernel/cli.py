@@ -772,7 +772,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         # the person's choice for a big label's ask (the terminal's ask runs this, as the person)
         r = LB.answer_ask(st, name, a.ask or "", a.answer, EST.SAMPLE, a.seed)
         lab, _, obj = _recount(st, name)
-        card = obj or ({"id": lab["card"], "version": None} if lab.get("card") else None)
+        card = {"id": obj["id"], "version": obj["version"]} if obj else ({"id": lab["card"], "version": None} if lab.get("card") else None)
         # the key that ran this starts the model's reads itself (shell/labels.ts answerAsk), so the feed has no line
         out_json({"name": name, "choice": r["choice"], "reads": r["reads"], "of": r["of"], "card": card, **LB.status(lab)})
         return 0
