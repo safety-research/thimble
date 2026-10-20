@@ -45,13 +45,13 @@ test('the first data command of a session carries the card guide, once; a save o
     expect((await bash($, command)).context ?? []).toEqual([])
   }
   await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:v5', 'thimble run']])
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:v6', 'thimble run']])
 })
 
 test('thimble sources first: the guide comes with whichever data command runs first', async ($, on) => {
   const w = world(on)
   const r = await bash($, 'thimble sources')
-  expect(r.context[0]).toContain('The card guide (forms:v5')
+  expect(r.context[0]).toContain('The card guide (forms:v6')
   await w.clock.advance(100)
   expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['thimble sources'])
 })

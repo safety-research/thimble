@@ -1,0 +1,202 @@
+{
+ "old": "March",
+ "new": "June",
+ "rows": [
+  {
+   "old": {
+    "n": 1,
+    "title": "Purpose",
+    "ref": "policy-march.md#L10-17"
+   },
+   "new": {
+    "n": 1,
+    "title": "Purpose",
+    "ref": "policy-june.md#L10-17"
+   },
+   "change": "same"
+  },
+  {
+   "new": {
+    "n": 2,
+    "title": "Consent",
+    "ref": "policy-june.md#L19-26"
+   },
+   "change": "moved"
+  },
+  {
+   "old": {
+    "n": 2,
+    "title": "Scope",
+    "ref": "policy-march.md#L19-26"
+   },
+   "new": {
+    "n": 3,
+    "title": "Scope",
+    "ref": "policy-june.md#L28-35"
+   },
+   "change": "same"
+  },
+  {
+   "old": {
+    "n": 3,
+    "title": "Definitions",
+    "ref": "policy-march.md#L28-35"
+   },
+   "new": {
+    "n": 4,
+    "title": "Definitions",
+    "ref": "policy-june.md#L37-44"
+   },
+   "change": "same"
+  },
+  {
+   "old": {
+    "n": 4,
+    "title": "What we collect",
+    "ref": "policy-march.md#L37-44"
+   },
+   "new": {
+    "n": 5,
+    "title": "What we collect",
+    "ref": "policy-june.md#L46-53"
+   },
+   "change": "reworded"
+  },
+  {
+   "old": {
+    "n": 5,
+    "title": "How we use data",
+    "ref": "policy-march.md#L46-53"
+   },
+   "new": {
+    "n": 6,
+    "title": "How we use data",
+    "ref": "policy-june.md#L55-62"
+   },
+   "change": "same"
+  },
+  {
+   "old": {
+    "n": 6,
+    "title": "Sharing with partners",
+    "ref": "policy-march.md#L55-62"
+   },
+   "new": {
+    "n": 7,
+    "title": "Sharing with partners",
+    "ref": "policy-june.md#L64-71"
+   },
+   "change": "reworded"
+  },
+  {
+   "old": {
+    "n": 7,
+    "title": "Consent",
+    "ref": "policy-march.md#L64-71"
+   },
+   "change": "moved"
+  },
+  {
+   "old": {
+    "n": 8,
+    "title": "Deletion after 30 days",
+    "ref": "policy-march.md#L73-80"
+   },
+   "change": "removed"
+  },
+  {
+   "old": {
+    "n": 9,
+    "title": "Security",
+    "ref": "policy-march.md#L82-89"
+   },
+   "new": {
+    "n": 8,
+    "title": "Security",
+    "ref": "policy-june.md#L73-80"
+   },
+   "change": "same"
+  },
+  {
+   "old": {
+    "n": 10,
+    "title": "Your rights",
+    "ref": "policy-march.md#L91-98"
+   },
+   "new": {
+    "n": 9,
+    "title": "Your rights",
+    "ref": "policy-june.md#L82-89"
+   },
+   "change": "same"
+  },
+  {
+   "old": {
+    "n": 11,
+    "title": "Children's data",
+    "ref": "policy-march.md#L100-107"
+   },
+   "new": {
+    "n": 10,
+    "title": "Children's data",
+    "ref": "policy-june.md#L91-98"
+   },
+   "change": "same"
+  },
+  {
+   "new": {
+    "n": 11,
+    "title": "Training models on your data",
+    "ref": "policy-june.md#L100-107"
+   },
+   "change": "added"
+  },
+  {
+   "old": {
+    "n": 12,
+    "title": "Contact",
+    "ref": "policy-march.md#L109-116"
+   },
+   "new": {
+    "n": 12,
+    "title": "Contact",
+    "ref": "policy-june.md#L109-116"
+   },
+   "change": "same"
+  }
+ ],
+ "moves": [
+  {
+   "from": 7,
+   "to": 1,
+   "label": "consent"
+  }
+ ],
+ "kinds": [
+  {
+   "key": "same",
+   "label": "unchanged",
+   "tone": "dim"
+  },
+  {
+   "key": "reworded",
+   "label": "reworded",
+   "tone": "warn"
+  },
+  {
+   "key": "moved",
+   "label": "moved",
+   "tone": "accent"
+  },
+  {
+   "key": "removed",
+   "label": "removed",
+   "tone": "bad"
+  },
+  {
+   "key": "added",
+   "label": "new",
+   "tone": "good"
+  }
+ ]
+}
