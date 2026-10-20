@@ -243,6 +243,7 @@ test('a call that fails says so plainly: a toast with what failed, and the label
 
 test("the detail of a label's card: each example shows its labels; a number key checks the record shown, which steps on; when the detail closes the card is counted again and Claude hears of the checks", async ($, on) => {
   const w = world(on)
+  const session = mock.session(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '02-label-apology value-0' } as never)
   await pane($, clock)
@@ -265,11 +266,12 @@ test("the detail of a label's card: each example shows its labels; a number key 
   // flipped back, the checked records say so
   await press($, clock, edit('['))
   expect(await pane($, clock)).toContain('apology: yes → you: no')
-  // the pane is gone (a close the module did not hear): the next prompt to main carries the checks
+  // the pane is gone (a close the module did not hear): before the next prompt to main, Claude reads the checks in a row
+  // of its own
   w.opened.length = 0
   await $.prompt.submit({ text: 'so?', origin: { kind: 'composer' } } as never)
   expect(w.runs.some(r => r.slice(-3).join(' ') === 'label apology --json')).toBe(true)
-  const note = w.submitted.at(-1)!.context.join('\n')
+  const note = (session.appended() as unknown as { message: { content: { text?: string }[] } }[]).map(r => String(r.message.content[0]?.text ?? '')).join('\n')
   expect(note).toContain('The analyst checked 2 records of the label apology: they agree with 1 and changed 1: chat/room.jsonl#L3 (the label said yes, the analyst says no)')
   expect(note).toContain('its counts are now query q9')
 })

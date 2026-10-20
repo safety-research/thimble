@@ -5,7 +5,7 @@
 //                       mark a press (a cite underlined, a gloss on a teal fill, a sparkline in place), and every other
 //                       run of blocks drawn by Claude Code's own Markdown, so paragraphs, lists, code and tables look
 //                       as in any reply
-//   catchUpEl(els, o)   a catch-up under the newest reply: a rule down its left side, `thimble  catch-up of …`, then
+//   catchUpEl(els, o)   a catch-up in place of the replies it stands in for: a rule down its left side, `thimble  catch-up of …`, then
 //                       its text (a message drawn as above)
 //   messageRows(els, o) a message as rows, one element a row of the terminal, each block laid out here (as the
 //                       catch-up's), so a side thread's answer can be cut to the rows its panel has

@@ -43,5 +43,5 @@ export function viewMade({ about = '', cards = [] }) {
   const named = cards.map(c => `${c.id}${c.v != null ? `@${c.v}` : ''} (${String(c.root || '').replace(/\/+$/, '')}/thimble/objects/${c.id}.json)`)
   if (!named.length) return ''
   const what = about ? `your answer that begins "${firstWords(about)}"` : 'your last answer'
-  return `The analyst pressed v (visualize) on ${what}. A copy of you that worked in the background made the card${named.length > 1 ? 's' : ''} ${named.join(', ')} for it, drawn under that answer. The analyst may ask about ${named.length > 1 ? 'them' : 'it'}.`
+  return `The analyst pressed v (visualize) on ${what}. A copy of you that worked in the background made the card${named.length > 1 ? 's' : ''} ${named.join(', ')} for it, drawn under that answer, and the analyst sees ${named.length > 1 ? 'them' : 'it'} there. What ${named.length > 1 ? 'each shows' : 'it shows'}, as the analyst sees it:`
 }

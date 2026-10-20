@@ -72,7 +72,7 @@ function textOf(n: any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  // a Client's words are its props (the squeeze chips: squeeze/chipsclient.js draws its rows and the line under them)
+  // a Client's words are its props (a held pane, such as the squeeze chips: shell/keysclient.js draws its rows)
   if (n.type === 'Client') { const p = n.props?.props ?? {}; return (p.rows ?? []).map((r: { s: string }[]) => r.map(x => x.s).join('')).join('\n') + (p.hint ? `\n${p.hint}` : '') }
   return (n.type === 'Markdown' ? String(n.props?.text ?? '') : '') + textOf(n.props?.children) + textOf(n.children)
 }
@@ -97,7 +97,7 @@ async function answered($: any, on: any, clock: { settle: () => Promise<void> },
   await clock.settle()
 }
 
-test('s opens the chips under the answer, in place of its verb row: each its label, dots and level, the keys in the hint line', async ($, on) => {
+test('s opens the chips under the answer, in place of its verb row: each its label, dots and level, the keys in the bar alone', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await answered($, on, clock)
@@ -107,18 +107,19 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   expect(await press($, clock, edit('s'))).toEqual({ text: '', cursor: 0 })
   const drawn = textOf(await $.ui.render(view(TEXT)))
   expect(drawn).not.toContain('visualize')
-  expect(drawn).toContain(' Length ○○○● full ')
-  expect(drawn).toContain(' Report ↔ Interpret ○●○ balanced ')
-  expect(drawn).toContain(' Familiarity ○○●○○ working ')
-  expect(drawn).not.toContain('+')
+  // Length's original in its middle, as written; + at the end of the row adds a chip of the person's own
+  expect(drawn).toContain(' Length ○○●○○ as written ')
+  expect(drawn).toContain(' Interpretation ○●○ some meaning ')
+  expect(drawn).toContain(' Background ○○●○ working ')
+  expect(drawn).toContain(' + ')
   // nothing under the chips: their keys are in the bar, once
   expect(drawn).not.toContain('change')
-  expect(await hintOf($)).toContain('[ ] shorter / longer · 1–3 pick chip · 0 close')
+  expect(await hintOf($)).toContain('[ ] shorter / longer · 1–3 chip · s done · + your own')
   // only the picked chip has a fill: its words, dots and level, and no other chip's (the chips are a Client: its runs)
   const filled = (t: Any): string => (Array.isArray(t) ? t.map(filled).join('') : t && typeof t === 'object' ? (t.type === 'Client' ? (t.props?.props?.rows ?? []).flat().filter((r: Any) => r.bg).map((r: Any) => r.s).join('') : t.props?.backgroundColor ? textOf(t) : filled(t.children ?? t.props?.children)) : '')
   const fill = filled(await $.ui.render(view(TEXT)))
   expect(fill).toContain('Length')
-  expect(fill).toContain('full')
+  expect(fill).toContain('as written')
   expect(fill).not.toContain('Report')
   // a short answer: nothing was squeezed, no call made
   expect(w.calls.length).toBe(0)
@@ -128,13 +129,14 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   expect(await hintOf($)).toContain('v visualize · s squeeze')
 })
 
-test('a chip change rewrites the message in place with one call; the citations are placed again on the new text; 0 restores the original', async ($, on) => {
+test('a chip change rewrites the message in place with one call; the citations are placed again on the new text; 0 reverts to the original; Claude reads the version settled on, once, in a row of its own', async ($, on) => {
   const SHORT = 'June 18: [6,543 saves](q1#day=2026-06-18@n).'
   const w = world(on, [`<text>\n${SHORT}\n</text>`])
+  const session = mock.session(on)
   const clock = mock.clock(on)
   await answered($, on, clock)
   await press($, clock, edit('s'))
-  // [ : Length one level down, to medium
+  // [ : Length one level down, from as written to short
   expect(await press($, clock, edit('['))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.calls.length).toBe(1)
@@ -143,23 +145,23 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(call.system).toBe('THE PROMPT')
   expect(call.prompt).toContain('The analyst asked: when did the agents edit most?')
   expect(call.prompt).toContain(TEXT)
-  expect(call.prompt).toContain('- Length: medium, at most 14 words (levels one line · short · medium · full; the original is at full, 18 words)')
-  expect(call.prompt).toContain('- Report ↔ Interpret: as the original')
-  expect(call.prompt).toContain('- Familiarity: as the original (levels new to the field · beginner · working · fluent · expert)')
+  expect(call.prompt).toContain('- Length: short, at most 11 words (levels one line · short · as written · longer · much longer; the original is at "as written", 18 words)')
+  expect(call.prompt).toContain('- Interpretation: as the original')
+  expect(call.prompt).toContain('- Background: as the original (levels new · learning · working · expert)')
   const rec = record(w)
   expect(rec.text).toBe(TEXT)
   expect(rec.shown).toBe(SHORT)
   expect(rec.marks.map((m: Any) => SHORT.slice(m.start, m.end))).toEqual(['[6,543 saves](q1#day=2026-06-18@n)'])
-  expect(rec.squeeze.at).toEqual({ length: 2 })
+  expect(rec.squeeze.at).toEqual({ length: 1 })
   await writtenIn(clock)
-  // the message is drawn from the new text, its citation a press; the chip reads medium; the hint offers the original
+  // the message is drawn from the new text, its citation a press; the chip reads short; the bar offers to revert
   const ui = await $.ui.mount(view(TEXT))
   const drawn = textOf(await ui.drawn())
   expect(drawn).toContain('June 18: 6,543 saves.')
   expect(drawn).not.toContain('from this one')
-  expect(drawn).toContain('Length ○○●○ medium')
+  expect(drawn).toContain('Length ○●○○○ short')
   expect(drawn).not.toContain('rewriting')
-  expect(await hintOf($)).toContain('[ ] shorter / longer · 1–3 pick chip · 0 original · s done')
+  expect(await hintOf($)).toContain('[ ] shorter / longer · 1–3 chip · 0 revert · s done')
   await ui.unmount()
   await press($, clock, edit('0'))
   await clock.settle()
@@ -167,14 +169,19 @@ test('a chip change rewrites the message in place with one call; the citations a
   const back = record(w)
   expect(back.shown).toBe(null)
   expect(back.marks.filter((m: Any) => m.kind === 'cite').map((m: Any) => TEXT.slice(m.start, m.end))).toEqual(['[6,543 saves](q1#day=2026-06-18@n)', '[this one](revisions.jsonl#L28)'])
-  expect(await hintOf($)).toContain('0 close')
+  expect(await hintOf($)).not.toContain('revert')
   // a state seen before comes back from the record, with no call
   await press($, clock, edit('['))
   await clock.settle()
   expect(w.calls.length).toBe(1)
   expect(record(w).shown).toBe(SHORT)
+  // Claude has heard nothing of the versions yet; before the next prompt it reads the one the person settled on, whole
+  const told = () => (session.appended() as unknown as { message: { content: { text?: string }[] } }[]).map(r => String(r.message.content[0]?.text ?? '')).filter(t => t.includes('now reads, for the analyst, as:'))
+  expect(told()).toEqual([])
   await $.prompt.submit({ text: 'and then?', origin: { kind: 'composer' } } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).toContain('rewritten by the squeeze chips (Length: medium)')
+  expect(told().length).toBe(1)
+  expect(told()[0]).toMatch(/^Your message from \d\d:\d\d \("Mostly 6,543 saves on June 18, from this…"\) now reads, for the analyst, as:\n\nJune 18: \[6,543 saves\]\(q1#day=2026-06-18@n\)\.\n\n\(The squeeze chips wrote this version of yours \(Length: short\)\./)
+  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('squeeze chips')
 })
 
 test('the new text writes itself in from the top: the old text dims while the call runs, then the new one grows from its first words until it is whole', { options: { observer: false } }, async ($, on) => {
@@ -186,7 +193,7 @@ test('the new text writes itself in from the top: the old text dims while the ca
   await press($, clock, edit('3'))
   await press($, clock, edit(']'))
   await clock.settle()
-  expect(w.calls[0].prompt).toContain('- Familiarity: fluent (levels new to the field · beginner · working · fluent · expert; the original is at a level not yet known)')
+  expect(w.calls[0].prompt).toContain('- Background: expert (levels new · learning · working · expert; the original is at a level not yet known)')
   // the first piece only: whole words, the citation whole
   const first = textOf(await $.ui.render(view(TEXT)))
   expect(first).toContain('June 18 had the most')
@@ -225,16 +232,17 @@ test('a long answer arrives as Claude wrote it: no call, the bar at rest reads s
   expect(textOf(await $.ui.render(view(LONG)))).toContain('Run 30 landed')
   expect(await hintOf($)).toContain('v visualize · s squeeze')
   expect(await hintOf($)).not.toContain('lines')
-  // s, then [ : one call, and the bar says how much of it shows
+  // s, then [ : one call, and the bar says the level it shows, never a count of lines
   await press($, clock, edit('s'))
-  expect(textOf(await $.ui.render(view(LONG)))).toContain('Length ○○○● full')
+  expect(textOf(await $.ui.render(view(LONG)))).toContain('Length ○○●○○ as written')
   await press($, clock, edit('['))
   await clock.settle()
   expect(w.calls.length).toBe(1)
-  expect(w.calls[0].prompt).toContain('- Length: medium')
+  expect(w.calls[0].prompt).toContain('- Length: short')
   expect(record(w).shown).toBe(SHORT)
   await press($, clock, edit('s'))
-  expect(await hintOf($)).toContain('s ● 1 of 44 lines')
+  expect(await hintOf($)).toContain('s ● short')
+  expect(await hintOf($)).not.toContain('lines')
 })
 
 test('a key the bar named a moment ago is taken, never typed, when what it named has gone meanwhile: a rewrite landing closes the tray the person is closing', async ($, on) => {
@@ -274,7 +282,7 @@ test('a rewrite that cites a ref the original never cited shows it as plain word
   await press($, clock, edit('3'))
   await press($, clock, edit('['))
   await clock.settle()
-  expect(w.calls[0].prompt).toContain('- Familiarity: beginner')
+  expect(w.calls[0].prompt).toContain('- Background: learning')
   const rec = record(w)
   expect(rec.shown).toBe('June 18 had [6,543 saves](q1#day=2026-06-18@n), 12% more.')
   expect(rec.marks.map((m: Any) => m.ref)).toEqual(['q1#day=2026-06-18@n'])
@@ -289,13 +297,13 @@ test('keys pressed while a rewrite is on its way add up: the chip shows where it
   const clock = mock.clock(on)
   await answered($, on, clock)
   await press($, clock, edit('s'))
-  // three presses before the first call comes back: medium, short, one line (no settling between them)
-  for (let i = 0; i < 3; i++) await ($ as Any).prompt.edit(edit('['))
+  // two presses before the first call comes back: short, one line (no settling between them)
+  for (let i = 0; i < 2; i++) await ($ as Any).prompt.edit(edit('['))
   await clock.settle()
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('Length ●○○○ one line')
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain('Length ●○○○○ one line')
   await clock.settle()
   await clock.settle()
-  // the first call (medium) was on its way; short was passed over; one line came last
+  // the first call (short) was on its way; one line came last
   expect(w.calls.length).toBe(2)
   expect(w.calls[1].prompt).toContain('- Length: one line')
   expect(record(w).squeeze.at).toEqual({ length: 0 })
@@ -309,8 +317,8 @@ test('a correction of its own earlier answer stays at every length: the request 
   const clock = mock.clock(on)
   await answered($, on, clock, FIXED)
   await press($, clock, edit('s'))
-  // three steps of Length down: one line
-  for (const k of ['<', '<', '<']) await press($, clock, edit(k))
+  // two steps of Length down: one line
+  for (const k of ['<', '<']) await press($, clock, edit(k))
   await clock.settle()
   const call = w.calls.at(-1)
   expect(call.prompt).toContain('then each correction listed below in a few words')
@@ -402,4 +410,40 @@ test('a rewrite refused for an expired sign-in says so in plain words, with the 
   expect(bar).not.toContain('401')
   expect(bar).not.toContain('authentication_failed')
   expect(record(w).squeeze.error).toContain('Sign in again with /login')
+})
+
+test('+ adds a chip in the person\'s own words: the prompt takes them as /squeeze, the chip runs from as written to fully, the rewrite names it, and /squeeze offers the words again as they are typed', async ($, on) => {
+  const w = world(on, ['<text>\n**Status:** June 18 peaked, [6,543 saves](q1#day=2026-06-18@n).\n</text>'])
+  on('prompt.autocomplete', () => ({ suggestions: [] }))
+  const clock = mock.clock(on)
+  await answered($, on, clock)
+  await press($, clock, edit('s'))
+  // + with the prompt holding the keys: the prompt takes the words, as the command that adds the chip
+  expect(await press($, clock, edit('+'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(w.fills.at(-1)).toBe('/squeeze ')
+  expect(await $.command.run({ command: 'squeeze', args: 'for my manager' } as never)).toEqual({})
+  await clock.settle()
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain('4 for my manager ●○○○ as written')
+  expect(await hintOf($)).toContain('[ ] less / more · 1–4 chip · s done · + your own')
+  // ] moves it a step: one call, which names the chip by its words and level
+  await press($, clock, edit(']'))
+  await clock.settle()
+  expect(w.calls.length).toBe(1)
+  expect(w.calls[0].prompt).toContain('- A chip the analyst typed, "for my manager": a little (levels as written · a little · more · fully; the original is at "as written")')
+  expect(record(w).squeeze.own).toEqual([{ id: 'x-for-my-manager', words: 'for my manager' }])
+  // typed earlier this session: /squeeze offers the words again
+  const r = await ($ as Any).prompt.autocomplete({ text: '/squeeze fo', cursor: 11, token: 'fo', start: 9 })
+  expect(r.suggestions.map((x: Any) => x.text)).toContain('for my manager')
+})
+
+test('an arrow whose escape byte came apart (Claude Code read it as esc, and the rest arrives as "[D") is the arrow on the open chips, and nothing lands in the prompt', async ($, on) => {
+  const w = world(on, ['<text>\nJune 18: [6,543 saves](q1#day=2026-06-18@n).\n</text>'])
+  const clock = mock.clock(on)
+  await answered($, on, clock)
+  await press($, clock, edit('s'))
+  expect(await press($, clock, { origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: '[D' } as never)).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(record(w).squeeze.at).toEqual({ length: 1 })
+  expect(w.calls.length).toBe(1)
 })

@@ -59,13 +59,13 @@ that work at that moment, so you do not need to learn them first.
 | Key | What it does |
 |---|---|
 | `v` | Asks Claude for another view of the reply, as a card. When the side agent has a view in mind, `v` is lit and offers it. |
-| `s` | Rewrites the reply in place: shorter or longer, more or less interpretation, for a newcomer or an expert. When two or more replies came since your last prompt, `s` offers one catch-up message of all of them. |
+| `s` | Rewrites the reply in place: shorter or longer, more or less interpretation, for a newcomer or an expert, or along a chip in your own words (`+`). When two or more replies came since your last prompt, `s` catches up on them: one message in their place, with the replies one key away (`0`). |
 | `]` `[` | Step through the citations and explained terms in the reply, then its cards. |
-| `1` | Opens the card or citation you stepped to. |
+| `o` | Opens the card you stepped to. |
 | `{` `}` | Pick an earlier or a later reply. |
-| `0` or `esc` | Close. |
+| `esc` or `0` | Close. Claude Code keeps `esc` at the prompt, so it closes the side panel and what opens over it; `0` closes the rest. |
 
-A citation opens in a tray above the prompt: `r` shows its rows, `c` the code behind it, and `1` lets you ask a
+A citation opens in a tray above the prompt: `r` shows its rows, `c` the code behind it, and `a` lets you ask a
 question about it in a side thread that the main conversation does not see.
 
 A card opens in a detail view beside the chat: arrow keys select a part, `↵` shows its details, `e` its example rows,

@@ -106,7 +106,7 @@ function textOf(n: any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  // a Client's words are its props (the squeeze chips: squeeze/chipsclient.js draws its rows and the line under them)
+  // a Client's words are its props (a held pane, such as the squeeze chips: shell/keysclient.js draws its rows)
   if (n.type === 'Client') { const p = n.props?.props ?? {}; return (p.rows ?? []).map((r: { s: string }[]) => r.map(x => x.s).join('')).join('\n') + (p.hint ? `\n${p.hint}` : '') }
   return textOf(n.props?.children) + textOf(n.children)
 }
@@ -138,7 +138,7 @@ const markdowns = (t: Node) => { const out: string[] = []; walk(t, x => { if (x.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const reply = ($: any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
-test('an object Claude saves is drawn under the next words of the turn; its verbs and 1 open detail are in the bar', async ($, on) => {
+test('an object Claude saves is drawn under the next words of the turn; its verbs are in the bar, and 1 opens its detail', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   const opened: string[] = []
@@ -159,10 +159,11 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   expect(drawn).toContain('Jun 18')
   expect(drawn).toContain('6,543')
   // the message, then the object with nothing under it; the keys act on this answer, so the bar above the
-  // prompt names its verbs and what 1 does, and 1 on an empty prompt opens the card's detail view
+  // prompt names its verbs (at rest the three alone), and 1 on an empty prompt opens the card's detail view
   expect(drawn).not.toContain('visualize')
   expect(drawn).not.toContain('1 open detail')
-  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims · ] card · 1 open detail')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims')
+  expect(await hintOf($)).not.toContain('open detail')
   expect(drawn).not.toContain('x explore')
   expect(drawn).not.toContain('? all')
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
@@ -298,9 +299,9 @@ test('a reply draws its citations inline, each underlined and a press that opens
   const card = textOf(await $.ui.render(BAND))
   expect(card).toContain('Jun 18')
   // the tray's keys are in the bar under it, not on its frame
-  expect(card.split('╯')[0]).not.toContain('1 ask')
+  expect(card.split('╯')[0]).not.toContain('a ask')
   // with the keys of the card's sections: the rows behind the value, and its code
-  expect(await hintOf($)).toContain('thimble  1 ask · r rows · c code · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  a ask · r rows · c code · 0 close · ] next')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
 })
@@ -322,14 +323,14 @@ test('a quote opens its span under a link to its file, drawn as Claude Code draw
     expect(textOf(band)).toContain('27 an earlier save / 28 ▌ change_summary: the totals do not match')
     // the file, as a link Claude Code's own Markdown draws: an OSC 8 hyperlink to the file, its line as the fragment
     expect(markdowns(band)).toContain('↗ [revisions.jsonl:28](file:///data/revisions.jsonl#L28)')
-    expect(await hintOf($)).toContain('thimble  1 ask · c raw · 0 close · ] next')
+    expect(await hintOf($)).toContain('thimble  a ask · c raw · 0 close · ] next')
     // c: the record as the file holds it, in place of the span, in the same panel
     expect(await press($, clock, edit('c'))).toEqual({ text: '', cursor: 0 })
     let now = textOf(await $.ui.render(BAND))
     expect(now).toContain('revisions.jsonl:28, as the file holds it')
     expect(now).not.toContain('27 an earlier save')
     expect(now).toContain('cite · revisions.jsonl · raw')
-    expect(await hintOf($)).toContain('thimble  1 ask · c raw · 0 back · ] next')
+    expect(await hintOf($)).toContain('thimble  a ask · c raw · 0 back · ] next')
     // 0 brings the span back; the tray stays open
     expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
     now = textOf(await $.ui.render(BAND))
@@ -475,14 +476,15 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   await markedTurn($, on, clock)
   // the hint line names the key that opens the answer's marks; the verb row does not
   expect(textOf(await $.ui.render({ ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never))).not.toContain('marks')
-  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims')
+  expect(await hintOf($)).not.toContain('cite & explain')
   // the bar above the prompt says how much of the data the session read
   expect(textOf(await $.ui.render(BAND))).toContain('seen 17%')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  expect(await hintOf($)).toContain('thimble  1 ask · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  a ask · 0 close · ] next')
   await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
   await press($, clock, edit('['))
@@ -522,7 +524,7 @@ function slowWrites(on: any) {
   return { next: (n: number) => { ms = n } }
 }
 // the squeeze chips under the answer: the line a key opens in these tests
-const lineOpen = async ($: Any) => textOf(await $.ui.render(MOUNT)).includes('Length ○○○● full')
+const lineOpen = async ($: Any) => textOf(await $.ui.render(MOUNT)).includes('Length ○○●○○ as written')
 
 test('a key is answered before its work runs; a key pressed while that work runs waits for it, past the hook\'s 50 ms, and is still taken: the .catch gives what the hook decided', async ($, on) => {
   const w = world(on)
@@ -626,13 +628,15 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   w.files[`${dir}/${AT}.json`] = JSON.stringify(rec)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   const RESUMED = { ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never
-  expect(textOf(await $.ui.render(HINT))).toContain('s ● 24 lines')
+  // (an older record's lit s says a count of lines: the bar says no line counts)
+  expect(textOf(await $.ui.render(HINT))).toContain('v visualize · s squeeze')
+  expect(textOf(await $.ui.render(HINT))).not.toContain('lines')
   await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   await press($, clock, edit('0'))
   await press($, clock, edit('s'))
   // s opens the squeeze chips under it, in place of its verb row
-  expect(textOf(await $.ui.render(RESUMED))).toContain('Report ↔ Interpret')
+  expect(textOf(await $.ui.render(RESUMED))).toContain('Interpretation')
 })
 
 test('a failure reads as plain words, never JSON; a refusal that needs nothing from the person says nothing', () => {
@@ -653,7 +657,7 @@ test('the bar is one row above the prompt: the verbs in words at its left, a lit
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   const bar = textOf(await $.ui.render(HINT))
-  expect(bar).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
+  expect(bar).toContain('thimble  v visualize · s squeeze · c claims')
   // 102 of 600 rows read, as the kernel counts them (events.jsonl was only named): 17%; no zero count shows
   expect(bar).toContain('seen 17%')
   expect(bar).not.toContain('cites')
@@ -704,24 +708,22 @@ test('the keys act on the newest answer, never on an error; { and } pick another
   await answerTurn($, clock, { turn: 't1', uuid: LONG, text: MARKED, prompt: 'when?' })
   await answerTurn($, clock, { turn: 't2', uuid: SHORT, text: 'The second reader is done too.' })
   await answerTurn($, clock, { turn: 't3', uuid: ERR, text: 'API Error: 401 Authentication failed', reason: 'error' })
-  // the keys act on the short follow-up (the error answered nothing), and the bar says which of the two replies; it has
-  // no marks, so ] is named dim
+  // the keys act on the short follow-up (the error answered nothing); at rest the bar names nothing more (two replies
+  // since the prompt: s catches up)
   let bar = await hintOf($)
-  expect(bar).toContain('v visualize')
-  expect(bar).toContain('{ } reply 2 of 2')
-  expect(dimText(await $.ui.render(HINT))).toContain('] cite & explain')
-  // { picks the long answer: its marks are the keys' now, and its first row shows ▸ in place of its bullet
+  expect(bar).toContain('v visualize · s catch up · c claims')
+  expect(bar).not.toContain('{ }')
+  // { picks the long answer: its marks are the keys' now, the bar names which reply, and its first row shows ▸ in place
+  // of its bullet
   expect(await press($, clock, edit('{'))).toEqual({ text: '', cursor: 0 })
   bar = await hintOf($)
   expect(bar).toContain('{ } reply 1 of 2')
-  expect(bar).toContain('] cite & explain')
   const long = textOf(await $.ui.render({ ...(MOUNT as object), requestId: LONG, props: { text: MARKED, isFirstOfReply: true } } as never))
   expect(long.startsWith('▸')).toBe(true)
   // } gives the keys back to the newest answer; no key of the bar reads as an arrow key
   await press($, clock, edit('}'))
-  expect(await hintOf($)).toContain('{ } reply 2 of 2')
+  expect(await hintOf($)).not.toContain('{ }')
   expect(await hintOf($)).not.toMatch(/[<>←→]/)
-  expect(dimText(await $.ui.render(HINT))).toContain('] cite & explain')
 })
 
 test('a conversation continued in a new session (moved to the background, --fork-session) finds its records: the cards under its replies and its answers', async ($, on) => {

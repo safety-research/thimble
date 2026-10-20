@@ -227,13 +227,16 @@ test('a citation in an answer opens over the card in the panel, as its own threa
   expect(await hintOf($)).toContain('esc back')
 })
 
-test("a citation's thread: 1 in the tray opens the citation in the side panel with the input bar holding the keys; a letter starts the question there", async ($, on) => {
+test("a citation's thread: a in the tray opens the citation in the side panel with the input bar holding the keys; a letter starts the question there", async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await markedTurn($, clock)
   await press($, clock, edit(']'))
-  expect(await hintOf($)).toContain('1 ask')
-  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
+  expect(await hintOf($)).toContain('a ask')
+  // a acts once a letter after it could no longer make it the start of a word
+  expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(800)
+  await clock.settle()
   expect(w.opened.some(x => x.title === 'Cite · 6,543 saves')).toBe(true)
   // the tray gives way to the panel; the bar says how to ask, and the thread's name
   const bar = await hintOf($)
@@ -382,7 +385,7 @@ test('a terminal too narrow for the panel: 1 in the tray leaves the tray as it w
   await press($, clock, edit('1'))
   expect(w.toasts.at(-1)).toBe('The side panel needs 144 columns when a key opens it (120 now). Type /threads to open it here, or widen the terminal.')
   // the keys are the chat's again, and the tray still shows the citation
-  expect(await hintOf($)).toContain('1 ask')
+  expect(await hintOf($)).toContain('a ask')
   expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   const n = w.opened.length
   await $.command.run({ command: 'threads', args: '' } as never)

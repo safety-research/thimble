@@ -7,8 +7,8 @@
 //         {kind: 'cite', ref, label} for a citation inside a card or a thread's answer
 //   state: {open: the section shown in place of the card}
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host (cards.js drawnCard)
-//   keys: the sections' keys (r rows, c code) · 2–9 open a citation inside the card (over this one, in the panel) ·
-//         ] [ the next mark of the message and the one before, in its place (a mark of a message only)
+//   keys: the sections' keys (r rows, c code) · o open the first citation inside the card (over this one, in the
+//         panel; 2–9 the others, unnamed) · ] [ the next mark of the message and the one before, in its place (a mark of a message only)
 //   asks of the host: open {mark: frame} (a citation inside the card, opened over this one), step {dir}
 import { threadKey } from '../shell/threads.js'
 import { cardBody, cardRequest, scopeOf } from './tray.js'
@@ -54,7 +54,9 @@ export function program(k, data) {
   const open = sections.find(s => s.id === st.open) || null
   const openLink = l => { k.do('open', { mark: { kind: 'cite', ref: l.ref, label: l.label } }) }
   sections.forEach(s => k.on(s.key, () => ({ open: open && open.id === s.id ? null : s.id }), s.words))
-  links.forEach((l, j) => k.on(String(j + 2), () => openLink(l), 'open'))
+  // o: the first citation inside the card (the rest by a click; 2–9 still open them, unnamed), so the line reads as words
+  if (links.length) k.on('o', () => openLink(links[0]), `open ${String(links[0].label || links[0].ref || '').slice(0, 28)}`)
+  links.forEach((l, j) => k.on(String(j + 2), () => openLink(l)))
   // esc closes the section open first; then the panel's host goes back
   if (open) k.on('esc', () => ({ open: null }), 'back')
   // a mark of a message: the next one and the one before (the host's order of marks and cards), in its place

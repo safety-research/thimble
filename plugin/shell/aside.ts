@@ -11,8 +11,9 @@
 //     read after its own calls where its tool.call reaches this plugin, else at its end, and a save another call read
 //     first from the change feed goes under the message when the agent's commands name the card;
 //   - its end is heard at its turn.complete, and a hand-back or task notification it leaves in main's queue is dropped;
-//   - main learns of the card from one row it reads and the person does not see ($.session.append), so a later turn
-//     knows the card exists and where it is drawn.
+//   - main learns of the card from one row it reads and the person does not see (shell.tsx tellMain), with each card's
+//     content (its title, its takeaway, what it draws as text, its refs: cardForClaude), so a later turn can discuss
+//     it and cite its values.
 // The other mechanisms were weighed: hiding the plugin's prompt and Claude's reply rows (ui.render) still runs a turn
 // of main, which holds the prompt while it runs; $.model.fork has no tools, so it cannot query the data a card draws.
 // Where the fork is refused (a build without forks), the caller asks main as before (shell.tsx ask).
@@ -24,6 +25,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Aside, ObjRef } from '../types'
 import { claimAgent } from '../telemetry/telemetry'
 import { ownReport } from './threads.js'
+import { cardForClaude, tellMain } from './shell'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -222,8 +224,13 @@ export const registerAside: Register = on => {
           if (a.saves.length) {
             const done: Aside = { ...a, status: 'done', secs: Math.round((t - a.at) / 1000) }
             await $.state.set({ ...ASIDE, id: row }, done)
-            const text = madeBy.get(a.verb)?.(done)
-            if (text) await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+            const head = madeBy.get(a.verb)?.(done)
+            if (head) {
+              // each card as the person sees it, in words, after the line that says what the key made
+              const cards: string[] = []
+              for (const ref of done.saves) cards.push(await cardForClaude($, ref).catch(() => ''))
+              await tellMain($, [head, ...cards.filter(Boolean)].join('\n\n'))
+            }
           } else {
             const why = e.reason !== 'answer' ? (e.reason === 'aborted' ? 'it was stopped' : `it ended in ${e.reason === 'refusal' ? 'a refusal' : 'an error'}`) : answer ? answer.slice(0, 120) : 'it saved no card'
             await $.state.set({ ...ASIDE, id: row }, { ...a, status: 'failed', error: why })

@@ -123,15 +123,17 @@ async function drawn($: any, clock: { settle: () => Promise<void> }, what: unkno
   return textOf(await $.ui.render(what))
 }
 
-test('under a reply: the dial turns where it is clicked, ] then . or n turn it too, and the row and the bar say 1 reads all its chapters', async ($, on) => {
+test('under a reply: the dial turns where it is clicked, ] then . or n turn it too, and with the keys the row and the bar say o reads all its chapters', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await turnSaving($, w, clock, [1])
   let t = await drawn($, clock, reply)
   expect(t).toContain('Apples')
   expect(t).toContain('◂ 1 of 3 ▸')
-  expect(t).toContain('3 chapters · 1 read all')
-  expect(textOf(await $.ui.render(HINT))).toContain('] card · 1 read all 3 chapters')
+  // at rest the row names no key beside the dial (a click reads them all), and the bar the three verbs alone
+  expect(t).toContain('3 chapters · read all')
+  expect(t).not.toContain('1 read all')
+  expect(textOf(await $.ui.render(HINT))).not.toContain('read all')
   // the dial is two halves: its right half turns it on, here, with no detail opened
   const ui = await $.ui.mount({ plugin: 'thimble', ...(reply as Any) } as never)
   const halves = keysIn(await ui.drawn()).filter(k => k.startsWith('t|') && k.endsWith('|chapter|next'))
@@ -148,7 +150,7 @@ test('under a reply: the dial turns where it is clicked, ] then . or n turn it t
   expect(JSON.parse(w.files[STATE]!).state).toEqual({ chapter: 1 })
   // ] gives the card the keys: the bar names them by what they do, and . and n turn it
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(HINT))).toContain('n next chapter · p previous chapter · 1 read all 3 chapters · ] next · 0 back')
+  expect(textOf(await $.ui.render(HINT))).toContain('n next chapter · p previous chapter · o read all 3 chapters · ] next · 0 back')
   expect(await press($, clock, edit('.'))).toEqual({ text: '', cursor: 0 })
   expect(JSON.parse(w.files[STATE]!).state).toEqual({ chapter: 2 })
   await clock.advance(1000)

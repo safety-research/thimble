@@ -8,7 +8,7 @@
 // marked: shell/cards.js); what reads less easily is one key away in the same panel, a section the card names (r the
 // rows behind the value, c its code, or a record as the file holds it), shown in place of the card until the same key
 // or 0 closes it. A citation inside a card opens over it; back returns to the card under it, and back from the first
-// card closes the tray. 1 opens the card in the side panel as the mark's side thread (side.ts): the card at its top,
+// card closes the tray. a opens the card in the side panel as the mark's side thread (side.ts): the card at its top,
 // the thread's conversation under it, its input bar at the bottom. Main does not see the thread.
 //
 //   state: {stack: [frame, ...]}
@@ -19,10 +19,16 @@
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
 //          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
 //          label}], problem} (cards.js drawnCard)
-//   keys: 1 ask (or thread: the side panel) · the sections' keys (r rows, c code) · 2–9 open a citation inside the card
-//         · 0 back (or close) · ] [ the next and the one before (the host's order of marks and cards: k.do('step'))
+//   keys: a ask (or thread: the side panel) · the sections' keys (r rows, c code) · o open the first citation inside the
+//         card (the rest by a click; 2–9 still open them, unnamed) · ] [ the next and the one before (the host's order of
+//         marks and cards: k.do('step')) · 0 back (or close): esc at the prompt never reaches a plugin, so 0 stays named.
+//         Letters for what the person does, so the line reads as words (`a ask · o open … · 0 close`), never as a
+//         number; 1 still asks, unnamed
 //   asks of the host: thread {frame} (the side panel on this card, its input bar holding the keys), step, close
 import { threadKey } from '../shell/threads.js'
+
+/** A label cut to `n` characters, with … where it was cut. */
+const short = (s, n) => (String(s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s))
 
 /** The rows a card may take in the tray. */
 export const BODY = 9
@@ -104,12 +110,15 @@ export function program(k, data) {
     return { stack: [] }
   }
   const openLink = l => ({ stack: [...stack, { kind: 'cite', ref: l.ref, label: l.label }].slice(-12) })
-  // 1: the card in the side panel, as the mark's thread, its input bar holding the keys (the question is typed there)
+  // a: the card in the side panel, as the mark's thread, its input bar holding the keys (the question is typed there)
   const toThread = () => { k.do('thread', { frame: { ...top, open: null } }) }
-  k.on('1', toThread, thread ? 'thread' : 'ask')
+  k.on('a', toThread, thread ? 'thread' : 'ask')
+  k.on('1', toThread)
   // a section's key opens it in place of the card, and closes it again
   sections.forEach(s => k.on(s.key, () => withTop({ open: open && open.id === s.id ? null : s.id }), s.words))
-  links.forEach((l, j) => k.on(String(j + 2), () => openLink(l), 'open'))
+  // o: the first citation inside the card, over it; the others by a click, or 2–9, unnamed
+  if (links.length) k.on('o', () => openLink(links[0]), `open ${short(links[0].label || links[0].ref || '', 28)}`)
+  links.forEach((l, j) => k.on(String(j + 2), () => openLink(l)))
   k.on('0', back, open || stack.length > 1 ? 'back' : 'close')
   k.on('esc', back)
   k.on(']', () => { k.do('step', { dir: 1 }) }, 'next')
@@ -125,7 +134,7 @@ export function program(k, data) {
   const parts = cardBody(k, card, top, open)
   if (thread && thread.turns.length && !open && card && !card.problem && !card.error) {
     const q = (thread.turns.find(t => t.role === 'person') || {}).text || ''
-    parts.push(k.region('thread', { label: 'the thread about this mark' }, k.text(`{dim:↳ thread:} ${k.escape(q.length > 60 ? q.slice(0, 59) + '…' : q)} {dim:· 1 opens it}`, { wrap: false })))
+    parts.push(k.region('thread', { label: 'the thread about this mark' }, k.text(`{dim:↳ thread:} ${k.escape(q.length > 60 ? q.slice(0, 59) + '…' : q)} {dim:· a opens it}`, { wrap: false })))
   }
   const title = top.label.length > inner - 12 ? top.label.slice(0, Math.max(8, inner - 13)) + '…' : top.label
   // the frame's right says what the card is from (the card's own words, `cite · revisions.jsonl`), the section open,

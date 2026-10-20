@@ -316,13 +316,16 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   await w.clock.settle()
   const card = textOf(await $.ui.render(BAND2))
   expect(card).toContain('fixture scope')
-  // the person reads the mark's kind by its teal frame; 1 asks, and the cite inside the card has the next digit, as
-  // the hint line under the prompt says
+  // the person reads the mark's kind by its teal frame; a asks, and o opens the cite inside the card, as the bar under
+  // the prompt says
   expect(card).not.toContain('gloss')
   expect(JSON.stringify(await $.ui.render(BAND2))).toContain('"color":"#62d2c6"')
-  expect(textOf(await $.ui.render(HINT))).toContain('1 ask · 2 open · 0 close · ] next')
-  // 2 opens the citation in it, over it; 0 comes back
-  await press($, w.clock, key('2'))
+  expect(textOf(await $.ui.render(HINT))).toContain('a ask · o open ')
+  expect(textOf(await $.ui.render(HINT))).toContain(' · 0 close · ] next')
+  // o opens the citation in it, over it (once a letter after it could no longer make it a word); 0 comes back
+  await press($, w.clock, key('o'))
+  await w.clock.advance(800)
+  await w.clock.settle()
   expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')
   expect(textOf(await $.ui.render(HINT))).toContain('0 back')
   await press($, w.clock, key('0'))
@@ -418,14 +421,14 @@ test('a version that does not exist: the default is read, and one line says so',
 
 // ------------------------------------------------------------------------------------------------ the order with squeeze
 
-test("a step on Report ↔ Interpret made while the look runs waits for it, then counts from the level the look gave: one step toward report from interpret is balanced", async ($, on) => {
+test("a step on Interpretation made while the look runs waits for it, then counts from the level the look gave: one step toward facts only from full meaning is some meaning", async ($, on) => {
   let release = () => {}
   const held = new Promise<void>(r => { release = r })
   const w = world(on, { holdPass: held, squeeze: 'June 18, in a few words.', fork: { notes: [], line: null, settled: false, verbs: { s: { at: { interpret: 'interpret', familiarity: 'working' } } }, glosses: [] } })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: 'June 18 had the most saves, because the fixture scope leaked between tests.', tools: 2, save: true })
   await w.clock.settle()
-  // the chips open with Report ↔ Interpret in its middle; < asks for one step toward report before the look has said
+  // the chips open with Interpretation in its middle; < asks for one step toward report before the look has said
   await press($, w.clock, key('s'))
   await press($, w.clock, key('2'))
   await press($, w.clock, key('<'))
@@ -437,7 +440,7 @@ test("a step on Report ↔ Interpret made while the look runs waits for it, then
   await w.clock.advance(100)
   await w.clock.settle()
   expect(w.squeezes.length).toBe(1)
-  expect(w.squeezes[0]).toContain('- Report ↔ Interpret: balanced (levels report · balanced · interpret; the original is at interpret)')
+  expect(w.squeezes[0]).toContain('- Interpretation: some meaning (levels facts only · some meaning · full meaning; the original is at full meaning)')
   const rec = JSON.parse(w.files[MSGPATH]!)
   expect(rec.squeeze.at).toEqual({ interpret: 1 })
   expect(rec.shown).toBe('June 18, in a few words.')
@@ -455,18 +458,18 @@ test('a step on Length, whose original level is always known, goes at once while
   await w.clock.settle()
   expect(w.forks.length).toBe(0)
   expect(w.squeezes.length).toBe(1)
-  expect(w.squeezes[0]).toContain('- Length: medium')
-  expect(w.squeezes[0]).toContain('- Report ↔ Interpret: as the original')
+  expect(w.squeezes[0]).toContain('- Length: short')
+  expect(w.squeezes[0]).toContain('- Interpretation: as the original')
   release()
   await w.clock.settle()
   // the look's levels came after: the version written stays the one the chips show
   const rec = JSON.parse(w.files[MSGPATH]!)
-  expect(rec.squeeze.at).toEqual({ length: 2 })
-  expect(Object.keys(rec.squeeze.versions)).toEqual(['length=2'])
+  expect(rec.squeeze.at).toEqual({ length: 1 })
+  expect(Object.keys(rec.squeeze.versions)).toEqual(['length=1'])
   expect(rec.shown).toBe('June 18.')
 })
 
-test('a long answer arrives as Claude wrote it, beside the look; a step on Report ↔ Interpret pressed while the look runs shows where it goes, waits for it, and runs from the level it gave', async ($, on) => {
+test('a long answer arrives as Claude wrote it, beside the look; a step on Interpretation pressed while the look runs shows where it goes, waits for it, and runs from the level it gave', async ($, on) => {
   let looked = () => {}
   const LONG = Array.from({ length: 44 }, (_, i) => `Run ${i + 1} landed ${i + 3} changes in the swarm.`).join('\n')
   const w = world(on, {
@@ -492,7 +495,7 @@ test('a long answer arrives as Claude wrote it, beside the look; a step on Repor
   await w.clock.advance(400)
   await w.clock.settle()
   expect(w.squeezes.length).toBe(1)
-  expect(w.squeezes[0]).toContain('- Report ↔ Interpret: balanced (levels report · balanced · interpret; the original is at interpret)')
+  expect(w.squeezes[0]).toContain('- Interpretation: some meaning (levels facts only · some meaning · full meaning; the original is at full meaning)')
   const rec = JSON.parse(w.files[MSGPATH]!)
   expect(rec.squeeze.at).toEqual({ interpret: 1 })
   expect(Object.keys(rec.squeeze.versions)).toEqual(['interpret=1'])

@@ -1,13 +1,13 @@
-// chipsclient.js: the squeeze chips under a message as a surface module (a Claude Code `Client`), so they can hold the
-// keyboard. Claude Code keeps tab, shift+tab and the arrow keys in its prompt, where no plugin hears them; a click on
-// the chips hands the keys to this region instead, until esc gives them back to the prompt. Each key and each click is
-// posted to the hooks module (shell.tsx, the `ui.message` hook), which runs the chips program (panes/chips.js) on it:
-// tab and shift+tab move between the chips, ← and → between the levels, enter or s is done. The module draws what the
-// hooks module drew of the program, as rows of styled runs, and one dim line under it saying how the keys work now.
+// keysclient.js: a pane program's drawing as a Claude Code `Client` that takes the keyboard once clicked (a surface
+// module). Claude Code keeps tab, shift+tab, the arrow keys and enter in its prompt, where no plugin hears them; a click
+// on this region hands the keys to it instead, until esc gives them back to the prompt. Each key and each click is
+// posted to the hooks module (shell.tsx heldEl and the `ui.message` hook), which runs the pane program on it. The
+// module draws what the hooks module drew of the program, as rows of styled runs, and one dim line under them when the
+// props carry one. The squeeze chips use it; any pane can (shell.tsx heldEl).
 //
-//   props: {rows: [[{s, color?, bg?, bold?}]], hint: string, keys: boolean}
+//   props: {rows: [[{s, color?, bg?, bold?}]], hint?: string, keys: boolean}
 //   posts: {key: {key, shift?, ctrl?, meta?}} for each key, {press: {x, y}} for a click (a pointer released over it)
-export default function ChipsClient(props, surface) {
+export default function KeysClient(props, surface) {
   const { Box, Text } = surface.elements
   if (surface.state === undefined) {
     surface.setState({ ready: true })

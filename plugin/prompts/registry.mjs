@@ -35,8 +35,8 @@ export const FEATURES = {
     versions: { v4: { about: "dim by default, lit only for a claim no card shows; written clean in the 0.9 style: two principles and one example, good and bad" } },
   },
   'lens-squeeze': {
-    about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v2', optional: true,
-    versions: { v2: { about: 'written clean in the 0.9 style' } },
+    about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v3', optional: true,
+    versions: { v2: { about: 'written clean in the 0.9 style' }, v3: { about: 'the chips as squeeze v7 names them: Interpretation (facts only · some meaning · full meaning) and Background (new · learning · working · expert), each in one sentence' } },
   },
   'lens-explain': {
     about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v4', optional: true,
@@ -54,8 +54,11 @@ export const FEATURES = {
     versions: { v1: { about: "the coh-atlas skill in the 0.9 style, for thimble's five commands: the map saved as the card folder-claims, its citations checked by the save" } },
   },
   squeeze: {
-    about: "squeeze's rewrite along its chips", reads: 'squeeze/term.ts', default: 'v6',
-    versions: { v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
+    about: "squeeze's rewrite along its chips", reads: 'squeeze/term.ts', default: 'v7',
+    versions: {
+      v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true },
+      v7: { about: 'each chip in a sentence or two of what it is, no layout: Length with the original in its middle (one line · short · as written · longer · much longer), Interpretation, Background, and a chip the analyst types; the principles cut to the general ones', keep: true, terms: true },
+    },
   },
   context: {
     about: "the block thimble adds to a conversation's first message: thimble is on here, so load its skill for a question about these files, code included",
