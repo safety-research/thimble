@@ -69,7 +69,7 @@ export type SqzUi = { focus: string; running: { since: number } | null; error: s
  *  which tell its saves from main's; `saves` the cards it saved, drawn under the message. */
 export type Aside = {
   row: string; verb: string; what: string; about: string; agentId: string; status: 'running' | 'done' | 'failed'
-  at: number; secs: number; steps: number; last?: string; cmds: string[]; saves: ObjRef[]; error?: string
+  at: number; secs: number; steps: number; last?: string; cmds: string[]; saves: ObjRef[]; error?: string; told?: boolean
 }
 
 /** The bar's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
@@ -127,6 +127,10 @@ declare module 'claude-code' {
       cardfocus: (ObjRef & { row: string }) | null
       /** the squeeze chips' line of a message, by its row */
       sqz: StateFamily<SqzUi | null>
+      /** the row whose squeeze chips hold the keyboard (a click on them gave it), or none */
+      chipkeys: string | null
+      /** v's card landed under a message off screen: the bar says so for a few seconds (shell.tsx cardLanded) */
+      cardnote: { row: string; id: string; about: string; at: number } | null
       /** work a key asked of Claude beside the conversation (shell/aside.ts), by the message it was asked on */
       aside: StateFamily<Aside | null>
       /** the message each such agent works for, by the agent's id */

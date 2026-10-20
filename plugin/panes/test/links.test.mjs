@@ -43,12 +43,15 @@ test('in the detail a click on a link opens what it points at: a cite its rows, 
   assert.deepEqual(press('zz').state, { region: 'b2' })
 })
 
-test('the keys walk the parts the card draws, never a link only a click reaches', () => {
-  let state = { region: 'b1' }
-  state = nextState(state, run(state, { type: 'key', key: 'down' }))
-  assert.equal(state.region, 'b2')
-  state = nextState(state, run(state, { type: 'key', key: 'down' }))
-  assert.equal(state.region, 'b1')
+test('the keys walk the parts in reading order, the links to a cite, examples or a knob among them', () => {
+  // the links stand in the words above the bars: ↓ from the last bar wraps to them, in the order they are written (a
+  // link to a bar is that bar, reached where the link stands first)
+  const walk = []
+  let state = { region: 'b2' }
+  for (let i = 0; i < 4; i++) { state = nextState(state, run(state, { type: 'key', key: 'down' })); walk.push(state.region) }
+  assert.deepEqual(walk, ['c1', 'ex1', 'b1', 'page'])
+  // ↑ walks back
+  assert.equal(nextState({ region: 'c1' }, run({ region: 'c1' }, { type: 'key', key: 'up' })).region, 'b2')
 })
 
 test('a link is underlined only where a click answers it: never with no press, never to an id nothing defines', () => {

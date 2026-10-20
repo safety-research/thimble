@@ -78,6 +78,8 @@ function textOf(n: Any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
+  // a Client's words are its props (the squeeze chips: squeeze/chipsclient.js draws its rows and the line under them)
+  if (n.type === 'Client') { const p = n.props?.props ?? {}; return (p.rows ?? []).map((r: { s: string }[]) => r.map(x => x.s).join('')).join('\n') + (p.hint ? `\n${p.hint}` : '') }
   return (n.type === 'Markdown' ? String(n.props?.text ?? '') : '') + textOf(n.props?.children) + textOf(n.children)
 }
 // each Text of a drawn tree whose children are words, with its style

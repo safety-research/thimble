@@ -25,7 +25,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { LineCounts, MsgRecord, ObjRef, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
 import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
 import { PAGES_DEFAULT } from './carddetail.js'
-import { gridText, renderTerm } from '../draw/term.js'
+import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
@@ -45,16 +45,16 @@ import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedO
 import { catchUpStands, isCatchUp, revealCut } from '../squeeze/chips.mjs'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
-import { act, paneDrawing, paneEl, paneFire, paneNow, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
+import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
-import { mix } from '../draw/palette.js'
+import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
 import { countLabels, DOCK_KEY, dockAction, dockAnyOpen, dockCountEl, dockCounts, dockKey, dockOpen, dockStore, dockWant, noteCoverage, registerDock, resetDock, restKey, syncDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
-import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, onAsideMade, registerAside, resetAside } from './aside'
+import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,6 +81,8 @@ const ANSWER = { plugin: 'thimble', key: 'answer' } as const
 const ANSWERS = { plugin: 'thimble', key: 'answers' } as const
 const CARDFOCUS = { plugin: 'thimble', key: 'cardfocus' } as const
 const SQZ = { plugin: 'thimble', key: 'sqz' } as const
+const CHIPKEYS = { plugin: 'thimble', key: 'chipkeys' } as const
+const CARDNOTE = { plugin: 'thimble', key: 'cardnote' } as const
 const COUNTS = { plugin: 'thimble', key: 'counts' } as const
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
@@ -1325,6 +1327,8 @@ export async function popFocus($: Engine, ...kinds: FocusKind[]): Promise<void> 
 /** v's line or the chips, the PICK state, with the stack kept beside it. */
 async function setPick($: Engine, pick: { row: string; verb: string } | null): Promise<void> {
   await $.state.set(PICK, pick)
+  // the chips closed (or opened on another message): the keyboard is the prompt's again
+  if (chipKeysRow && !(pick?.verb === 's' && pick.row === chipKeysRow)) await setChipKeys($, null)
   if (!pick) await popFocus($, 'chips', 'proposals')
   else { await popFocus($, pick.verb === 's' ? 'proposals' : 'chips'); await pushFocus($, pick.verb === 's' ? 'chips' : 'proposals') }
 }
@@ -1485,6 +1489,12 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     // before it); with none yet, they are named dim and type as letters
     const row = await actingRow($)
     const rec = row ? await recordNow($, row) : null
+    // v's card landed under a message off screen, a moment ago: first, a click away
+    const note = (await $.state.get(CARDNOTE)).value as { row: string; id: string; about: string; at: number } | null
+    if (note && (await $.clock.now()) - note.at < CARDNOTE_MS) {
+      const words = `card ready under "${cut(String(note.about || '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim(), 30)}" · click to go there`
+      left.push({ key: '', words, short: 'card ready', color: keyColor('v', theme), wordsColor: keyColor('v', theme), label: 'go to the card', onPress: () => goToCard($, note.row, note.id) })
+    }
     if (!row || !rec) {
       for (const v of ROW_KEYS) left.push({ key: v.key, words: v.name, dim: true })
       left.push({ key: ']', words: 'cite & explain', dim: true })
@@ -1637,6 +1647,8 @@ const shellKey = keySlot()
 /** One key pressed in the prompt, answered: by the prompt.edit hook (`fresh`), or past its budget by its .catch, with
  *  the decision the hook began. A key taken is answered at once, and its work runs after (keys.ts). */
 async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<Any> {
+  // a key in the prompt: the chips no longer hold the keyboard (esc gave it back)
+  if (chipKeysRow && fresh) void setChipKeys($, null).catch(() => undefined)
   // when the key came: a letter typed straight after a verb key counts from here, however long the verb's work takes
   const at = await $.clock.now()
   // a paste while the detail is open begins a question there, so it waits its turn like a key
@@ -1823,6 +1835,93 @@ function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
 }
 
+/** The messages whose card landing the shell has looked at (whether to say so in the bar). */
+const told = new Set<string>()
+/** How long the bar says a card landed under a message off screen. */
+const CARDNOTE_MS = 8000
+
+/** v's card landed under a message: when the message was off screen as the card was drawn, the bar says so for a few
+ *  seconds, a click there bringing the card into view. Nothing when the message is on screen, or the surface does not
+ *  say (the terminal's main screen). */
+async function cardLanded($: Engine, row: string, off: boolean): Promise<void> {
+  const a = await asideOn($, row)
+  if (!a || a.told) return
+  await markTold($, row)
+  const card = a.saves[a.saves.length - 1]
+  if (!off || !card) return
+  const at = await $.clock.now()
+  await $.state.set(CARDNOTE, { row, id: card.id, about: a.about, at })
+  $.clock.after(CARDNOTE_MS, () => { void (async () => { if (((await $.state.get(CARDNOTE)).value as Any)?.at === at) await $.state.set(CARDNOTE, null) })().catch(() => undefined) })
+}
+
+/** A click on the bar's `card ready under …`: the card in view, and the note gone. */
+async function goToCard($: Engine, row: string, id: string): Promise<void> {
+  await $.state.set(CARDNOTE, null)
+  await quietly($.ui.scroll({ to: { key: `card-${row}-${id}` }, block: 'nearest' }))
+}
+
+/** The squeeze chips of a message as drawn last, by its row: a click on them is read against the grid it landed on. */
+const chipsGrids = new Map<string, Any>()
+/** The row whose chips hold the keyboard now (a click gave it them), mirrored from CHIPKEYS for the key hook. */
+let chipKeysRow: string | null = null
+
+/** The squeeze chips under a message: the chips program (panes/chips.js) drawn in a Claude Code `Client`
+ *  (squeeze/chipsclient.js), the one element that can hold the keyboard in the transcript. A click on them hands it the
+ *  keys (tab, shift+tab, the arrows, enter) until esc; the line under them says so, and what the keys do then. */
+async function chipsEl($: Engine, e: Any, row: string, w: number): Promise<Any> {
+  const { Client } = $.ui.resolve(e) as Any
+  const d = await paneRun($, 'chips', { row }, { w, h: 3 })
+  const grid = renderTerm(d, { w })
+  chipsGrids.set(row, grid)
+  const keys = (await $.state.get(CHIPKEYS)).value === row
+  // each row as runs of one style: the tone's color (the theme's where one fits), its fill, its weight
+  const rows = (grid.rows as Any[][]).map(r => {
+    const out: { s: string; color?: string; bg?: string; bold?: boolean; k: string }[] = []
+    for (const c of r) {
+      if (c.cont) continue
+      const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}`
+      const last = out[out.length - 1]
+      if (last && last.k === k) { last.s += c.ch; continue }
+      const color = termColor(c.tone, theme)
+      out.push({ s: c.ch, k, ...(color ? { color } : {}), ...(c.bg ? { bg: toneHex(c.bg, theme) } : {}), ...(c.b ? { bold: true } : {}) })
+    }
+    return out.map(({ k: _k, ...run }) => run)
+  })
+  const hint = keys ? 'tab next chip · ← → change it · enter done · esc back to the prompt' : 'click the chips to move with tab and ← →'
+  return Client({ key: `chips-${row}`, module: '../squeeze/chipsclient.js', props: { rows, hint, keys } })
+}
+
+/** The chips hold the keyboard (a click), or give it back (a key in the prompt, the chips closed): the bar and the
+ *  line under them follow. */
+async function setChipKeys($: Engine, row: string | null): Promise<void> {
+  chipKeysRow = row
+  if ((await $.state.get(CHIPKEYS)).value !== row) await $.state.set(CHIPKEYS, row)
+}
+
+/** A key or a click the chips' Client posted (squeeze/chipsclient.js): the chips program's event. A key the chips do
+ *  not take is the start of something typed: the chips close, the keys go back to the prompt, and the letter is there. */
+async function chipsPosted($: Engine, row: string, data: Any): Promise<void> {
+  const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+  if (!pick || pick.verb !== 's' || pick.row !== row) return
+  await setChipKeys($, row)
+  if (data?.press && typeof data.press === 'object') {
+    const grid = chipsGrids.get(row)
+    const r = grid ? regionAt(grid, Number(data.press.x), Number(data.press.y)) : null
+    if (r) await paneFire($, 'chips', { row }, { type: 'press', region: r.id })
+    return
+  }
+  const ev = data?.key
+  if (!ev || typeof ev.key !== 'string' || ev.ctrl || ev.meta) return
+  const name = ev.key === 'tab' && ev.shift ? 'shift+tab' : ev.key === 'enter' ? 'return' : ev.key
+  const event = { type: 'key', key: name }
+  if (await paneTakes($, 'chips', { row }, event)) { await paneFire($, 'chips', { row }, event); return }
+  if ([...name].length === 1) {
+    await setPick($, null)
+    // once the chips are gone and the prompt has the keys again (a fill while the chips hold them is refused)
+    $.clock.after(60, () => { void $.prompt.fill({ text: name, mode: 'insert' }).catch(() => undefined) })
+  }
+}
+
 /** The line under a message while a key's work runs beside the conversation (`visualize… another view of this answer ·
  *  3 steps · 24s`), or why it made nothing. */
 function asideRowEl(els: Any, line: { text: string; error: boolean }, key: string): Any {
@@ -1864,7 +1963,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
     ? Box({ flexDirection: 'row', children: [Box({ flexDirection: 'column', width: 2, flexShrink: 0, children: Array.from({ length: Math.min(rows, p.grid.h) }, (_, i) => Text({ key: `bar${i}`, color: ring, children: '▎' })) }), cells] })
     : cells
   return Box({
-    flexDirection: 'column', marginTop: 1, marginLeft: ring && !framed ? 0 : 2, width: Math.max(p.grid.w, 40) + (ring && !framed ? 2 : 0),
+    key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: ring && !framed ? 0 : 2, width: Math.max(p.grid.w, 40) + (ring && !framed ? 2 : 0),
     children: [body, ...(pages ? [Box({ marginLeft: ring && !framed ? 2 : 0, children: [pages] })] : []), ...(run ? [run] : [])],
   })
 }
@@ -1908,7 +2007,7 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
     return { ...cu, shown: part, marks: cu.marks.filter(m => m.end <= part.length) } as MsgRecord
   })()
   const parts: Any[] = [catchUpEl(els, { rec: shown, key: `cu-${row}`, cols, first: false, theme, head, note, focus: base && base.row === row ? base.i ?? null : null, onMark: (i: number) => openMark($, row, i, cu), dim: !!busy })]
-  if (open === 's') parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row }, { w: Math.max(30, cols - 2), h: 3 })] }))
+  if (open === 's') parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await chipsEl($, e, row, Math.max(30, cols - 2))] }))
   else if (open) parts.push(Box({ key: `vl-${row}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
   const aside = asideLine(await asideOn($, row))
   if (aside) parts.push(asideRowEl(els, aside, `as-${row}`))
@@ -2061,6 +2160,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'record': return arg ? await recordNow($, arg) : null
     // the squeeze's own state of a message (a call running, a failure): the terminal's alone
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
+    // whether a message's chips hold the keyboard now (a click gave it them)
+    case 'chipkeys': return !!arg && (await $.state.get(CHIPKEYS)).value === arg
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': return arg ? cardStore($, arg) : null
     // the session's side threads: the tray shows a mark's
@@ -2458,7 +2559,14 @@ export const registerShell: Register = (on, options) => {
       // the catch-up under it, when replies piled up and the person caught up on them here
       const caught = await catchUpParts($, e, at, cols)
       // work a key asked of Claude on this message (v's card, aside.ts): one line while it runs, or why it made none
-      const aside = asideLine(await asideOn($, at))
+      const made = await asideOn($, at)
+      const aside = asideLine(made)
+      // v's card just landed under this message: when the message is off screen, the bar says so for a few seconds
+      if (made?.status === 'done' && !made.told && !told.has(at)) {
+        told.add(at)
+        const off = e.props.onScreen === null
+        $.clock.after(0, () => { void cardLanded($, at, off).catch(() => undefined) })
+      }
       if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null && !caught.length && !aside) return next(e)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       await $.state.get(CARDFOCUS)
@@ -2470,7 +2578,7 @@ export const registerShell: Register = (on, options) => {
       if (open === 's') {
         // the chips under the message (panes/chips.js, the browser draws the same program); their keys are in the
         // bar
-        parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row: at }, { w: Math.max(30, cols - 2), h: 3 })] }))
+        parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await chipsEl($, e, at, Math.max(30, cols - 2))] }))
       } else if (open) {
         // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar
         parts.push(Box({ key: `vl-${at}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row: at, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
@@ -2530,6 +2638,14 @@ export const registerShell: Register = (on, options) => {
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => answerKey($, e, next, true))
     // past the hook's budget (the hooks worker busy drawing), the same decision answers within the .catch's grace
     .catch(async ($, e, next) => answerKey($, e, next, false))
+
+  // the squeeze chips' Client (squeeze/chipsclient.js): each key and click it holds, for the chips program
+  on('ui.message', async ($, e, next) => {
+    const el = String(e.element || '')
+    if (!el.startsWith('chips-')) return next(e)
+    try { await chipsPosted($, el.slice('chips-'.length), e.data) } catch { /* the chips stay as they were */ }
+    return {}
+  })
 
   // a turn whose last word was a tool call: its objects under that call's row
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -2663,6 +2779,9 @@ export function resetShell(): void {
   resetDock()
   resetKeys(shellKey)
   resetAside()
+  chipsGrids.clear()
+  chipKeysRow = null
+  told.clear()
   graphLayout = null
 }
 

@@ -68,6 +68,8 @@ function textOf(n: any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
+  // a Client's words are its props (the squeeze chips: squeeze/chipsclient.js draws its rows and the line under them)
+  if (n.type === 'Client') { const p = n.props?.props ?? {}; return (p.rows ?? []).map((r: { s: string }[]) => r.map(x => x.s).join('')).join('\n') + (p.hint ? `\n${p.hint}` : '') }
   return (n.type === 'Markdown' ? String(n.props?.text ?? '') : '') + textOf(n.props?.children) + textOf(n.children)
 }
 const view = (text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 48, isFullscreen: true } }) as never
@@ -108,8 +110,8 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   // nothing under the chips: their keys are in the bar, once
   expect(drawn).not.toContain('change')
   expect(await hintOf($)).toContain('[ ] shorter / longer · 1–3 pick chip · 0 close')
-  // only the picked chip has a fill: its words, dots and level, and no other chip's
-  const filled = (t: Any): string => (Array.isArray(t) ? t.map(filled).join('') : t && typeof t === 'object' ? (t.props?.backgroundColor ? textOf(t) : filled(t.children ?? t.props?.children)) : '')
+  // only the picked chip has a fill: its words, dots and level, and no other chip's (the chips are a Client: its runs)
+  const filled = (t: Any): string => (Array.isArray(t) ? t.map(filled).join('') : t && typeof t === 'object' ? (t.type === 'Client' ? (t.props?.props?.rows ?? []).flat().filter((r: Any) => r.bg).map((r: Any) => r.s).join('') : t.props?.backgroundColor ? textOf(t) : filled(t.children ?? t.props?.children)) : '')
   const fill = filled(await $.ui.render(view(TEXT)))
   expect(fill).toContain('Length')
   expect(fill).toContain('full')

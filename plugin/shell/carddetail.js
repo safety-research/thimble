@@ -37,7 +37,8 @@ export function partsOf(grid) {
   const out = []
   for (const r of grid?.regions || []) {
     if (!r.rects || !r.rects.length) continue
-    if (r.link && !r.meta?.knob) continue
+    // a link is a part when a click on it answers: a knob it turns, a cite or examples it opens (panes/detail.js)
+    if (r.link && !r.meta?.knob && !r.meta?.cite && !r.meta?.examples) continue
     if (out.some(p => p.id === r.id)) continue
     out.push({ id: r.id, label: String(r.meta?.label || r.id), rects: r.rects, ...(r.meta?.knob ? { knob: r.meta.knob } : {}) })
   }

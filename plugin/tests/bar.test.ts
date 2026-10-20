@@ -25,6 +25,8 @@ function textOf(n: Any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
+  // a Client's words are its props (the squeeze chips: squeeze/chipsclient.js draws its rows and the line under them)
+  if (n.type === 'Client') { const p = n.props?.props ?? {}; return (p.rows ?? []).map((r: { s: string }[]) => r.map(x => x.s).join('')).join('\n') + (p.hint ? `\n${p.hint}` : '') }
   return textOf(n.props?.children) + textOf(n.children)
 }
 function walk(n: Any, f: (x: Any) => void): void {
@@ -71,6 +73,8 @@ function world(on: Any, o: { read?: number; abortPreps?: number } = {}) {
   on('ui.toast', () => ({ value: undefined }))
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  // a squeeze's rewrite, as the model answers it
+  on('model.complete', () => ({ value: { isAnswered: true, text: '<text>June 18 had the most saves.</text>', usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }))
   return { files, submitted }
 }
 
@@ -232,5 +236,73 @@ test('a card drawing Claude Code cut short is asked again: the card is drawn, ne
   const ui = await $.ui.mount(REPLY)
   for (let i = 0; i < 4; i++) { await clock.advance(10); await clock.settle() }
   expect(textOf(await ui.drawn())).toContain('Jun 18 6,543')
+  await ui.unmount()
+})
+
+test('the squeeze chips take the keyboard with a click: tab and shift+tab move between them, ← and → change one, enter is done, and a letter goes back to the prompt', async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  await answered($, clock)
+  const ui = await $.ui.mount(REPLY)
+  await press($, clock, edit('s'))
+  // the chips' row says how to give them the keys; the bar names the prompt's keys
+  expect(textOf(await ui.drawn())).toContain('click the chips to move with tab and ← →')
+  expect(textOf(await $.ui.render(HINT))).toContain('[ ] shorter / longer · 1–3 pick chip')
+  // a click: the keys are the chips', and the bar says so
+  await ui.pointer({ type: 'up', x: 30, y: 0, button: 'left' })
+  await clock.settle()
+  expect(textOf(await ui.drawn())).toContain('tab next chip · ← → change it · enter done · esc back to the prompt')
+  expect(textOf(await $.ui.render(HINT))).toContain('tab next chip')
+  // tab moves on a chip, shift+tab back
+  await ui.key({ key: 'tab' })
+  await clock.settle()
+  expect(textOf(await $.ui.render(HINT))).toContain('newer reader / more expert')
+  await ui.key({ key: 'tab', shift: true })
+  await ui.key({ key: 'tab', shift: true })
+  await clock.settle()
+  expect(textOf(await $.ui.render(HINT))).toContain('←→ shorter / longer')
+  // ← makes it shorter: Length one level down, where it goes shown at once
+  await ui.key({ key: 'left' })
+  await clock.settle()
+  expect(textOf(await ui.drawn())).toMatch(/Length ○○●○ medium/)
+  // a letter the chips do not take: the chips close, and it is typed in the prompt
+  await ui.key({ key: 'w' })
+  for (let i = 0; i < 3; i++) { await clock.advance(50); await clock.settle() }
+  expect(textOf(await ui.drawn())).not.toContain('1 Length')
+  // a key in the prompt again; s opens them, a click and enter close them
+  await press($, clock, edit('s'))
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left' })
+  await ui.key({ key: 'return' })
+  await clock.settle()
+  expect(textOf(await ui.drawn())).not.toContain('1 Length')
+  expect(textOf(await $.ui.render(HINT))).toContain('v visualize · s squeeze')
+  await ui.unmount()
+})
+
+test("v's card landing under an answer off screen: the bar says so, and a click there (which brings the card into view) takes the note away", async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  const spawns: Any[] = []
+  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-test' } as never })
+  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `fork-${i + 1}`, type: 'fork', description: 'thimble · visualize', status: 'running' })) }))
+  on('session.messages', () => ({ value: [] }))
+  await answered($, clock)
+  // the answer scrolled out of view
+  const ui = await $.ui.mount({ ...(REPLY as Any), props: { ...(REPLY as Any).props, onScreen: null } } as never)
+  await press($, clock, edit('v'))
+  await clock.advance(700)
+  await clock.settle()
+  feedSave(w.files, '02-view')
+  await $.turn.complete({ turnId: 'f1', agentId: 'fork-1', answer: 'Saved.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  await ui.drawn()
+  await clock.advance(10)
+  await clock.settle()
+  const bar = await $.ui.mount(HINT)
+  expect(textOf(await bar.drawn())).toContain('card ready under "June 18 had the most saves, 6…" · click to go there')
+  await bar.press({ key: buttons(await bar.drawn()).find((b: Any) => b.props.label === 'go to the card').props.key })
+  await clock.settle()
+  expect(textOf(await bar.drawn())).not.toContain('card ready')
+  await bar.unmount()
   await ui.unmount()
 })

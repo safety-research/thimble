@@ -12,7 +12,7 @@ import { renderTerm } from '../../draw/term.js'
 
 const rect = (x, y, w = 4, h = 1) => ({ x, y, w, h })
 
-test('parts are the regions drawn with cells, in reading order; a knob dial is a part, a link to a cite is not', () => {
+test('parts are the regions drawn with cells, in reading order; a knob dial is a part, and so is a link to a cite (a click opens it)', () => {
   const grid = {
     regions: [
       { id: 'fix', meta: { label: 'Fix' }, rects: [rect(40, 6)] },
@@ -24,11 +24,12 @@ test('parts are the regions drawn with cells, in reading order; a knob dial is a
     ],
   }
   const parts = partsOf(grid)
-  assert.deepEqual(parts.map(p => p.id), ['scale', 'detour', 'orient', 'fix'])
+  assert.deepEqual(parts.map(p => p.id), ['scale', 'detour', 'orient', 'fix', 'file'])
   assert.equal(parts[0].knob, 'scale')
   assert.equal(stepPart(parts, 'orient', 1), 'fix')
-  assert.equal(stepPart(parts, 'fix', 1), 'scale', 'wraps at the end')
-  assert.equal(stepPart(parts, 'scale', -1), 'fix', 'wraps at the start')
+  assert.equal(stepPart(parts, 'fix', 1), 'file')
+  assert.equal(stepPart(parts, 'file', 1), 'scale', 'wraps at the end')
+  assert.equal(stepPart(parts, 'scale', -1), 'file', 'wraps at the start')
   assert.equal(stepPart(parts, null, 1), 'scale')
   assert.equal(stepPart([], 'x', 1), null)
 })

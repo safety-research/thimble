@@ -9,7 +9,9 @@
 //   state: {focus: chip id}
 //   keys: [ ] shorter / longer (the picked chip's two ways, in its words) · 1-3 pick chip (each chip drawn after its
 //         digit) · 0 original (at the original: close) · s done. Claude Code keeps tab, shift+tab and the arrow keys
-//         in its prompt, so the chips cannot move on them. On a catch-up (a message
+//         in its prompt; a click on the chips hands them the keyboard (squeeze/chipsclient.js, `data.keys`), and then
+//         tab and shift+tab move between the chips, ← and → between the levels, and enter is done, until esc gives the
+//         keys back to the prompt. On a catch-up (a message
 //         the chips wrote of several replies) 0 dismisses it: its original is the replies, in the transcript above, so
 //         no step lands on the original either. No key is labelled
 //         < >: next to Claude Code's `← for agents` it reads as the arrow keys, and ← in an empty prompt leaves the
@@ -24,7 +26,7 @@ const WAYS = { length: 'shorter / longer', interpret: 'more report / more interp
 export default {
   name: 'chips',
   title: 'Squeeze',
-  reads: args => [`record:${args.row}`, `sqz:${args.row}`],
+  reads: args => [`record:${args.row}`, `sqz:${args.row}`, `chipkeys:${args.row}`],
   stateKey: args => `chips-${String(args.row || '').replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 64)}`,
   data(stores, args, size) {
     const rec = stores[`record:${args.row}`] || null
@@ -35,6 +37,8 @@ export default {
     const catchup = isCatchUp(rec) ? { replies: Number(rec.catchup.replies) || 0 } : null
     return {
       row: args.row, rec: lean, catchup,
+      // the chips hold the keyboard (a click gave it them): tab and the arrows reach them
+      keys: !!stores[`chipkeys:${args.row}`],
       note: catchup ? null : typeof rec.shown === 'string' || s.auto ? noteOf(rec, size.w) : null,
       lit: rec.verbs && rec.verbs.s && rec.verbs.s.lit && rec.verbs.s.note ? String(rec.verbs.s.note) : null,
       // the terminal's own: a call running, a call that failed
@@ -66,15 +70,24 @@ export function program(k, data) {
     if (to && !toOriginal(to)) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '[' : ']' })
     return { focus: id }
   }
-  // [ and ] say which way they move the picked chip, in its words: `[ ] shorter / longer`
+  // [ and ] say which way they move the picked chip, in its words: `[ ] shorter / longer`; with the keyboard in the
+  // chips, ← and → do (and tab and shift+tab move between the chips)
   const ways = WAYS[focus] || 'change'
-  k.on('[', () => step(focus, -1), ways)
-  k.on(']', () => step(focus, 1), ways)
+  const held = !!data.keys
+  k.on('[', () => step(focus, -1), held ? undefined : ways)
+  k.on(']', () => step(focus, 1), held ? undefined : ways)
+  const at0 = chips.findIndex(c => c.id === focus)
+  const pickAt = d => ({ focus: chips[(at0 + d + chips.length) % chips.length].id })
+  k.on('tab', () => pickAt(1), held ? 'next chip' : undefined)
+  k.on('shift+tab', () => pickAt(-1))
+  k.on('left', () => step(focus, -1), held ? ways : undefined)
+  k.on('right', () => step(focus, 1), held ? ways : undefined)
+  k.on('return', () => { k.do('close'); return {} }, held ? 'done' : undefined)
   k.on('<', () => step(focus, -1))
   k.on('>', () => step(focus, 1))
   k.on(',', () => step(focus, -1))
   k.on('.', () => step(focus, 1))
-  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id }), 'pick chip'))
+  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id }), held ? undefined : 'pick chip'))
   if (data.catchup) {
     k.on('0', () => { k.do('dismiss', { row: data.row }); return {} }, 'dismiss')
   } else {
@@ -84,8 +97,9 @@ export function program(k, data) {
       return {}
     }, orig && !pending ? 'close' : 'original')
   }
-  k.on('s', () => { k.do('close'); return {} }, 'done')
-  k.on('esc', () => { k.do('close'); return {} })
+  k.on('s', () => { k.do('close'); return {} }, held ? undefined : 'done')
+  // esc with the keyboard in the chips gives it back to the prompt (Claude Code's own); the chips stay open
+  k.on('esc', () => { k.do('close'); return {} }, held ? 'back to the prompt' : undefined)
   k.on('press', e => {
     const r = String(e.region || '')
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)

@@ -160,6 +160,11 @@ export async function asideSaved($: Engine, row: string, ref: ObjRef): Promise<v
   await patch($, row, a => ({ ...a, saves: [...a.saves.filter(x => !(x.id === ref.id && x.root === ref.root)), ref] }))
 }
 
+/** The shell looked at where the card landed (shell.tsx cardLanded): it says so once. */
+export async function markTold($: Engine, row: string): Promise<void> {
+  await patch($, row, a => ({ ...a, told: true }))
+}
+
 /** The key was pressed again on the message: a line left by a failed aside goes. */
 export async function clearAside($: Engine, row: string): Promise<void> {
   const a = await asideOn($, row)

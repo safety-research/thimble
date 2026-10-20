@@ -30,6 +30,7 @@
 import { barAfter, cycleKnob, examplesView, exampleSet, fromLine, linkRuns, namedKnob, partOfLink, programLines, shownVersions, stepVersion } from '../shell/carddetail.js'
 import { pageId, pageOf, turn as turnKnob } from '../draw/handoff.js'
 import { chainWords, regionRefs } from '../shell/object.js'
+import { renderTerm } from '../draw/term.js'
 
 const EXR = 6
 const n = x => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))
@@ -69,9 +70,17 @@ export default {
     }
     const refs = {}
     for (const p of parts) refs[p.id] = regionRefs(o, d, p.id).refs
+    // the parts in reading order, as drawn at this width: the order ↑ ↓ and tab walk them in, links among them
+    let order = null
+    try {
+      const grid = renderTerm(inner, { w: Math.max(20, size.w || 96) })
+      const at = new Map()
+      for (const g of grid.regions || []) for (const q of g.rects || []) { const was = at.get(g.id); if (!was || q.y < was.y || (q.y === was.y && q.x < was.x)) at.set(g.id, q) }
+      order = parts.map(p => p.id).filter(id => at.has(id)).sort((a, b) => at.get(a).y - at.get(b).y || at.get(a).x - at.get(b).x)
+    } catch { order = null }
     return {
       id: o.id, title: o.title || o.id, question: o.question || '', text: o.text || '', program: o.program || '', version: o.version ?? null,
-      versions: card.versions || [], v: card.v ?? o.version ?? null, drawing: inner, parts, refs,
+      versions: card.versions || [], v: card.v ?? o.version ?? null, drawing: inner, parts, refs, order,
       cites: d.cites || {}, examples: d.examples || {}, controls: d.controls || [], cardState: card.state || {},
       // the card shown with every page at once ({knob, n, at}), and the keys its own program takes (with what they turn)
       pages: d.pages || null, cardOn: d.on || [],
@@ -109,8 +118,8 @@ export function program(k, data) {
 
   // ---- what the person does: each a new state, or an action of the host
   const pick = id => (ids.includes(id) ? { region: id, ex: 0 } : null)
-  // the keys walk the parts the card draws; a link's target (a part only a click reaches) is not on the way
-  const walk = parts.filter(p => !p.link).map(p => p.id)
+  // the keys walk the parts in reading order, the links to a cite, examples or a knob among them
+  const walk = Array.isArray(data.order) && data.order.length ? data.order.filter(id => ids.includes(id)) : ids
   const step = dir => () => {
     if (!walk.length) return null
     const i = walk.indexOf(region)
