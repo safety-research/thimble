@@ -86,6 +86,18 @@ export interface LabelRunState {
   choice?: string
 }
 
+/** An ask as the label editor shows it: `POST /concepts/{id}/apply` answers `{status: 'asked', ask}` when a model would
+ * read many records, and the analyst's choice goes to `POST /label-runs/{id}`. */
+export interface LabelAskShown {
+  id: string
+  concept: string
+  name: string
+  state?: string
+  text: string
+  units: number
+  sample: number
+}
+
 /** `GET /label-runs/{id}`: the row's live state while its run goes (status, done of total, calls at once, seconds). */
 export interface LabelRunLive {
   id: string
@@ -403,6 +415,8 @@ export interface Concept {
    * those changes in words */
   rev?: number
   changes?: LabelChange[]
+  /** a model run of it that waits for the analyst's choice (backend asks.pending), which the editor shows */
+  ask?: LabelAskShown | null
 }
 
 /** One change to a label that a card counting by it did not see (backend concepts.note_change): a redefinition, a run
@@ -1898,6 +1912,8 @@ export interface ConceptRun {
   files_indexed?: number
   /** the whole files or runs it read only in part, once its classifier calls end */
   cut?: ReadCut | null
+  /** with status `asked`: the run did not start, and the analyst chooses its size first */
+  ask?: LabelAskShown
   [k: string]: unknown
 }
 

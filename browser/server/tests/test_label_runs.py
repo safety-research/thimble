@@ -237,3 +237,38 @@ def test_the_estimate_counts_the_real_batches_and_prices_the_model(big, folder):
     assert est["dollars"] and est["dollars"] > 0 and est["seconds"] > 0
     assert asks.needs_asking(est)
     assert not asks.needs_asking({**est, "units": asks.SAMPLE})
+
+
+def test_the_label_editors_run_asks_first_with_the_same_ask(big, folder, monkeypatch):
+    """The page's own Run (POST /concepts/{id}/apply) over many records: the same line and choices as the chat, answered
+    through the same route, and no chat gets a row or a note."""
+    from fastapi.testclient import TestClient
+
+    from thimble_browser.app import build
+
+    monkeypatch.setattr(run, "_call", answer_all("no"))
+    port = 21099
+    app, auth, _ = build(port)
+    with TestClient(app, base_url=f"http://127.0.0.1:{port}") as c:
+        r = c.post("/api/ui/key", json={"code": auth.mint()}, headers={"origin": f"http://127.0.0.1:{port}"})
+        key, cookie = r.json()["key"], r.headers["set-cookie"].split(";")[0]
+        c.headers.update({"cookie": cookie, "origin": f"http://127.0.0.1:{port}"})
+        base = f"/b/{key}/api/ws/{big}"
+        made = c.post(f"{base}/concepts", json={"name": "purpose", "kind": "prompt", "description": "What it is for.",
+                                                "labels": ["yes", "no"], "glob": "edits.jsonl"})
+        cid = made.json()["id"]
+        got = c.post(f"{base}/concepts/{cid}/apply", json={}).json()
+        assert got["status"] == "asked" and not run.running(big, cid)
+        ask = got["ask"]
+        assert ask["text"].startswith("Read 2,000 records of edits.jsonl with Claude: about ")
+        assert ask["units"] == 2000 and ask["sample"] == asks.SAMPLE
+        assert c.post(f"{base}/concepts/{cid}/apply", json={}).json()["ask"]["id"] == ask["id"]  # one ask, not two
+        assert c.get(f"{base}/concepts/{cid}").json()["ask"]["id"] == ask["id"]  # the editor shows it when it opens
+        assert c.post(f"{base}/label-runs/{ask['id']}", json={"choice": "sample"}).status_code == 200
+        for _ in range(200):
+            if not run.running(big, cid):
+                break
+            time.sleep(0.05)
+        assert run.record(big, cid)["total"] == asks.SAMPLE and run.record(big, cid)["status"] == "done"
+        assert c.get(f"{base}/concepts/{cid}").json()["ask"] is None
+    assert label_runs(big) == [] and agent.take_notes(big, "main") == []

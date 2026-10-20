@@ -22,7 +22,8 @@ import { bus } from '../lib/bus'
 import { loadSettings, modelChoices, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
-import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
+import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelAskShown, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
+import { LabelAsk } from '../chat/LabelRun'
 import { examplesNote } from '../canvas/details'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
@@ -210,6 +211,9 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
   const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<DeleteLabelAsk | null>(null)
+  // a model run over many records that waits for the analyst's choice: the one Run just asked, else one the label has
+  const [asked, setAsked] = useState<LabelAskShown | null>(null)
+  const ask = asked ?? label?.ask ?? null
   const isNew = label == null
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
   const classes = withSavedColours(label, draft)
@@ -237,7 +241,12 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
     try {
       const k = isNew ? await labelApi.create(ws, { ...patch, name: patch.name!, unit: unitOfOver(draft.over, draft.marks), shown: files }) : await labels.save(label!.id, patch)
       track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: files ? draft.marks : null, kind: draft.kind, created: isNew } })
-      onRun(k.id, await labelApi.apply(ws, k.id, {}))
+      const r = await labelApi.apply(ws, k.id, {})
+      if (r.status === 'asked' && r.ask) {
+        setAsked(r.ask)
+        return
+      }
+      onRun(k.id, r)
       onClose()
     } catch (e) {
       bus.emit('toast', { text: `Could not run ${patch.name}. ${(e as Error).message}`, kind: 'error' })
@@ -283,7 +292,8 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
           void labels.remove(id)
         }}
       />
-      {changed && (
+      {ask && <LabelAsk ws={ws} ask={ask} onAnswered={onClose} />}
+      {changed && !ask && (
         <div className="label-card-foot">
           {!isNew && examplesNote(draft.kind, label?.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, label?.n_marked)}</span>}
           <Button onClick={onClose}>Cancel</Button>
@@ -618,8 +628,10 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
 export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onReview }: { ws: string; label: Concept; draft: Draft | null; onDraft: (d: Draft | null) => void; onClose: () => void; onOpen: () => void; onReview?: () => void }) {
   const labels = useFilesLabels(ws)
   const [saving, setSaving] = useState(false)
+  const [asked, setAsked] = useState<LabelAskShown | null>(null)
   // the label as Files shows it, a colour just picked included, else as the canvas has it
   const k = labels.byId.get(label.id) ?? label
+  const ask = asked ?? k.ask ?? null
   const shown = draft ?? draftOf(k, [])
   const classes = withSavedColours(k, shown)
   // a draft back at the label's definition is dropped. The draft is read at the call, since a handler kept from an
@@ -643,7 +655,8 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
       await labels.save(k.id, patchOf(draft, classes))
       track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: draft.over === 'files' ? draft.marks : null, kind: draft.kind, created: false } })
       onDraft(null)
-      await labelApi.apply(ws, k.id, {})
+      const r = await labelApi.apply(ws, k.id, {})
+      if (r.status === 'asked' && r.ask) setAsked(r.ask)
     } catch (e) {
       bus.emit('toast', { text: `Could not run ${k.name}. ${(e as Error).message}`, kind: 'error' })
     } finally {
@@ -666,6 +679,7 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
       </div>
       <LabelFields ws={ws} label={k} labels={labels} draft={shown} classes={classes} set={set} counts={k.counts} />
+      {ask && <LabelAsk ws={ws} ask={ask} onAnswered={() => setAsked(null)} />}
       <div className="label-card-foot">
         {draft ? (
           <>
