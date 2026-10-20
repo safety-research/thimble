@@ -431,7 +431,7 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     const objs = root ? await objectsNow($, root, S.since) : []
     row.objects = objs.map(x => `${x.ref.id}@${x.ref.v}${x.isNew ? ' new' : ''}`)
     // every message queued is read, a short answer of a turn with no tool too: the lenses say when there is nothing
-    // to give (the claims lens's quiet rule, an empty reply)
+    // to give (an empty reply)
     const msgs = batch
     const evidence = await evidenceNow($, root, objs)
 
@@ -443,9 +443,8 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     const glossSkip = S.glossSkip
     const parts = await lensParts($)
     if (!parts.length) { row.skip = 'no lens on'; return }
-    // the session's claims so far, which the claims lens adds these messages' to, and the words of their turn
-    const all = (await $.session.messages().catch(() => [])) as Any[]
-    const claims = parts.some(x => x.lens.name === 'claims') ? await claimsDigest($, all, newest.prompt.text) : null
+    // the session's claims so far, which the claims lens adds these messages' to
+    const claims = parts.some(x => x.lens.name === 'claims') ? await claimsDigest($) : null
     const st = { notesGiven: S.notesGiven, glossed, glossSkip, headsGiven: S.headsGiven, ...(claims ?? {}) }
     // a message the person squeezed already: the pass reads the version they read
     const kept = await messageRecord($, newest.row)

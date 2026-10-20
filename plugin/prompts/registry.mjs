@@ -62,10 +62,11 @@ export const FEATURES = {
     },
   },
   'lens-claims': {
-    about: "lens: the turn's claims (statements), each placed by a quote, in a cluster", reads: 'the pass', default: 'v4', optional: true,
+    about: "lens: the turn's claims (statements), each placed by a quote, in a cluster", reads: 'the pass', default: 'v5', optional: true,
     versions: {
       v3: { about: "written clean in the 0.9 style from v2 (the quote names the claim, the digest holds the claims that bear on the turn): five principles and one example, good and bad; a part only when the claim's words leave it open" },
       v4: { about: "one kind, a statement: four short principles (what a claim is, found by its words, its history, clusters) and one example, good and bad; no kinds, parts, counts or case rules" },
+      v5: { about: "v4 with every claim a full sentence that reads alone (the analyst reads it away from its message), and the quote only what finds it; the example's claims each given in words, its bad one a fragment" },
     },
   },
   'claims-folder': {

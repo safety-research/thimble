@@ -506,10 +506,10 @@ export function clearGap(store, turn) {
 }
 
 /** The note c lights with for one turn, or '' to stay dim: only a correction lights it. New claims alone light nothing:
- *  the count at the bar's right says they came. */
+ *  c's count in the bar says they came. The bar draws it after the count: `c ● 12 claims, 1 corrected`. */
 export function noteFor(res) {
   const fixed = res?.revised?.length || 0
-  if (fixed) return `${fixed} claim${fixed === 1 ? '' : 's'} corrected`
+  if (fixed) return `${fixed} corrected`
   return ''
 }
 
@@ -527,14 +527,6 @@ export function promptLines(store, max = 120) {
     claims: lines.length ? (store.claims.length > claims.length ? `(${store.claims.length - claims.length} older claims not shown)\n` : '') + lines.join('\n') : '(none yet)',
     clusters: clusters.length ? clusters.join('\n') : '(none yet)',
   }
-}
-
-const CLAIMY = /\d|\]\(|\b(all|every|most|none|never|always|only|no one|nobody|more|less|fewer|than|because|caused?|due to|led to|drove|drives|so that|therefore|biased?|typical|usually|rarely|often|increase[ds]?|decrease[ds]?|rose|fell|grew|dropped|same|different|wrong|right|true|false|correct)\b/i
-
-/** Whether a turn's words state nothing that could be true or false: no number, no citation, no cause, no comparison
- *  and no "all" or "most" (a turn of greetings, questions or plans). The lens is told to give none then. */
-export function claimless(text) {
-  return !CLAIMY.test(String(text || ''))
 }
 
 /** The grown clusters, as the lens reads them, or '' with none. */

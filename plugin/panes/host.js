@@ -157,7 +157,7 @@ export function hostKeys(mode, surface = 'terminal') {
 }
 
 // ---------------------------------------------------------------- the one bar, in the room it has
-// The bar is one line: `thimble  v visualize · s squeeze · c claims · ] cite & explain      9 claims · coverage 34%`. With
+// The bar is one line: `thimble  v visualize · s squeeze · c 9 claims      t 2 threads · r seen 34%`. With
 // less room it gives up, in this order: the counts (coverage last), then each key's words beyond their first word
 // (`visualize`, `squeeze`, `cite`), then the label, then the end of the line (an ellipsis). It never wraps.
 //
