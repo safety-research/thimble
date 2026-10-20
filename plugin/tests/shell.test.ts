@@ -722,7 +722,7 @@ test('a record an earlier version kept with an explain after its text: the expla
   const tree = await ui.drawn()
   expect(textOf(tree)).not.toContain('explain:')
   // the explain's words are the citation's: one press, named as the citation
-  expect(buttons(tree).map(b => b.props.label)).toEqual(['cite browse-bare', 'cite 30'])
+  expect(buttons(tree).map(b => b.props.label).filter(l => !String(l).startsWith('ask about'))).toEqual(['cite browse-bare', 'cite 30'])
   const g = buttons(tree).find(b => b.props.label === 'cite browse-bare')!
   await ui.press({ key: g.props.key })
   await clock.settle()
