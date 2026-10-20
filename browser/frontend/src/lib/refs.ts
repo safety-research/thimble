@@ -372,6 +372,62 @@ export function tdRef(cellId: string, col: string, row: string): string | null {
   return `${CARD}${cellId}#${encodeLabel(col)}/${encodeLabel(row)}`
 }
 
+/** One `[words](target)` of a text: where it starts and ends, its words and its target as written. */
+export interface LinkSpan {
+  start: number
+  end: number
+  words: string
+  target: string
+}
+
+/** Each Markdown link `[words](target)` of a text, not an image's. A target may hold spaces and balanced brackets, so a
+ * ref to a row named "(no name)", `[899](card:<id>#edits/(no name))`, is one link (backend cite.link_spans, the kernel's
+ * refs.link_spans and the terminal's linkSpans read it the same). Words hold no bracket and no line break. */
+export function linkSpans(text: string): LinkSpan[] {
+  const s = text || ''
+  const out: LinkSpan[] = []
+  let i = 0
+  for (;;) {
+    const a = s.indexOf('[', i)
+    if (a < 0) break
+    const b = s.indexOf(']', a + 1)
+    if (b < 0) break
+    const words = s.slice(a + 1, b)
+    if (s[a - 1] === '!' || /[[\n]/.test(words) || s[b + 1] !== '(') {
+      i = a + 1
+      continue
+    }
+    let depth = 0
+    let j = b + 2
+    for (; j < s.length && s[j] !== '\n'; j++) {
+      if (s[j] === '(') depth++
+      else if (s[j] === ')') {
+        if (depth === 0) break
+        depth--
+      }
+    }
+    const target = s.slice(b + 2, j)
+    if (s[j] !== ')' || !target.trim()) {
+      i = a + 1
+      continue
+    }
+    out.push({ start: a, end: j + 1, words, target })
+    i = j + 1
+  }
+  return out
+}
+
+/** `text` with each link (linkSpans) replaced by what `fn` returns for it. */
+export function mapLinks(text: string, fn: (link: LinkSpan, whole: string) => string): string {
+  let out = ''
+  let at = 0
+  for (const l of linkSpans(text)) {
+    out += text.slice(at, l.start) + fn(l, text.slice(l.start, l.end))
+    at = l.end
+  }
+  return out + text.slice(at)
+}
+
 /** A value-ref token `<display>|<ref>` split at its first `|`; a bare token has no display. */
 export function splitValueRef(token: string): { value?: string; ref: string } {
   const i = token.indexOf('|')

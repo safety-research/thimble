@@ -52,6 +52,7 @@ from typing import Any
 from fastapi import Body, HTTPException
 
 from .. import agent, canvas, chats, home, llm, prompts, report, tools
+from ..cards import cite
 from ..hub import hub
 from ..tools import Result
 from . import Feature, is_on
@@ -347,12 +348,13 @@ def _texts(ws: str, chat: str | None, answer: str | None, cards: list[str], with
 
 # a citation's link text, in Markdown and in the canvas's own form: words a mark may not sit on, since a click there
 # opens the citation
-LINKED = re.compile(r"\[\[[^\]]*\]\]|\[[^\]\n]*\]\([^)\n]*\)")
+TOKENS = re.compile(r"\[\[[^\]]*\]\]")
 
 
 def outside_links(text: str) -> str:
-    """The text with each citation's words taken out, where a mark's words must stand."""
-    return LINKED.sub(" ", text)
+    """The text with each citation's words taken out, where a mark's words must stand. A Markdown link's ref may hold
+    balanced brackets (cite.link_spans)."""
+    return cite.map_links(TOKENS.sub(" ", text), lambda *_: " ")
 
 
 def _surface_of(place: str) -> str:

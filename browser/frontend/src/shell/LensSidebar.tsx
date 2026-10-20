@@ -21,6 +21,7 @@ import { classesOf, colourVar, howMade, labelDefinition, isFilesLabel, mainColou
 import { labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { lensApi, lensColors, loadLenses, revealMark, SURFACES, SURFACE_WORDS, useLenses, type FoundMark, type Lens, type Surface } from '../lib/marks'
+import { mapLinks } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, LabelAskShown, LabelRowText } from '../lib/types'
@@ -167,7 +168,10 @@ function CheckRow({ ws, lens, onOpen }: { ws: string; lens: Lens; onOpen: () => 
 }
 
 /** The first line of a mark's Markdown as plain words: a citation's link text kept, its target dropped. Pure. */
-export const plainLine = (md: string): string => md.split('\n').find((l) => l.trim())?.replace(/^[-*]\s+/, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`]/g, '').trim() ?? ''
+export const plainLine = (md: string): string => {
+  const line = md.split('\n').find((l) => l.trim())
+  return line == null ? '' : mapLinks(line.replace(/^[-*]\s+/, ''), (l) => l.words).replace(/[*_`]/g, '').trim()
+}
 
 /** A found mark drawn as it looks where it is: its words in the check's highlight, then what the check says, and its
  * place; a click goes there (lib/marks revealMark). */

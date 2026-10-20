@@ -21,7 +21,6 @@ from typing import Any, Callable
 
 from . import cite, frames
 
-LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\n]+)\)")
 CARD_REF = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#([^/\s]+)/(.+))?$")
 DIGIT = re.compile(r"\d")
 
@@ -43,8 +42,8 @@ def _places(cell: dict | None) -> list[tuple[str, str, str]]:
 
 def cited_cards(text: str) -> list[str]:
     out: list[str] = []
-    for m in LINK.finditer(text or ""):
-        p = CARD_REF.match(m[2].strip())
+    for _words, target, _a, _b in cite.link_spans(text or ""):
+        p = CARD_REF.match(target.strip())
         if p and p[1] not in out:
             out.append(p[1])
     return out
@@ -86,8 +85,8 @@ def heal(text: str, load: Loader) -> dict[str, Any]:
     changes: list[dict[str, Any]] = []
     out: list[str] = []
     pos = 0
-    for m in LINK.finditer(text):
-        label, ref = m[1], m[2].strip()
+    for label, target, start, end in cite.link_spans(text):
+        ref = target.strip()
         p = CARD_REF.match(ref)
         if not p:
             continue
@@ -127,9 +126,9 @@ def heal(text: str, load: Loader) -> dict[str, Any]:
                            f"the card {cid} has no {col} for {row}" if at is None else f"no place shows {label.strip()}")
                     c.update(state=QUIET, how=how, why=why)
         changes.append(c)
-        out.append(text[pos:m.start()])
-        out.append(m[0] if c["to"] == ref or c["state"] != LINKED else f"[{label}]({c['to']})")
-        pos = m.end()
+        out.append(text[pos:start])
+        out.append(text[start:end] if c["to"] == ref or c["state"] != LINKED else f"[{label}]({c['to']})")
+        pos = end
     out.append(text[pos:])
     healed = "".join(out)
     of = version(text, card)

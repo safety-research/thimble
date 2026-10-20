@@ -128,8 +128,9 @@ async def edit_document(t: Any, args: dict[str, Any]) -> Result:
 
 # ---- the write as it streams in
 
-# a citation or figure still streaming in at the end of a draft, which would show as raw Markdown until it closes
-_OPEN_LINK = re.compile(r"!?\[\[?[^\]\n]*(\]\([^)\n]*|\|[^\]\n]*)?$")
+# a citation or figure still streaming in at the end of a draft, which would show as raw Markdown until it closes; its
+# ref may hold balanced brackets, `(no name)` (cite.link_spans), and the last of them may still be open
+_OPEN_LINK = re.compile(r"!?\[\[?[^\]\n]*(\]\((?:[^()\n]|\([^()\n]*\))*(?:\([^()\n]*)?|\|[^\]\n]*)?$")
 
 
 def draft_of(md: str, name: str, args: dict[str, Any]) -> str | None:

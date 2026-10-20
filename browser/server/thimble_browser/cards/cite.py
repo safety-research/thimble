@@ -100,6 +100,56 @@ def find(outputs: Any, col: str, row: str) -> tuple[str, str] | None:
     return None
 
 
+def link_spans(text: str) -> list[tuple[str, str, int, int]]:
+    """(words, target, start, end) of each Markdown link `[words](target)` of a text, not an image's. A target may hold
+    spaces and balanced brackets, so a ref to a row named "(no name)", `[899](card:<id>#edits/(no name))`, is one link
+    (the page's linkSpans, the kernel's refs.link_spans and the terminal's linkSpans read it the same). Words hold no
+    bracket and no line break."""
+    s = text or ""
+    out: list[tuple[str, str, int, int]] = []
+    i = 0
+    while True:
+        a = s.find("[", i)
+        if a < 0:
+            break
+        b = s.find("]", a + 1)
+        if b < 0:
+            break
+        words = s[a + 1:b]
+        if (a > 0 and s[a - 1] == "!") or "[" in words or "\n" in words or s[b + 1:b + 2] != "(":
+            i = a + 1
+            continue
+        depth, j = 0, b + 2
+        while j < len(s) and s[j] != "\n":
+            if s[j] == "(":
+                depth += 1
+            elif s[j] == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            j += 1
+        target = s[b + 2:j]
+        if s[j:j + 1] != ")" or not target.strip():
+            i = a + 1
+            continue
+        out.append((words, target, a, j + 1))
+        i = j + 1
+    return out
+
+
+def map_links(text: str, fn) -> str:
+    """`text` with each link (link_spans) replaced by `fn(words, target, whole)`."""
+    s = text or ""
+    out: list[str] = []
+    at = 0
+    for words, target, a, b in link_spans(s):
+        out.append(s[at:a])
+        out.append(fn(words, target, s[a:b]))
+        at = b
+    out.append(s[at:])
+    return "".join(out)
+
+
 _SPACE = re.compile(r"[\s,   ]")
 
 

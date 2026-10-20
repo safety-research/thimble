@@ -11,6 +11,11 @@ describe('citeLinks', () => {
       '[[11|card:ab12cd34#runs/all failed]] of 24, [["it stopped"|runs/a.jsonl#L4]] [[card:ab12cd34]] [docs](https://example.org)',
     )
   })
+  it('reads a ref with balanced brackets whole', () => {
+    expect(citeLinks('[899](card:ab12cd34#edits/(no name)) had none, [a](https://x.org/A_(b))')).toBe(
+      '[[899|card:ab12cd34#edits/(no name)]] had none, [a](https://x.org/A_(b))',
+    )
+  })
   it('reads %20 as a space', () => {
     expect(citeLinks('[5](card:ab12cd34#failed%20runs/wrong-file)')).toBe('[[5|card:ab12cd34#failed runs/wrong-file]]')
   })

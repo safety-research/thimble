@@ -75,21 +75,17 @@ def _prior(nb: dict[str, Any], cid: str) -> str | None:
     i = ids.index(cid) if cid in ids else -1
     return ids[i - 1] if i > 0 else None
 
-MD_LINK = re.compile(r"(?<!!)\[([^\[\]\n]*)\]\(([^()\n]+?)\)")
-
-
 def to_canvas_links(text: str) -> str:
     """Markdown-link citations as the canvas writes them: `[31](ref)` -> `[[31|ref]]`, `[↗](ref)` -> `[[ref]]`. A web
-    link (http, https, mailto) stays a Markdown link."""
-    def sub(m: re.Match) -> str:
-        words, ref = m.group(1), m.group(2)
+    link (http, https, mailto) stays a Markdown link. A ref may hold balanced brackets (cite.link_spans)."""
+    def sub(words: str, ref: str, whole: str) -> str:
         if re.match(r"^([a-z][a-z0-9+.-]*://|mailto:|#|/)", ref.strip(), re.I):
-            return m.group(0)
+            return whole
         ref = ref.strip().replace("%20", " ")
         if words.strip() in ("", "↗"):
             return f"[[{ref}]]"
         return f"[[{words}|{ref}]]"
-    return MD_LINK.sub(sub, text or "")
+    return cite.map_links(text or "", sub)
 
 
 def own_id(text: str, cid: str) -> str:
