@@ -4,9 +4,11 @@
 //   the graph       each claim a dot, the claims of a cluster together in the cluster's color under its name (each
 //                   cluster a rectangle of the graph, sized by how many claims it holds); a hollow dot is a claim a
 //                   later one corrected, a heavier one a claim said twice or more; a cluster's earlier claims stand at
-//                   its left, its later ones at its right, and linked claims near each other. A dashed amber line joins a correction to the claim it corrects, a blue one a claim
-//                   to one it supports or shares a topic with (red: contradicts), and, for the claim selected, a gray
-//                   one to each claim that cites the same rows. The dots keep their places while the ring walks them.
+//                   its left, its later ones at its right, and linked claims near each other. A dashed amber line
+//                   joins a correction to the claim it corrects, a blue one a claim to one it supports or shares a
+//                   topic with (red: contradicts, from the folder's map), and, for the claim selected, a gray one to
+//                   each claim that cites the same rows. The key names only what the graph shows. The dots keep their
+//                   places while the ring walks them.
 //   the claim       under the graph, the claim selected: its words, its turn, where it came from (a press, or ↵ on
 //                   its dot, opens the place in the transcript over the pane, as a citation opens), the claim that
 //                   corrects it or that it corrects, the claims it is linked to, and its evidence (each citation with
@@ -17,7 +19,7 @@
 // The side panel holds the keys: the ring (↑↓) walks the dots and the claim's rows and selects what it lands on
 // (k.select), and the panel's input bar asks its thread about that.
 //
-//   state: {claim, part: the dot or row selected}
+//   state: {claim, part: the dot or row selected, at: the last turn when it was selected}
 //   reads: claims (the store with the folder's offer), threads (whether the panel's thread has a conversation, which
 //          takes rows under the pane); with {source, row}: claims and the message's record
 //   wants: {rows: [ref]} for each evidence row of the selected claim (what its rows say, through the kernel)
@@ -303,20 +305,25 @@ export function program(k, data) {
   // ---- what is selected: the claim the state names, else the newest (of the last turn, the last said)
   const num = c => Number(/\d+$/.exec(String(c.id))?.[0] || 0)
   const newest = claims.reduce((b, c) => ((c.turn ?? -1) > (b.turn ?? -1) || ((c.turn ?? -1) === (b.turn ?? -1) && num(c) > num(b)) ? c : b))
-  const claim = byId.get(st.claim) || newest
+  // after a turn that came since the selection, the pane opens on what is new: the turn's newest correction, else its
+  // newest claim
+  const fixes = claims.filter(c => c.revises && c.turn != null && c.turn === newest.turn)
+  const fresh = st.at != null && data.last != null && st.at < data.last
+  const claim = (!fresh && byId.get(st.claim)) || (fixes.length ? fixes.reduce((b, c) => (num(c) > num(b) ? c : b)) : newest)
   const evidence = (claim.sources || []).slice(0, MAX_EVIDENCE)
   const other = claim.revised_by ? byId.get(claim.revised_by) : claim.revises ? byId.get(claim.revises) : null
   // the claims it is linked to, either way: what it supports or contradicts, what supports or contradicts it
   const links = linksOf(claim, data.edges || [], byId)
   const rowsHere = new Set(['said', ...evidence.map((_, i) => `ev-${i + 1}`), ...(other ? [`fix-${other.id}`] : []), ...links.map(l => `rel-${l.id}`)])
-  const pick = id => (byId.has(id) ? { claim: id, part: nodeRegion(id) } : null)
+  const at = data.last ?? null
+  const pick = id => (byId.has(id) ? { claim: id, part: nodeRegion(id), at } : null)
   const nodeOf = r => claims.find(c => nodeRegion(c.id) === r) || null
 
   // ---- what the person does
   k.on('focus', e => {
     const n = nodeOf(e.region)
     if (n) return pick(n.id)
-    if (rowsHere.has(String(e.region))) return { claim: claim.id, part: String(e.region) }
+    if (rowsHere.has(String(e.region))) return { claim: claim.id, part: String(e.region), at }
     return null
   })
   const openSource = c => {
@@ -349,7 +356,7 @@ export function program(k, data) {
   k.on('return', () => null, 'open')
   evidence.forEach((s, i) => k.on(String(i + 1), () => { openEvidence(s); return null }, 'evidence'))
 
-  const part = st.part && (rowsHere.has(st.part) || st.part === nodeRegion(claim.id)) ? st.part : nodeRegion(claim.id)
+  const part = !fresh && st.part && (rowsHere.has(st.part) || st.part === nodeRegion(claim.id)) ? st.part : nodeRegion(claim.id)
   k.select(part)
 
   // ---- the claim selected, under the graph

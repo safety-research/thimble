@@ -438,7 +438,9 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
   const local = new Map()
   const links = []
   for (const it of items) {
+    // #N: the Nth claim of this same list, which has no id yet
     if (it.revises && /^#\d+$/.test(it.revises)) it.revises = local.get(Number(it.revises.slice(1))) || null
+    if (it.same && /^#\d+$/.test(it.same)) it.same = local.get(Number(it.same.slice(1))) || null
     const known = it.same ? store.claims.find(c => c.id === it.same) : null
     const where = locate(it.quote, places, it.by, it.text || known?.text || '')
     if (!where) { res.dropped.push({ claim: it.text || it.same, why: `its words "${cutTo(it.quote, 60)}" are not in this turn's messages` }); continue }
@@ -646,7 +648,8 @@ export function viewOf(store) {
 /**
  * The graph's edges: a correction (the claim that corrects to the one it corrects), a link one claim names to another
  * (supports, contradicts, same topic), and two claims that cite the same rows (each later claim citing a ref to the
- * first claim that cited it, so a ref many claims cite draws a star, not every pair). One edge per pair, in that order
+ * first claim that cited it, so a ref many claims cite draws a star, not every pair; two values of one selection,
+ * `q4#user=Kestrel@n` and `@share`, are the same rows). One edge per pair, in that order
  * of kinds. [{a, b, kind: 'corrects' | 'relates' | 'rows', ref?, how?}]
  */
 export function edgesOf(flat) {
@@ -662,11 +665,14 @@ export function edgesOf(flat) {
   }
   for (const c of flat) if (c.revises) add(c.id, c.revises, 'corrects')
   for (const c of flat) for (const l of c.links || []) add(c.id, l.to, 'relates', null, l.how)
+  // the same rows: the same selection of a query (`q4#user=Kestrel`, whichever value after `@` it names), or the same row
+  const rowsOf = ref => String(ref).replace(/@[^@#/]*$/, '')
   const first = new Map()
   for (const c of flat) {
     for (const s of c.sources || []) {
-      if (!first.has(s.ref)) first.set(s.ref, c.id)
-      else add(c.id, first.get(s.ref), 'rows', s.ref)
+      const key = rowsOf(s.ref)
+      if (!first.has(key)) first.set(key, c.id)
+      else add(c.id, first.get(key), 'rows', s.ref)
     }
   }
   return out

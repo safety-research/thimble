@@ -148,6 +148,13 @@ test('a claim said again adds its place (×N); a correction is linked both ways,
     { quote: 'Bots made only 4% of the edits', cluster: 'k4', revises: '#1' },
   ] } })
   assert.deepEqual(same.revised, ['c6'])
+  // said again in the same turn (#N): one claim, said twice
+  const twice = applyTurn(store, { places: [{ row: 'r7', by: 'claude', turn: 5, text: 'Wren made [22%](q9#user=Wren@share) of the edits. In short, Wren made a fifth of them.' }], turn: 5, out: { claims: [
+    { quote: 'Wren made 22% of the edits', cluster: 'k2' },
+    { same: '#1', quote: 'Wren made a fifth of them' },
+  ] } })
+  assert.equal(twice.added.length, 1)
+  assert.equal(store.claims.find(c => c.id === twice.added[0]).said.length, 2)
   assert.ok(likeness("Kestrel made 41% of June's edits", 'Kestrel made 41% of the edits in June') >= 0.8)
 })
 
@@ -246,6 +253,8 @@ test("the graph's edges: a correction, a link one claim names to another, and cl
   assert.deepEqual(edgesOf(viewOf(store).flat), [{ a: 'c5', b: 'c1', kind: 'corrects' }, { a: 'c6', b: 'c5', kind: 'relates', how: 'supports' }, { a: 'c3', b: 'c4', kind: 'relates', how: 'same topic' }, { a: 'c6', b: 'c2', kind: 'rows', ref: 'q4#user=Kestrel@share' }])
   const flat = [{ id: 'a', sources: [{ ref: 'x' }, { ref: 'y' }] }, { id: 'b', sources: [{ ref: 'x' }, { ref: 'y' }] }, { id: 'c', sources: [{ ref: 'x' }] }, { id: 'd', revises: 'a', sources: [{ ref: 'x' }] }]
   assert.deepEqual(edgesOf(flat).map(e => `${e.a}-${e.b} ${e.kind}`), ['d-a corrects', 'b-a rows', 'c-a rows'])
+  // two values of one selection are the same rows
+  assert.deepEqual(edgesOf([{ id: 'a', sources: [{ ref: 'q4#user=K@n' }] }, { id: 'b', sources: [{ ref: 'q4#user=K@share' }] }, { id: 'c', sources: [{ ref: 'q4#user=W@n' }] }]).map(e => `${e.a}-${e.b}`), ['b-a'])
 })
 
 test('the layout: each cluster an island, no two dots touching, each name clear of the dots, the same every time', () => {
@@ -286,14 +295,20 @@ test('the pane: the head, the graph with a dot per claim and each cluster named,
   assert.deepEqual(d.regions.filter(r => /^n-/.test(r.id)).map(r => r.id).sort(), ['n-c1', 'n-c2', 'n-c3', 'n-c4', 'n-c5', 'n-c6'])
   assert.equal((text.match(/○/g) || []).length, 2)
   assert.ok(text.includes('◉'))
-  // at rest: the newest claim selected, its words, where it came from and its evidence under the graph
-  assert.equal(d.selected, 'n-c6')
-  assert.match(text, /● Kestrel and Wren made 63% of the tilt\n {2}finding who edited · turn 2\n {2}from “Kestrel and Wren made 63% of it, Kestrel's 41% the larger part\.”/)
-  assert.match(text, /1 63% +reading its rows…/)
+  // at rest: the last turn's correction selected, beside the claim it corrects
+  assert.equal(d.selected, 'n-c5')
+  assert.match(text, /● The tilt is two editors, not one\n {2}testing for bias · turn 2\n {2}from “Fix one thing: it is two editors, not one\.”\n {2}corrects The tilt in the edits is one editor/)
+  // a claim selected: its words, where it came from and its evidence under the graph
+  const six = draw(data, { state: { claim: 'c6' } })
+  assert.match(six.text, /● Kestrel and Wren made 63% of the tilt\n {2}finding who edited · turn 2\n {2}from “Kestrel and Wren made 63% of it, Kestrel's 41% the larger part\.”/)
+  assert.match(six.text, /1 63% +reading its rows…/)
+  // a selection made before the last turn gives way to what is new
+  assert.equal(draw(data, { state: { claim: 'c3', part: 'n-c3', at: 1 } }).d.selected, 'n-c5')
+  assert.equal(draw(data, { state: { claim: 'c3', part: 'n-c3', at: 2 } }).d.selected, 'n-c3')
   // no kinds: no fact, finding, judgment or event anywhere
   assert.ok(!/judgment|\bfact\b|\bevent\b/.test(text))
   // its keys, as the side panel's bar names them (esc is the panel's own: back, then close)
-  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', '1 2 evidence'])
+  assert.deepEqual(keysOf(six.d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', '1 2 evidence'])
 })
 
 test('the pane: the ring on a dot selects its claim; ↵ on it opens where it came from; a correction goes to the other claim', () => {
@@ -301,7 +316,7 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   const data = pane.data({ claims: store, threads: [] })
   const run = (state, event, got) => DK.run(pane.program, data, { w: 90, h: 44, mode: 'pane', state, event, got })
   const st = run({}, { type: 'focus', region: 'n-c2' }).state
-  assert.deepEqual(st, { claim: 'c2', part: 'n-c2' })
+  assert.deepEqual(st, { claim: 'c2', part: 'n-c2', at: 2 })
   // the dot selected is what the panel's thread asks about, with the claim's citations as its refs
   const sel = run(st)
   assert.equal(sel.selected, 'n-c2')
@@ -312,23 +327,23 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   assert.match(draw(data, { state: st, got }).text, /1 41% +q4 · share by user ← 517 source rows in revisions\.jsonl/)
   // a press on the dot selected (↵) opens where it came from; on another dot it selects that one
   assert.deepEqual(run(st, { type: 'press', region: 'n-c2' }).effects, [{ id: 'c2', row: 'r2', do: 'source' }])
-  assert.deepEqual(run(st, { type: 'press', region: 'n-c4' }).state, { claim: 'c4', part: 'n-c4' })
+  assert.deepEqual(run(st, { type: 'press', region: 'n-c4' }).state, { claim: 'c4', part: 'n-c4', at: 2 })
   assert.deepEqual(run(st, { type: 'press', region: 'said' }).effects, [{ id: 'c2', row: 'r2', do: 'source' }])
   // the digits open the evidence as a citation opens (over the pane, in the side panel)
   assert.deepEqual(run(st, { type: 'key', key: '1' }).effects, [{ mark: { kind: 'cite', ref: 'q4#user=Kestrel@share', label: '41%' }, do: 'open' }])
   // the ring on an evidence row selects that row, the claim kept
   const ev = run(st, { type: 'focus', region: 'ev-1' })
-  assert.deepEqual(ev.state, { claim: 'c2', part: 'ev-1' })
+  assert.deepEqual(ev.state, { claim: 'c2', part: 'ev-1', at: 2 })
   assert.equal(run(ev.state).regions.find(r => r.id === 'ev-1').meta.ref, 'q4#user=Kestrel@share')
   // the claims it is linked to, either way, each a row a press goes to
   const linked = draw(data, { state: { claim: 'c5' } }).text
   assert.match(linked, /supported by Kestrel and Wren made 63% of the tilt/)
-  assert.deepEqual(run({ claim: 'c5' }, { type: 'press', region: 'rel-c6' }).state, { claim: 'c6', part: 'n-c6' })
+  assert.deepEqual(run({ claim: 'c5' }, { type: 'press', region: 'rel-c6' }).state, { claim: 'c6', part: 'n-c6', at: 2 })
   // a corrected claim names the claim that corrects it, and a press goes there
   const old = draw(data, { state: { claim: 'c1' } }).text
   assert.match(old, /○ The tilt in the edits is one editor/)
   assert.match(old, /corrected in turn 2 by The tilt is two editors, not one/)
-  assert.deepEqual(run({ claim: 'c1' }, { type: 'press', region: 'fix-c5' }).state, { claim: 'c5', part: 'n-c5' })
+  assert.deepEqual(run({ claim: 'c1' }, { type: 'press', region: 'fix-c5' }).state, { claim: 'c5', part: 'n-c5', at: 2 })
   // the pane takes no esc (the panel's own)
   assert.ok(!(run(st, { type: 'key', key: 'esc' }).effects || []).length)
   // the dots keep their places while the ring walks them, whatever the claim under the graph
