@@ -656,7 +656,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   ] })]
   kids.push(...convEls(els, conv, T))
   // what an action opened (the selected part's rows, the code), right above the actions and the input bar
-  if (belowRows) kids.push(Text({ key: 'below-gap', children: ' ' }), Box({ key: 'below', marginLeft: 1, children: [paintRegions(grid, els, { theme, selected: region, key: 'pane', from: split, rows: belowRows, onPress, painted: true })] }))
+  if (belowRows) kids.push(Text({ key: 'below-gap', children: ' ' }), Box({ key: 'below', marginLeft: 1, children: [paintRegions(openedOnly(grid), els, { theme, selected: region, key: 'pane', from: split, rows: belowRows, onPress, painted: true })] }))
   const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : 'this card'
   // what it offers above the input bar: the detail's actions, then the card's own keys with their words, each a press
   const own = ownActions(card?.drawing)
@@ -857,7 +857,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   const kids: Any[] = [...back, ...(above ? [above, els.Text({ key: 'above-gap', children: ' ' })] : []), Box({ marginLeft: 1, children: [paintRegions(grid, els, { theme, selected: region, key: 'side', from, rows, onPress, painted: true })] })]
   kids.push(...convEls(els, conv, T))
   // what an action opened, right above the actions and the input bar
-  if (belowRows) kids.push(Text({ key: 'below-gap', children: ' ' }), Box({ key: 'below', marginLeft: 1, children: [paintRegions(grid, els, { theme, selected: region, key: 'side', from: split, rows: belowRows, onPress, painted: true })] }))
+  if (belowRows) kids.push(Text({ key: 'below-gap', children: ' ' }), Box({ key: 'below', marginLeft: 1, children: [paintRegions(openedOnly(grid), els, { theme, selected: region, key: 'side', from: split, rows: belowRows, onPress, painted: true })] }))
   const fireAct = (ev: string) => { void paneFire($, view.pane, view.args, { type: ev }).then(() => takeKeys($)) }
   if (subject) kids.push(...entryEls($, els, subject.label, C, acts, fireAct))
   else if (acts.length) kids.push(...actionEls(els, acts, fireAct))
@@ -882,6 +882,12 @@ const ABOVE_ROWS = 5
 function keepsBar(view: SideView | null): boolean {
   if (view?.kind !== 'pane') return false
   try { return !!paneOf(view.pane).keepBar } catch { return false }
+}
+
+/** What an action opened, to paint: its own parts only (a record, next ›). The `side:opened` region that holds them is
+ *  where the opened area starts, never a press of its own (its blank rows would take the ring). */
+function openedOnly(grid: Any): Any {
+  return { ...grid, regions: (grid.regions || []).filter((r: Any) => r.id !== 'side:opened') }
 }
 
 /** A question typed in the input bar: the thread of what the panel shows is asked about the part selected, and the
