@@ -8,17 +8,17 @@
 // (squeeze.error), so the browser's chips show the same as the terminal's.
 //
 // A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
-// recorded in the session's events with the prompt version it used; the record's
+// recorded in the session's events with the prompt it used; the record's
 // `shown` holds the result and its marks are placed again on it, citations kept; a state seen before comes back from
 // the record with no call. While a call runs the old text dims and its first glyph turns; when the new text is there
 // it writes itself in from the top at a model's pace, and nothing else is drawn for it.
 //
-// The chips belong to the whole answer, so with the squeeze switch for cards on (and a prompt version that knows
-// cards), the request also shows the cards under the original and the query outputs they and the text draw on. A
-// change of a card the reply asks for is saved through the kernel as the person's (`thimble save`): an edit is a new
-// version of the same card, marked as an edit the analyst asked for; an add is a new card under the answer; a drop
-// leaves one out of this version. A change that does not save or draw is left out, and the hint line says why. Each
-// version keeps its cards, so a version seen before and the original (0) come back with theirs (showCards).
+// The chips belong to the whole answer, so with the squeeze switch for cards on, the request also shows the cards under
+// the original and the query outputs they and the text draw on. A change of a card the reply asks for is saved through
+// the kernel as the person's (`thimble save`): an edit is a new version of the same card, marked as an edit the analyst
+// asked for; an add is a new card under the answer; a drop leaves one out of this version. A change that does not save
+// or draw is left out, and the hint line says why. Each version keeps its cards, so a version seen before and the
+// original (0) come back with theirs (showCards).
 import type { EngineInterface } from 'claude-code'
 
 import type { MsgRecord, ObjRef, SqzUi, Tray } from '../types'
@@ -26,7 +26,6 @@ import { promptText as registryText } from '../prompts/prompts'
 import { newRecord, remark as remarkAny } from '../shell/message.js'
 import { modelWhy } from '../shell/why.js'
 import { tracked } from '../telemetry/telemetry'
-import { FEATURES } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { lookPending } from '../observer/observer'
 import { answerRow, cardsUnder, closeTray, drawnTextOf, leanEnv, loadObject, prepared, questionBefore, recordNow, rootHere, saveRecord, setCardsUnder, tellMain } from '../shell/shell'
@@ -221,14 +220,12 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     // a catch-up answers the person's last prompt, whatever notification or hand-back came after it
     const question = isCatchUp(rec) ? String(rec.catchup!.question || '') : await questionBefore($, row).catch(() => '')
     const sp = await registryText($, 'squeeze')
-    // a version that keeps corrections (squeeze:v4): the corrections in the original are named in the request, and one
-    // the rewrite left out is put back after it
-    const keeps = !!(FEATURES.squeeze.versions as Any)?.[sp.version]?.keep
-    const keep: string[] = keeps ? mustKeep(rec.text) : []
-    // a version that keeps the terms of the explain marks (squeeze:v5): the terms are named in the request
-    const terms: string[] = (FEATURES.squeeze.versions as Any)?.[sp.version]?.terms ? termsOf(rec) : []
-    // the answer's cards and the outputs they draw on, for a version that may change them (squeeze:v8, and the switch)
-    const answer = featureOn('squeezeCards') && (FEATURES.squeeze.versions as Any)?.[sp.version]?.cards ? await answerCards($, rec).catch(() => null) : null
+    // the corrections in the original are named in the request, and one the rewrite left out is put back after it
+    const keep: string[] = mustKeep(rec.text)
+    // the terms of the explain marks are named in the request
+    const terms: string[] = termsOf(rec)
+    // the answer's cards and the outputs they draw on, which a version may change (with the switch on)
+    const answer = featureOn('squeezeCards') ? await answerCards($, rec).catch(() => null) : null
     const toolkit = answer ? toolkitOf((await registryText($, 'forms').catch(() => ({ text: '' }))).text) : ''
     const req = request(probe, {
       system: sp.text, toolkit, question, keep, terms, cards: answer?.cards ?? [], outputs: answer?.outputs ?? [],
@@ -254,7 +251,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     // a heading the rewrite ends on, with nothing under it, promises what the text does not give: dropped before a
     // correction is put back after it, and after
     const bare = dropOrphanHeads(reply.text)
-    const back = keeps ? keepCorrections(bare.text, keep, rec.text) : { text: bare.text, back: [] }
+    const back = keepCorrections(bare.text, keep, rec.text)
     const whole = dropOrphanHeads(back.text)
     whole.dropped.unshift(...bare.dropped)
     // held to the whole answer it was shown: the message, and its cards' words and values when the request had them

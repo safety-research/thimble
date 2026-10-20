@@ -1,40 +1,26 @@
-// Stub texts of the prompt registry (prompts/<feature>/<version>.md) for the hooks tests, whose $.fs is mocked: short
-// templates with the same placeholders and sections as the real ones, so a test sees what the observer composed.
+// Stub texts of the prompt registry (prompts/<text>.md) for the hooks tests, whose $.fs is mocked: short templates with
+// the same placeholders and sections as the real ones, so a test sees what the observer composed.
 
 const STUBS: Record<string, string> = {
-  'observer/v3': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
-  'observer/v4': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
-  'observer/v5': 'FRAME\n{{LENSES}}',
-  'observer/v6': 'FRAME\n{{LENSES}}',
-  'observer-turn/v2': 'TURN {{QUESTION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
-  'observer-turn/v3': 'NOW {{MESSAGES}} | {{ROW}} | {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}}\n{{DIGEST}}\n{{RULES}}\nREPLY {{SKELETON}}',
-  'lens-actions/v4': 'LENS actions',
-  'lens-actions/v5': 'LENS actions',
-  'lens-squeeze/v2': 'LENS squeeze',
-  'lens-squeeze/v3': 'LENS squeeze',
-  'lens-squeeze/v4': 'LENS squeeze',
-  'lens-explain/v3': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
-  'lens-claims/v4': 'LENS claims\n<!-- digest -->\nCLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}}{{GROWN}}\n<!-- when quiet -->\nGive no claims this time.',
-  'lens-claims/v5': 'LENS claims\n<!-- digest -->\nCLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}}{{GROWN}}\n<!-- when quiet -->\nGive no claims this time.',
-  'lens-explain/v4': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive one explain mark at most this time.',
-  'lens-explain/v5': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive one explain mark at most this time.',
-  'lens-explain/v6': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}',
-  'lens-heads/v1': 'LENS heads\n<!-- digest -->\n| {{HEADS}}',
-  'lens-heads/v2': 'LENS heads\n<!-- digest -->\n| {{HEADS}}',
-  'squeeze/v6': 'THE PROMPT',
-  'squeeze/v7': 'THE PROMPT',
-  'squeeze/v8': 'THE PROMPT',
-  'thread/v2': 'THE THREAD PROMPT',
-  'labels/v2': 'LABEL {{NAME}} | {{VALUES}}\n{{RECORDS}}',
+  observer: 'FRAME\n{{LENSES}}',
+  'observer-turn': 'NOW {{MESSAGES}} | {{ROW}} | {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}}\n{{DIGEST}}\n{{RULES}}\nREPLY {{SKELETON}}',
+  'lens-actions': 'LENS actions',
+  'lens-squeeze': 'LENS squeeze',
+  'lens-claims': 'LENS claims\n<!-- digest -->\nCLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}}{{GROWN}}\n<!-- when quiet -->\nGive no claims this time.',
+  'lens-explain': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}',
+  'lens-heads': 'LENS heads\n<!-- digest -->\n| {{HEADS}}',
+  squeeze: 'THE PROMPT',
+  thread: 'THE THREAD PROMPT',
+  labels: 'LABEL {{NAME}} | {{VALUES}}\n{{RECORDS}}',
 }
 
-/** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */
+/** The stub text of a registry path (`…/prompts/<text>.md`), or undefined for any other path. */
 export function promptStub(path: string): string | undefined {
-  // the card guide (forms:v6 reads it whole)
+  // the card guide (forms reads it whole)
   if (/\/skills\/thimble\/cards\.md$/.test(path)) return '# The card guide\n\n## What makes a good card\n\nTHE WORKED FORMS'
-  const m = /\/prompts\/([^/]+)\/([^/]+)\.md$/.exec(path)
+  const m = /\/prompts\/([^/]+)\.md$/.exec(path)
   if (!m) return undefined
-  return STUBS[`${m[1]}/${m[2]}`] ?? `PROMPT ${m[1]}:${m[2]}`
+  return STUBS[m[1]!] ?? `PROMPT ${m[1]}`
 }
 
 /** A key pressed in the prompt: the answer the shell gives it, once the key's work has run. The shell answers a key at

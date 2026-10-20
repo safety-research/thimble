@@ -241,7 +241,7 @@ def test_answers_take_near_misses_and_say_what_is_missing():
 # ---- the classifier prompt is the terminal's
 
 def test_the_classifier_prompt_is_the_terminals_with_the_listed_change():
-    term = prompts.plugin_read(prompts.default_file("labels"))
+    term = prompts.plugin_read(prompts.prompt_file("labels"))
     concept = {"name": "blame", "description": "Who the agent blames.", "labels": ["tests", "itself"], "comment": True}
     want = term.split("{{RECORDS}}", 1)[0]
     for k, v in {"{{NAME}}": "blame", "{{DEFINITION}}": "Who the agent blames.", "{{VALUES}}": "tests, itself",

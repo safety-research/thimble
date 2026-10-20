@@ -1,5 +1,5 @@
 {
-  "about": "The parts of the terminal plugin's texts that thimble browser uses (server/thimble_browser/prompts.py). Each part is read from the plugin at run time: `file`, a file under plugin/, or `prompt`, the default version of a prompt in plugin/prompts/registry.mjs. Then a section of it and, when given, some of its bullets (counted from 1). `replace` and `drop` are the only changes, exact strings; tests/test_prompt_parity.py fails when the terminal's text no longer holds one of them.",
+  "about": "The parts of the terminal plugin's texts that thimble browser uses (server/thimble_browser/prompts.py). Each part is read from the plugin at run time: `file`, a file under plugin/, or `prompt`, a prompt of plugin/prompts/registry.mjs, read from its one file. Then a section of it and, when given, some of its bullets (counted from 1). `replace` and `drop` are the only changes, exact strings; tests/test_prompt_parity.py fails when the terminal's text no longer holds one of them.",
   "parts": {
     "communicating": {
       "file": "skills/thimble/SKILL.md",

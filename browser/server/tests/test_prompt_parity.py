@@ -4,7 +4,7 @@ from plugin/ as they are now.
 - Every change shared.json makes still finds its words in the terminal's text, so a reworded sentence there stops
   this test until someone looks at it.
 - Undoing the listed changes gives back the terminal's text word for word, so no other edit slips in.
-- The default version the server reads from the plugin's prompt registry is the one Node reads from it.
+- The file the server reads for a prompt of the plugin's registry is the one Node reads from it.
 - The prompts Claude reads hold each shared part whole.
 """
 import json
@@ -42,21 +42,24 @@ def test_changes_are_only_the_listed_ones(part):
     assert _words(got) == _words(source)
 
 
-FEATURES = sorted({s["prompt"] for s in prompts.manifest()["parts"].values() if s.get("prompt")})
-READ_DEFAULTS = """
-import { loadIndex } from './prompts/node.mjs'
-const idx = loadIndex()
+TEXTS = sorted({s["prompt"] for s in prompts.manifest()["parts"].values() if s.get("prompt")})
+READ_FILES = """
+import { TEXTS, fileOf } from './prompts/registry.mjs'
 const out = {}
-for (const f of process.argv.slice(1)) out[f] = idx[f].versions[idx[f].default].file
+for (const n of [...Object.keys(TEXTS), ...process.argv.slice(1)]) out[n] = fileOf(n)
 console.log(JSON.stringify(out))
 """
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs Node to read the plugin's prompt registry")
-def test_the_default_versions_are_the_registrys():
-    got = subprocess.run(["node", "--input-type=module", "-e", READ_DEFAULTS, *FEATURES], cwd=prompts.PLUGIN,
+def test_the_files_are_the_registrys():
+    got = subprocess.run(["node", "--input-type=module", "-e", READ_FILES, *TEXTS], cwd=prompts.PLUGIN,
                          capture_output=True, text=True, check=True)
-    assert json.loads(got.stdout) == {f: prompts.default_file(f) for f in FEATURES}
+    files = json.loads(got.stdout)
+    assert set(TEXTS) <= set(files)
+    assert files == {n: prompts.prompt_file(n) for n in files}
+    for f in files.values():
+        assert (prompts.PLUGIN / f).is_file(), f"{f} is a file of the plugin"
 
 
 def test_main_prompt_holds_the_shared_parts_whole(tmp_path):

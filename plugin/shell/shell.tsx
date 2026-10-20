@@ -453,7 +453,7 @@ async function restoreShown($: Engine): Promise<void> {
 
 /** The env of the shell's own `thimble` calls: the person's, never counted as what Claude read (coverage). */
 export async function leanEnv($: Engine, root: string): Promise<Record<string, string>> {
-  // the prompt versions in use (prompts/prompts.ts set THIMBLE_PROMPTS), so a child reads the same ones
+  // the texts turned off (prompts/prompts.ts set THIMBLE_PROMPTS), so a child reads the same ones
   const prompts = String((await $.env.get('THIMBLE_PROMPTS')) || '')
   return { THIMBLE_ROOT: root, THIMBLE_SESSION: `person-${(await sessionKey($)).slice(0, 8)}`, ...(prompts ? { THIMBLE_PROMPTS: prompts } : {}) }
 }

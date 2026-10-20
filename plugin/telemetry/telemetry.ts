@@ -2,7 +2,7 @@
 // ($THIMBLE_HOME/lean/events/<session>.jsonl, events.mjs says the lines). `thimble stats` reads them back.
 //
 // - A call: `tracked($, {feature, prompt, model}, () => $.model.complete(...))` times it and writes its line: the
-//   feature (observer, question, squeeze, a verb), the prompt version it used, the model, the four token counts, the
+//   feature (observer, question, squeeze, a verb), the prompt it used, the model, the four token counts, the
 //   seconds, and whether the main turn waited for it.
 // - A turn: main's, with its duration and usage from Claude Code's turn.complete, the feature that started it ('main',
 //   or the verb whose request it answers: markNextTurn), and `hook_ms`, the time thimble's own hooks took inside it;
@@ -98,7 +98,7 @@ async function flush($: Engine): Promise<void> {
 }
 
 /**
- * A model call, timed and recorded: its feature, the prompt version, the model, the usage, the seconds, and whether
+ * A model call, timed and recorded: its feature, the prompt, the model, the usage, the seconds, and whether
  * the main turn waited for it. Returns the call's result as it came.
  */
 export async function tracked<R>($: Engine, o: { feature: string; prompt?: string | null; model?: string | null; blocked?: boolean; extra?: Record<string, unknown> }, call: () => Promise<R>): Promise<R> {

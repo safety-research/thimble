@@ -8,7 +8,7 @@ Every prompt is a file under browser/prompts/. Three directives join them:
 Shared parts. The terminal plugin's texts that both products use (its thimble skill, its explain lens, its label
 classifier) are read from the plugin itself, plugin/ at the top of the repository, when the server makes a prompt. A
 part names a file of the plugin (`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose
-default version is the one read. prompts/shared.json names each shared part: where it comes from, the `## ` section, which of
+one file is the one read. prompts/shared.json names each shared part: where it comes from, the `## ` section, which of
 its bullets (all when not given), and the few literal changes the browser needs, such as a ref of the terminal's own
 form written in the browser's form. Each change is a pair of exact strings, and the test (tests/test_prompt_parity.py)
 fails when the terminal's text no longer holds a string that a change replaces. So the browser follows every edit to
@@ -55,29 +55,24 @@ def plugin_read(rel: str) -> str:
         raise PromptError(f"the terminal plugin's {rel}: {e}") from None
 
 
-def default_file(feature: str) -> str:
-    """The file of a prompt's default version in the plugin's registry, as a path under plugin/: the file the registry
-    names for that version, else prompts/<feature>/<version>.md. The registry is JavaScript, and this reads only its
-    table's plain form; tests/test_prompt_parity.py checks the result against what Node reads from it."""
+def prompt_file(name: str) -> str:
+    """The file of a prompt in the plugin's registry, as a path under plugin/: the `file` its entry names, else
+    prompts/<name>.md. The registry is JavaScript, and this reads only its table's plain form;
+    tests/test_prompt_parity.py checks the result against what Node reads from it."""
     text = plugin_read(REGISTRY)
-    start = re.search(rf"^  (['\"]?){re.escape(feature)}\1:\s*\{{", text, re.M)
+    start = re.search(rf"^  (['\"]?){re.escape(name)}\1:\s*\{{", text, re.M)
     if not start:
-        raise PromptError(f"the terminal plugin's {REGISTRY} has no prompt {feature!r}")
+        raise PromptError(f"the terminal plugin's {REGISTRY} has no prompt {name!r}")
     rest = text[start.end():]
     end = re.search(r"^  (['\"]?)[A-Za-z0-9_-]+\1:\s*\{|^\}", rest, re.M)
     entry = rest[: end.start()] if end else rest
-    version = re.search(r"\bdefault:\s*'([^']+)'", entry)
-    if not version:
-        raise PromptError(f"the terminal plugin's {REGISTRY} gives no default for {feature!r}")
-    v = version.group(1)
-    meta = re.search(rf"(['\"]?){re.escape(v)}\1:\s*\{{([^{{}}]*)\}}", entry)
-    file = meta and re.search(r"\bfile:\s*'([^']+)'", meta.group(2))
-    return file.group(1) if file else f"prompts/{feature}/{v}.md"
+    file = re.search(r"\bfile:\s*'([^']+)'", entry)
+    return file.group(1) if file else f"prompts/{name}.md"
 
 
 def source_file(spec: dict[str, Any]) -> str:
     """The path under plugin/ that a shared part comes from."""
-    return default_file(spec["prompt"]) if spec.get("prompt") else spec["file"]
+    return prompt_file(spec["prompt"]) if spec.get("prompt") else spec["file"]
 
 
 def body_of(text: str) -> str:

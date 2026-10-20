@@ -22,9 +22,9 @@ test('price weights: input 1, cache write 1.25, cache read 0.1, output 5', () =>
   assert.deepEqual(usageOf({ input_tokens: 3, junk: 1 }), U(3, 0, 0, 0))
 })
 
-test("a call's line names the feature, the prompt version, the model, the four counts, the time and whether it blocked", () => {
-  const l = callLine({ feature: 'squeeze', prompt: 'squeeze:v2', model: 'sonnet', usage: U(10, 0, 5, 2), ms: 1234.4, extra: 1 })
-  assert.deepEqual(l, { kind: 'call', feature: 'squeeze', prompt: 'squeeze:v2', model: 'sonnet', usage: U(10, 0, 5, 2), ms: 1234, blocked: false, ok: true, extra: 1 })
+test("a call's line names the feature, the prompt, the model, the four counts, the time and whether it blocked", () => {
+  const l = callLine({ feature: 'squeeze', prompt: 'squeeze', model: 'sonnet', usage: U(10, 0, 5, 2), ms: 1234.4, extra: 1 })
+  assert.deepEqual(l, { kind: 'call', feature: 'squeeze', prompt: 'squeeze', model: 'sonnet', usage: U(10, 0, 5, 2), ms: 1234, blocked: false, ok: true, extra: 1 })
   const t = turnLine({ feature: 'visualize', ms: 20000, usage: U(1, 2, 3, 4), hook_ms: 41.6 })
   assert.equal(t.kind, 'turn')
   assert.equal(t.agent, null)
@@ -33,15 +33,15 @@ test("a call's line names the feature, the prompt version, the model, the four c
 })
 
 const EVENTS = [
-  { kind: 'prompts', active: { observer: 'v2' }, changed: 'forms:principles', problems: [] },
+  { kind: 'prompts', plugin: '9.9.9', off: ['lens-explain'], problems: [] },
   turnLine({ feature: 'main', ms: 60000, usage: U(2000, 10000, 50000, 3000), hook_ms: 120 }),
-  callLine({ feature: 'question', prompt: 'question:v1', usage: U(2000, 0, 0, 100), ms: 2000 }),
-  callLine({ feature: 'observer', prompt: 'observer:v2', usage: U(10000, 9000, 0, 2000), ms: 30000,
+  callLine({ feature: 'question', prompt: 'question', usage: U(2000, 0, 0, 100), ms: 2000 }),
+  callLine({ feature: 'observer', prompt: 'observer', usage: U(10000, 9000, 0, 2000), ms: 30000,
     lenses: { notes: { in: 1000, out: 0 }, claims: { in: 3000, out: 1500 }, explain: { in: 1000, out: 500 } }, shared_in: 5000, shared_out: 0 }),
-  callLine({ feature: 'squeeze', prompt: 'squeeze:v2', usage: U(3000, 0, 0, 400), ms: 3000 }),
+  callLine({ feature: 'squeeze', prompt: 'squeeze', usage: U(3000, 0, 0, 400), ms: 3000 }),
   turnLine({ feature: 'visualize', ms: 25000, usage: U(1000, 5000, 60000, 2000), hook_ms: 30 }),
   turnLine({ feature: 'thread', agent: 'a1', ms: 9000, usage: U(500, 0, 0, 200) }),
-  { kind: 'prompt', feature: 'forms', prompt: 'forms:principles', via: 'thimble guide cards' },
+  { kind: 'prompt', feature: 'forms', prompt: 'forms', via: 'thimble run' },
 ]
 
 test('the sums per feature, the main turns with the time thimble added, and each lens with its share of the pass', () => {
@@ -90,14 +90,14 @@ test('`thimble stats`: per feature and per lens, and against a plain transcript 
   const r = report(EVENTS.map(e => ({ session: 's-123456789', ...e })), { plain })
   const text = r.lines.join('\n')
   assert.match(text, /^thimble · session s-123456/)
-  assert.match(text, /prompts: not the defaults: forms:principles/)
+  assert.match(text, /prompts: thimble 9\.9\.9 · turned off: lens-explain/)
   assert.match(text, /\n {2}thimble hooks inside them\s+0\.1s/)
-  assert.match(text, /\nobserver\s+1\s+\S+k\s+30s\s+0 of 1 · observer:v2/)
+  assert.match(text, /\nobserver\s+1\s+\S+k\s+30s\s+0 of 1 · observer/)
   assert.match(text, /\n {2}lens claims\s/)
   assert.match(text, /\nsqueeze\s+1\s/)
   assert.match(text, /against plain Claude Code \(1 turns in the transcript, 2 main turns here\)/)
   assert.match(text, /thimble's hooks took 0\.1s of the main turns' time/)
-  assert.match(text, /read on demand: forms:principles \(thimble guide cards\)/)
+  assert.match(text, /read on demand: forms \(thimble run\)/)
   assert.equal(r.out.plain.hook_ms, 150)
 })
 
@@ -118,29 +118,24 @@ test('the command finds the newest session in THIMBLE_HOME, or one by id, and sa
   assert.deepEqual(parseLines('{"a":1}\n{bad\n\n{"b":2}'), [{ a: 1 }, { b: 2 }])
 })
 
-test('thimble stats counts the looks: how often v lit and how often the person pressed it; a shadow pass is its own row, outside all', () => {
+test('thimble stats counts the looks: how often v lit and how often the person pressed it', () => {
   const U2 = { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
   const events = [
     turnLine({ feature: 'main', ms: 10000, usage: U2 }), turnLine({ feature: 'main', ms: 10000, usage: U2 }),
-    callLine({ feature: 'observer', prompt: 'observer:v2-low', usage: U2, ms: 5000 }),
-    { ...callLine({ feature: 'observer', prompt: 'observer:v2', usage: { ...U2, output_tokens: 900 }, ms: 9000 }), shadow: 'observer:v2' },
+    callLine({ feature: 'observer', prompt: 'observer', usage: U2, ms: 5000 }),
     { kind: 'look', turn: 1, lit: ['v'], v: { note: 'saves by day', proposals: ['saves per day'] } },
     { kind: 'look', turn: 2, lit: [] },
     { kind: 'look', turn: 3, skip: 'no work, no decision, no drift' },
-    { kind: 'look', turn: 1, shadow: 'observer:v2', lit: ['v'], v: {} },
-    { kind: 'look', turn: 2, shadow: 'observer:v2', lit: ['v'], v: {} },
     { kind: 'press', verb: 'v', row: 'r1', lit: true },
     { kind: 'press', verb: 'v', row: 'r2', lit: false },
   ]
   const s = summarize(events)
-  assert.deepEqual(s.looks, { looks: 2, skipped: 1, v_lit: 1, pressed_lit: 1, pressed_dim: 1, shadow: { 'observer:v2': { looks: 2, skipped: 0, v_lit: 2 } } })
+  assert.deepEqual(s.looks, { looks: 2, skipped: 1, v_lit: 1, pressed_lit: 1, pressed_dim: 1 })
   const text = report(events).lines.join('\n')
-  assert.match(text, /\nobserver \(shadow\)\s+1\s+\S+k\s+9.0s\s+measured only, not in all · observer:v2/)
-  // all: the two turns and the pass, not the shadow (2 × 2.0k + 2.0k)
+  // all: the two turns and the pass (2 × 2.0k + 2.0k)
   assert.match(text, /\nall\s+6\.0k/)
   assert.match(text, /\nper main turn\s+3\.0k in all · the pass 1\.0k \(33% of all\)/)
   assert.match(text, /\nlooks\s+v lit on 1 of 2 looks \(1 skipped\) · v pressed 1 of 1 times lit, 1 while dim/)
-  assert.match(text, /\nlooks \(shadow\)\s+v lit on 2 of 2 · observer:v2/)
 })
 
 test("a save's check is a line of its own: thimble stats counts the saves checked, the tries, the failures, the milliseconds and the characters Claude read", () => {

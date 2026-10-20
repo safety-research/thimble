@@ -408,20 +408,18 @@ test('the pass is a fork of the session: its prompt is the frame, the lenses, th
   const file = '/home/t/.thimble/lean/events/s-1.jsonl'
   expect(w.events.every(e => e.file === file)).toBe(true)
   const prompts = w.events.find(e => e.kind === 'prompts')!
-  expect((prompts.active as Json).observer).toBe('v6')
-  expect((prompts.active as Json)['lens-explain']).toBe('v6')
+  expect(prompts.off).toEqual([])
   // one call after the turn: no question step
   expect(w.events.some(e => e.kind === 'call' && e.feature === 'question')).toBe(false)
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
-  expect(pass.prompt).toBe('observer:v6')
-  expect(pass.turn_prompt).toBe('observer-turn:v3')
+  expect(pass.prompt).toBe('observer')
+  expect(pass.turn_prompt).toBe('observer-turn')
   // a fork runs as main's thread does: no effort of its own
   expect(pass.effort).toBeUndefined()
   expect(pass.blocked).toBe(false)
-  expect(pass.mode).toBe('fork')
   expect(pass.usage).toEqual(USAGE)
   expect(Object.keys(pass.lenses as Json)).toEqual(['actions', 'squeeze', 'explain', 'heads', 'claims'])
-  expect((pass.lens_prompts as Json).actions).toBe('lens-actions:v5')
+  expect((pass.lens_prompts as Json).actions).toBe('lens-actions')
   // one look line in the events: what it lit
   const look = w.events.find(e => e.kind === 'look')!
   expect(look.lit).toEqual(['v', 's'].filter(k => (look.lit as string[]).includes(k)))
@@ -435,8 +433,8 @@ test('the pass is a fork of the session: its prompt is the frame, the lenses, th
   expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves per day, June 18 marked'])
 })
 
-test('a lens turned off is neither asked nor merged; another frame version is read in its place', async ($, on) => {
-  const w = world(on, { env: { THIMBLE_PROMPTS: 'lens-explain:off,observer:v3' }, fork: { line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
+test('a lens turned off is neither asked nor merged', async ($, on) => {
+  const w = world(on, { env: { THIMBLE_PROMPTS: 'lens-explain:off' }, fork: { line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
   await w.clock.settle()
   await w.clock.advance(100)
@@ -446,12 +444,12 @@ test('a lens turned off is neither asked nor merged; another frame version is re
   expect(w.forks[0]).toContain('REPLY {"verbs": {}, "heads": null, "claims": []}')
   expect(JSON.parse(w.files[MSGPATH]!).glosses).toEqual({})
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
-  expect(pass.prompt).toBe('observer:v3')
+  expect(pass.prompt).toBe('observer')
   expect(Object.keys(pass.lenses as Json)).not.toContain('explain')
-  expect((w.events.find(e => e.kind === 'prompts')!.changed as string)).toBe('observer:v3,lens-explain:off')
+  expect(w.events.find(e => e.kind === 'prompts')!.off).toEqual(['lens-explain'])
 })
 
-test('a version that does not exist: the default is read, and one line says so', async ($, on) => {
+test('a version named in THIMBLE_PROMPTS: the one text is read, and one line says so', async ($, on) => {
   const w = world(on, { env: { THIMBLE_PROMPTS: 'observer:v9' }, fork: { line: null, settled: false, verbs: {}, glosses: [] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'when?', answer: 'June 18.', tools: 1 })
   await w.clock.settle()
@@ -459,7 +457,7 @@ test('a version that does not exist: the default is read, and one line says so',
   await w.clock.settle()
   expect(w.forks[0]).toContain('FRAME\n')
   expect(w.toasts.length).toBe(1)
-  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v6')
+  expect(w.toasts[0]).toContain('observer:v9 is not read: each text is one file (prompts/observer.md)')
   expect((w.events.find(e => e.kind === 'prompts')!.problems as string[]).length).toBe(1)
 })
 
@@ -649,21 +647,5 @@ test('a pass that fails is tried once more; a second failure is said plainly, wi
   await w.clock.settle()
   expect(w.forks.length).toBe(4)
   expect(w.toasts).toEqual(["thimble's observer could not read Claude's last message: the API is overloaded."])
-})
-
-test('THIMBLE_OBSERVER_SHADOW runs another frame version on the same look, measured and never merged', async ($, on) => {
-  const w = world(on, { env: { THIMBLE_OBSERVER_SHADOW: 'v4-low' }, fork: { verbs: { v: { note: '1 view ready', proposals: ['saves per day'] } }, glosses: [] } })
-  await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
-  await w.clock.settle()
-  await w.clock.advance(100)
-  await w.clock.settle()
-  // the look's fork and the shadow's completion (the earlier pass: its frame as the system prompt, low effort)
-  expect(w.forks.length).toBe(2)
-  expect(w.efforts).toEqual(['low'])
-  const log = JSON.parse(w.files[OBS]!).log
-  expect(log.find((r: Json) => r.kind === 'shadow')).toMatchObject({ version: 'v4-low' })
-  expect(w.events.filter(e => e.kind === 'call' && e.feature === 'observer').map(e => e.shadow ?? null).sort()).toEqual([null, 'observer:v4-low'].sort())
-  // only the look's part is merged: v lit once, by the look
-  expect(log.filter((r: Json) => r.kind === 'look').map((r: Json) => r.verbs_lit)).toEqual([['v']])
 })
 

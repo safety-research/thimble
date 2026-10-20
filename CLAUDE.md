@@ -25,7 +25,7 @@ https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
 [CONTRIBUTING.md](CONTRIBUTING.md) gives the layout of each product and how to test it. `scripts/check.sh` runs every
 check CI runs, and `scripts/check.sh STEP` one of them.
 
-- A change to a text the plugin's model reads goes in a new version of that prompt (`plugin/prompts/<feature>/`), and
+- A change to a text the plugin's model reads is an edit of its one file (`plugin/prompts/<text>.md`, or the skill), and
   follows CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
   symptom.
 - The browser workbench reads its shared texts from `plugin/`, with the changes `browser/prompts/shared.json` lists.

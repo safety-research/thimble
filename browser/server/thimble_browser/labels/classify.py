@@ -1,7 +1,7 @@
 """A prompt label's model calls: the request for one batch of records and what its reply says of each record.
 
-The prompt is the terminal plugin's label classifier (the default version in plugin/prompts/labels/, the shared
-part `labels`), so a label reads the same in both products. The words before its records are the system prompt, the
+The prompt is the terminal plugin's label classifier (plugin/prompts/labels.md, the shared part `labels`), so a
+label reads the same in both products. The words before its records are the system prompt, the
 same on every call of a run, so the calls after the first read them from the prompt cache; the records, each under
 `### record <n>`, are the user message. The reply is JSON in the form the schema gives.
 """

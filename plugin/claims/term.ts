@@ -12,7 +12,7 @@
 //                said opens over the pane (the same pane with {source}), as a citation does; esc goes back
 //   the folder   a press on the pane's folder action (or /claims folder) asks Claude, as a turn of main, to have one
 //                subagent map the claims of the whole folder, with its estimate in the request (estimate.mjs); the subagent
-//                saves the map as the card folder-claims (prompts/claims-folder/), and the save brings its claims into
+//                saves the map as the card folder-claims (prompts/claims-folder.md), and the save brings its claims into
 //                the store (foldInSaves)
 //
 // It registers no model tool and starts no `claude`; the folder's map is built only when the person asks for it.

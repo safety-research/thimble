@@ -320,7 +320,7 @@ test("/claims folder asks Claude, as a turn, to map the folder's claims with a s
   const request = w.appended.find(x => x.includes('thimble save folder-claims'))!
   expect(request).toContain('Hand the reading to one subagent with the Agent tool')
   expect(request).toContain(`--from ${ROOT}/thimble/claims/folder.json --program`)
-  expect(request).toMatch(/First read \S+\/prompts\/claims-folder\/v2\.md and follow it/)
+  expect(request).toMatch(/First read \S+\/prompts\/claims-folder\.md and follow it/)
   expect(w.submitted.at(-1)!.text).toBe('claims of the whole folder (3 trials, about 4 min)')
   expect(textOf(await $.ui.render(PANE))).toContain('Claude is reading the whole folder for its claims')
   // the subagent saves the map: the feed names the save, and the shell reads it after its Bash call

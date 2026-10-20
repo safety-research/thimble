@@ -478,7 +478,7 @@ export async function citeCard({ ref, label, root, room = 9 }, io) {
   }
   let lines
   const path = ref.split('#')[0]
-  // a whole file (`plugin/prompts/context/v1.md`): its top, read as it is, as a citation of its lines shows them
+  // a whole file (`plugin/prompts/context.md`): its top, read as it is, as a citation of its lines shows them
   if (wholeFile(ref)) {
     try {
       const all = String(await io.read(path.startsWith('/') ? path : `${root}/${path}`)).split('\n')

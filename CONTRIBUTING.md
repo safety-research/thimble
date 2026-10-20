@@ -57,7 +57,7 @@ The terminal plugin, `plugin/`:
 | the features a person turns on and off, and the settings panel with its preview of the bar (`/thimble-settings`, a click on `thimble` in the bar) | `plugin/settings/`, `plugin/panes/settings.js` |
 | the rewrite behind `s`, and the catch-up | `plugin/squeeze/` |
 | Claims: the session's claims, the Claims pane behind `c`, and the map of the folder's claims | `plugin/claims/` |
-| the texts the model reads: the skill and card guide, and the versioned prompts | `plugin/skills/`, `plugin/prompts/` |
+| the texts the model reads: the skill and card guide, and the prompts | `plugin/skills/`, `plugin/prompts/` |
 | the session's events and its cost per feature (`thimble dev stats`) | `plugin/telemetry/` |
 | tests | `plugin/tests/` (hooks tests and pytest), and a `test/` folder beside the code it tests (node) |
 
@@ -79,10 +79,10 @@ The browser workbench, `browser/`:
 ## Changing what the model reads
 
 The texts the plugin's models read are the thimble skill (`plugin/skills/thimble/SKILL.md`), the card guide
-(`plugin/skills/thimble/cards.md`) and the versioned prompts in `plugin/prompts/<feature>/<version>.md`.
-`plugin/prompts/registry.mjs` names each feature's default version; `THIMBLE_PROMPTS=feature:version,...` picks
-another for a session, and `thimble dev prompts` lists the versions and which is active. A change to a text goes in a
-new version of it, so the old one can still be picked and compared.
+(`plugin/skills/thimble/cards.md`) and the prompts in `plugin/prompts/<text>.md`, one file per text, each paragraph on
+one line. To change a text, edit its file; git keeps the earlier wording, so compare with `git diff` or `git log -p`.
+`plugin/prompts/registry.mjs` names each text, what it is for and what reads it, and `thimble dev prompts` lists them
+with their files. `THIMBLE_PROMPTS=lens-explain:off,...` turns an optional text off for a session.
 
 When the model does something you do not want, change the cause, not the symptom:
 
@@ -96,10 +96,10 @@ When the model does something you do not want, change the cause, not the symptom
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
 The browser workbench reads some of those texts from `plugin/` when it makes a prompt: Communicating, Citing and Labels
-from the thimble skill, and the default versions of the explain lens and the label classifier. Each part may carry a
-few changes for the browser, each a pair of exact strings, listed in `browser/prompts/shared.json`. When you reword the
-plugin's text, the parity test says which change no longer applies; fix the pair in `shared.json`, and keep the
-browser's version of a ref or a tool name in it.
+from the thimble skill, and the explain lens and the label classifier. Each part may carry a few changes for the
+browser, each a pair of exact strings, listed in `browser/prompts/shared.json`. When you reword the plugin's text, the
+parity test says which change no longer applies; fix the pair in `shared.json`, and keep the browser's version of a ref
+or a tool name in it.
 
 ## Pull requests
 
