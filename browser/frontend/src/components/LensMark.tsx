@@ -26,12 +26,15 @@ export function LensMark({ mark, lens, children }: { mark: Mark; lens?: Lens; ch
       document.removeEventListener('keydown', key)
     }
   }, [open])
-  // the card opens under the words and stays inside the text's column: shifted left when it would pass its right edge
+  // the card opens under the words and stays inside the text's column: no wider than it, and shifted left when it
+  // would pass its right edge, never past its left
   const place = (card: HTMLSpanElement | null) => {
     if (!card) return
-    const column = card.closest('.chat-text, .chat-msg, .bcell-take, .wu-page') ?? document.body
-    const over = card.getBoundingClientRect().right - column.getBoundingClientRect().right
-    if (over > 0) card.style.left = `${-over}px`
+    const col = (card.closest('.chat-msg, .bcell-take, .wu-page, .chat-card') ?? document.body).getBoundingClientRect()
+    if (card.getBoundingClientRect().width > col.width) card.style.width = `${col.width}px`
+    const r = card.getBoundingClientRect()
+    const shift = Math.max(col.left - r.left, Math.min(0, col.right - r.right))
+    if (shift) card.style.left = `${shift}px`
   }
   const explainer = mark.lens === 'explain'
   return (
@@ -44,9 +47,23 @@ export function LensMark({ mark, lens, children }: { mark: Mark; lens?: Lens; ch
       data-anchor-text={`${mark.term}: ${mark.title || mark.body}`}
       style={{ '--mark-fill': colors.fill, '--mark-ink': colors.ink, '--mark-edge': colors.edge } as React.CSSProperties}
     >
-      <button type="button" className="lens-mark-term" aria-expanded={open} onClick={() => setOpen((o) => !o)} title={name}>
+      {/* a span, not a button, so long words wrap with the line as the text around them does */}
+      <span
+        role="button"
+        tabIndex={0}
+        className="lens-mark-term"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setOpen((o) => !o)
+          }
+        }}
+        title={name}
+      >
         {children}
-      </button>
+      </span>
       {open && (
         <span className="lens-card" role="note" ref={place}>
           <span className="lens-card-head">

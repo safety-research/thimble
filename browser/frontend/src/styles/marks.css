@@ -4,6 +4,10 @@
    --mark-edge are the lens's viz family (lib/marks lensColors). */
 .lens-mark { position: relative; }
 .lens-mark-term {
+  /* the words flow with the text around them, wrapping as it does */
+  display: inline;
+  white-space: normal;
+  text-align: inherit;
   font: inherit;
   color: inherit;
   padding: 0 1px;
