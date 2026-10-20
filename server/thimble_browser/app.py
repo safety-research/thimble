@@ -15,7 +15,7 @@ from typing import Any, Callable
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import canvas, chats, corpus, features, home, report, settings, views
+from . import canvas, chats, corpus, features, home, report, settings, tools, views
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -197,6 +197,8 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     def resolve_ref(c: str, ref: str) -> dict[str, Any]:
         f = folder_of(c)
         try:
+            if (fn := tools.resolver(ref)) is not None:
+                return fn(c, ref)
             if ref.startswith(("card:", "cell:")):
                 got = canvas.resolve_card_ref(c, ref)
                 _, cell = canvas.find(c, ref)

@@ -65,6 +65,75 @@
       "file": "terminal/lens-explain/v3.md",
       "after": "<!-- digest -->",
       "until": "<!-- when backoff -->"
+    },
+    "labels": {
+      "file": "terminal/labels/v2.md",
+      "until": "{{RECORDS}}",
+      "replace": [
+        [
+          "Reply with one JSON array and nothing else, and return exactly one entry for each record:",
+          "Reply with one JSON object whose `records` array has exactly one entry for each record:"
+        ]
+      ]
+    },
+    "labels-guide": {
+      "file": "terminal/SKILL.md",
+      "section": "Labels",
+      "heading": "Labels",
+      "replace": [
+        [
+          "`thimble label NAME --in GLOB` defines it",
+          "`apply_label` defines it"
+        ],
+        [
+          "`--regex` matches the text, `--code` is a Python function",
+          "a regex matches the text, code is a Python function"
+        ],
+        [
+          "and `--prompt` has a model judge",
+          "and a prompt has a model judge"
+        ],
+        [
+          "use `thimble label`.**",
+          "use `apply_label`.**"
+        ],
+        [
+          "(`--values`)",
+          "(`values`)"
+        ],
+        [
+          "with `--limit`, read them with `thimble rows GLOB --label NAME=VALUE`,",
+          "with `limit`, read them with `thimble.labels(\"NAME\", negatives=True)` in run_python,"
+        ],
+        [
+          "In a query, `use(\"NAME\")` gives each record's `_ref` and value.",
+          "In run_python and a card's code, `thimble.labels(\"NAME\", negatives=True)` gives each record's `ref` and its value as `effective`."
+        ],
+        [
+          "thimble rows \"tickets/*.jsonl\" -n 25, to see",
+          "reads 25 tickets, to see"
+        ],
+        [
+          "thimble label complaint --in \"tickets/*.jsonl\" --values broken,late,billing,other --limit 25",
+          "apply_label complaint, paths [\"tickets/*.jsonl\"], values broken, late, billing, other, limit 25,"
+        ],
+        [
+          "--prompt \"The main thing",
+          "a prompt \"The main thing"
+        ],
+        [
+          "the label again with the new definition and no --limit, then thimble label complaint --wait",
+          "apply_label again with the new definition and no limit"
+        ],
+        [
+          "[1,210](r4#complaint=broken@n)",
+          "[1,210](concept:<id>/broken)"
+        ],
+        [
+          "a query with cats =",
+          "run_python with cats ="
+        ]
+      ]
     }
   }
 }

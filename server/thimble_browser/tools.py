@@ -20,7 +20,6 @@ from typing import Any, Awaitable, Callable
 import jsonschema
 
 from . import canvas, corpus, prompts, report, views
-from .cards import sandbox
 
 BUILD_ATTEMPTS = 3
 READ_LINES = 2000
@@ -32,6 +31,14 @@ RESULT_CHARS = 30_000
 
 # tools a feature module adds (register): name -> async fn(tools, args) -> Result
 EXTRA: dict[str, Callable[["Tools", dict[str, Any]], Awaitable["Result"]]] = {}
+# refs a feature module resolves, by their prefix (such as `concept:`): prefix -> fn(workspace, ref) -> {ref, kind,
+# excerpt, ...}, KeyError for a ref that names nothing
+REF_RESOLVERS: dict[str, Callable[[str, str], dict[str, Any]]] = {}
+
+
+def resolver(ref: str) -> Callable[[str, str], dict[str, Any]] | None:
+    """The feature's resolver of `ref`, or None for a ref of the core's own (a card, a file)."""
+    return next((fn for prefix, fn in REF_RESOLVERS.items() if ref.startswith(prefix)), None)
 
 
 def register(name: str, fn: Callable[["Tools", dict[str, Any]], Awaitable["Result"]]) -> None:
@@ -44,6 +51,7 @@ class Result:
     text: str
     is_error: bool = False
     cell_id: str | None = None
+    extra: dict[str, Any] | None = None  # more fields for the chat's tool_result record, such as `label_card`
 
 
 def _ok(text: str, **kw: Any) -> Result:
@@ -208,8 +216,8 @@ class Tools:
     # ---- computing
 
     async def t_run_python(self, args: dict[str, Any]) -> Result:
-        res = await sandbox.run_code(str(args.get("code") or ""), self.folder, timeout=120,
-                                     unsandboxed=self.unsandboxed)
+        res = await canvas.run_code(self.ws, str(args.get("code") or ""), self.folder, timeout=120,
+                                    unsandboxed=self.unsandboxed)
         cell = {"id": "run", "outputs": [{**o, "_out": i} for i, o in enumerate(res.get("outputs") or [])]}
         text = canvas.outputs_text(cell, limit=RESULT_CHARS).replace("(cite a value as card:run#<column>/<row>)", "")
         return Result(text, res.get("status") != "ok")
@@ -219,6 +227,9 @@ class Tools:
     async def t_read_ref(self, args: dict[str, Any]) -> Result:
         ref = str(args.get("ref") or "").strip().strip("[]()")
         try:
+            if (fn := resolver(ref)) is not None:
+                got = fn(self.ws, ref)
+                return _ok(f"{ref} ({got['kind']})\n{got.get('excerpt', '')}")
             if ref.startswith(("card:", "cell:")):
                 _, cell = canvas.find(self.ws, ref)
                 got = canvas.resolve_card_ref(self.ws, ref)
@@ -286,7 +297,9 @@ class Tools:
     def _opens(self, ref: str) -> str | None:
         """Why `ref` does not open, or None when it does."""
         try:
-            if ref.startswith(("card:", "cell:")):
+            if (fn := resolver(ref)) is not None:
+                fn(self.ws, ref)
+            elif ref.startswith(("card:", "cell:")):
                 canvas.resolve_card_ref(self.ws, ref)
             else:
                 corpus.resolve(self.folder, ref)
