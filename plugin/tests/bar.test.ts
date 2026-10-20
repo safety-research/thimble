@@ -25,7 +25,7 @@ function textOf(n: Any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  // a Client's words are its props (the squeeze chips: squeeze/chipsclient.js draws its rows and the line under them)
+  // a Client's words are its props (a held pane, such as the squeeze chips: shell/keysclient.js draws its rows)
   if (n.type === 'Client') { const p = n.props?.props ?? {}; return (p.rows ?? []).map((r: { s: string }[]) => r.map(x => x.s).join('')).join('\n') + (p.hint ? `\n${p.hint}` : '') }
   return textOf(n.props?.children) + textOf(n.children)
 }
@@ -91,8 +91,10 @@ test('the bar is there from the start of a session: its keys dim while there is 
   const clock = mock.clock(on)
   await clock.settle()
   const bar = await $.ui.render(HINT)
-  expect(textOf(bar)).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
-  expect(dimText(bar)).toContain('v visualize| · |s squeeze| · |c claims| · |] cite & explain')
+  // at rest the bar names the three verbs alone: ] works, unnamed
+  expect(textOf(bar)).toContain('thimble  v visualize · s squeeze · c claims')
+  expect(textOf(bar)).not.toContain('cite & explain')
+  expect(dimText(bar)).toContain('v visualize| · |s squeeze| · |c claims')
   // nothing to act on: no key of it is a press, and v types
   expect(buttons(bar).length).toBe(0)
   expect(await press($, clock, edit('v'))).toEqual({ text: 'v', cursor: 1 })
@@ -107,9 +109,10 @@ test('while Claude works the keys act on the last finished answer: the bar names
   await answered($, clock)
   await $.turn.start({ turnId: 't2', text: 'and the day before?' } as never)
   const bar = textOf(await $.ui.render(WORKING))
-  expect(bar).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
+  expect(bar).toContain('thimble  v visualize · s squeeze · c claims')
+  expect(bar).not.toContain('cite & explain')
   expect(await press($, clock, edit('s'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(WORKING))).toContain('[ ] shorter / longer · 1–3 pick chip')
+  expect(textOf(await $.ui.render(WORKING))).toContain('[ ] shorter / longer · 1–3 chip')
   expect(textOf(await $.ui.render(REPLY))).toContain('1 Length')
 })
 
@@ -178,6 +181,12 @@ test('v makes its card beside the conversation: a fork, no prompt and no reply i
   const rows = session.appended() as unknown as { door: string; message: { type: string; content: { text?: string }[] } }[]
   const note = rows.filter(r => r.door === 'note' && r.message.content.some(b => String(b.text).includes('A copy of you that worked in the background made the card 02-view@1')))
   expect(note.length).toBe(1)
+  // with what the card shows as the analyst sees it: its title and what it draws as text (its refs when its parts
+  // name any; this one's name none)
+  const told = String(note[0]!.message.content[0]!.text)
+  expect(told).toContain('What it shows, as the analyst sees it:')
+  expect(told).toMatch(/The card 02-view@1 "Card 02-view" \(\/data\/thimble\/objects\/02-view\.json\)\./)
+  expect(told).toContain('What it draws, as text:\nJun 18 6,543')
   // its report in main's queue is dropped
   const r = await $.prompt.submit({ text: '<task-notification><task-id>fork-1</task-id><status>completed</status></task-notification>', origin: { kind: 'task-notification' } } as never)
   expect((r as Any).drop).toBeDefined()
@@ -245,36 +254,36 @@ test('the squeeze chips take the keyboard with a click: tab and shift+tab move b
   await answered($, clock)
   const ui = await $.ui.mount(REPLY)
   await press($, clock, edit('s'))
-  // the chips' row says how to give them the keys; the bar names the prompt's keys
-  expect(textOf(await ui.drawn())).toContain('click the chips to move with tab and ← →')
-  expect(textOf(await $.ui.render(HINT))).toContain('[ ] shorter / longer · 1–3 pick chip')
+  // nothing is written under the chips: the bar alone names the keys
+  expect(textOf(await ui.drawn())).not.toContain('click the chips')
+  expect(textOf(await $.ui.render(HINT))).toContain('[ ] shorter / longer · 1–3 chip')
   // a click: the keys are the chips', and the bar says so
   await ui.pointer({ type: 'up', x: 30, y: 0, button: 'left' })
   await clock.settle()
-  expect(textOf(await ui.drawn())).toContain('tab next chip · ← → change it · enter done · esc back to the prompt')
-  expect(textOf(await $.ui.render(HINT))).toContain('tab next chip')
+  expect(textOf(await ui.drawn())).not.toContain('tab next chip')
+  expect(textOf(await $.ui.render(HINT))).toContain('tab next chip · ←→ facts / meaning · ↵ done')
   // tab moves on a chip, shift+tab back
   await ui.key({ key: 'tab' })
   await clock.settle()
-  expect(textOf(await $.ui.render(HINT))).toContain('newer reader / more expert')
+  expect(textOf(await $.ui.render(HINT))).toContain('newer / more expert')
   await ui.key({ key: 'tab', shift: true })
   await ui.key({ key: 'tab', shift: true })
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('←→ shorter / longer')
-  // ← makes it shorter: Length one level down, where it goes shown at once
+  // ← makes it shorter: Length one level down from as written, where it goes shown at once
   await ui.key({ key: 'left' })
   await clock.settle()
-  expect(textOf(await ui.drawn())).toMatch(/Length ○○●○ medium/)
+  expect(textOf(await ui.drawn())).toMatch(/Length ○●○○○ short/)
   // a letter the chips do not take: the chips close, and it is typed in the prompt
   await ui.key({ key: 'w' })
   for (let i = 0; i < 3; i++) { await clock.advance(50); await clock.settle() }
   expect(textOf(await ui.drawn())).not.toContain('1 Length')
   // a key in the prompt again; s opens them, a click on the chip picked hands them the keys and changes nothing, and
-  // enter closes them (the answer stays at medium)
+  // enter closes them (the answer stays at short)
   await press($, clock, edit('s'))
   await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left' })
   await clock.settle()
-  expect(textOf(await ui.drawn())).toMatch(/Length ○○●○ medium/)
+  expect(textOf(await ui.drawn())).toMatch(/Length ○●○○○ short/)
   await ui.key({ key: 'return' })
   await clock.settle()
   expect(textOf(await ui.drawn())).not.toContain('1 Length')

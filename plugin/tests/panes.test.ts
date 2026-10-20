@@ -108,11 +108,13 @@ test('a card under a reply is drawn as it was left (its state, its part); at res
   const w = world(on)
   const clock = mock.clock(on)
   await savedTurn($, clock)
-  // at rest the bar names the verbs, ] to reach the card and 1 for its detail, never the card's own keys
+  // at rest the bar names the three verbs alone (] reaches the card and 1 opens its detail, unnamed), never the card's
+  // own keys
   await $.ui.render(HINT)
   await clock.settle()
   const rest = textOf(await $.ui.render(HINT))
-  expect(rest).toContain('v visualize · s squeeze · c claims · ] card · 1 open detail')
+  expect(rest).toContain('v visualize · s squeeze · c claims')
+  expect(rest).not.toContain('open detail')
   expect(rest).not.toContain('next day')
   // under the reply: the state and the part the person left it at (here, in the browser)
   await reply($)
@@ -128,7 +130,7 @@ test('a card under a reply is drawn as it was left (its state, its part); at res
   // ] gives the card the focus: the bar names its keys, then the host's
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
-  expect(textOf(await $.ui.render(HINT))).toContain('j next day · 1 open detail · ] next · 0 back')
+  expect(textOf(await $.ui.render(HINT))).toContain('j next day · o open detail · ] next · 0 back')
   // j now is the card's: its program answers, and the state is kept for every surface
   expect(await press($, clock, edit('j'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
@@ -163,7 +165,7 @@ test('a card whose key is a verb\'s letter: at rest the verb takes it, with the 
   // ] gives the card the focus, and v is its flip now, named in the bar
   await press($, clock, edit(']'))
   await clock.settle()
-  expect(textOf(await $.ui.render(HINT))).toContain('v flip · 1 open detail · ] next · 0 back')
+  expect(textOf(await $.ui.render(HINT))).toContain('v flip · o open detail · ] next · 0 back')
   expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(p => p.event?.key === 'v' && p.mode === 'inline')).toBe(true)

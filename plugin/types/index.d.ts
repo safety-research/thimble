@@ -38,14 +38,17 @@ export type MsgRecord = {
   final?: boolean
   /** the squeeze chips' state (squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
   squeeze?: Squeeze
-  /** a catch-up's own record (it is no row of the transcript): what it covers, drawn under `host` */
+  /** a catch-up's own record (it is no row of the transcript): what it covers, drawn in place of them at `host` */
   catchup?: CatchUp
-  /** the catch-up drawn under this answer: the newest written when this was the newest reply */
+  /** the catch-up drawn in this answer's place: the newest written when this was the newest reply */
   caughtUp?: string
+  /** the catch-up this message is one of: while its version shows, this message draws no text of its own */
+  inCatchUp?: string
 }
 
 /** A catch-up: one message the squeeze chips write of Claude's messages since the person's last prompt (`rows`, in
- *  order; `replies` of them ended a turn), drawn under the newest reply (`host`). `question` is the person's prompt,
+ *  order; `replies` of them ended a turn), drawn in their place: at the newest reply (`host`), the others drawing no
+ *  text while its version shows. `question` is the person's prompt,
  *  `prompt` its row. A dismissed one is drawn no more; one that showed a version counts as read. */
 export type CatchUp = { host: string; rows: string[]; replies: number; question: string; prompt: string | null; dismissed?: boolean }
 
@@ -62,7 +65,7 @@ export type Squeeze = {
 
 /** The chips' line of one message as the person works it: the picked chip, a call running (and the frame of its turning glyph), a call that failed, and the new text writing
  *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
-export type SqzUi = { focus: string; running: { since: number } | null; error: string | null; tick: number; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
+export type SqzUi = { focus: string; running: { since: number } | null; error: string | null; tick: number; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null; asked?: number | null }
 
 /** Work a key asked of Claude beside the conversation (shell/aside.ts): a fork of main making v's card, by the message
  *  the key was pressed on. Its line under the message says how far it is (`steps`, `secs`); `cmds` are its commands,
@@ -130,16 +133,20 @@ declare module 'claude-code' {
       cardfocus: (ObjRef & { row: string }) | null
       /** the squeeze chips' line of a message, by its row */
       sqz: StateFamily<SqzUi | null>
-      /** the row whose squeeze chips hold the keyboard (a click on them gave it), or none */
-      chipkeys: string | null
+      /** the pane drawn as a Client that holds the keyboard (a click on it gave it), by its id (shell.tsx heldEl), or none */
+      held: string | null
+      /** the chips the person typed after + this session, newest last */
+      owndims: string[]
       /** v's card landed under a message off screen: the bar says so for a few seconds (shell.tsx cardLanded) */
       cardnote: { row: string; id: string; about: string; at: number } | null
       /** work a key asked of Claude beside the conversation (shell/aside.ts), by the message it was asked on */
       aside: StateFamily<Aside | null>
       /** the message each such agent works for, by the agent's id */
       asideof: Record<string, string>
-      /** what Claude reads with the next prompt of the version the person reads now, by row */
-      sqznote: Record<string, string>
+      /** the rows whose shown version changed since Claude was told of it (squeeze/term.ts tellSettled) */
+      sqznote: Record<string, true>
+      /** the version of each row Claude was last told of (chips.mjs shownKey) */
+      sqztold: Record<string, string>
       /** the bar's counts above the prompt */
       counts: LineCounts | null
       /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */

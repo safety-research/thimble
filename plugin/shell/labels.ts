@@ -13,10 +13,10 @@
 //                person's command (their session, never counted as what Claude read)
 //   checksDone   when the detail closes after checks (or at the next prompt to main, if the close was never heard): the
 //                label counted again and its card saved again (drawn in the old one's place), and Claude hears what the
-//                person checked, with their next prompt
+//                person checked at once, in a row of its own the person never sees (shell.tsx tellMain)
 import type { EngineInterface } from 'claude-code'
 
-import { leanEnv, noteForClaude, showVersion } from './shell'
+import { leanEnv, noteForClaude, showVersion, tellMain } from './shell'
 import { promptText } from '../prompts/prompts'
 import { tracked } from '../telemetry/telemetry'
 import { SETTINGS, progressText, readLabel } from './labelreads.mjs'
@@ -171,7 +171,7 @@ export async function checksDone($: Engine): Promise<void> {
     const agree = m.checks.filter(c => c.was != null && c.was === c.now)
     const changed = m.checks.filter(c => c.was !== c.now)
     const shown = changed.slice(0, 6).map(c => `${c.ref} (the label said ${c.was ?? 'nothing'}, the analyst says ${c.now})`)
-    await noteForClaude($, `The analyst checked ${m.checks.length} record${m.checks.length === 1 ? '' : 's'} of the label ${m.label}: they agree with ${agree.length}` +
+    await tellMain($, `The analyst checked ${m.checks.length} record${m.checks.length === 1 ? '' : 's'} of the label ${m.label}: they agree with ${agree.length}` +
       (changed.length ? ` and changed ${changed.length}: ${shown.join('; ')}${changed.length > 6 ? '; …' : ''}` : '') +
       `. Their checks count in place of the label's values${s?.query ? `; its counts are now query ${s.query}` : ''}.`)
   }

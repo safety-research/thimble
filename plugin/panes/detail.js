@@ -10,7 +10,7 @@
 //   state: {region: the selected part, bar: null | 'details' | 'examples', ex: the example shown, prog: the program,
 //          pages: 'all' | 'one' (a card with pages: every page at once, or one at a time)}
 //   keys: ↑↓ part · ↵ details · e examples · [ ] flip · + − zoom · f filter · , . turn · a all at once / one at a time ·
-//         p program · h versions · 0 clear · esc back
+//         p program · h versions · esc back (0 too, unnamed)
 //
 // Pages: a card with a page knob (kit.js) is shown with every page at once, one after another, each under its own
 // heading, when the person chose so (a) or PAGES_DEFAULT says (carddetail.js); the host draws it so (shell/detail.tsx).
@@ -173,7 +173,8 @@ export function program(k, data) {
     k.on(']', () => ({ bar: 'examples', ex: 0 }))
     k.on('[', () => ({ bar: 'examples', ex: 0 }))
   }
-  if (bar || prog) k.on('0', () => (prog ? { prog: false } : { bar: barAfter(bar, 'back') }), 'clear')
+  // esc clears them (the panel catches it); 0 does too, unnamed, for a moment when esc is Claude Code's (a turn running)
+  if (bar || prog) k.on('0', () => (prog ? { prog: false } : { bar: barAfter(bar, 'back') }))
   if (zoom) {
     const zoomed = data.cardState && Object.keys(data.cardState).length
     // + zooms into the selected part when the zoom has a level for it (a station `rerun-loop` for the part

@@ -1,9 +1,10 @@
 // Catch-up (shell/shell.tsx, squeeze/term.ts): a message arrives as Claude wrote it, and the bar at rest reads
 // `s squeeze`. When two or more of Claude's replies came since the person's last prompt (the answer to it, and each
-// answer to a hand-back or a notification), s is lit in squeeze's amber, bold, as `s catch up on N replies`; s then
-// writes one catch-up of every message since that prompt, drawn under the newest reply beside a rule, while the
-// replies stay as written. The catch-up is a message for the grammar: the chips change it, its citations open, v makes
-// a card for it, and the next prompt carries it for Claude. `claude plugin test plugin`.
+// answer to a hand-back or a notification), s is lit in squeeze's amber, bold, as `s catch up`; s then writes one
+// catch-up of every message since that prompt in their place: the newest reply draws it beside a rule, the others no
+// text of their own, and 0 (or the chips' scope chip) brings the replies back. The catch-up is a message for the
+// grammar: the chips change it, its citations open, v makes a card for it, and Claude reads it in a row of its own.
+// `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { press, promptStub } from './stubs'
@@ -80,7 +81,7 @@ function textOf(n: Any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  // a Client's words are its props (the squeeze chips: squeeze/chipsclient.js draws its rows and the line under them)
+  // a Client's words are its props (a held pane, such as the squeeze chips: shell/keysclient.js draws its rows)
   if (n.type === 'Client') { const p = n.props?.props ?? {}; return (p.rows ?? []).map((r: { s: string }[]) => r.map(x => x.s).join('')).join('\n') + (p.hint ? `\n${p.hint}` : '') }
   return (n.type === 'Markdown' ? String(n.props?.text ?? '') : '') + textOf(n.props?.children) + textOf(n.children)
 }
@@ -134,41 +135,45 @@ test("the bar at rest reads s squeeze; two or more replies since the person's la
   await turnOf($, clock, { turn: 't1', prompt: { uuid: P1, text: QUESTION }, says: [{ uuid: A0, text: NOTE }, { uuid: A1, text: ANSWER }] })
   await clock.advance(1000)
   expect(w.calls.length).toBe(0)
-  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims')
   // a hand-back answered: two replies since the prompt (the note of progress ended no turn)
   await turnOf($, clock, { turn: 't2', prompt: { uuid: H2, text: HANDBACK, kind: 'peer' }, says: [{ uuid: A2, text: FOLLOW }] })
   let bar = await hintOf($)
-  // (the newest reply has no marks: ] is named dim)
-  expect(bar).toContain('thimble  v visualize · s catch up on 2 replies · c claims · ] cite & explain · { } reply 2 of 2')
+  expect(bar).toContain('thimble  v visualize · s catch up · c claims')
   expect(bar).not.toContain('lines')
-  const lit = texts(await $.ui.render(HINT)).filter(t => t.text === 's' || t.text.includes('catch up on'))
+  const lit = texts(await $.ui.render(HINT)).filter(t => t.text === 's' || t.text.includes('catch up'))
   expect(lit.length).toBe(2)
   expect(lit.every(t => t.bold && t.color === '#e0a43a')).toBe(true)
   // a task's notification answered makes three; a turn that ended in an error answered nothing
   await turnOf($, clock, { turn: 't3', prompt: { uuid: N3, text: NOTIFY, kind: 'task-notification' }, says: [{ uuid: A3, text: 'Both readers are done.' }] })
   await turnOf($, clock, { turn: 't5', says: [{ uuid: E5, text: 'API Error: 500' }], reason: 'error' })
-  expect(await hintOf($)).toContain('s catch up on 3 replies')
-  // { picks an earlier reply: s squeezes that one; } gives the keys back to the newest, and s is lit again
+  expect(await hintOf($)).toContain('s catch up')
+  // { picks an earlier reply: s squeezes that one, and the bar names it; } gives the keys back to the newest, and s is
+  // lit again
   await press($, clock, edit('{'))
   bar = await hintOf($)
   expect(bar).toContain('s squeeze')
   expect(bar).toContain('{ } reply 2 of 3')
   await press($, clock, edit('}'))
-  expect(await hintOf($)).toContain('s catch up on 3 replies')
+  expect(await hintOf($)).toContain('s catch up')
+  expect(await hintOf($)).not.toContain('{ }')
   // the person's next prompt starts over: its answer alone is no pile-up
   await turnOf($, clock, { turn: 't6', prompt: { uuid: P6, text: 'And the bots?' }, says: [{ uuid: A6, text: 'No bots among them.' }] })
   expect(await hintOf($)).toContain('v visualize · s squeeze')
 })
 
-test("s writes one catch-up of everything since the person's last prompt: one call, drawn under the newest reply beside a rule, the replies as written, its citations open; the next prompt carries it for Claude", async ($, on) => {
+test("s writes one catch-up of everything since the person's last prompt: one call, drawn in their place beside a rule, its citations open; Claude reads it in a row of its own", async ($, on) => {
   const w = world(on, [`<text>\n${DIGEST}\n</text>`])
+  const session = mock.session(on)
   const clock = mock.clock(on)
   await piledUp($, clock)
   expect(await press($, clock, edit('s'))).toEqual({ text: '', cursor: 0 })
-  // on its way: the catch-up's line under the newest reply, and the chips open on it
+  // on its way: a line on the newest reply, which stays as written under it until the catch-up lands, and the chips
+  // open on it with the scope chip at all the replies
   let drawn = textOf(await $.ui.render(view(A2, FOLLOW)))
-  expect(drawn).toContain('thimble  catch-up of 2 replies since your last message')
-  expect(drawn).toContain('writing it from the messages above')
+  expect(drawn).toContain('writing one message of these 2 replies…')
+  expect(drawn).toContain('The counter is back')
+  expect(drawn).toContain('4 Messages ○● all 2')
   expect(await hintOf($)).toContain('s ● writing the catch-up of 2 replies…')
   await written(clock)
   expect(w.calls.length).toBe(1)
@@ -190,7 +195,9 @@ test("s writes one catch-up of everything since the person's last prompt: one ca
   for (const r of [A0, A1, A2]) expect(recordOf(w, row(r)).shown).toBe(null)
   const tree = await $.ui.render(view(A2, FOLLOW))
   drawn = textOf(tree)
-  expect(drawn).toContain('thimble  catch-up of 2 replies since your last message')
+  expect(drawn).toContain('thimble  catch-up of 2 replies, in their place')
+  // in place of the replies: the newest draws the catch-up and not its own words, the others draw no text
+  expect(drawn).not.toContain('The counter is back')
   // the rule runs down every row of it (the head, each line of its text, the blank rows between), and no further
   const box = find(tree, x => x.props?.key === `cu-${cu.row}`)
   const rows = [box.props?.children, box.children].flat().filter(Boolean)
@@ -198,35 +205,39 @@ test("s writes one catch-up of everything since the person's last prompt: one ca
   expect(rows.every((r: Any) => textOf(r).startsWith('▎ '))).toBe(true)
   expect(drawn.split('▎').length - 1).toBe(rows.length)
   expect(drawn.replace(/\s+/g, ' ')).toContain('The empty label had 20 edits on day 1')
-  expect(drawn).toContain('Length ○●○○ short')
-  expect(textOf(await $.ui.render(view(A1, ANSWER)))).not.toContain('catch-up')
+  expect(drawn).toContain('Length ○●○○○ short')
+  expect(textOf(await $.ui.render(view(A1, ANSWER)))).not.toContain('Day 1: the empty label')
+  expect(textOf(await $.ui.render(view(A0, NOTE)))).not.toContain('line counter')
   let bar = await hintOf($)
   expect(bar).toContain('s ● catch-up of 2 replies')
-  expect(bar).toContain('[ ] shorter / longer · 1–3 pick chip · 0 dismiss · s done')
+  expect(bar).toContain('[ ] shorter / longer · 1–4 chip · 0 revert · s done')
   expect(bar).not.toContain('lines')
-  // s: done; the keys act on the catch-up, and the bar says so
+  // s: done; the keys act on the catch-up, the bar at rest, and Claude reads what the person reads now, in a row of its
+  // own: the catch-up whole, and the messages it stands in for
   await press($, clock, edit('s'))
+  await clock.settle()
   bar = await hintOf($)
-  expect(bar).toContain('v visualize · s squeeze · c claims · ] cite & explain')
-  expect(bar).toContain('{ } catch-up of 2 replies')
-  expect(bar).not.toContain('catch up on')
+  expect(bar).toContain('v visualize · s squeeze · c claims')
+  expect(bar).not.toContain('catch up')
+  const told = (session.appended() as unknown as { message: { content: { text?: string }[] } }[]).map(r => String(r.message.content[0]?.text ?? '')).filter(t => t.startsWith('The analyst caught up'))
+  expect(told).toEqual([`The analyst caught up on your 2 replies since their last prompt. In place of those messages ("I will start the line counter in the…"; "Day 1: the empty label had 20 edits…"; "The counter is back: labels.jsonl has 3,104 lines.…"), they now read one message that the squeeze chips wrote of them (Length: short):\n\n${DIGEST}\n\n(What you wrote is unchanged, and the analyst can go back to it.)`])
   // its citation opens in the tray, as any reply's
   await press($, clock, edit(']'))
   expect(await hintOf($)).toContain('20 edits')
   expect(JSON.parse(w.files[`${ROOT}/thimble/panes/s-1/tray.json`]!).state.stack[0].row).toBe(cu.row)
   await press($, clock, edit('0'))
-  // { goes to the newest reply, } back to the catch-up
+  // { goes to the newest reply, } back to the catch-up (at rest, named by nothing)
   await press($, clock, edit('{'))
   expect(await hintOf($)).toContain('{ } reply 2 of 2')
   await press($, clock, edit('}'))
-  expect(await hintOf($)).toContain('{ } catch-up of 2 replies')
-  // the next prompt carries what the person read, as a squeeze's note does
+  expect(await hintOf($)).not.toContain('{ }')
+  // the next prompt carries nothing more: Claude was told once
   await $.prompt.submit({ text: 'And the bots?', origin: { kind: 'composer' } } as never)
-  const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('The analyst caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\n' + DIGEST)
+  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('caught up')
+  expect((session.appended() as unknown as { message: { content: { text?: string }[] } }[]).filter(r => String(r.message.content[0]?.text ?? '').startsWith('The analyst caught up')).length).toBe(1)
 })
 
-test('the chips work on a catch-up: ] makes it longer with one call, no step lands on its original, [ comes back with none; 0 dismisses it, and two more replies offer a new one', async ($, on) => {
+test('the chips work on a catch-up: ] makes it longer with one call, stepping past its original, [ comes back with none; 0 reverts to the replies, and two more replies offer a new one', async ($, on) => {
   const NEW = 'All four replies: [20 edits](q4#day=1@n) on day 1; 3,104 lines, and its 39 days do not start at the first write; both readers done.'
   const w = world(on, [`<text>${DIGEST}</text>`, `<text>${LONGER}</text>`, `<text>${NEW}</text>`])
   const clock = mock.clock(on)
@@ -234,36 +245,40 @@ test('the chips work on a catch-up: ] makes it longer with one call, no step lan
   await press($, clock, edit('s'))
   await written(clock)
   const cuRow = recordOf(w, row(A2)).caughtUp
-  // ] : Length medium, one call
+  // ] : as written would be its original (the replies themselves), so Length goes on to longer, one call
   await press($, clock, edit(']'))
   await written(clock)
   expect(w.calls.length).toBe(2)
-  expect(w.calls[1].prompt).toContain('- Length: medium')
+  expect(w.calls[1].prompt).toContain('- Length: longer')
   expect(recordOf(w, cuRow).shown).toBe(LONGER)
   let drawn = textOf(await $.ui.render(view(A2, FOLLOW)))
-  expect(drawn).toContain('Length ○○●○ medium')
+  expect(drawn).toContain('Length ○○○●○ longer')
   expect(drawn.replace(/\s+/g, ' ')).toContain('rising each day to 49 edits on day 30')
-  // ] again would be its original, the replies above: nothing happens
-  await press($, clock, edit(']'))
-  await written(clock)
-  expect(w.calls.length).toBe(2)
-  // [ : short again, kept, no call
+  // [ : short again, past the original, kept, no call
   await press($, clock, edit('['))
   await written(clock)
   expect(w.calls.length).toBe(2)
   expect(recordOf(w, cuRow).shown).toBe(DIGEST)
-  // 0 dismisses it: drawn no more, the keys back on the newest reply, and the replies count as read
+  // 0 reverts: the catch-up drawn no more, the replies as written in their places again, the keys back on the newest
+  // reply, and the replies count as read
   await press($, clock, edit('0'))
   expect(recordOf(w, cuRow).catchup.dismissed).toBe(true)
   drawn = textOf(await $.ui.render(view(A2, FOLLOW)))
   expect(drawn).not.toContain('catch-up')
+  // (each as Claude Code draws it; the chips stay open on the newest reply, the scope chip at this reply)
+  expect(drawn).toContain('the reply')
+  expect(drawn).toContain('4 Messages ●○ this reply')
+  expect(textOf(await $.ui.render(view(A1, ANSWER)))).toContain('Day 1: the empty label')
+  expect(await hintOf($)).toContain('[ ] this reply / all · 1–4 chip · s done')
+  // s: done, and the bar at rest
+  await press($, clock, edit('s'))
   expect(await hintOf($)).toContain('v visualize · s squeeze')
   // one more reply is no pile-up; two are
   await turnOf($, clock, { turn: 't3', prompt: { uuid: N3, text: NOTIFY, kind: 'task-notification' }, says: [{ uuid: A3, text: 'Both readers are done.' }] })
   expect(await hintOf($)).toContain('s squeeze')
   await turnOf($, clock, { turn: 't4', prompt: { uuid: H4, text: HANDBACK, kind: 'peer' }, says: [{ uuid: A4, text: 'The last reader agrees.' }] })
-  expect(await hintOf($)).toContain('s catch up on 4 replies')
-  // the new catch-up covers every message since the prompt, under the newest reply
+  expect(await hintOf($)).toContain('s catch up')
+  // the new catch-up covers every message since the prompt, in their place
   await press($, clock, edit('s'))
   await written(clock)
   expect(w.calls.length).toBe(3)
@@ -297,8 +312,11 @@ test('v on a catch-up: it asks for a card of it, Claude reads the catch-up with 
   expect(w.submitted.map(x => x.text)).toEqual(['visualize another view of this answer'])
   const notes = (session.appended() as unknown as { door: string; message: { content: { text?: string }[] } }[]).filter(r => r.door === 'note' && r.message.content.some(b => String(b.text).includes(ask)))
   expect(notes.length).toBe(1)
-  // with what the person read: the catch-up, as their own prompt would carry it
-  expect(String(notes[0]!.message.content[0]!.text)).toContain('The analyst caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short)')
+  // what the person read, the catch-up, reached Claude before, in a row of its own
+  const all = (session.appended() as unknown as { message: { content: { text?: string }[] } }[]).map(r => String(r.message.content[0]?.text ?? ''))
+  const caught = all.findIndex(t => t.startsWith('The analyst caught up on your 2 replies since their last prompt. In place of those messages'))
+  expect(caught).toBeGreaterThanOrEqual(0)
+  expect(caught).toBeLessThan(all.findIndex(t => t.includes(ask)))
   // Claude's turn for it saves a card: drawn under the catch-up, not under the turn's own words
   await $.turn.start({ turnId: 't3', text: 'visualize another view of this answer' } as never)
   await $.tool.call({ tool: 'Bash', command: 'thimble save empty-label-days --from card.json', tool_use_id: 'tu1' } as never)
@@ -327,5 +345,5 @@ test('s then a letter at once is a word: the catch-up it began is undone with no
   expect(recordOf(w, cuRow).catchup.dismissed).toBe(true)
   expect(recordOf(w, row(A2)).caughtUp).toBe(undefined)
   expect(textOf(await $.ui.render(view(A2, FOLLOW)))).not.toContain('catch-up')
-  expect(await hintOf($)).toContain('s catch up on 2 replies')
+  expect(await hintOf($)).toContain('s catch up')
 })

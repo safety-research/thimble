@@ -44,7 +44,7 @@ import { paintRegions, regionOfKey } from './cells'
 import { askMerge, beganWord, examplesView, PAGES_DEFAULT, partsOf, versionsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { citeLabels, currentTheme, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { citeLabels, currentTheme, escTop, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadCount, threadFor, threadOf } from './thread'
 import { cardEvent, cardKey, noteSeen, ownState, pressTaken, readCardState, readSeen, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
@@ -1185,6 +1185,9 @@ export function registerDetail(on: Parameters<Register>[0]): void {
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const person = (e.origin as { kind?: string }).kind === 'person'
     if (person) keysMoved(await $.clock.now())
+    // esc at the prompt with a surface opened over the panel since (the tray, the chips): that surface closes, and the
+    // panel stays (shell.tsx escTop)
+    if (person && isOpen && !paneFocused && !draft && (await escTop($))) return { value: undefined } as Any
     // (the input bar holding the keys with nothing typed in it: esc goes on, as if the card or pane had them)
     if (person && isOpen && isAsk(ringAt) && !draft) { askGen++; ringAt = null; landed = null; moveGen++ }
     if (person && isOpen && draft) {

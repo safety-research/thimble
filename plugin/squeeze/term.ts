@@ -21,9 +21,9 @@ import { modelWhy } from '../shell/why.js'
 import { tracked } from '../telemetry/telemetry'
 import { FEATURES } from '../prompts/registry.mjs'
 import { lookPending } from '../observer/observer'
-import { answerRow, closeTray, questionBefore, recordNow, saveRecord } from '../shell/shell'
+import { answerRow, closeTray, questionBefore, recordNow, saveRecord, tellMain } from '../shell/shell'
 import { sessionKey } from '../hooks/conversation'
-import { ARRIVE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, termsOf, unplacedMoves } from './chips.mjs'
+import { ARRIVE, SCALE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, unplacedMoves } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,12 +35,14 @@ const PICK = { plugin: 'thimble', key: 'pick' } as const
 const TRAY = { plugin: 'thimble', key: 'tray' } as const
 
 const SQZ = { plugin: 'thimble', key: 'sqz' } as const
+// the rows whose shown version changed since Claude was told (tellSettled), and the version it was told of, by row
 const SQZNOTE = { plugin: 'thimble', key: 'sqznote' } as const
+const SQZTOLD = { plugin: 'thimble', key: 'sqztold' } as const
 const remark = (rec: MsgRecord) => remarkAny(rec) as MsgRecord
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }
 const TICK = 50
-// the longest a step on Report ↔ Interpret or Familiarity waits for the observer's look to say where the original stands
+// the longest a step on Interpretation or Background waits for the observer's look to say where the original stands
 const LEVELS_WAIT_MS = 30000
 const BLANK: SqzUi = { focus: 'length', running: null, error: null, tick: 0 }
 
@@ -77,14 +79,15 @@ async function ensure($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the bar
 
-/** What the bar shows for s: lit with `6 of 33 lines` while the person has the message squeezed; else what the
- *  observer gave (dim when nothing), so a message as Claude wrote it reads `s squeeze`, however long. A catch-up is
- *  squeezed by what it is, and says no line counts. */
+/** What the bar shows for s: lit with the levels set (`short · interpret`) while the person has the message squeezed;
+ *  else what the observer gave (dim when nothing), so a message as Claude wrote it reads `s squeeze`, however long. No
+ *  line counts: the levels say what the person chose. A catch-up is squeezed by what it is. */
 export function sLit(rec: MsgRecord, _ui: SqzUi | null): { lit: boolean; note: string } | null {
   if (isCatchUp(rec)) return null
-  if (typeof rec.shown === 'string') return { lit: true, note: noteOf(rec, view.cols) }
+  if (typeof rec.shown === 'string') return { lit: true, note: setWords(rec) || 'squeezed' }
+  // (a record from before lit s with a count of lines: no line counts are said)
   const own = rec.verbs?.s
-  return own?.lit && own.note ? { lit: true, note: String(own.note) } : null
+  return own?.lit && own.note && !/\blines?\b/.test(String(own.note)) ? { lit: true, note: String(own.note) } : null
 }
 
 /** Whether the message is drawn dim with a turning glyph: a rewrite of it is running. */
@@ -104,12 +107,21 @@ export function failedWords(why: string, key?: string | null): string {
   return `The rewrite failed: ${why}. ${key ? `Press ${key} to try again` : 'Pick the level again to try again'}`
 }
 
+/** Where the chips of a row go, recorded at once (the chips and the browser read it), before the rewrite is asked:
+ *  a key pressed right after reads the levels this one set. */
+export async function wantLevels($: Engine, row: string, at: At): Promise<void> {
+  await setUi($, row, { want: at, error: null })
+  await markRecord($, row, { want: at, error: null })
+}
+
 /** Set the chips of a row to `at` and show that version: from the record when it was written before, else one call.
  *  Changes made while a call runs wait, and only the latest of them runs next. `key`: the key that asked for it. */
 export async function setLevels($: Engine, row: string, at: At, key: string | null = null): Promise<void> {
-  // the chips show where they go at once (here, and in the browser from the record); the text follows
+  // the chips show where they go at once (here, and in the browser from the record), and the message says it is being
+  // rewritten (asked: since when, from the first key of a run of them); the text follows
   await setUi($, row, { want: at, error: null })
   await markRecord($, row, { want: at, error: null })
+  if (!(await uiOf($, row)).asked) await setUi($, row, { asked: await $.clock.now() })
   const job = inflight.get(row)
   if (job) {
     job.want = { at, key }
@@ -133,13 +145,13 @@ export async function setLevels($: Engine, row: string, at: At, key: string | nu
     }
   } finally {
     inflight.delete(row)
-    await setUi($, row, { running: null, want: null })
+    await setUi($, row, { running: null, want: null, asked: null })
     await markRecord($, row, { want: null, error: (await uiOf($, row)).error ?? null })
   }
 }
 
 /**
- * A step on Report ↔ Interpret or Familiarity of the latest answer, made before the observer said where the original
+ * A step on Interpretation or Background of the latest answer, made before the observer said where the original
  * stands on it, while its look still runs: it waits for that look (at most LEVELS_WAIT_MS) and then counts from the
  * level the look gave, so a change never starts from the chip's middle when the look is about to say otherwise. A
  * change of Length alone, or of a chip already placed, goes at once. Returns the levels to write.
@@ -179,7 +191,8 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   const rec = await recordNow($, row)
   if (!rec) return
   const s = ((rec as Any).squeeze ?? {}) as Any
-  const probe = { ...rec, squeeze: { ...s, at: want.at } } as MsgRecord
+  // (want.at is on the chips' scales now)
+  const probe = { ...rec, squeeze: { ...s, at: want.at, scale: SCALE } } as MsgRecord
   const chips = chipsOf(probe)
   const hit = isOriginal(chips) ? restore(probe, remark) : fromVersions(rec, want.at, remark)
   if (hit) { await settled($, row, hit as MsgRecord); return }
@@ -248,15 +261,12 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
 }
 
 /** A version shown: the record kept, the new text writing itself in from the top, the tray off this row's moved marks,
- *  and Claude told which version the person reads. */
+ *  and the row marked for Claude to hear of once the person settles on a version (tellSettled). */
 async function settled($: Engine, row: string, rec: MsgRecord): Promise<void> {
   const before = await recordNow($, row)
   await saveRecord($, rec)
   await closeTrayOn($, row)
-  const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
-  // a catch-up dismissed while it was being written was never read: Claude hears nothing of it
-  const note = rec.catchup?.dismissed ? '' : noteFor(rec)
-  await $.state.set(SQZNOTE, { ...notes, [row]: note })
+  await markChanged($, row)
   const was = before ? (typeof before.shown === 'string' ? before.shown : before.text) : ''
   const now = typeof rec.shown === 'string' ? rec.shown : rec.text
   if (now !== was) await writeIn($, row, now.length)
@@ -306,12 +316,36 @@ function tick($: Engine, row: string): { stop: () => void } {
   return { stop: () => { on = false } }
 }
 
-/** The notes for Claude of every version the person changed to since its last reply: given with the next prompt. */
-export async function takeNotes($: Engine): Promise<string[]> {
-  const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
-  const out = Object.values(notes).filter(Boolean)
-  if (out.length) await $.state.set(SQZNOTE, {})
-  return out
+/** A row whose shown version changed: Claude hears of it once the person settles (tellSettled). */
+export async function markChanged($: Engine, row: string): Promise<void> {
+  const rows = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, true>)
+  if (!rows[row]) await $.state.set(SQZNOTE, { ...rows, [row]: true })
+}
+
+/**
+ * The versions the person settled on, told to Claude: for each row whose shown version changed since Claude was last
+ * told (or only `row`), one row of main's transcript that Claude reads and the person never sees, holding the version
+ * they read whole (chips.mjs settledNote). Called when the chips close and before the person's next prompt, so a
+ * version is told once, not at each key. A version back at the original is told only after another was.
+ */
+export async function tellSettled($: Engine, row: string | null = null): Promise<void> {
+  const rows = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, true>)
+  const which = row ? (rows[row] ? [row] : []) : Object.keys(rows)
+  if (!which.length) return
+  const told = { ...(((await $.state.get(SQZTOLD)).value ?? {}) as Record<string, string>) }
+  const left = { ...rows }
+  for (const r of which) {
+    delete left[r]
+    // a rewrite still on its way: told when it lands and the person settles again
+    if (inflight.has(r)) { left[r] = true; continue }
+    const rec = await recordNow($, r)
+    if (!rec) continue
+    const text = settledNote(rec, told[r] ?? 'orig')
+    told[r] = shownKey(rec)
+    if (text) await tellMain($, text)
+  }
+  await $.state.set(SQZNOTE, left)
+  await $.state.set(SQZTOLD, told)
 }
 
 /** One line per call in $THIMBLE_HOME/lean/squeeze.jsonl: its time, its tokens, what it wrote. */
@@ -329,10 +363,11 @@ async function log($: Engine, row: Record<string, unknown>): Promise<void> {
 // ------------------------------------------------------------------------------------------------ the catch-up
 
 /**
- * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt, drawn under the newest reply
- * (`host`): a record of its own whose original is those messages as written, one after another, first written at
- * Length short (one call, as any chip change is). The host names it, so its drawing and a resumed session find it.
- * Returns its row; the first version is on its way (the chips show it is being written).
+ * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt, drawn in their place: a record
+ * of its own whose original is those messages as written, one after another, first written at Length short (one call,
+ * as any chip change is). The newest reply (`host`) names it and draws it; each other message names it as the one it
+ * is in, and draws no text of its own while its version shows. A resumed session finds it the same way. Returns its
+ * row; the first version is on its way (the host says it is being written).
  */
 export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null }): Promise<string | null> {
   const texts: string[] = []
@@ -347,6 +382,11 @@ export async function catchUp($: Engine, o: { host: string; rows: string[]; repl
   const made = newRecord({ row, session: await sessionKey($), text: catchUpText(texts), at: new Date(now).toISOString() }) as MsgRecord
   await saveRecord($, { ...made, catchup: { host: o.host, rows: [...o.rows], replies: o.replies, question: o.question, prompt: o.prompt }, squeeze: { at: {} } } as MsgRecord)
   await saveRecord($, { ...host, caughtUp: row } as MsgRecord)
+  for (const r of o.rows) {
+    if (r === o.host) continue
+    const rec = await recordNow($, r)
+    if (rec) await saveRecord($, { ...rec, inCatchUp: row } as MsgRecord)
+  }
   void setLevels($, row, { length: ARRIVE }).catch(() => undefined)
   return row
 }
@@ -368,13 +408,13 @@ export async function dismissCatchUp($: Engine, row: string, o: { undo?: boolean
       await saveRecord($, rest as MsgRecord)
     }
   }
-  if (!read || o.quiet) {
-    const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
-    if (row in notes) {
-      const { [row]: _drop, ...keep } = notes
-      await $.state.set(SQZNOTE, keep)
-    }
-  }
+  // one Claude was told of: it hears the person went back to the replies; one never told: nothing (unless quiet,
+  // as when a newer catch-up of the same replies takes its place)
+  if (o.quiet) {
+    const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, true>)
+    const { [row]: _drop, ...keep } = notes
+    await $.state.set(SQZNOTE, keep)
+  } else await markChanged($, row)
 }
 
 /** For tests: the module's memory, cleared. */

@@ -2,12 +2,15 @@
 // (panes/chips.js) and the tests import it.
 //
 // The chips are the same for every message; only where the original stands on each differs:
-//   Length              one line · short · medium · full. The original is always at full.
-//   Report ↔ Interpret  report · balanced · interpret: the facts and counts alone, or the story of what they mean
-//                       with its judgment calls. The two ends share almost no sentences.
-//   Familiarity         new to the field · beginner · working · fluent · expert: how much of the field the text
-//                       assumes. New explains each term where it stands; expert reads like a commit message.
-// The observer says where the original stands on Report ↔ Interpret and Familiarity (record.verbs.s.at); until it
+//   Length              one line · short · as written · longer · much longer. The original is always in the middle,
+//                       "as written": shorter versions leave parts out, longer ones explain the same content more.
+//   Interpretation      facts only · some meaning · full meaning: how much the text says about what the facts mean,
+//                       from the facts alone to Claude's reading of them.
+//   Background          new · learning · working · expert: the reader's background, how much of the field the text
+//                       explains and how much it assumes.
+//   a chip the person typed, after +: their own words ("for my manager", "more skeptical", "as a timeline",
+//                       "engineer → manager"), as written · a little · more · fully. The original stands at as written.
+// The observer says where the original stands on Interpretation and Background (record.verbs.s.at); until it
 // has, each stands in its middle. A message arrives as Claude wrote it; the chips rewrite it on demand. A step on one
 // of them made while that look runs waits for it, and then counts from the level it gives (rebaseAt; term.ts). Every
 // chip counts in every rewrite: one $.model.complete call writes the message at all the chips' levels at once, and each
@@ -22,6 +25,10 @@
 // The record keeps it (CONTRACT 1, beside `shown`):
 //   squeeze: {
 //     at:       {chipId: level}       the levels set now; a chip not named stands where the original does
+//     own:      [{id, words}]         the chips the person typed for this message (at most three)
+//     scale:    3                     the chips' scales now: Length's original in its middle (records before scale 2
+//                                     had one line · short · medium · full), Background's four levels (records before
+//                                     scale 3 had five): levelsAt reads them
 //     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
 //     orig:     {marks}               the original's marks, so a sparkline's values outlive a version that dropped it
 //     auto:     true                  it arrived squeezed (a long message, in sessions before arrival squeezes ended)
@@ -32,24 +39,48 @@
 
 /** The chips every message has, in the order drawn. `level0` is where the original stands until the observer says. */
 export const CHIPS = Object.freeze([
-  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['one line', 'short', 'medium', 'full']), level0: 3, kind: 'fixed' }),
-  Object.freeze({ id: 'interpret', name: 'Report ↔ Interpret', levels: Object.freeze(['report', 'balanced', 'interpret']), level0: 1, kind: 'fixed' }),
-  Object.freeze({ id: 'familiarity', name: 'Familiarity', levels: Object.freeze(['new to the field', 'beginner', 'working', 'fluent', 'expert']), level0: 2, kind: 'fixed' }),
+  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['one line', 'short', 'as written', 'longer', 'much longer']), level0: 2, kind: 'fixed' }),
+  // (the ids are the records' since before the chips were renamed; `key` is the name the observer gives each now)
+  Object.freeze({ id: 'interpret', key: 'interpretation', name: 'Interpretation', levels: Object.freeze(['facts only', 'some meaning', 'full meaning']), level0: 1, kind: 'fixed' }),
+  Object.freeze({ id: 'familiarity', key: 'background', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed' }),
 ])
 export const LENGTH = CHIPS[0]
 /** The level of Length a catch-up arrives at: short. */
 export const ARRIVE = 1
 // the names an observer or an older record may give a level, as the levels are named now
-const ALIAS = { interpret: { both: 1, story: 2, facts: 0 }, familiarity: { new: 0, newcomer: 0, novice: 0, familiar: 2, intermediate: 2, 'new to testing': 0 } }
+const ALIAS = {
+  interpret: { report: 0, balanced: 1, interpret: 2, both: 1, story: 2, facts: 0, 'facts alone': 0, reading: 2 },
+  familiarity: { 'new to the field': 0, newcomer: 0, novice: 0, 'new to testing': 0, beginner: 1, familiar: 2, intermediate: 2, fluent: 3 },
+}
+/** The chips' scales now (the record's `scale`): Length's original in its middle, and Background's four levels. */
+export const SCALE = 3
+
+/** The levels of a chip the person typed: from the original (0) to all the way their words ask. */
+export const OWN_LEVELS = Object.freeze(['as written', 'a little', 'more', 'fully'])
+const MAX_OWN = 3
 
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 const sq = rec => (rec && rec.squeeze && typeof rec.squeeze === 'object' ? rec.squeeze : {})
 
-/** The dots of a chip at level v: one ● at its place among ○, as `○●○○` for Length short. */
+/** The dots of a chip at level v: one ● at its place among ○, as `○●○○○` for Length short. */
 export function glyph(chip, v) {
   const n = Math.max(1, chip.levels.length)
   const lv = Math.max(0, Math.min(n - 1, v))
   return Array.from({ length: n }, (_, i) => (i === lv ? '●' : '○')).join('')
+}
+
+/** A chip's level in words: its name, and `as written` where the original stands (Length's middle is named so). A
+ *  chip whose original level nobody has said yet reads `as written` at its start. */
+export function levelWords(c) {
+  const name = c.levels[c.level] || ''
+  if (c.level !== c.level0) return name
+  if (c.id === LENGTH.id || c.kind === 'own' || !c.known) return 'as written'
+  return `${name}, as written`
+}
+
+/** The levels set away from the original, in words (`short · interpret`), or '' at the original. */
+export function setWords(rec) {
+  return chipsOf(rec).filter(c => c.level !== c.level0).map(c => c.levels[c.level]).join(' · ')
 }
 
 /** A level's index from its name (or an alias, or an index), or null. */
@@ -67,19 +98,72 @@ function levelOf(chip, v) {
 function observed(rec, chip) {
   const at = rec?.verbs?.s?.at
   if (!at || typeof at !== 'object' || chip.id === LENGTH.id) return null
-  return levelOf(chip, at[chip.id])
+  return levelOf(chip, at[chip.key] ?? at[chip.id])
 }
 
-/** Every chip of the message, in the order drawn: the fixed three. Each with `level0`, where the original stands
- *  (`known` once the observer said so), and `level`, where it is now. */
+/** `at` as the chips' scales read it now. A record written before Length had its original in the middle (scale 2) had
+ *  one line · short · medium · full with the original at full, so full is the original and medium reads as short; one
+ *  written before Background had four levels (scale 3) had five, and its level reads as the original's. */
+function levelsAt(s) {
+  let at = s.at && typeof s.at === 'object' ? s.at : {}
+  // (a record of before has versions written; a new one has none until its first rewrite, which sets the scale)
+  const scale = Number(s.scale) || 1
+  if (scale >= SCALE || !Object.keys(s.versions || {}).length) return at
+  if (scale < 2 && Number.isInteger(at.length)) {
+    const { length, ...rest } = at
+    at = length >= 3 ? rest : { ...rest, length: Math.min(length, 1) }
+  }
+  if (Number.isInteger(at.familiarity)) {
+    const { familiarity: _old, ...rest } = at
+    at = rest
+  }
+  return at
+}
+
+/** The levels set now, as the chips' scales read them (a record from before is read as levelsAt says). */
+export const atOf = rec => levelsAt(sq(rec))
+
+/** A chip the person typed, as a chip: its words are its name, and its levels run from the original to fully. */
+function ownChip(c) {
+  return { id: c.id, kind: 'own', name: c.words, words: c.words, levels: [...OWN_LEVELS], level0: 0, known: true }
+}
+
+/** What the person typed after +, as a chip's words: one line, at most 40 characters, the + dropped. '' for none. */
+export function ownWords(typed) {
+  return str(String(typed || '').replace(/^\s*\+\s*/, ''), 40).replace(/[.,;:]+$/, '')
+}
+
+/** The record's squeeze with a chip the person typed added (or kept, when those words have one), its id, and the
+ *  oldest of more than MAX_OWN gone. Null for empty words. */
+export function withOwn(rec, typed) {
+  const words = ownWords(typed)
+  if (!words) return null
+  const s = sq(rec)
+  const own = (Array.isArray(s.own) ? s.own : []).filter(c => c && c.id)
+  const have = own.find(c => c.words.toLowerCase() === words.toLowerCase())
+  if (have) return { squeeze: s, id: have.id }
+  const base = `x-${String(words).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'own'}`
+  const used = new Set([...CHIPS.map(c => c.id), ...own.map(c => c.id)])
+  let id = base
+  for (let i = 2; used.has(id); i++) id = `${base.slice(0, 18)}-${i}`
+  const next = [...own, { id, words }]
+  const gone = next.length > MAX_OWN ? next.shift() : null
+  const at = { ...(s.at || {}) }
+  if (gone) delete at[gone.id]
+  return { squeeze: { ...s, own: next, at }, id }
+}
+
+/** Every chip of the message, in the order drawn: the fixed three, then the ones the person typed. Each with `level0`,
+ *  where the original stands (`known` once the observer said so), and `level`, where it is now. */
 export function chipsOf(rec) {
   const s = sq(rec)
-  const at = s.at && typeof s.at === 'object' ? s.at : {}
+  const at = levelsAt(s)
   const fixed = CHIPS.map(c => {
     const o = observed(rec, c)
     return { ...c, levels: [...c.levels], level0: o ?? c.level0, known: c.id === LENGTH.id || o != null }
   })
-  return fixed.map(c => {
+  const own = (Array.isArray(s.own) ? s.own : []).filter(c => c && c.id && c.words).map(ownChip)
+  return [...fixed, ...own].map(c => {
     const want = at[c.id]
     const level = Number.isInteger(want) && want >= 0 && want < Math.max(1, c.levels.length) ? want : c.level0
     return { ...c, level }
@@ -101,7 +185,7 @@ export function stepAt(rec, id, dir) {
   if (!chip || !chip.levels.length) return null
   const to = chip.level + dir
   if (to < 0 || to >= chip.levels.length) return null
-  return { ...(sq(rec).at || {}), [id]: to }
+  return { ...levelsAt(sq(rec)), [id]: to }
 }
 
 /** The fixed chips other than Length that `at` moves while nobody has said where the original stands on them: such a
@@ -166,20 +250,23 @@ export function wordsOf(text) {
 }
 
 /** What a level of Length means for this message, in words: the model keeps a number better than a level's name. A
- *  correction the request lists does not count against it (`keep`: how many there are). */
+ *  correction the request lists does not count against it (`keep`: how many there are). Longer and much longer are
+ *  about one and a half and two and a half times the original: room to explain, never to add. */
 export function lengthTarget(level, words, keep = 0) {
   if (level === 0) return keep ? `one sentence, at most 35 words, then each correction listed below in a few words` : 'one sentence, at most 35 words'
-  // a quarter and a half of the original, but never longer than most of a short message, and short stays short
+  // a quarter of the original, but never longer than most of a short message, and short stays short
   const round = n => (n >= 40 ? Math.round(n / 5) * 5 : Math.max(1, Math.round(n)))
   if (level === 1) return `at most ${round(Math.min(120, Math.max(Math.min(30, words * 0.6), words * 0.25)))} words`
-  if (level === 2) return `at most ${round(Math.max(words * 0.5, Math.min(50, words * 0.8)))} words`
+  if (level === 3) return `about ${round(Math.max(words * 1.5, words + 60))} words`
+  if (level === 4) return `about ${round(Math.max(words * 2.5, words + 150))} words`
   return `about ${words} words, as the original`
 }
 
 /** One chip as the request names it. */
 function chipLine(c, words = 0, keep = 0) {
   const levels = c.levels.join(' · ')
-  if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words, keep)} (levels ${levels}; the original is at full, ${words} words)`
+  if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words, keep)} (levels ${levels}; the original is at "as written", ${words} words)`
+  if (c.kind === 'own') return `- A chip the analyst typed, "${c.words}": ${c.levels[c.level]} (levels ${levels}; the original is at "as written")`
   // where nobody has said where the original stands, a chip the person left alone keeps the original as it is
   if (!c.known && c.level === c.level0) return `- ${c.name}: as the original (levels ${levels})`
   return `- ${c.name}: ${c.levels[c.level]} (levels ${levels}; the original is at ${c.known ? c.levels[c.level0] : 'a level not yet known'})`
@@ -465,7 +552,7 @@ export function revealStep(total, tickMs = 50) {
 /** @param {any} rec @param {{text: string, at: Record<string, number>, made?: any, problems?: string[]}} change @param {(r: any) => any} remark */
 export function applyRewrite(rec, { text, at, made = null, problems = [] }, remark) {
   const s0 = sq(rec)
-  const s = { ...s0, at: { ...at }, versions: { ...(s0.versions || {}) }, orig: s0.orig || { marks: (rec.shown == null ? rec.marks : []) || [] } }
+  const s = { ...s0, at: { ...at }, scale: SCALE, versions: scaledVersions(s0), orig: s0.orig || { marks: (rec.shown == null ? rec.marks : []) || [] } }
   const probe = { ...rec, squeeze: s }
   const chips = chipsOf(probe)
   const key = keyOf(chips)
@@ -477,40 +564,72 @@ export function applyRewrite(rec, { text, at, made = null, problems = [] }, rema
   return remark({ ...next, marks: prev })
 }
 
+/** The versions kept, keyed by the chips' scales now: a record from before them keeps those Length's short and one
+ *  line wrote, and drops the ones no level names now (Length's medium, Background's old five levels). */
+function scaledVersions(s) {
+  const v = { ...(s.versions || {}) }
+  const scale = Number(s.scale) || 1
+  if (scale >= SCALE) return v
+  for (const k of Object.keys(v)) if ((scale < 2 && /(^|&)length=[23](&|$)/.test(k)) || /(^|&)familiarity=/.test(k)) delete v[k]
+  return v
+}
+
 /** The record at a set of levels already written (a level seen before): no call. Null when that version is not kept. */
 export function fromVersions(rec, at, remark) {
   const s = sq(rec)
-  const chips = chipsOf({ ...rec, squeeze: { ...s, at } })
+  const chips = chipsOf({ ...rec, squeeze: { ...s, at, scale: SCALE } })
   if (isOriginal(chips)) return restore({ ...rec, squeeze: { ...s, at } }, remark)
-  const text = (s.versions || {})[keyOf(chips)]
+  const text = scaledVersions(s)[keyOf(chips)]
   if (typeof text !== 'string') return null
   const prev = [...(rec.marks || []), ...((s.orig && s.orig.marks) || [])]
-  return remark({ ...rec, shown: text, squeeze: { ...s, at, problems: [] }, marks: prev })
+  return remark({ ...rec, shown: text, squeeze: { ...s, at, scale: SCALE, versions: scaledVersions(s), problems: [] }, marks: prev })
 }
 
 /** The original again: every chip back where the original stands, the person's chips kept (off). */
 export function restore(rec, remark) {
   const s = sq(rec)
   const prev = [...((s.orig && s.orig.marks) || []), ...(rec.marks || [])]
-  return remark({ ...rec, shown: null, squeeze: { ...s, at: {}, problems: [] }, marks: prev })
+  return remark({ ...rec, shown: null, squeeze: { ...s, at: {}, scale: SCALE, versions: scaledVersions(s), problems: [] }, marks: prev })
 }
 
-/** What the bar says of the message: `6 of 33 lines` while it is squeezed, `33 lines` for a long original. */
-export function noteOf(rec, cols = 100) {
-  const full = rowsOf(rec?.text, cols)
-  if (rec && typeof rec.shown === 'string') return `${rowsOf(rec.shown, cols)} of ${full} lines`
-  return `${full} lines`
+
+/** A message's first words, plain (a citation as its words), for naming it to Claude. */
+export function firstWordsOf(text, n = 8) {
+  const words = String(text || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/\*\*|__|`/g, '').replace(/^[#>|\s]+/gm, ' ').split(/\s+/).filter(Boolean)
+  return words.slice(0, n).join(' ') + (words.length > n ? '…' : '')
 }
 
-/** What Claude reads, with the person's next prompt, of the version they see. */
-export function noteFor(rec) {
-  const chips = chipsOf(rec)
-  const set = chips.filter(c => c.level !== c.level0).map(c => `${c.name}: ${c.levels[c.level]}`).join(', ')
+/** A record's time as the person saw it, `14:05`; '' when it has none. */
+export function clockOf(at) {
+  const d = at ? new Date(at) : null
+  return d && !Number.isNaN(d.getTime()) ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : ''
+}
+
+/** The version of a record Claude was last told of, as one key: `orig` while it shows as written. */
+export function shownKey(rec) {
+  if (!rec) return 'orig'
+  if (isCatchUp(rec)) return rec.catchup.dismissed || typeof rec.shown !== 'string' ? 'orig' : `cu:${keyOf(chipsOf(rec))}:${rec.shown.length}`
+  return typeof rec.shown === 'string' ? `v:${keyOf(chipsOf(rec))}:${rec.shown.length}` : 'orig'
+}
+
+/**
+ * What Claude reads, as a row of its own that the person never sees, once the person settled on a version of its
+ * message (the chips closed, or they sent their next prompt): the version they read, whole, so a later turn knows what
+ * they saw. A catch-up names the replies it stands in for. `told` says the version Claude was told of before: going
+ * back to the original is said only after a version was told. Empty when there is nothing new to say.
+ */
+export function settledNote(rec, told = 'orig') {
+  if (!rec || shownKey(rec) === told) return ''
+  const set = chipsOf(rec).filter(c => c.level !== c.level0).map(c => `${c.name}: ${c.levels[c.level]}`).join(', ')
   if (isCatchUp(rec)) {
-    if (typeof rec.shown !== 'string' || !rec.shown.trim()) return ''
     const n = Number(rec.catchup.replies) || 0
-    return `The analyst caught up on your ${n === 1 ? 'reply' : `${n} replies`} since their last prompt by reading them rewritten as one message by the squeeze chips (${set}); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\n${rec.shown.slice(0, 8000)}`
+    const of = n === 1 ? 'reply' : `${n} replies`
+    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst went back to reading your ${of} since their last prompt as you wrote them.`
+    const named = String(rec.text || '').split('\n\n---\n\n').map(t => `"${firstWordsOf(t)}"`).join('; ')
+    return `The analyst caught up on your ${of} since their last prompt. In place of those messages (${named}), they now read one message that the squeeze chips wrote of them${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}\n\n(What you wrote is unchanged, and the analyst can go back to it.)`
   }
-  if (isOriginal(chips)) return 'The analyst restored your last reply as you wrote it.'
-  return `The analyst reads your last reply rewritten by the squeeze chips (${set}); what you wrote is unchanged, and they can restore it. "This" may mean the version they read:\n${String(rec.shown || '').slice(0, 1500)}`
+  const when = clockOf(rec.at)
+  const which = `Your message${when ? ` from ${when}` : ''} ("${firstWordsOf(rec.text)}")`
+  if (typeof rec.shown !== 'string') return told === 'orig' ? '' : `${which} reads again, for the analyst, as you wrote it.`
+  return `${which} now reads, for the analyst, as:\n\n${rec.shown.slice(0, 12000)}\n\n(The squeeze chips wrote this version of yours${set ? ` (${set})` : ''}. What you wrote is unchanged, and the analyst can go back to it.)`
 }

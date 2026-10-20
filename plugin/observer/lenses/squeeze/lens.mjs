@@ -1,4 +1,4 @@
-// The squeeze lens: where the answer stands on squeeze's fixed chips (Report ↔ Interpret, Familiarity), so the person's
+// The squeeze lens: where the answer stands on squeeze's fixed chips (Interpretation, Background), so the person's
 // first change starts from the right level. Its merge puts s's `at` in the answer's record, unlit.
 import { verbsOf } from '../../../shell/message.js'
 

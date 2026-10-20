@@ -10,7 +10,7 @@
 //          labels (`thimble label --json`), held here; what a program wants on demand: a file's lines around a read
 //          range, and a page of a label's records (`thimble label NAME --records …`)
 //   acts   a label value checked with the number keys is the person's check (labels.ts check), as in the card detail;
-//          when the panel closes, Claude hears of the checks with the next prompt (labels.ts checksDone, detail.tsx)
+//          when the panel closes, Claude hears of the checks in a row of its own (labels.ts checksDone, detail.tsx)
 //   bar    the two counts, their clicks and their keys (r and l act once a moment has passed with no letter after them,
 //          as t does: a letter makes them the start of a word)
 //

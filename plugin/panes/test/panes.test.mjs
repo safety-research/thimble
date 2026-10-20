@@ -25,51 +25,111 @@ const chipsData = (rec = REC, w = 100) => PANES.chips.data({ 'record:r1': rec, '
 test('chips: keys pick and change a chip; the rewrite is the host\'s action; the same presses in both surfaces', () => {
   const data = chipsData()
   const d0 = run(PANES.chips, data)
-  // no key reads as an arrow key: [ ] move the picked chip, in its words, and a digit picks a chip (drawn before it)
-  assert.equal(barText([d0]), '[ ] shorter / longer · 1–3 pick chip · 0 close · s done')
-  assert.match(gridText(renderTerm(d0, { w: 100 })), /1 Length ○○○● full\s+2 Report ↔ Interpret ○●○ balanced\s+3 Familiarity/)
+  // no key reads as an arrow key: [ ] move the picked chip, in its words, and a digit picks a chip (drawn before it); at
+  // the original nothing reverts. Nothing is written under the chips: the bar says the keys
+  assert.equal(barText([d0]), '[ ] shorter / longer · 1–3 chip · s done · + your own')
+  // the chips as they were drawn before; the level where the original stands reads `as written` on the picked chip
+  // (Length's middle is named so)
+  const g0 = gridText(renderTerm(run(PANES.chips, chipsData(REC, 140), { w: 140 }), { w: 140 }))
+  assert.match(g0, /1 Length ○○●○○ as written\s+2 Interpretation ○●○ some meaning\s+3 Background ○○●○ working\s+\+/)
+  assert.equal(g0.trim().split('\n').length, 1)
+  assert.match(gridText(renderTerm(run(PANES.chips, chipsData(REC, 140), { w: 140, state: { focus: "interpret" } }), { w: 140 })), /2 Interpretation ○●○ as written/)
   let { d, state } = act(PANES.chips, data, {}, keyEvent('['), 'terminal')
   // the step names the key the bar names, so a rewrite that fails says which key tries again
-  assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
+  assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 1 }, key: '[', do: 'squeeze' }])
+  // longer is one step up from the original
+  assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 3 }, key: ']', do: 'squeeze' }])
   // < and , still change, unnamed, and name [ for a retry too
-  assert.deepEqual(act(PANES.chips, data, {}, keyEvent('<'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
+  assert.deepEqual(act(PANES.chips, data, {}, keyEvent('<'), 'terminal').d.effects, [{ row: 'r1', at: { length: 1 }, key: '[', do: 'squeeze' }])
   ;({ d, state } = act(PANES.chips, data, state, keyEvent('2'), 'terminal'))
   assert.equal(state.focus, 'interpret')
-  assert.equal(barText([d]), '[ ] more report / more interpret · 1–3 pick chip · 0 close · s done')
+  assert.equal(barText([d]), '[ ] facts / meaning · 1–3 chip · s done · + your own')
   // a press on a dot in the browser sets that level at once
-  const web = act(PANES.chips, data, state, { type: 'press', region: 'lvl-familiarity-4' }, 'browser')
-  assert.deepEqual(web.d.effects, [{ row: 'r1', at: { familiarity: 4 }, do: 'squeeze' }])
+  const web = act(PANES.chips, data, state, { type: 'press', region: 'lvl-familiarity-3' }, 'browser')
+  assert.deepEqual(web.d.effects, [{ row: 'r1', at: { familiarity: 3 }, do: 'squeeze' }])
   assert.equal(web.state.focus, 'familiarity')
-  // + is no key of the chips
-  assert.equal(takes(run(PANES.chips, data), keyEvent('+')), false)
+  // + is no change of a chip; = is no key of the chips
+  assert.equal(takes(run(PANES.chips, data), keyEvent('=')), false)
+  // away from the original, 0 reverts to it
+  const moved = chipsData({ ...REC, shown: 'Short.', squeeze: { at: { length: 1 }, scale: 3, versions: { 'length=1': 'Short.' } } })
+  const dm = run(PANES.chips, moved)
+  assert.equal(barText([dm]), '[ ] shorter / longer · 1–3 chip · 0 revert · s done · + your own')
+  assert.match(gridText(renderTerm(dm, { w: 100 })), /1 Length ○●○○○ short/)
+  assert.deepEqual(act(PANES.chips, moved, {}, keyEvent('0'), 'terminal').d.effects, [{ row: 'r1', reset: true, do: 'squeeze' }])
+  // with the keys in the chips (a click): tab, ← →, ↵ and esc, in the bar alone
+  const held = PANES.chips.data({ 'record:r1': { ...REC, shown: 'Short.', squeeze: { at: { length: 1 }, scale: 3, versions: { 'length=1': 'Short.' } } }, 'sqz:r1': null, 'held:chips-r1': true }, { row: 'r1' })
+  assert.equal(barText([run(PANES.chips, held)]), 'tab next chip · ←→ shorter / longer · ↵ done · 0 revert · + your own · esc back to the prompt')
+  assert.deepEqual(act(PANES.chips, held, {}, keyEvent('right'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: ']', do: 'squeeze' }])
+  // a step past the end of the scale changes nothing, and the bar says so
+  const longest = chipsData({ ...REC, shown: 'Much longer.', squeeze: { at: { length: 4 }, scale: 3, versions: { 'length=4': 'Much longer.' } } })
+  const edge = act(PANES.chips, longest, {}, keyEvent(']'), 'terminal')
+  assert.deepEqual(edge.d.effects || [], [])
+  assert.equal(run(PANES.chips, longest, { state: edge.state }).status.text, 'Length goes no further than much longer')
+})
+
+test('chips: + adds a chip of the person\'s own: typed in the chips while they hold the keys, else in the prompt; it moves from as written to fully', () => {
+  const recAt = { ...REC, shown: null, squeeze: { at: {}, own: [{ id: 'x-for-my-manager', words: 'for my manager' }] } }
+  // the prompt holds the keys: + asks the host to take the words in the prompt
+  assert.deepEqual(act(PANES.chips, chipsData(), {}, keyEvent('+'), 'terminal').d.effects, [{ row: 'r1', do: 'ownask' }])
+  // the chips hold the keys: + starts the words here; they are typed, ⌫ takes one back, ↵ adds the chip
+  const held = rec => PANES.chips.data({ 'record:r1': rec, 'sqz:r1': null, 'held:chips-r1': true }, { row: 'r1' })
+  let st = act(PANES.chips, held(REC), {}, keyEvent('+'), 'terminal').state
+  assert.equal(st.typing, '')
+  for (const ch of 'for my managerx') st = act(PANES.chips, held(REC), st, ch === ' ' ? keyEvent('space') : keyEvent(ch), 'terminal').state
+  st = act(PANES.chips, held(REC), st, keyEvent('backspace'), 'terminal').state
+  assert.equal(st.typing, 'for my manager')
+  const typed = run(PANES.chips, held(REC), { state: st })
+  assert.equal(typed.status.text, '+ for my manager▏ ↵ adds it · tab lets it go')
+  assert.match(gridText(renderTerm(typed, { w: 120 })), /\+ for my manager▏/)
+  const added = act(PANES.chips, held(REC), st, keyEvent('return'), 'terminal')
+  assert.deepEqual(added.d.effects, [{ row: 'r1', words: 'for my manager', do: 'own' }])
+  assert.equal(added.state.typing, null)
+  // the chip: its words, its dots, as written; picked, ] moves it toward fully
+  const d = run(PANES.chips, chipsData(recAt, 140), { state: { focus: 'x-for-my-manager' } })
+  assert.match(gridText(renderTerm(d, { w: 140 })), /4 for my manager ●○○○ as written\s+\+/)
+  assert.equal(barText([d]), '[ ] less / more · 1–4 chip · s done · + your own')
+  assert.deepEqual(act(PANES.chips, chipsData(recAt), { focus: 'x-for-my-manager' }, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { 'x-for-my-manager': 1 }, key: ']', do: 'squeeze' }])
+  // a press on + in the browser asks the host too
+  assert.deepEqual(act(PANES.chips, chipsData(), {}, { type: 'press', region: 'add' }, 'browser').d.effects, [{ row: 'r1', do: 'ownask' }])
 })
 
 test('chips: a change on its way shows at once from the record (squeeze.want), and the bar says it is rewriting', () => {
   const data = chipsData({ ...REC, squeeze: { at: {}, want: { length: 1 } } })
   const d = run(PANES.chips, data)
-  assert.match(gridText(renderTerm(d, { w: 100 })), /Length ○●○○ short/)
+  assert.match(gridText(renderTerm(d, { w: 100 })), /Length ○●○○○ short/)
   assert.equal(d.status.text, 's ● rewriting…')
 })
 
-test('chips on a catch-up: 0 dismisses it, no step lands on its original (the replies above it), and the bar names its replies, never lines', () => {
+test('chips: two or more replies since the last prompt add the scope chip; all of them asks the host for one message in their place, and on that catch-up 0 or the scope chip brings the replies back', () => {
+  const pile = (rec, n) => PANES.chips.data({ 'record:r1': rec, 'sqz:r1': null, 'pile:r1': n ? { n } : null }, { row: 'r1' })
+  // one reply: no scope chip
+  assert.doesNotMatch(gridText(renderTerm(run(PANES.chips, pile(REC, 0)), { w: 140 })), /Messages/)
+  // three: the fourth chip, this reply; ] (or a press on its second dot) asks for all three
+  const three = run(PANES.chips, pile(REC, 3), { w: 140 })
+  assert.match(gridText(renderTerm(three, { w: 140 })), /3 Background ○○●○ working\s+4 Messages ●○ this reply\s+\+/)
+  assert.deepEqual(act(PANES.chips, pile(REC, 3), { focus: 'scope' }, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', all: true, do: 'scope' }])
+  assert.deepEqual(act(PANES.chips, pile(REC, 3), {}, { type: 'press', region: 'lvl-scope-1' }, 'browser').d.effects, [{ row: 'r1', all: true, do: 'scope' }])
+  assert.equal(barText([run(PANES.chips, pile(REC, 3), { state: { focus: 'scope' } })]), '[ ] this reply / all · 1–4 chip · s done · + your own')
+  // the catch-up: the scope chip at all 3; [ on it, or 0, lets it go and the replies show again
   const CU = { ...REC, shown: 'Mostly [6,543 saves](q1#day=2026-06-18@n).', catchup: { host: 'r0', rows: ['r0'], replies: 3, question: 'when?', prompt: 'p0' }, squeeze: { at: { length: 1 } } }
   const data = chipsData(CU)
   const d0 = run(PANES.chips, data)
-  assert.equal(barText([d0]), '[ ] shorter / longer · 1–3 pick chip · 0 dismiss · s done')
+  assert.match(gridText(renderTerm(run(PANES.chips, data, { w: 140 }), { w: 140 })), /4 Messages ○● all 3/)
+  assert.equal(barText([d0]), '[ ] shorter / longer · 1–4 chip · 0 revert · s done · + your own')
   assert.equal(d0.status.text, 's ● catch-up of 3 replies')
-  assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: ']', do: 'squeeze' }])
-  // at medium, a step up would be its original: none, and a press on full's dot neither
-  const medium = chipsData({ ...CU, squeeze: { at: { length: 2 } } })
-  assert.deepEqual(act(PANES.chips, medium, {}, keyEvent(']'), 'terminal').d.effects || [], [])
-  assert.deepEqual(act(PANES.chips, medium, {}, { type: 'press', region: 'lvl-length-3' }, 'browser').d.effects || [], [])
-  // with another chip moved, full is a rewrite like any other
-  const moved = chipsData({ ...CU, squeeze: { at: { length: 2, familiarity: 1 } } })
-  assert.deepEqual(act(PANES.chips, moved, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 3, familiarity: 1 }, key: ']', do: 'squeeze' }])
+  assert.deepEqual(act(PANES.chips, data, { focus: 'scope' }, keyEvent('['), 'terminal').d.effects, [{ row: 'r1', all: false, do: 'scope' }])
   assert.deepEqual(act(PANES.chips, data, {}, keyEvent('0'), 'terminal').d.effects, [{ row: 'r1', do: 'dismiss' }])
+  // from short, a step up would be its original (the replies as written): it goes on to longer; a press on the
+  // original's dot does nothing
+  assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 3 }, key: ']', do: 'squeeze' }])
+  assert.deepEqual(act(PANES.chips, data, {}, { type: 'press', region: 'lvl-length-2' }, 'browser').d.effects || [], [])
+  // with another chip moved, as written is a rewrite like any other
+  const moved = chipsData({ ...CU, squeeze: { at: { length: 1, familiarity: 1 } } })
+  assert.deepEqual(act(PANES.chips, moved, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2, familiarity: 1 }, key: ']', do: 'squeeze' }])
   // its first version on its way
   const writing = run(PANES.chips, chipsData({ ...CU, shown: null, squeeze: { at: {}, want: { length: 1 } } }))
   assert.equal(writing.status.text, 's ● writing the catch-up of 3 replies…')
-  assert.match(gridText(renderTerm(writing, { w: 100 })), /Length ○●○○ short/)
+  assert.match(gridText(renderTerm(writing, { w: 140 })), /Length ○●○○○ short/)
 })
 
 // ---------------------------------------------------------------- the card detail
@@ -211,21 +271,26 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   const got = { [d.wants[0].key]: { drawings: [inner], links: [{ id: 'n1', ref: 'q1#user=A@n', label: 'A' }, { id: 'n2', ref: 'q2', label: 'B' }] } }
   const full = run(PANES.tray, data, { state: { stack: [f0] }, w: 70, got })
   assert.match(gridText(renderTerm(full, { w: 70 })), /Jun 18 6,543/)
-  assert.equal(barText([full]), '1 ask · 2 3 open · 0 close · ] next')
-  // 2 opens the first citation inside the card over it; 0 goes back to the card under it
-  const opened = act(PANES.tray, data, { stack: [f0] }, keyEvent('2'), 'terminal', { got, w: 70 })
+  // letters for what the person does, so the line reads as words, never as a number: a asks, o opens the first citation
+  // inside the card (2–9 still open them, unnamed)
+  assert.equal(barText([full]), 'a ask · o open A · 0 close · ] next')
+  // o opens the first citation inside the card over it; 0 goes back to the card under it
+  const opened = act(PANES.tray, data, { stack: [f0] }, keyEvent('o'), 'terminal', { got, w: 70 })
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('2'), 'terminal', { got, w: 70 }).state.stack.at(-1), { kind: 'cite', ref: 'q1#user=A@n', label: 'A' })
   assert.deepEqual(opened.state.stack.at(-1), { kind: 'cite', ref: 'q1#user=A@n', label: 'A' })
   assert.equal(act(PANES.tray, data, opened.state, keyEvent('0'), 'terminal').state.stack.length, 1)
   // back from the first card closes the tray; ] asks the host for the next mark or card
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('0'), 'terminal').d.effects, [{ do: 'close' }])
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent(']'), 'terminal').d.effects, [{ dir: 1, do: 'step' }])
-  // 1 asks: the host opens the card in the side panel as the mark's thread (the question is typed in its input bar)
+  // a asks: the host opens the card in the side panel as the mark's thread (the question is typed in its input bar); 1
+  // does too, unnamed
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('a'), 'terminal').d.effects, [{ do: 'thread', frame: { ...f0, open: null } }])
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'terminal').d.effects, [{ do: 'thread', frame: { ...f0, open: null } }])
-  // a mark with a thread says so, and 1 opens it
+  // a mark with a thread says so, and a opens it
   const withThread = PANES.tray.data({ threads: [{ key: 'mark-r1-q3-day-2026-06-18-n', turns: [{ role: 'person', text: 'why so high?' }] }] })
   const t = run(PANES.tray, withThread, { state: { stack: [f0] }, w: 70, got })
-  assert.match(gridText(renderTerm(t, { w: 70 })), /↳ thread: why so high\? · 1 opens it/)
-  assert.equal(barText([t]), '1 thread · 2 3 open · 0 close · ] next')
+  assert.match(gridText(renderTerm(t, { w: 70 })), /↳ thread: why so high\? · a opens it/)
+  assert.equal(barText([t]), 'a thread · o open A · 0 close · ] next')
 })
 
 test('tray: a citation opens on its most readable form; each section the card names (r rows, c code) is a key away in the same panel, never shown first', async () => {
@@ -239,14 +304,14 @@ test('tray: a citation opens on its most readable form; each section the card na
   const shown = gridText(renderTerm(full, { w: 70 }))
   assert.match(shown, /day 06-18 6,543/)
   assert.doesNotMatch(shown, /tally|L28/)
-  assert.equal(barText([full]), '1 ask · r rows · c code · 0 close · ] next')
+  assert.equal(barText([full]), 'a ask · r rows · c code · 0 close · ] next')
   // c shows the code in place of the card, in the same panel; the frame says which; c again or 0 brings the card back
   const code = act(PANES.tray, data, { stack: [f0] }, keyEvent('c'), 'terminal', { got, w: 70 })
   assert.equal(code.state.stack.at(-1).open, 'code')
   const drawn = run(PANES.tray, data, { state: code.state, w: 70, got })
   assert.match(gridText(renderTerm(drawn, { w: 70 })), /6,543.*cite · code[\s\S]*tally\(df, "day"\)/)
   assert.doesNotMatch(gridText(renderTerm(drawn, { w: 70 })), /day 06-18 6,543/)
-  assert.equal(barText([drawn]), '1 ask · r rows · c code · 0 back · ] next')
+  assert.equal(barText([drawn]), 'a ask · r rows · c code · 0 back · ] next')
   assert.equal(act(PANES.tray, data, code.state, keyEvent('c'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('0'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('r'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, 'rows')
@@ -320,7 +385,8 @@ test('mark: a citation in the side panel is the tray\'s card at the panel\'s wid
   const got = { [d.wants[0].key]: { drawings: [inner], links: [{ id: 'n1', ref: 'q1#user=A@n', label: 'A' }] } }
   const full = run(PANES.mark, data, { w: 70, got })
   assert.match(gridText(renderTerm(full, { w: 70 })), /6,543[\s\S]*Jun 18 6,543/)
-  assert.equal(barText([full]), '2 open · ] next')
+  assert.equal(barText([full]), 'o open A · ] next')
+  assert.deepEqual(act(PANES.mark, data, {}, keyEvent('o'), 'terminal', { got, w: 70 }).d.effects, [{ do: 'open', mark: { kind: 'cite', ref: 'q1#user=A@n', label: 'A' } }])
   assert.deepEqual(act(PANES.mark, data, {}, keyEvent(']'), 'terminal', { got, w: 70 }).d.effects, [{ dir: 1, do: 'step' }])
   assert.deepEqual(act(PANES.mark, data, {}, keyEvent('2'), 'terminal', { got, w: 70 }).d.effects, [{ do: 'open', mark: { kind: 'cite', ref: 'q1#user=A@n', label: 'A' } }])
   // a citation opened from an answer (no message): no stepping

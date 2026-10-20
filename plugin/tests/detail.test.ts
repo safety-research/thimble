@@ -166,13 +166,15 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   const d = textOf(await ui.drawn())
   expect(d).toContain('from revisions.jsonl')
   expect(d).not.toContain('e examples')
-  expect(await hintOf($)).toContain('↑↓ part · e examples · 0 clear')
+  // esc clears the bar (the panel catches it): 0 still does, unnamed
+  expect(await hintOf($)).toContain('↑↓ part · e examples · ')
+  expect(await hintOf($)).not.toContain('0 clear')
   expect(d).not.toContain('Hello agents')
   // e: the examples of the selected part, labelled, with their from line; each reads as its words, never as field: value
   expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   const b = await pane($, clock)
   expect(b).toContain('examples of saves on Jun 18 · 1 of 6,543')
-  expect(await hintOf($)).toContain('[ ] flip · e hide examples · 0 clear')
+  expect(await hintOf($)).toContain('[ ] flip · e hide examples · ')
   expect(b).toContain('from revisions.jsonl')
   expect(b).toContain('label purpose')
   expect(b).toContain('1 of 2 files read')
