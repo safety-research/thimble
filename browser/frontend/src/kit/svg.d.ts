@@ -31,5 +31,19 @@ export function approxMeasure(s: string, o?: { size?: number; bold?: boolean; mo
 export function canvasMeasure(doc?: Document): Measure
 export function renderSvg(
   drawing: Drawing,
-  opts?: { w?: number; cw?: number; lh?: number; fs?: number; theme?: 'light' | 'dark'; measure?: Measure; selected?: string | null; hover?: string | null; hits?: boolean },
+  opts?: {
+    w?: number
+    cw?: number
+    lh?: number
+    fs?: number
+    /** the small size of axis ticks and a table's heads (the page's --viz-size) */
+    ns?: number
+    theme?: 'light' | 'dark'
+    /** a tone's CSS color on this page, or null for the plugin's palette (KitBody's themeColors) */
+    color?: ((tone: string) => string | null) | null
+    measure?: Measure
+    selected?: string | null
+    hover?: string | null
+    hits?: boolean
+  },
 ): Rendered

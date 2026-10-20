@@ -41,6 +41,63 @@ const CW = 7.8
 
 const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
+// each tone of the toolkit as thimble's charts color it (styles/tokens.css): the inks, the axis and the gridlines, the
+// series (the accent's family first), the status colors and the card's own surface. A tone with `-faint` is its color
+// a third of the way from the card's surface, as the palette makes it.
+const TONE_TOKENS: Record<string, string> = {
+  ink: '--viz-ink-1', dim: '--viz-label', rule: '--viz-axis', axis: '--viz-axis', grid: '--viz-grid', unseen: '--viz-ink-4',
+  accent: '--viz-highlight', good: '--status-positive', bad: '--status-negative', warn: '--status-warning',
+  c1: '--viz-1', c2: '--viz-2', c3: '--viz-3', c4: '--viz-4', c5: '--viz-5', c6: '--viz-6',
+  paper: '--surface-card', hover: '--surface-hover', select: '--accent-soft',
+}
+
+/** The page's color of each tone, read from its tokens now (a light or dark page, its accent), or null where the page
+ *  has no tokens (tests), so the drawing keeps the plugin's palette. */
+export function themeColors(): ((tone: string) => string | null) | null {
+  if (typeof document === 'undefined' || !document.body || typeof getComputedStyle !== 'function') return null
+  const probe = document.createElement('span')
+  probe.style.display = 'none'
+  document.body.appendChild(probe)
+  const read = (expr: string): string | null => {
+    probe.style.color = ''
+    probe.style.color = expr
+    const v = probe.style.color ? getComputedStyle(probe).color : ''
+    return v && !v.includes('var(') ? v : null
+  }
+  const out = new Map<string, string>()
+  try {
+    for (const [tone, name] of Object.entries(TONE_TOKENS)) {
+      const v = read(`var(${name})`)
+      if (!v) continue
+      out.set(tone, v)
+      const faint = read(`color-mix(in srgb, var(${name}) 34%, var(--surface-card))`)
+      if (faint) out.set(`${tone}-faint`, faint)
+    }
+  } finally {
+    probe.remove()
+  }
+  // a page without the tokens (no stylesheet) reads every token as nothing: the palette draws then
+  if (!out.has('ink')) return null
+  return (tone) => out.get(tone) ?? null
+}
+
+/** themeColors, read again when the page's theme or accent changes. */
+function useThemeColors(resolved: string) {
+  const [colors, setColors] = useState(themeColors)
+  useEffect(() => {
+    const again = () => setColors(() => themeColors())
+    // the theme's attributes are set after the page renders: read the tokens once they apply
+    const raf = requestAnimationFrame(again)
+    const watch = new MutationObserver(again)
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-paper', 'data-accent', 'class'] })
+    return () => {
+      cancelAnimationFrame(raf)
+      watch.disconnect()
+    }
+  }, [resolved])
+  return colors
+}
+
 /** The page's measure of type: the canvas's metrics where there is a canvas, else svg.js's estimate (tests). */
 function pageMeasure(): Measure {
   try {
@@ -54,6 +111,7 @@ function pageMeasure(): Measure {
 export function KitBody({ cell, width }: { cell: Cell; width?: number }) {
   const run = kitRunOf(cell)
   const { resolved } = useTheme()
+  const colors = useThemeColors(resolved)
   // what the analyst turned or pressed, for this run of the card: a new run draws from its own drawing again
   const [live, setLive] = useState<{ drawing: Drawing; state: Record<string, unknown> } | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -77,8 +135,8 @@ export function KitBody({ cell, width }: { cell: Cell; width?: number }) {
   const measure = useMemo(pageMeasure, [])
   const drawing = live?.drawing ?? run?.drawing ?? null
   const rendered = useMemo(
-    () => (drawing ? renderSvg(drawing, { cw: CW, measure, theme: resolved, selected, hover }) : null),
-    [drawing, measure, resolved, selected, hover],
+    () => (drawing ? renderSvg(drawing, { cw: CW, measure, theme: resolved, color: colors, selected, hover }) : null),
+    [drawing, measure, resolved, colors, selected, hover],
   )
   if (!run || !drawing || !rendered) return null
   const labels = new Map(rendered.regions.map((r) => [r.id, String(r.meta.label ?? r.id)]))

@@ -13,8 +13,10 @@
 //   regions  [{id, meta, rects: [{x, y, w, h}]}] in pixels, in the drawing's order (the same ids term.js gives)
 //   marks    the same list term.js returns for the same drawing: what was drawn, renderer-free
 // Pure: no DOM unless `measure` uses one (canvasMeasure below). In Node it measures with approxMeasure. Its colors are
-// the plugin's palette (plugin/draw/palette.js) and its faces the page's own, so a card reads as thimble in both
-// products; the layout helpers are the plugin's, one copy for both.
+// the page's chart tokens when the page passes `color` (tone -> CSS color, KitBody's themeColors), else the plugin's
+// palette (plugin/draw/palette.js), and its faces the page's own: text in the body face, numbers in a right-aligned
+// column and axis ticks in the mono face, as thimble's charts and tables set them. The layout helpers are the
+// plugin's, one copy for both.
 import { distribute } from '../../../../plugin/draw/flex.js'
 import { knobOf } from '../../../../plugin/draw/handoff.js'
 import { hex } from '../../../../plugin/draw/palette.js'
@@ -24,6 +26,8 @@ export const MONO = '"Geist Mono", "SF Mono", Menlo, "DejaVu Sans Mono", monospa
 const LEVEL = '▁▂▃▄▅▆▇█'
 const LEFT = { '▏': 1, '▎': 2, '▍': 3, '▌': 4, '▋': 5, '▊': 6, '▉': 7 }
 const SHADE = { '░': 1, '▒': 2, '▓': 3 }
+// a number as a column or an axis shows it: set in the mono face, as thimble's tables and charts set their figures
+const NUM = /^[+\-−~≈<>]?[$€£]?\d[\d.,:]*(%|[kKMB×x])?$/
 const plain = runs => (runs || []).map(r => r.br ? '\n' : r.s).join('')
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 const r1 = v => Math.round(v * 100) / 100
@@ -44,6 +48,8 @@ const typeStyle = o => {
   const s = [o.size ? `font-size:${r1(o.size)}px` : '', o.mono ? `font-family:${MONO.replace(/"/g, "'")}` : ''].filter(Boolean).join(';')
   return s ? ` style="${s}"` : ''
 }
+// a round step near `raw`: 1, 2 or 5 times a power of ten
+const niceStep = raw => { const e = Math.pow(10, Math.floor(Math.log10(raw > 0 && isFinite(raw) ? raw : 1))); return [1, 2, 5, 10].map(q => q * e).find(q => q >= raw * 0.999) || e * 10 }
 const fmtTick = v => !isFinite(v) ? '' : Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en-US') : String(+v.toPrecision(3))
 
 // ---------------------------------------------------------------- measuring type
@@ -81,19 +87,20 @@ export function canvasMeasure(doc) {
 }
 
 // ---------------------------------------------------------------- text: pieces, words, lines
-function textPieces(runs) {
+// `num`: the text stands in a right-aligned column, where a number is set as a figure (NUM)
+function textPieces(runs, num) {
   const out = []
   for (const r of runs || []) {
     if (r.br) { out.push({ br: true }); continue }
-    for (const part of String(r.s).split(/( +)/)) if (part) out.push({ s: part, tone: r.tone || 'ink', b: !!r.b, ref: r.ref, sp: /^ +$/.test(part) })
+    for (const part of String(r.s).split(/( +)/)) if (part) out.push({ s: part, tone: r.tone || 'ink', b: !!r.b, ref: r.ref, sp: /^ +$/.test(part), num: !!num && NUM.test(part) })
   }
   return out
 }
 // hard lines of words; a word is the pieces between spaces (it may change style midway)
-function hardWords(runs) {
+function hardWords(runs, num) {
   const lines = [[]]
   let word = null
-  for (const p of textPieces(runs)) {
+  for (const p of textPieces(runs, num)) {
     if (p.br) { word = null; lines.push([]); continue }
     if (p.sp) { word = null; lines[lines.length - 1].push({ sp: true, pieces: [p] }); continue }
     if (!word) { word = { pieces: [] }; lines[lines.length - 1].push(word) }
@@ -111,24 +118,33 @@ function hardWords(runs) {
  */
 export function renderSvg(drawing, opts = {}) {
   const cw = opts.cw || 7.8, lh = opts.lh || 20, fs = opts.fs || 13
+  // the small size of axis ticks and a table's heads, and a figure's size, as thimble's charts (--viz-size)
+  const ns = opts.ns || 11, nfs = fs - 1
   const theme = opts.theme || 'light'
   const M = opts.measure || approxMeasure
-  const C = t => hex(t, theme)
+  // `grid` (a chart's gridlines) and `axis` are the renderer's own tones: the palette draws them as faint and plain rule
+  const FALL = { grid: 'rule-faint', axis: 'rule' }
+  const C = t => (opts.color && opts.color(t)) || hex(FALL[t] || t, theme)
+  // a table's row: a little taller than a line, with a hairline between rows
+  const TR = lh + 6
   const W = (opts.w || drawing.w || 96) * cw
   const PADX = 14
-  const bh = Math.round(lh * 0.55), by = (lh - bh) / 2
+  const bh = Math.round(lh * 0.7), by = (lh - bh) / 2
   const id = 'dk' + Math.random().toString(36).slice(2, 8)
   const memo = new WeakMap(), heights = new WeakMap()
   const cx = { regions: new Map(), links: [], marks: [], cut: [] }
   const mw = (s, o) => M(s, Object.assign({ size: fs }, o))
-  const piecesW = ps => ps.reduce((a, p) => a + mw(p.s, { bold: p.b }), 0)
+  // a piece's type: a figure in the mono face a size down, a table's head in small capitals (measured a tenth wider, for
+  // its letter spacing), else the body face
+  const ptype = p => p.num ? { bold: p.b, mono: true, size: nfs } : p.head ? { size: ns * 1.1 } : { bold: p.b }
+  const piecesW = ps => ps.reduce((a, p) => a + mw(p.s, ptype(p)), 0)
   const base = (y, size) => y + lh / 2 + (size || fs) * 0.35
 
   // ------------------------------------------------ text lines at width w
   function textLines(n, w) {
     const lines = []
     let cut = false
-    for (const hl of hardWords(n.runs)) {
+    for (const hl of hardWords(n.runs, n.align === 'right')) {
       if (n.wrap === false) {
         const ps = hl.flatMap(t => t.pieces)
         const r = capPieces(ps, w)
@@ -146,7 +162,7 @@ export function renderSvg(drawing, opts = {}) {
             // a word longer than the line: break it by characters
             let ps = [], pw = 0
             for (const p of t.pieces) for (const ch of Array.from(p.s)) {
-              const cwid = mw(ch, { bold: p.b })
+              const cwid = mw(ch, ptype(p))
               if (pw + cwid > w && ps.length) { lines.push(ps); ps = []; pw = 0 }
               const last = ps[ps.length - 1]
               if (last && last.tone === p.tone && last.b === p.b && last.ref === p.ref) last.s += ch; else ps.push(Object.assign({}, p, { s: ch }))
@@ -176,7 +192,7 @@ export function renderSvg(drawing, opts = {}) {
     let used = 0
     for (const p of ps) {
       let s = ''
-      for (const ch of Array.from(p.s)) { const c = mw(ch, { bold: p.b }); if (used + c > w - ell) break; s += ch; used += c }
+      for (const ch of Array.from(p.s)) { const c = mw(ch, ptype(p)); if (used + c > w - ell) break; s += ch; used += c }
       if (s) out.push(Object.assign({}, p, { s }))
       if (s.length < Array.from(p.s).length) break
     }
@@ -190,6 +206,8 @@ export function renderSvg(drawing, opts = {}) {
     for (const p of ps) {
       const attrs = [`fill="${C(p.tone || 'ink')}"`]
       if (p.b) attrs.push('font-weight="600"')
+      if (p.num) attrs.push(`style="font-family:${MONO.replace(/"/g, "'")};font-size:${nfs}px"`)
+      if (p.head) attrs.push(`style="font-size:${ns}px;letter-spacing:.06em"`)
       if (p.ref) attrs.push('text-decoration="underline"')
       spans += `<tspan ${attrs.join(' ')}>${xml(p.s)}</tspan>`
     }
@@ -199,7 +217,7 @@ export function renderSvg(drawing, opts = {}) {
     if (dry) return
     let dx = 0
     for (const p of ps) {
-      const pw = mw(p.s, { bold: p.b })
+      const pw = mw(p.s, ptype(p))
       if (p.ref) {
         const last = cx.links[cx.links.length - 1]
         if (last && last.ref === p.ref && last.y === y && Math.abs(last.x + last.w - (x + dx)) < 0.5) last.w += pw
@@ -227,7 +245,7 @@ export function renderSvg(drawing, opts = {}) {
   function baseSizes(n) {
     switch (n.t) {
       case 'text': {
-        const hl = hardWords(n.runs)
+        const hl = hardWords(n.runs, n.align === 'right')
         const nat = Math.max(0, ...hl.map(l => l.reduce((a, t) => a + piecesW(t.pieces), 0)))
         if (n.wrap === false) return { min: Math.min(nat, 6 * cw), nat, grow: 0 }
         const word = Math.max(1, ...hl.flatMap(l => l.filter(t => !t.sp).map(t => piecesW(t.pieces))))
@@ -266,11 +284,14 @@ export function renderSvg(drawing, opts = {}) {
     m.set(key, h)
     return h
   }
+  // a table's column head, in small capitals as thimble's tables set them
+  const headPieces = c => [{ s: String(c.label).toUpperCase(), tone: 'dim', b: false, head: true }]
+  const rightCol = (n, j) => !!n.cols[j] && n.cols[j].align === 'right'
   function tablePlan(n, avail) {
     const gap = 2 * cw
     const head = n.head !== false
-    const cellW = n.rows.map(r => r.cells.map(c => piecesW(textPieces(c))))
-    const wd = n.cols.map((c, j) => c.w != null ? c.w * cw : Math.max(head ? mw(c.label) : 0, ...cellW.map(r => r[j] || 0), cw))
+    const cellW = n.rows.map(r => r.cells.map((c, j) => piecesW(textPieces(c, rightCol(n, j)))))
+    const wd = n.cols.map((c, j) => c.w != null ? c.w * cw : Math.max(head ? piecesW(headPieces(c)) : 0, ...cellW.map(r => r[j] || 0), cw))
     const total = () => wd.reduce((s, x) => s + x, 0) + gap * Math.max(0, wd.length - 1)
     const min = wd.reduce((s, x) => s + Math.min(x, 6 * cw), 0) + gap * Math.max(0, wd.length - 1)
     if (isFinite(avail)) {
@@ -418,34 +439,38 @@ export function renderSvg(drawing, opts = {}) {
         t.wd.forEach(cwid => { xs.push(xx); xx += cwid + t.gap })
         const tw = Math.min(w, t.total)
         let yy = y
+        // rows a little taller than a line (TR), the text in their middle, a hairline between them, and the heads in
+        // small capitals over a rule: thimble's table
+        const mid = (TR - lh) / 2
         if (n.head !== false) {
           if (!dry) {
             n.cols.forEach((c, j) => {
-              const r = capPieces([{ s: c.label, tone: 'dim', b: false }], t.wd[j])
+              const r = capPieces(headPieces(c), t.wd[j])
               L.text.push(textSVG(r.pieces, c.align === 'right' ? xs[j] + t.wd[j] : xs[j], yy, c.align === 'right' ? 'end' : 'start'))
             })
-            L.mark.push(hl(x, x + tw, yy + lh - 0.5, 'rule', '─'))
+            L.mark.push(hl(x, x + tw, yy + lh + 1.5, 'rule', '─'))
           }
           mark({ k: 'head', cells: n.cols.map(c => c.label) })
-          yy += lh
+          yy += lh + 2
         }
-        n.rows.forEach(r => {
+        n.rows.forEach((r, i) => {
           if (!dry) r.cells.forEach((cell, j) => {
-            const res = capPieces(textPieces(cell), t.wd[j])
-            const right = n.cols[j].align === 'right'
-            L.text.push(textSVG(res.pieces, right ? xs[j] + t.wd[j] : xs[j], yy, right ? 'end' : 'start'))
-            linkRects(res.pieces, right ? xs[j] + t.wd[j] - piecesW(res.pieces) : xs[j], yy)
+            const right = rightCol(n, j)
+            const res = capPieces(textPieces(cell, right), t.wd[j])
+            L.text.push(textSVG(res.pieces, right ? xs[j] + t.wd[j] : xs[j], yy + mid, right ? 'end' : 'start'))
+            linkRects(res.pieces, right ? xs[j] + t.wd[j] - piecesW(res.pieces) : xs[j], yy + mid)
             if (res.cut) cut({ k: 'cell', s: plain(cell) })
           })
+          if (!dry && i < n.rows.length - 1) L.mark.push(hl(x, x + tw, yy + TR - 1, 'grid', '─'))
           if (r.region) mark({ k: 'region', id: r.region })
           mark({ k: 'row', cells: r.cells.map(plain) })
-          if (r.region && !dry) addRect(r.region, r.meta, { x, y: yy, w: tw, h: lh })
-          yy += lh
+          if (r.region && !dry) addRect(r.region, r.meta, { x, y: yy, w: tw, h: TR })
+          yy += TR
         })
         if (n.more) {
-          if (!dry) L.text.push(textSVG([{ s: `+ ${n.more.toLocaleString('en-US')} more rows`, tone: 'dim' }], x, yy, 'start'))
+          if (!dry) L.text.push(textSVG([{ s: `+ ${n.more.toLocaleString('en-US')} more rows`, tone: 'dim' }], x, yy + mid, 'start'))
           mark({ k: 'more', n: n.more })
-          yy += lh
+          yy += TR
         }
         return yy - y
       }
@@ -551,25 +576,38 @@ export function renderSvg(drawing, opts = {}) {
     let xmax = okX(xs.max) ? xs.max : xv.length ? Math.max(...xv) : 1
     if (xmax === xmin) xmax = xlog ? xmin * 10 : xmin + 1
     const yv = all.map(p => p[1]).filter(v => v !== null && isFinite(v))
-    const ymin = isFinite(ys.min) ? ys.min : yv.length ? Math.min(...yv) : 0
+    let ymin = isFinite(ys.min) ? ys.min : yv.length ? Math.min(...yv) : 0
     let ymax = isFinite(ys.max) ? ys.max : yv.length ? Math.max(...yv) : 1
     if (ymax === ymin) ymax = ymin + 1
-    const legend = n.legend !== false && (S.length > 1 || S.some(s => s.name)) ? 1 : 0
-    const yl = [fmtTick(ymax), fmtTick(ymin)]
-    const yw = Math.max(mw(yl[0], { size: fs - 1 }), mw(yl[1], { size: fs - 1 })) + 6
-    const ox = x + yw, oy = y + (ys.label ? lh : 0) + 6
+    // one series that the y axis already names needs no legend
+    const named = S.length === 1 && S[0].name && ys.label && String(S[0].name) === String(ys.label)
+    const legend = n.legend !== false && (S.length > 1 || (S.some(s => s.name) && !named)) ? 1 : 0
     const ph = Math.max(lh, h - (ys.label ? lh : 0) - 6 - lh - legend * lh - 4)
+    // the y axis at round steps under gridlines, as thimble's charts draw it: the finest step that leaves a gridline at
+    // least 24 pixels from the next, and an end the program did not set goes out to the next step
+    const most = Math.max(2, Math.floor(ph / 24))
+    let ystep = niceStep((ymax - ymin) / most)
+    const span = st => (isFinite(ys.max) ? ymax : Math.ceil(ymax / st - 1e-9) * st) - (isFinite(ys.min) ? ymin : Math.floor(ymin / st + 1e-9) * st)
+    if (span(ystep) / ystep > most) ystep = niceStep(ystep * 1.01)
+    if (!isFinite(ys.max)) ymax = Math.ceil(ymax / ystep - 1e-9) * ystep
+    if (!isFinite(ys.min)) ymin = Math.floor(ymin / ystep + 1e-9) * ystep
+    const yticks = []
+    for (let v = Math.ceil(ymin / ystep - 1e-9) * ystep; v <= ymax + ystep * 1e-6; v += ystep) yticks.push(+v.toPrecision(10))
+    const tick = { size: ns, mono: true }
+    const yw = Math.max(0, ...yticks.map(v => mw(fmtTick(v), tick))) + 8
+    const ox = x + yw, oy = y + (ys.label ? lh : 0) + 6
     const pw = Math.max(2 * cw, w - yw - 4)
     const col = v => ox + (tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * pw
     const row = v => oy + (ymax - clamp(v, ymin, ymax)) / ((ymax - ymin) || 1) * ph
     if (!dry && n.brush) brushes.push({ id: n.brush.id, x: ox, y: oy, w: pw, h: ph, min: xmin, max: xmax, log: xlog })
     if (!dry) {
-      if (ys.label) L.text.push(textSVG([{ s: ys.label, tone: 'dim' }], x, y, 'start', { size: fs - 1 }))
-      L.text.push(textSVG([{ s: yl[0], tone: 'dim' }], ox - 6, oy - lh / 2, 'end', { size: fs - 1 }))
-      L.text.push(textSVG([{ s: yl[1], tone: 'dim' }], ox - 6, oy + ph - lh / 2, 'end', { size: fs - 1 }))
-      L.mark.push(hl(ox, ox + pw, oy, 'rule', '·'))
-      L.mark.push(hl(ox, ox + pw, oy + ph, 'rule', '─'))
-      L.mark.push(vl(ox, oy, oy + ph, 'rule', '│'))
+      if (ys.label) L.text.push(textSVG([{ s: ys.label, tone: 'dim' }], x, y, 'start', { size: ns }))
+      yticks.forEach(v => {
+        const yy = row(v)
+        if (Math.abs(yy - (oy + ph)) > 0.5) L.mark.push(hl(ox, ox + pw, yy - 0.5, 'grid', '─'))
+        L.text.push(textSVG([{ s: fmtTick(v), tone: 'dim' }], ox - 6, yy - lh / 2, 'end', tick))
+      })
+      L.mark.push(hl(ox, ox + pw, oy + ph, 'axis', '─'))
       let ticks = []
       if (Array.isArray(xs.ticks)) ticks = xs.ticks
       else if (xlog) { for (let e = Math.ceil(Math.log10(xmin) - 1e-9); e <= Math.floor(Math.log10(xmax) + 1e-9); e++) ticks.push({ at: Math.pow(10, e) }) }
@@ -584,16 +622,16 @@ export function renderSvg(drawing, opts = {}) {
         if (!okX(t.at)) return
         const tx0 = col(t.at)
         if (tx0 < ox - 0.5 || tx0 > ox + pw + 0.5) return
-        L.mark.push(vl(tx0 - 0.5, oy + ph, oy + ph + 4, 'rule', '│'))
+        L.mark.push(vl(tx0 - 0.5, oy + ph, oy + ph + 4, 'axis', '│'))
         const s = t.label != null ? t.label : fmtTick(t.at)
-        const sw = mw(s, { size: fs - 1 })
+        const sw = mw(s, tick)
         if (tx0 - sw / 2 <= lastEnd + 6) return
-        L.text.push(textSVG([{ s, tone: 'dim' }], tx0, oy + ph + 2, 'middle', { size: fs - 1 }))
+        L.text.push(textSVG([{ s, tone: 'dim' }], tx0, oy + ph + 2, 'middle', tick))
         lastEnd = tx0 + sw / 2
       })
       if (xs.label) {
-        const sw = mw(xs.label, { size: fs - 1 })
-        if (ox + pw - sw > lastEnd + 10) L.text.push(textSVG([{ s: xs.label, tone: 'dim' }], ox + pw, oy + ph + 2, 'end', { size: fs - 1 }))
+        const sw = mw(xs.label, { size: ns })
+        if (ox + pw - sw > lastEnd + 10) L.text.push(textSVG([{ s: xs.label, tone: 'dim' }], ox + pw, oy + ph + 2, 'end', { size: ns }))
       }
       S.slice().reverse().forEach(s => {
         const P = s.pts.filter(p => okX(p[0])).sort((a, b) => a[0] - b[0])
@@ -601,8 +639,9 @@ export function renderSvg(drawing, opts = {}) {
         if (n.dots) { P.forEach(p => { if (p[1] !== null) L.mark.push(`<circle cx="${r1(col(p[0]))}" cy="${r1(row(p[1]))}" r="2.5" fill="${c}"/>`) }); return }
         let seg = []
         const flush = () => {
-          if (seg.length > 1) L.mark.push(`<polyline points="${seg.join(' ')}" fill="none" stroke="${c}" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round"/>`)
-          else if (seg.length === 1) { const [a, b] = seg[0].split(','); L.mark.push(`<circle cx="${a}" cy="${b}" r="2" fill="${c}"/>`) }
+          if (seg.length > 1) L.mark.push(`<polyline points="${seg.join(' ')}" fill="none" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`)
+          // a line of few points shows each point, as thimble's line charts do
+          if (seg.length === 1 || (seg.length > 1 && P.length <= 60)) seg.forEach(q => { const [a, b] = q.split(','); L.mark.push(`<circle cx="${a}" cy="${b}" r="${seg.length === 1 ? 2.25 : 2}" fill="${c}"/>`) })
           seg = []
         }
         P.forEach(p => { if (p[1] === null) flush(); else seg.push(`${r1(col(p[0]))},${r1(row(p[1]))}`) })
@@ -702,8 +741,9 @@ export function renderSvg(drawing, opts = {}) {
         case 'box': {
           const [, bx, by0, bw, bh0, tone, title, f] = op
           if (bw < 2 || bh0 < 2) break
-          // an opaque box covers the marks drawn before it (a callout); an open one is a frame under them
-          if (!dry) (f && f.fill ? L.mark : L.frame).push(`<rect x="${r1(X(bx) + cw / 2)}" y="${r1(Y(by0) + rh / 2)}" width="${r1((bw - 1) * cw)}" height="${r1((bh0 - 1) * rh)}" rx="5" fill="${f && f.fill ? C('paper') : 'none'}" stroke="${C(tone)}"/>`)
+          // an opaque box covers the marks drawn before it (a callout); an open one is a frame under them, tinted faintly in
+          // its own tone, as thimble's diagrams draw a node
+          if (!dry) (f && f.fill ? L.mark : L.frame).push(`<rect x="${r1(X(bx) + cw / 2)}" y="${r1(Y(by0) + rh / 2)}" width="${r1((bw - 1) * cw)}" height="${r1((bh0 - 1) * rh)}" rx="5" fill="${f && f.fill ? C('paper') : C(tone)}"${f && f.fill ? '' : ' fill-opacity=".06"'} stroke="${C(tone)}"/>`)
           if (title && bw > 6) {
             if (!dry) {
               const r = capPieces(textPieces(title), (bw - 6) * cw)
