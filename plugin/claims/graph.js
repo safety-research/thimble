@@ -5,11 +5,11 @@
 //                   asks Claude to add the claims of the whole folder (never a key, since it starts a turn)
 //   the graph       each claim a dot, the claims of a cluster together in the cluster's color under its name (each
 //                   cluster a rectangle of the graph, sized by how many claims it holds), in rows in the order they were
-//                   said; a hollow dot is a claim a later one corrected, a heavier one a claim said twice or more. For
-//                   the claim selected, a line joins it to each claim it is linked to (amber and dashed: the correction;
-//                   blue: supports or same topic; red: contradicts, from the folder's map; gray: cites the same rows),
-//                   and those dots are drawn bold. No other link is drawn, so the graph stays readable with a hundred
-//                   claims. The dots keep their places while the ring walks them.
+//                   said; a hollow dot is a claim a later one corrected, a heavier one a claim said twice or more. The
+//                   claims linked to the one selected are drawn bold on a tinted ground (amber: the correction; red: a
+//                   contradiction, from the folder's map; gray: supports, the same topic or the same rows). No line is
+//                   drawn, so the graph stays readable with a hundred claims or more. The dots keep their places while
+//                   the ring walks them.
 //   the claim       under the graph, the claim selected: its sentence (a press opens where it was said, over the pane, as
 //                   a citation opens), then its evidence (the rows each citation names, with their numbers, the values
 //                   it cites marked; a press opens the citation over the pane), then the claim that corrects it or that
@@ -59,8 +59,9 @@ export const nodeRegion = id => `n-${String(id).replace(/[^A-Za-z0-9_.:-]/g, '-'
 export const toneOf = i => `c${(Math.max(0, i) % 6) + 1}`
 /** A claim's dot: hollow once corrected, heavier when said twice or more. */
 export const dotOf = c => (c.revised_by ? '○' : (c.n || 1) >= 2 ? '◉' : '●')
-/** An edge's tone: a correction amber, a contradiction red, another link blue, the same rows gray. */
-export const edgeTone = e => (e.kind === 'corrects' ? 'warn' : e.kind === 'relates' ? (e.how === 'contradicts' ? 'bad' : 'accent') : 'ink')
+/** The tint of a claim linked to the one selected: amber for a correction, red for a contradiction, gray for any other
+ *  link (blue is the selection's own). */
+export const edgeTone = e => (e.kind === 'corrects' ? 'warn' : e.kind === 'relates' && e.how === 'contradicts' ? 'bad' : 'ink')
 
 /** Who said a claim and when, in a few words, for the thread's agent: `turn 2`, `turn 2 · you`, `the folder`. */
 export function whenOf(c) {
@@ -405,13 +406,14 @@ export function program(k, data) {
   k.on('up', step(-1), 'move')
   k.on('down', step(1), 'move')
   // ↵ presses what the ring is on (Claude Code's own press); the bar says what that does there
-  const enter = part === `fix-${other?.id}` ? (claim.revised_by ? 'the correction' : 'the claim it corrects') : /^ev-/.test(part) ? 'open the rows' : claim.folder && !(claim.said || []).some(x => x.row) ? 'open the rows' : 'where it was said'
+  // (one or two words whose first says it alone, since a narrow bar keeps only the first)
+  const enter = part === `fix-${other?.id}` ? (claim.revised_by ? 'correction' : 'earlier claim') : /^ev-/.test(part) || (claim.folder && !(claim.said || []).some(x => x.row)) ? 'rows' : 'message'
   k.on('return', () => null, enter)
   k.select(part)
 
   // ---- the claim selected, under the graph: its sentence, its evidence, the claim that corrects it or that it corrects
   const rowsFor = x => 1 + Math.min(MAX_SENTENCE, wrap(`${x.text} · ${saidWords(x)}`, W - 3).length) + evidenceHeight(evidenceOf(x)) + (x.revised_by || x.revises ? 1 : 0)
-  const panel = claimRows(k, { claim, tone, evidence, other, W })
+  const panel = claimRows(k, { claim, tone, evidence, other })
 
   // ---- the graph, in the rows left: the rows under it are those of the tallest claim's, so the graph keeps its size and
   // its dots their places while the ring walks them. A conversation under the pane takes about two fifths of the rows,
@@ -432,9 +434,9 @@ export function program(k, data) {
     const gg = groups.find(x => String(x.id) === nm.id)
     c.text(nm.x, nm.y, `{${toneOf(gg ? gg.i : 0)}:${k.escape(nm.name)}}`)
   }
-  // the claims linked to the one selected stand out on a tinted ground: amber for the correction, gray for the same
-  // rows, red for a contradiction, blue for any other link. No line is drawn: in rows of dots a line runs through the
-  // dots between its ends, and a hundred claims would hide under them
+  // the claims linked to the one selected stand out, bold on a tinted ground: amber for the correction, red for a
+  // contradiction, gray for any other link (support, the same topic, the same rows). No line is drawn: in rows of dots
+  // a line runs through the dots between its ends, and a hundred claims would hide under them
   const edges = data.edges || []
   const near = new Map()
   for (const e of edges) {
@@ -464,7 +466,7 @@ function headLine(k, data) {
 
 /** The claim selected, as rows under the graph: its sentence (a press opens where it was said), each row of its
  *  evidence (a press opens it), and the claim it corrects or that corrects it (a press selects it). */
-function claimRows(k, { claim, tone, evidence, other, W }) {
+function claimRows(k, { claim, tone, evidence, other }) {
   const e = k.escape
   const rows = [k.text(' ')]
   const who = saidWords(claim)

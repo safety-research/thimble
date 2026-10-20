@@ -316,8 +316,9 @@ test('the pane: the count, the graph with a dot per claim and each cluster named
   assert.equal(draw(data, { state: { claim: 'c3', part: 'n-c3', at: 1 } }).d.selected, 'n-c5')
   assert.equal(draw(data, { state: { claim: 'c3', part: 'n-c3', at: 2 } }).d.selected, 'n-c3')
   // its keys, as the side panel's bar names them (esc is the panel's own: back, then close): ↵ says what it does there
-  assert.deepEqual(keysOf(six.d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ where it was said'])
-  assert.deepEqual(keysOf(draw(data, { state: { claim: 'c5', part: 'fix-c1' } }).d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ the claim it corrects'])
+  assert.deepEqual(keysOf(six.d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ message'])
+  assert.deepEqual(keysOf(draw(data, { state: { claim: 'c5', part: 'fix-c1' } }).d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ earlier claim'])
+  assert.deepEqual(keysOf(draw(data, { state: { claim: 'c1', part: 'fix-c5' } }).d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ correction'])
 })
 
 test('the pane: the ring on a dot selects its claim; ↵ on it opens where it was said; its evidence is a table of the rows it cites; a correction goes to the other claim', () => {
@@ -352,7 +353,7 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it wa
   // the claims it is linked to are drawn bold on a tinted ground, with no line and no row of words
   const linked = run({ claim: 'c5' })
   const ops = linked.root.kids.find(n => n.t === 'canvas').ops
-  assert.ok(ops.some(o => o[0] === 'bg' && /accent-faint/.test(o[5])))
+  assert.ok(ops.some(o => o[0] === 'bg' && /-faint/.test(o[5])))
   assert.ok(!ops.some(o => o[0] === 'link'))
   assert.ok(!draw(data, { state: { claim: 'c5' } }).text.includes('Kestrel and Wren'))
   // a corrected claim names the claim that corrects it, and a press goes there

@@ -230,7 +230,7 @@ test('c opens the Claims pane in the side panel: the count, the graph of claims 
   expect(t).not.toContain('esc')
   const bar = await hint($)
   expect(bar).toContain('thimble:main/Claims')
-  expect(bar).toContain('↑↓ move · ↵ where it was said')
+  expect(bar).toContain('↑↓ move · ↵ message')
   expect(bar).toContain('type to ask about claim: The tilt is two editors')
 })
 
