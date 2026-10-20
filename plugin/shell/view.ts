@@ -185,7 +185,8 @@ export function messageEl(els: Any, given: MessageOpts): Any {
     push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0)
     i = j + 1
   }
-  // an explain whose term the rewrite left out: its term after the text, a press as in the text
+  // an explain whose term the rewrite left out, or whose term stands only in a citation's words: its term after the
+  // text, a press as in the text
   const loose = looseOf(o.rec.marks)
   if (loose.length) {
     const kids: Any[] = [els.Text({ dimColor: true, children: 'explain: ' })]
@@ -193,7 +194,7 @@ export function messageEl(els: Any, given: MessageOpts): Any {
       if (j) kids.push(els.Text({ dimColor: true, children: ' · ' }))
       kids.push(markEl(els, o, { s: String(o.rec.glosses?.[m.gloss]?.term || 'a term'), mark: m.i }, `${o.key}-loose-${j}`))
     })
-    kids.push(els.Text({ dimColor: true, children: ' (in the full answer)' }))
+    if (loose.some((m: Any) => !m.inLink)) kids.push(els.Text({ dimColor: true, children: ' (in the full answer)' }))
     push([Box({ flexDirection: 'row', flexWrap: 'wrap', children: kids })], true)
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })

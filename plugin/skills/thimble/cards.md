@@ -1,59 +1,61 @@
 # The card guide
 
-This guide says what makes a good card, lists the toolkit a card's program is made of, and ends with examples.
+This guide says what makes a good card, lists the toolkit a card's program is made of, and ends with worked programs
+to adapt.
 
 ## What makes a good card
 
-A good card asks one clear question, shows content that fits that question exactly, and has a takeaway that answers
-it. The common failures in the question and the content are a question that asks several things, content that shows
-something other than what the question asks, and a question in jargon the analyst has not used. The common failures in
-the takeaway are one that does not answer the question, one that claims what the card does not show, one that claims
-more than the data holds, and one crowded with numbers, and the four points below take them in turn.
+A card shows the analyst one finding: a question, the content that shows the answer, and a takeaway that answers the
+question in a sentence or two, in words the analyst knows. The analyst reads the question and the takeaway, then checks
+the takeaway against the content. So the takeaway claims only what the card shows and no more than the data holds, and
+gives the one or two numbers it rests on, each with its base, as in "26 of the 53". A caveat comes after the answer,
+and only when it changes what they would conclude.
 
-- **It answers the question first, in words the analyst knows.** The analyst reads the question and the takeaway and
-  moves on, so an answer they have to dig out of the content, or a caveat in its place, leaves them without one. A
-  caveat comes after the answer, and only when it changes what they would conclude.
-- **It claims only what the card shows.** The analyst checks each claim against the content, and a claim they cannot
-  find there they must take on trust or read as a mistake. The card shows less than your output: long labels are cut,
-  a wide table is cut at the card's edge, and a record shows only its opening unless you quote the passage. So quote
-  the passage the takeaway rests on, keep a table to the columns the takeaway uses, or leave the claim out. Quote words
-  exactly as the record has them.
-- **It claims no more than the data holds.** Compute a claim about every record or about order, and any total, first
-  or last, over every record rather than reading it off a chart, and check it against the card's own dates and values.
-  When it holds for most, say how many, as in "26 of the 53".
-- **It gives the one or two numbers the answer rests on, each with its base.** The analyst cannot take in four numbers
-  in one sentence or judge a count without its base, and the rest are on the card.
+```
+Analyst   Which bus lines run late most often?
+Good      takeaway   Line 12 Harbor ran late most often, on [212](r4#line=line-12-harbor@late) of its 930 trips,
+                     nearly twice the share of the next line.
+Bad       takeaway   Line 12 was late on 212 trips (22.8%), Line 7 on 118 and Line 30 on 97, with a mean of 3.4
+                     minutes late (sd 2.9).
+```
 
-**Be creative about how you present the content, since the right form lets the analyst see the answer immediately and
-the wrong one hides it.** There are no card kinds: you compose the form from the toolkit's parts.
-- Bars or a plot for a pattern, a trend or a comparison. People read lengths and positions most accurately, so give
-  each value as a number and let the toolkit draw it. Name each color where it stands, such as a bar part's `label`.
-- A table when exact values matter, kept to a few short columns and rows named by what they are. Large tables will not
-  fit on a card, and the analyst cannot read them at a glance.
-- Real records, since one instance makes a pattern believable. Quote the passage that makes the point, and attach more
-  records to a part with `k.examples`; the analyst opens them when they select it.
-- A timeline for a sequence of events, a causal chain or a story, with about a dozen events at most, each named in a
-  few words. One long run reads as its stations in order (`k.map`), and several runs as strips on one axis, so the
-  same moment lines up.
-- A diagram for how things branch and connect, drawn on the canvas. Steps in a straight line read better as a timeline.
-- A total the analyst should take apart, as the pieces that add up to it. A result that rests on a choice, such as a
-  threshold, with the choice as a knob, so the analyst sees how the answer changes when they turn it.
+The bad takeaway gives six numbers, two of them without a base, so the analyst cannot tell which line is late most
+often for its size.
 
-**Show the whole first, and the details on demand.** Under your reply the card has about half a screen, and the detail
-view (`k.mode === 'detail'`) has more room for more of the same. The analyst opens a part to read its records, so the
-card itself does not list them.
+**Let the shape of the claim choose the form.** There are no card kinds: you compose the form from the toolkit's parts,
+and the right form lets the analyst see the answer at once. People read lengths and positions most accurately, so give
+each value as a number and let the toolkit draw it.
+- Counts by group read as bars, a trend as a plot, and exact values as a short table with a few columns.
+- One long run reads as its stations in order (`k.map`), and several runs as strips on one axis, so the same moment
+  lines up.
+- How parts connect, such as the modules of a codebase or the steps of a pipeline, reads as a diagram on the canvas.
+  A change to files reads as a map of where it touched them.
+- A total the analyst should take apart reads as the pieces that add up to it. A result that rests on a choice, such
+  as a threshold, reads best with the choice as a knob, so the analyst sees the answer change as they turn it.
+- A why question wants a story, a timeline or a diagram, more than a count. Real records make a pattern believable:
+  quote the passage that makes the point.
 
-**Use color to make what the question needs stand out, one encoding at a time.** The analyst's attention is limited,
-and many colors at once overload them. Gray (`dim`) is for context, for "other" and for what is turned off. Draw what
-you did not read with `k.unseen()`, so a gap does not read as a zero.
+**Every part the analyst can select opens what it stands for.** Draw the whole first, and let the analyst open a part
+for its records. A part they may ask about is a region whose meta names what it stands for: a query row, a record, or
+the lines of a file (`ref: 'server/auth.py#L60-94'`). A part drawn from a row of a bound query output opens that row's
+records by itself. A part that looks selectable and opens nothing leaves the analyst unsure what went wrong, so give
+each region a ref, a cite or examples, or draw it as plain text.
 
-**Choose a sequence of cards with the same care as a single card.** When a question takes several steps, or one card
-raises the next question, answer with as few cards as the question needs, and give the answer itself in your reply. A
-card should show a single finding, not your process. Say how you worked in a sentence. The analyst can follow three or
-four cards that build on each other, and cannot follow ten. Usually lead with the card that answers the question most
-directly, then the pattern and the examples that support it. When the answer would not make sense on its own, lead
-instead with a card that builds their intuition, such as a few real records or the shape of the data. A why question
-wants a story, such as a timeline or a diagram, more than a count.
+**Use color for what the question needs, one encoding at a time.** Gray (`dim`) is for context and for "other". Name
+each color where it stands, such as a bar part's `label`. Draw what you did not read with `k.unseen()`, so a gap does
+not read as a zero.
+
+**Answer with as few cards as the question needs.** Under your reply a card has about half a screen, and the detail
+view (`k.mode === 'detail'`) has more room for more of the same. Lead with the card that answers most directly, then
+the pattern or the records that support it: three or four cards that build on each other are easy to follow, and ten
+are not. Say how you worked in a sentence, not in a card.
+
+**A guide is one card with pages.** When the analyst asks to be taught something (an introduction, a tour, a
+textbook), make one card whose page knob holds the chapters, as in `k.knob('chapter', { values: [1, 2, 3], label:
+'chapter', fmt: v => `${v} of 3`, pages: true })`, and draw each page from the knob's value alone. Teach one idea per
+page with a picture, such as a diagram of the parts, a flow, bars of sizes or a real record, and two or three sentences
+that walk through it, with the parts of the picture opening the lines or rows behind them. A page of bullet points reads
+as notes, not as a lesson. The dial and the bar turn the pages, so give the card no page keys and no key hints.
 
 ## The toolkit
 
@@ -102,13 +104,6 @@ thread. A card gets its keys while it has the focus, and the bar shows each with
 `c flip · , . year`, so the card draws no key hints. Claude Code keeps ← and → in the terminal, and `0` goes back, so a
 card never gets them; `thimble save` names a key a card cannot get.
 
-**A guide is one card with pages.** When the analyst asks to be taught something in steps (an introduction, a tour, a
-textbook), make one card whose page knob holds the chapters, as in `k.knob('chapter', { values: [1, 2, 3], label:
-'chapter', fmt: v => `${v} of 3`, pages: true })`, and draw each page from the knob's value alone. Under your reply
-the card shows one page, and the analyst reads all the pages one after another in the detail view. The dial and the
-bar turn the pages, so give them no keys of your own, and write no hints such as "Press n for the next chapter" or
-"Select a step to see its code" in the card or in your reply.
-
 **A map of work.** `k.map(spec, { full, lens })` lays work out by its own structure: `threads` (runs, agents) with their
 `stops` or `moves`, `stations`, `links`, `groups`, and a `lens`, the thread field that colors the lanes. One thread draws
 as a line of its stations, many as lanes that split and merge, and stations with no threads as boxes. Under a reply it
@@ -132,88 +127,11 @@ the error and what to fix, and warnings come back with the drawing. To check a k
 run the saved card with an event: `node ../../draw/cli.mjs thimble/objects/<id>.json --text --event
 '{"type":"key","key":"f"}'`.
 
-## Examples
+## Worked programs
 
-```
-Analyst   What caused most of last quarter's outages?
-          question   What caused the outages written up in postmortems from July to September?
-          content    bars of postmortems per cause, from a label that sorts each postmortem by the cause it names
-Good      takeaway   Most outages were caused by configuration changes, 14 of the 22 postmortems that name a cause.
-                     The other 9 of the 31 name none.
-Bad       takeaway   The postmortems follow three different templates, and 9 of the 31 name no cause, so causes are
-                     hard to compare across teams.
-```
+Examples to adapt, not templates: each shows another form on another kind of data. Each program's data is in `forms/<name>.data.json` beside this file.
 
-The bad takeaway describes the data instead of answering the question, the first failure, although its own chart
-answers plainly.
-
-```
-Analyst   Show me a run where the agent deleted a failing test instead of fixing the code.
-          question   What did the agent do when the date test kept failing in run 41?
-Good      content    the three transcript records where the test fails, the agent says it will remove the test, and
-                     it deletes the file, each quoted
-          takeaway   After the date test failed twice, the agent wrote "this test is flaky, removing it" and deleted
-                     the test file.
-Bad       content    the first record of run 41, which shows only the task statement
-          takeaway   (the same)
-```
-
-The takeaways are the same, but the bad card does not show what its takeaway claims, the second failure. It shows only
-how the run begins, so the analyst finds neither the failure nor the deletion on it.
-
-```
-Analyst   Did the new permit rule stop the late-night construction complaints?
-          question   How many late-night construction complaints came in each week before and after the permit rule
-                     of June 1?
-          content    complaints per week from April to August, with June 1 marked
-Good      takeaway   Mostly. They fell from about 40 a week before the rule to about 6 a week after it, and some still
-                     came in every week to the end of August.
-Bad       takeaway   Yes. They fell from about 40 a week before the rule to none from June 1 on.
-```
-
-The bad takeaway claims more than the data holds, the third failure. It says none came after June 1, while its own
-chart shows a few every week.
-
-```
-Analyst   Which bus lines run late most often?
-          question   Which bus lines ran more than five minutes late most often in March?
-          content    a sorted bar chart of the share of late trips per line, the bars named by line, such as Line 12
-                     Harbor, not by route ids like rt_0012_v3
-Good      takeaway   Line 12 Harbor ran late most often, on [212](r4#line=line-12-harbor@late) of its 930 trips,
-                     nearly twice the share of the next line.
-Bad       takeaway   Line 12 was late on 212 trips (22.8%), Line 7 on 118 and Line 30 on 97, with a mean of 3.4
-                     minutes late (sd 2.9).
-```
-
-The bad takeaway crowds in six numbers, the fourth failure, and two of its counts have no base, so the analyst cannot
-tell which line is late most often for its size.
-
-```
-Analyst   Why did refunds jump in March?
-Good      reply   Refunds jumped in March because a shipment of X200 chargers delivered at the end of February began
-                  failing in the first days of March, and nearly all of the extra refunds are for those chargers.
-          cards   1  timeline   the shipment, the first failure reports, the refunds
-                                Batch 17 shipped on February 24, failure reports began on March 2 and refunds peaked
-                                on March 10.
-                  2  bars       refunds per week by product: The jump is all X200, from 20 a week to 140 after March 3.
-                  3  records    three March X200 refund tickets, quoted: Each says the charger stopped working within
-                                days.
-Bad       reply   I loaded the 4,120 tickets, ran describe() on the table and grouped refunds by product, week and
-                  day. Refunds rose from 118 in February to 612 in March (+418.6%). The X200 accounts for 548 of the
-                  March refunds (89.5%), and the daily count peaked at 31 on March 10. See the cards for the analysis.
-          cards   1  describe() of the ticket table   2  refunds by product and week, 60 rows   3  refunds per day
-                  4  refunds by shipment batch         5  a summary note
-```
-
-The bad reply retells the work and lists numbers instead of answering, the cards follow the order the work was done
-in, and no card says why. The analyst has to piece the answer together from cards 3 to 5.
-
-### Four programs
-
-Each program's data is in `forms/<name>.data.json` beside this file.
-
-Bars split by a label. Each day is a part that opens its records and real saves when the analyst selects it, and each
-piece is named where it stands.
+Counts by group, split by a label (edits to a wiki per day, by what each edit was for). Each day is a part that opens its records and real edits, and each piece is named where it stands.
 
 ```js
 const P = [['ask', 'c1'], ['instruct', 'c3'], ['share', 'c2'], ['test', 'c5']]
@@ -228,57 +146,111 @@ return k.stack(
 )
 ```
 
-A total taken apart. How to split it is a choice, so it is a knob, and the card checks that the pieces add up to the
-total.
+A trend and the moment that changed it (p95 latency of a service per hour, two regions, a deploy). The deploy sits on the axis where it landed, and each line opens its rows.
 
 ```js
-const by = k.knob('by', { values: Object.keys(data.splits), at: 'purpose', label: 'unfold by' })
-const parts = data.splits[by]
-const sum = parts.reduce((s, p) => s + p.n, 0)
+const d = data.deploy
 return k.stack(
-  k.beside(k.text(`**${k.fmt(data.total)}** ${data.what}`), k.dial('by'), { gap: 3 }),
-  k.bars(parts.map(p => ({ id: `${by}-${p.key}`.toLowerCase().replace(/[^a-z0-9_.:-]+/g, '-').slice(0, 60), label: p.key, value: p.n,
-    note: `${Math.round(p.n / data.total * 100)}%`,
-    meta: { ref: p.ref, examples: data.examples[p.key] && k.examples('ex-' + p.key, { label: `saves that ${p.key}`, records: data.examples[p.key], fmt: '“{text}”\n{user}' }) } }))),
-  k.text(sum === data.total ? `{dim:${parts.map(p => k.fmt(p.n)).join(' + ')} = ${k.fmt(sum)}}` : `{warn:the pieces add to ${k.fmt(sum)}, not ${k.fmt(data.total)}}`),
+  k.text(`eu-west's p95 rose from **${data.before} ms** to **${data.after} ms** after ${d.version} went out, and us-east stayed flat`),
+  k.plot(data.regions.map((r, i) => ({ id: 'region-' + r.name, name: r.name, tone: i ? 'c3' : 'c1', points: r.hours.map(h => [h.hour, h.p95]), meta: { label: `${r.name}, p95 per hour`, ref: `r2#region=${r.name}@p95` } })),
+    { h: k.mode === 'detail' ? 14 : 8, x: { label: 'hours from Jun 17 00:00', min: 0, max: 72, ticks: [0, 24, { at: d.hour, label: `▲ ${d.version}` }, 72] }, y: { label: 'p95 ms', min: 0 } }),
+  k.region('deploy', { label: `${d.version} deployed ${d.label}`, ref: d.ref }, k.text(`{warn:▲} ${d.version} deployed ${d.label}`)),
 )
 ```
 
-Several runs on one axis. No helper has this shape, so it is drawn on a canvas: one strip per run, each cell what the
-run was doing at that share of its steps.
+Real records, quoted (support tickets). The passage of each record that makes the point, with what the analyst needs to place it; each opens the record.
 
 ```js
-const tone = { read: 'c4', search: 'c3', edit: 'c2', test: 'c1', rerun: 'c5' }
-const W = Math.min(k.w - 18, 100)
-const rows = data.runs.map(r => {
-  const c = k.canvas(W, 1)
-  for (let x = 0; x < W; x++) c.put(x, 0, '▆', tone[r.buckets[Math.floor(x / W * r.buckets.length)]])
-  const share = r.buckets.filter(b => b === 'rerun').length / r.buckets.length
-  return k.region('run-' + r.id, { label: `${r.id}: ${r.outcome}, ${Math.round(share * 100)}% reruns`, ref: `r7#run=${r.id}@steps`,
-    examples: data.examples[r.id] && k.examples('ex-' + r.id, { label: `${r.id}'s key steps`, records: data.examples[r.id] }) },
-    k.beside(k.text(`**${r.id}**`, { w: 4 }), c, k.text(r.outcome, { w: 8, tone: r.outcome === 'fixed' ? 'good' : 'bad' }), { gap: 1 }))
-})
 return k.stack(
-  k.text(`${data.runs.length} runs, each scaled to its own length · ${Object.entries(tone).map(([a, t]) => `{${t}:■} ${a}`).join('  ')}`),
-  ...rows,
-)
+  k.text(`**${k.fmt(data.n)}** of the ${k.fmt(data.total)} March refund tickets name the X200 charger. Three of them:`),
+  ...data.tickets.map(t => k.region('ticket-' + t.id, { label: `ticket ${t.id}, ${t.date}`, ref: t.ref },
+    k.beside(k.text('{c1:▎}', { w: 1 }), k.stack(k.text(`“${k.escape(t.quote)}”`, { wrap: true }), k.text(`{dim:${t.id} · ${t.date} · ${t.outcome}}`)), { gap: 1 }))),
+  { gap: 1 })
 ```
 
-One long run, as its stations in order. A query gives each step of agent-05's run a station, by step ranges you
-chose after reading the run, with one output row per station (`thread`, `station`, `start`, `end` and its records).
-`k.map` draws the stations in order, each as wide as its share of the steps, and each opens its records. The card's data
-is the spec, with the query's output bound as `moves`:
-
-```json
-{"title": "agent-05 · 143 tool calls", "unit": "calls", "threads": [{"id": "agent-05", "steps": 143}], "moves": "r1",
- "stations": [{"id": "orient", "label": "reads the board"}, {"id": "fix-a", "label": "fixes PR #66708", "note": "edits, runs pytest 6 times"},
-  {"id": "review", "label": "reviews #66534"}, {"id": "fix-b", "label": "fixes PR #66763"}, {"id": "merge", "label": "merges", "mark": "✓"},
-  {"id": "tidy", "label": "cleans up"}]}
-```
+One long run as its stations in order (an agent's transcript), each as wide as its share of the steps and each opening its lines. The data is the map's spec: the thread, its moves, and stations named after reading the run.
 
 ```js
 return k.frame(k.map(data), { title: data.title })
 ```
 
-Under the reply it reads `reads the board ─ fixes PR #66708 ────── reviews #66534 ─ fixes PR #66763 ─ merges ✓ ─ cleans up`.
-Many runs draw as lanes that split at the stations where they differ, colored by the thread field you name as `lens`.
+A table kept small (a training sweep): six rows, four columns, the best row marked, each row opening its run.
+
+```js
+const best = data.runs.reduce((a, b) => (b.acc > a.acc ? b : a))
+return k.stack(
+  k.text(`The best run, **${best.run}**, reached ${best.acc}% with Adam at learning rate ${best.lr}`),
+  k.table(data.runs.map(r => ({ ...r, note: r === best ? 'best' : r.acc < 75 ? 'diverged' : '' })), {
+    cols: [{ key: 'run' }, { key: 'lr', label: 'learning rate', fmt: v => String(v) }, { key: 'batch' },
+      { key: 'acc', label: 'val acc %', fmt: v => v.toFixed(1) }, { key: 'note', label: '', tone: v => (v === 'best' ? 'good' : 'bad') }],
+    id: r => 'run-' + r.run }),
+)
+```
+
+A knob that changes the answer (CI jobs that hung): the count rests on a threshold, so the threshold is a knob, and the strips and the count follow it.
+
+```js
+const t = k.knob('quiet', { values: [2, 5, 10, 20], at: 5, label: 'hung after', fmt: v => `${v} min quiet` })
+const W = Math.max(20, Math.min(k.w - 20, 70))
+const hung = data.jobs.filter(j => j.gaps.some(g => g.min >= t))
+return k.stack(
+  k.beside(k.text(`**${hung.length}** of ${data.jobs.length} jobs hung`), k.dial('quiet'), { gap: 3 }),
+  ...data.jobs.map(j => {
+    const c = k.canvas(W, 1)
+    c.fill(0, 0, W, 1, '─', 'unseen')
+    for (const g of j.gaps) {
+      const x = Math.min(W - 1, Math.floor(g.at / j.minutes * W))
+      c.fill(x, 0, Math.max(1, Math.min(W - x, Math.round(g.min / j.minutes * W))), 1, '█', g.min >= t ? 'bad' : 'c4-faint')
+    }
+    const longest = Math.max(...j.gaps.map(g => g.min))
+    return k.region('job-' + j.id, { label: `${j.id}: quiet for ${longest} min at most`, ref: j.ref },
+      k.beside(k.text(j.id, { w: 10 }), c, k.text(longest >= t ? '{bad:hung}' : '{dim:ran}', { w: 5 }), { gap: 1 }))
+  }),
+)
+```
+
+A guide in pages (a tour of a codebase): one idea per page, each a picture whose parts open the lines or rows behind them, and a few sentences that walk through it.
+
+```js
+const n = data.chapters.length
+const ch = k.knob('chapter', { values: data.chapters.map((_, i) => i + 1), label: 'chapter', fmt: v => `${v} of ${n}`, pages: true })
+const c = data.chapters[ch - 1]
+const w = Math.max(14, Math.min(24, Math.floor((k.w - 3 * (c.steps?.length || 1)) / (c.steps?.length || 1))))
+const picture = c.sizes
+  ? k.bars(c.sizes.map(s => ({ id: 'size-' + s.id, label: s.label, value: s.lines, meta: { label: s.label, ref: s.ref } })))
+  : k.beside(...c.steps.map((s, i) => k.region('step-' + s.id, { label: s.label, ref: s.ref },
+      k.frame(k.text(s.does, { wrap: true, w: w - 2 }), { title: `${i + 1} ${s.label}`, tone: s.tone }))), { gap: 1 })
+return k.stack(k.text(`**${c.title}**`), picture, k.text(c.text, { wrap: true }), { gap: 1 })
+```
+
+## A sequence of cards
+
+When a question takes several cards, their order is part of the answer. Lead with the card that gives the analyst the picture they need, then the finding, then the records that make it believable.
+
+```
+Analyst   Why did refunds jump in March?
+Reply     Refunds jumped because a batch of X200 chargers shipped on Feb 24 began failing in the first days of March,
+          and nearly all of the extra refunds are for those chargers.
+Cards     1  timeline   the shipment, the first failure reports, the peak and the recall, in order (the program below)
+          2  bars       refunds per week by product: the jump is all X200, from about 20 a week to 140 after Mar 3
+          3  records    three March X200 tickets, quoted: each says the charger died within days
+```
+
+The timeline of the first card:
+
+```js
+const W = Math.max(30, Math.min(k.w, 96)), n = data.events.length
+const x = day => Math.round((day - data.from) / (data.to - data.from) * (W - 1))
+const c = k.canvas(W, n + 2)
+c.hline(0, 0, W, '─', 'dim')
+c.text(0, n + 1, data.start, { tone: 'dim' })
+c.text(W - 1, n + 1, data.end, { tone: 'dim', align: 'right' })
+// the ticks and their stems first, then the labels over them, so no stem cuts a label
+data.events.forEach((e, i) => { c.put(x(e.day), 0, '●', e.tone); if (i) c.vline(x(e.day), 1, i, '│', 'dim') })
+data.events.forEach((e, i) => {
+  const left = Math.max(0, Math.min(x(e.day), W - e.label.length))
+  c.text(left, i + 1, e.label, { tone: e.tone === 'dim' ? 'ink' : e.tone })
+  c.region('event-' + i, left, i + 1, e.label.length, 1, { label: e.label, ref: e.ref })
+})
+return c
+```

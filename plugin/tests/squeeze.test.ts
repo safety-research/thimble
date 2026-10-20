@@ -27,6 +27,8 @@ function world(on: any, replies: (string | Record<string, unknown>)[] = [], hold
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
     if (/\/prompts\/squeeze\/v\d+\.md$/.test(e.path)) return { value: 'THE PROMPT' }
+    // the observer's frame, so its look after a turn is known and left out of the calls counted here
+    if (/\/prompts\/observer\/v\d+\.md$/.test(e.path)) return { value: 'FRAME {{LENSES}} {{SKELETON}}' }
     if (e.path.endsWith('/squeeze/settings.json')) return { value: '{"model": "sonnet", "effort": "low"}' }
     return { value: files[e.path] ?? '' }
   })
@@ -51,6 +53,8 @@ function world(on: any, replies: (string | Record<string, unknown>)[] = [], hold
   // the model: each call answers with the next reply given, and is kept for the test to read
   const calls: Any[] = []
   on('model.complete', async (_$: unknown, e: Any) => {
+    // the observer's look after a turn answers with nothing here, and is not one of the calls these tests count
+    if (/\bFRAME\b|thimble's observer/.test(JSON.stringify(e.system ?? ''))) return { value: { isAnswered: true, text: '{}', usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }
     calls.push(e)
     // a reply on its way until the test lets it come
     if (hold) await hold

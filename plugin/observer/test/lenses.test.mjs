@@ -96,7 +96,9 @@ test('the notes, actions, squeeze and explain lenses each put their part where i
   assert.equal(s.ctx.verbs.s.lit, false)
   const g = { term: 'p95', body: 'b' }
   assert.deepEqual((await merge('explain', { glosses: [g] })).ctx.glosses, [g])
-  assert.deepEqual((await merge('explain', { glosses: [g] }, { glossSkip: 2 })).ctx.glosses, [])
+  // backing off, a look gives at most one explain
+  const g2 = { term: 'canary', body: 'c' }
+  assert.deepEqual((await merge('explain', { glosses: [g, g2] }, { glossSkip: 2 })).ctx.glosses, [g])
   // when lit with no proposal and no note, v stays dim
   assert.deepEqual((await merge('actions', { verbs: { v: { proposals: [] } } })).ctx.verbs, {})
 })

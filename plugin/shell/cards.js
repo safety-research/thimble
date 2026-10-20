@@ -26,7 +26,7 @@
 // A card is drawn part by part (`parts`, each a program and its data), a blank row between parts.
 // `links` are the nested marks a card holds, in reading order: [{id, ref, label}]. Their words carry a small digit
 // (² ³ ⁴), the key that opens one from an empty prompt; 1 is the tray's ask.
-import { isRef } from './object.js'
+import { citeRef } from './object.js'
 import { seriesRef } from './message.js'
 
 const SUP = ['¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹']
@@ -51,8 +51,8 @@ export function cardKind(ref) {
 export function linksIn(md) {
   const out = []
   for (const m of String(md || '').matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
-    const ref = String(m[2]).trim()
-    if (!isRef(ref) || out.some(x => x.ref === ref)) continue
+    const ref = citeRef(m[2])
+    if (!ref || out.some(x => x.ref === ref)) continue
     out.push({ id: `n${out.length + 1}`, ref, label: String(m[1]).replace(/[*_`]/g, '') })
   }
   return out.slice(0, SUP.length - 1)
@@ -66,7 +66,7 @@ export function linkedText(md, links) {
   const s = String(md || '')
   for (const m of s.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
     out += esc(s.slice(i, m.index)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
-    const k = links.findIndex(x => x.ref === String(m[2]).trim())
+    const k = links.findIndex(x => x.ref === citeRef(m[2]))
     out += k >= 0 ? `[${esc(String(m[1]).replace(/[*_`]/g, ''))}${SUP[k + 1]}](#${links[k].id})` : esc(m[1])
     i = m.index + m[0].length
   }

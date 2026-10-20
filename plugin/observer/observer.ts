@@ -70,12 +70,11 @@ const TRAY = { plugin: 'thimble', key: 'tray' } as const
 const LONG_ANSWER = 800 // characters: a turn that ran no tool is substantial when its answer is this long
 const CONTEXT_OBJECTS = 4 // objects the fork reads: every new one, then the latest older ones up to this many
 const STEPS_BUDGET = 24000 // characters of the turn's words and tool calls the pass reads, the latest calls kept longest
-const K = {
-  // glosses: the terms the person saw explained (never glossed again), looks whose glosses nobody opened, looks to skip
-  glossed: 'observer.glossed', glossUnopened: 'observer.glossUnopened', glossSkip: 'observer.glossSkip',
-}
+// explains, per session (kept in the session's file, so another session or another folder starts afresh): the terms the
+// person saw explained (never explained again in this session), the looks whose explains nobody opened, and the looks
+// still to come that give at most one
 const GLOSSED_KEEP = 100
-const GLOSS_FREE = 2 // looks whose glosses nobody opened before glosses back off
+const GLOSS_FREE = 2 // looks whose explains nobody opened before explains back off to one a look
 export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2 ** (n - GLOSS_FREE - 1)))
 
 const S = {
@@ -98,6 +97,10 @@ const S = {
   again: null as Look | null,
   log: [] as Record<string, unknown>[],
   failedWhy: '', // why the last pass failed, as said in its toast: the same reason is not said again
+  glossed: [] as string[],
+  glossUnopened: 0,
+  glossSkip: 0,
+  glossOpenedAt: 0, // the person's last open of an explain the observer has counted
 }
 
 // the looks to come and the one running: a promise that settles when the last of them has ended, so a squeeze step
@@ -138,6 +141,9 @@ async function ensure($: Engine): Promise<void> {
         const kept = JSON.parse(String(await $.fs.read(S.file)))
         S.log = Array.isArray(kept.log) ? kept.log : []
         S.notesGiven = strs(kept.notesGiven)
+        S.glossed = strs(kept.glossed)
+        S.glossUnopened = num(kept.glossUnopened)
+        S.glossSkip = Math.min(8, num(kept.glossSkip))
         // a reload mid-session: the notes not yet delivered wait again, and the person's questions come back
         const delivered = new Set(S.log.filter(r => r.kind === 'notes_delivered').flatMap(r => strs(r.notes)))
         const added = S.log.filter(r => r.kind === 'look').flatMap(r => (Array.isArray(r.notes_added) ? (r.notes_added as Note[]) : []))
@@ -156,7 +162,7 @@ async function ensure($: Engine): Promise<void> {
 async function save($: Engine): Promise<void> {
   if (!S.file) return
   try {
-    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), log: S.log.slice(-400) }, null, 1))
+    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), glossed: S.glossed.slice(-GLOSSED_KEEP), glossUnopened: S.glossUnopened, glossSkip: S.glossSkip, log: S.log.slice(-400) }, null, 1))
   } catch {
     // the file is memory for a resume and a record for measuring; the observer works without it
   }
@@ -270,8 +276,11 @@ async function look($: Engine, t: Look): Promise<void> {
     const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through thimble)'
 
     // 2. the pass: the state each lens needs, the lenses enabled, one call
-    const glossed = strs(await $.store.get(K.glossed))
-    const glossSkip = Math.min(8, num(await $.store.get(K.glossSkip)))
+    // an explain the person opened since the last look (the shell sets glossOpened): the backoff starts over
+    const opened = num((await $.state.get({ plugin: 'thimble', key: 'glossOpened' })).value)
+    if (opened > S.glossOpenedAt) Object.assign(S, { glossOpenedAt: opened, glossUnopened: 0, glossSkip: 0 })
+    const glossed = S.glossed.slice()
+    const glossSkip = S.glossSkip
     const msgs = (await $.session.messages().catch(() => [])) as Any[]
     const frame = await promptText($, 'observer')
     const parts: { lens: Any; text: string; id: string }[] = []
@@ -392,11 +401,10 @@ async function look($: Engine, t: Look): Promise<void> {
       row.v_lit = v ? { note: v.note ?? '', proposals: v.proposals ?? [] } : null
       row.glosses = placed
       if (placed.length) {
-        await $.store.set(K.glossed, [...glossed, ...placed].slice(-GLOSSED_KEEP))
-        const n = num(await $.store.get(K.glossUnopened)) + 1
-        await $.store.set(K.glossUnopened, n)
-        await $.store.set(K.glossSkip, glossSkipsFor(n))
-      } else if (glossSkip > 0) await $.store.set(K.glossSkip, glossSkip - 1)
+        S.glossed = [...glossed, ...placed].slice(-GLOSSED_KEEP)
+        S.glossUnopened += 1
+        S.glossSkip = glossSkipsFor(S.glossUnopened)
+      } else if (glossSkip > 0) S.glossSkip = glossSkip - 1
     }  } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
@@ -583,7 +591,7 @@ export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', enabled: true, model: '', turnId: '', turnNo: 0, steps: 0, tools: 0,
     turnStart: 0, running: false, since: 0, prompt: { text: '', typed: true, verb: '' }, questions: [], notesGiven: [], pending: [], looking: false, again: null,
-    log: [], failedWhy: '',
+    log: [], failedWhy: '', glossed: [], glossUnopened: 0, glossSkip: 0, glossOpenedAt: 0,
   })
   carrying = []
   lookEnded()

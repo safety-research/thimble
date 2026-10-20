@@ -359,7 +359,7 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   expect(w.events.every(e => e.file === file)).toBe(true)
   const prompts = w.events.find(e => e.kind === 'prompts')!
   expect((prompts.active as Json).observer).toBe('v3-low')
-  expect((prompts.active as Json)['lens-explain']).toBe('v3')
+  expect((prompts.active as Json)['lens-explain']).toBe('v4')
   // one call after the turn: no question step
   expect(w.events.some(e => e.kind === 'call' && e.feature === 'question')).toBe(false)
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!

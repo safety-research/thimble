@@ -928,8 +928,8 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
   await setCardFocus($, null)
   await setTray($, trayOpen(trayFrameOf(rec, i)) as Tray)
   await $.state.set(SELROW, row === (await restRow($)) ? null : row)
-  // a gloss opened: the observer's backoff for glosses starts over
-  if (m.kind === 'gloss') await $.store.set('observer.glossUnopened', 0)
+  // a gloss opened: the observer's backoff for glosses starts over (the observer reads it at its next look)
+  if (m.kind === 'gloss') await $.state.set({ plugin: 'thimble', key: 'glossOpened' }, Date.now())
   // the mark in view, when a key opened it (it may be in a message above the screen)
   await revealMark($, rec!, i)
 }
@@ -1064,7 +1064,9 @@ async function drawPart($: Engine, part: { program: string; data: unknown; id?: 
 /** A citation's card spec (cards.js citeCard): the ref resolved, the query's record or the code file's lines read, as
  *  the person's own reads. */
 async function sourceSpec($: Engine, ref: string, label: string, room: number): Promise<Any> {
-  const root = await rootHere($)
+  // a file's rows or lines need no thimble/ folder: with none yet (a codebase Claude only read), they are read from the
+  // folder the session works in; a query's or a card's value needs the folder that keeps it
+  const root = (await rootHere($)) || (/^(?:[qr]\d+(?:[#@]|$)|obj:|card:)/.test(ref) ? null : String(await $.session.cwd()).replace(/\/+$/, '') || null)
   if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run thimble in the data folder first` }
   return citeCard({ ref, label, root, room }, { resolve: (r: string, n: number, l?: string) => resolveJson($, root, r, n, l), read: (p: string) => $.fs.read(p) })
 }

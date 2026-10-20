@@ -15,7 +15,7 @@ export type Said = { verb: string; text?: string; error?: string; running?: bool
 
 
 /** One mark in a message (CONTRACT 1): a citation, a gloss or a sparkline, as offsets into the shown markdown. */
-export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; anchor?: 'form' | 'word' }
+export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; inLink?: boolean; code?: boolean; anchor?: 'form' | 'word' }
 
 /** A gloss the observer wrote for a message: the term as it stands in the text, what it is, where it mattered here. */
 export type Gloss = { term: string; title?: string; body?: string; here?: string; program?: string; refs?: string[] }
@@ -122,6 +122,8 @@ declare module 'claude-code' {
       selrow: string | null
       /** the row of the latest turn's answer */
       answer: string | null
+      /** when the person last opened an explain (ms): the observer's backoff for explains starts over */
+      glossOpened: number
       /** the rows of the session's answers (each turn's last words, a turn that ended in an error left out), oldest first */
       answers: string[]
       /** the card under a reply that has the keys (] reached it): its own keys win over the verbs until 0 */

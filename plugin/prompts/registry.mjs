@@ -37,8 +37,11 @@ export const FEATURES = {
     versions: { v2: { about: 'written clean in the 0.9 style' } },
   },
   'lens-explain': {
-    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v3', optional: true,
-    versions: { v3: { about: "written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" } },
+    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v4', optional: true,
+    versions: {
+      v3: { about: "written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" },
+      v4: { about: "v3 with names from the files (a function, a hook, a field) among the words that stop a reader, a code example, and a backoff that gives one" },
+    },
   },
   'lens-claims': {
     about: "lens: the turn's claims, with what each leaves open", reads: 'the pass', default: 'v3', optional: true,
@@ -52,10 +55,18 @@ export const FEATURES = {
     about: "squeeze's rewrite along its chips", reads: 'squeeze/term.ts', default: 'v6',
     versions: { v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
   },
+  context: {
+    about: "the block thimble adds to a conversation's first message: thimble is on here, so load its skill for a question about these files, code included",
+    reads: 'prompts/prompts.ts (prompt.context), once per conversation', default: 'v1', optional: true,
+    versions: { v1: { about: "thimble's purpose in the 0.9 preamble's words, and the skill to load before an answer about the files" } },
+  },
   forms: {
     about: 'the card guide: what makes a good card, the toolkit, and worked examples',
-    reads: 'beside the result of the first data command of a session (prompts.ts); v asks Claude to read it', default: 'v3',
-    versions: { v3: { about: "skills/thimble/cards.md, in the 0.9 words", file: 'skills/thimble/cards.md' } },
+    reads: 'beside the result of the first data command of a session (prompts.ts); v asks Claude to read it', default: 'v4',
+    versions: {
+      v3: { about: 'the card guide in the 0.9 words, with its four takeaway failures and four programs (kept as prompts/forms/v3.md)' },
+      v4: { about: "skills/thimble/cards.md: the 0.9 principles in fewer words, one takeaway example, every part opening what it stands for, guides taught with pictures, seven worked programs that each show another form on another kind of data, and one sequence of cards", file: 'skills/thimble/cards.md' },
+    },
   },
   thread: {
     about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v2',

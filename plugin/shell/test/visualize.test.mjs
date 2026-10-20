@@ -15,8 +15,9 @@ import { viewRequest } from '../visualize.js'
 
 const FORMS_DIR = fileURLToPath(new URL('../../skills/thimble/forms/', import.meta.url))
 const GUIDE = fileURLToPath(new URL('../../skills/thimble/cards.md', import.meta.url))
-const FORMS = ['bars', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
-const V3 = ['bars', 'unfold', 'strips']
+const FORMS = ['bars', 'trend', 'records', 'map', 'table', 'knob', 'guide', 'timeline', 'weeks', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
+// the forms the card guide shows, without their opening comment lines
+const V3 = ['bars', 'trend', 'records', 'map', 'table', 'knob', 'guide', 'timeline']
 
 test('v asks Claude for another view of the answer, with the proposal the person picked first and the card guide to read', () => {
   const message = { text: '[840](q3#n) of the 2,143 steps were **reruns**; the cause was a shared fixture.', objects: ['r17-trail@1'],
@@ -43,7 +44,6 @@ test('v on a catch-up names it as the catch-up the squeeze chips wrote of its re
 for (const name of FORMS) {
   test(`the ${name} form draws as the card guidance shows it, under a reply and in the detail, its parts selectable`, () => {
     const program = readFileSync(join(FORMS_DIR, `${name}.program.js`), 'utf8').trimEnd()
-    // the card guide shows three of the forms, without their opening comment lines
     if (V3.includes(name)) assert.ok(readFileSync(GUIDE, 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `the card guide holds ${name}.program.js`)
     const data = JSON.parse(readFileSync(join(FORMS_DIR, `${name}.data.json`), 'utf8'))
     for (const [w, mode] of [[96, 'inline'], [98, 'detail'], [60, 'inline']]) {
