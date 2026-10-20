@@ -347,3 +347,19 @@ async def test_the_chats_stop_stops_the_label_it_waits_on(runs, monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await call
     assert not run.running(ws, k["id"]) and run.record(ws, k["id"])["stopped"]
+
+
+async def test_a_run_over_other_files_keeps_the_rows_it_does_not_cover(runs):
+    ws = home.open_folder(runs)
+    k = await _define(ws, "task", "regex", '"kind": "task"', ["task", "other"], glob=["runs/r1.jsonl"])
+    await run.start(ws, runs, k, paths=["runs/r1.jsonl"])
+    await run.wait(ws, k["id"], 30)
+    k = await _define(ws, "task", "regex", '"kind": "task"', ["task", "other"], glob=["runs/r2.jsonl"])
+    assert k["glob"] == "runs/r1.jsonl, runs/r2.jsonl"
+    await run.start(ws, runs, k, paths=["runs/r2.jsonl"])
+    await run.wait(ws, k["id"], 30)
+    assert store.stats(ws, k["id"])["counts"] == {"task": 2, "other": 4}
+    k = await _define(ws, "task", "regex", '"kind": "end"', ["task", "other"], glob=["runs/r2.jsonl"])
+    await run.start(ws, runs, k, paths=["runs/r2.jsonl"])
+    await run.wait(ws, k["id"], 30)
+    assert store.stats(ws, k["id"])["n_labeled"] == 3  # a new definition starts its rows anew

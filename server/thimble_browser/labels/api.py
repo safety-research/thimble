@@ -204,7 +204,7 @@ def register_routes(ctx: Any) -> None:
         except store.LabelError as e:
             raise HTTPException(409 if "running" in str(e) else 400, str(e)) from None
         if not store.label_cards(ws, cid):
-            await asyncio.to_thread(store.label_card, ws, k, group=None, by="analyst")
+            await asyncio.to_thread(store.label_card, ws, k, group="", by="analyst")
         if body.get("wait"):
             rec = await run.wait(ws, cid, chat.APPLY_WAIT_S) or rec
             return JSONResponse(rec, status_code=202 if rec.get("status") == "running" else 200)

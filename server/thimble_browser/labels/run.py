@@ -107,7 +107,11 @@ async def start(ws: str, folder: Path, concept: dict[str, Any], *, paths: list[s
            "paths": list(paths), "limit": limit, "total": len(found), "matched_total": len(found), "done": 0,
            "labeled": 0, "failed": 0, "matches": 0, "message": None, "examples": 0, "version": concept["version"],
            "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "calls": 0}}
-    await asyncio.to_thread(store.clear_model_rows, ws, concept["id"])
+    # a run of the definition its rows came from replaces the rows of the units it labels and keeps the others (a run
+    # over other files adds to them); a run of a new definition starts the rows anew
+    last = concept["applications"][-1] if concept["applications"] else None
+    same = last is not None and last.get("version") == concept["version"]
+    await asyncio.to_thread(store.clear_model_rows, ws, concept["id"], {u.ref for u in found} if same else None)
     RUNS[key] = rec
     TASKS[key] = asyncio.create_task(_run(ws, folder, concept, found, rec))
     store.notify(ws, concept["id"], "applying")

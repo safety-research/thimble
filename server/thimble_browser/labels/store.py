@@ -513,7 +513,8 @@ def label_cards(ws: str, cid: str) -> list[tuple[dict[str, Any], dict[str, Any]]
 def label_card(ws: str, concept: dict[str, Any], *, group: str | None, by: str, chat: str | None = None,
                question: str | None = None) -> dict[str, Any]:
     """The label's card, kind `label` with payload {concept}: the one it has (with a new question when one is given and
-    the analyst has not locked it), else a new one in `group`, or in a group named after the label."""
+    the analyst has not locked it), else a new one in `group`: None for a group named after the label (a chat's label),
+    '' for the canvas's first group (the analyst's label, as 0.8 put it in the analyst's own group)."""
     title = " ".join(str(question or "").split())
     with canvas._lock:
         for nb, cell in label_cards(ws, concept["id"]):
@@ -524,7 +525,7 @@ def label_card(ws: str, concept: dict[str, Any], *, group: str | None, by: str, 
                 canvas.emit(ws, cell, "edited")
             return cell
         now = home.now()
-        nb = canvas.group_for(ws, group or concept["name"], chat)
+        nb = canvas.group_for(ws, concept["name"] if group is None else group or None, chat)
         taken = {c.get("slug") for g in canvas.notebooks(ws) for c in g["cells"]}
         cell = {"id": secrets.token_hex(4), "kind": "label", "title": title or concept["name"],
                 "slug": canvas._slug(title or concept["name"], taken), "takeaway": "", "takeaway_author": None,
