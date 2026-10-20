@@ -1,5 +1,5 @@
 """The tools of thimble browser's agents, as Python functions the agent loop (agent.py) calls. Their descriptions and
-input schemas are the `## <name>` sections of prompts/browser/tools.md; each agent gets a fixed set (agent.AGENTS).
+input schemas are the `## <name>` sections of prompts/tools.md; each agent gets a fixed set (agent.AGENTS).
 
 What a tool can touch:
 - Read, Grep and Glob read files under the agent's read roots (the folder; for the view builder also the view kit's
@@ -47,7 +47,7 @@ REFS: dict[str, Callable[["Tools", str], "Result"]] = {}
 
 
 def register(name: str, fn: Callable[["Tools", dict[str, Any]], Awaitable["Result"]]) -> None:
-    """Add a tool. Its description and schema are its `## <name>` section in prompts/browser/tools*.md."""
+    """Add a tool. Its description and schema are its `## <name>` section in prompts/tools*.md."""
     EXTRA[name] = fn
 
 
@@ -69,7 +69,7 @@ def _err(text: str) -> Result:
 
 
 def schema_of(name: str) -> tuple[str, dict[str, Any]]:
-    """(description, input schema) of a tool, from prompts/browser/tools.md."""
+    """(description, input schema) of a tool, from prompts/tools.md."""
     body = prompts.tool_text(name)
     m = re.search(r"```json\n(.*?)\n```", body, re.S)
     if not m:

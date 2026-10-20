@@ -310,7 +310,7 @@ def mark_built(ws: str, slug: str) -> None:
     set_proposal(ws, slug, status="built")
 
 
-# ---- the builder's instructions: thimble 0.8's (prompts/browser/dev-view-0.8.md), for the browser, with the changes
+# ---- the builder's instructions: thimble 0.8's (prompts/dev-view-0.8.md), for the browser, with the changes
 # below; each change is an exact string, and builder_prompt fails when the 0.8 text no longer holds one
 
 REPO = Path(__file__).resolve().parents[3]
@@ -335,7 +335,7 @@ def _ifs(text: str, keep: str = "browser") -> str:
 def builder_prompt(folder: Path, attempts: int) -> str:
     from .. import prompts  # noqa: PLC0415
 
-    text = _ifs(prompts.read("browser/dev-view-0.8.md"))
+    text = _ifs(prompts.read("dev-view-0.8.md"))
     guide = text[text.index("## A good view"):text.index("## Checking")]
     lines = guide.split("\n")
     for start, new in BUILDER_CHANGES:
@@ -346,7 +346,7 @@ def builder_prompt(folder: Path, attempts: int) -> str:
     guide = "\n".join(lines)
     guide = (guide.replace("{{docs}}", str(REPO / "docs")).replace("{{examples}}", str(REPO / "samples" / "views"))
              .replace("{{corpus}}", str(folder)))
-    return prompts.render("browser/view-builder.md", {"workdir": str(folder), "guide": guide,
+    return prompts.render("view-builder.md", {"workdir": str(folder), "guide": guide,
                                                       "attempts": str(attempts)})
 
 

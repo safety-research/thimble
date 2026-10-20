@@ -5,7 +5,7 @@ canvas's cards, the report's sentences), by a model's judgment, a regex or Pytho
   (thimble.labels), and the filters;
 - units.py says what a label labels; run.py runs a label over its units (classify.py: the model's calls,
   code_runner.py: code in the sandbox);
-- api.py has the page's routes; chat.py the chat's tools (prompts/browser/tools-labels.md), and define.py what a
+- api.py has the page's routes; chat.py the chat's tools (prompts/tools-labels.md), and define.py what a
   chat's definition does and what a `concept:` ref names.
 """
 from __future__ import annotations

@@ -413,11 +413,11 @@ async def draft(ws: str, folder: Any, text: str, paths: list[str]) -> dict[str, 
             if len(lines) >= SAMPLE_RECORDS:
                 break
         names = ", ".join(found[:5]) + (f" and {len(found) - 5} more files" if len(found) > 5 else "")
-        records = prompts.render("browser/labels-draft-records.md", {"paths": names, "path": first,
+        records = prompts.render("labels-draft-records.md", {"paths": names, "path": first,
                                                                      "cut": str(SAMPLE_CUT), "lines": "\n".join(lines)})
     else:
         records = ""
-    prompt = prompts.render("browser/labels-draft.md", {"description": text, "records": records})
+    prompt = prompts.render("labels-draft.md", {"description": text, "records": records})
     try:
         reply = await llm.complete(prompt, "Define the label.", schema=DRAFT_SCHEMA, effort="low")
     except Exception as e:  # noqa: BLE001

@@ -1,5 +1,5 @@
 """The card check: once an agent's card has its takeaway, one model reading assesses it against five criteria
-(prompts/browser/card-check.md) and gives the card that replaces it, and the replacement is applied in place, with Undo
+(prompts/card-check.md) and gives the card that replaces it, and the replacement is applied in place, with Undo
 in the card's details (frontend canvas/CheckDetails.tsx, lib/cardCheck.ts).
 
 What the reading sees. thimble browser draws no picture of the card: the reading sees what the card shows as data, a
@@ -40,7 +40,7 @@ from .hub import hub
 
 log = logging.getLogger("thimble_browser.card_check")
 
-PROMPT = "browser/card-check.md"
+PROMPT = "card-check.md"
 CONCURRENCY = 4
 EFFORT = "medium"
 CONTEXT_CHARS = 30_000

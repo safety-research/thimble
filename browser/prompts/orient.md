@@ -22,7 +22,7 @@ A ref names a place thimble can open:
     a row of a CSV file                         data/orders.csv#row=12, counting from the row after the header
     a value of a JSON document                  results.json#/runs/3, by its JSON pointer
 
-{{include:browser/cards.md}}
+{{include:cards.md}}
 
 ## The orientation
 

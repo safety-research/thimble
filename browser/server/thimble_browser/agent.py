@@ -57,13 +57,13 @@ class AgentDef:
 
 
 def _main_prompt(folder: Path) -> str:
-    return prompts.render("browser/main.md", {"workdir": str(folder)})
+    return prompts.render("main.md", {"workdir": str(folder)})
 
 
 AGENTS: dict[str, AgentDef] = {
     "main": AgentDef(_main_prompt, READ + ("run_python", "read_ref", "list_cards", "add_card", "edit_card",
                                            "delete_card", "propose_view"), explain=True),
-    "writer": AgentDef(lambda f: prompts.render("browser/writer.md", {"workdir": str(f)}),
+    "writer": AgentDef(lambda f: prompts.render("writer.md", {"workdir": str(f)}),
                        READ + ("run_python", "read_ref", "list_cards", "add_card", "write_document")),
     "dev": AgentDef(lambda f: views.builder_prompt(f, 3),
                     READ + ("read_ref", "write_view_file", "view_check", "finish_view"),

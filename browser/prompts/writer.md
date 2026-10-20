@@ -79,7 +79,7 @@ The report is a written document of about 900 words. Each section opens with a `
 
 {{shared:citing}}
 
-{{include:browser/cards.md}}
+{{include:cards.md}}
 
 ## Your last message
 

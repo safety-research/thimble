@@ -1,13 +1,13 @@
 """The orientation: a broad analysis of the folder that leaves its findings as a deck of cards, the group `Orientation`,
 with a critic that reviews its analysis before it finishes.
 
-The orientation is one of thimble's agents (agent.AGENTS["orient"], prompts/browser/orient.md), started in a chat of its
+The orientation is one of thimble's agents (agent.AGENTS["orient"], prompts/orient.md), started in a chat of its
 own (kind `agent`, role `orient`) by main's `start_orientation` or by `POST /ws/{c}/orientation`. Main's chat gets an
 `agent` row that opens its thread. Every card it adds goes to the deck (AgentDef.group), whose group has the role
 `exploration`, which the canvas opens on. Each of its calls carries its ref, `call:<chat>/<n>` (calls.py).
 
 The critic. Once the deck is drafted, the orientation calls `critique` with its account. The tool starts the critic
-(agent.AGENTS["critic"], prompts/browser/critic.md) in a chat of its own, a step of the orientation's thread (role
+(agent.AGENTS["critic"], prompts/critic.md) in a chat of its own, a step of the orientation's thread (role
 `step`, agent type `thimble:critic`), with a brief: the account, the drafted cards, the files no call named, the
 orientation's transcript with each call under its ref, and the analyst's chat. The tool waits for the critic's turn to
 end, and its report is the tool's result. Meanwhile the orientation's chat is `paused: critique`. Stopping the critique
@@ -445,11 +445,11 @@ async def t_message_orientation(t: tools.Tools, args: dict[str, Any]) -> tools.R
 # ---- registration
 
 def _orient_prompt(folder: Path) -> str:
-    return prompts.render("browser/orient.md", {"workdir": str(folder)})
+    return prompts.render("orient.md", {"workdir": str(folder)})
 
 
 def _critic_prompt(folder: Path) -> str:
-    return prompts.render("browser/critic.md", {"workdir": str(folder)})
+    return prompts.render("critic.md", {"workdir": str(folder)})
 
 
 AGENTS[ROLE] = AgentDef(_orient_prompt, ORIENT_TOOLS, finished=_finished, group=DECK, call_refs=True)

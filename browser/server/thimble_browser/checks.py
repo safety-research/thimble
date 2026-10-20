@@ -2,12 +2,12 @@
 passages it applies to (frontend report/Checks.tsx, report/checkComments.ts, report/Margin.tsx).
 
 A check is `checks/<id>.json` in the workspace = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
-covers, runs: {report: Run}}. The built-ins are prompts/browser/checks/<id>.md, read from the prompt file until first
+covers, runs: {report: Run}}. The built-ins are prompts/checks/<id>.md, read from the prompt file until first
 changed, each on or off as its front matter's `shown` says until the analyst turns it on or off. A check that is on
 (`shown`) shows its comments, and runs again by itself after the writer saves the report, unless the home's checks.json
 says `report_checks: false` (PUT /ws/{c}/checks/settings turns that on or off).
 
-A run is the agent `check` (prompts/browser/check.md) in a chat of its own (kind `agent`, role `check`). Its first
+A run is the agent `check` (prompts/check.md) in a chat of its own (kind `agent`, role `check`). Its first
 message holds the check's instructions, the passages it covers, the report with the id of every passage, the cards and
 the analyst's chat. It comments with add_comment and ends with one line, the run's summary. Run = {run, status:
 running|done|failed|stopped, chat, started, ended, covered, seen, comments, summary, stale}.
@@ -101,7 +101,7 @@ def _front(text: str) -> tuple[dict[str, Any], str]:
 def builtin(cid: str) -> dict[str, Any] | None:
     if cid not in BUILTINS:
         return None
-    meta, body = _front(prompts.read(f"browser/checks/{cid}.md"))
+    meta, body = _front(prompts.read(f"checks/{cid}.md"))
     return {"id": cid, "name": str(meta.get("name") or cid), "prompt": body, "colour": int(meta.get("color") or 1),
             "shown": bool(meta.get("shown")), "builtin": True, "created_by": "thimble", "ts": None, "version": 1,
             "covers": ["documents"], "runs": {}}
@@ -542,7 +542,7 @@ async def t_stop_check(t: tools.Tools, args: dict[str, Any]) -> tools.Result:
 
 
 def _check_prompt(folder: Path) -> str:
-    return prompts.render("browser/check.md", {"workdir": str(folder)})
+    return prompts.render("check.md", {"workdir": str(folder)})
 
 
 AGENTS[ROLE] = AgentDef(_check_prompt, CHECK_TOOLS, finished=_run_finished)

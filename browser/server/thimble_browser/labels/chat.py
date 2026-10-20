@@ -1,5 +1,5 @@
 """The chat's label tools: apply_label, show_label, delete_label, set_filter and clear_filter (their texts are in
-prompts/browser/tools-labels.md). apply_label waits for its run, so the chat's tool card runs as long as the label does
+prompts/tools-labels.md). apply_label waits for its run, so the chat's tool card runs as long as the label does
 and its result has the counts; the chat's Stop stops the run, keeping what it labeled so far.
 """
 from __future__ import annotations

@@ -64,7 +64,7 @@ test('an extension\'s orientation instructions lead its follow-up as a line nami
 
 describe('tool names', () => {
   test("thimble browser's tools reach the chat by their own names, which carry no MCP prefix to strip", () => {
-    const names = [...readFileSync(path.join(ROOT, 'prompts/browser/tools.md'), 'utf8').matchAll(/^## (\S+)$/gm)].map((m) => m[1])
+    const names = [...readFileSync(path.join(ROOT, 'prompts/tools.md'), 'utf8').matchAll(/^## (\S+)$/gm)].map((m) => m[1])
     expect(names).toContain('add_card')
     for (const n of names) expect(MCP_PREFIXES.some((p) => n.startsWith(p))).toBe(false)
   })

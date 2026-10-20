@@ -1,18 +1,19 @@
 """The texts Claude reads in thimble browser, and how they stay the same as the terminal plugin's.
 
-Every prompt is a file under prompts/ at the top of the repository. Three directives join them:
-- `{{include:<file>}}` puts in another file of prompts/;
+Every prompt is a file under browser/prompts/. Three directives join them:
+- `{{include:<file>}}` puts in another file of browser/prompts/;
 - `{{shared:<part>}}` puts in a part of the terminal plugin's text, as shared.json says (below);
 - `{{<slot>}}` is a value the server fills, such as the folder's path.
 
-Shared parts. The terminal plugin's texts that both products use (its thimble skill, its explain lens) are copied, as
-they are, into prompts/terminal/, with prompts/terminal/SOURCE.json naming the commit they came from and their
-sha256. `scripts/sync-terminal-prompts` copies them again. prompts/shared.json names each shared part: the file, the
-`## ` section, which of its bullets (all when not given), and the few literal changes the browser needs, such as a ref
-of the terminal's own form written in the browser's form. Each change is a pair of exact strings, and the test
-(tests/test_prompt_parity.py) fails when the terminal's text no longer holds a string that a change replaces. So the
-browser follows every edit to the terminal's text with no change here, and an edit that touches a replaced string
-stops the test until someone looks at it.
+Shared parts. The terminal plugin's texts that both products use (its thimble skill, its explain lens, its label
+classifier) are read from the plugin itself, plugin/ at the top of the repository, when the server makes a prompt. A
+part names a file of the plugin (`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose
+default version is the one read. prompts/shared.json names each shared part: where it comes from, the `## ` section, which of
+its bullets (all when not given), and the few literal changes the browser needs, such as a ref of the terminal's own
+form written in the browser's form. Each change is a pair of exact strings, and the test (tests/test_prompt_parity.py)
+fails when the terminal's text no longer holds a string that a change replaces. So the browser follows every edit to
+the terminal's text with no change here, and an edit that touches a replaced string stops the test until someone looks
+at it.
 """
 from __future__ import annotations
 
@@ -23,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2] / "prompts"
+PLUGIN = Path(__file__).resolve().parents[3] / "plugin"
+REGISTRY = "prompts/registry.mjs"
 DIRECTIVE = re.compile(r"\{\{(include|shared):([A-Za-z0-9_./-]+)\}\}")
 SLOT = re.compile(r"\{\{([a-z_]+)\}\}")
 
@@ -39,6 +42,42 @@ def read(rel: str) -> str:
         return p.read_text(encoding="utf-8")
     except OSError as e:
         raise PromptError(f"{rel}: {e}") from None
+
+
+def plugin_read(rel: str) -> str:
+    """A file of the terminal plugin, by its path under plugin/."""
+    p = (PLUGIN / rel).resolve()
+    if PLUGIN.resolve() not in p.parents:
+        raise PromptError(f"{rel}: outside plugin/")
+    try:
+        return p.read_text(encoding="utf-8")
+    except OSError as e:
+        raise PromptError(f"the terminal plugin's {rel}: {e}") from None
+
+
+def default_file(feature: str) -> str:
+    """The file of a prompt's default version in the plugin's registry, as a path under plugin/: the file the registry
+    names for that version, else prompts/<feature>/<version>.md. The registry is JavaScript, and this reads only its
+    table's plain form; tests/test_prompt_parity.py checks the result against what Node reads from it."""
+    text = plugin_read(REGISTRY)
+    start = re.search(rf"^  (['\"]?){re.escape(feature)}\1:\s*\{{", text, re.M)
+    if not start:
+        raise PromptError(f"the terminal plugin's {REGISTRY} has no prompt {feature!r}")
+    rest = text[start.end():]
+    end = re.search(r"^  (['\"]?)[A-Za-z0-9_-]+\1:\s*\{|^\}", rest, re.M)
+    entry = rest[: end.start()] if end else rest
+    version = re.search(r"\bdefault:\s*'([^']+)'", entry)
+    if not version:
+        raise PromptError(f"the terminal plugin's {REGISTRY} gives no default for {feature!r}")
+    v = version.group(1)
+    meta = re.search(rf"(['\"]?){re.escape(v)}\1:\s*\{{([^{{}}]*)\}}", entry)
+    file = meta and re.search(r"\bfile:\s*'([^']+)'", meta.group(2))
+    return file.group(1) if file else f"prompts/{feature}/{v}.md"
+
+
+def source_file(spec: dict[str, Any]) -> str:
+    """The path under plugin/ that a shared part comes from."""
+    return default_file(spec["prompt"]) if spec.get("prompt") else spec["file"]
 
 
 def body_of(text: str) -> str:
@@ -136,7 +175,7 @@ def source_part(name: str) -> str:
     spec = manifest()["parts"].get(name)
     if not spec:
         raise PromptError(f"no shared part '{name}' in prompts/shared.json")
-    text = read(spec["file"])
+    text = plugin_read(source_file(spec))
     if spec.get("until"):
         if spec["until"] not in text:
             raise PromptError(f"shared part '{name}': the terminal's text no longer has {spec['until']!r}")
@@ -198,10 +237,10 @@ def render(rel: str, slots: dict[str, str] | None = None, _depth: int = 0) -> st
 
 
 def tool_text(name: str) -> str:
-    """The description of one of the browser's tools: its `## <name>` section in prompts/browser/tools.md, or in a
-    feature's prompts/browser/tools-<feature>.md."""
-    for p in [ROOT / "browser" / "tools.md", *sorted((ROOT / "browser").glob("tools-*.md"))]:
+    """The description of one of the browser's tools: its `## <name>` section in prompts/tools.md, or in a
+    feature's prompts/tools-<feature>.md."""
+    for p in [ROOT / "tools.md", *sorted(ROOT.glob("tools-*.md"))]:
         text = p.read_text(encoding="utf-8")
         if re.search(rf"^## {re.escape(name)}$", text, re.M):
             return section(text, name)
-    raise PromptError(f"no tool text for {name!r} in prompts/browser/tools*.md")
+    raise PromptError(f"no tool text for {name!r} in prompts/tools*.md")

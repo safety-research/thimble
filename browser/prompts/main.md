@@ -29,7 +29,7 @@ A ref names a place thimble can open:
     a value of a JSON document                  results.json#/runs/3, by its JSON pointer
     a label, or the count of one of its values  concept:<id>, or concept:<id>/<value>
 
-{{include:browser/cards.md}}
+{{include:cards.md}}
 
 {{shared:labels-guide}}
 

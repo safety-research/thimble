@@ -1,8 +1,8 @@
 {
-  "about": "The parts of the terminal plugin's texts that thimble browser uses (server/thimble_browser/prompts.py). Each part is a file under prompts/terminal/, a section of it and, when given, some of its bullets (counted from 1). `replace` and `drop` are the only changes, exact strings; tests/test_prompt_parity.py fails when the terminal's text no longer holds one of them.",
+  "about": "The parts of the terminal plugin's texts that thimble browser uses (server/thimble_browser/prompts.py). Each part is read from the plugin at run time: `file`, a file under plugin/, or `prompt`, the default version of a prompt in plugin/prompts/registry.mjs. Then a section of it and, when given, some of its bullets (counted from 1). `replace` and `drop` are the only changes, exact strings; tests/test_prompt_parity.py fails when the terminal's text no longer holds one of them.",
   "parts": {
     "communicating": {
-      "file": "terminal/SKILL.md",
+      "file": "skills/thimble/SKILL.md",
       "section": "Communicating",
       "heading": "Communicating",
       "replace": [
@@ -17,7 +17,7 @@
       ]
     },
     "citing": {
-      "file": "terminal/SKILL.md",
+      "file": "skills/thimble/SKILL.md",
       "section": "Computing and citing",
       "heading": "Citing",
       "bullets": [
@@ -31,20 +31,29 @@
           "never sees your tools' output"
         ],
         [
+          "a number links to its query row",
+          "a number links to its value in a card"
+        ],
+        [
           "(r3#outcome=approved@n)",
           "(card:<id>#outcome/approved)"
         ],
         [
+          "(server/auth.py#L88-94)",
+          "(server/auth.py#L88-L94)"
+        ],
+        [
           "run `thimble rows` on its ref before you use it",
           "read its ref with `read_ref` before you use it"
+        ],
+        [
+          "`thimble coverage` says which files you saw (some of their lines entered your context) and which you only computed over, searched, named or never touched: none of those were seen. What a label's model read is counted apart.",
+          "You saw a file when some of its lines entered your context. A file you only computed over, searched, named or never touched was not seen, and neither was a record that only a label's model read."
         ]
-      ],
-      "drop": [
-        "`thimble coverage` lists the files this session read or computed over, and those it only searched, only named or counted, or never touched: none of these were read."
       ]
     },
     "explain": {
-      "file": "terminal/lens-explain/v3.md",
+      "prompt": "lens-explain",
       "replace": [
         [
           " (the squeezed text, when they read it squeezed)",
@@ -55,19 +64,23 @@
           ". thimble browser draws no \"program\", so give none."
         ],
         [
-          "[6 of 9 hosts](r2#over=800ms@hosts)",
-          "[6 of 9 hosts](card:<id>#over/800ms)"
+          ", \"program\": \"<optional, at most six lines>\"",
+          ""
+        ],
+        [
+          "(app/session.ts#L40-52)",
+          "(app/session.ts#L40-L52)"
         ]
       ],
       "until": "<!-- digest -->"
     },
     "explain-digest": {
-      "file": "terminal/lens-explain/v3.md",
+      "prompt": "lens-explain",
       "after": "<!-- digest -->",
       "until": "<!-- when backoff -->"
     },
     "labels": {
-      "file": "terminal/labels/v2.md",
+      "prompt": "labels",
       "until": "{{RECORDS}}",
       "replace": [
         [
@@ -77,7 +90,7 @@
       ]
     },
     "labels-guide": {
-      "file": "terminal/SKILL.md",
+      "file": "skills/thimble/SKILL.md",
       "section": "Labels",
       "heading": "Labels",
       "replace": [

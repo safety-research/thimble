@@ -1,7 +1,7 @@
 """Explain marks: after each answer in the chat, one model call reads the answer and marks the one to three terms the
 analyst may not know, each with a short explanation that opens in place. The instructions are the terminal plugin's
 explain lens, word for word (prompts/shared.json, part `explain`), inside the browser's own short frame
-(prompts/browser/explain.md), and the list of terms already explained is the lens's own digest line.
+(prompts/explain.md), and the list of terms already explained is the lens's own digest line.
 
 The call has no tools. Its result is a `glosses` record in the chat's log; the page draws each term with a teal fill and
 opens the explanation on a click. Settings turns the pass off.
@@ -57,7 +57,7 @@ def parse(text: str, answer: str) -> list[dict[str, Any]]:
 
 async def after_turn(ws: str, chat: str, answer: str, folder: Path) -> None:
     """Run the explain pass on `answer` and add its marks to the chat."""
-    system = prompts.render("browser/explain.md")
+    system = prompts.render("explain.md")
     seen = glossed_terms(ws, chat)
     digest = prompts.shared("explain-digest").replace("{{GLOSSED}}", "\n".join(seen) if seen else "(none)")
     msg = f"The analyst asked:\n{last_question(ws, chat)}\n\nClaude answered:\n{answer}\n\n{digest}"
