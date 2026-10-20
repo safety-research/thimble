@@ -215,17 +215,19 @@ test('c opens the Claims pane in the side panel: the count, the graph of claims 
   await press($, w.clock, key('c'))
   await w.clock.settle()
   expect(w.opened.some(x => x.id === 'object' && x.title === 'Claims' && x.focus === true)).toBe(true)
-  const t = textOf(await $.ui.render(PANE))
+  const t = textOf(await $.ui.render(PANE)).replace(/\u00a0/g, ' ')
   expect(t).toContain('4 claims')
   expect(t).not.toMatch(/to turn|clusters|turn \d/)
   for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst']) expect(t).toContain(name)
-  // a dot per claim, the corrected one hollow; the newest claim selected under the graph, beside the claim it corrected
+  // a dot per claim, the corrected one hollow; the newest claim selected under the graph, its sentence alone
   expect(t).toContain('○')
   expect(t).toContain('The tilt is two editors, Kestrel and Wren, not one')
   expect(t).not.toMatch(/judgment|finding ·|precisely/)
-  expect(t).toMatch(/corrects\s+○\s+The tilt in the edits is one editor/)
-  // a claim linked to it is a dot drawn on a tinted ground, not a row of words
-  expect(t).not.toMatch(/same topic as|supported by|from “/)
+  expect(t).not.toMatch(/corrects|corrected by|same topic as|supported by|from “/)
+  // its evidence and its history are actions above the input bar, in words
+  const drawn = JSON.stringify(await $.ui.render(PANE))
+  expect(drawn).toContain('e evidence')
+  expect(drawn).toContain('h history')
   // no key hints in the pane, and none of the panel's in the bar but what esc does; the input bar says what a typed
   // question is about
   expect(t).not.toContain('esc')
@@ -236,7 +238,7 @@ test('c opens the Claims pane in the side panel: the count, the graph of claims 
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about claim: The tilt is two editors')
 })
 
-test('the ring on a dot selects its claim, with its evidence read through the kernel under it; a press on a row of evidence opens it over the pane', async ($, on) => {
+test('the ring on a dot selects its claim; e opens its evidence above the input bar, read through the kernel; a press on a row of evidence opens it over the pane', async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))
   await w.clock.settle()
@@ -246,6 +248,11 @@ test('the ring on a dot selects its claim, with its evidence read through the ke
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain("Kestrel made 41% of June's edits, 212 of them reverts.")
   expect(t).not.toContain('from “')
+  // its rows are read only once asked for
+  expect(w.runs.some(a => a.includes('resolve') && a.includes('q4#user=Kestrel@share'))).toBe(false)
+  await press($, w.clock, key('e'))
+  await w.clock.advance(100)
+  await w.clock.settle()
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q4#user=Kestrel@share'))).toBe(true)
   // a press on its evidence opens it as a citation opens: over the pane, in the side panel
   const ui = await $.ui.mount({ ...(PANE as Any) } as never)
@@ -331,7 +338,7 @@ test("/claims folder asks Claude, as a turn, to map the folder's claims with a s
   const store = JSON.parse(w.files[STORE]!)
   expect(store.claims.filter((c: Any) => c.by === 'folder').map((c: Any) => c.text)).toEqual(['The belt skips a slot', 'The scale is off'])
   expect(store.folderAsked).toBeUndefined()
-  const t = textOf(await $.ui.render(PANE))
+  const t = textOf(await $.ui.render(PANE)).replace(/\u00a0/g, ' ')
   expect(t).not.toContain("add the whole folder's claims")
   expect(t).toContain("the whole folder's map · 2 claims")
   expect(t).toContain('belt slips')
