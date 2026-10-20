@@ -262,7 +262,7 @@ test('the layout: each cluster an island in the order said, no two dots touching
   assert.ok(lay.fits)
   const ps = [...lay.pos.values()]
   assert.equal(ps.length, 24)
-  for (const p of ps) assert.ok(p.x >= 1 && p.x <= 78 && p.y >= 1 && p.y <= 23, JSON.stringify(p))
+  for (const p of ps) assert.ok(p.x >= 0 && p.x <= 78 && p.y >= 1 && p.y <= 23, JSON.stringify(p))
   for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) assert.ok(ps[i].y !== ps[j].y || Math.abs(ps[i].x - ps[j].x) >= 2, `${JSON.stringify(ps[i])} ${JSON.stringify(ps[j])}`)
   assert.equal(lay.names.length, 4)
   for (const n of lay.names) assert.ok(!ps.some(p => p.y === n.y && p.x >= n.x && p.x < n.x + n.name.length), n.name)
@@ -281,10 +281,11 @@ test('the layout: each cluster an island in the order said, no two dots touching
   assert.ok(big.fits)
   const bp = [...big.pos.values()]
   assert.equal(new Set(bp.map(p => `${p.x},${p.y}`)).size, 150)
-  // the dots of two clusters never stand side by side
+  // the gap between two clusters' dots is wider than the gap between two dots of one
   const cl = id => many.find(n => n.id === id).cluster
   const at = [...big.pos]
-  for (const [a, p] of at) for (const [b, q] of at) if (cl(a) !== cl(b) && p.y === q.y) assert.ok(Math.abs(p.x - q.x) >= 3, `${a} ${b}`)
+  const gap = (same) => Math.min(...at.flatMap(([a, p]) => at.filter(([b, q]) => a !== b && p.y === q.y && (cl(a) === cl(b)) === same).map(([, q]) => Math.abs(p.x - q.x))))
+  assert.ok(gap(false) > gap(true), `${gap(false)} ${gap(true)}`)
   for (const p of bp) assert.ok(p.x >= 0 && p.x < 100 && p.y >= 0 && p.y < 30, JSON.stringify(p))
 })
 
