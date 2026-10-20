@@ -18,7 +18,7 @@
 //   ─────────────────────────────────
 //
 // Each item says how many rows it takes, so the panel cuts the conversation from the top to the rows it has.
-import { newRecord } from './message.js'
+import { healedRecord, newRecord, textKey } from './message.js'
 import { messageRows } from './view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,6 +38,8 @@ export type ConvOpts = {
   now: number
   /** a citation in an answer pressed: its ref and words */
   onCite: (ref: string, label: string) => unknown
+  /** what the healing pass did to an answer's citations, or that one checks them now (shell.tsx healOfText) */
+  heal?: (text: string) => { heal: Any | null; checking: boolean } | null
   /** a card the thread's agent saved, drawn as under a reply (null: not drawn, or the card the panel shows above) */
   card?: (ref: CardRef, key: string) => Item | null
 }
@@ -111,7 +113,10 @@ export function conversation(els: Any, o: ConvOpts): Item[] {
     } else if (working && !t.text) { gap(`${k}-steps-gap`); row(Text({ key: `${k}-steps`, color: 'warning', children: '● ◌ starting' })) }
     if (t.text) {
       gap(`${k}-a-gap`)
-      const rec = newRecord({ row: `${o.key}-a${i}`, session: '', text: String(t.text), at: null })
+      // its citations as the healing pass left them (o.heal: the host's, shell.tsx healOfText)
+      const h = o.heal?.(String(t.text)) ?? null
+      const made = newRecord({ row: `${o.key}-a${i}`, session: '', text: String(t.text), at: null })
+      const rec = healedRecord(h?.heal ? { ...made, heal: { ...h.heal, key: textKey(String(t.text)) } } : made, { checking: !!h?.checking })
       const rows = messageRows(els, {
         rec, key: `${k}-a`, cols: w, first: true, theme: o.theme, focus: null, ink: 'text',
         onMark: (m: number) => { const x = rec.marks[m]; if (x?.ref) o.onCite(String(x.ref), String(x.label || x.ref)) },

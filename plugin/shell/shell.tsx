@@ -30,7 +30,7 @@ import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { cardFrame, frameWidth } from './cardframe.js'
-import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink } from './cards.js'
+import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
@@ -884,6 +884,57 @@ async function runHeal($: Engine, row: string, key: string): Promise<void> {
   }
 }
 
+/** The results of texts no message record keeps (a thread's answer, a card's takeaway, an explainer), by their key,
+ *  for this load of the module, and the passes over them that run now. */
+const healTexts = new Map<string, Any>()
+const healTextRuns = new Map<string, Promise<void>>()
+
+/** A text's healing as a drawing reads it: what the pass did, once it has read the text; else whether one checks it now
+ *  (after SPIN_AFTER). A pass starts when the text has settled and holds a citation; with `wait`, the caller waits for
+ *  it (a card drawn once, such as an explainer, whose card says it is being read meanwhile). */
+export async function healOfText($: Engine, text: string, o: { settled?: boolean; wait?: boolean } = {}): Promise<{ heal: Any | null; checking: boolean }> {
+  const t = String(text || '')
+  const none = { heal: null, checking: false }
+  if (!/\]\(/.test(t)) return none
+  const key = textKey(t)
+  const id = `text|${key}`
+  await $.state.get(HEALTICK)
+  if (healTexts.has(key)) return { heal: healTexts.get(key), checking: false }
+  let run = healTextRuns.get(id)
+  if (!run) {
+    if (o.settled === false || healRead.has(id)) return none
+    const root = await rootHere($)
+    if (!root) return none
+    healRead.add(id)
+    healing.set(id, await $.clock.now())
+    run = (async () => {
+      const dir = $.plugin.root.replace(/\/+$/, '')
+      const env = { ...(await leanEnv($, root)), THIMBLE_SESSION: await sessionKey($) }
+      const r = await $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healMd(t), timeoutMs: 60000 })
+      let out: Any = null
+      try { out = JSON.parse(r.stdout) } catch { out = null }
+      if (!out || !Array.isArray(out.changes)) {
+        healTexts.set(key, { key, changes: [], error: true })
+        failed($, 'The citations were not checked', (r.stderr || r.stdout || `exit ${r.exitCode}`).trim(), 'Open a citation to see its place')
+        return
+      }
+      healTexts.set(key, { key, of: out.of, version: out.version, changes: out.changes })
+    })().catch(err => failed($, 'The citations were not checked', err, 'Open a citation to see its place')).finally(() => {
+      healing.delete(id)
+      healTextRuns.delete(id)
+      void $.state.set(HEALTICK, id).catch(() => undefined)
+    })
+    healTextRuns.set(id, run)
+    if (!o.wait) {
+      $.clock.after(SPIN_AFTER, () => { if (healing.has(id)) void $.state.set(HEALTICK, id) })
+      return none
+    }
+  }
+  if (o.wait) { await run; return { heal: healTexts.get(key) ?? null, checking: false } }
+  const began = healing.get(id)
+  return { heal: null, checking: began !== undefined && (await $.clock.now()) - began >= SPIN_AFTER }
+}
+
 /** Claude hears of the values it stated that the cited place contradicts: one short row it alone reads, after the turn. */
 async function tellHealed($: Engine): Promise<void> {
   const wait = healTell
@@ -1238,7 +1289,12 @@ export async function paneStateChanged($: Engine, name: string, _args: Record<st
  *  in the sandbox at `w` (cards.js drawnCard). */
 async function trayCard($: Engine, req: Any, w: number, h: number): Promise<Any> {
   let spec: Any
-  if (req?.kind === 'gloss') spec = explainerCard({ gloss: req.gloss || {} })
+  if (req?.kind === 'gloss') {
+    // its citations healed first: the card says it is being drawn meanwhile
+    const g = req.gloss || {}
+    const words = [g.body, g.here, ...(Array.isArray(g.bullets) ? g.bullets : []), g.todo].filter(x => typeof x === 'string' && x).join('\n')
+    spec = explainerCard({ gloss: g, heal: (await healOfText($, words, { wait: true })).heal })
+  }
   else if (typeof req?.ref === 'string' && req.ref) spec = await sourceSpec($, req.ref, req.kind === 'spark' ? 'sparkline' : String(req.label || req.ref), h)
   else return { problem: 'this mark names no ref, so there are no rows to show', drawings: [], links: [] }
   return drawnCard(spec, async (part: Any) => (await drawPart($, part, w, h)).drawing)
@@ -2601,7 +2657,12 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     // whether a pane drawn by heldEl holds the keyboard now (a click gave it them), by its id
     case 'held': return !!arg && (await $.state.get(HELD)).value === arg
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
-    case 'card': return arg ? cardStore($, arg) : null
+    case 'card': {
+      // with what the healing pass did to its takeaway's citations (panes/detail.js draws them)
+      const card = arg ? ((await cardStore($, arg)) as Any) : null
+      const take = card?.object && typeof card.object.text === 'string' ? card.object.text : ''
+      return card && take ? { ...card, heal: (await healOfText($, take)).heal } : card
+    }
     // the session's side threads: the tray shows a mark's
     case 'threads': return threadList()
     // the session's claims, with the folder's offer (claims/term.ts)

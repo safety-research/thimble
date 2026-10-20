@@ -57,27 +57,55 @@ export function cardKind(ref) {
 }
 
 /** The kernel refs a card's words cite (`[words](ref)`), each once, as nested marks. */
-export function linksIn(md) {
+export function linksIn(md, look = null) {
   const out = []
   for (const m of String(md || '').matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
-    const ref = citeRef(m[2])
+    const c = look ? look(m[1], m[2]) : null
+    // a citation the healing pass unwrapped is words, not a link; one it re-pointed opens its new place
+    if (c && c.state === 'quiet') continue
+    const ref = c && c.to && c.state === 'linked' ? c.to : citeRef(m[2])
     if (!ref || out.some(x => x.ref === ref)) continue
-    out.push({ id: `n${out.length + 1}`, ref, label: citeWords(m[1], ref) })
+    out.push({ id: `n${out.length + 1}`, ref, label: citeWords(m[1], ref), ...(c && c.to && c.to !== c.ref && c.state === 'linked' ? { wrote: c.ref } : {}) })
   }
   return out.slice(0, MAX_LINKS)
 }
 
+// ---- the healing pass on a card's words (an explainer, a takeaway): the kernel's `thimble heal` reads the words with
+// each citation's target as the ref the card opens, and a lookup gives what it did to each citation
+
+/** Card words as the healing pass reads them: each citation's target written as the ref the card opens. */
+export function healMd(md) {
+  return String(md || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (all, w, t) => { const r = citeRef(t); return r ? `[${w}](${r})` : all })
+}
+
+/** What the pass did to a citation of card words, by its words and target (by its ref alone when the words were
+ *  rewritten for the drawing): a change `{state, to, why}`, or null. */
+export function healLook(heal) {
+  const by = new Map()
+  const byRef = new Map()
+  for (const c of (heal && Array.isArray(heal.changes) ? heal.changes : [])) {
+    if (!c) continue
+    if (!by.has(`${c.label}|${c.ref}`)) by.set(`${c.label}|${c.ref}`, c)
+    if (!byRef.has(c.ref)) byRef.set(c.ref, c)
+  }
+  if (!by.size) return null
+  return (words, target) => { const r = citeRef(target) || String(target || '').trim(); return by.get(`${words}|${r}`) || byRef.get(r) || null }
+}
+
 /** Card words with each nested mark as a toolkit link to its cite in the cite tone (`{cite:[words](#n1)}`), as a
  *  citation in the answer looks, other markup escaped. */
-export function linkedText(md, links) {
+export function linkedText(md, links, look = null) {
   const esc = s => String(s).replace(/`([^`\n]+)`/g, '$1').replace(/[\\{}[\]*]/g, c => '\\' + c)
   let out = ''
   let i = 0
   const s = String(md || '')
   for (const m of s.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
     out += esc(s.slice(i, m.index)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
-    const k = links.findIndex(x => x.ref === citeRef(m[2]))
-    out += k >= 0 ? `{cite:[${esc(citeWords(m[1], links[k].ref))}](#${links[k].id})}` : esc(m[1])
+    // the healing pass: an unwrapped citation in grey, a contradicted one with a red ×, a re-pointed one at its new place
+    const c = look ? look(m[1], m[2]) : null
+    const ref = c && c.to && c.state === 'linked' ? c.to : citeRef(m[2])
+    const k = c && c.state === 'quiet' ? -1 : links.findIndex(x => x.ref === ref)
+    out += c && c.state === 'quiet' ? `{dim:${esc(m[1])}}` : k >= 0 ? `{cite:[${esc(citeWords(m[1], links[k].ref))}](#${links[k].id})}${c && c.state === 'contradicted' ? '{bad: ×}' : ''}` : esc(m[1])
     i = m.index + m[0].length
   }
   return out + esc(s.slice(i)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
@@ -437,11 +465,12 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
 
 /** A gloss's explain card: what the term is, its tiny drawing, and where it mattered in this work. Three parts,
  *  drawn one under the other with a blank row between: a drawing that fails leaves the words as they are. */
-export function explainerCard({ gloss }) {
+export function explainerCard({ gloss, heal = null }) {
   const g = gloss || {}
-  if (g.kind === 'heads') return headsCard(g)
-  const links = linksIn(`${g.body || ''}\n${g.here || ''}`)
-  const words = md => ({ program: WORDS_PROGRAM, data: { text: linkedText(md, links), links: links.filter(l => String(md).includes(`(${l.ref})`)) } })
+  const look = healLook(heal)
+  if (g.kind === 'heads') return headsCard(g, look)
+  const links = linksIn(`${g.body || ''}\n${g.here || ''}`, look)
+  const words = md => ({ program: WORDS_PROGRAM, data: { text: linkedText(md, links, look), links: links.filter(l => String(linkedText(md, links, look)).includes(`(#${l.id})`)) } })
   const parts = [words(g.body || g.title || '')]
   if (typeof g.program === 'string' && g.program.trim()) parts.push({ program: g.program, data: g.data && typeof g.data === 'object' ? g.data : {}, pic: true })
   if (g.here) parts.push(words(g.here))
@@ -450,11 +479,11 @@ export function explainerCard({ gloss }) {
 
 /** An important detail's card (a gloss of kind 'heads'): its title, two to four bullets with their citations, and one
  *  line on what to do, as a "heads up" note reads. */
-function headsCard(g) {
+function headsCard(g, look = null) {
   const bullets = (Array.isArray(g.bullets) ? g.bullets : []).filter(x => typeof x === 'string' && x.trim()).slice(0, 4)
-  const links = linksIn([...bullets, g.todo || ''].join('\n'))
+  const links = linksIn([...bullets, g.todo || ''].join('\n'), look)
   const md = [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', ...bullets.map(x => `• ${x}`), g.todo ? `→ ${g.todo}` : ''].filter(Boolean).join('\n')
-  return { title: g.term || g.title || 'heads up', right: 'heads up', parts: [{ program: WORDS_PROGRAM, data: { text: linkedText(md, links), links } }], links }
+  return { title: g.term || g.title || 'heads up', right: 'heads up', parts: [{ program: WORDS_PROGRAM, data: { text: linkedText(md, links, look), links } }], links }
 }
 
 /** A citation of a whole file: a path with no `#`, not a query's or a card's value. */

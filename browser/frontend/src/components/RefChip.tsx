@@ -202,6 +202,8 @@ export interface RefChipProps {
   /** a citation in prose: its target's glyph alone where GlyphCites holds (and for a card anywhere), and hidden while
    * the links are off */
   cite?: boolean
+  /** the ref as written, when the healing pass re-pointed the citation here: its card says so, faintly */
+  movedFrom?: string
 }
 
 /** Place a body-portaled label beside the chip at `rect`, inside the viewport. */
@@ -233,7 +235,7 @@ const FILE_KINDS = new Set(['record', 'range', 'block', 'span', 'page', 'pointer
 /** the ref kinds with nothing to excerpt: the label names them and the click teleports */
 const NAME_ONLY = new Set(['group', 'report', 'view', 'ui', 'chat'])
 
-export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, quiet, quietWhy, late, anchor, cite }: RefChipProps) {
+export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, quiet, quietWhy, late, anchor, cite, movedFrom }: RefChipProps) {
   const ws = workspace ?? workspaceFromUrl() ?? ''
   const chipEl = useRef<HTMLElement>(null)
   const popEl = useRef<HTMLDivElement>(null)
@@ -343,7 +345,9 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
         // a table's cell: the table around it, never its column and row in words
         const table = citedTable(r, parsed.col, parsed.row)
-        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table, note: versionNote(r) })
+        // a citation the healing pass re-pointed says where it pointed as written, faintly, so the fix is not invisible
+        const moved = movedFrom ? `moved here from ${movedFrom}, which does not show this value` : undefined
+        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table, note: [versionNote(r), moved].filter(Boolean).join(' · ') || undefined })
         return setPop({ state: 'error', rect, message: 'This cell is no longer in the card\'s table' })
       }
       if (parsed.kind === 'cell' && parsed.out != null && parsed.line != null) {

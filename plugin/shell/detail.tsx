@@ -48,7 +48,7 @@ import { paintRegions, regionOfKey } from './cells'
 import { askMerge, beganWord, editsOf, examplesView, PAGES_DEFAULT, partsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { barPreviewEl, citeLabels, currentTheme, escTop, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { barPreviewEl, citeLabels, currentTheme, escTop, healOfText, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, setThreadWindow, threadFor, threadOf } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, readEdits, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
@@ -771,8 +771,14 @@ async function convOf($: Engine, els: Any, thread: Any | null, name: string, w: 
       cards.set(k, await preparedNow($, { id: c.id, v: null, root: c.root }, Math.max(30, w - 2), null, 'inline', 14))
     }
   }
+  // each answer's citations healed once its turn has ended (the last answer of a running thread still writes)
+  const heals = new Map<string, { heal: Any | null; checking: boolean }>()
+  for (const [i, t] of (thread.turns as Any[]).entries()) {
+    if (t && typeof t.text === 'string' && t.text && !heals.has(t.text)) heals.set(t.text, await healOfText($, t.text, { settled: !(String(thread.status || '') === 'running' && i === thread.turns.length - 1) }))
+  }
   return conversation(els, {
     thread, name, w, theme, key: 'conv', now: Date.now(),
+    heal: (text: string) => heals.get(text) ?? null,
     onCite: (ref, label) => { void openMark($, { kind: 'cite', ref, label }, { push: true }) },
     card: (c, key) => {
       if (here(c)) return { el: Text({ key, dimColor: true, wrap: 'truncate-end', children: '  ⎿ saved a new version of this card, shown above' }), h: 1 }

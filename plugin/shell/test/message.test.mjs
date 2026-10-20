@@ -3,13 +3,14 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
+import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, linksIn, placeOf, sourceCard } from '../cards.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
 import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../draw/term.js'
+import { frameOf } from '../../panes/tray.js'
 
 const TEXT = 'Mostly notes. Of 9,120 saves, [2,310 notes](q2#label=note@n) [~](q3@n) went to other bots, from [880 senders](q4#row=1@n). I read only **1 of 3 files**, so the `fixture scope` and `rebase loop` are guesses.'
 const at = (text, m) => text.slice(m.start, m.end)
@@ -75,4 +76,22 @@ test('the healing pass in a drawing: a spinner while it runs, a re-pointed citat
   assert.deepEqual(drawn.filter(r => r.tag).map(r => r.s), [' ×'])
   // a squeeze's new text is a new key: its own pass, the old result left alone
   assert.equal(needsHeal({ ...healed, shown: 'Busiest: [5](r1#day=a@n).' }), true)
+})
+
+test('an explainer and a re-pointed citation\'s card show what the healing pass did: grey, ×, the new place, and where it was moved from', async () => {
+  const gloss = { term: 'edits', body: 'Wren made [7](r1#day=a@n) edits, [12](r9@n) in all, and [4](r1#day=b@n) reverts.' }
+  const heal = { changes: [
+    { label: '7', ref: 'r1#day=a@n', state: 'linked', how: 'cell', to: 'r1#day=c@n' },
+    { label: '12', ref: 'r9@n', state: 'quiet', how: 'gone' },
+    { label: '4', ref: 'r1#day=b@n', state: 'contradicted', how: 'contradicted', to: 'r1#day=b@n', why: 'the cited place shows 3' },
+  ] }
+  const card = explainerCard({ gloss, heal })
+  const text = card.parts[0].data.text
+  assert.ok(text.includes('{dim:12}') && text.includes('{bad: ×}'))
+  assert.deepEqual(card.links.map(l => l.ref), ['r1#day=c@n', 'r1#day=b@n'])
+  assert.equal(healMd('see [it](auth.py:88)'), 'see [it](auth.py#L88)')
+  const rec = { ...newRecord({ row: 'x', session: 's', text: 'Wren made [7](r1#day=a@n) edits.' }) }
+  const healed = healedRecord({ ...rec, heal: { key: textKey(rec.text), changes: [heal.changes[0]] } })
+  const f = frameOf(healed, 0)
+  assert.deepEqual([f.ref, f.heal, f.wrote], ['r1#day=c@n', 'moved', 'r1#day=a@n'])
 })
