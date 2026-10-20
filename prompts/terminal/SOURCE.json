@@ -10,6 +10,10 @@
     "lens-explain/v3.md": {
       "source": "lean/prompts/lens-explain/v3.md",
       "sha256": "785c2ff0b5238f28fe070f9d421b333c55f8459946a0f7852a50fc96b4761b8a"
+    },
+    "labels/v2.md": {
+      "source": "lean/prompts/labels/v2.md",
+      "sha256": "46fb600ea8fc5c624a5ab217147a56d922fd11806058c710ef9af0c6e9284946"
     }
   }
 }

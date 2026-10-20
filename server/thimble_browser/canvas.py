@@ -242,10 +242,27 @@ def set_run(ws: str, cid: str, **fields: Any) -> dict[str, Any]:
     return cell
 
 
-async def run_card(ws: str, cid: str, corpus: Path, *, unsandboxed: bool = False, timeout: float = 60.0) -> dict:
-    """Run a card's code in the sandbox and keep its outputs."""
+def kernel_workspace(ws: str) -> Path:
+    """The folder card code reads as thimble's workspace (cards/kernel_thimble.py WS): the workspace's labels folder,
+    which holds its labels' definitions and rows (labels/store.py), read-only in the sandbox."""
+    return home.workspace_dir(ws) / "labels"
+
+
+async def run_code(ws: str, code: str, corpus: Path, *, timeout: float = 60.0, unsandboxed: bool = False) -> dict:
+    """Run code in the sandbox as a card's code runs: it reads the folder, and thimble.labels() reads the workspace's
+    labels."""
     from .cards import sandbox
 
+    wsdir = kernel_workspace(ws)
+    if not wsdir.is_dir():
+        return await sandbox.run_code(code, corpus, timeout=timeout, unsandboxed=unsandboxed)
+    req = {"code": code, "corpus": str(corpus.resolve()), "workspace": str(wsdir), "timeout": timeout}
+    return await sandbox.run_script(sandbox.RUNNER, req, corpus, extra_ro=[wsdir], timeout=timeout,
+                                    unsandboxed=unsandboxed)
+
+
+async def run_card(ws: str, cid: str, corpus: Path, *, unsandboxed: bool = False, timeout: float = 60.0) -> dict:
+    """Run a card's code in the sandbox and keep its outputs."""
     _, cell = find(ws, cid)
     if cell["kind"] not in CODE_KINDS:
         return cell
@@ -253,7 +270,7 @@ async def run_card(ws: str, cid: str, corpus: Path, *, unsandboxed: bool = False
     import time
 
     t0 = time.monotonic()
-    res = await sandbox.run_code(cell["code"], corpus, timeout=timeout, unsandboxed=unsandboxed)
+    res = await run_code(ws, cell["code"], corpus, timeout=timeout, unsandboxed=unsandboxed)
     outputs = [{**o, "_out": i} for i, o in enumerate(res.get("outputs") or [])]
     status = "ok" if res.get("status") == "ok" else "error"
     _, cell = find(ws, cid)

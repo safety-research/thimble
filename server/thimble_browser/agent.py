@@ -272,6 +272,8 @@ class Session:
                 for b, r in zip(calls, results):
                     rec: dict[str, Any] = {"type": "tool_result", "id": b.id, "summary": r.text[:4000],
                                            "is_error": r.is_error}
+                    if r.extra:
+                        rec.update(r.extra)
                     if r.cell_id:
                         rec["cell_id"] = r.cell_id
                         try:
