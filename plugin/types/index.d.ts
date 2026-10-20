@@ -72,8 +72,10 @@ export type LineCounts = { threads: number; cov: number; at: number; changed: Re
  *  inside a card (panes/tray.js frameOf). */
 export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss'; gloss?: Record<string, unknown> }
 
-/** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
+/** The tray: the stack of cards it shows, the top one drawn. */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }
+/** What the side panel shows (shell/side.ts): a card's detail, or a pane of thimble's with its arguments. */
+export type SideView = { kind: 'card'; id: string; v: number | null; root: string; region?: string | null } | { kind: 'pane'; pane: string; args: Record<string, unknown>; title?: string }
 
 
 declare module 'claude-code' {
@@ -124,6 +126,8 @@ declare module 'claude-code' {
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
+      /** what the side panel shows now, and what it showed before (esc goes back to it), newest last */
+      side: { now: SideView | null; back: SideView[] } | null
       /** the detail's ask line drawn again (shell/detail.tsx): a count the pane and the bar read, so a letter of a
        *  question redraws them alone */
       askline: number
