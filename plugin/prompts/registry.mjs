@@ -14,13 +14,14 @@ export const FEATURES = {
   observer: {
     about: "the observer's frame, which holds the shared principles and composes the enabled lenses",
     reads: "observer/observer.ts, after each of Claude's messages",
-    default: 'v5',
+    default: 'v6',
     versions: {
       v3: { about: "the frame for the lenses (one call over the new turn and a digest of the state), with thimble's purpose in the 0.9 preamble's words, and cards for objects", mode: 'lenses', turn: 'v2' },
       'v3-low': { about: 'v3 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low', turn: 'v2' },
       v4: { about: "v3 in coverage's words: a file is seen when some of its lines entered Claude's context; one only computed over, counted, listed or searched is not; and v3's word on explainers (they wait until opened, so give one for a term the analyst has not used)", mode: 'lenses', turn: 'v2' },
       'v4-low': { about: 'v4 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v4.md', mode: 'lenses', effort: 'low', turn: 'v2' },
       v5: { about: "v4 as the prompt of a fork that shares the session: it reads each of Claude's messages with the whole session, the messages to read named at the end; when to give each part is left to the lenses", mode: 'fork', turn: 'v3' },
+      v6: { about: "v5 with the request framed as a side request whose one reply goes to thimble, in place of the sentence that it has no tools (the fork keeps main's tools for the cache), and its parts going mostly to the analyst's screen", mode: 'fork', turn: 'v3' },
     },
   },
   'observer-turn': {
@@ -46,19 +47,23 @@ export const FEATURES = {
     versions: { v2: { about: 'written clean in the 0.9 style' }, v3: { about: 'the chips as squeeze v7 names them: Interpretation (facts only · some meaning · full meaning) and Background (new · learning · working · expert), each in one sentence' } },
   },
   'lens-heads': {
-    about: 'lens: an important detail of the answer, an orange mark that opens a heads-up card', reads: 'the pass', default: 'v1', optional: true,
-    versions: { v1: { about: "a detail the analyst should know before they rely on the answer: one principle (mark it when missing it would change what they conclude or do) and one example" } },
+    about: 'lens: an important detail of the answer, an orange mark that opens a heads-up card', reads: 'the pass', default: 'v2', optional: true,
+    versions: {
+      v1: { about: "a detail the analyst should know before they rely on the answer: one principle (mark it when missing it would change what they conclude or do) and one example" },
+      v2: { about: "v1 with one line of purpose: mark for this analyst, from what the session shows they know and care about (their questions, what they opened, their side threads)" },
+    },
   },
   'explain-expand': {
     about: "an explainer written again at more length (e on an explainer): one side call over the term, the answer and the files it cites", reads: 'shell/expand.ts', default: 'v1',
     versions: { v1: { about: 'what it is, what it does here and how it connects, cited, with an example of a drawn explanation' } },
   },
   'lens-explain': {
-    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v5', optional: true,
+    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v6', optional: true,
     versions: {
       v3: { about: "written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" },
       v4: { about: "v3 with names from the files (a function, a hook, a field) among the words that stop a reader, a code example, and a backoff that gives one" },
       v5: { about: "v4 with its lists of words and counts gone: the 0.9 principle and its reason, a body with no length, and an example with a drawn explainer beside one in words" },
+      v6: { about: "v5 with one line of purpose (explain for this analyst, from what the session shows they know and care about), and no backoff and no count of explainers" },
     },
   },
   'lens-claims': {

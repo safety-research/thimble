@@ -1,7 +1,8 @@
 // thread.ts: side threads (CONTRACT 6). Whatever opens in the side panel is a thread (side.ts): a card's detail, a
 // citation or an explainer, the thread list, any pane of thimble's. The person asks it in the panel's input bar; it
 // answers about the part they selected, with turns of its own, and can query the data with `thimble`. Main's
-// conversation learns nothing of it unless the person sends the result there (`m` in the panel).
+// conversation reads each question in one row (engaged.ts), and no answer unless the person sends it there (`m` in the
+// panel).
 //
 // The mechanism: one subagent of the session per thread, started by this module with $.agent.spawn, no turn of main.
 //   - It is the lightest thing that can query the data. $.model.complete and $.model.fork have no tools; a loop of our
@@ -35,6 +36,7 @@ import { promptText } from '../prompts/prompts'
 import { claimAgent } from '../telemetry/telemetry'
 import { aboutOf, firstMessage, forkDirective, nameOf, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
 import { sessionKey } from '../hooks/conversation'
+import { tellAsked } from './engaged'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -285,6 +287,8 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
     await keep($, t)
     if (scope.region) await noteSelection($, key, { region: scope.region, label: aboutOf(scope), refs: ask.refs || [] })
     follow($)
+    // the question, not its answer, reaches main's session: what the analyst asks about is what they care about
+    await tellAsked($, { ...ask, text }).catch(() => undefined)
     return { thread: t }
   } finally {
     inFlight--

@@ -34,14 +34,21 @@ export default {
     const heads = f.kind === 'gloss' && f.gloss && f.gloss.kind === 'heads'
     return `${heads ? 'Heads up' : f.kind === 'gloss' ? 'Explain' : 'Cite'} · ${String(f.label || f.ref || '')}`.slice(0, 60)
   },
-  /** What its side thread is about: the mark (one thread per mark, the tray's own), its ref, in words. */
+  /** What its side thread is about: the mark (one thread per mark, the tray's own), its ref, in words, and what an
+   *  explainer or an important detail said, as the person reads it. */
   thread(args) {
     const f = frameOf(args)
     if (!f) return null
     const refs = f.ref ? [f.ref] : (f.gloss && Array.isArray(f.gloss.refs) ? f.gloss.refs.slice(0, 3) : [])
-    return { scope: scopeOf(f), label: String(f.label || f.ref || 'this mark'), refs }
+    return { scope: scopeOf(f), label: String(f.label || f.ref || 'this mark'), refs, ...(f.kind === 'gloss' && f.gloss ? { about: saidOf(f.gloss) } : {}) }
   },
   program,
+}
+
+/** What an explainer or an important detail says, in words for a side thread's agent. */
+export function saidOf(g) {
+  if (g.kind === 'heads') return `thimble marked them as an important detail, "${g.title || g.term}": ${(g.bullets || []).join(' ')}${g.todo ? ` What to do: ${g.todo}` : ''}`
+  return `thimble's explainer of them says: ${g.body || g.title || ''}${g.here ? ` ${g.here}` : ''}`
 }
 
 export function program(k, data) {

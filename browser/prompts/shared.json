@@ -11,8 +11,8 @@
           "[290](card:<id>#product/X200)"
         ],
         [
-          "[↗](r1)",
-          "[↗](card:<id>)"
+          "(r1)",
+          "(card:<id>)"
         ]
       ]
     },
@@ -80,12 +80,14 @@
           ""
         ]
       ],
-      "until": "<!-- digest -->"
+      "until": "<!-- digest -->",
+      "drop": [
+        "**Explain for this analyst.** Use what the session shows about what they know and care about: the words they use, what they opened, and what they asked in side threads. Each turn shows more."
+      ]
     },
     "explain-digest": {
       "prompt": "lens-explain",
-      "after": "<!-- digest -->",
-      "until": "<!-- when backoff -->"
+      "after": "<!-- digest -->"
     },
     "labels": {
       "prompt": "labels",

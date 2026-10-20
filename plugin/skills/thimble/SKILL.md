@@ -36,8 +36,8 @@ them valuable time and attention.
 ```
 Analyst   What are most of the refund requests about?
 Good      Most refund requests name one product, the X200 charger, [290](r2#product=X200@n) of all 410 refund requests
-          in March and April. I defined the "product named" label [↗](r1) to classify which product each request is
-          about. A typical X200 refund request reads ["stopped working after two days"](tickets/march.jsonl#L88).
+          in March and April. I sorted the requests by [the product each one names](r1). A typical X200 refund request
+          reads ["stopped working after two days"](tickets/march.jsonl#L88).
 Bad       The refund-intent cluster (n=410, 33.1%, 95% CI 30.5-35.7%) is dominated by the X200 signal (70.7%), peaking
           on 2026-03-14 at 09:12:07.
 Bad       Most refund requests are about the X200 (290). One says "stopped working after two days."
@@ -76,11 +76,11 @@ Bad       352 of the 410 refund requests were approved [352](r3#outcome=approved
 Analyst   Why do some users get logged out after a few minutes?
 Good      The check that ends a session [reads the timeout as seconds](server/auth.py#L88-94), but the setting
           [gives it in minutes](config/app.yaml#L12), so a 30-minute timeout ends after 30 seconds.
-Bad       The check is in `server/auth.py:88`, and the timeout comes from `config/app.yaml:12`.
+Bad       The bug is in [server/auth.py:88](server/auth.py#L88) and [config/app.yaml:12](config/app.yaml#L12).
 ```
 
-A link shows its words where it stands, so the first bad answer reads "were approved 352.", and the second gives the
-analyst two paths to look up by hand instead of two lines to open.
+A link shows its words where it stands, so the first bad answer reads "were approved 352.", and the second links two
+places without saying what either one shows: the analyst has to open both to learn the cause.
 
 ## Cards
 

@@ -1,6 +1,9 @@
 // The observer: thimble's always-on, quiet part. It reads each of Claude's messages with the whole session, once,
-// after the message exists. What it finds goes to Claude as notes the person never sees, and to the message as explain
-// marks, lit verbs and where the answer stands on squeeze's chips.
+// after the message exists. What it finds goes to the person: explain marks and important details on the message's
+// words, lit verbs, where the answer stands on squeeze's chips, and the session's claims. Notes to Claude, which the
+// person never sees, are an experimental part, off unless its switch is on. The session it reads holds what the person
+// engaged with (shell/engaged.js): the explainers, details and citations they opened, and what they asked in side
+// threads.
 //
 // A hook and a queue. Each new message of Claude's is queued as it arrives:
 //   - an answer: the last words of a turn of main that answered (the person's question, a key's ask, a background
@@ -85,12 +88,9 @@ const CONTEXT_OBJECTS = 4 // cards the pass reads: every new one, then the lates
 const STEPS_BUDGET = 24000 // the earlier pass (lenses mode): characters of the turn's words and tool calls it reads
 const LOOK_DELAY = 50 // ms after a message is queued before the worker takes the queue
 const RETRY_MS = 2000 // ms before a failed pass is tried again
-// explains, per session (kept in the session's file, so another session or another folder starts afresh): the terms the
-// person saw explained (never explained again in this session), the looks whose explains nobody opened, and the looks
-// still to come that give at most one
+// explains, per session (kept in the session's file, so another session or another folder starts afresh): the terms
+// already explained, never explained again in this session
 const GLOSSED_KEEP = 100
-const GLOSS_FREE = 2 // looks whose explains nobody opened before explains back off to one a look
-export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2 ** (n - GLOSS_FREE - 1)))
 
 const S = {
   session: '',
@@ -112,9 +112,6 @@ const S = {
   pending: [] as Note[],
   log: [] as Record<string, unknown>[],
   glossed: [] as string[],
-  glossUnopened: 0,
-  glossSkip: 0,
-  glossOpenedAt: 0, // the person's last open of an explain the observer has counted
   headsGiven: [] as string[], // the titles of the heads-ups placed in this session, for the lens's digest
 }
 
@@ -140,7 +137,6 @@ export function lookPending(): Promise<void> | null {
 }
 
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
-const num = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0)
 const bullets = (xs: string[]) => (xs.length ? xs.map(x => `- ${x}`).join('\n') : '(none)')
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
 const cut = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n - 1) + '…')
@@ -164,8 +160,6 @@ async function ensure($: Engine): Promise<void> {
         S.notesGiven = strs(kept.notesGiven)
         S.glossed = strs(kept.glossed)
         S.headsGiven = strs(kept.headsGiven)
-        S.glossUnopened = num(kept.glossUnopened)
-        S.glossSkip = Math.min(8, num(kept.glossSkip))
         // a reload mid-session: the notes not yet delivered wait again, and the person's questions come back
         const delivered = new Set(S.log.filter(r => r.kind === 'notes_delivered').flatMap(r => strs(r.notes)))
         const added = S.log.filter(r => r.kind === 'look').flatMap(r => (Array.isArray(r.notes_added) ? (r.notes_added as Note[]) : []))
@@ -184,7 +178,7 @@ async function ensure($: Engine): Promise<void> {
 async function save($: Engine): Promise<void> {
   if (!S.file) return
   try {
-    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), glossed: S.glossed.slice(-GLOSSED_KEEP), glossUnopened: S.glossUnopened, glossSkip: S.glossSkip, headsGiven: S.headsGiven.slice(-40), log: S.log.slice(-400) }, null, 1))
+    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), glossed: S.glossed.slice(-GLOSSED_KEEP), headsGiven: S.headsGiven.slice(-40), log: S.log.slice(-400) }, null, 1))
   } catch {
     // the file is memory for a resume and a record for measuring; the observer works without it
   }
@@ -436,16 +430,12 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     const evidence = await evidenceNow($, root, objs)
 
     // 2. the state each lens needs, the lenses enabled, one pass
-    // an explain the person opened since the last look (the shell sets glossOpened): the backoff starts over
-    const opened = num((await $.state.get({ plugin: 'thimble', key: 'glossOpened' })).value)
-    if (opened > S.glossOpenedAt) Object.assign(S, { glossOpenedAt: opened, glossUnopened: 0, glossSkip: 0 })
     const glossed = S.glossed.slice()
-    const glossSkip = S.glossSkip
     const parts = await lensParts($)
     if (!parts.length) { row.skip = 'no lens on'; return }
     // the session's claims so far, which the claims lens adds these messages' to
     const claims = parts.some(x => x.lens.name === 'claims') ? await claimsDigest($) : null
-    const st = { notesGiven: S.notesGiven, glossed, glossSkip, headsGiven: S.headsGiven, ...(claims ?? {}) }
+    const st = { notesGiven: S.notesGiven, glossed, headsGiven: S.headsGiven, ...(claims ?? {}) }
     // a message the person squeezed already: the pass reads the version they read
     const kept = await messageRecord($, newest.row)
     const squeezed = kept && typeof kept.shown === 'string' && kept.shown.trim() && kept.shown !== kept.text ? kept.shown : ''
@@ -478,7 +468,7 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     const fresher: Note[] = []
     let claimsLit: { row: string; note: string; claims: string[] } | null = null
     const ctx: Any = {
-      moved, glossSkip, isRepeat,
+      moved, isRepeat,
       verbs: {} as Record<string, unknown>,
       glosses: null as unknown[] | null,
       heads: null as Record<string, unknown> | null,
@@ -551,11 +541,7 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
       }
     }
     row.glosses = placed
-    if (placed.length) {
-      S.glossed = [...glossed, ...placed].slice(-GLOSSED_KEEP)
-      S.glossUnopened += 1
-      S.glossSkip = glossSkipsFor(S.glossUnopened)
-    } else if (glossSkip > 0) S.glossSkip = glossSkip - 1
+    if (placed.length) S.glossed = [...glossed, ...placed].slice(-GLOSSED_KEEP)
     row.land_ms = Date.now() - newest.t
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
@@ -773,7 +759,7 @@ export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', model: '', turnId: '', turnNo: 0, steps: 0, tools: 0, turnStart: 0, running: false, since: 0,
     prompt: { text: '', typed: true, verb: '', from: 'composer' }, questions: [], texts: [], queue: [], busy: false,
-    notesGiven: [], pending: [], log: [], glossed: [], glossUnopened: 0, glossSkip: 0, glossOpenedAt: 0, headsGiven: [],
+    notesGiven: [], pending: [], log: [], glossed: [], headsGiven: [],
   })
   carrying = []
   lookEnded()

@@ -252,6 +252,38 @@ export function fileLink(ref, root) {
   return { href, label: placeOf(r), path: abs }
 }
 
+// terminals Claude Code takes to draw an OSC 8 hyperlink by their name, as it names them (2.1.301)
+const LINK_TERMS = ['ghostty', 'Hyper', 'kitty', 'alacritty', 'iTerm.app', 'iTerm2', 'WarpTerminal']
+const version = v => String(v || '').split('.').map(x => parseInt(x, 10) || 0)
+
+/**
+ * Whether Claude Code draws a link of a reply as an OSC 8 hyperlink in this terminal, by the test it applies to the
+ * environment (`env`: the variables it reads). Where it does not, it draws the link's words, then the address in
+ * brackets. Only the cases where it surely draws one say yes, so a surface that asks never shows that address:
+ * FORCE_HYPERLINK, a terminal known by its name (TERM_PROGRAM, LC_TERMINAL, TERM), tmux 3.4 or later (which passes a
+ * hyperlink on where its `terminal-features` give the outer terminal `hyperlinks`), Windows Terminal outside tmux, and
+ * VTE 0.50.1 or later.
+ */
+export function drawsHyperlinks(env = {}) {
+  const e = env || {}
+  if (typeof e.FORCE_HYPERLINK === 'string' && e.FORCE_HYPERLINK) return parseInt(e.FORCE_HYPERLINK, 10) !== 0
+  if (typeof e.FORCE_HYPERLINK === 'string') return false
+  const p = e.TERM_PROGRAM || ''
+  if (LINK_TERMS.includes(p) || LINK_TERMS.includes(e.LC_TERMINAL || '')) return true
+  if (e.TERMINAL_EMULATOR === 'JetBrains-JediTerm') return true
+  if (e.WT_SESSION && p !== 'tmux' && !e.TMUX) return true
+  if (p === 'tmux') { const [a, b] = version(e.TERM_PROGRAM_VERSION); return a > 3 || (a === 3 && b >= 4) }
+  if (String(e.TERM || '').includes('kitty')) return true
+  if (e.CI || e.TEAMCITY_VERSION) return false
+  if (p === 'WezTerm') return version(e.TERM_PROGRAM_VERSION)[0] >= 20200620
+  if (p === 'vscode') { const [a, b] = version(e.TERM_PROGRAM_VERSION); return a > 1 || (a === 1 && b >= 72) }
+  if (e.VTE_VERSION && e.VTE_VERSION !== '0.50.0') {
+    const v = /^\d{3,4}$/.test(e.VTE_VERSION) ? [0, parseInt(e.VTE_VERSION.slice(0, -2), 10), 0] : version(e.VTE_VERSION)
+    return v[0] > 0 || v[1] >= 50
+  }
+  return e.TERM === 'alacritty'
+}
+
 /** The span part of a source citation: the kernel's span (resolve's `span`), or the code file's lines read here. */
 function spanPart(sp, room) {
   const rows = (sp.rows || []).map(r => ({ ...r, n: r.n != null ? String(r.n) : '', text: r.hot ? spanText(r) : esc(short(r.text, 300)) }))

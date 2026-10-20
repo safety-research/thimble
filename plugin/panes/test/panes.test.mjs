@@ -396,3 +396,16 @@ test('mark: a citation in the side panel is the tray\'s card at the panel\'s wid
   const loose = run(PANES.mark, PANES.mark.data({}, { frame: { kind: 'cite', ref: 'q2#n', label: '2,994' } }), { w: 70 })
   assert.ok(!loose.on.some(h => h.name === ']'))
 })
+
+test("a mark's side thread is told what the person reads on it: an important detail's points and what to do, an explainer's words", async () => {
+  const { firstMessage } = await import('../../shell/threads.js')
+  const heads = { row: 'r1', i: 2, kind: 'gloss', label: 'fell 40% in March', gloss: { kind: 'heads', term: 'fell 40% in March', title: 'March is half a month', bullets: ['refunds.csv ends on Mar 14.', 'Per day, refunds fell 12%.'], todo: 'Quote the per-day drop.' } }
+  const th = PANES.mark.thread({ frame: heads })
+  assert.equal(th.about, 'thimble marked them as an important detail, "March is half a month": refunds.csv ends on Mar 14. Per day, refunds fell 12%. What to do: Quote the per-day drop.')
+  const first = firstMessage({ text: 'is the drop real?', scope: th.scope, about: th.about })
+  assert.match(first, /About: the words "fell 40% in March" in Claude's message\.\nthimble marked them as an important detail/)
+  const gloss = { row: 'r1', i: 1, kind: 'gloss', label: 'p95', gloss: { term: 'p95', body: 'The time 95 of 100 requests beat.', here: 'Here it is 2.1 s.' } }
+  assert.equal(PANES.mark.thread({ frame: gloss }).about, "thimble's explainer of them says: The time 95 of 100 requests beat. Here it is 2.1 s.")
+  // a citation's thread names its ref, as before
+  assert.equal(PANES.mark.thread({ frame: { kind: 'cite', ref: 'q2#n', label: '2,994' } }).about, undefined)
+})

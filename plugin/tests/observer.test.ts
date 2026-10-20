@@ -1,12 +1,10 @@
-// The observer's hooks (observer/observer.ts): one look after a turn of work; its notes reach Claude beside the next
-// prompt and never the person; it lights the verbs of the answer's row and places its glosses, a gloss never twice and
-// fewer when nobody opens them. Notes to Claude is an experimental feature, off by default: the tests of notes turn it
-// on (settings/features.mjs).
+// The observer's hooks (observer/observer.ts): one look after a turn of work; it lights the verbs of the answer's row
+// and places its glosses and heads-ups, a gloss never twice and never fewer for being unopened; its notes, where their
+// switch is on, reach Claude beside the next prompt and never the person. What the person opens reaches the session.
 // `claude plugin test plugin`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { slim } from '../observer/evidence.js'
-import { glossSkipsFor } from '../observer/observer'
 import { press, promptStub } from './stubs'
 
 const ROOT = '/data'
@@ -369,9 +367,10 @@ test('e on an explainer writes a longer one in its place: in the tray when the t
   expect(g.short.body).toBe(GLOSS.body)
 })
 
-test('a heads-up is placed on its words in orange beside the explainers, and opens a card of its title, its points and what to do', async ($, on) => {
+test('a heads-up is placed on its words in orange beside the explainers, and opens a card of its title, its points and what to do; each open reaches the session once, in a row the person never sees', async ($, on) => {
   const HEADS = { term: 'June 18 had the most saves', title: 'Two days are missing', bullets: ['[revisions.jsonl ends on Jun 20](revisions.jsonl#L14591), so the last week is short.'], todo: 'Count again per day.' }
   const w = world(on, { fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS], heads: HEADS } })
+  const session = mock.session(on)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
   await w.clock.settle()
@@ -392,9 +391,29 @@ test('a heads-up is placed on its words in orange beside the explainers, and ope
   expect(card).toContain('June 18 had the most saves')
   expect(card).toContain('heads up')
   expect(textOf(await $.ui.render(HINT))).not.toContain('expand')
+  // the next mark, the explainer; then back to the heads-up, which is told once
+  await press($, w.clock, key(']'))
+  await press($, w.clock, key('['))
+  await w.clock.settle()
+  const rows = (session.appended() as Any[]).filter(r => r.message?.type === 'user').map(r => String(r.message.content?.[0]?.text ?? ''))
+  expect(rows.filter(r => r.startsWith('The analyst opened'))).toEqual([
+    'The analyst opened the important detail "Two days are missing" on "June 18 had the most saves" in your message that begins "June 18 had the most saves, because the fixture scope was…".',
+    'The analyst opened the explainer of "fixture scope" in your message that begins "June 18 had the most saves, because the fixture scope was…".',
+  ])
 })
 
-test('a term the person saw explained is never glossed again; glosses nobody opens back off', async ($, on) => {
+test('notes to Claude are off until their switch is on: the pass has no notes section and asks for none', async ($, on) => {
+  const w = world(on, { fork: { notes: [{ note: 'Say the 6,543 counts reverts.' }], verbs: {}, glosses: [] } })
+  await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
+  await w.clock.settle()
+  expect(w.forks.length).toBe(1)
+  expect(w.forks[0]).not.toContain('LENS notes')
+  expect(w.forks[0]).not.toContain('"notes"')
+  await $.prompt.submit({ text: 'next', origin: { kind: 'composer' } } as never)
+  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('Say the 6,543 counts reverts.')
+})
+
+test('a term already explained is never glossed again, and explains never back off', async ($, on) => {
   const w = world(on, { fork: () => ({ notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] }) })
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
   expect(Object.keys(JSON.parse(w.files[MSGPATH]!).glosses)).toEqual(['g1'])
@@ -402,8 +421,11 @@ test('a term the person saw explained is never glossed again; glosses nobody ope
   await turn($, w, w.clock, { id: 't2', prompt: 'and June 19?', answer: ANSWER, tools: 2, save: true })
   expect(w.forks[1]).toContain('| - fixture scope')
   expect(JSON.parse(w.files[MSGPATH]!).glosses).toEqual({})
-  // looks whose glosses nobody opened: after two, the next looks are told to give none
-  expect([1, 2, 3, 4, 5, 9].map(glossSkipsFor)).toEqual([0, 0, 1, 2, 4, 8])
+  // looks whose glosses nobody opened: the next looks are asked as the first was, with no rule to give fewer
+  await turn($, w, w.clock, { id: 't3', prompt: 'and June 20?', answer: 'June 20 had the module-scoped tests run.', tools: 2, save: true })
+  await turn($, w, w.clock, { id: 't4', prompt: 'and June 21?', answer: 'June 21 had the module-scoped tests run.', tools: 2, save: true })
+  expect(w.forks.length).toBe(4)
+  for (const f of w.forks) expect(f).not.toMatch(/at most|this time/)
 })
 
 // ------------------------------------------------------------------------------------------------ lenses, versions, telemetry
@@ -426,12 +448,12 @@ test('the pass is a fork of the session: its prompt is the frame, the lenses, th
   const file = '/home/t/.thimble/lean/events/s-1.jsonl'
   expect(w.events.every(e => e.file === file)).toBe(true)
   const prompts = w.events.find(e => e.kind === 'prompts')!
-  expect((prompts.active as Json).observer).toBe('v5')
-  expect((prompts.active as Json)['lens-explain']).toBe('v5')
+  expect((prompts.active as Json).observer).toBe('v6')
+  expect((prompts.active as Json)['lens-explain']).toBe('v6')
   // one call after the turn: no question step
   expect(w.events.some(e => e.kind === 'call' && e.feature === 'question')).toBe(false)
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
-  expect(pass.prompt).toBe('observer:v5')
+  expect(pass.prompt).toBe('observer:v6')
   expect(pass.turn_prompt).toBe('observer-turn:v3')
   // a fork runs as main's thread does: no effort of its own
   expect(pass.effort).toBeUndefined()
@@ -479,7 +501,7 @@ test('a version that does not exist: the default is read, and one line says so',
   await w.clock.settle()
   expect(w.forks[0]).toContain('FRAME\n')
   expect(w.toasts.length).toBe(1)
-  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v5')
+  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v6')
   expect((w.events.find(e => e.kind === 'prompts')!.problems as string[]).length).toBe(1)
 })
 

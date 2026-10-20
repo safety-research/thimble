@@ -11,12 +11,12 @@
 //                       catch-up's), so a side thread's answer can be cut to the rows its panel has
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
 //                       rows; its keys are in the bar under it, and its color says cite or explain
-import { blocks, inline, looseOf, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
+import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
 import { paintRegions } from './cells'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number }
+type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; within?: number }
 export type Theme = 'dark' | 'light'
 
 /** The marks' colors, per theme: a citation's indigo; an explained term as a highlighter pen marks it, dark text on a
@@ -67,8 +67,8 @@ function runText(els: Any, r: Run, dim = false, ink: string | null = null) {
   return els.Text(p)
 }
 
-/** A mark's run as a press: the citation underlined in indigo, the gloss on its teal fill, the sparkline in place;
- *  the focused one inverse. */
+/** A mark's run as a press: the citation underlined in indigo, the gloss on its teal fill (underlined too when it
+ *  stands inside a citation's words), the sparkline in place; the focused one inverse. */
 function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const m = o.rec.marks[r.mark as number]
   const c = markColors(o.theme)
@@ -81,6 +81,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
     const heads = o.rec.glosses?.[m.gloss as string]?.kind === 'heads'
     p.color = heads ? c.headsInk : c.glossInk
     p.backgroundColor = on ? (heads ? c.focusHeads : c.focusGloss) : heads ? c.headsBg : c.glossBg
+    if (r.within !== undefined) p.underline = true
   } else {
     p.color = on ? 'text' : 'inactive'
     if (on) p.backgroundColor = 'selectionBg'
@@ -189,18 +190,6 @@ export function messageEl(els: Any, given: MessageOpts): Any {
     while (j + 1 < bs.length && !marksIn(o.rec.marks, bs[j + 1].start, bs[j + 1].end).length) j++
     push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0)
     i = j + 1
-  }
-  // an explain whose term the rewrite left out, or whose term stands only in a citation's words: its term after the
-  // text, a press as in the text
-  const loose = looseOf(o.rec.marks)
-  if (loose.length) {
-    const kids: Any[] = [els.Text({ dimColor: true, children: 'explain: ' })]
-    loose.forEach((m: Any, j: number) => {
-      if (j) kids.push(els.Text({ dimColor: true, children: ' · ' }))
-      kids.push(markEl(els, o, { s: String(o.rec.glosses?.[m.gloss]?.term || 'a term'), mark: m.i }, `${o.key}-loose-${j}`))
-    })
-    if (loose.some((m: Any) => !m.inLink)) kids.push(els.Text({ dimColor: true, children: ' (in the full answer)' }))
-    push([Box({ flexDirection: 'row', flexWrap: 'wrap', children: kids })], true)
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
 }

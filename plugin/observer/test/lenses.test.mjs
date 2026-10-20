@@ -15,7 +15,7 @@ import { callOf, stepsOf, turnMessages } from '../turn.mjs'
 
 const byName = Object.fromEntries(LENSES.map(l => [l.name, l]))
 const FRAG = 'LENS one\n\nits principles\n\n<!-- digest -->\nKnown: {{THINGS}}\n\n<!-- when open -->\nNo line now.\n<!-- when backoff -->\nNothing now.'
-const ST = { notesGiven: ['a note given'], glossed: ['p95'], glossSkip: 0 }
+const ST = { notesGiven: ['a note given'], glossed: ['p95'] }
 
 test("a fragment's sections: its instructions, its digest's template, its rules by name", () => {
   const s = sectionsOf(FRAG)
@@ -56,7 +56,7 @@ test('the real fragments compose: every lens of the registry has instructions, a
   const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { MESSAGES: 'Read this message of Claude\'s', ROW: 'v visualize', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', SKELETON: skeletonOf(LENSES) }, parts, ST)
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
   assert.match(turn.text, /Notes Claude already has:\n- a note given/)
-  assert.match(turn.text, /Terms the analyst already saw explained:\n- p95/)
+  assert.match(turn.text, /Terms that already have an explainer in this session:\n- p95/)
   assert.match(turn.text, /\{"notes": \[\], "verbs": \{\}, "glosses": \[\], "heads": null, "claims": \[\]\}\s*$/)
   // the earlier pass's template (observer-turn:v2) still composes
   const old = composeTurn(textOf('observer-turn', ROOT, { THIMBLE_PROMPTS: 'observer-turn:v2' }).text, { QUESTION: 'q', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, ST)
@@ -81,7 +81,7 @@ test("each lens's share of the pass: its characters in and out, the frame and th
 function ctxOf(o = {}) {
   const did = { notes: [], logged: {} }
   const ctx = {
-    moved: false, glossSkip: 0, isRepeat, verbs: {}, glosses: null,
+    moved: false, isRepeat, verbs: {}, glosses: null,
     note: n => did.notes.push(n), log: (k, v) => { did.logged[k] = v }, ...o,
   }
   return { ctx, did }
@@ -101,17 +101,19 @@ test('the notes, actions, squeeze and explain lenses each put their part where i
   assert.equal(s.ctx.verbs.s.lit, false)
   const g = { term: 'p95', body: 'b' }
   assert.deepEqual((await merge('explain', { glosses: [g] })).ctx.glosses, [g])
-  // backing off, a look gives at most one explain
-  const g2 = { term: 'canary', body: 'c' }
-  assert.deepEqual((await merge('explain', { glosses: [g, g2] }, { glossSkip: 2 })).ctx.glosses, [g])
+  // every explain the pass gives is kept: no count and no backoff
+  const more = ['canary', 'p99', 'shard', 'quorum'].map(term => ({ term, body: term }))
+  assert.deepEqual((await merge('explain', { glosses: [g, ...more] })).ctx.glosses, [g, ...more])
   // when lit with no proposal and no note, v stays dim
   assert.deepEqual((await merge('actions', { verbs: { v: { proposals: [] } } })).ctx.verbs, {})
 })
 
-test('the rule of the explain lens holds only when its condition does', () => {
-  assert.deepEqual(byName.explain.when({ glossSkip: 1 }), ['backoff'])
+test('the explain lens has no rule of its own, and its digest and the notes lens\'s fill every placeholder', () => {
+  assert.deepEqual(byName.explain.when({}), [])
+  const explain = readFileSync(new URL('../../prompts/lens-explain/v6.md', import.meta.url), 'utf8')
+  assert.deepEqual(sectionsOf(explain).when, {})
   for (const name of ['notes', 'explain']) {
-    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${name === "notes" ? "v2" : "v3"}.md`, import.meta.url), 'utf8')
+    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${name === "notes" ? "v2" : "v6"}.md`, import.meta.url), 'utf8')
     const d = sectionsOf(frag).digest
     assert.ok(d, `lens-${name} has a digest`)
     const keys = [...d.matchAll(/\{\{([A-Z_]+)\}\}/g)].map(m => m[1])
