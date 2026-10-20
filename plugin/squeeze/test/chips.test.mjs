@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../shell/message.js'
-import { ARRIVE, CATCHUP_HEAD, CHIPS, applyRewrite, atOf, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, levelWords, mustKeep, ownWords, readReply, setWords, settledNote, shownKey, withOwn, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, termsOf, unplacedMoves } from '../chips.mjs'
+import { ARRIVE, CATCHUP_HEAD, CHIPS, answerText, applyRewrite, atOf, cardListsAt, drawnOf, cardNotesFor, cardSpec, cardsAfter, cardsBlock, cardsDid, cardsKnown, queryIdsOf, toolkitOf, withLater, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, levelWords, mustKeep, ownWords, readReply, setWords, settledNote, shownKey, withOwn, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, termsOf, unplacedMoves } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -18,7 +18,7 @@ const TEXT = [
   '- The fix is one line.',
   '- The test then [passed 200 times in a row](q3#test=checkout@passes).',
 ].join('\n')
-const PROMPT = readFileSync(fileURLToPath(new URL('../../prompts/squeeze/v7.md', import.meta.url)), 'utf8')
+const PROMPT = readFileSync(fileURLToPath(new URL('../../prompts/squeeze/v8.md', import.meta.url)), 'utf8')
 
 function record() {
   const rec = newRecord({ row: 'r1', session: 's1', text: TEXT })
@@ -172,10 +172,89 @@ test('a message taller than half the screen arrives squeezed; the rows count as 
   assert.ok(!isLong(long, { cols: 100, room: 60 }))
 })
 
-test('readReply takes the text from its tags, or the whole reply when it gave none', () => {
-  assert.deepEqual(readReply('<text>\nA.\n</text>'), { text: 'A.' })
-  assert.deepEqual(readReply('A plain reply.'), { text: 'A plain reply.' })
-  assert.deepEqual(readReply('```markdown\nB.\n```'), { text: 'B.' })
+test('readReply takes the text from its tags, or the whole reply when it gave none, and the card changes after it', () => {
+  const none = { cards: [], cardProblems: [] }
+  assert.deepEqual(readReply('<text>\nA.\n</text>'), { text: 'A.', ...none })
+  assert.deepEqual(readReply('A plain reply.'), { text: 'A plain reply.', ...none })
+  assert.deepEqual(readReply('```markdown\nB.\n```'), { text: 'B.', ...none })
+  const reply = [
+    '<text>\nShort.\n</text>',
+    '<card edit="01-saves">\n<title>Saves each day</title>\n<takeaway>June 18 had the most\n saves.</takeaway>\n</card>',
+    '<card add="saves-by-hour">\n<title>Saves by hour</title>\n<takeaway>Most came at noon.</takeaway>\n<data>{"hours": "r2"}</data>\n<program>\nreturn k.bars(data.hours.map(h => ({ id: `h${h.hour}`, label: h.hour, value: h.n })))\n</program>\n</card>',
+    '<card drop="02-old"/>',
+    '<card add="broken">\n<title>No data</title>\n<program>return 1</program>\n</card>',
+    '<card edit="03-x">\n<data>[1, 2]</data>\n</card>',
+  ].join('\n')
+  const got = readReply(reply)
+  assert.equal(got.text, 'Short.')
+  assert.deepEqual(got.cards, [
+    { op: 'edit', id: '01-saves', title: 'Saves each day', takeaway: 'June 18 had the most saves.' },
+    { op: 'add', id: 'saves-by-hour', title: 'Saves by hour', takeaway: 'Most came at noon.', program: 'return k.bars(data.hours.map(h => ({ id: `h${h.hour}`, label: h.hour, value: h.n })))', data: { hours: 'r2' } },
+    { op: 'drop', id: '02-old' },
+  ])
+  assert.equal(got.cardProblems.length, 2)
+  assert.match(got.cardProblems[0], /the new card broken came without its data/)
+  assert.match(got.cardProblems[1], /card 03-x gave data that is no JSON object/)
+  // a reply with no text tags: the card blocks are no part of the text
+  assert.equal(readReply('Plain.\n<card drop="02-old"/>').text, 'Plain.')
+})
+
+test("a squeeze's cards: the request shows the original's cards and the outputs they draw on; each version keeps the cards it drew, the original comes back with its own, and a card made since is kept", () => {
+  const cards = [{ id: '01-saves', title: 'Saves per day', text: 'June 18 had [6,543](q1#day=2026-06-18@n).', data: { days: 'q1' }, program: 'return k.bars([])' }]
+  const outputs = [{ id: 'q1', about: 'saves per day', text: '   day      n\n0  06-18  6543' }]
+  const block = cardsBlock(cards, outputs)
+  assert.match(block, /^The cards drawn under the original, in order:\n<card id="01-saves">\n<title>Saves per day<\/title>/)
+  assert.match(block, /<data>\{"days":"q1"\}<\/data>\n<program>\nreturn k.bars\(\[\]\)\n<\/program>/)
+  assert.match(block, /<output id="q1" about="saves per day">\n   day      n\n0  06-18  6543\n<\/output>/)
+  assert.equal(cardsBlock([], []), '')
+  assert.deepEqual(queryIdsOf(['See [6,543](q1#day=1@n) and [~](r4@n), and [x](r4#a=1).'], ['q1#/days', 'r2']), ['q1', 'r2', 'r4'])
+  // the request: the block after the original, and the toolkit as a second cached system block
+  const rec = { ...record(), squeeze: { at: { length: 4 }, scale: 3 } }
+  const req = request(rec, { system: 'P', toolkit: 'TOOLKIT', cards, outputs })
+  assert.deepEqual(req.system.map(x => x.text), ['P', 'TOOLKIT'])
+  assert.match(req.prompt[0].text, /<\/original>\n\nThe cards drawn under the original/)
+  assert.deepEqual(request(rec, { system: 'P', toolkit: 'TOOLKIT' }).system.map(x => x.text), ['P'])
+  assert.equal(toolkitOf('# G\n\n## What\n\nx\n\n## The toolkit\n\nk.bars\n\n## Worked programs\n\ny'), '## The toolkit\n\nk.bars')
+  // an edit lays its parts over the original's spec; an add is its own
+  assert.deepEqual(cardSpec({ op: 'edit', id: '01-saves', takeaway: 'Plainer.', data: { hours: 'q2' } }, { title: 'T', text: 'Old.', data: { days: 'q1' }, program: 'P' }), { title: 'T', text: 'Plainer.', data: { days: 'q1', hours: 'q2' }, program: 'P' })
+  assert.deepEqual(cardSpec({ op: 'add', id: 'x', title: 'X', program: 'P2', data: { a: 'q2' } }, { title: 'T' }), { title: 'X', program: 'P2', data: { a: 'q2' } })
+  // the versions: one edits a card and adds one, one leaves a card out; the original has its own
+  const A = { id: '01-saves', v: 1, root: '/d' }, B = { id: '02-hours', v: 1, root: '/d' }
+  const orig = { r1: [A, B] }
+  const longer = cardsAfter(orig, 'r1', [{ op: 'edit', id: '01-saves', ref: { id: '01-saves', v: 2, root: '/d' }, title: 'Saves per day' }, { op: 'add', id: '03-new', ref: { id: '03-new', v: 1, root: '/d' }, title: 'New' }])
+  assert.deepEqual(longer.rows.r1.map(x => `${x.id}@${x.v}`), ['01-saves@2', '02-hours@1', '03-new@1'])
+  assert.deepEqual(longer.did.map(d => d.did), ['edited', 'added'])
+  const shorter = cardsAfter(orig, 'r1', [{ op: 'drop', id: '02-hours', title: 'Hours' }])
+  assert.deepEqual(shorter.rows.r1.map(x => x.id), ['01-saves'])
+  const remark = r => r
+  let r = applyRewrite({ ...record(), squeeze: {} }, { text: 'Longer.', at: { length: 3 }, cards: longer, origCards: orig }, remark)
+  r = applyRewrite(r, { text: 'Short.', at: { length: 1 }, cards: shorter, origCards: orig }, remark)
+  r = applyRewrite(r, { text: 'Facts.', at: { interpret: 0 }, cards: null, origCards: orig }, remark)
+  assert.deepEqual(cardListsAt(r).r1.map(x => x.id), ['01-saves', '02-hours'])
+  assert.deepEqual(cardsDid(r), [])
+  const back = fromVersions(r, { length: 3 }, remark)
+  assert.deepEqual(cardListsAt(back).r1.map(x => `${x.id}@${x.v}`), ['01-saves@2', '02-hours@1', '03-new@1'])
+  assert.deepEqual(cardNotesFor(back, 'r1'), { marks: { '01-saves': 'edited', '03-new': 'added' }, left: [] })
+  assert.deepEqual(cardNotesFor(fromVersions(r, { length: 1 }, remark), 'r1'), { marks: {}, left: ['Hours'] })
+  const orig2 = restore(back, remark)
+  assert.deepEqual(cardListsAt(orig2).r1.map(x => `${x.id}@${x.v}`), ['01-saves@1', '02-hours@1'])
+  // a card v made under the answer since: kept after the cards the squeeze answers for
+  const C = { id: '04-later', v: 1, root: '/d' }
+  assert.deepEqual(withLater([A, B, C], longer.rows.r1, cardsKnown(back)).map(x => x.id), ['01-saves', '02-hours', '03-new', '04-later'])
+  // Claude hears what the version did to the cards, and that they came back
+  assert.match(settledNote(back), /Its cards changed with it: "Saves per day" \(01-saves\) edited, now version 2; "New" \(03-new\) added\./)
+  assert.match(settledNote(orig2, shownKey(back)), /as you wrote it, with its cards as they were\.$/)
+  // a rewrite is held to the whole answer it was shown: a value a card draws, or a ref its takeaway cites, is no addition
+  const drawnCard = { title: 'Saves per day', text: 'June 18 had [6,543](q1#day=2026-06-18@n).', drawn: drawnOf({ data: { days: [{ day: '06-17', n: 4210, _ref: 'q1#day=06-17', _rows: ['x#row=1'] }] } }) }
+  assert.equal(drawnCard.drawn, '{"days":[{"day":"06-17","n":4210}]}')
+  const longerText = 'June 17 had 4,210 saves and June 18 had [6,543](q1#day=2026-06-18@n).'
+  assert.deepEqual(checkRewrite('Most saves came on June 18.', longerText).problems.length, 2)
+  assert.deepEqual(checkRewrite(answerText('Most saves came on June 18.', [drawnCard]), longerText).problems, [])
+  // a value the answer states, rounded or as a percent, is no addition; a value it never states is
+  assert.deepEqual(checkRewrite('Its rate was 0.369 and its mean 36.94 steps.', 'About 37% of them, with 36.9 steps on average.').problems, [])
+  assert.deepEqual(checkRewrite('Its rate was 0.369.', 'About 39% of them.').problems, ['"39" is not in the original'])
+  // a record no rewrite touched the cards of: nothing to place
+  assert.equal(cardListsAt(applyRewrite({ ...record(), squeeze: {} }, { text: 'S.', at: { length: 1 } }, remark)), null)
 })
 
 test('the new text writes itself in from the top: each cut ends a word and never splits a link, code, bold or a table row', () => {
@@ -268,7 +347,7 @@ test('a rewrite that ends on a heading with nothing under it loses the heading; 
 test('the request names the corrections and does not count them in a level\'s length', () => {
   const q = request({ text: 'A. Earlier I said 3; it is 4.', squeeze: { at: { length: 0 } } }, { system: 'S', keep: ['Earlier I said 3; it is 4.'] })
   const tail = q.prompt[1].text
-  assert.match(tail, /one line, one sentence, at most 35 words, then each correction listed below in a few words/)
+  assert.match(tail, /one line, one sentence with its main point, then each correction listed below in a few words/)
   assert.match(tail, /Corrections in the original\. Each stays at every level, in as few words as it needs, next to what it corrects:\n- Earlier I said 3; it is 4\./)
   assert.doesNotMatch(request({ text: 'A.', squeeze: { at: { length: 0 } } }, { system: 'S' }).prompt[1].text, /Corrections in the original/)
 })
@@ -298,7 +377,7 @@ test('a catch-up is several messages written as one: its original is them in ord
   // one header line differs from a single message's request; the rest is the same request
   assert.equal(head, `The analyst asked: What does labels.jsonl say about the empty label?\n\n${CATCHUP_HEAD}\n<original>\n${text}\n</original>`)
   assert.equal(CATCHUP_HEAD, "Claude's messages since the analyst's last prompt, in the order it wrote them, as written (the original). Write them as one message:")
-  assert.match(req.prompt[1].text, /- Length: short, at most \d+ words/)
+  assert.match(req.prompt[1].text, /- Length: short, about a quarter of the original, about \d+ words/)
   assert.match(req.prompt[1].text, /Corrections in the original\. Each stays at every level/)
   assert.equal(request(record(), { system: 'P' }).prompt[0].text.split('\n')[2], "Claude's message, as written (the original):")
   // nothing for Claude until a version shows; then the version, as the person reads it, and the messages it stands in for
@@ -313,8 +392,8 @@ test('a catch-up is several messages written as one: its original is them in ord
 test('longer and much longer ask for more words of the same content; a record from before the scale reads full as the original and medium as short', () => {
   const rec = record()
   const words = request({ ...rec, squeeze: { at: { length: 3 }, scale: 3 } }, { system: PROMPT }).prompt[1].text
-  assert.match(words, /- Length: longer, about \d+ words \(levels one line · short · as written · longer · much longer; the original is at "as written", \d+ words\)/)
-  assert.match(request({ ...rec, squeeze: { at: { length: 4 }, scale: 3 } }, { system: PROMPT }).prompt[1].text, /- Length: much longer, about \d+ words \(/)
+  assert.match(words, /- Length: longer, about one and a half times the original, about \d+ words \(levels one line · short · as written · longer · much longer; the original is at "as written", \d+ words\)/)
+  assert.match(request({ ...rec, squeeze: { at: { length: 4 }, scale: 3 } }, { system: PROMPT }).prompt[1].text, /- Length: much longer, about two and a half times the original, about \d+ words \(/)
   // a record squeezed before the scale (its versions kept, no scale): full was the original, medium reads as short
   const before = { ...rec, shown: 'Medium.', squeeze: { at: { length: 2 }, versions: { 'length=2': 'Medium.', 'length=1': 'Short.' } } }
   assert.deepEqual(atOf(before), { length: 1 })

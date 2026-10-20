@@ -80,10 +80,11 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); expand
     return { value: { isAnswered: true, text: JSON.stringify(out), usage: USAGE } }
   }
   const efforts: (string | null)[] = []
-  // squeeze's rewrites (its prompt's stub is THE PROMPT), each answered with `squeeze` once `holdSqueeze` lets it come
+  // squeeze's rewrites (its prompt's stub is THE PROMPT, with the card guide's toolkit after it when the answer has a
+  // card), each answered with `squeeze` once `holdSqueeze` lets it come
   const squeezes: string[] = []
   on('model.complete', async (_$: unknown, e: { prompt: string; system?: string; effort?: string; promptBlocks?: { text: string; cache?: true }[] }) => {
-    if (e.system === 'THE PROMPT') {
+    if (String(e.system ?? '').startsWith('THE PROMPT')) {
       squeezes.push(String(e.prompt))
       if (o.holdSqueeze && squeezes.length === 1) await o.holdSqueeze
       return { value: { isAnswered: true, text: `<text>${o.squeeze ?? 'Squeezed.'}</text>`, usage: USAGE } }

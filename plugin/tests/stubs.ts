@@ -22,6 +22,7 @@ const STUBS: Record<string, string> = {
   'lens-heads/v2': 'LENS heads\n<!-- digest -->\n| {{HEADS}}',
   'squeeze/v6': 'THE PROMPT',
   'squeeze/v7': 'THE PROMPT',
+  'squeeze/v8': 'THE PROMPT',
   'thread/v2': 'THE THREAD PROMPT',
   'labels/v2': 'LABEL {{NAME}} | {{VALUES}}\n{{RECORDS}}',
 }

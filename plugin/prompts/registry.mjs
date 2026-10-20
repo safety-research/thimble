@@ -78,10 +78,11 @@ export const FEATURES = {
     },
   },
   squeeze: {
-    about: "squeeze's rewrite along its chips", reads: 'squeeze/term.ts', default: 'v7',
+    about: "squeeze's rewrite along its chips", reads: 'squeeze/term.ts', default: 'v8',
     versions: {
       v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true },
       v7: { about: 'each chip in a sentence or two of what it is, no layout: Length with the original in its middle (one line · short · as written · longer · much longer), Interpretation, Background, and a chip the analyst types; the principles cut to the general ones', keep: true, terms: true },
+      v8: { about: "v7 for the whole answer: the message and the cards under it. The request shows the cards and the query outputs they draw on (with the card guide's toolkit), and a version may edit, add or leave out a card when its length or reader needs it", keep: true, terms: true, cards: true },
     },
   },
   context: {
