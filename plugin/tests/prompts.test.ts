@@ -92,9 +92,9 @@ test("a conversation's first message carries one thimble block: thimble is on he
   on('prompt.context', () => ({ blocks: [{ name: 'currentDate', text: 'Today is Jun 18.' }] }))
   const r = (await ($ as Any).prompt.context({ blocks: [] })) as Any
   expect(r.blocks.map((b: Any) => b.name)).toEqual(['currentDate', 'thimble'])
-  expect(r.blocks[1].text).toContain('PROMPT context:v2')
+  expect(r.blocks[1].text).toContain('PROMPT context:v3')
   await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.prompt)).toEqual(['context:v2'])
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.prompt)).toEqual(['context:v3'])
 })
 
 test('the thimble block can be turned off: THIMBLE_PROMPTS=context:off sends none', async ($, on) => {

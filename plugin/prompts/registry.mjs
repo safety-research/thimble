@@ -84,10 +84,11 @@ export const FEATURES = {
   },
   context: {
     about: "the block thimble adds to a conversation's first message: thimble is on here, so load its skill for a question about these files",
-    reads: 'prompts/prompts.ts (prompt.context), once per conversation', default: 'v2', optional: true,
+    reads: 'prompts/prompts.ts (prompt.context), once per conversation', default: 'v3', optional: true,
     versions: {
       v1: { about: "thimble's purpose in the 0.9 preamble's words, and the skill to load before an answer about the files, code included" },
       v2: { about: 'v1 without naming code: before any answer about the files' },
+      v3: { about: 'the two facts alone: thimble is on here, and load its skill before the first answer about these files; the note is for Claude' },
     },
   },
   forms: {
