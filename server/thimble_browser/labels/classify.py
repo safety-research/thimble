@@ -12,7 +12,7 @@ from typing import Any
 
 from .. import prompts
 
-MODEL = "claude-sonnet-5-5"  # the terminal's labels run on Sonnet at low effort (lean/verbs/label/verb.json)
+# the model is the analyst's (Settings: claude-opus-5-5 by default), at low effort: each call reads one batch
 EFFORT = "low"
 MAX_TOKENS = 16000
 BATCH_ITEMS = 50  # records per call

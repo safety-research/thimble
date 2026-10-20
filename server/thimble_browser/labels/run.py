@@ -22,7 +22,7 @@ from typing import Any
 
 import anthropic
 
-from .. import home, llm
+from .. import settings, home, llm
 from ..cards import sandbox
 from . import classify, store, units as units_mod
 
@@ -225,7 +225,7 @@ def _count(rec: dict[str, Any], concept: dict[str, Any], rows: list[dict[str, An
 
 async def _call(concept: dict[str, Any], system: str, user: str, rec: dict[str, Any]) -> str | None:
     """One classifier call: the reply's text, or None when Claude declined it."""
-    args = llm.request_args(effort=classify.EFFORT, model=concept.get("model") or classify.MODEL)
+    args = llm.request_args(effort=classify.EFFORT, model=concept.get("model") or settings.read()["model"])
     args["output_config"] = {**args["output_config"],
                              "format": {"type": "json_schema", "schema": classify.schema(concept)}}
     msg = await llm.client().beta.messages.create(
