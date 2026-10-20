@@ -190,6 +190,11 @@ export function readableOf(content: readonly InlinePart[] | undefined): string {
     .trim()
 }
 
+/** The document's sentences as one text, the words its citations are checked against (lib/heal). */
+export function docText(doc: Pick<Writeup, 'sections'>): string {
+  return (doc.sections ?? []).flatMap((sec) => (sec.paragraphs ?? []).flatMap((p) => (p.sentences ?? []).map((x) => x.text))).join('\n')
+}
+
 // ---- the document as blocks ----
 
 export interface DocBlocks {

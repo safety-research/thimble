@@ -28,6 +28,7 @@ import type { IconName } from './Icon'
 import { chartLabels, Output, isNumericCell, primaryArtifact } from './Outputs'
 import { useConcepts } from '../canvas/concepts'
 import { Spinner } from './Spinner'
+import { CHECKED_REF, HealContext } from '../lib/heal'
 import { QuoteBox, RecordFacts } from '../canvas/Quote'
 import { FACT_KINDS, markFacts, markValue, recordFacts, type RecordFact } from '../canvas/facts'
 import { quoteParts, type QuotePart } from '../canvas/quotes'
@@ -235,7 +236,27 @@ const FILE_KINDS = new Set(['record', 'range', 'block', 'span', 'page', 'pointer
 /** the ref kinds with nothing to excerpt: the label names them and the click teleports */
 const NAME_ONLY = new Set(['group', 'report', 'view', 'ui', 'chat'])
 
-export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, quiet, quietWhy, late, anchor, cite, movedFrom }: RefChipProps) {
+/** A ref on every surface, and a citation of a card as the healing pass of the text around it left it (lib/heal): a
+ * spinner right after it while the check runs, then the place it was re-pointed to, a red × when the cited place shows
+ * another value, grey when its place is gone. */
+export function RefChip(props: RefChipProps) {
+  const heal = useContext(HealContext)
+  const c = heal && props.cite && CHECKED_REF.test(props.ref) ? heal.get(props.value, props.ref) : null
+  const fix: Partial<RefChipProps> =
+    c?.state === 'contradicted' ? { broken: true, brokenWhy: c.why }
+    : c?.state === 'quiet' ? { quiet: true, quietWhy: c.why }
+    : c?.to && c.to !== c.ref ? { ref: c.to, movedFrom: c.ref }
+    : {}
+  const checking = !!heal?.checking && !!props.cite && CHECKED_REF.test(props.ref)
+  return (
+    <>
+      <RefChipBody {...props} {...fix} />
+      {checking && <Spinner size={8} className="refchip-checking" label="Checking the citation" />}
+    </>
+  )
+}
+
+function RefChipBody({ ref, value, compact, workspace, broken, brokenWhy, quiet, quietWhy, late, anchor, cite, movedFrom }: RefChipProps) {
   const ws = workspace ?? workspaceFromUrl() ?? ''
   const chipEl = useRef<HTMLElement>(null)
   const popEl = useRef<HTMLDivElement>(null)
@@ -346,7 +367,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
         // a table's cell: the table around it, never its column and row in words
         const table = citedTable(r, parsed.col, parsed.row)
         // a citation the healing pass re-pointed says where it pointed as written, faintly, so the fix is not invisible
-        const moved = movedFrom ? `moved here from ${movedFrom}, which does not show this value` : undefined
+        const moved = movedFrom ? `moved here from ${chipLabel(movedFrom, null, ws)}, which does not show this value` : undefined
         if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table, note: [versionNote(r), moved].filter(Boolean).join(' · ') || undefined })
         return setPop({ state: 'error', rect, message: 'This cell is no longer in the card\'s table' })
       }
@@ -427,6 +448,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
       {asText ? (
         <span ref={chipEl as React.Ref<HTMLSpanElement>} className={cls} data-ref={ref} {...anchorAttrs} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
           {shownValue(value ?? '')}
+          {broken && <span className="refchip-x" aria-label="contradicted">×</span>}
         </span>
       ) : (
         <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={kind && NAME_KINDS.has(kind) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers} {...(wholeCell ? { draggable: true, onDragStart: (e: DragEvent) => dragCard(e, wholeCell) } : {})}>
