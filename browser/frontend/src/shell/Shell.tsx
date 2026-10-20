@@ -380,7 +380,7 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
-        {side && <LensSidebar ws={ws} tab={side} onTab={setSide} onClose={() => setSide(null)} />}
+        {side && <LensSidebar ws={ws} tab={side} onClose={() => setSide(null)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />

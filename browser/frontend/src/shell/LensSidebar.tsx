@@ -8,13 +8,14 @@
 // found, each drawn as it looks where it is (the passage in the check's highlight, the record with its value's color),
 // a click on which goes straight to that place, and Run again, Turn off and Delete, with Color Files by it for a label.
 // Each list ends in "+ New". A check's scope is set through the lenses' one route (lib/marks lensApi.set).
+// The sidebar's head names the list it shows and has no tabs of its own: the top bar's two buttons, just above it, are
+// the one way to switch between Labels and Checks.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { Button } from '../components/Button'
 import { TextArea, TextInput } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Switch } from '../components/Switch'
-import { useFeature } from '../features'
 import { openLabelEditor } from '../files/LabelEditor'
 import { classesOf, colourVar, isFilesLabel, mainColour, unitWord } from '../files/labels'
 import { labelApi } from '../lib/api'
@@ -42,7 +43,7 @@ export function labelSurface(k: Pick<Concept, 'unit'>): 'files' | 'cards' | 'rep
   return k.unit === 'cell' ? 'cards' : k.unit === 'span' ? 'report' : 'files'
 }
 
-export function LensSidebar({ ws, tab, onTab, onClose }: { ws: string; tab: SideTab; onTab: (t: SideTab) => void; onClose: () => void }) {
+export function LensSidebar({ ws, tab, onClose }: { ws: string; tab: SideTab; onClose: () => void }) {
   const lenses = useLenses(ws)
   const concepts = useConcepts(ws)
   const labels = useMemo(() => listedLabels(concepts), [concepts])
@@ -50,8 +51,6 @@ export function LensSidebar({ ws, tab, onTab, onClose }: { ws: string; tab: Side
   useEffect(() => setDetail(null), [tab])
   // a request from elsewhere to open one label's detail (a label's chip or tag)
   useEffect(() => bus.on('openLens', (e) => setDetail(e.id ? { kind: e.tab, id: e.id } : null)), [])
-  const lensesOn = useFeature('lenses')
-  const labelsOn = useFeature('labels')
   const lens = detail?.kind === 'checks' ? lenses.find((l) => l.id === detail.id) : undefined
   const label = detail?.kind === 'labels' ? concepts.get(detail.id) : undefined
   return (
@@ -63,20 +62,7 @@ export function LensSidebar({ ws, tab, onTab, onClose }: { ws: string; tab: Side
             {detail.kind === 'labels' ? 'Labels' : 'Checks'}
           </button>
         ) : (
-          <div className="lside-tabs" role="tablist">
-            {labelsOn && (
-              <button type="button" role="tab" aria-selected={tab === 'labels'} className="lside-tab" onClick={() => onTab('labels')}>
-                <Icon name="label" size={13} />
-                Labels <span className="lside-n">{labels.length}</span>
-              </button>
-            )}
-            {lensesOn && (
-              <button type="button" role="tab" aria-selected={tab === 'checks'} className="lside-tab" onClick={() => onTab('checks')}>
-                <Icon name="comment" size={13} />
-                Checks <span className="lside-n">{lenses.length}</span>
-              </button>
-            )}
-          </div>
+          <h2 className="lside-heading">{tab === 'labels' ? 'Labels' : 'Checks'}</h2>
         )}
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
       </header>
