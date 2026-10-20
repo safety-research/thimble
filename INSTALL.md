@@ -14,8 +14,8 @@ For both:
 For the terminal plugin:
 
 - **Claude Code** 2.1.301 or later. Check with `claude --version`.
-- **Python 3.10 or later, with pandas.** thimble's kernel runs on `python3`. Check with `python3 -c "import pandas"`;
-  if that fails, see [Python](#python) below.
+- **Python 3.10 or later.** thimble's kernel runs on `python3`. Its queries need pandas, which thimble installs for
+  itself when `python3` has none; see [Python](#python) below.
 
 For the browser workbench:
 
@@ -82,13 +82,17 @@ thimble from it.
 
 ### Python
 
-The plugin runs `python3` unless you tell it otherwise. If that Python has no pandas, do one of these:
+The plugin runs `python3` unless you tell it otherwise. Its queries (`thimble run`) need pandas. When `python3` has
+none, thimble makes its own Python with pandas in `~/.thimble/python` (with uv when it is installed, else
+`python3 -m venv` and pip), and uses it from then on:
 
-- Install pandas for it: `python3 -m pip install --user pandas`.
-- Point thimble at another Python that has pandas. Set `THIMBLE_PYTHON` before you start Claude Code, for example
-  `export THIMBLE_PYTHON="$HOME/venvs/data/bin/python"`, or add it under `"env"` in `~/.claude/settings.json`.
+- `scripts/install.sh` makes it when it installs the plugin.
+- A plugin installed without the script makes it at its first query, which then takes up to a minute longer. If
+  that fails, for example with no network, Claude shows you a command that makes it, which you run in a terminal.
 
-The install script checks the same Python: `THIMBLE_PYTHON` if you set it, else `python3`.
+To use another Python that has pandas, set `THIMBLE_PYTHON` before you start Claude Code, for example
+`export THIMBLE_PYTHON="$HOME/venvs/data/bin/python"`, or add it under `"env"` in `~/.claude/settings.json`. thimble
+installs nothing into a Python you name.
 
 ## Check that it works
 
@@ -141,7 +145,8 @@ The terminal plugin:
 - **No line above the prompt, and no cards.** The plugin is not loaded in this session. Check that the folder is
   trusted and that thimble is enabled in `/plugin`. Managed settings that set `disableAllHooks` turn thimble off.
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
-- **`No module named 'pandas'`.** See [Python](#python).
+- **`thimble run needs pandas`.** thimble could not install pandas for itself, and the line says why. Run the
+  command it names in a terminal, or see [Python](#python).
 - **`1` does not open a card's detail.** Below 144 columns Claude Code does not open a side pane from a key. Type
   `/card` instead, or widen the terminal.
 

@@ -43,6 +43,7 @@ from . import estimate as EST
 from . import labels as LB
 from . import lineage as LIN
 from . import objects as O
+from . import pyenv as PY
 from . import query as Q
 from . import refs as R
 from . import sources as S
@@ -252,11 +253,9 @@ def cmd_rows(a: argparse.Namespace) -> int:
 
 def cmd_q(a: argparse.Namespace) -> int:
     st = Store()
-    try:
-        import pandas  # noqa: F401
-    except ImportError:
-        print("thimble run needs pandas: set THIMBLE_PYTHON to a Python that has it, or install it (pip install pandas)")
-        return 2
+    if not PY.has_pandas():
+        # the first query on a Python without pandas: thimble installs its own, once, and runs the query there
+        return PY.run_with_pandas(getattr(a, "argv", None) or sys.argv[1:])
     if a.rerun:
         old = Q.get(st, a.rerun)
         if not old:
@@ -994,6 +993,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
+    # thimble's own Python with pandas, made now (scripts/install.sh, or the person after a failed first query):
+    # neither help nor usage lists it
+    p = sub.add_parser("setup")
+    p.set_defaults(fn=lambda a: PY.setup())
     # the shell's healing pass over a text it draws (heal.py): neither help nor usage lists it
     p = sub.add_parser("heal")
     p.add_argument("--from", dest="text_file", metavar="FILE")
@@ -1044,6 +1047,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args[0].startswith("-") and args[0] not in sub.choices:
         ap.error(f"no command {args[0]!r}: the commands are run, save, rows, coverage and label")
     a = ap.parse_args(args)
+    a.argv = args
     if not getattr(a, "fn", None):
         print(__doc__.strip())
         return 0
