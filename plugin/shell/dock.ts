@@ -231,7 +231,8 @@ export function restPane(k: string, named: { cov: boolean; labels: boolean }): D
 
 // ------------------------------------------------------------------------------------------------ the bar's counts
 
-type Count = { id: string; text: string; bright: boolean }
+// (bare: drawn without its key, which does something else now: shell.tsx)
+type Count = { id: string; text: string; bare?: boolean; bright: boolean }
 type Counts = { cov: number; labels?: number; mix?: { tone: string; seen: boolean; n: number }[] }
 
 /** The bar's counts of the two panes, as fitBar measures them: `r seen 12% ████████` and `l 2 labels`. The coverage
@@ -253,10 +254,10 @@ export function dockCountEl($: Engine, els: Any, x: Count, c: Counts, press: boo
   const theme = currentTheme()
   const pane: Dock = x.id === 'cov' ? 'coverage' : 'labels'
   const key = DOCK_KEY[pane]
-  const words = x.text.slice(key.length + 1).replace(/ █+$/, '')
+  const words = (x.bare ? x.text : x.text.slice(key.length + 1)).replace(/ █+$/, '')
   const kids: Any[] = [
-    Text({ key: `ck-${x.id}`, color: keyColor(key, theme), ...(x.bright ? { bold: true } : {}), children: key }),
-    Text({ key: `cw-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: ` ${words}` }),
+    ...(x.bare ? [] : [Text({ key: `ck-${x.id}`, color: keyColor(key, theme), ...(x.bright ? { bold: true } : {}), children: key })]),
+    Text({ key: `cw-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.bare ? words : ` ${words}` }),
   ]
   if (pane === 'coverage' && c.mix?.length) {
     kids.push(Text({ key: 'cm-gap', children: ' ' }))

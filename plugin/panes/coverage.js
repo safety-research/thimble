@@ -12,7 +12,7 @@
 //   overview   a bar of the folder's rows by file type, as GitHub shows a repository's languages, each type's rows in
 //              four shades: seen █, read by a label's model ▓, computed over ▒, untouched ░; then the files grouped by
 //              wildcard pattern (`runs/*.jsonl`, the `*` lit, so it is clear which files a row stands for), or by file
-//              type (t), each group with its files, those touched and those seen, and its rows in the same shades
+//              type (g), each group with its files, those touched and those seen, and its rows in the same shades
 //   a group    its files, each with what happened to it: the lines seen, what a label's model read, what was computed
 //              over, or why none of its lines entered a context
 //   a file     a strip of the whole file with the lines seen lit, the seen ranges to step through, and the file's own
@@ -20,7 +20,7 @@
 //              its lines as a citation, over this pane (esc comes back)
 //
 //   state: {by: 'pattern' | 'type', group: the group open, file: the file open, at: the part selected, range: the range}
-//   keys: t by type / by pattern · [ ] step · 0 back · esc back (at the top, esc is the panel's: back, or close)
+//   keys: g by type / by pattern · [ ] step · 0 back · esc back (at the top, esc is the panel's: back, or close)
 //   wants: {lines: path, from, to} (the file's lines around a range, read by the host)
 //   asks of the host: open {mark: {kind: 'cite', ref, label}} (a seen range, as a citation)
 
@@ -208,7 +208,8 @@ export function program(k, data) {
   k.on('return', () => (at ? open(at) : null))
   k.on('[', step(-1), level === 'file' ? 'step through what was seen' : 'step')
   k.on(']', step(1), level === 'file' ? 'step through what was seen' : 'step')
-  if (level === 'top') k.on('t', () => ({ by: by === 'type' ? 'pattern' : 'type', group: null, file: null, at: null }), by === 'type' ? 'by pattern' : 'by type')
+  // (g, for grouping: t is the panel's own key, the thread list)
+  if (level === 'top') k.on('g', () => ({ by: by === 'type' ? 'pattern' : 'type', group: null, file: null, at: null }), by === 'type' ? 'by pattern' : 'by type')
   if (level !== 'top') k.on('0', back)
   if (level !== 'top') k.on('esc', back, 'back')
   if (at) k.select(at)
