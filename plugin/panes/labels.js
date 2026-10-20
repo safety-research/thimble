@@ -45,8 +45,12 @@ export function valueTone(values, v) {
 // the tones that carry no color of their own (draw/palette.js)
 const PLAIN = /^(ink|paper|dim|unseen|rule)(-faint)?$/
 
+// the marks a legend puts before a value's name in the value's color (`■ agent`)
+const SWATCH = /^[■●▪◼█▆▇▌◆▲]$/u
+
 /** The tones a drawn card gives a label's values ({value: tone}): where a value first stands as a word of its own in
- *  a color (a legend, a bar's name), not on a fill. Empty when the card colors none of them. */
+ *  a color (a legend, a bar's name), or in plain words after a mark in a color (`■ agent`), never on a fill. Empty when
+ *  the card colors none of them. */
 export function tonesIn(grid, values) {
   const out = {}
   const left = new Set((values || []).filter(v => typeof v === 'string' && v.trim()))
@@ -62,7 +66,11 @@ export function tonesIn(grid, values) {
         const after = text[i + v.length]
         const word = !(before && /[\p{L}\p{N}_]/u.test(before)) && !(after && /[\p{L}\p{N}_]/u.test(after))
         const c = row[at[i]]
-        if (word && c && c.tone && !PLAIN.test(c.tone) && !c.bg) { out[v] = c.tone; left.delete(v); break }
+        const colored = x => x && x.tone && !PLAIN.test(x.tone) && !x.bg
+        // the mark before it: one or two cells back, over a space
+        const mark = [1, 2].map(b => (i - b >= 0 ? row[at[i - b]] : null)).find(x => x && String(x.ch).trim())
+        const tone = !word || !c || c.bg ? null : colored(c) ? c.tone : mark && SWATCH.test(String(mark.ch)) && colored(mark) ? mark.tone : null
+        if (tone) { out[v] = tone; left.delete(v); break }
         i = text.indexOf(v, i + 1)
       }
     }
