@@ -116,6 +116,8 @@ let ringY = -1
 let draft = ''
 let refocus = false
 let drawnSig = ''
+// the presses drawn before the input bar's field, in order, as the last drawing had them (pressesBefore)
+let drawnAbove = ''
 let paneFocused = false
 // the page's window when the page is taller than the pane: what it follows (the selected part, or the bar under the
 // card once the person opened it), the bar and part it last saw, and the rows the wheel moved it by since
@@ -280,6 +282,7 @@ async function closed($: Engine, keep = false): Promise<void> {
   draft = ''
   landed = null
   convBy = 0
+  drawnAbove = ''
   moveGen++
   await popFocus($, 'detail')
   // what the panel showed, and the way back through it, end with it (kept when it could not be placed: /threads opens it)
@@ -706,6 +709,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   // press drawn above it hands it to another element): the input bar asks for it again, and a part's ring goes back
   // on the selected part
   if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
+  ringAbove($, kids)
   // the pane taking the keyboard back puts the ring where the person last moved it, as the engine kept it, which is
   // another part once the page scrolled: it goes back on the selected part
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
@@ -906,6 +910,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   // press drawn above it hands it to another element): the input bar asks for it again, and a part's ring goes back
   // on the selected part
   if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
+  ringAbove($, kids)
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
   paneFocused = !!e.props.isFocused
   if (want && e.props.isFocused && !isAsk(ringAt) && ringAt !== want && !refocus) {
@@ -913,6 +918,34 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
     $.clock.after(0, () => { void focusPart($).finally(() => { refocus = false }) })
   }
   return Box({ flexDirection: 'column', width: C, children: kids })
+}
+
+/** The keys of the presses (and fields) a drawing holds before the element keyed `field`, in order. */
+function pressesBefore(tree: Any, field: string): string {
+  const out: string[] = []
+  let done = false
+  const walk = (n: Any): void => {
+    if (done || n == null || typeof n !== 'object') return
+    if (Array.isArray(n)) { for (const x of n) walk(x); return }
+    if (n.props?.key === field) { done = true; return }
+    if (n.type === 'Button' || n.type === 'Input' || n.type === 'Select') out.push(String(n.props?.key ?? ''))
+    walk(n.children)
+    walk(n.props?.children)
+  }
+  walk(tree)
+  return out.join(',')
+}
+
+/** Claude Code keeps the ring at its place in the order of the presses: a press added or gone before the input bar's
+ *  field hands the ring on the field to another element, where ↵ would press it. That happens while a question is
+ *  typed (the conversation takes more rows then, and shows more of its citations) and when an answer brings its
+ *  citations. So when the presses before the field change while it has the ring, the input bar asks for the ring
+ *  again. */
+function ringAbove($: Engine, kids: Any[]): void {
+  const above = pressesBefore(kids, askKey())
+  if (above === drawnAbove) return
+  drawnAbove = above
+  if (isAsk(ringAt) && landed) { landed = null; moveSoon($) }
 }
 
 /** The rows the bar's preview takes over a pane (shell.tsx barPreviewEl): its title, its frame, and a blank row. */
@@ -1430,6 +1463,7 @@ export function resetDetail(): void {
   refocus = false
   paneFocused = false
   drawnSig = ''
+  drawnAbove = ''
   win.follow = 'part'; win.bar = ''; win.region = null; win.by = 0
   viewCols = 0
   latestSeen.clear()
