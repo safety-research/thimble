@@ -1,6 +1,7 @@
 // labels.js: the label viewer, a program on the card runtime (draw/kit.js) over the folder's labels (`thimble label
-// --json`, engine/kernel/labels.py). It docks beside the conversation where the card detail opens; the bar's `2
-// labels` opens it (a click, or l). It brings back thimble 0.9's label views in the terminal: the labels list, each
+// --json`, engine/kernel/labels.py). It opens in the side panel (shell/side.ts openSide) as a thread: a question typed
+// under it is about the label, value or record selected, and carries its refs. The bar's `2 labels` opens it (a click,
+// or l). It brings back thimble 0.9's label views in the terminal: the labels list, each
 // label with a bar of its values in their colors and a legend under it (0.9's home Labels block and labels list), and
 // one label's panel: what made it (a rule or a model) and its definition, its values with their counts and bars, which
 // filter its records, and its records with their values in color, stepped through and checked with the number keys,
@@ -9,12 +10,15 @@
 //
 //   state: {open: the label open, filter: the value its records are filtered to ('-': no value yet), rec: the record
 //          selected (its place among the filtered ones), at: the part selected}
-//   keys: the list: 1–9 a label · [ ] step · esc close; a label: [ ] record · 1–9 check the record (its values) ·
-//         f filter · 0 back · esc back
+//   keys: the list: 1–9 a label · [ ] step (esc is the panel's: back, or close); a label: [ ] record · 1–9 check the
+//         record (its values) · f filter · 0 back · esc back
 //   wants: {records: name, value, at, n, gen} (a page of the records, read by the host)
-//   asks of the host: check {label, ref, value} (the person's check), close
+//   asks of the host: check {label, ref, value} (the person's check), open {mark: {kind: 'cite', ref, label}} (↵ on
+//         the record selected: its row as a citation, over this pane)
 
 const PAGE = 20
+// the rows the side panel takes under a pane (its input bar), so the records that fit show above it
+const CHROME = 5
 // the column the label panel's fields start at, after their names
 const F = 11
 const NO_VALUE = '-'
@@ -76,6 +80,13 @@ export default {
   local: ['at'],
   reads: () => ['labels'],
   stateKey: () => 'labels',
+  /** What a question asked under the pane is about, beyond the part selected (side.ts paneSubject). */
+  thread(_args, state, data) {
+    const lab = state && state.open && data && Array.isArray(data.list) ? data.list.find(l => l.name === state.open) : null
+    if (!lab) return { about: `the folder's labels (\`thimble label\`): ${((data && data.list) || []).map(l => l.name).join(', ') || 'none yet'}` }
+    const counts = (lab.values || []).map(v => `${v} ${n((lab.counts || {})[v] || 0)}`).join(', ')
+    return { about: `the label ${lab.name}, made by ${madeBy(lab)}, over ${lab.in || 'the records Claude named'}: ${n(lab.records || 0)} records (${counts}${lab.waiting ? `, ${n(lab.waiting)} waiting for the model` : ''})${lab.checked ? `; the analyst checked ${n(lab.checked)}` : ''}${state.filter ? `; its records filtered to ${state.filter === NO_VALUE ? 'those with no value yet' : state.filter}` : ''}. \`thimble label ${lab.name}\` shows it` }
+  },
   data(stores, _args, size) {
     const s = stores.labels || {}
     // gen: how many checks the person made, so a page of records is read again after one
@@ -110,7 +121,6 @@ function listView(k, data, st, W) {
   k.on('[', () => (ids.length ? { at: ids[Math.max(0, idx - 1)] } : null), 'step')
   k.on(']', () => (ids.length ? { at: ids[Math.min(ids.length - 1, idx + 1)] } : null), 'step')
   list.slice(0, 9).forEach((_, i) => k.on(String(i + 1), () => open(i), 'open a label'))
-  k.on('esc', () => { k.do('close'); return null }, 'close')
   if (at) k.select(at)
   const head = k.text(`**Labels**{dim: · ${n(list.length)} in this folder}${data.refreshing ? '{dim: · ◌}' : ''}`, { wrap: false })
   if (!list.length) return k.stack(head, k.text(' '), k.text('{dim:No labels here yet. Ask Claude to label records: it runs thimble label, and the label shows here.}'))
@@ -127,11 +137,11 @@ function listView(k, data, st, W) {
     const meta = metaW > 6 ? `{dim:${k.escape(pad([l.kind, l.in, l.trial ? 'a trial sample' : ''].filter(Boolean).join(' · '), metaW))}}` : ''
     const bar = parts.length ? stacked(parts, bw) : `{dim:${pad('not run yet', bw)}}`
     const row = `${on ? '{accent:**▸**}' : ' '}${glyph} ${on ? `**${name}**` : name}  ${meta}  ${bar}  ${pad(n(l.records || 0), tw, true)}`
-    blocks.push(k.region(`lb-${i}`, { label: `${l.name}: ${n(l.records || 0)} records` }, k.text(row, { wrap: false })))
+    blocks.push(k.region(`lb-${i}`, { label: `the label ${l.name}: ${n(l.records || 0)} records`, ...(l.query ? { ref: `${l.query}#${l.name}=${l.values[0]}@n` } : {}) }, k.text(row, { wrap: false })))
     blocks.push(k.text(`    ${parts.map(p => `{${p.tone}:${p.mark === '█' ? '●' : p.mark}} ${k.escape(p.name)} {dim:${n(p.n)}}`).join('   ')}`, { wrap: false }))
   })
   // two rows a label: as many as fit, from the one selected
-  const room = Math.max(2, Math.floor((k.h - 3) / 2))
+  const room = Math.max(2, Math.floor((k.h - 3 - CHROME) / 2))
   const top = Math.max(0, Math.min(list.length - room, idx - room + 2))
   const shown = blocks.slice(top * 2, (top + room) * 2)
   return k.stack(head, k.text(' '), ...shown, ...(list.length > top + room ? [k.text(`{dim:  ↓ ${n(list.length - top - room)} more}`)] : []))
@@ -173,6 +183,8 @@ function labelView(k, data, st, lab, W) {
     const v = /^val-(\d+)$/.exec(r)
     if (v) return setFilter(filter === values[Number(v[1])] ? null : values[Number(v[1])])
     const m = /^rec-(\d+)$/.exec(r)
+    // a press on the record selected (↵ on it): its row as a citation, over this pane
+    if (m && r === at && cur && Number(m[1]) === cur.i && !cur.missing) { k.do('open', { mark: { kind: 'cite', ref: cur.ref, label: `${lab.name} = ${cur.value ?? 'no value'}: ${place(cur.ref)}` } }); return null }
     if (m) return { rec: Number(m[1]), at: r }
     return null
   })
@@ -221,7 +233,10 @@ function labelView(k, data, st, lab, W) {
   const valueRow = (id, label, tone, mark, c, on, sel) => {
     const cells = c ? Math.max(1, Math.round((c / max) * bw)) : 0
     const row = `{dim:${pad(id === 'val-0' ? 'values' : '', F - 2)}}${sel ? '{accent:**▸**}' : ' '} {${tone}:${mark}} ${on ? `{accent:**${k.escape(pad(label, vw))}**}` : k.escape(pad(label, vw))}  {${tone}:${'█'.repeat(cells)}}${' '.repeat(bw - cells)}  ${pad(n(c), 7, true)} {dim:${pad(lab.records ? pctOf(c / lab.records) : '', 4, true)}}${on ? '  {accent:filter on}' : ''}`
-    return k.region(id, { label: `${label}: ${n(c)} records${on ? ', the filter' : ''}` }, k.text(row, { wrap: false }))
+    const value = id.startsWith('val-') ? values[Number(id.slice(4))] : null
+    // a value carries the citation of its count (the label's count query), so a question about it names its records
+    const ref = value != null && lab.query && /^[\w.-]+$/.test(lab.name) && /^[\w.-]+$/.test(value) ? `${lab.query}#${lab.name}=${value}@n` : null
+    return k.region(id, { label: `${lab.name} = ${label}: ${n(c)} records${on ? ', the filter' : ''}`, ...(ref ? { ref } : {}) }, k.text(row, { wrap: false }))
   }
   values.forEach((v, i) => out.push(valueRow(`val-${i}`, v, valueTone(values, v), '●', counts[v] || 0, filter === v, at === `val-${i}`)))
   if (none) out.push(valueRow('filter-none', 'no value yet', 'unseen', '░', none, filter === NO_VALUE, at === 'filter-none'))
@@ -240,7 +255,7 @@ function labelView(k, data, st, lab, W) {
   if (!got) { out.push(k.text('{dim:  reading the records…}')); return k.stack(out) }
   if (got.error) { out.push(k.text(`{bad:  × ${k.escape(got.error)}}`)); return k.stack(out) }
   const detail = cur ? recordDetail(k, lab, cur, W) : []
-  const room = Math.max(3, k.h - out.length - detail.length - 1)
+  const room = Math.max(3, k.h - out.length - detail.length - 1 - CHROME)
   const i0 = Math.max(0, recs.findIndex(r => r.i === rec))
   const top = Math.max(0, Math.min(recs.length - room, i0 - Math.floor(room / 2)))
   const placeW = Math.min(30, Math.max(8, ...recs.map(r => len(place(r.ref)))))
@@ -252,7 +267,7 @@ function labelView(k, data, st, lab, W) {
     const words = String(r.words || r.missing || '').replace(/\s+/g, ' ')
     const wroom = Math.max(10, W - 3 - placeW - 2 - (vW + 2) - 2 - 16 - 2)
     const line = `${on ? '{accent:**▸**}' : ' '} {dim:${k.escape(pad(place(r.ref), placeW))}}  {${tone}:● ${k.escape(pad(v, vW))}}  {dim:${k.escape(pad(byWords(r), 16))}}  ${on ? `**${k.escape(cut(words, wroom))}**` : k.escape(cut(words, wroom))}`
-    out.push(k.region(`rec-${r.i}`, { label: `${r.ref}: ${v}` }, k.text(line, { wrap: false })))
+    out.push(k.region(`rec-${r.i}`, { label: `a record of ${lab.name}, ${place(r.ref)}: ${v} (${byWords(r) || 'no source'})`, ref: r.ref }, k.text(line, { wrap: false })))
   }
   out.push(k.text(' '))
   out.push(...detail)

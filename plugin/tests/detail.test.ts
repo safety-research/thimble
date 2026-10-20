@@ -296,8 +296,11 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(w.spawns.length).toBe(1)
   expect(w.sent.at(-1).text).toContain('and here?')
   expect(w.sent.at(-1).text).toContain('About the part "Jun 17" (day-2026-06-17) now.')
-  // m sends the thread's answer to main, as a row Claude reads with the next prompt
+  // m sends the thread's answer to main, as a row Claude reads with the next prompt, once a moment has passed with no
+  // letter after it (a letter makes m the start of a question)
   expect(await press($, clock, edit('m'))).toEqual({ text: '', cursor: 0 })
+  expect(JSON.stringify(session.appended())).not.toContain('The thread answered')
+  await clock.advance(800)
   await clock.settle()
   expect(JSON.stringify(session.appended())).toContain('The thread answered: Links peaked that day')
 })
@@ -439,7 +442,7 @@ test('one selection, one highlight: the ring stands on the selected part, and st
   const TALL = { ...DRAWING, root: { t: 'stack', kids: steps }, regions: steps.map(x => ({ id: x.id, meta: x.meta })) }
   const w = world(on, () => TALL)
   const clock = mock.clock(on)
-  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
+  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 16, offset: 0 } } } as never
   await $.command.run({ command: 'card', args: '01-saves step-0' } as never)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(SMALL as Any) } as never)
   const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
@@ -475,12 +478,12 @@ test('one selection, one highlight: the ring stands on the selected part, and st
 })
 
 test('on a tall card, e shows what it opens: the window moves to the bar under the card, and the wheel moves the window', async ($, on) => {
-  // a tall card: 30 steps, one row each, in a pane of 14 rows; the first step has examples
+  // a tall card: 30 steps, one row each, in a pane of 16 rows (4 of them the input bar); the first step has examples
   const steps = Array.from({ length: 30 }, (_, i) => region(`step-${i}`, `Step ${i}`, i, i === 0 ? 'ex-18' : undefined))
   const TALL = { ...DRAWING, root: { t: 'stack', kids: steps }, regions: steps.map(x => ({ id: x.id, meta: x.meta })) }
   world(on, () => TALL)
   const clock = mock.clock(on)
-  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
+  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 16, offset: 0 } } } as never
   await $.command.run({ command: 'card', args: '01-saves step-0' } as never)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(SMALL as Any) } as never)
   const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
@@ -494,7 +497,7 @@ test('on a tall card, e shows what it opens: the window moves to the bar under t
   expect(shown).toContain('Hello agents, sign below.')
   expect(shown).toContain('Step 29')
   // the wheel up over the pane: the window moves up, rows of the card come back into view
-  const wheel = (by: number) => $.ui.scroll({ component: 'Pane', requestId: 'object', offset: 0, by, bodyRows: 14, contentRows: 14, origin: { kind: 'person' } } as never)
+  const wheel = (by: number) => $.ui.scroll({ component: 'Pane', requestId: 'object', offset: 0, by, bodyRows: 16, contentRows: 16, origin: { kind: 'person' } } as never)
   expect(shown).not.toContain('Step 20')
   for (let i = 0; i < 8; i++) await wheel(-1)
   await draw()

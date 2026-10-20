@@ -1,4 +1,5 @@
-// Coverage and the label viewer (panes/coverage.js, panes/labels.js): the side panes the bar's counts open. Coverage
+// Coverage and the label viewer (panes/coverage.js, panes/labels.js): the panes the bar's counts open in the side
+// panel, each a thread (a question under it is about the part selected and carries its refs). Coverage
 // shows the folder's rows by file type with the read part lit, its files grouped by wildcard pattern or by type, a
 // group's files with what reached Claude, and a file's read lines; the label viewer lists the labels with their values'
 // bars, and opens one label: what made it, its definition, its values (a filter each), its records in their values'
@@ -10,7 +11,7 @@ import '../../draw/kit.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import PANES from '../index.js'
 import { mixCells, typeMix } from '../coverage.js'
-import { barText, keyEvent, nextState } from '../host.js'
+import { barText, keyEvent, nextState, takes } from '../host.js'
 
 const DK = globalThis.DrawKit
 const SIZE = { w: 96, h: 30 }
@@ -53,7 +54,13 @@ test('coverage: the type bar shows the share of rows of each file type, its read
   assert.match(text, /▸ runs\/\*\.jsonl\s+4\s+1\s+1\s+1\s+1/)
   const star = after.root.kids.flatMap(k => k.kids || []).flatMap(k => k.kid?.runs || []).find(r => r.s === '*')
   assert.equal(star.tone, 'accent')
-  assert.equal(barText([after]), '[ ] step · t by type · esc close')
+  // at the top esc is the panel's (back to what it showed, or close)
+  assert.equal(barText([after]), '[ ] step · t by type')
+  assert.equal(takes(after, keyEvent('esc')), false)
+  // the group selected carries its pattern, and the pane's thread says what the pane shows
+  assert.equal(after.regions.find(r => r.id === 'g-0').meta.ref, 'runs/*.jsonl')
+  const about = PANES.coverage.thread({}, {}, covData()).about
+  assert.match(about, /what this session read of the folder, by `thimble coverage`: 5 source files, 60 of 1,500 rows read \(4%\)/)
 })
 
 test('coverage: t groups by type; a group opens its files with what reached each; a file opens its read lines, which the host reads; esc goes back, then closes', () => {
@@ -80,16 +87,18 @@ test('coverage: t groups by type; a group opens its files with what reached each
   const lines = Array.from({ length: want.request.to }, (_, i) => `{"n": ${i + 1}}`)
   const shown = turn(PANES.coverage, covData(), opened.state, null, { [want.key]: { lines } })
   assert.match(shown.text, / 1 ▌\{"n": 1\}/)
-  // ] steps to the next read range
+  // ] steps to the next read range; ↵ opens its lines as a citation over the pane, and a question carries them
   const next = turn(PANES.coverage, covData(), opened.state, keyEvent(']'))
   assert.equal(next.state.at, 'rg-1')
   assert.equal(next.after.wants[0].request.from, 98)
-  // esc: back to the group, back to the groups, then the host closes the pane
+  assert.equal(next.after.regions.find(r => r.id === 'rg-1').meta.ref, 'runs/r1.jsonl#L100-119')
+  assert.deepEqual(turn(PANES.coverage, covData(), next.state, keyEvent('return')).d.effects, [{ mark: { kind: 'cite', ref: 'runs/r1.jsonl#L100-119', label: 'runs/r1.jsonl lines 100–119' }, do: 'open' }])
+  // esc: back to the group, back to the groups; at the top it is the panel's
   let back = turn(PANES.coverage, covData(), opened.state, keyEvent('esc'))
   assert.equal(back.state.file, null)
   back = turn(PANES.coverage, covData(), back.state, keyEvent('esc'))
   assert.equal(back.state.group, null)
-  assert.deepEqual(turn(PANES.coverage, covData(), back.state, keyEvent('esc')).d.effects, [{ do: 'close' }])
+  assert.equal(takes(back.after, keyEvent('esc')), false)
 })
 
 test('coverage: a file only counted or untouched says why no line of it is shown; the pane says when it is still reading', () => {
@@ -129,7 +138,8 @@ test('labels: the list shows each label with its kind and scope, a bar of its va
   // the bar's cells in the values' tones: the first value the accent, as the label card colors it
   const bar = after.root.kids[2].kid.runs.filter(r => /^[█░]+$/.test(r.s)).map(r => r.tone)
   assert.deepEqual(bar, ['accent', 'c3', 'unseen'])
-  assert.equal(barText([after]), '[ ] step · 1 2 open a label · esc close')
+  assert.equal(barText([after]), '[ ] step · 1 2 open a label')
+  assert.equal(takes(after, keyEvent('esc')), false)
   assert.equal(turn(PANES.labels, labData(), state, keyEvent('2')).state.open, 'fails')
 })
 
@@ -151,6 +161,10 @@ test('labels: one label says what made it and its definition, its values with ba
   assert.match(t.text, /chat\/room\.jsonl#L1 · ● yes · the model, 92% sure/)
   assert.match(t.text, /why: says sorry for the build/)
   assert.equal(barText([t.after]), '[ ] record · 1 yes · 2 no · f filter · esc back')
+  // a question under it carries the record selected; ↵ on it (a press) opens its row as a citation over the pane
+  assert.equal(t.after.regions.find(r => r.id === 'rec-0').meta.ref, 'chat/room.jsonl#L1')
+  assert.deepEqual(turn(PANES.labels, labData(), state, { type: 'press', region: 'rec-0' }, got).d.effects, [{ mark: { kind: 'cite', ref: 'chat/room.jsonl#L1', label: 'apology = yes: room.jsonl:1' }, do: 'open' }])
+  assert.match(PANES.labels.thread({}, state, labData()).about, /^the label apology, made by a model, reading each record against the definition, over chat\/\*\.jsonl: 6 records \(yes 2, no 3, 1 waiting for the model\); the analyst checked 1/)
   // 2: the analyst says the record is no; the host keeps the check, and the next record is selected
   const checked = turn(PANES.labels, labData(), state, keyEvent('2'), got)
   assert.deepEqual(checked.d.effects, [{ label: 'apology', ref: 'chat/room.jsonl#L1', value: 'no', do: 'check' }])

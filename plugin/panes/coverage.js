@@ -1,6 +1,7 @@
 // coverage.js: what Claude read of the folder, a program on the card runtime (draw/kit.js) over `thimble coverage
-// --json` (engine/kernel/lineage.py coverage). It docks beside the conversation where the card detail opens; the bar's
-// `coverage 34%` opens it (a click, or r). Overview first, then zoom, then details on demand:
+// --json` (engine/kernel/lineage.py coverage). It opens in the side panel (shell/side.ts openSide) as a thread: a
+// question typed under it is about the group, file or lines selected, and carries their refs. The bar's `coverage 34%`
+// opens it (a click, or r). Overview first, then zoom, then details on demand:
 //
 //   overview   a bar of the folder's rows by file type, as GitHub shows a repository's languages, each type's read part
 //              bright and the rest pale; then the files grouped by wildcard pattern (`runs/*.jsonl`, the `*` lit, so it
@@ -8,13 +9,13 @@
 //              only counted and untouched, and the share of its rows read
 //   a group    its files, each with what reached Claude: the lines read, the lines a search showed, or why none did
 //   a file     a strip of the whole file with the lines read lit, the read ranges and search hits to step through, and
-//              the file's own lines around the one chosen (read lines marked ▌), as a citation opens a file; the host
-//              adds a link under it that opens the file
+//              the file's own lines around the one chosen (read lines marked ▌); ↵ on a range opens its lines as a
+//              citation, over this pane (esc comes back)
 //
 //   state: {by: 'pattern' | 'type', group: the group open, file: the file open, at: the part selected, range: the range}
-//   keys: t by type / by pattern · [ ] step · 0 back · esc back (then close)
+//   keys: t by type / by pattern · [ ] step · 0 back · esc back (at the top, esc is the panel's: back, or close)
 //   wants: {lines: path, from, to} (the file's lines around a range, read by the host)
-//   asks of the host: close
+//   asks of the host: open {mark: {kind: 'cite', ref, label}} (a read range or the search hits, as a citation)
 
 const STATUS = ['computed', 'read', 'searched', 'named', 'not read']
 // each status as the pane says it, and its tone
@@ -23,6 +24,8 @@ const TONE = { computed: 'accent', read: 'accent', searched: 'warn', named: 'dim
 // the file types the bar names by color; the others are `other`
 const TYPE_TONES = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
 const LINES = 400 // characters of one line of a file shown
+// the rows the side panel takes under a pane (its input bar), so a list that fits shows whole above it
+const CHROME = 5
 const n = x => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))
 const cut = (s, k) => (Array.from(String(s)).length <= k ? String(s) : Array.from(String(s)).slice(0, Math.max(0, k - 1)).join('') + '…')
 const pad = (s, k, right = false) => { const t = cut(s, k); const sp = ' '.repeat(Math.max(0, k - Array.from(t).length)); return right ? sp + t : t + sp }
@@ -99,6 +102,11 @@ export default {
   local: ['at'],
   reads: () => ['coverage'],
   stateKey: () => 'coverage',
+  /** What a question asked under the pane is about, beyond the part selected (side.ts paneSubject). */
+  thread(_args, _state, data) {
+    const t = (data && data.total) || {}
+    return { about: `what this session read of the folder, by \`thimble coverage\`: ${n(t.files || 0)} source files, ${n(t.read_rows || 0)} of ${n(t.rows || 0)} rows read (${pct(t.read_share || 0)}). A file is read when some of its lines reached Claude; searched when a search showed only its matching lines; counted when it was only named, listed or counted; untouched otherwise` }
+  },
   data(stores, _args, size) {
     const s = stores.coverage || {}
     const cov = s.cov
@@ -146,6 +154,8 @@ export function program(k, data) {
     if (!it) return null
     if (it.g) return { group: it.g.key, file: null, at: 'f-0' }
     if (it.f) return { file: it.f.path, at: 'rg-0' }
+    // a read range or the search hits: their lines as a citation, over this pane
+    if (it.r && file) { k.do('open', { mark: { kind: 'cite', ref: rangeRef(file, it.r), label: `${file.path} ${rangeWords(it.r)}` } }); return { at: id } }
     return { at: id }
   }
   const back = () => (file ? { file: null, at: `f-${Math.max(0, inGroup(group || { key: null }).findIndex(f => f.path === file.path))}` }
@@ -157,13 +167,13 @@ export function program(k, data) {
   k.on(']', step(1), level === 'file' ? 'step through what was read' : 'step')
   if (level === 'top') k.on('t', () => ({ by: by === 'type' ? 'pattern' : 'type', group: null, file: null, at: null }), by === 'type' ? 'by pattern' : 'by type')
   if (level !== 'top') k.on('0', back)
-  k.on('esc', () => { if (level === 'top') { k.do('close'); return null } return back() }, level === 'top' ? 'close' : 'back')
+  if (level !== 'top') k.on('esc', back, 'back')
   if (at) k.select(at)
 
   const t = data.total
   const head = level === 'top' ? overview(k, data, W) : []
   if (level === 'top') {
-    const rows = Math.max(3, k.h - head.length - 3)
+    const rows = Math.max(3, k.h - head.length - 3 - CHROME)
     return k.stack(...head, k.text(' '), toggles(k, by), listOf(k, items, idx, rows, (it, on) => groupRow(k, it.g, by, W, on, it.id), header(k, by === 'type' ? 'type' : 'pattern', W)))
   }
   if (level === 'group') {
@@ -174,7 +184,7 @@ export function program(k, data) {
       k.text(`read ${n(group.read)} rows {dim:(${pct(share)})}`, { wrap: false }),
       { gap: 1 },
     )
-    const rows = Math.max(3, k.h - 4)
+    const rows = Math.max(3, k.h - 4 - CHROME)
     const pw = pathW(items.map(x => x.f), group, by, W)
     return k.stack(title, statusLine(k, group.by), k.text(' '), listOf(k, items, idx, rows, (it, on) => fileRow(k, it.f, group, by, W, pw, on, it.id), fileHeader(k, pw)))
   }
@@ -197,10 +207,10 @@ export function program(k, data) {
     return k.stack(out)
   }
   const shown = Math.min(ranges.length, 4)
-  out.push(listOf(k, items, idx, shown, (it, on) => rangeRow(k, it.r, on, it.id, unit), null))
+  out.push(listOf(k, items, idx, shown, (it, on) => rangeRow(k, it.r, on, it.id, unit, file), null))
   out.push(k.text(' '))
   const r = ranges[Math.max(0, idx)] || ranges[0]
-  const room = Math.max(3, k.h - out.length - 1)
+  const room = Math.max(3, k.h - out.length - 1 - CHROME)
   const from = Math.max(1, Math.min(r.from - 2, Math.max(1, total - room + 1)))
   const to = Math.min(total || r.to, from + room - 1)
   const got = k.want({ lines: file.path, from, to })
@@ -264,7 +274,8 @@ function groupRow(k, g, by, W, on, id) {
   const fill = Math.round(share * BAR)
   const bar = `{accent:${'█'.repeat(share > 0 ? Math.max(1, fill) : 0)}}{dim:${'·'.repeat(BAR - (share > 0 ? Math.max(1, fill) : 0))}}`
   const line = `${on ? '{accent:**▸**} ' : '  '}${name}${' '.repeat(Math.max(0, nw - len))} ${cnt(g.files, 'ink', 5)} ${cnt(read, 'accent', 5)} ${cnt(g.by.searched, 'warn', 8)} ${cnt(g.by.named, 'dim', 7)} ${cnt(g.by['not read'], 'unseen', 9)}  ${bar} ${pad(pct(share), 5, true)}`
-  return k.region(id, { label: `${g.key}: ${n(g.files)} files, ${pct(share)} of its rows read` }, k.text(line, { wrap: false }))
+  // a pattern's group carries its pattern, which `thimble rows` reads, so a question about it names its files
+  return k.region(id, { label: `${g.key}: ${n(g.files)} files, ${pct(share)} of its rows read`, ...(by === 'pattern' ? { ref: g.key } : {}) }, k.text(line, { wrap: false }))
 }
 
 function statusLine(k, by) {
@@ -307,14 +318,28 @@ function fileRow(k, f, group, by, W, pw, on, id) {
   const name = k.escape(shown)
   const words = fileWords(f, /^(jsonl|transcript)$/.test(f.type) ? 'rows' : 'lines')
   const line = `${on ? '{accent:**▸**} ' : '  '}{${TONE[f.status]}:${pad(SAID[f.status], 10)}}${on ? `**${name}**` : name}${' '.repeat(Math.max(0, pw - Array.from(shown).length))}  ${pad(n(f.rows), 8, true)}  {dim:${k.escape(cut(words, Math.max(10, W - pw - 24)))}}`
-  return k.region(id, { label: `${f.path}: ${words}` }, k.text(line, { wrap: false }))
+  return k.region(id, { label: `${f.path}: ${words}`, ref: fileRef(f) }, k.text(line, { wrap: false }))
 }
 
-function rangeRow(k, r, on, id, unit) {
+/** A file as a ref: the lines that reached Claude, else the lines a search showed, else the file. */
+export function fileRef(f) {
+  if ((f.ranges || []).length) return `${f.path}#L${f.ranges.slice(0, 40).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(',')}`
+  if ((f.hit_lines || []).length) return `${f.path}#L${f.hit_lines.slice(0, 60).join(',')}`
+  return f.path
+}
+
+/** A read range, or a run of search hits, as a ref. */
+export function rangeRef(f, r) {
+  return r.kind === 'read' ? `${f.path}#L${r.from === r.to ? r.from : `${r.from}-${r.to}`}` : `${f.path}#L${r.lines.join(',')}`
+}
+
+const rangeWords = r => (r.kind === 'read' ? (r.from === r.to ? `line ${r.from}` : `lines ${r.from}–${r.to}`) : `lines ${r.lines.join(', ')}`)
+
+function rangeRow(k, r, on, id, unit, f) {
   const words = r.kind === 'read'
     ? `{accent:read}  ${unit} ${r.from === r.to ? n(r.from) : `${n(r.from)}–${n(r.to)}`}{dim:  (${n(r.to - r.from + 1)})}`
     : `{warn:a search showed}  ${r.lines.length === 1 ? 'line' : 'lines'} ${r.lines.map(n).join(', ')}`
-  return k.region(id, { label: r.kind === 'read' ? `read ${unit} ${r.from} to ${r.to}` : `search hits at ${r.lines.join(', ')}` }, k.text(`${on ? '{accent:**▸**} ' : '  '}${words}`, { wrap: false }))
+  return k.region(id, { label: r.kind === 'read' ? `${f.path}: read ${unit} ${r.from} to ${r.to}` : `${f.path}: search hits at ${r.lines.join(', ')}`, ref: rangeRef(f, r) }, k.text(`${on ? '{accent:**▸**} ' : '  '}${words}`, { wrap: false }))
 }
 
 /** The whole file in one row: each cell a stretch of its lines, lit where a read range or a search hit falls. */
