@@ -219,17 +219,21 @@ def test_coverage_merges_queries_rows_and_what_the_hook_saw(root: Path, tmp_path
     seen = tmp_path / "th" / "lean" / "seen"
     seen.mkdir(parents=True)
     rows = [{"tool": "Read", "file": str(root / "saves.jsonl"), "from": 1, "to": 4, "cwd": str(root)},
-            {"tool": "Grep", "path": str(root), "glob": "*.md", "files": [str(root / "notes.md")], "lines": {}, "cwd": str(root)},
-            {"tool": "Bash", "command": "head -2 change.diff", "cwd": str(root)}]
+            {"tool": "Grep", "path": str(root), "glob": "*.md", "mode": "content", "files": [str(root / "notes.md")],
+             "lines": {str(root / "notes.md"): [4]}, "cwd": str(root)},
+            {"tool": "Bash", "command": "head -2 change.diff", "out_lines": 2, "cwd": str(root)},
+            {"tool": "Bash", "command": "wc -l agent.jsonl", "out_lines": 1, "cwd": str(root)}]
     (seen / "s-test.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     cov = LIN.coverage(st)
     status = {o["path"]: o["status"] for o in cov["files"]}
-    assert status == {"runs.csv": "computed", "saves.jsonl": "read", "notes.md": "searched", "change.diff": "named",
-                      "agent.jsonl": "not read", "forge.db": "not read", "report.json": "not read"}
+    assert status == {"runs.csv": "computed", "saves.jsonl": "read", "notes.md": "searched", "change.diff": "read",
+                      "agent.jsonl": "named", "forge.db": "not read", "report.json": "not read"}
     saves = next(o for o in cov["files"] if o["path"] == "saves.jsonl")
     assert saves["read_lines"] == 4
-    assert cov["total"]["not_read_files"] == 3
-    assert "Not read: 3 files" in LIN.coverage_text(cov)
+    assert next(o for o in cov["files"] if o["path"] == "change.diff")["read_lines"] == 2
+    # searched and counted files are not read
+    assert cov["total"]["not_read_files"] == 4 and cov["total"]["read_files"] == 3
+    assert "Not read: 4 files" in LIN.coverage_text(cov)
 
 
 # ------------------------------------------------------------------ the command

@@ -336,7 +336,7 @@ def build(st: Store, spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     cov = LIN.coverage(st)
     snap = {"session": st.session, "at": now(), "total": cov["total"],
             "files": {o["path"]: o["status"] for o in cov["files"] if o["status"] != "not read"},
-            "not_read": [o["path"] for o in cov["files"] if o["status"] == "not read"][:500]}
+            "not_read": [o["path"] for o in cov["files"] if not o["read"]][:500]}
     lineage = {"queries": queries, "bindings": ctx["bindings"], "cites": ctx["cites"], "rows": rows,
                "coverage": snap, "declared": spec.get("declared"), "problems": ctx["problems"]}
     return data, lineage

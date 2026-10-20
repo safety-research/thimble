@@ -41,6 +41,19 @@ test('row sets count their rows, and a whole file counts as unknown', () => {
   assert.equal(rowCount(['a.jsonl']), null)
 })
 
+test('a file only counted or searched is not read: the digest says so, from a snapshot of now and of before', () => {
+  const at = cov => digest({ ...OBJECT, lineage: { ...OBJECT.lineage, coverage: cov } }, {})
+  // now: not_read holds every file not read, and files says how each was touched
+  const now = at({ files: { 'orders.csv': 'computed', 'a.py': 'read', 'b.py': 'named', 'c.py': 'searched' }, not_read: ['b.py', 'c.py', 'd.py'] })
+  assert.match(now, /the session had: computed orders.csv; read a.py; not read b.py \(only named or counted\), c.py \(searched\), d.py$/m)
+  // before: not_read held only the untouched files
+  assert.match(at({ files: { 'orders.csv': 'computed', 'b.py': 'named' }, not_read: ['d.py'] }), /not read d.py, b.py \(only named or counted\)$/m)
+  // many: counted by how
+  const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s${i}.py`, i < 8 ? 'named' : 'searched']))
+  assert.match(at({ files: many, not_read: Object.keys(many), not_read_count: 12 }), /not read 12 files \(8 only named or counted, 1 searched\), as s0.py, s1.py, s2.py, s3.py$/m)
+  assert.equal(slim({ id: 'x', lineage: { coverage: { files: {}, not_read: ['a'], total: { not_read_files: 40 } } } }).lineage.coverage.not_read_count, 40)
+})
+
 test('numbers in the words that cite nothing are named; cited ones, years and dates are not', () => {
   assert.deepEqual(bareNumbers('West had [412 refunds](q3#region=West@n) in March 2026, about 31% of all, on 2026-03-14, and 9 regions had none; 1,203 rows.'), ['31%', '1,203'])
 })

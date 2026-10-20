@@ -584,7 +584,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/thi
     // what Claude's session read, as `thimble coverage` counts it, once per change of the folder
     if (coverage.at !== sig) {
       const c = sess ? await leanJson(lean, root, ['coverage'], { THIMBLE_SESSION: sess }) : { error: 'no session' }
-      coverage = { at: sig, value: c.error ? null : { total: c.total, share: readShare(c.files), groups: (c.groups || []).slice(0, 4).map(g => ({ group: g.group, files: g.files, rows: g.rows, byStatus: g.by_status })) } }
+      coverage = { at: sig, value: c.error ? null : { total: c.total, share: typeof c.total?.read_share === 'number' ? c.total.read_share : readShare(c.files), groups: (c.groups || []).slice(0, 4).map(g => ({ group: g.group, files: g.files, rows: g.rows, byStatus: g.by_status })) } }
     }
     return { session: sess, root, folder: basename(root), title: firstPrompt ? firstPrompt.text : '', started: rows[0]?.at || null, rows: rows.length, coverage: coverage.value }
   }
