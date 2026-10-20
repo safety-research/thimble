@@ -19,7 +19,8 @@
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
 //          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
 //          label}], problem} (cards.js drawnCard)
-//   keys: a open (a citation: in the side panel, its whole source with its thread; ↵ and 1 too, unnamed) · ↵ or e
+//   keys: a open (a citation: in the side panel, its whole source with its thread; ↵ and 1 too, unnamed) · h the
+//         heads up (or explainer) on the citation's words, over it (a click on its line too) · ↵ or e
 //         expand an explainer (a longer one in its place) · the sections' keys (r rows, when rows stand behind it; c
 //         code) · a ask an explainer (or thread: the side panel; 1 too, unnamed)
 //         · o open the first citation inside the card (the rest by a click; 2–9 still open them, unnamed) · 0 back (or
@@ -45,7 +46,23 @@ export function frameOf(rec, i) {
     const g = (rec.glosses && rec.glosses[m.gloss]) || { term: m.label || '' }
     return { row: rec.row, i, kind: 'gloss', label: String(g.term || m.label || ''), gloss: { id: m.gloss, kind: g.kind, term: g.term, title: g.title, body: g.body, here: g.here, program: g.program, data: g.data, refs: g.refs, bullets: g.bullets, todo: g.todo, expanded: g.expanded } }
   }
-  return { row: rec.row, i, kind: m.kind === 'spark' ? 'spark' : 'cite', ref: m.ref, label: m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label || m.ref || '') }
+  // a gloss on words inside the citation's words: a click on those words opens the citation, so its card offers the gloss
+  const inner = m.kind === 'cite' ? rec.marks.map((x, j) => (x && x.kind === 'gloss' && x.start >= m.start && x.end <= m.end ? frameOf(rec, j) : null)).filter(Boolean) : []
+  return { row: rec.row, i, kind: m.kind === 'spark' ? 'spark' : 'cite', ref: m.ref, label: m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label || m.ref || ''), ...(inner.length ? { inner } : {}) }
+}
+
+/** A part of a mark's card by its region id: its label and the refs it carries, for the side panel's thread. */
+export function partOf(card, id) {
+  if (!id) return null
+  for (const d of (card && card.drawings) || []) {
+    const r = (d.regions || []).find(x => x && x.id === id)
+    if (r) {
+      const meta = r.meta || {}
+      const refs = [].concat(meta.ref || [], meta.refs || []).filter(x => typeof x === 'string')
+      return { id, label: String(meta.label || id), refs }
+    }
+  }
+  return /^pic-\d+$/.test(id) ? { id, label: 'the picture', refs: [] } : null
 }
 
 /** The side thread's scope for a frame: one thread per mark of a message, or per citation opened inside a card. */
@@ -141,15 +158,29 @@ export function program(k, data) {
   k.on('esc', back)
   k.on(']', () => { k.do('step', { dir: 1 }) }, 'next')
   k.on('[', () => { k.do('step', { dir: -1 }) })
+  // the gloss on the citation's words (frameOf `inner`): over the citation, as a citation inside a card opens
+  const onWords = !open && Array.isArray(top.inner) ? top.inner.find(f => f && f.kind === 'gloss') : null
+  const wordsHeads = !!(onWords && onWords.gloss && onWords.gloss.kind === 'heads')
+  const openOnWords = () => ({ stack: [...stack, onWords].slice(-12) })
+  if (onWords) k.on('h', openOnWords, wordsHeads ? 'heads up' : `explain ${short(onWords.label, 24)}`)
   k.on('press', e => {
     const l = links.find(x => x.id === e.region)
     if (l) return openLink(l)
-    if (e.region === 'thread') toThread()
+    if (e.region === 'thread') { toThread(); return null }
+    if (e.region === 'inner' && onWords) return openOnWords()
+    // a part of the card (the picture an explainer draws, its parts, a row of a source): the card in the side panel,
+    // that part selected, as a click on a card's part opens it elsewhere
+    const part = partOf(card, e.region)
+    if (part) k.do('thread', { frame: { ...top, open: null }, part })
     return null
   })
 
   // ---- the card
   const parts = cardBody(k, card, top, open)
+  if (onWords && !(card && (card.problem || card.error))) {
+    const words = wordsHeads ? String((onWords.gloss && onWords.gloss.title) || onWords.label) : onWords.label
+    parts.push(k.region('inner', { label: `${wordsHeads ? 'heads up' : 'explain'} ${onWords.label}` }, k.text(`{${wordsHeads ? 'heads' : 'explain'}:${wordsHeads ? '▲ heads up' : 'explain'}} ${k.escape(words.length > 70 ? words.slice(0, 69) + '…' : words)}`, { wrap: false })))
+  }
   if (top.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text('{dim:writing a longer explanation…}'))
   if (thread && thread.turns.length && !open && card && !card.problem && !card.error) {
     const q = (thread.turns.find(t => t.role === 'person') || {}).text || ''
@@ -180,10 +211,11 @@ export function cardBody(k, card, top, open) {
   } else {
     (card.drawings || []).forEach((d, j) => {
       if (j) parts.push(k.space(1, 1))
-      parts.push(k.embed(d))
+      // the picture an explainer draws is a press as a whole, its own parts inside it too
+      parts.push(d && d.pic ? k.region(`pic-${j}`, { label: 'the picture' }, k.embed(d)) : k.embed(d))
     })
     // a value of a card: the card's part that holds it, marked as a selection is
-    const marked = markedPart((card.drawings || [])[0], card.mark)
+    const marked = (top && top.part) || markedPart((card.drawings || [])[0], card.mark)
     if (marked) k.select(marked)
     // why a value has no rows behind it is the code section's to say, not the card's
   }

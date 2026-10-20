@@ -306,6 +306,42 @@ test('a reply draws its citations inline, each underlined and a press that opens
   await ui.unmount()
 })
 
+test('a heads-up on a citation\'s words keeps its fill; a click on the words opens the citation, whose card offers the heads-up; the tray stands one blank row under what is above it', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  const text = 'Two accounts fought: [Alder reverted Birch 82 times](q1#day=2026-06-18@n), all on one page.'
+  const at = ROW.slice(0, 24)
+  const dir = `${ROOT}/thimble/messages/s-1`
+  const start = text.indexOf('[')
+  const end = text.indexOf(')') + 1
+  const marks = [{ kind: 'cite', start, end, ref: 'q1#day=2026-06-18@n', label: 'Alder reverted Birch 82 times' }, { kind: 'gloss', start: start + 1, end: text.indexOf(']'), gloss: 'h1' }]
+  w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: at, kind: 'assistant' })}\n`
+  w.files[`${dir}/${at}.json`] = JSON.stringify({ v: 1, row: at, uuid: ROW, session: 's-1', text, shown: null, marks, glosses: { h1: { kind: 'heads', term: 'Alder reverted Birch 82 times', title: 'Only the last editor counts', bullets: ['One revert can undo many saves.'], todo: 'Ask for the full count.' } }, verbs: {}, objects: [], final: true })
+  const ui = await $.ui.mount({ ...(MOUNT as object), props: { text, isFirstOfReply: true } } as never)
+  const tree = await ui.drawn()
+  // one press on the words, named as the citation, with the heads-up's fill kept under the underline
+  const words = buttons(tree).filter(b => textOf(b).includes('Alder'))
+  expect(words.map(b => b.props.label)).toEqual(['cite Alder reverted Birch 82 times'])
+  expect(JSON.stringify(words[0])).toContain('"backgroundColor":"#ffcf94"')
+  expect(JSON.stringify(words[0])).toContain('"underline":true')
+  await ui.press({ key: words[0].props.key })
+  await clock.settle()
+  const band = await $.ui.render(BAND)
+  // the citation's card, with the heads-up a press and a key in it
+  expect(textOf(band)).toContain('Alder reverted Birch 82 times')
+  expect(textOf(band)).toContain('▲ heads up Only the last editor counts')
+  expect(await hintOf($)).toContain('h heads up')
+  // one blank row above the tray: it never runs into the card or the words above it
+  expect(JSON.stringify(band)).toMatch(/^\{"type":"Box","props":\{"flexDirection":"column"\},"children":\[\{"type":"Text","children":\[" "\]\},\{"type":"Box","props":\{"marginLeft":2/)
+  // h opens the heads-up over the citation
+  await press($, clock, edit('h'))
+  await clock.advance(800)
+  await clock.settle()
+  expect(textOf(await $.ui.render(BAND))).toContain('─ heads up · 2 ─')
+  await ui.unmount()
+})
+
 test('a quote opens its span under its file\'s place, never an address; c shows the record as the file holds it in the same panel, and a letter typed straight after c is a word', async ($, on) => {
   const w = world(on)
   w.files[`${ROOT}/revisions.jsonl`] = '{}\n'
@@ -670,7 +706,7 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   expect(textOf(await $.ui.render(RESUMED))).toContain('Interpretation')
 })
 
-test('a record an earlier version kept with an explain after its text: the explain stands inside the citation, and a press on it opens it', async ($, on) => {
+test('a record an earlier version kept with an explain after its text: the explain stands inside the citation, a press on its words opens that citation, and the citation offers the explain', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   const dir = `${ROOT}/thimble/messages/s-1`
@@ -685,15 +721,21 @@ test('a record an earlier version kept with an explain after its text: the expla
   await clock.settle()
   const tree = await ui.drawn()
   expect(textOf(tree)).not.toContain('explain:')
-  const g = buttons(tree).find(b => b.props.label === 'explain browse-bare')!
-  expect(g).toBeDefined()
+  // the explain's words are the citation's: one press, named as the citation
+  expect(buttons(tree).map(b => b.props.label)).toEqual(['cite browse-bare', 'cite 30'])
+  const g = buttons(tree).find(b => b.props.label === 'cite browse-bare')!
   await ui.press({ key: g.props.key })
   await clock.settle()
-  // the tray opens on the explainer pressed, not on the citation after it
+  // the tray opens on the citation pressed, not on the citation after it, and offers the explain on its words
   const band = textOf(await $.ui.render(BAND))
   expect(band).toContain('╭─ browse-bare ─')
-  expect(band).toContain(' explain ─')
   expect(band).not.toContain('╭─ 30 ')
+  expect(band).toContain('explain browse-bare')
+  expect(await hintOf($)).toContain('h explain browse-bare')
+  await press($, clock, edit('h'))
+  await clock.advance(800)
+  await clock.settle()
+  expect(textOf(await $.ui.render(BAND))).toContain('─ explain · 2 ─')
   await ui.unmount()
 })
 

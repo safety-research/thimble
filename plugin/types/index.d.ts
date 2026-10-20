@@ -85,7 +85,7 @@ export type LineCounts = { claims?: number; threads: number; cov: number; covRow
 
 /** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
  *  inside a card (panes/tray.js frameOf). */
-export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss'; gloss?: Record<string, unknown>; open?: string | null; expanding?: boolean; full?: boolean }
+export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss'; gloss?: Record<string, unknown>; open?: string | null; expanding?: boolean; full?: boolean; inner?: TrayFrame[]; part?: string }
 
 /** The tray: the stack of cards it shows, the top one drawn. */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }

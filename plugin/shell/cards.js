@@ -525,7 +525,7 @@ export async function drawnCard(spec, draw) {
       const pic = !!(parts[i] && parts[i].pic)
       if (err || !d) { if (pic) continue; throw new Error(`the card could not be drawn: ${String(err?.message || err || 'no drawing').slice(0, 160)}`) }
       if (d.error && pic) continue
-      out.push(d)
+      out.push(pic ? { ...d, pic: true } : d)
     }
     return out
   }

@@ -131,7 +131,7 @@ let trayKeyed: { key: string; at: number } | null = null
 // a key of the tray whose work cannot be undone (a asks in the side panel, o opens a citation over the card), waiting a
 // moment for a letter after it: one typed at once makes it the start of a word, and it does nothing
 let trayWait: { key: string; at: number; cancelled: boolean } | null = null
-const TRAY_WAIT = new Set(['a', 'o'])
+const TRAY_WAIT = new Set(['a', 'o', 'h'])
 // the row the next turn's cards are drawn under, when v asked about a catch-up: under the catch-up,
 // not under the turn's own last words
 let placeNext: string | null = null
@@ -2620,6 +2620,8 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
     // 1: the card in the side panel as the mark's thread, the input bar holding the keys; the tray gives way to it
     if (name === 'thread' && a.frame && typeof a.frame === 'object') {
       const placed = await openMarkSide($, a.frame as TrayFrame, { ask: true })
+      // a click on a part of the card: that part selected there (panes/mark.js)
+      if (placed && a.part && typeof a.part === 'object') await patchPaneState($, 'mark', { frame: { ...(a.frame as TrayFrame), open: null } }, { part: a.part })
       if (placed) await setTray($, null)
       return
     }
@@ -3045,10 +3047,12 @@ export const registerShell: Register = (on, options) => {
       const line = await barEl($, els, bw)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       const above = trayTop(tray) ? await trayBand($, e, tray!) : null
-      if (!line) return above ?? next(e)
-      // one blank row between what stands above (Claude Code's spinner or its last status row, the tray) and the bar
+      if (!line) return above ? Box({ flexDirection: 'column', children: [Text({ key: 'tray-gap', children: ' ' }), above] }) : next(e)
+      // one blank row between what stands above (Claude Code's spinner or its last status row, the tray) and the bar,
+      // and one above the tray, so it never runs into the card or the words above it. The band is Claude Code's slot
+      // above the prompt (at most half the screen): what does not fit there scrolls in it, never over the transcript
       const rows: Any[] = []
-      if (above) rows.push(above)
+      if (above) rows.push(Text({ key: 'tray-gap', children: ' ' }), above)
       rows.push(Text({ key: 'bar-gap', children: ' ' }), line)
       return Box({ flexDirection: 'column', children: rows })
     } catch {
