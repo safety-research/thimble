@@ -3,6 +3,7 @@
 // (files/Ruler PageRuler). The page is the analyst's from the start: an empty report is a document they type into and
 // place cards in. A mark highlights its words in its lens's color; a click on the highlight opens its card, as a click
 // on the card does.
+import { shownMarks, useLenses as useLensList } from '../lib/marks'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PageRuler, type Passage } from '../files/Ruler'
 import { api, reportApi } from '../lib/api'
@@ -96,7 +97,10 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   // the mark whose card is open: a click on its highlight or its card
   const [active, setActive] = useState<string | null>(null)
   const [done, setDone] = useState<ReadonlySet<string>>(new Set())
-  const marks = useMemo(() => (doc.marks ?? NO_MARKS).filter((m) => !done.has(m.id)), [doc.marks, done])
+  // a lens turned off, or with the report out of its scope, hides its marks at once (lib/marks shownMarks), before the
+  // document is read again
+  const lensList = useLensList(ws)
+  const marks = useMemo(() => shownMarks(doc.marks ?? NO_MARKS, lensList, 'report').filter((m) => !done.has(m.id)), [doc.marks, lensList, done])
   useEffect(() => {
     if (active && !marks.some((m) => m.id === active)) setActive(null)
   }, [active, marks])

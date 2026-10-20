@@ -65,10 +65,10 @@ def test_a_lens_scope_is_set_through_one_route_and_its_marks_follow(api, monkeyp
     from thimble_browser.features import lenses as lens_mod
     n = asyncio.run(lens_mod.read(api.ws, chat="main", answer="It sat in the merge queue for a day."))
     assert n == 1
-    assert [m["term"] for m in api("GET", "/marks?surface=chat").json()["marks"]] == ["merge queue"]
+    assert [(m["term"], m["shown"]) for m in api("GET", "/marks?surface=chat").json()["marks"]] == [("merge queue", True)]
     r = api("PUT", "/lenses/explain", json={"scope": {"chat": False}})
     assert r.status_code == 200 and r.json()["scope"]["chat"] is False
-    assert api("GET", "/marks?surface=chat").json()["marks"] == []
+    assert [m["shown"] for m in api("GET", "/marks?surface=chat").json()["marks"]] == [False]
     assert api("PUT", "/lenses/explain", json={"scope": {"elsewhere": True}}).status_code == 400
     api("PUT", "/lenses/explain", json={"scope": {"chat": True}})
     mid = api("GET", "/marks").json()["marks"][0]["id"]
@@ -91,7 +91,7 @@ def test_an_own_check_is_a_lens_that_reads_the_report_at_once(api, monkeypatch):
     r = api("POST", "/lenses", json={"name": "Unsupported", "instructions": "Mark claims no source shows."})
     assert r.status_code == 201 and r.json()["scope"] == {"chat": False, "cards": False, "report": True}
     got = until(lambda: api("GET", "/investigations/main/types/report").json().get("marks"))
-    assert got[0]["term"] == "always" and got[0]["lens"] == r.json()["id"]
+    assert got[0]["term"] == "always" and got[0]["lens"] == r.json()["id"] and got[0]["shown"] is True
     assert "<text place=\"report\">" in calls[0]
     assert api("DELETE", f"/lenses/{r.json()['id']}").status_code == 200
     assert api("GET", "/investigations/main/types/report").json()["marks"] == []
@@ -171,6 +171,7 @@ def test_important_details_read_as_the_terminal_s_heads_up_and_take_surfaces(api
     from thimble_browser.features import lenses as lens_mod
     assert asyncio.run(lens_mod.read(api.ws, chat="main", answer="Refunds fell 40% in March.")) == 1
     m = api("GET", "/marks?surface=chat").json()["marks"][0]
+    assert m["shown"] is True
     assert (m["lens"], m["term"], m["title"], m["body"], m["here"]) == (
         "details", "fell 40%", "March is half a month", "- The file ends on Mar 14.", "Quote the per-day drop.")
     assert "## Heads-ups" in seen[0] and "Heads-ups the analyst already saw" in seen[0]

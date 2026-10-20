@@ -35,7 +35,8 @@ answer they mark, so the page draws them on that answer.
     POST   /api/ws/{c}/lenses              {name, instructions, scope?}: the analyst's own check; it reads at once
     DELETE /api/ws/{c}/lenses/{id}         remove an own check and its marks
     POST   /api/ws/{c}/lenses/read         {lens?, surfaces?}: read now, as the analyst asks
-    GET    /api/ws/{c}/marks               {marks, lenses}: the marks shown now (?surface= for one surface)
+    GET    /api/ws/{c}/marks               {marks, lenses}: the marks whose words are still there, each with `shown`,
+                                           whether its lens shows it now (?surface= for one surface)
 """
 from __future__ import annotations
 
@@ -241,6 +242,11 @@ def present(ws: str, surface: str | None = None) -> list[dict[str, Any]]:
 def shown(ws: str, surface: str | None = None) -> list[dict[str, Any]]:
     """The marks the page shows now: of a lens that reads that surface, on words that are still there."""
     return [m for m in present(ws, surface) if reads(ws, m["lens"], m["surface"])]
+
+
+def marked(ws: str, surface: str | None = None) -> list[dict[str, Any]]:
+    """Every mark whose words are still there, each with `shown`: whether its lens shows it there now."""
+    return [{**m, "shown": reads(ws, m["lens"], m["surface"])} for m in present(ws, surface)]
 
 
 def resolve_ref(ws: str, ref: str) -> dict[str, Any]:
@@ -460,7 +466,9 @@ def register(ctx: Any) -> None:
     app = ctx.app
     agent.AFTER_TURN.append(_after_turn)
     tools.REF_RESOLVERS["mark:"] = resolve_ref
-    report.DECORATE.append(lambda ws, doc: doc.__setitem__("marks", shown(ws, "report")))
+    # the page reads every mark whose words are still there, each with whether its lens shows it now, and hides the
+    # others itself, so a change of scope shows or hides marks at once
+    report.DECORATE.append(lambda ws, doc: doc.__setitem__("marks", marked(ws, "report")))
 
     @app.get("/api/ws/{c}/lenses")
     def get_lenses(c: str) -> list[dict[str, Any]]:
@@ -520,7 +528,7 @@ def register(ctx: Any) -> None:
     @app.get("/api/ws/{c}/marks")
     def get_marks(c: str, surface: str | None = None) -> dict[str, Any]:
         ws = ctx.ws_of(c)
-        return {"marks": shown(ws, surface), "lenses": with_found(ws, lenses(ws))}
+        return {"marks": marked(ws, surface), "lenses": with_found(ws, lenses(ws))}
 
     @app.post("/api/ws/{c}/marks/{mid}/dismiss")
     def dismiss(c: str, mid: str) -> dict[str, bool]:
