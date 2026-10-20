@@ -38,7 +38,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef } from '../types'
 import { answerRow, applyObserver, drawnTextOf, messageRecord, personHere } from '../shell/shell'
-import { glossesOf } from '../shell/message.js'
+import { glossesOf, headsOf } from '../shell/message.js'
 import { promptText } from '../prompts/prompts'
 import { FEATURES } from '../prompts/registry.mjs'
 import { record, tracked } from '../telemetry/telemetry'
@@ -101,6 +101,7 @@ const S = {
   glossUnopened: 0,
   glossSkip: 0,
   glossOpenedAt: 0, // the person's last open of an explain the observer has counted
+  headsGiven: [] as string[], // the titles of the heads-ups placed in this session, for the lens's digest
 }
 
 // the looks to come and the one running: a promise that settles when the last of them has ended, so a squeeze step
@@ -142,6 +143,7 @@ async function ensure($: Engine): Promise<void> {
         S.log = Array.isArray(kept.log) ? kept.log : []
         S.notesGiven = strs(kept.notesGiven)
         S.glossed = strs(kept.glossed)
+        S.headsGiven = strs(kept.headsGiven)
         S.glossUnopened = num(kept.glossUnopened)
         S.glossSkip = Math.min(8, num(kept.glossSkip))
         // a reload mid-session: the notes not yet delivered wait again, and the person's questions come back
@@ -162,7 +164,7 @@ async function ensure($: Engine): Promise<void> {
 async function save($: Engine): Promise<void> {
   if (!S.file) return
   try {
-    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), glossed: S.glossed.slice(-GLOSSED_KEEP), glossUnopened: S.glossUnopened, glossSkip: S.glossSkip, log: S.log.slice(-400) }, null, 1))
+    await $.fs.write(S.file, JSON.stringify({ notesGiven: S.notesGiven.slice(-200), glossed: S.glossed.slice(-GLOSSED_KEEP), glossUnopened: S.glossUnopened, glossSkip: S.glossSkip, headsGiven: S.headsGiven.slice(-40), log: S.log.slice(-400) }, null, 1))
   } catch {
     // the file is memory for a resume and a record for measuring; the observer works without it
   }
@@ -290,7 +292,7 @@ async function look($: Engine, t: Look): Promise<void> {
     }
     // the session's claims so far, which the claims lens adds this turn's to, and the turn's own words
     const claims = parts.some(x => x.lens.name === 'claims') ? await claimsDigest($, msgs, t.question) : null
-    const st = { notesGiven: S.notesGiven, glossed, glossSkip, ...(claims ?? {}) }
+    const st = { notesGiven: S.notesGiven, glossed, glossSkip, headsGiven: S.headsGiven, ...(claims ?? {}) }
     const model = S.model || 'opus'
     const fork: Record<string, unknown> = { prompt: frame.id, lenses: Object.fromEntries(parts.map(x => [x.lens.name, x.id])) }
     row.fork = fork
@@ -351,6 +353,7 @@ async function look($: Engine, t: Look): Promise<void> {
       moved, glossSkip, isRepeat,
       verbs: {} as Record<string, unknown>,
       glosses: null as unknown[] | null,
+      heads: null as Record<string, unknown> | null,
       note: (n: Note) => { fresher.push(n) },
       log: (k: string, v: unknown) => { row[k] = v },
       // the turn's claims into the session's Claims, placed by their words in the turn's messages
@@ -393,9 +396,14 @@ async function look($: Engine, t: Look): Promise<void> {
       if (lit && lit.row === at) verbs.c = { lit: true, note: lit.note, claims: lit.claims }
       // marks are kept by the words Claude wrote, so a term a squeeze left out is placed again when the original shows
       // (a term may stand in the original or in the squeezed text the person reads)
-      const glosses = ctx.glosses ? glossesOf(ctx.glosses, kept ? `${String(kept.text)}\n\n${typeof kept.shown === 'string' ? kept.shown : ''}` : shown, glossed) : {}
-      const rec = await applyObserver($, at, { verbs, glosses })
-      const placed = rec ? Object.entries(rec.glosses || {}).filter(([id]) => rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
+      const words = kept ? `${String(kept.text)}\n\n${typeof kept.shown === 'string' ? kept.shown : ''}` : shown
+      const glosses = ctx.glosses ? glossesOf(ctx.glosses, words, glossed) : {}
+      // the heads-up, one at most, placed on its words beside the explainers
+      const heads = ctx.heads ? headsOf(ctx.heads, words) : {}
+      const rec = await applyObserver($, at, { verbs, glosses: { ...glosses, ...heads } })
+      const placed = rec ? Object.entries(rec.glosses || {}).filter(([id, g]) => g.kind !== 'heads' && rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
+      const headsPlaced = rec ? Object.entries(rec.glosses || {}).filter(([id, g]) => g.kind === 'heads' && rec.marks.some(m => m.gloss === id)).map(([, g]) => String(g.title || g.term)) : []
+      if (headsPlaced.length) { row.heads = headsPlaced; S.headsGiven = [...S.headsGiven, ...headsPlaced].slice(-40) }
       row.verbs_lit = Object.keys(verbs)
       const v = verbs.v as { note?: string; proposals?: string[] } | undefined
       row.v_lit = v ? { note: v.note ?? '', proposals: v.proposals ?? [] } : null
@@ -591,7 +599,7 @@ export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', enabled: true, model: '', turnId: '', turnNo: 0, steps: 0, tools: 0,
     turnStart: 0, running: false, since: 0, prompt: { text: '', typed: true, verb: '' }, questions: [], notesGiven: [], pending: [], looking: false, again: null,
-    log: [], failedWhy: '', glossed: [], glossUnopened: 0, glossSkip: 0, glossOpenedAt: 0,
+    log: [], failedWhy: '', glossed: [], glossUnopened: 0, glossSkip: 0, glossOpenedAt: 0, headsGiven: [],
   })
   carrying = []
   lookEnded()

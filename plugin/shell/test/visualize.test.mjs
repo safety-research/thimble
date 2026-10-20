@@ -17,7 +17,7 @@ const FORMS_DIR = fileURLToPath(new URL('../../skills/thimble/forms/', import.me
 const GUIDE = fileURLToPath(new URL('../../skills/thimble/cards.md', import.meta.url))
 const FORMS = ['bars', 'trend', 'records', 'map', 'table', 'knob', 'guide', 'timeline', 'weeks', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
 // the forms the card guide shows, without their opening comment lines
-const V3 = ['bars', 'trend', 'records', 'map', 'table', 'knob', 'guide', 'timeline']
+const V3 = ['bars', 'trend', 'records', 'map', 'table', 'knob', 'timeline']
 
 test('v asks Claude for another view of the answer, with the proposal the person picked first and the card guide to read', () => {
   const message = { text: '[840](q3#n) of the 2,143 steps were **reruns**; the cause was a shared fixture.', objects: ['r17-trail@1'],

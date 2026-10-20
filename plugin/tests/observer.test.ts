@@ -32,7 +32,7 @@ type Any = any
 
 /** The session around the observer: one object on disk, the Node children, the model's two calls (answered by
  *  `question` and `fork`), the prompt and the band. */
-function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string>; squeeze?: string; holdSqueeze?: Promise<void>; holdPass?: Promise<void> } = {}) {
+function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); expand?: Json; env?: Record<string, string>; squeeze?: string; holdSqueeze?: Promise<void>; holdPass?: Promise<void> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...(o.env ?? {}) })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
@@ -82,6 +82,8 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
       if (o.holdSqueeze && squeezes.length === 1) await o.holdSqueeze
       return { value: { isAnswered: true, text: `<text>${o.squeeze ?? 'Squeezed.'}</text>`, usage: USAGE } }
     }
+    // e on an explainer: the longer one, written from the explainer as it stands
+    if (o.expand && String(e.prompt).includes('The explainer as it stands:')) return { value: { isAnswered: true, text: JSON.stringify(o.expand), usage: USAGE } }
     if (e.system) { efforts.push(e.effort ?? null); return pass(`${e.system}\n${e.prompt}`) }
     questions.push(String(e.prompt))
     qblocks.push([...(e.promptBlocks ?? [])])
@@ -320,13 +322,64 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   // the hint line under the prompt says
   expect(card).not.toContain('gloss')
   expect(JSON.stringify(await $.ui.render(BAND2))).toContain('"color":"#62d2c6"')
-  expect(textOf(await $.ui.render(HINT))).toContain('1 ask · 2 open · 0 close · ] next')
+  expect(textOf(await $.ui.render(HINT))).toContain('↵ e expand · a ask · 2 open · 0 close · ] next')
   // 2 opens the citation in it, over it; 0 comes back
   await press($, w.clock, key('2'))
   expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')
   expect(textOf(await $.ui.render(HINT))).toContain('0 back')
   await press($, w.clock, key('0'))
   expect(textOf(await $.ui.render(BAND2))).toContain('fixture scope')
+})
+
+test('e on an explainer writes a longer one in its place: in the tray when the terminal has no room for the side panel', async ($, on) => {
+  const LONGER = { body: 'How long pytest keeps one fixture object before it builds a new one: a function, a module or the whole session.', here: 'Run 7 set it to "module" in [conftest.py:14](tests/conftest.py#L14).' }
+  const w = world(on, { fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] }, expand: LONGER })
+  on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'needs 160 columns (120 now)' } }))
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
+  await w.clock.settle()
+  await press($, w.clock, key(']'))
+  await w.clock.settle()
+  textOf(await $.ui.render(BAND2))
+  await w.clock.settle()
+  await press($, w.clock, key('e'))
+  await w.clock.settle()
+  textOf(await $.ui.render(BAND2))
+  await w.clock.settle()
+  // the tray's frame names it expanded (its card's words are drawn by cards.js, tested in shell/test/message.test.mjs)
+  const card = textOf(await $.ui.render(BAND2))
+  expect(card).toContain('explain · expanded')
+  expect(card).not.toContain('writing a longer explanation')
+  expect(textOf(await $.ui.render(HINT))).toContain('thimble  a ask · 2 open · 0 close · ] next')
+  // the answer's record keeps the longer one, and the short one beside it
+  const g: Any = Object.values(JSON.parse(w.files[MSGPATH]!).glosses)[0]
+  expect(g.expanded).toBe(true)
+  expect(g.short.body).toBe(GLOSS.body)
+})
+
+test('a heads-up is placed on its words in orange beside the explainers, and opens a card of its title, its points and what to do', async ($, on) => {
+  const HEADS = { term: 'June 18 had the most saves', title: 'Two days are missing', bullets: ['[revisions.jsonl ends on Jun 20](revisions.jsonl#L14591), so the last week is short.'], todo: 'Count again per day.' }
+  const w = world(on, { fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS], heads: HEADS } })
+  on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
+  await w.clock.settle()
+  const rec = JSON.parse(w.files[MSGPATH]!)
+  expect(Object.values(rec.glosses).map((g: Any) => [g.term, g.kind ?? 'explain'])).toEqual([['fixture scope', 'explain'], ['June 18 had the most saves', 'heads']])
+  const drawn = JSON.stringify(await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: ANSWER, isFirstOfReply: true }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never))
+  expect(drawn).toContain('"label":"heads up June 18 had the most saves"')
+  // the orange highlighter, dark text on a light fill, beside the explainer's teal one
+  expect(drawn).toContain('"backgroundColor":"#ffcf94"')
+  expect(drawn).toContain('"backgroundColor":"#9fe0d5"')
+  // ] reaches the heads-up first: its words stand first in the answer
+  await press($, w.clock, key(']'))
+  await w.clock.settle()
+  textOf(await $.ui.render(BAND2))
+  await w.clock.settle()
+  const card = textOf(await $.ui.render(BAND2))
+  // the tray's frame names it a heads-up (its card's words are drawn by cards.js, tested in shell/test/message.test.mjs)
+  expect(card).toContain('June 18 had the most saves')
+  expect(card).toContain('heads up')
+  expect(textOf(await $.ui.render(HINT))).not.toContain('expand')
 })
 
 test('a term the person saw explained is never glossed again; glosses nobody opens back off', async ($, on) => {
@@ -352,14 +405,14 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   // one call, the frame and the lenses as its system prompt, the turn and the digests as its message
   expect(w.forks.length).toBe(1)
   const p = w.forks[0]!
-  for (const x of ['FRAME', 'LENS notes', 'LENS actions', 'LENS squeeze', 'LENS explain', 'LENS claims', 'REPLY {"notes": [], "verbs": {}, "glosses": [], "claims": []}', 'TURN ', 'when did they edit most?', 'Card 01-saves v1']) expect(p).toContain(x)
+  for (const x of ['FRAME', 'LENS notes', 'LENS actions', 'LENS squeeze', 'LENS explain', 'LENS heads', 'LENS claims', 'REPLY {"notes": [], "verbs": {}, "glosses": [], "heads": null, "claims": []}', 'TURN ', 'when did they edit most?', 'Card 01-saves v1']) expect(p).toContain(x)
   expect(p).not.toContain('LENS line')
   expect(p).toContain('STEPS (no steps before the answer)')
   const file = '/home/t/.thimble/lean/events/s-1.jsonl'
   expect(w.events.every(e => e.file === file)).toBe(true)
   const prompts = w.events.find(e => e.kind === 'prompts')!
   expect((prompts.active as Json).observer).toBe('v4-low')
-  expect((prompts.active as Json)['lens-explain']).toBe('v4')
+  expect((prompts.active as Json)['lens-explain']).toBe('v5')
   // one call after the turn: no question step
   expect(w.events.some(e => e.kind === 'call' && e.feature === 'question')).toBe(false)
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
@@ -370,8 +423,8 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   expect(pass.blocked).toBe(false)
   expect(pass.mode).toBe('lenses')
   expect(pass.usage).toEqual(USAGE)
-  expect(Object.keys(pass.lenses as Json)).toEqual(['notes', 'actions', 'squeeze', 'explain', 'claims'])
-  expect((pass.lens_prompts as Json).actions).toBe('lens-actions:v4')
+  expect(Object.keys(pass.lenses as Json)).toEqual(['notes', 'actions', 'squeeze', 'explain', 'heads', 'claims'])
+  expect((pass.lens_prompts as Json).actions).toBe('lens-actions:v5')
   // one look line in the events: what it lit
   const look = w.events.find(e => e.kind === 'look')!
   expect(look.lit).toEqual(['v', 's'].filter(k => (look.lit as string[]).includes(k)))
@@ -395,7 +448,7 @@ test('a lens turned off is neither asked nor merged; another frame version is re
   await w.clock.settle()
   expect(w.forks[0]).toContain('FRAME')
   expect(w.forks[0]).not.toContain('LENS explain')
-  expect(w.forks[0]).toContain('REPLY {"notes": [], "verbs": {}, "claims": []}')
+  expect(w.forks[0]).toContain('REPLY {"notes": [], "verbs": {}, "heads": null, "claims": []}')
   expect(JSON.parse(w.files[MSGPATH]!).glosses).toEqual({})
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
   expect(pass.prompt).toBe('observer:v3')

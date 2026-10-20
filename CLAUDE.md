@@ -24,7 +24,9 @@ https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
 [CONTRIBUTING.md](CONTRIBUTING.md) gives the layout of each product and how to test it. `scripts/check.sh` runs every
 check CI runs, and `scripts/check.sh STEP` one of them.
 
-- A change to a text the plugin's model reads goes in a new version of that prompt (`plugin/prompts/<feature>/`).
+- A change to a text the plugin's model reads goes in a new version of that prompt (`plugin/prompts/<feature>/`), and
+  follows CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
+  symptom.
 - The browser workbench reads its shared texts from `plugin/`, with the changes `browser/prompts/shared.json` lists.
   When a plugin text changes, run `scripts/check.sh parity` and fix the pairs it names.
 - The browser's server binds 127.0.0.1 only. Card code and view readers run only in its sandbox

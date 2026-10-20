@@ -22,24 +22,14 @@ Bad       takeaway   Line 12 was late on 212 trips (22.8%), Line 7 on 118 and Li
 The bad takeaway gives six numbers, two of them without a base, so the analyst cannot tell which line is late most
 often for its size.
 
-**Let the shape of the claim choose the form.** There are no card kinds: you compose the form from the toolkit's parts,
-and the right form lets the analyst see the answer at once. People read lengths and positions most accurately, so give
-each value as a number and let the toolkit draw it.
-- Counts by group read as bars, a trend as a plot, and exact values as a short table with a few columns.
-- One long run reads as its stations in order (`k.map`), and several runs as strips on one axis, so the same moment
-  lines up.
-- How parts connect, such as the modules of a codebase or the steps of a pipeline, reads as a diagram on the canvas.
-  A change to files reads as a map of where it touched them.
-- A total the analyst should take apart reads as the pieces that add up to it. A result that rests on a choice, such
-  as a threshold, reads best with the choice as a knob, so the analyst sees the answer change as they turn it.
-- A why question wants a story, a timeline or a diagram, more than a count. Real records make a pattern believable:
-  quote the passage that makes the point.
+**Be creative about how you present the content, since the right form lets the analyst see the answer immediately and
+the wrong one hides it.** There are no card kinds: you compose the form from the toolkit's parts, as the worked programs
+below do, each in another form. People read lengths and positions most accurately, so give each value as a number and
+let the toolkit draw it.
 
 **Every part the analyst can select opens what it stands for.** Draw the whole first, and let the analyst open a part
-for its records. A part they may ask about is a region whose meta names what it stands for: a query row, a record, or
-the lines of a file (`ref: 'server/auth.py#L60-94'`). A part drawn from a row of a bound query output opens that row's
-records by itself. A part that looks selectable and opens nothing leaves the analyst unsure what went wrong, so give
-each region a ref, a cite or examples, or draw it as plain text.
+for its records: a query row, a record, or the lines of a file (`ref: 'server/auth.py#L60-94'`). A part drawn from a
+row of a bound query output opens that row's records by itself.
 
 **Use color for what the question needs, one encoding at a time.** Gray (`dim`) is for context and for "other". Name
 each color where it stands, such as a bar part's `label`. Draw what you did not read with `k.unseen()`, so a gap does
@@ -49,13 +39,6 @@ not read as a zero.
 view (`k.mode === 'detail'`) has more room for more of the same. Lead with the card that answers most directly, then
 the pattern or the records that support it: three or four cards that build on each other are easy to follow, and ten
 are not. Say how you worked in a sentence, not in a card.
-
-**A guide is one card with pages.** When the analyst asks to be taught something (an introduction, a tour, a
-textbook), make one card whose page knob holds the chapters, as in `k.knob('chapter', { values: [1, 2, 3], label:
-'chapter', fmt: v => `${v} of 3`, pages: true })`, and draw each page from the knob's value alone. Teach one idea per
-page with a picture, such as a diagram of the parts, a flow, bars of sizes or a real record, and two or three sentences
-that walk through it, with the parts of the picture opening the lines or rows behind them. A page of bullet points reads
-as notes, not as a lesson. The dial and the bar turn the pages, so give the card no page keys and no key hints.
 
 ## The toolkit
 
@@ -73,8 +56,8 @@ return k.frame(k.stack(
 ), { title: 'Messages per day' })
 ```
 
-**Text and layout.** `k.text(str, { tone, bold, align, wrap, max, w })`, where `str` may hold `**bold**`, `{dim:words}`
-for a tone, and `[words](#id)` for a link to a part or a knob; `k.escape(s)` makes data safe to put in it.
+**Text and layout.** `k.text(str, { tone, bold, align, wrap, max, w })`, where `str` may hold `**bold**` and
+`{dim:words}` for a tone; `k.escape(s)` makes data safe to put in it.
 `k.stack(...parts, { gap, align })` puts parts under each other, `k.beside(...)` side by side, and `k.frame(part,
 { title, right, bottom, tone })` draws a border with a title. A part may be a node, a string, a number, an array or
 `false` (left out). `k.size(part, { w, grow })`, `k.space(w, h)` and `k.rule()` place them.
@@ -96,8 +79,8 @@ behind that row. `k.cite(id, { text, source, query, rows, note })` and `k.exampl
 register a citation or a set of real records and return the id, and a region points at them with `{ cite, examples }`.
 
 **Knobs and keys.** `k.knob(id, { values, at, label, fmt })` returns the value the analyst set, else `at`; `values` is a
-list (up to 2,000) or `{ min, max, step }`. `k.dial(id)` draws it as `label ◂ value ▸`, and a link `[words](#id)` is the
-knob too. `k.on(name, fn, label)` answers a key (`'j'`), a press on a part (`'press:<id>'`) or a drag in the browser
+list (up to 2,000) or `{ min, max, step }`. `k.dial(id)` draws it as `label ◂ value ▸`.
+`k.on(name, fn, label)` answers a key (`'j'`), a press on a part (`'press:<id>'`) or a drag in the browser
 (`'brush'`); `fn(event)` returns the new state, and the program runs again and reads it in `k.state`. In a handler,
 `k.set(key, value)` sets one value, and `k.ask({ label, rows, text })` sends the analyst's next question to the card's
 thread. A card gets its keys while it has the focus, and the bar shows each with the label you gave it, such as
@@ -207,20 +190,6 @@ return k.stack(
       k.beside(k.text(j.id, { w: 10 }), c, k.text(longest >= t ? '{bad:hung}' : '{dim:ran}', { w: 5 }), { gap: 1 }))
   }),
 )
-```
-
-A guide in pages (a tour of a codebase): one idea per page, each a picture whose parts open the lines or rows behind them, and a few sentences that walk through it.
-
-```js
-const n = data.chapters.length
-const ch = k.knob('chapter', { values: data.chapters.map((_, i) => i + 1), label: 'chapter', fmt: v => `${v} of ${n}`, pages: true })
-const c = data.chapters[ch - 1]
-const w = Math.max(14, Math.min(24, Math.floor((k.w - 3 * (c.steps?.length || 1)) / (c.steps?.length || 1))))
-const picture = c.sizes
-  ? k.bars(c.sizes.map(s => ({ id: 'size-' + s.id, label: s.label, value: s.lines, meta: { label: s.label, ref: s.ref } })))
-  : k.beside(...c.steps.map((s, i) => k.region('step-' + s.id, { label: s.label, ref: s.ref },
-      k.frame(k.text(s.does, { wrap: true, w: w - 2 }), { title: `${i + 1} ${s.label}`, tone: s.tone }))), { gap: 1 })
-return k.stack(k.text(`**${c.title}**`), picture, k.text(c.text, { wrap: true }), { gap: 1 })
 ```
 
 ## A sequence of cards

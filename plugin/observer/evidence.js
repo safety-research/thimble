@@ -262,7 +262,9 @@ export function parseAnswer(text) {
   // the turn's claims and the clusters' renames, read as given (claims/store.js applyTurn checks them)
   const claims = Array.isArray(d.claims) ? d.claims : []
   const clusters = Array.isArray(d.clusters) ? d.clusters : []
-  return { notes, verbs, glosses, claims, clusters }
+  // the one heads-up, if any, read as given (shell/message.js headsOf checks it)
+  const heads = d.heads && typeof d.heads === 'object' && !Array.isArray(d.heads) ? d.heads : null
+  return { notes, verbs, glosses, claims, clusters, heads }
 }
 
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()

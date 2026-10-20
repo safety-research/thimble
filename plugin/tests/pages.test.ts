@@ -227,7 +227,7 @@ test('a card saved three times in one turn was seen once: the header lists no ve
   await drawn($, clock, reply)
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
   let t = await drawn($, clock, PANE)
-  expect(t).toContain('card:01-orchard')
+  expect(t).not.toContain('card:01-orchard')
   expect(t).not.toMatch(/v\d/)
   expect(textOf(await $.ui.render(HINT))).toContain('h drafts')
   // h: the draft before it, named a draft beside the one the person saw

@@ -45,13 +45,13 @@ test('the first data command of a session carries the card guide, once; a save o
     expect((await bash($, command)).context ?? []).toEqual([])
   }
   await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:v4', 'thimble run']])
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:v5', 'thimble run']])
 })
 
 test('thimble sources first: the guide comes with whichever data command runs first', async ($, on) => {
   const w = world(on)
   const r = await bash($, 'thimble sources')
-  expect(r.context[0]).toContain('The card guide (forms:v4')
+  expect(r.context[0]).toContain('The card guide (forms:v5')
   await w.clock.advance(100)
   expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['thimble sources'])
 })
@@ -92,9 +92,9 @@ test("a conversation's first message carries one thimble block: thimble is on he
   on('prompt.context', () => ({ blocks: [{ name: 'currentDate', text: 'Today is Jun 18.' }] }))
   const r = (await ($ as Any).prompt.context({ blocks: [] })) as Any
   expect(r.blocks.map((b: Any) => b.name)).toEqual(['currentDate', 'thimble'])
-  expect(r.blocks[1].text).toContain('PROMPT context:v1')
+  expect(r.blocks[1].text).toContain('PROMPT context:v2')
   await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.prompt)).toEqual(['context:v1'])
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.prompt)).toEqual(['context:v2'])
 })
 
 test('the thimble block can be turned off: THIMBLE_PROMPTS=context:off sends none', async ($, on) => {

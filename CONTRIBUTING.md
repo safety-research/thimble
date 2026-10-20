@@ -74,10 +74,24 @@ The browser workbench, `browser/`:
 
 `scripts/` holds `install.sh`, `check.sh`, `scan.sh` and the git hooks.
 
-## Prompts
+## Changing what the model reads
 
-A change to a text the plugin's model reads goes in a new version of that prompt (`plugin/prompts/<feature>/`), and
-`thimble dev prompts` lists the versions and which is active.
+The texts the plugin's models read are the thimble skill (`plugin/skills/thimble/SKILL.md`), the card guide
+(`plugin/skills/thimble/cards.md`) and the versioned prompts in `plugin/prompts/<feature>/<version>.md`.
+`plugin/prompts/registry.mjs` names each feature's default version; `THIMBLE_PROMPTS=feature:version,...` picks
+another for a session, and `thimble dev prompts` lists the versions and which is active. A change to a text goes in a
+new version of it, so the old one can still be picked and compared.
+
+When the model does something you do not want, change the cause, not the symptom:
+
+1. Say what the model did, and what you want it to do instead.
+2. Read the whole text the model receives at that point, and find what leads it there: a principle, an example, or a
+   purpose it was never given. Check the guess on a few runs.
+3. Change that: reword the principle, replace the example, or delete the text that pulls the wrong way. Removing text
+   is better than adding it.
+4. Never add a sentence that forbids the symptom. What is really about the interface (a color, a key, a line of
+   status) is fixed in code.
+5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
 The browser workbench reads some of those texts from `plugin/` when it makes a prompt: Communicating, Citing and Labels
 from the thimble skill, and the default versions of the explain lens and the label classifier. Each part may carry a
