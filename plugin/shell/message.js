@@ -575,10 +575,11 @@ export function remark(rec) {
   return { ...rec, marks: placeMarks(shownOf(rec), rec.glosses || {}, rec.marks || [], { original: typeof rec.shown === 'string' ? rec.text : null }) }
 }
 
-/** The record for a message whose words are `text`: the kept record when its words are the same, else a new one that
- *  keeps the kept one's glosses, verbs and objects (a summary row, a resumed session). */
+/** The record for a message whose words are `text`: the kept record when its words are the same (its marks placed
+ *  again when an earlier version left an explain after the text, so it stands on its words), else a new one that keeps
+ *  the kept one's glosses, verbs and objects (a summary row, a resumed session). */
 export function recordFor(kept, { row, session, text, at }) {
-  if (kept && kept.text === String(text ?? '')) return kept
+  if (kept && kept.text === String(text ?? '')) return (kept.marks || []).some(m => m && m.loose) ? remark(kept) : kept
   const rec = newRecord({ row, session, text, at: at || kept?.at })
   if (!kept) return rec
   return remark({ ...rec, ...(kept.uuid ? { uuid: kept.uuid } : {}), glosses: kept.glosses || {}, verbs: kept.verbs || {}, objects: kept.objects || [], final: !!kept.final })

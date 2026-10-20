@@ -332,6 +332,11 @@ test('an explain stands on its term in the text: in a citation\'s words it is dr
   // restored to the original, it stands on its words again
   const back = remark({ ...n2, shown: null })
   assert.equal(orig.slice(back.marks[0].start, back.marks[0].end), 'Emergent vs managed')
+  // a record an earlier version kept with the explain after the text: read again, it stands inside the citation
+  const kept = { ...rec, marks: [...linkMarks(text), { kind: 'gloss', start: text.length, end: text.length, gloss: 'g1', loose: true, inLink: true }] }
+  const again = recordFor(kept, { row: 'r1', session: 's1', text })
+  assert.deepEqual(again.marks.filter(m => m.kind === 'gloss').map(m => text.slice(m.start, m.end)), ['claimer'])
+  assert.equal(recordFor(rec, { row: 'r1', session: 's1', text }), rec)
 })
 
 test('a model call that gave no answer is said as what happened, never as its code alone', async () => {
