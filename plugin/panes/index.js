@@ -12,6 +12,7 @@
 //     refs?, about?, key?}. Without it, one thread per pane (its state key), each question about the part the program
 //     selected (k.select), named by the part's label and carrying its refs (its region's meta ref or refs).
 import chips from './chips.js'
+import claims from '../claims/atlas.js'
 import coverage from './coverage.js'
 import detail from './detail.js'
 import labels from './labels.js'
@@ -20,4 +21,4 @@ import proposals from './proposals.js'
 import threads from './threads.js'
 import tray from './tray.js'
 
-export default { chips, coverage, detail, labels, mark, proposals, threads, tray }
+export default { chips, claims, coverage, detail, labels, mark, proposals, threads, tray }

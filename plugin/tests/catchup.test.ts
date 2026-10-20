@@ -132,12 +132,12 @@ test("the bar at rest reads s squeeze; two or more replies since the person's la
   await turnOf($, clock, { turn: 't1', prompt: { uuid: P1, text: QUESTION }, says: [{ uuid: A0, text: NOTE }, { uuid: A1, text: ANSWER }] })
   await clock.advance(1000)
   expect(w.calls.length).toBe(0)
-  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] cite & explain')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
   // a hand-back answered: two replies since the prompt (the note of progress ended no turn)
   await turnOf($, clock, { turn: 't2', prompt: { uuid: H2, text: HANDBACK, kind: 'peer' }, says: [{ uuid: A2, text: FOLLOW }] })
   let bar = await hintOf($)
   // (the newest reply has no marks: ] is named dim)
-  expect(bar).toContain('thimble  v visualize · s catch up on 2 replies · ] cite & explain · { } reply 2 of 2')
+  expect(bar).toContain('thimble  v visualize · s catch up on 2 replies · c claims · ] cite & explain · { } reply 2 of 2')
   expect(bar).not.toContain('lines')
   const lit = texts(await $.ui.render(HINT)).filter(t => t.text === 's' || t.text.includes('catch up on'))
   expect(lit.length).toBe(2)
@@ -205,7 +205,7 @@ test("s writes one catch-up of everything since the person's last prompt: one ca
   // s: done; the keys act on the catch-up, and the bar says so
   await press($, clock, edit('s'))
   bar = await hintOf($)
-  expect(bar).toContain('v visualize · s squeeze · ] cite & explain')
+  expect(bar).toContain('v visualize · s squeeze · c claims · ] cite & explain')
   expect(bar).toContain('{ } catch-up of 2 replies')
   expect(bar).not.toContain('catch up on')
   // its citation opens in the tray, as any reply's

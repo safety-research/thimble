@@ -157,7 +157,7 @@ export function hostKeys(mode, surface = 'terminal') {
 }
 
 // ---------------------------------------------------------------- the one bar, in the room it has
-// The bar is one line: `thimble  v visualize · s squeeze · ] cite & explain      2 cards · coverage 34%`. With
+// The bar is one line: `thimble  v visualize · s squeeze · c claims · ] cite & explain      9 claims · coverage 34%`. With
 // less room it gives up, in this order: the counts (coverage last), then each key's words beyond their first word
 // (`visualize`, `squeeze`, `cite`), then the label, then the end of the line (an ellipsis). It never wraps.
 //
@@ -165,7 +165,7 @@ export function hostKeys(mode, surface = 'terminal') {
 //   barLadder(bar) -> the bar at each step, fullest first
 //   fitBar(bar, width, measure) -> the first step whose line fits `width` (measure: text -> width, default columns)
 
-const COUNT_ORDER = ['threads', 'labels', 'cov']
+const COUNT_ORDER = ['threads', 'labels', 'claims', 'cov']
 const GAP = 3 // between the keys and the counts
 
 /** The line a bar draws, as text (for measuring). */

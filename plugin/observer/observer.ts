@@ -14,8 +14,8 @@
 //    declared, the problems `thimble save` found) and the verbs that can act on it; and `thimble coverage` for the session.
 // 2. The pass: one call that composes the enabled lenses (lenses/index.mjs; compose.mjs). Each lens is a folder with
 //    its output shape, its digest of the state and its merge into the store, and its prompt fragment in the registry
-//    (prompts/lens-<name>/): notes to Claude, the lit actions, where the answer stands on squeeze's chips, and explain
-//    marks. The system prompt is the frame (registry feature `observer`)
+//    (prompts/lens-<name>/): notes to Claude, the lit actions, where the answer stands on squeeze's chips, explain
+//    marks, and the turn's claims with what each leaves open. The system prompt is the frame (registry feature `observer`)
 //    with the lenses' fragments, which the prompt cache serves; the message is the new turn (the person's prompt,
 //    Claude's words and tool calls cut to fit, the answer), its objects, and each lens's digest. It never reads the
 //    session before the turn. Every call is a line in the session's events (telemetry), with each lens's share of the
@@ -28,7 +28,10 @@
 // Where its output goes:
 // - notes: beside the next prompt of main, whatever sent it (the person, a verb's ask, a notification), as context the
 //   person never sees. Once each: a prompt that never entered gives them back. Deduplicated across the session.
-// A pass that fails says so once, in a toast with its fix, and again only when the reason changes.
+// - claims: into the session's Claims (claims/term.ts): placed by their words in the turn's messages, with the
+//   citations near them; c lights under the answer only when a new claim reads two ways or one was corrected.
+// A pass that fails says so once, in a toast with its fix, and again only when the reason changes, and the Claims pane
+// says which turn was not read.
 // Off: the Observer row in /config.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
@@ -45,6 +48,7 @@ import { LENSES } from './lenses/index.mjs'
 import { stepsOf } from './turn.mjs'
 import { sessionKey } from '../hooks/conversation'
 import { modelWhy } from '../shell/why.js'
+import { claimsDigest, claimsGap, turnClaims } from '../claims/term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -269,13 +273,15 @@ async function look($: Engine, t: Look): Promise<void> {
     const glossed = strs(await $.store.get(K.glossed))
     const glossSkip = Math.min(8, num(await $.store.get(K.glossSkip)))
     const msgs = (await $.session.messages().catch(() => [])) as Any[]
-    const st = { notesGiven: S.notesGiven, glossed, glossSkip }
     const frame = await promptText($, 'observer')
     const parts: { lens: Any; text: string; id: string }[] = []
     for (const lens of LENSES) {
       const pt = await promptText($, lens.feature)
       if (!pt.off) parts.push({ lens, text: pt.text, id: pt.id })
     }
+    // the session's claims so far, which the claims lens adds this turn's to, and the turn's own words
+    const claims = parts.some(x => x.lens.name === 'claims') ? await claimsDigest($, msgs, t.question) : null
+    const st = { notesGiven: S.notesGiven, glossed, glossSkip, ...(claims ?? {}) }
     const model = S.model || 'opus'
     const fork: Record<string, unknown> = { prompt: frame.id, lenses: Object.fromEntries(parts.map(x => [x.lens.name, x.id])) }
     row.fork = fork
@@ -290,7 +296,7 @@ async function look($: Engine, t: Look): Promise<void> {
     const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
     const vals: Record<string, unknown> = {
       QUESTION: cut(t.question, 4000) || '(none)',
-      ROW: 'v visualize, s squeeze',
+      ROW: 'v visualize, s squeeze, c claims',
       STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
       LINES: String(answer.split('\n').length),
       ANSWER: cut(answer, 16000),
@@ -323,18 +329,31 @@ async function look($: Engine, t: Look): Promise<void> {
         S.failedWhy = why
         $.ui.toast(`thimble's check of the answer did not run: ${why}.`)
       }
+      // the Claims pane says which turn was not read
+      if (claims) await claimsGap($, t.turnNo, why || 'the check of the answer did not run').catch(() => undefined)
       return
     }
     S.failedWhy = ''
 
     // 4. each lens merges its part into the store; the answer's record takes the verbs and marks of all of them
     const fresher: Note[] = []
+    let claimsLit: { row: string; note: string; claims: string[] } | null = null
     const ctx: Any = {
       moved, glossSkip, isRepeat,
       verbs: {} as Record<string, unknown>,
       glosses: null as unknown[] | null,
       note: (n: Note) => { fresher.push(n) },
       log: (k: string, v: unknown) => { row[k] = v },
+      // the turn's claims into the session's Claims, placed by their words in the turn's messages
+      claims: async (value: { claims: unknown[]; clusters: unknown[] }) => {
+        try {
+          const r = await turnClaims($, value, { answer, turnNo: t.turnNo, grown: claims?.grown ?? [] })
+          row.claims = r.log
+          claimsLit = r.lit
+        } catch (err) {
+          row.claims_error = cut(String((err as Error)?.message || err), 300)
+        }
+      },
     }
     for (const x of parts) {
       try {
@@ -360,6 +379,9 @@ async function look($: Engine, t: Look): Promise<void> {
       const kept = await messageRecord($, at)
       const shown = kept ? String(kept.shown ?? kept.text) : answer
       const verbs = { ...(ctx.verbs as Record<string, unknown>) }
+      // c is lit by thimble, not the pass: when a new claim of the answer reads two ways, or one was corrected
+      const lit = claimsLit as { row: string; note: string; claims: string[] } | null
+      if (lit && lit.row === at) verbs.c = { lit: true, note: lit.note, claims: lit.claims }
       // marks are kept by the words Claude wrote, so a term a squeeze left out is placed again when the original shows
       // (a term may stand in the original or in the squeezed text the person reads)
       const glosses = ctx.glosses ? glossesOf(ctx.glosses, kept ? `${String(kept.text)}\n\n${typeof kept.shown === 'string' ? kept.shown : ''}` : shown, glossed) : {}

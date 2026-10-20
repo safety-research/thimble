@@ -48,6 +48,7 @@ wording or layout.
 | the panes thimble draws as programs on that runtime (detail, tray, chips, proposals, the side panel's mark and thread list) | `plugin/panes/` |
 | the side agent that reads each reply, and its lenses | `plugin/observer/` |
 | the rewrite behind `s`, and the catch-up | `plugin/squeeze/` |
+| Claims: the session's claims, the Claims pane behind `c`, and the map of the folder's claims | `plugin/claims/` |
 | the texts the model reads: the skill and card guide, and the versioned prompts | `plugin/skills/`, `plugin/prompts/` |
 | the session's events and its cost per feature (`thimble dev stats`) | `plugin/telemetry/` |
 | tests | `plugin/tests/` (hooks tests and pytest), and a `test/` folder beside the code it tests (node) |

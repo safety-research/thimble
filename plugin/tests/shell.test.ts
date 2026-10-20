@@ -162,7 +162,7 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   // prompt names its verbs and what 1 does, and 1 on an empty prompt opens the card's detail view
   expect(drawn).not.toContain('visualize')
   expect(drawn).not.toContain('1 open detail')
-  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] card · 1 open detail')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims · ] card · 1 open detail')
   expect(drawn).not.toContain('x explore')
   expect(drawn).not.toContain('? all')
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
@@ -475,7 +475,7 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   await markedTurn($, on, clock)
   // the hint line names the key that opens the answer's marks; the verb row does not
   expect(textOf(await $.ui.render({ ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never))).not.toContain('marks')
-  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] cite & explain')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
   // the bar above the prompt says how much of the data the session read
   expect(textOf(await $.ui.render(BAND))).toContain('coverage 17%')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
@@ -653,13 +653,13 @@ test('the bar is one row above the prompt: the verbs in words at its left, a lit
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   const bar = textOf(await $.ui.render(HINT))
-  expect(bar).toContain('thimble  v visualize · s squeeze · ] cite & explain')
+  expect(bar).toContain('thimble  v visualize · s squeeze · c claims · ] cite & explain')
   // 102 of 600 rows read, as the kernel counts them (events.jsonl was only named): 17%; no zero count shows
   expect(bar).toContain('coverage 17%')
   expect(bar).not.toContain('cites')
   expect(bar).not.toContain('card')
   expect(bar).not.toContain('thread')
-  expect(bar).not.toContain('claims')
+  expect(bar).not.toMatch(/\d claims?\b/)
   // the counts that just changed are bright, then dim
   const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x).trim() === 'coverage 17%') on = true }); return on }
   expect(lit(await $.ui.render(HINT))).toBe(true)

@@ -352,7 +352,7 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   // one call, the frame and the lenses as its system prompt, the turn and the digests as its message
   expect(w.forks.length).toBe(1)
   const p = w.forks[0]!
-  for (const x of ['FRAME', 'LENS notes', 'LENS actions', 'LENS squeeze', 'LENS explain', 'REPLY {"notes": [], "verbs": {}, "glosses": []}', 'TURN ', 'when did they edit most?', 'Card 01-saves v1']) expect(p).toContain(x)
+  for (const x of ['FRAME', 'LENS notes', 'LENS actions', 'LENS squeeze', 'LENS explain', 'LENS claims', 'REPLY {"notes": [], "verbs": {}, "glosses": [], "claims": []}', 'TURN ', 'when did they edit most?', 'Card 01-saves v1']) expect(p).toContain(x)
   expect(p).not.toContain('LENS line')
   expect(p).toContain('STEPS (no steps before the answer)')
   const file = '/home/t/.thimble/lean/events/s-1.jsonl'
@@ -370,7 +370,7 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   expect(pass.blocked).toBe(false)
   expect(pass.mode).toBe('lenses')
   expect(pass.usage).toEqual(USAGE)
-  expect(Object.keys(pass.lenses as Json)).toEqual(['notes', 'actions', 'squeeze', 'explain'])
+  expect(Object.keys(pass.lenses as Json)).toEqual(['notes', 'actions', 'squeeze', 'explain', 'claims'])
   expect((pass.lens_prompts as Json).actions).toBe('lens-actions:v4')
   // one look line in the events: what it lit
   const look = w.events.find(e => e.kind === 'look')!
@@ -395,7 +395,7 @@ test('a lens turned off is neither asked nor merged; another frame version is re
   await w.clock.settle()
   expect(w.forks[0]).toContain('FRAME')
   expect(w.forks[0]).not.toContain('LENS explain')
-  expect(w.forks[0]).toContain('REPLY {"notes": [], "verbs": {}}')
+  expect(w.forks[0]).toContain('REPLY {"notes": [], "verbs": {}, "claims": []}')
   expect(JSON.parse(w.files[MSGPATH]!).glosses).toEqual({})
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
   expect(pass.prompt).toBe('observer:v3')

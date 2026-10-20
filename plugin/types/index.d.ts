@@ -74,8 +74,9 @@ export type Aside = {
 
 /** The bar's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */
-/** The bar's counts: the side threads, the coverage share with its small type bar (shell/side.ts), the labels. */
-export type LineCounts = { threads: number; cov: number; labels?: number; mix?: { tone: string; read: boolean; n: number }[]; at: number; changed: Record<string, number> }
+/** The bar's counts: the session's claims, the side threads, the coverage share with its small type bar (shell/side.ts),
+ *  the labels. */
+export type LineCounts = { claims?: number; threads: number; cov: number; labels?: number; mix?: { tone: string; read: boolean; n: number }[]; at: number; changed: Record<string, number> }
 
 /** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
  *  inside a card (panes/tray.js frameOf). */
@@ -160,6 +161,8 @@ declare module 'claude-code' {
       labelgen: number
       /** the labels of a set of records, by folder, generation and refs (`thimble label --of`) */
       labelsof: StateFamily<unknown>
+      /** this session's claims (claims/store.js), as held for the drawing; thimble/claims/<session>.json on disk */
+      claims: Record<string, unknown> | null
     }
   }
 }

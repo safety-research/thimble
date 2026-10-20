@@ -10,7 +10,7 @@
 //   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
 //   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
-//   parseAnswer(text)          -> {notes, verbs, glosses} from the pass's reply, or null
+//   parseAnswer(text)          -> {notes, verbs, glosses, claims, clusters} from the pass's reply, or null
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
 // the statuses of `thimble coverage` that count as read
@@ -247,7 +247,7 @@ export function jsonIn(text) {
   }
 }
 
-/** The pass's reply, read leniently: notes, lit verbs and glosses. */
+/** The pass's reply, read leniently: notes, lit verbs, glosses and claims. */
 export function parseAnswer(text) {
   const d = jsonIn(text)
   if (!d || typeof d !== 'object') return null
@@ -258,7 +258,10 @@ export function parseAnswer(text) {
   // the message row: the verbs it lights and its glosses, read as given (shell/message.js verbsOf and glossesOf check them)
   const verbs = d.verbs && typeof d.verbs === 'object' && !Array.isArray(d.verbs) ? d.verbs : {}
   const glosses = Array.isArray(d.glosses) ? d.glosses : []
-  return { notes, verbs, glosses }
+  // the turn's claims and the clusters' renames, read as given (claims/store.js applyTurn checks them)
+  const claims = Array.isArray(d.claims) ? d.claims : []
+  const clusters = Array.isArray(d.clusters) ? d.clusters : []
+  return { notes, verbs, glosses, claims, clusters }
 }
 
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()

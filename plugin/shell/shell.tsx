@@ -10,7 +10,8 @@
 //              on) and while Claude works (they act on the last finished answer), each a click too: v asks for another
 //              view of the answer (visualize.js), made by a fork of the conversation in the background and drawn
 //              under the answer (aside.ts); s opens the squeeze chips (squeeze/); ] steps through the marks and cards;
-//              1 opens the card in focus; t lists the session's threads in the side panel.
+//              1 opens the card in focus; c opens the Claims pane in the side panel (claims/); t lists the session's
+//              threads in the side panel.
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
 //              `claude -c` and `--resume` draw the objects under the same replies again. <session> is the
 //              conversation's key (hooks/conversation.ts): a conversation Claude Code continues under a new session id
@@ -50,6 +51,7 @@ import { frameOf as trayFrameOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
+import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
 import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, resetDock, restPane, toggleDock } from './dock'
@@ -477,7 +479,7 @@ export async function openDetail($: Engine, at: ObjRef, region: string | null = 
 
 /** The folder under analysis for a ref that names no object: the latest object's, else the nearest folder at or above
  *  the session's that holds a thimble/ record folder. */
-async function rootHere($: Engine): Promise<string | null> {
+export async function rootHere($: Engine): Promise<string | null> {
   const last = (await $.state.get(LAST)).value
   if (last) return last.root
   const env = await $.env.get('THIMBLE_ROOT')
@@ -707,8 +709,8 @@ async function drawnRecord($: Engine, at: string, text: string): Promise<MsgReco
   return recordFor(kept, { row: at, session: await sessionKey($), text }) as MsgRecord
 }
 
-/** The keys of the row: v and s. */
-const ROW_KEYS = [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }]
+/** The keys of the row: v and s, and c, which opens the Claims pane in the side panel. */
+const ROW_KEYS = [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }, { key: 'c', name: 'claims' }]
 
 /** Whether a person is at this session: `now` (an interactive session), `later` (one Claude Code's background service
  *  runs, a pre-warmed spare or a background job, until the person's first prompt), `never` (a `-p` run, the SDK). */
@@ -751,7 +753,7 @@ async function restoreAnswers($: Engine): Promise<void> {
 /** Whether an index row is a prompt the person sent (not a task's notification or another agent's message, which
  *  start a turn of their own): typed, sent from a phone or the SDK, or a key of theirs that asked Claude (a verb's
  *  ask, this plugin's prompt). A row an older index kept with no sender is told by its words. */
-const personPrompt = (x: Any) => x.kind === 'user' && (x.by ? /^(composer|bridge|sdk|plugin|auto-continuation)$/.test(String(x.by)) : !/^\s*(<task-notification>|<agent-message|Another Claude session sent a message)/.test(String(x.text || '')))
+export const personPrompt = (x: Any) => x.kind === 'user' && (x.by ? /^(composer|bridge|sdk|plugin|auto-continuation)$/.test(String(x.by)) : !/^\s*(<task-notification>|<agent-message|Another Claude session sent a message)/.test(String(x.text || '')))
 
 /** Since the person's last prompt: that prompt, Claude's messages after it in order (`rows`), and those of them that
  *  ended a turn (`replies`): the answer to the prompt, and each answer to an agent's hand-back, a task's notification
@@ -887,6 +889,11 @@ async function messageRows($: Engine): Promise<string[]> {
   const f = await msgFilesNow($)
   const held = ((await $.state.get(MSGROWS)).value ?? []) as string[]
   return [...new Set([...f.index.filter(x => x.kind === 'assistant').map(x => String(x.row)), ...held])]
+}
+
+/** The session's index (CONTRACT 1): one line per row the shell drew, oldest first. */
+export async function sessionIndex($: Engine): Promise<Any[]> {
+  return (await msgFilesNow($)).index
 }
 
 async function allMarks($: Engine): Promise<{ row: string; i: number }[]> {
@@ -1080,6 +1087,8 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   void recordEvent($, { kind: 'press', verb: key, row, lit: !!v?.lit })
   await setTray($, null)
   await setCardFocus($, null)
+  // c: the Claims pane, in the side panel
+  if (key === 'c') { await setPick($, null); await openClaims($); return }
   if (key === 'v') {
     // v while its card is being made under this message: the line under it says how far it is
     if ((await asideOn($, row))?.status === 'running') { $.ui.toast('v is still making a view of this answer: its line under the answer says how far it is.'); return }
@@ -1278,8 +1287,9 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         // the line keeps the last share it had
       }
     }
-    const next: LineCounts = { threads: threadCount(), cov, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
-    const keys = ['threads', 'cov', 'labels'] as const
+    const claims = await claimCount($).catch(() => old?.claims ?? 0)
+    const next: LineCounts = { claims, threads: threadCount(), cov, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
+    const keys = ['claims', 'threads', 'cov', 'labels'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : (next[k] ?? 0) > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
     await $.state.set(COUNTS, next)
@@ -1540,6 +1550,8 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   // each count: its id, its number, its words, and the key that acts on it (drawn before its words; a click on the
   // count does what the key does)
   const items: [string, number, string, string?][] = c ? [
+    // c: the Claims pane in the side panel
+    ['claims', c.claims ?? 0, c.claims === 1 ? '1 claim' : `${fmtN(c.claims ?? 0)} claims`, 'c'],
     // t: the list of them in the side panel
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`, 't'],
     // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 34% ▆▆▆▆`, `l 2 labels` (their
@@ -1589,7 +1601,7 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     const sepEl = i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []
     // coverage and the labels: a press that does what r and l do, their pane docked (dock.ts)
     if (docked(x.id)) return [...sepEl, dockCountEl($, els, x, c!, true)]
-    const press = x.id === 'threads' ? () => listThreads($) : x.key ? () => pressBarKey($, x.key!) : barItems.has(x.id) ? () => undefined : null
+    const press = x.id === 'threads' ? () => listThreads($) : x.id === 'claims' ? () => openClaims($) : x.key ? () => pressBarKey($, x.key!) : barItems.has(x.id) ? () => undefined : null
     return [...sepEl, press ? Button({ key: `bar-item-${x.id}`, plain: true, label: x.text, onPress: press, children: countWords(x) }) : Text({ key: `count-t-${x.id}`, children: countWords(x) })]
   }) }) : null
   return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
@@ -2178,6 +2190,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'card': return arg ? cardStore($, arg) : null
     // the session's side threads: the tray shows a mark's
     case 'threads': return threadList()
+    // the session's claims, with the folder's offer (claims/term.ts)
+    case 'claims': return claimsPaneStore($)
     default: return paneStoreMore($, kind, arg)
   }
 }
@@ -2272,6 +2286,8 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   // ] and [ on a mark in the side panel: the next mark or card in its place
   if (pane === 'mark' && name === 'step') { await stepSide($, (_args.frame ?? null) as TrayFrame | null, Number(a.dir) < 0 ? -1 : 1); return }
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
+  // the Claims pane's own actions (claims/term.ts); its citations open as any pane's do (open, below)
+  if (pane === 'claims') { const said = await claimsAction($, a); if (said !== false) return said }
   if (pane === 'detail') return detailAction($, a)
   // a label value checked in the label viewer (dock.ts); what a pane opens is the panel's, below
   if ((pane === 'coverage' || pane === 'labels') && name === 'check') return dockAction($, pane, a)
@@ -2379,6 +2395,8 @@ export const registerShell: Register = (on, options) => {
       if (!read.length) return r
       const saves: ObjRef[] = []
       const threadSaves: ObjRef[] = []
+      // a map of the folder's claims, saved by main or by the subagent that made it, joins the session's claims
+      await foldInSaves($, read).catch(() => undefined)
       notes = []
       for (const ref of read) {
         const at = await asideFor($, input.agentId, ref.id)
