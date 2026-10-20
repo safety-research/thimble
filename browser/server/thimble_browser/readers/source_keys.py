@@ -211,8 +211,8 @@ class _Tally:
             per = [Counter() for _ in range(bins)]
             for i, vi in enumerate(k.lines):
                 if vi != _NONE:
-                    # every bin of the lines the record covers
-                    for b in range(min(bins - 1, self.at[i] * bins // lines), min(bins - 1, self.till[i] * bins // lines) + 1):
+                    # every bin of the lines the record covers, so it fills its whole share of the strip
+                    for b in base.share_bins(self.at[i], self.till[i], lines, bins):
                         per[b][rank[vi]] += 1
             at = [c.most_common(1)[0][0] if c else -1 for c in per]
             rest = ranked[VALUES_LISTED:]

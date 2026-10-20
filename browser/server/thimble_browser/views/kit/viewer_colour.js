@@ -2320,6 +2320,7 @@
       recs.sort(function (a, b) {
         return a[0] - b[0]
       })
+      closeGaps(recs)
     }
     this.recs = recs
     this.grey = g
@@ -2389,27 +2390,40 @@
         var top2 = this.page ? -box2.scrollTop : this.rect().top + box2.clientTop - box2.scrollTop
         var anchored = (this.page ? document : box2).querySelectorAll('[data-anchor]')
         var seen2 = {}
+        // every record's place, coloured in a lane or not, so a record's share runs to the next record's top
+        var places = []
         for (var ai = 0; ai < anchored.length; ai++) {
           var ae = anchored[ai]
           if (ae.tagName === 'CANVAS' || ae.closest('.thimble-colour-mount,.thimble-colour-menu,[data-thimble-chrome]')) continue
           var aref = ae.getAttribute('data-anchor')
           if (!aref || seen2[aref]) continue
           seen2[aref] = true
-          var ar = null
+          var ar = ae.getBoundingClientRect()
+          if (!ar.height) continue
+          var ay = ar.top - top2
+          var place = [ay / H2, (ay + ar.height) / H2, null, ae]
+          places.push(place)
           for (var lb = 0; lb < lanes.length; lb++) {
             var ca = colourIn(lanes[lb], aref, ae)
             if (!ca) continue
-            ar = ar || ae.getBoundingClientRect()
-            if (!ar.height) break
-            var ay = ar.top - top2
-            lanes[lb].recs.push([ay / H2, (ay + ar.height) / H2, ca, ae])
+            lanes[lb].recs.push(place.slice(0, 2).concat([ca, ae, place]))
             lanes[lb].by.set(ae, ca)
           }
         }
-        for (var lc = 0; lc < lanes.length; lc++)
+        places.sort(function (a, b) {
+          return a[0] - b[0]
+        })
+        closeGaps(places)
+        for (var lc = 0; lc < lanes.length; lc++) {
+          for (var lr = 0; lr < lanes[lc].recs.length; lr++) {
+            var lrec = lanes[lc].recs[lr]
+            lrec[1] = Math.max(lrec[1], lrec[4][1])
+            lrec.length = 4
+          }
           lanes[lc].recs.sort(function (a, b) {
             return a[0] - b[0]
           })
+        }
       }
     }
     for (var lq = 0; lq < lanes.length && !coloured; lq++) coloured = lanes[lq].recs.length > 0
@@ -2423,6 +2437,12 @@
       this.stale = true
       this.dirty()
     }
+  }
+  // Records measured on the page, sorted by their tops ([top, bottom, ...] as fractions of the list's height): each one's
+  // share runs on to the next one's top, so the margins and borders between records leave no gap on the strip and
+  // consecutive records of one colour draw one band, as a code editor's overview does
+  function closeGaps(recs) {
+    for (var i = 0; i + 1 < recs.length; i++) if (recs[i + 1][0] > recs[i][1]) recs[i][1] = recs[i + 1][0]
   }
   // the part in view, as fractions of the list's height
   Strip.prototype.view = function () {

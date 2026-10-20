@@ -458,7 +458,10 @@ def presence(ws: str, cid: str) -> dict[str, dict[str, int]]:
 
 
 def ruler(ws: str, cid: str, path: str, total: int, bins: int) -> dict[str, dict[int, int]]:
-    """{value: {bin: n}}: where on a file of `total` lines the label's values fall, the lines cut into `bins`."""
+    """{value: {bin: n}}: where on a file of `total` lines the label's values fall, the lines cut into `bins`; a record
+    counts in every bin its line overlaps, so a few records fill the strip as bands, not ticks."""
+    from ..readers.base import share_bins  # noqa: PLC0415
+
     out: dict[str, dict[int, int]] = {}
     if total <= 0:
         return out
@@ -467,9 +470,9 @@ def ruler(ws: str, cid: str, path: str, total: int, bins: int) -> dict[str, dict
         v = effective(r)
         if p != path or line is None or v is None:
             continue
-        b = min(bins - 1, (line - 1) * bins // total)
         per = out.setdefault(str(v), {})
-        per[b] = per.get(b, 0) + 1
+        for b in share_bins(line - 1, line - 1, total, bins):
+            per[b] = per.get(b, 0) + 1
     return out
 
 
