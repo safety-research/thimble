@@ -155,6 +155,24 @@
           "run_python with cats ="
         ]
       ]
+    },
+    "heads": {
+      "prompt": "lens-heads",
+      "until": "<!-- digest -->",
+      "replace": [
+        [
+          "(The query read refunds.csv, which ends on Mar 14.)",
+          "(The card read refunds.csv, which ends on Mar 14.)"
+        ],
+        [
+          "[12%](r4#month=03@per_day)",
+          "[12%](card:<id>#month/03)"
+        ]
+      ]
+    },
+    "heads-digest": {
+      "prompt": "lens-heads",
+      "after": "<!-- digest -->"
     }
   }
 }

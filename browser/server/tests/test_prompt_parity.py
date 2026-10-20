@@ -67,13 +67,15 @@ def test_main_prompt_holds_the_shared_parts_whole(tmp_path):
         assert prompts.shared(part) in text
 
 
-def test_explain_lens_holds_the_terminal_lens_whole(folder):
+def test_the_lenses_hold_the_terminal_lenses_whole(folder):
     from thimble_browser import home
     from thimble_browser.features import lenses
 
     ws = home.open_folder(folder)
     text = prompts.render("lenses.md", {"lenses": lenses._lens_text(ws, lenses.lens(ws, "explain"))})
     assert prompts.shared("explain") in text
+    text = prompts.render("lenses.md", {"lenses": lenses._lens_text(ws, lenses.lens(ws, "details"))})
+    assert prompts.shared("heads") in text
 
 
 def test_tool_schemas_parse():

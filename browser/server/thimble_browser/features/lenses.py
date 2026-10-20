@@ -5,13 +5,16 @@ There are three built-in lenses, and the analyst's own checks (the page calls ev
 
 - **Explainers** (`explain`, teal) mark the terms the analyst may not know, with what each means here. The instructions
   are the terminal plugin's explain lens, word for word (prompts/shared.json, part `explain`).
-- **Important details** (`details`, orange) mark a detail the analyst should know before relying on the text.
+- **Important details** (`details`, orange) mark a detail the analyst should know before relying on the text. The
+  instructions are the terminal plugin's heads-up lens, word for word (prompts/shared.json, part `heads`).
 - **Unverifiable** (`unverifiable`, off at first) marks a claim that nothing in the files can support.
 - **A check** the analyst asks for (`add_check`, or POST /lenses) marks the passages its instructions name, such as
   "claims no cited source shows".
 
 Each lens has a scope: the surfaces it reads, the chat's answers (`chat`), the cards' takeaways (`cards`) and the
 report (`report`). One small API sets it (PUT /api/ws/{c}/lenses/{id}), so any control on the page can sit on top. A
+lens is served in the shape of the terminal's switches (plugin/settings/features.mjs): `key`, `title`, the terminal's
+`lens` it runs (explain, heads; none for a check of the analyst's), and `surfaces`, the ones it reads. A
 lens that is off, or a surface out of its scope, shows no marks there, and the next reading skips it.
 
 When a lens reads. After each turn of the chat agent, one model call reads what the turn wrote on each surface that
@@ -26,7 +29,8 @@ answer they mark, so the page draws them on that answer.
 
     GET    /api/ws/{c}/lenses              the lenses, each {id, name, color, builtin, on, scope, question, leaves,
                                            instructions, found: {chat, cards, report}}
-    PUT    /api/ws/{c}/lenses/{id}         {on?, scope?: {chat?, cards?, report?}, instructions?}: the lens as it is now
+    PUT    /api/ws/{c}/lenses/{id}         {on?, scope?: {chat?, cards?, report?} or surfaces?: [...], instructions?}:
+                                           the lens as it is now
     GET    /api/ws/{c}/lenses/{id}/found   what the lens found, where it stands now, newest first
     POST   /api/ws/{c}/lenses              {name, instructions, scope?}: the analyst's own check; it reads at once
     DELETE /api/ws/{c}/lenses/{id}         remove an own check and its marks
@@ -55,12 +59,13 @@ log = logging.getLogger("thimble_browser.lenses")
 SURFACES = ("chat", "cards", "report")
 # the built-in lenses: their names, colors and today's default scope
 BUILTIN: dict[str, dict[str, Any]] = {
-    "explain": {"name": "Explainers", "color": "teal", "key": "glosses", "prompt": "lens-explain.md", "on": True,
+    "explain": {"name": "Explainers", "color": "teal", "key": "glosses", "lens": "explain", "prompt": "lens-explain.md",
+                "on": True,
                 "question": "Which terms might the reader not know?",
                 "leaves": "the term highlighted; a click explains it",
                 "scope": {"chat": True, "cards": False, "report": False}},
-    "details": {"name": "Important details", "color": "orange", "key": "details", "prompt": "lens-details.md",
-                "on": True, "question": "Which details are easy to miss and matter before relying on this?",
+    "details": {"name": "Important details", "color": "orange", "key": "heads", "lens": "heads",
+                "prompt": "lens-details.md", "on": True, "question": "Which details are easy to miss and matter before relying on this?",
                 "leaves": "the detail highlighted, and what to do about it beside it",
                 "scope": {"chat": False, "cards": False, "report": True}},
     "unverifiable": {"name": "Unverifiable", "color": "gold", "key": "unverifiable", "prompt": "lens-check.md",
@@ -112,12 +117,14 @@ def lenses(ws: str) -> list[dict[str, Any]]:
 
 
 def with_found(ws: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The lenses with how many marks each found on each surface, shown or not: what the Checks sidebar counts."""
+    """The lenses as the page reads them: with how many marks each found on each surface, shown or not (what the
+    Checks sidebar counts), and the terminal switches' fields (key, title, lens, surfaces)."""
     found = {x["id"]: {s: 0 for s in SURFACES} for x in rows}
     for m in present(ws):
         if m["lens"] in found:
             found[m["lens"]][m["surface"]] += 1
-    return [{**x, "found": found[x["id"]]} for x in rows]
+    return [{**x, "key": x["id"], "title": x["name"], "lens": (BUILTIN.get(x["id"]) or {}).get("lens"),
+             "surfaces": [s for s in SURFACES if x["scope"][s]], "found": found[x["id"]]} for x in rows]
 
 
 def lens(ws: str, lid: str) -> dict[str, Any]:
@@ -253,9 +260,11 @@ def resolve_ref(ws: str, ref: str) -> dict[str, Any]:
 def _lens_text(ws: str, x: dict[str, Any]) -> str:
     if x["builtin"] and BUILTIN[x["id"]]["prompt"] != "lens-check.md":
         text = prompts.render(BUILTIN[x["id"]]["prompt"])
+        seen = [m["term"] for m in _marks(ws) if m["lens"] == x["id"]][-KEEP_SEEN:]
         if x["id"] == "explain":
-            seen = [m["term"] for m in _marks(ws) if m["lens"] == "explain"][-KEEP_SEEN:]
             text += "\n\n" + prompts.shared("explain-digest").replace("{{GLOSSED}}", "\n".join(seen) or "(none)")
+        elif x["id"] == "details":
+            text += "\n\n" + prompts.shared("heads-digest").replace("{{HEADS}}", "\n".join(seen) or "(none)")
         return text
     return prompts.render("lens-check.md", {"name": x["name"], "instructions": x["instructions"] or "",
                                             "key": x["id"]})
@@ -281,13 +290,34 @@ def found(ws: str, lid: str) -> list[dict[str, Any]]:
     return sorted(out, key=lambda m: str(m.get("ts") or ""), reverse=True)
 
 
+# the heads-up lens's reply (the terminal's lens-heads): null, or one heads-up, with the text's place added
+HEADS = {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": False,
+                                      "required": ["where", "term", "title", "bullets", "todo"],
+                                      "properties": {"where": {"type": "string"}, "term": {"type": "string"},
+                                                     "title": {"type": "string"},
+                                                     "bullets": {"type": "array", "items": {"type": "string"}},
+                                                     "todo": {"type": "string"}}}]}
+
+
 def _schema(active: list[dict[str, Any]]) -> dict[str, Any]:
     item = {"type": "object", "additionalProperties": False, "required": ["where", "term", "body"],
             "properties": {"where": {"type": "string"}, "term": {"type": "string"}, "title": {"type": "string"},
                            "body": {"type": "string"}, "here": {"type": "string"}}}
     keys = [_key(x) for x in active]
     return {"type": "object", "additionalProperties": False, "required": keys,
-            "properties": {k: {"type": "array", "items": item} for k in keys}}
+            "properties": {k: HEADS if k == "heads" else {"type": "array", "items": item} for k in keys}}
+
+
+def _items(got: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    """A lens's marks in the reply as one shape: a heads-up's points are its body and what to do its `here`."""
+    if key != "heads":
+        return [it for it in got.get(key) or [] if isinstance(it, dict)]
+    h = got.get("heads")
+    if not isinstance(h, dict):
+        return []
+    points = [str(b) for b in h.get("bullets") or [] if b]
+    return [{"where": h.get("where") or "answer", "term": h.get("term"), "title": h.get("title"),
+             "body": "\n".join(f"- {b}" for b in points), "here": h.get("todo") or ""}]
 
 
 def _texts(ws: str, chat: str | None, answer: str | None, cards: list[str], with_report: bool) -> dict[str, str]:
@@ -337,7 +367,7 @@ async def read(ws: str, *, chat: str | None = None, answer: str | None = None, c
         return 0
     made: list[dict[str, Any]] = []
     for x in active:
-        for it in (got.get(_key(x)) or [])[:5]:
+        for it in _items(got, _key(x))[:5]:
             place, term = str(it.get("where") or "answer"), str(it.get("term") or "").strip().strip("`")
             if place not in texts or not term or term not in texts[place] or not it.get("body"):
                 continue
@@ -437,6 +467,8 @@ def register(ctx: Any) -> None:
     @app.put("/api/ws/{c}/lenses/{lid}")
     def put_lens(c: str, lid: str, body: dict = Body(...)) -> dict[str, Any]:
         scope = body.get("scope")
+        if isinstance(body.get("surfaces"), list):  # the terminal switches' shape: the surfaces it reads
+            scope = {x: x in body["surfaces"] for x in SURFACES}
         if scope is not None and (not isinstance(scope, dict) or any(k not in SURFACES for k in scope)):
             raise HTTPException(400, f"scope: {{surface: true or false}}, the surfaces {', '.join(SURFACES)}")
         ws = ctx.ws_of(c)

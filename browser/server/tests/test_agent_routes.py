@@ -158,3 +158,19 @@ def test_the_checks_list_their_question_what_they_found_and_go_to_it(api, monkey
     assert api("PUT", f"/lenses/{a['id']}", json={"instructions": "Flag a claim with no citation."}).json()["question"] == \
         "Flag a claim with no citation."
     assert api("PUT", "/lenses/explain", json={"instructions": "Something else."}).status_code == 400
+
+
+def test_important_details_read_as_the_terminal_s_heads_up_and_take_surfaces(api, monkeypatch):
+    reply = {"glosses": [], "heads": {"where": "answer", "term": "fell 40%", "title": "March is half a month",
+                                      "bullets": ["The file ends on Mar 14."], "todo": "Quote the per-day drop."}}
+    seen = []
+    monkeypatch.setattr(llm, "client", lambda: ScriptedClient(answer=lambda s, u: seen.append(s) or json.dumps(reply)))
+    r = api("PUT", "/lenses/details", json={"surfaces": ["chat", "report"]})
+    assert r.json()["surfaces"] == ["chat", "report"] and r.json()["key"] == "details" and r.json()["lens"] == "heads"
+    import asyncio
+    from thimble_browser.features import lenses as lens_mod
+    assert asyncio.run(lens_mod.read(api.ws, chat="main", answer="Refunds fell 40% in March.")) == 1
+    m = api("GET", "/marks?surface=chat").json()["marks"][0]
+    assert (m["lens"], m["term"], m["title"], m["body"], m["here"]) == (
+        "details", "fell 40%", "March is half a month", "- The file ends on Mar 14.", "Quote the per-day drop.")
+    assert "## Heads-ups" in seen[0] and "Heads-ups the analyst already saw" in seen[0]
