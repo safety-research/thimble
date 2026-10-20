@@ -161,7 +161,8 @@ async def start(ws: str, sessions: agent.Sessions, query: str, *, by: str = "cli
                     "chats": {ROLE: cid}, "run": 0, "pending": []})
     chats.append(ws, "main", {"type": "agent", "chat": cid, "role": ROLE, "title": TITLE,
                               **({"tool_use_id": tool_use_id} if tool_use_id else {})})
-    await sessions.get(ws, cid).send(first_message(ws, query), shown=query.strip() or NO_REQUEST)
+    await sessions.get(ws, cid).send(first_message(ws, query), shown=query.strip() or NO_REQUEST,
+                                     record={"by": "main"} if by == "typed" else None)
     _announce(ws, "running", chat=cid)
     return {"chat": cid, "agentId": cid}
 
@@ -386,7 +387,8 @@ async def t_critique(t: tools.Tools, args: dict[str, Any]) -> tools.Result:
     _set_paused(ws, chat, "critique")
     critic = s.manager.get(ws, cid)
     try:
-        await critic.send(brief, shown="Review the orientation's analysis and its drafted cards.")
+        await critic.send(brief, shown="Review the orientation's analysis and its drafted cards.",
+                          record={"by": "thimble"})
         if critic.task is not None:
             await asyncio.wait({critic.task})
     except asyncio.CancelledError:

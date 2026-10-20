@@ -390,7 +390,8 @@ async def start_run(ws: str, sessions: agent.Sessions, cid: str, *, wanted: list
         chats.append(ws, "main", {"type": "agent", "chat": chat, "role": ROLE, "title": check["name"],
                                   "tool_use_id": from_main})
     await sessions.get(ws, chat).send(task_text(ws, check, cover), shown=f"Run the check {check['name']} on the "
-                                      f"report: {len(cover)} passage{'s' if len(cover) != 1 else ''}.")
+                                      f"report: {len(cover)} passage{'s' if len(cover) != 1 else ''}.",
+                                      record={"by": "thimble"})
     _stream(ws, cid, "running", rid, chat)
     return rec
 
