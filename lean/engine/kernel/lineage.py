@@ -223,8 +223,8 @@ def _num(ref: str) -> int:
 
 def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
     """(the ref of the one value a citation's words show, how it was found), when the citation names a whole query, a
-    column or several rows and its words show one value that only one cell of them holds: `[6,543](q1@n)` is
-    `q1#day=2026-06-18@n`. None when the ref already names one value, or the words fit no cell or several."""
+    column or several rows and its words show one value that only one cell of them holds: `[6,543](r1@n)` is
+    `r1#day=2026-06-18@n`. None when the ref already names one value, or the words fit no cell or several."""
     from .objects import NUM_RE, number_matches
 
     if not label:
@@ -383,7 +383,7 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
                             "inputs": [{"path": x["path"], "rows_read": x.get("rows_read")} for x in q.get("inputs") or []]}
     if stale:
         step["stale"] = stale
-        notes.append(f"{', '.join(stale)} changed since {q['id']} ran; `thimble rerun {q['id']}` runs it again")
+        notes.append(f"{', '.join(stale)} changed since {q['id']} ran; `thimble run --rerun {q['id']}` runs it again")
     if q.get("uses"):
         step["uses"] = q["uses"]
     chain.append(step)

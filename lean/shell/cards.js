@@ -25,7 +25,7 @@ const CODE = /\.(py|pyi|js|mjs|cjs|jsx|ts|tsx|go|rs|java|kt|c|cc|cpp|h|hpp|rb|ph
 export function cardKind(ref) {
   const r = String(ref || '')
   if (seriesRef(r)) return 'series'
-  if (/^q\d+(?:#|$)/.test(r)) return 'query'
+  if (/^[qr]\d+(?:#|$)/.test(r)) return 'query'
   if (r.startsWith('obj:')) return 'object'
   const path = r.split('#')[0]
   if (CODE.test(path) && /#L\d+(?:-L?\d+)?$/.test(r)) return 'code'
@@ -73,7 +73,7 @@ function filesOf(resolved, query) {
 /** The query's output column, the cited row and its key's words, read from the query's record. */
 function columnOf(query, ref) {
   const table = Array.isArray(query?.table) ? query.table : []
-  const m = /^q\d+(?:#(.*?))?(?:@([^@]+))?$/.exec(String(ref))
+  const m = /^[qr]\d+(?:#(.*?))?(?:@([^@]+))?$/.exec(String(ref))
   const frag = m?.[1] || ''
   const keys = Array.isArray(query?.keys) ? query.keys : []
   let col = m?.[2] || null
@@ -151,7 +151,7 @@ return k.text(data.text)`
 // ------------------------------------------------------------------------------------------------ cards
 
 /**
- * A citation's card. `resolved` is `thimble resolve <ref> --json`; `query` the query's record (thimble/queries/q<n>.json)
+ * A citation's card. `resolved` is `thimble resolve <ref> --json`; `query` the query's record (thimble/queries/r<n>.json)
  * for a query ref; `lines` the file's lines around the cited ones, for a code ref ({n, text}); `room` the card's rows.
  */
 export function sourceCard({ ref: wrote, label, resolved, query, lines, path, room = 9 }) {
@@ -235,7 +235,7 @@ export async function citeCard({ ref, label, root, room = 9 }, io) {
   const series = seriesRef(ref)
   const resolved = await io.resolve(series ? series.query : ref, 6, series ? undefined : label)
   let query = null
-  const q = /^(q\d+)(?:[#@]|$)/.exec(ref)
+  const q = /^([qr]\d+)(?:[#@]|$)/.exec(ref)
   if (q) {
     try { query = JSON.parse(String(await io.read(`${root}/thimble/queries/${q[1]}.json`))) } catch { query = null }
   }

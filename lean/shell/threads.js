@@ -74,7 +74,7 @@ function handback(content) {
   return b ? String(b.input?.message ?? b.input?.text ?? b.input?.report ?? '') : ''
 }
 
-/** A tool call in a thread, in a few words: `thimble q "reruns after 1240"`, `Read conftest.py`. */
+/** A tool call in a thread, in a few words: `thimble run "reruns after 1240"`, `Read conftest.py`. */
 export function callWords(b) {
   const i = b?.input || {}
   if (b?.name === 'Bash') return String(i.command || '').split('\n')[0].slice(0, 120)

@@ -1,112 +1,115 @@
 ---
 name: thimble
-description: Use when you read, count or explain what is in files for a person (agent transcripts, logs, CSV or JSONL records, databases, diffs, docs). The `thimble` command keeps where each value came from, saves what you make as an object, and says what you did not read.
+description: Use when you read, count or explain what is in files for a person (agent transcripts, logs, CSV or JSONL records, databases, diffs, docs). The `thimble` command keeps where each value came from, saves what you make as a card, and says what you did not read.
 ---
 
-# Where each value comes from
+# thimble
 
-The person must be able to trust what you show them and check it quickly. So each value you show should lead back to the rows it came from. The `thimble` command keeps this record for you. Run it with Bash in the folder of files. `thimble` alone lists its commands.
+thimble is a harness for Claude Code, a plugin for making sense of what happened in a corpus of files. Its work serves
+one overarching goal: augment the person's judgment through clear communication and verifiable analyses. The
+`thimble` command keeps where each value came from, so the person can check it. Run it with Bash in the folder of
+files. `thimble` alone lists its commands.
 
-## Principles
+## Communicating
 
-**Compute with code that is kept.** Count, group and compare in `thimble q`. It keeps your code, the files it read and its output, and a later query reads that output with `use("q3")`, so a result is never computed twice. When you count by group, each output row also keeps its source rows, so the person can open the rows behind any number. `tally(df, by)` keeps them exactly. A plain `groupby` usually works too, and the output says how sure the match is.
+Everything you write for the person, in the chat or on a card, is there to serve their understanding and judgment.
+They read your outputs once, quickly, in the middle of other work. Every unclear sentence and every verbose reply
+costs them valuable time and attention.
 
-**Cite what you show.** Write a number as a link to the value it came from, as in `[6,543 saves](q1#day=2026-06-18@n)`. Write a quote as a link to its row, as in `["PRECISION ALERT"](revisions.jsonl#L4410)`. A ref is a stable id, so it still works when the analysis runs again. If you are not sure where a value came from, run `thimble resolve` on it before you use it.
+- Write for *this* person. Infer what this particular person knows and what they want from all previous messages. Use
+  their terminology whenever possible. Use simple, concise, straightforward language that a bright fifteen-year-old
+  could follow. Write about 80% of the way to ASD-STE100 Simplified Technical English: short sentences, common words,
+  one term for one thing, and one action per instruction. Write a date month first, as in "Jun 18" or "Jun 18 13:05".
+  When you need a term or a concept they have not used, explain it the first time, since a name you made up or a field
+  name from the data may mean nothing to them.
+- Say what you mean in literal words. A metaphor or a flourish, such as "a smoking gun" for a decisive record or a
+  "load-bearing" observation, only makes the person expend more cognitive effort trying to read your outputs.
+- Answer directly. Answer the question they asked, with the one or two numbers it rests on, each with its base, as in
+  "12 of the 40 runs". There is no need to mention every detail or caveat. Anything that does not change their
+  understanding, such as how you worked or a restatement of the question, only delays the answer.
+- When describing general trends or patterns in the corpus, it is often useful to pair them with representative
+  examples. However, do not provide so many examples as to overwhelm the person.
+- Keep each answer atomic. One card or one paragraph answers one question. When something needs explaining, walk them
+  through it from first principles, one step per card or paragraph, in order, so the person can check each step and
+  see exactly where they disagree. Present one thing at a time, and ask for one thing at a time.
 
-A sparkline draws a series in your sentence: write `[~](q3@n)`, and the person sees column `n` of q3's output, in its row order, drawn in place, and opens its rows like any citation. It helps only when the sentence claims a shape that the numbers alone hide: a trend, a burst or a spread. For example: `Messages fell after June 16 [~](q3@n), from [1,546](q3#day=2026-06-16@n) to [5](q3#day=2026-06-22@n).` Next to a single count, or in a short reply, a sparkline is decoration that takes the person's attention. So use at most one in a message, and none in a short reply.
+```
+Person    What are most of the refund requests about?
+Good      Most refund requests name one product, the X200 charger, [290](r2#product=X200@n) of all 410 refund requests
+          in March and April. I defined the "product named" label [↗](r1) to classify which product each request is
+          about. A typical X200 refund request reads ["stopped working after two days"](tickets/march.jsonl#L88).
+Bad       The refund-intent cluster (n=410, 33.1%, 95% CI 30.5-35.7%) is dominated by the X200 signal (70.7%), peaking
+          on 2026-03-14 at 09:12:07.
+Bad       Most refund requests are about the X200 (290). One says "stopped working after two days."
+```
+The first bad reply names things the person never said, "refund-intent cluster" and "X200 signal", and gives six
+numbers where one answers the question. The second gives a count without its base, says nothing about how the requests
+were sorted, and quotes "one" without saying one of what.
 
-**Save what the person will keep as an object.** When a result is worth more than one reply (a chart, a table, a map, a short summary), save it with `thimble save`. An object is a program, its data and its lineage. Put query refs in its data, not copied numbers: the kernel fills in each value and keeps the rows behind it. Add any field that helps. If you read or judged rows in a way that no tool saw, say so under `declared`, in your own words. A long object is easier to read and to change as a file: write its JSON with the Write tool and run `thimble save NAME --from FILE`.
+## Computing and citing
 
-**Know what you did not read.** "All", "every" and "typical" are claims about files you may not have opened. `thimble coverage` shows what this session computed over, read, searched and did not touch. If a file you did not read could change the answer, tell the person.
+The person never sees your shell output, so put the work your answer rests on where they can check it.
 
-**Fix what does not hold.** `thimble save` checks each citation and each binding. It saves the object anyway and lists each problem in its output. Fix the problem and save again. The object keeps each version.
+- Compute every count, total, first or last over every record with `thimble run`, rather than reading it off a chart
+  or a sample. It runs your Python over the files and keeps its trace under an id such as r3: the code, the files it
+  read, its output, and the source rows behind each output row. `tally(df, by)` keeps each group's rows exactly; a
+  plain `groupby` usually works too, and the output says how sure the match is. A later run reads an earlier output
+  with `use("r3")`, so a result is never computed twice.
+- A citation opens its source in one click, so cite each number and quote your answer rests on, in the chat and on a
+  card. Write each one as a Markdown link: `[31](r3#outcome=merged@n)` makes the number the link,
+  `["this test is flaky"](runs/41.jsonl#L88)` makes a quote the link, and `[↗](<ref>)` is a citation with no words of
+  its own. Wrap the whole quantity and cite where you read the value. A link shows its words where it stands, and they
+  are all the person reads of it: the number or the quoted words, never the ref. So "352 of the 410 requests were
+  approved [352](<ref>)" reads "approved 352." Ids appear only inside refs: in prose, name a card by its question and
+  a record by what it shows. A ref is a stable id, so it still works when the analysis runs
+  again. When you are not sure where a value came from, run `thimble resolve` on it before you use it.
+- A sparkline, `[~](r3@n)`, draws column `n` of r3's output inside a sentence. It helps only when the sentence claims
+  a shape the numbers alone hide (a trend, a burst or a spread), as in `Messages fell after June 16 [~](r3@n), from
+  [1,546](r3#day=2026-06-16@n) to [5](r3#day=2026-06-22@n).` Next to a single count, or in a short reply, it takes the
+  person's attention and shows nothing more, so use at most one in a message.
+- Words such as "only", "all", "stopped", "from then on" and "then" are claims about every record or about order, and
+  one record the other way makes the answer false and makes the person doubt the rest. `thimble coverage` shows what
+  this session computed over, read, searched and did not touch. When a file you did not read could change the answer,
+  say so.
+- A label is a run that gives rows a value, by a rule or by values you wrote after reading them, and keeps it with
+  `keep("name", values)`. A later run reads it with `use("name")`, and its lineage names the run that made that version.
 
-## What the person sees
+## Cards
 
-An object you save is drawn for the person under your reply, in the terminal, from its `program`. So the reply does
-not need to repeat what the object shows: say what it means and what to look at.
+A card is how you show the person a piece of work. Every card has three parts, the question, the content and the
+takeaway. The question says what the card is for, the content shows the evidence (e.g., a chart, a table, or
+representative example), and the takeaway answers the question in a sentence or two. The person should be able to
+read the question and the takeaway in seconds and then check the takeaway against the content.
 
-**Make a card its title, its chart and its takeaway.** The title states the claim, and one line under the chart says
-what to see. Label marks in place (a bar part's `label`, a station's name) rather than in a legend, and leave sources
-and ids out: the detail view shows where each value comes from.
+Save a card when the work is worth more than one reply, such as a chart, a table or a map; answer a quick question
+that needs no computation in the chat, without a card. `thimble save` keeps the question as the card's `title`, the
+takeaway as its `text`, with each number cited, and the content as its `program`, a short program on the drawing
+toolkit (`../../draw/TOOLKIT.md` from this skill's base folder; read it before your first card). Bind run outputs in
+the card's data (`"data": {"days": "r1"}`), not copied numbers, so each part drawn from their rows opens those rows.
+When you read or judged rows in a way no tool saw, say so under `declared`, in your own words. A long card is easier
+to write as a file: `thimble save NAME --from FILE`. Put the work in the card, which thimble shows under your reply, and do not repeat it in your reply. thimble adds its
+card guidance, with worked examples, beside your first data command.
 
-**A card is a small program, and its form is yours.** Use any layout, zoom, filter or interaction that helps the
-claim. The helpers in `../../draw/TOOLKIT.md` (from this skill's base folder; read it before your first card) are
-conveniences, not a form to fill. One program draws in the terminal and the browser. Under a reply the person sees
-about half a screen; the detail view (`k.mode === 'detail'`) has more room.
-
-**Values keep their rows by themselves.** Bind query outputs in the card's data (`"data": {"days": "q1"}`). A part you
-draw from a row of it (the row, a copy, or `row: d` in a region's meta) opens its source rows and real examples when the
-person selects it, with no ref written. A value the program computes has no rows: say what it rests on.
-
-**Interaction is state.** `k.on(key | 'press:<id>' | 'brush', fn, label)` returns the new state, and the card draws
-again from `k.state`, the same in both surfaces. In a handler, `k.ask({label, rows})` sends the person's next question
-to the card's thread with those rows. Add an interaction only when it answers a likely next question.
-
-A card that fails draws one line with what to fix: fix it and save again under the same name.
-
-**Suggest the verbs that help, if any.** Under the object the person sees a row of 2–3 verbs and `? all`. An object
-may name them itself: `"hints": ["squeeze", "trace"]`. Leave it out when you have no reason to choose.
-
-When the person asks while an object is open, your context says which object and which part they had selected, with
-its refs. "This" usually means that part.
-
-The kernel shows the person nothing else by itself. They see only what you write and the objects you save.
-
-## Example: a count and the rows behind it (a wiki's edit log)
+## Example
 
 The person asks: "When did the agents edit the wiki most?"
 
 ```bash
 thimble sources
-thimble q "saves per day" <<'PY'
+thimble run "saves per day" <<'PY'
 df = load("revisions.jsonl", fields=["time", "label"])
 df["day"] = df.time.str[:10]
 tally(df, "day")
 PY
-```
-
-The output ends with "Each output row keeps its source rows" and a citation you can copy. Save the result, with its peak cited in the words:
-
-```bash
 thimble save saves-per-day <<'JSON'
-{"title": "Saves per day", "question": "When did the agents edit the wiki most?",
- "data": {"days": "q1"},
- "text": "June 18 had the most saves: [6,543](q1#day=2026-06-18@n).",
- "program": "..."}
+{"title": "When did the agents edit the wiki most?", "data": {"days": "r1"},
+ "text": "On June 18, with [6,543](r1#day=2026-06-18@n) of the 14,591 saves.", "program": "..."}
 JSON
 thimble resolve "obj:saves-per-day#/days/19/n" -n 3
 thimble coverage
 ```
 
-`thimble resolve` shows the chain: the object, query q1 with its code, the 6,543 rows of revisions.jsonl, and the first of them. `thimble coverage` shows that events.jsonl, labels.jsonl and pages.jsonl were not read. If they could change the answer, say so.
-
-## Example: one agent's run in a swarm (transcripts)
-
-The person asks: "Which agents ran the tests, and how did agent-09 do it?"
-
-A transcript's rows are its records, one per line. The blocks of a record (its words, each tool call, each result) are `<file>#L<n>.b<k>`. Count across all runs in code, then read one run to show what the count means:
-
-```bash
-thimble q "test runs per agent" <<'PY'
-df = load("runs/sweep1-fable-emergent_prs/agents/*.jsonl", fields=["type", "message"])
-calls = df[df.type == "assistant"].copy()
-calls["cmd"] = calls.message.map(lambda m: " ".join(str(b.get("input", {}).get("command", ""))
-    for b in m.get("content", []) if isinstance(b, dict) and b.get("type") == "tool_use"))
-calls["agent"] = calls._file.str.extract(r"(agent-\d+)", expand=False)
-tally(calls[calls.cmd.str.contains("pytest")], "agent")
-PY
-thimble rows "runs/sweep1-fable-emergent_prs/agents/agent-09.jsonl" --search pytest -n 3 --first
-```
-
-Then save the table with one example, and say what you read by hand:
-
-```bash
-thimble save test-runs <<'JSON'
-{"title": "Test runs per agent", "data": {"agents": "q2",
-  "example": {"ref": "runs/sweep1-fable-emergent_prs/agents/agent-09.jsonl#L212.b1", "quote": "pytest pandas/tests"}},
- "declared": {"read": "agent-09's run from L200 to L240, around its first merge"}}
-JSON
-```
-
-A label is the same move: a query that gives rows a value, by a rule or by values you wrote after reading them, and keeps it with `keep("name", values)`. A later query reads it with `use("name")`, and its lineage names the query that made that version.
+`thimble resolve` shows the chain: the card, r1 with its code, the 6,543 rows of revisions.jsonl, and the first of
+them. `thimble coverage` shows that events.jsonl and pages.jsonl were not read; if they could change the answer, say so.
+A transcript's records are its lines, and the blocks of a record (its words, each tool call, each result) are
+`<file>#L<n>.b<k>`: count across all runs in code, then read one run with `thimble rows FILE --search WORDS`.

@@ -186,7 +186,7 @@ def _all_queries(st: Store) -> list[dict[str, Any]]:
     d = st.dir / "queries"
     if not d.is_dir():
         return []
-    ids = sorted((p.stem for p in d.glob("q*.json") if p.stem[1:].isdigit()), key=lambda s: int(s[1:]))
+    ids = sorted((p.stem for p in [*d.glob("q*.json"), *d.glob("r*.json")] if p.stem[1:].isdigit()), key=lambda s: int(s[1:]))
     return [q for q in (Q.get(st, i) for i in ids) if q]
 
 
@@ -357,7 +357,7 @@ def session_transcripts(st: Store) -> list[tuple[str, Path]]:
     return out
 
 
-# lenient on purpose: an answer may write a key with a space, `q2#purpose=adds links@n`, which Markdown would not link
+# lenient on purpose: an answer may write a key with a space, `r2#purpose=adds links@n`, which Markdown would not link
 _LINKS = re.compile(r"\[([^\]\n]*)\]\(([^)\n]+)\)")
 
 

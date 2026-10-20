@@ -61,44 +61,44 @@ def test_uses_of_a_row_and_of_a_value(root: Path, tmp_path: Path) -> None:
     q1 = Q.run(st, "kind per save", 'df = load("saves.jsonl")\nkeep("kind", df[["_ref", "_file", "kind"]])\ntally(df, "kind")')
     q2 = Q.run(st, "saves per kind", 'tally(use("kind"), "kind")')
     assert not q1["error"] and not q2["error"]
-    O.save(st, "uses", {"title": "Uses", "data": {"kinds": "q2", "example": {"ref": "saves.jsonl#L3", "quote": "save 2"}},
-                        "text": "Messages: [3](q2#kind=message@n)."})
-    _answer(tmp_path, "sess-0001", ["Of 8 saves, [3](q2#kind=message@n) are messages.", "| links | [4](q2#kind=links@n) |"])
+    O.save(st, "uses", {"title": "Uses", "data": {"kinds": "r2", "example": {"ref": "saves.jsonl#L3", "quote": "save 2"}},
+                        "text": "Messages: [3](r2#kind=message@n)."})
+    _answer(tmp_path, "sess-0001", ["Of 8 saves, [3](r2#kind=message@n) are messages.", "| links | [4](r2#kind=links@n) |"])
 
     # a row: the query rows that rest on it, the object's value and citation, the answer whose value rests on it
     u = T.uses(st, "saves.jsonl#L3")
-    assert [(q["id"], q["rows"][0]["key"]) for q in u["queries"]] == [("q1", {"kind": "message"}), ("q2", {"kind": "message"})]
+    assert [(q["id"], q["rows"][0]["key"]) for q in u["queries"]] == [("r1", {"kind": "message"}), ("r2", {"kind": "message"})]
     (o,) = u["objects"]
     assert {a["at"] for a in o["at"]} >= {"/kinds/1", "/example"}
     assert [a["turn"] for a in u["answers"]] == [1]
     assert "3 are messages" in u["answers"][0]["text"]
 
     # a value: who binds it, cites it, and builds on its query; not the rows of other values
-    u = T.uses(st, "q2#kind=message@n")
+    u = T.uses(st, "r2#kind=message@n")
     assert u["objects"][0]["id"] == "01-uses"
     assert [a["turn"] for a in u["answers"]] == [1]
-    assert T.uses(st, "q2#kind=links@n")["answers"][0]["text"] == "links · 4"  # a table row reads as its cells
-    u = T.uses(st, "q1")
-    assert [q["id"] for q in u["queries"]] == ["q2"] and "kind" in u["queries"][0]["how"]
+    assert T.uses(st, "r2#kind=links@n")["answers"][0]["text"] == "links · 4"  # a table row reads as its cells
+    u = T.uses(st, "r1")
+    assert [q["id"] for q in u["queries"]] == ["r2"] and "kind" in u["queries"][0]["how"]
 
     # the object's value is the same value as the query row it is bound to
     u = T.uses(st, "obj:uses#/kinds/1/n")
     assert [a["turn"] for a in u["answers"]] == [1]
-    assert any(a.get("cites", "").startswith("q2#kind=message") for a in u["objects"][0]["at"])
+    assert any(a.get("cites", "").startswith("r2#kind=message") for a in u["objects"][0]["at"])
 
 
 def test_trace_back_names_the_label_and_the_files_not_behind_it(root: Path) -> None:
     st = Store(root)
     Q.run(st, "kind per save", 'df = load("saves.jsonl")\nkeep("kind", df[["_ref", "_file", "kind"]])\ntally(df, "kind")')
     Q.run(st, "saves per kind", 'tally(use("kind"), "kind")')
-    r = T.trace(st, "q2#kind=links@n", answers=False)
+    r = T.trace(st, "r2#kind=links@n", answers=False)
     assert r["label"] == "links"
     step = next(s for s in r["back"]["chain"] if s["step"] == "query")
-    assert step["upstream"][0]["query"] == "q1" and step["upstream"][0]["name"] == "kind"
+    assert step["upstream"][0]["query"] == "r1" and step["upstream"][0]["name"] == "kind"
     assert r["back"]["count"] == 4
     assert r["files"]["used"] == ["saves.jsonl"] and r["files"]["not_used"] == ["pages.jsonl"]
     text = T.text_of(r)
-    assert "uses 'kind', kept by q1" in text and "not behind it: 1 other file here: pages.jsonl" in text
+    assert "uses 'kind', kept by r1" in text and "not behind it: 1 other file here: pages.jsonl" in text
 
 
 def _agent(d: Path, name: str, records: list[tuple[str, ...]]) -> None:

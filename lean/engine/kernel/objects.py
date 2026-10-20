@@ -6,7 +6,7 @@ An object is a program + data + lineage:
     id, version, created, updated, session, history   kept by the kernel
     program      the program's text, written against the drawing contract (lean/draw); the kernel never runs it
     text         words for the person, in Markdown; each [label](ref) is a citation
-    data         the values the program draws: a query ref (q3, q3#day=2026-06-16, q3#day=2026-06-16@n) is replaced by
+    data         the values the program draws: a query ref (r3, r3#day=2026-06-16, r3#day=2026-06-16@n) is replaced by
                  its value, each row keeping `_rows`, its source rows; a {"ref": ..., "quote": ...} is a cited row
     source       the spec as Claude gave it, query refs unbound, so `thimble save --rerun` can bind it again
     lineage      queries (code, inputs, what they kept and used), bindings (which query fills which part of data),
@@ -146,7 +146,7 @@ def _bind(st: Store, ref: str, at: str, ctx: dict[str, Any]) -> Any:
         ctx["problems"].append(f"{at or '/'}: {q['id']} has no output row {ref.partition('#')[2]}")
         return None
 
-    # each row carries its own ref (q3#day=2026-06-18) beside its source rows, so whatever draws it can cite it and
+    # each row carries its own ref (r3#day=2026-06-18) beside its source rows, so whatever draws it can cite it and
     # open its rows with no work by the program
     own = Q.row_refs(q)
 
@@ -180,7 +180,7 @@ def _bind(st: Store, ref: str, at: str, ctx: dict[str, Any]) -> Any:
 
 
 def _walk_spec(st: Store, v: Any, at: str, ctx: dict[str, Any]) -> Any:
-    if isinstance(v, str) and re.fullmatch(r"q\d+(#.*)?", v):
+    if isinstance(v, str) and re.fullmatch(R.QUERY_ID + r"(#.*)?", v):
         try:
             return _bind(st, v, at, ctx)
         except R.RefError as e:
@@ -490,7 +490,7 @@ def update(st: Store, name: str, changes: dict[str, Any], rerun: bool = False, c
 
 
 def _rename_queries(text: str, renamed: dict[str, str]) -> str:
-    return re.sub(r"(?<![\w])(q\d+)(?=[#@\"\)\]]|$)", lambda m: renamed.get(m[1], m[1]), text)
+    return re.sub(r"(?<![\w])(" + R.QUERY_ID + r")(?=[#@\"\)\]]|$)", lambda m: renamed.get(m[1], m[1]), text)
 
 
 def summary_line(obj: dict[str, Any]) -> str:

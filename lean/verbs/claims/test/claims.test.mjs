@@ -384,16 +384,17 @@ test('the orientation\'s file is checked for what the store needs: evidence, a k
   assert.equal(kindOf('Judgement call'), 'judgment')
   assert.equal(relationOf('contradiction'), 'contradicts')
   const bad = {
-    clusters: [{ id: 'q2', name: 'reads as a query' }],
+    clusters: [{ id: 'q2', name: 'reads as a query' }, { id: 'r5', name: 'reads as a query too' }],
     claims: [
       { id: 'a', name: 'No rows', kind: 'finding', evidence: [] },
+      { id: 'r3', name: 'Named like a query', kind: 'fact', evidence: ['x.jsonl#L3'] },
       { id: 'b', name: 'Odd kind', kind: 'opinion', evidence: ['x.jsonl#L1'] },
       { id: 'c', name: 'Lost', kind: 'fact', cluster: 'nowhere', evidence: ['x.jsonl#L2'] },
     ],
     relations: [{ from: 'a', to: 'zz', type: 'supports' }],
   }
   const p = check(bad).problems.join('\n')
-  for (const want of ['claim "a" has no evidence ref', 'kind "opinion"', 'cluster "nowhere"', 'to "zz" is not a claim id', 'cluster id "q2" reads as a query ref']) assert.ok(p.includes(want), want)
+  for (const want of ['claim "a" has no evidence ref', 'kind "opinion"', 'cluster "nowhere"', 'to "zz" is not a claim id', 'cluster id "q2" reads as a query ref', 'cluster id "r5" reads as a query ref', 'claim "r3": an id of the form r<n> or q<n> reads as a query ref']) assert.ok(p.includes(want), want)
   const s = specFor({ ...DATA, added: { claims: ['pinned'] } })
   assert.equal(s.verb, 'claims')
   assert.equal(s.data.added, undefined)

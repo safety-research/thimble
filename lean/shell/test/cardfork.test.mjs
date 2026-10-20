@@ -47,6 +47,7 @@ test('a reply is read whether fenced or not: no card with its reason, a card wit
 
 test('a query name becomes the id thimble ran it under, in data, text and cites, and a longer name or a price is left alone', () => {
   assert.equal(queryIdOf('q12 · edits per day\n   day  n\n...\nq12 done in 0.1s'), 'q12')
+  assert.equal(queryIdOf('r12 · edits per day\n   day  n\n...\nr12 done in 0.1s'), 'r12')
   assert.equal(queryIdOf('Traceback (most recent call last)'), null)
   const o = bindQueries({ data: { days: '$byday', other: 'q3' }, text: 'June 18 had [6,543]($byday#day=2026-06-18@n), $bydays and $5' }, { byday: 'q12' })
   assert.equal(o.data.days, 'q12')
@@ -70,11 +71,11 @@ test("the thimble skill while the card comes after the answer: its saving princi
   const s = skillWithCards(SKILL, V1)
   assert.ok(s.includes('thimble draws the card for an answer after you write the answer'))
   assert.ok(s.includes('run `thimble guide cards` first'))
-  assert.ok(!s.includes('Make a card its title, its chart and its takeaway'), 'the card section is replaced')
-  assert.ok(!s.includes('When a result is worth more than one reply'), 'the saving principle is replaced')
-  assert.ok(s.includes('An object is a program, its data and its lineage'), 'the rest of the saving principle stays')
-  assert.ok(s.includes('**Cite what you show.**') && s.includes('## Example: a count and the rows behind it'), 'the rest stays')
-  assert.equal((s.match(/## What the person sees/g) || []).length, 1)
+  assert.ok(!s.includes('Every card has three parts'), 'the card section is replaced')
+  assert.ok(!s.includes('Save a card when the work is worth more than one reply'), 'the saving words are replaced')
+  assert.ok(s.includes('**Save what the person will keep as a card.**'), "the version's saving principle comes in its place")
+  assert.ok(s.includes('## Communicating') && s.includes('## Computing and citing') && s.includes('## Example'), 'the rest stays')
+  assert.equal((s.match(/## Cards/g) || []).length, 1)
   // a skill with neither part gets both at its end
   const bare = skillWithCards('# Where each value comes from\n\nSome words.', V1)
   assert.ok(bare.includes('Some words.') && bare.includes('## What the person sees') && bare.includes('thimble draws a card for it when one'))

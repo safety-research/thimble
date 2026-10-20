@@ -2,8 +2,8 @@
 // no DOM, no Node: the hooks module, the Node helpers, the browser page and the tests all import it.
 //
 // A mark is a span of the shown text (the record's `shown`, else its `text`: Claude's markdown as written):
-//   cite   {kind: 'cite', start, end, ref, label}       a link to a kernel ref, `[6,543](q1#day=2026-06-18@n)`
-//   spark  {kind: 'spark', start, end, ref, values}     a link whose words are `~`, `[~](q4@n)`: a series drawn inline
+//   cite   {kind: 'cite', start, end, ref, label}       a link to a kernel ref, `[6,543](r1#day=2026-06-18@n)`
+//   spark  {kind: 'spark', start, end, ref, values}     a link whose words are `~`, `[~](r4@n)`: a series drawn inline
 //   gloss  {kind: 'gloss', start, end, gloss}          a term the observer explains, found by its words
 //   loose  {kind: 'gloss', start, end, gloss, loose}   an explain whose term a rewrite left out: start = end = the
 //                                                       text's length; drawn after the text, so it stays reachable
@@ -15,7 +15,7 @@
 //                                       outside a link or code; a spark keeps the values `prev` resolved for its ref
 //   anchorTerm(text, term, taken)    -> where a term stands in a text that may say it in another form: its words, then
 //                                       the same words inflected ("claimed" → "claiming"), then its longest word
-//   seriesRef(ref)                   -> {query, col} for a spark's ref (q4@n, q4#n), or null
+//   seriesRef(ref)                   -> {query, col} for a spark's ref (r4@n, r4#n), or null
 //   sparkChars(values)               -> the sparkline's glyphs, ▁ to ▇, scaled from 0 (or the least value below 0)
 //   blocks(text)                     -> the markdown's blocks with their offsets
 //   inline(text, from, to, marks)    -> one block's content as runs: words with their style, and each mark as one run
@@ -28,7 +28,7 @@ const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
 /**
  * Each `[words](target)` of a text, as the regex's matches read ({index, 0: whole, 1: words, 2: target}). A target may
  * hold balanced brackets, and a query ref may hold spaces up to its closing bracket, so a ref Claude wrote with a key's
- * words in it, `[202](q11#run_result=won (clean ep)@median)`, is one link and nothing of it spills into the prose (the
+ * words in it, `[202](r11#run_result=won (clean ep)@median)`, is one link and nothing of it spills into the prose (the
  * kernel's refs.link_spans reads the same).
  */
 export function linkSpans(text) {
@@ -50,7 +50,7 @@ export function linkSpans(text) {
     }
     if (j >= s.length || s[j] !== ')') { i = a + 1; continue }
     const target = s.slice(b + 2, j)
-    if (target.trim() && (!/\s/.test(target.trim()) || /^q\d+#/.test(target.trim()))) {
+    if (target.trim() && (!/\s/.test(target.trim()) || /^[qr]\d+#/.test(target.trim()))) {
       const m = [s.slice(a, j + 1), words, target]
       m.index = a
       out.push(m)
@@ -75,9 +75,9 @@ export function codeRanges(text) {
 
 const inside = (ranges, a, b) => ranges.some(([x, y]) => a < y && b > x)
 
-/** A spark's series: `q4@n` or `q4#n` (the column n of q4's output, in its row order). */
+/** A spark's series: `r4@n` or `r4#n` (the column n of r4's output, in its row order). */
 export function seriesRef(ref) {
-  const m = /^(q\d+)(?:@|#)([A-Za-z_][\w .-]*)$/.exec(String(ref || '').trim())
+  const m = /^([qr]\d+)(?:@|#)([A-Za-z_][\w .-]*)$/.exec(String(ref || '').trim())
   if (!m || m[2].includes('=')) return null
   return { query: m[1], col: m[2].trim() }
 }

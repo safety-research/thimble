@@ -166,10 +166,10 @@ test('end to end with the real kernel: a query, a saved explore view, rows read 
   writeFileSync(join(dir, 'log.jsonl'), Array.from({ length: 30 }, (_, i) => JSON.stringify({ day: `2026-03-0${1 + (i % 3)}`, user: ['red-fox', 'blue-jay'][i % 2], text: `save ${i + 1}` })).join('\n') + '\n')
   const env = { ...process.env, THIMBLE_PYTHON: py, THIMBLE_HOME: join(dir, '.home'), THIMBLE_SESSION: 'test' }
   const lean = (args, input) => execFileSync(join(HERE, '..', '..', 'bin', 'thimble'), args, { cwd: dir, env, input, encoding: 'utf8' })
-  lean(['q', 'saves per day'], 'df = load("log.jsonl", fields=["day", "user", "text"])\ntally(df, "day")\n')
+  lean(['run', 'saves per day'], 'df = load("log.jsonl", fields=["day", "user", "text"])\ntally(df, "day")\n')
   writeFileSync(join(dir, 'view.js'), `const k2 = k.knob('min', { values: [0, 10], at: 0, label: 'at least' })
     return k.stack(data.days.filter(d => d.n >= k2).map(d => k.region('day-' + d.day, { label: d.day, rows: d._rows, fields: ['user', 'text'] }, k.beside(k.text(d.day), k.bar(d.n, { max: 10 })))))`)
-  writeFileSync(join(dir, 'spec.json'), JSON.stringify({ title: 'Saves per day', verb: 'explore', data: { days: 'q1' } }))
+  writeFileSync(join(dir, 'spec.json'), JSON.stringify({ title: 'Saves per day', verb: 'explore', data: { days: 'r1' } }))
   assert.match(lean(['save', 'explore-days', '--from', 'spec.json', '--program', 'view.js']), /saved 01-explore-days v1/)
   const ctx = nodeCtx(dir, { w: 80 })
   const saved = await ctx.kernel.load('explore-days')

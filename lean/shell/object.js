@@ -19,7 +19,7 @@
 //   fromFacts(object, coverage) -> where an object's values come from, as the detail's "from" line reads it: its
 //     sources, rows, labels and coverage (`thimble coverage <id> --json`).
 
-const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
+const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|[qr]\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
 
 /** Whether a string reads as a kernel ref (a query's value, an object's value, or a source row). */
 export function isRef(s) {
@@ -130,7 +130,7 @@ export function rankRow(verbs, ranking) {
 
 const n = x => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))
 
-/** `thimble resolve --json` in words: "q1 · saves per day ← 6,543 rows of revisions.jsonl", its notes and its records. */
+/** `thimble resolve --json` in words: "r1 · saves per day ← 6,543 rows of revisions.jsonl", its notes and its records. */
 export function chainWords(r) {
   if (!r) return { line: '', notes: [], records: [] }
   if (r.error) return { line: '', notes: [String(r.error)], records: [], error: true }
@@ -160,7 +160,7 @@ export function fromFacts(object, cov) {
   // a label is a query's kept column (CONTRACT: a label is a query that keeps a column), named where it is used
   const labels = []
   for (const q of Object.values(lin.queries || {})) {
-    for (const u of q?.uses || []) if (u?.name && !/^q\d+$/.test(u.name) && !labels.includes(u.name)) labels.push(u.name)
+    for (const u of q?.uses || []) if (u?.name && !/^[qr]\d+$/.test(u.name) && !labels.includes(u.name)) labels.push(u.name)
     for (const k of q?.kept || []) if (k && !labels.includes(k)) labels.push(k)
   }
   const out = { sources, rows: sources.reduce((n, s) => n + (s.rows || 0), 0), labels }

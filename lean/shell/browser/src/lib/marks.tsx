@@ -13,8 +13,8 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Mark, MessageRecord } from './store'
 
-const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
-/** Whether a string reads as a kernel ref (shell/object.js isRef, plus a spark's series q4@n). */
+const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|[qr]\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
+/** Whether a string reads as a kernel ref (shell/object.js isRef, plus a spark's series r4@n). */
 export const isRef = (s: unknown): s is string => typeof s === 'string' && s.length < 2000 && !/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && KERNEL_REF.test(s)
 
 export interface Prepared extends Mark {

@@ -1,7 +1,7 @@
 // evidence.js: what the observer reads of the objects Claude saved, in a few lines each, and how it reads the
 // observer's answer back. No `$`, no Node, no DOM: the hooks module imports it, and the tests run it under Node.
 //
-// The fork already has the conversation (every `thimble q` and `thimble save` call and its output). What it does not have
+// The fork already has the conversation (every `thimble run` and `thimble save` call and its output). What it does not have
 // in a few words is what the kernel knows about each object: how many rows stand behind each value it cites, how sure
 // each query's row lineage is, which files fed it and which the session never read, what Claude said it read or
 // judged by hand, the problems `thimble save` found, and the verbs that could act on it. That is what this writes.
@@ -110,7 +110,7 @@ export function digest(object, o = {}) {
   if (!object || typeof object !== 'object') return ''
   const lin = object.lineage || {}
   const L = []
-  L.push(`Object ${object.id} v${object.version ?? '?'} "${cut(object.title || '', 80)}"${o.isNew ? ' (saved since the last look)' : ''}`)
+  L.push(`Card ${object.id} v${object.version ?? '?'} "${cut(object.title || '', 80)}"${o.isNew ? ' (saved since the last look)' : ''}`)
   if (object.question) L.push(`  asked: ${cut(object.question, 200)}`)
   if (object.verb) L.push(`  made by the verb ${object.verb}, which the person pressed`)
   if (object.text) L.push(`  its words: ${cut(object.text, 700)}`)
@@ -128,16 +128,16 @@ export function digest(object, o = {}) {
     L.push(`  records it quotes or cites in its data: ${otherCites.length}${bad.length ? `, ${bad.length} with a problem: ${bad.slice(0, 3).map(c => cut(c.problem, 100)).join('; ')}` : ', each found in its row'}`)
   }
   const binds = lin.bindings || []
-  if (binds.length) L.push(`  data bound to queries: ${binds.slice(0, 8).map(b => `${b.at || '/'} ← ${b.ref}${b.lineage && b.lineage !== 'exact' ? ` (${b.lineage})` : ''}`).join('; ')}`)
+  if (binds.length) L.push(`  data bound to runs: ${binds.slice(0, 8).map(b => `${b.at || '/'} ← ${b.ref}${b.lineage && b.lineage !== 'exact' ? ` (${b.lineage})` : ''}`).join('; ')}`)
   const qs = Object.values(lin.queries || {})
   for (const q of qs.slice(0, 8)) {
     const inputs = fewInputs(q.inputs).map(x => `${x.path}${x.rows_read != null ? ` (${fmt(x.rows_read)} rows read)` : ''}`).join(', ')
     const uses = (q.uses || []).map(u => (typeof u === 'string' ? u : `${u.name || u.label || u.query}${u.version != null ? ' v' + u.version : ''}${u.query ? ' from ' + u.query : ''}`)).filter(Boolean)
-    const kept = Array.isArray(q.kept) && q.kept.length ? `; keeps ${q.kept.join(', ')} for later queries` : ''
+    const kept = Array.isArray(q.kept) && q.kept.length ? `; keeps ${q.kept.join(', ')} for later runs` : ''
     const mode = MODES[q.lineage] ? `; ${MODES[q.lineage]}` : ''
-    L.push(`  query ${q.id} "${cut(q.about || '', 90)}": ${inputs || 'no source files'}${uses.length ? `; uses ${uses.join(', ')}` : ''}${kept}${mode}${q.rerun_of ? `; a rerun of ${q.rerun_of}` : ''}`)
+    L.push(`  run ${q.id} "${cut(q.about || '', 90)}": ${inputs || 'no source files'}${uses.length ? `; uses ${uses.join(', ')}` : ''}${kept}${mode}${q.rerun_of ? `; a rerun of ${q.rerun_of}` : ''}`)
   }
-  if (qs.length > 8) L.push(`  … and ${qs.length - 8} more queries`)
+  if (qs.length > 8) L.push(`  … and ${qs.length - 8} more runs`)
   const rows = lin.rows || {}
   const rf = Object.entries(rows)
   if (rf.length) L.push(`  source rows behind its values: ${rf.slice(0, 6).map(([f, r]) => `${f} ${fmt(r.count)}`).join(', ')}`)
@@ -164,7 +164,7 @@ export function digest(object, o = {}) {
   const verbs = Array.isArray(o.verbs) ? o.verbs : []
   if (verbs.length) {
     const named = Array.isArray(object.hints) ? object.hints.map(h => (typeof h === 'string' ? h : h?.verb || h?.name)).filter(Boolean) : []
-    L.push(`  verbs that can act on it (key name: what it does${verbs.some(v => v.phrase) ? ' · its own hint for this object' : ''}):`)
+    L.push(`  verbs that can act on it (key name: what it does${verbs.some(v => v.phrase) ? ' · its own hint for this card' : ''}):`)
     for (const v of verbs) L.push(`    ${v.key || '-'} ${v.name}: ${cut(v.line, 90)}${v.phrase ? ` · ${cut(v.phrase, 60)}` : ''}`)
     L.push(`  its hint row now: ${verbs.filter(v => v.picked).map(v => v.name).join(', ') || 'none'}${named.length ? ` (Claude named ${named.join(', ')})` : ''}`)
   }

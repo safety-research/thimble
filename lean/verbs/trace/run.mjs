@@ -31,7 +31,7 @@ import { SHORT_PATH } from './programs.mjs'
 import { composePrompt, parseReply, slimFacts } from './prompt.mjs'
 import { modelWhy } from '../../shell/why.js'
 
-const REF = /^(q\d+(#.*)?|obj:[A-Za-z0-9_.-]+(#\/.*)?|[^\s#][^#\n]*#[^\s].*|[^\s#]+\.(jsonl|ndjson|csv|tsv|json|db|sqlite|md|txt|log|diff|patch))$/
+const REF = /^([qr]\d+(#.*)?|obj:[A-Za-z0-9_.-]+(#\/.*)?|[^\s#][^#\n]*#[^\s].*|[^\s#]+\.(jsonl|ndjson|csv|tsv|json|db|sqlite|md|txt|log|diff|patch))$/
 
 export const isRef = s => typeof s === 'string' && REF.test(s.trim()) && !/^https?:/.test(s)
 

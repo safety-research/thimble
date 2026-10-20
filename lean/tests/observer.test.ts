@@ -170,7 +170,7 @@ test('after a turn that saved an object: one look reads its lineage; its note re
   // one question step and one fork; the fork read the object's lineage, the verbs and the session's coverage
   expect(w.questions.length).toBe(1)
   expect(w.forks.length).toBe(1)
-  expect(w.forks[0]).toContain('Object 01-saves v1 "Saves per day" (saved since the last look)')
+  expect(w.forks[0]).toContain('Card 01-saves v1 "Saves per day" (saved since the last look)')
   expect(w.forks[0]).toContain('"6,543" = 6,543 (q1#day=2026-06-18@n): rests on 4 rows of revisions.jsonl')
   expect(w.forks[0]).not.toContain('t trace: where it came from')
   expect(w.forks[0]).toContain('as the person sees it under the reply:\n    Jun 18 6,543')
@@ -444,22 +444,22 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   // one call, the frame and the lenses as its system prompt, the turn and the digests as its message
   expect(w.forks.length).toBe(1)
   const p = w.forks[0]!
-  for (const x of ['FRAME', 'LENS notes', 'LENS line', 'LENS actions', 'LENS squeeze', 'LENS explain', 'LENS claims', 'REPLY {"notes": [], "line": null, "settled": false, "verbs": {}, "glosses": [], "claims": []}', 'TURN ', 'when did they edit most?', 'Object 01-saves v1']) expect(p).toContain(x)
+  for (const x of ['FRAME', 'LENS notes', 'LENS line', 'LENS actions', 'LENS squeeze', 'LENS explain', 'LENS claims', 'REPLY {"notes": [], "line": null, "settled": false, "verbs": {}, "glosses": [], "claims": []}', 'TURN ', 'when did they edit most?', 'Card 01-saves v1']) expect(p).toContain(x)
   expect(p).toContain('STEPS (no steps before the answer)')
   const file = '/home/t/.thimble/lean/events/s-1.jsonl'
   expect(w.events.every(e => e.file === file)).toBe(true)
   const prompts = w.events.find(e => e.kind === 'prompts')!
-  expect((prompts.active as Json).observer).toBe('v2-low')
-  expect((prompts.active as Json)['lens-explain']).toBe('v2')
+  expect((prompts.active as Json).observer).toBe('v3-low')
+  expect((prompts.active as Json)['lens-explain']).toBe('v3')
   const q = w.events.find(e => e.kind === 'call' && e.feature === 'question')!
-  expect(q.prompt).toBe('question:v1')
+  expect(q.prompt).toBe('question:v2')
   expect(q.blocked).toBe(false)
   // the question step's instructions, which come before the turn's words, are a block marked for the prompt cache; the
   // words it reads are the template filled, in order
   expect(w.qblocks[0]).toEqual([{ text: 'QUESTION ', cache: true }, { text: 'when did they edit most? June 18 had the most saves.' }])
   expect(w.questions[0]).toBe('QUESTION when did they edit most? June 18 had the most saves.')
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
-  expect(pass.prompt).toBe('observer:v2-low')
+  expect(pass.prompt).toBe('observer:v3-low')
   // the default pass runs at low effort: the same frame, less thinking (measured offline on 17 recorded looks: -28%)
   expect(pass.effort).toBe('low')
   expect(w.efforts).toEqual(['low'])
@@ -493,7 +493,7 @@ test('the shadow A/B: THIMBLE_PROMPTS_SHADOW runs the same turn again with other
   expect(w.forks.length).toBe(2)
   expect(w.efforts).toEqual(['low', null])
   const calls = w.events.filter(e => e.kind === 'call' && e.feature === 'observer')
-  expect(calls.map(c => [c.prompt, c.shadow ?? null])).toEqual([['observer:v2-low', null], ['observer:v2', 'observer:v2,lens-actions:v2']])
+  expect(calls.map(c => [c.prompt, c.shadow ?? null])).toEqual([['observer:v3-low', null], ['observer:v2', 'observer:v2,lens-actions:v2']])
   expect((calls[1]!.lens_prompts as Json).actions).toBe('lens-actions:v2')
   expect(w.events.filter(e => e.kind === 'look').map(e => String(e.shadow ?? '')).sort()).toEqual(['', 'observer:v2,lens-actions:v2'])
   // the shadow's note is never merged: Claude gets the note once
@@ -538,7 +538,7 @@ test('a version that does not exist: the default is read, and one line says so',
   await w.clock.settle()
   expect(w.forks[0]).toContain('FRAME\n')
   expect(w.toasts.length).toBe(1)
-  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v2')
+  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v3')
   expect((w.events.find(e => e.kind === 'prompts')!.problems as string[]).length).toBe(1)
 })
 

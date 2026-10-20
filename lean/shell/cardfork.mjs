@@ -90,9 +90,9 @@ export function readReply(text) {
   return { kind: 'card', name, queries, object }
 }
 
-/** The query id `thimble q` printed first (`q12 · edits per day`), or null. */
+/** The query id `thimble run` printed first (`r12 · edits per day`), or null. */
 export function queryIdOf(stdout) {
-  const m = /^(q\d+)\s+·/m.exec(String(stdout ?? ''))
+  const m = /^([qr]\d+)\s+·/m.exec(String(stdout ?? ''))
   return m ? m[1] : null
 }
 
@@ -125,14 +125,20 @@ export function problemsOf(saveOut, drawn) {
 }
 
 /**
- * The thimble skill as main reads it while the card comes after the answer: the start of its principle on saving and its
- * card section ("What the person sees") replaced by the version's "Saving" and "What the person sees" sections. A part
- * the skill no longer has is added at its end, so main always reads that the card comes after the answer.
+ * The thimble skill as main reads it while the card comes after the answer: its card section ("Cards") replaced by the
+ * version's "Saving" and "What the person sees" sections (an older skill: its principle on saving and its "What the
+ * person sees"). A part the skill no longer has is added at its end, so main always reads that the card comes after
+ * the answer.
  */
 export function skillWithCards(skill, raw) {
   let s = String(skill ?? '')
   const saving = body(raw, 'Saving')
   const sees = sectionOf(raw, 'What the person sees')
+  const cards = sectionOf(s, 'Cards')
+  if (cards && (saving || sees)) {
+    const seesBody = sees.replace(/^#+[^\n]*\n+/, '')
+    return s.replace(cards, ['## Cards', saving, seesBody].filter(Boolean).join('\n\n'))
+  }
   const start = s.indexOf('**Save what the person will keep as an object.**')
   const stop = start >= 0 ? s.indexOf('`thimble save`.', start) : -1
   if (saving && start >= 0 && stop > start) s = s.slice(0, start) + saving + s.slice(stop + '`thimble save`.'.length)

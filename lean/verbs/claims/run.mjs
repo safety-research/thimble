@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------------------------- the corpus orientation
 // Its time and tokens come from estimate.mjs (fitted to three live builds), and only the person's /verb claims orient
 // runs it. That asks main (`ask`) to start one subagent with a brief; the subagent reads with `thimble sources`,
-// `thimble rows` and `thimble q`, writes its claims as JSON and checks them with `thimble verb claims check`; main then runs
+// `thimble rows` and `thimble run`, writes its claims as JSON and checks them with `thimble verb claims check`; main then runs
 // `thimble verb claims save`, which puts them in the session's Claims marked as the orientation's. Why a subagent and not
 // main: building it reads tens of thousands of tokens of rows; in main they would ride along with every later request,
 // in a subagent they end with it. Manual mode stays manual: the subagent's thimble calls and its one Write go through the

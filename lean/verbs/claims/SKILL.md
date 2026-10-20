@@ -21,7 +21,7 @@ The subagent does the work below. Its last message is the last line of the check
 
 ## Principles
 
-**Read before you name.** Start with `thimble sources`. Count across all of the work with `thimble q`: the runs, how each
+**Read before you name.** Start with `thimble sources`. Count across all of the work with `thimble run`: the runs, how each
 one ended, the main moves, the events. Then read a few runs or records closely with `thimble rows`, one for each kind of
 outcome. Name a claim only after you have seen the rows that show it.
 
@@ -37,7 +37,7 @@ characters: "It fails 1 in 9 with no code change", not "flakiness analysis". Giv
 
 **Every claim names its rows.** Give each claim one to three evidence items. An item is a row with the words in it
 that show the claim, `{"ref": "runs/r17.jsonl#L214.b1", "quote": "the test fails because of a timezone mismatch"}`, or
-a value that a query counted, `{"ref": "q4#ended=fixed@n"}`. Copy each quote exactly from its row, and keep it short.
+a value that a query counted, `{"ref": "r4#ended=fixed@n"}`. Copy each quote exactly from its row, and keep it short.
 The check reads every ref and looks for every quote in its row.
 
 **Relations show how claims bear on each other.** "contradicts" joins two claims that cannot both be true. "supports"
@@ -87,7 +87,7 @@ the claims about them can cite the counts:
 
 ```bash
 thimble sources
-thimble q "how each run ended" <<'PY'
+thimble run "how each run ended" <<'PY'
 df = load("runs/*.jsonl", fields=["type", "message"])
 df["run"] = df._file.str.extract(r"(r\d+)", expand=False)
 df["text"] = df.message.map(lambda m: " ".join(b.get("text", "") for b in m.get("content", []) if isinstance(b, dict)) if isinstance(m, dict) else "")
@@ -96,7 +96,7 @@ word = last.text.str.extract(r"(fixed|retry|skip|giving up)", expand=False)
 last["ended"] = word.map({"fixed": "fixed", "retry": "masked", "skip": "masked", "giving up": "gave up"}).fillna("timed out")
 tally(last, "ended")
 PY
-thimble q "first theory per run" <<'PY'
+thimble run "first theory per run" <<'PY'
 df = load("runs/*.jsonl", fields=["type", "message"])
 df["run"] = df._file.str.extract(r"(r\d+)", expand=False)
 df["text"] = df.message.map(lambda m: " ".join(b.get("text", "") for b in m.get("content", []) if isinstance(b, dict)) if isinstance(m, dict) else "")
@@ -110,7 +110,7 @@ Then read one run of each ending, where its moves change: `thimble rows "runs/r1
 r17 reads the fixture at step 1720 and gives each test its own cart, so "Each test gets its own cart" is a finding
 in the "shared fixture" cluster, cited with r17's row and its words. The timezone theory in 14 runs is a claim, and
 "cart fixture is scope=module" contradicts it. "Added @retry(3) instead of finding the cause" is a judgment call that
-12 runs made, cited with `q1#ended=masked@n` and one of their rows.
+12 runs made, cited with `r1#ended=masked@n` and one of their rows.
 
 The check finds one quote that is not in its row:
 

@@ -1,6 +1,6 @@
 ---
 name: explore
-description: Use when the person presses x (Explore) on a reply or an object, or asks to explore, scrub, turn or unfold a result. You write a view of this one answer as a short program they can turn and open, with the real rows one key below, and save it with `thimble save`.
+description: Use when the person presses x (Explore) on a reply or a card, or asks to explore, scrub, turn or unfold a result. You write a view of this one answer as a short program they can turn and open, with the real rows one key below, and save it with `thimble save`.
 ---
 
 # Explore: a view of this answer that the person can turn and open
@@ -17,7 +17,7 @@ turn what you assumed, and read the real rows. You write a short program for thi
 `[Jun 18 had the most saves](#day-2026-06-18)`. The reply stays above the view, so do not repeat it. One or two
 sentences at the top are enough.
 
-**Every mark leads to its rows.** Bind the data from `thimble q`: `"data": {"days": "q1"}`. Each bound row keeps
+**Every mark leads to its rows.** Bind the data from `thimble run`: `"data": {"days": "r1"}`. Each bound row keeps
 `_rows`, its source rows. Put them in the part's meta: `k.region(id, { label, rows: d._rows, fields: ['user',
 'text'] }, part)`. `fields` names what a person needs to read one row. The person selects the part and reads the
 rows under it. If you have only a total, run a query that keeps the rows (`tally`) before you draw it.
@@ -39,7 +39,7 @@ keeps one id (`cursor`), so the selection stays on it while the person scrubs.
 that scales with batch size, a filter that drops links), a knob that shows the idea working on this data explains
 it better than a sentence. Use this only where the answer depends on the idea.
 
-**Keep it calm.** One title. Use color only where it means something, and say what it means in words. Use short
+**Show only what the question needs.** One title. Use color only where it means something, and say what it means in words. Use short
 labels. Fold what is quiet ("17 quiet days") so that what matters stands out. Leave out what the question does not
 need. The person can ask you for more.
 
@@ -51,9 +51,9 @@ it again under the same name and keep the region ids, so the selection survives.
 
 ## How to make one
 
-1. Reuse the queries you ran for the answer. Run a new `thimble q` only when a part needs rows that you did not keep.
-2. Write the program to a file and the object's JSON to another, with the Write tool:
-   `{"title": "...", "verb": "explore", "of": "<the object's id, if there is one>", "data": {"days": "q1"}}`.
+1. Reuse the queries you ran for the answer. Use `thimble run` again only when a part needs rows that you did not keep.
+2. Write the program to a file and the card's JSON to another, with the Write tool:
+   `{"title": "...", "verb": "explore", "of": "<the card's id, if there is one>", "data": {"days": "r1"}}`.
 3. `thimble save explore-<name> --from spec.json --program view.js`. Fix each problem that its output lists, then save
    again.
 4. Look at it as the person will: `thimble verb explore --text explore-<name>` prints the view, and

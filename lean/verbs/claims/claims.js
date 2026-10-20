@@ -258,10 +258,10 @@ export function sourcesNear(md, start, end, text = '') {
 /** Sources as {ref, label}: a bare ref (an older store, an orientation's evidence) is read as its own label. */
 export const sourceOf = x => (typeof x === 'string' ? { ref: x, label: shortRef(x) } : x && typeof x.ref === 'string' ? { ref: x.ref, label: x.label || shortRef(x.ref), ...(Array.isArray(x.values) ? { values: x.values } : {}) } : null)
 
-/** A ref as a person reads it: a row as `file:line`, a query value as `q3 · day=… · n`. */
+/** A ref as a person reads it: a row as `file:line`, a query value as `r3 · day=… · n`. */
 export function shortRef(ref) {
   const r = String(ref || '')
-  const m = /^(q\d+)(?:#(.*))?$/.exec(r)
+  const m = /^([qr]\d+)(?:#(.*))?$/.exec(r)
   if (m) {
     const [frag, col] = String(m[2] || '').split('@')
     let words = frag || ''
@@ -576,7 +576,7 @@ export function basedOnFrom(ref, resolved) {
     if (f && !files.includes(f)) files.push(f)
   }
   if (!files.length) return null
-  const m = /^q\d+(?:#([^@]*))?(?:@.*)?$/.exec(String(ref || ''))
+  const m = /^[qr]\d+(?:#([^@]*))?(?:@.*)?$/.exec(String(ref || ''))
   let key = ''
   if (m && m[1]) {
     try { key = decodeURIComponent(m[1]) } catch { key = m[1] }

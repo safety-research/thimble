@@ -7,7 +7,7 @@ if (zoom === 'overview') {
   const map = k.map({
     title: `run ${data.run}`, unit: 'steps',
     threads: [{ id: data.run, stops: data.stations.map(s => ({ station: s.id, from: s.from, to: s.to })) }],
-    stations: data.stations.map(s => ({ id: s.id, label: s.label, note: s.note || `${s.from}–${s.to}`, ref: `q3#station=${s.id}@n`,
+    stations: data.stations.map(s => ({ id: s.id, label: s.label, note: s.note || `${s.from}–${s.to}`, ref: `r3#station=${s.id}@n`,
       examples: data.examples[s.id] && k.examples('ex-' + s.id, { label: `${s.label.toLowerCase()}, steps ${s.from}–${s.to}`, records: data.examples[s.id], total: s.to - s.from + 1 }) })),
   })
   // the strip: one cell per bucket of steps, its color what the run was doing then
@@ -35,7 +35,7 @@ for (let i = 0; i < t.fails.length; i += W) {
   const c = k.canvas(W, 1)
   ;[...bits].forEach((b, x) => { if (b === '1' || filter === 'all') c.put(x, 0, b === '1' ? '┃' : '│', b === '1' ? 'bad' : 'unseen') })
   const n = [...bits].filter(b => b === '1').length
-  rows.push(k.region(`${zoom}-${from}`, { label: `steps ${from}–${to}: ${n} failures`, ref: `q3#step=${from}-${to}&failed=1@n` },
+  rows.push(k.region(`${zoom}-${from}`, { label: `steps ${from}–${to}: ${n} failures`, ref: `r3#step=${from}-${to}&failed=1@n` },
     k.beside(k.text(k.fmt(from), { w: 6, align: 'right', tone: 'dim' }), c, k.text(`1 in ${n ? Math.round(bits.length / n) : '–'}`, { w: 8, tone: 'dim' }), { gap: 1 })))
 }
 const all = [...t.fails].filter(b => b === '1').length

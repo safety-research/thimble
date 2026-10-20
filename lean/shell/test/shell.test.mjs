@@ -139,6 +139,7 @@ test('a region rests on the refs the program named, or on the data row its id na
   assert.deepEqual(recordRefs(DRAWING, 'day-2026-06-18'), [{ ref: 'r.jsonl#L4', text: 'four' }])
   assert.deepEqual(objectRefs(OBJ).map(c => c.ref), ['q1#day=2026-06-18@n'])
   assert.ok(isRef('revisions.jsonl#L28') && isRef('q12') && isRef('obj:01-a#/x') && !isRef('hello') && !isRef('https://x.org/#a'))
+  assert.ok(isRef('r12') && isRef('r1#day=2026-06-18@n') && !isRef('r17-trail'))
 })
 
 test('a resolve chain reads as a few words, and a check that fails is said', () => {

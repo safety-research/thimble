@@ -54,9 +54,9 @@ def test_a_group_key_with_spaces_and_brackets_round_trips_through_a_citation(roo
     # a key with a slash keeps it: it is safe in a link
     assert f"{q['id']}#outcome=failed/adversarial" in refs
     # a citation written with the words in it is still one link, and nothing of it leaks into the prose
-    text = f"Clean wins took a median of [110](q{q['id'][1:]}#outcome=won (clean ep)@median) calls."
+    text = f"Clean wins took a median of [110]({q['id']}#outcome=won (clean ep)@median) calls."
     assert R.links(text) == [("110", f"{q['id']}#outcome=won (clean ep)@median")]
-    # the example citation `thimble q` prints is already the safe form
+    # the example citation `thimble run` prints is already the safe form
     assert "(clean" not in (Q.cite_example(q) or "")
 
 
@@ -83,7 +83,7 @@ def test_a_citation_of_a_whole_query_opens_the_row_behind_the_value_it_shows(roo
     assert r["narrowed"] == f"{q['id']}#outcome=failed/adversarial@n" and r["wrote"] == q["id"]
     assert r["count"] == 4 and r["rows"] == ["runs.jsonl#L6-9"]
     assert "only row" in r["notes"][0]
-    # a column cite too: [125](q1@median) is the contested row's median
+    # a column cite too: [125](r1@median) is the contested row's median
     r = LIN.resolve(st, f"{q['id']}@median", label="190")
     assert r["narrowed"].endswith("#outcome=contested@median") and r["count"] == 1
     # words that two rows hold are not narrowed: the cite keeps every row it named, and says nothing it cannot know

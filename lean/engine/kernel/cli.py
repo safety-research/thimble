@@ -4,24 +4,25 @@ session's permission mode and sandbox like any other command.
     thimble sources [GLOB]                     the source files here: kind, rows, size
     thimble rows TARGET [--where EXPR] [--search RE] [-n 5] [--first] [--fields a,b]
                                                rows with their refs: one ref, or a random sample of a file or glob
-    thimble q "what it answers" <<'PY' ... PY  run Python over the sources; keeps the code, inputs, output and the rows
-                                               behind each output row (thimble q --rerun q3 runs a query again)
+    thimble run "what it answers" <<'PY' ... PY
+                                               run Python over the sources; keeps the code, inputs, output and the rows
+                                               behind each output row, as r1, r2, ... (--rerun r3 runs r3 again)
     thimble save [NAME] [--rerun] <<'JSON' ... JSON   (or --from FILE)
-                                               save an object (program + data + lineage) or a new version of one
-    thimble list [NAME]                        the objects, or one object with its lineage
+                                               save a card (its program, data and lineage) or a new version of one
+    thimble list [NAME]                        the cards, or one card with its lineage
     thimble resolve REF [-n 5] [--label WORDS] where a value came from, down to its source rows (a few of them, spread
                                                across the rows)
-    thimble coverage [NAME] [--all]            what was read and what was not (of this session, or of an object)
+    thimble coverage [NAME] [--all]            what was read and what was not (of this session, or of a card)
     thimble trace [REF] [--text PASSAGE] [--in GLOB]
                                                where it came from and where it went: the path back to its rows, what
-                                               uses it (queries, objects, answers), and in transcripts who read a
+                                               uses it (runs, cards, answers), and in transcripts who read a
                                                passage and who wrote it after reading it
 
-In a query: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
-group's rows; use("q3") is an earlier query's output; keep(name, x) and use(name) pass a named result or a label on;
-rows(glob), sample(df, n), pd, np, re, json. The last expression is the output. `thimble q --help` says more.
+In a run: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
+group's rows; use("r3") is an earlier run's output; keep(name, x) and use(name) pass a named result or a label on;
+rows(glob), sample(df, n), pd, np, re, json. The last expression is the output. `thimble run --help` says more.
 
-Add --json to sources, q, list, resolve, coverage or trace for the whole record.
+Add --json to sources, run, list, resolve, coverage or trace for the whole record.
 """
 from __future__ import annotations
 
@@ -211,12 +212,12 @@ def cmd_q(a: argparse.Namespace) -> int:
     try:
         import pandas  # noqa: F401
     except ImportError:
-        print("thimble q needs pandas: set THIMBLE_PYTHON to a Python that has it, or install it (pip install pandas)")
+        print("thimble run needs pandas: set THIMBLE_PYTHON to a Python that has it, or install it (pip install pandas)")
         return 2
     if a.rerun:
         old = Q.get(st, a.rerun)
         if not old:
-            print(f"no query {a.rerun}")
+            print(f"no run {a.rerun}")
             return 1
         q = Q.run(st, old.get("about") or "", old["code"], rerun_of=old["id"])
         if a.json:
@@ -231,7 +232,7 @@ def cmd_q(a: argparse.Namespace) -> int:
         return 1 if q["error"] else 0
     code = a.code if a.code else stdin_text()
     if not code.strip():
-        print("no code: pass it on stdin, as in thimble q \"what it answers\" <<'PY' ... PY")
+        print("no code: pass it on stdin, as in thimble run \"what it answers\" <<'PY' ... PY")
         return 2
     q = Q.run(st, a.about, code)
     if a.json:
@@ -323,10 +324,10 @@ def cmd_save(a: argparse.Namespace) -> int:
         if renamed:
             print("ran again: " + ", ".join(f"{k} → {v}" for k, v in renamed.items()))
     elif a.rerun:
-        print(f"no object {a.name} to run again")
+        print(f"no card {a.name} to run again")
         return 1
     elif not spec:
-        print("nothing to save: pass the object as JSON on stdin")
+        print("nothing to save: pass the card as JSON on stdin")
         return 2
     else:
         obj = O.save(st, a.name, spec, a.change)
@@ -387,14 +388,14 @@ def cmd_list(a: argparse.Namespace) -> int:
             out_json([{k: o.get(k) for k in ("id", "version", "title", "updated")} for o in objs if o])
             return 0
         if not objs:
-            print("no objects yet: thimble save makes one")
+            print("no cards yet: thimble save makes one")
         for o in objs:
             if o:
                 print(O.summary_line(o))
         return 0
     obj = O.load(st, a.name)
     if not obj:
-        print(f"no object {a.name}; objects: {', '.join(O.all_ids(st)) or 'none'}")
+        print(f"no card {a.name}; cards: {', '.join(O.all_ids(st)) or 'none'}")
         return 1
     if a.json:
         out_json(obj)
@@ -439,12 +440,12 @@ def cmd_resolve(a: argparse.Namespace) -> int:
     for step in r["chain"]:
         k = step["step"]
         if k == "object":
-            print(f"object {step['id']} v{step.get('version')}" + (f" · {step.get('title')}" if step.get("title") else "")
+            print(f"card {step['id']} v{step.get('version')}" + (f" · {step.get('title')}" if step.get("title") else "")
                   + (f" · at {step['at']} = {json.dumps(step.get('value'), ensure_ascii=False, default=str)[:200]}" if "at" in step else ""))
         elif k == "binding":
             print(f"  ← bound from {step['from']} (data{step['at'] or '/'})")
         elif k == "query":
-            print(f"  ← query {step['id']} · {step.get('about')} · rows: {step.get('lineage')}"
+            print(f"  ← run {step['id']} · {step.get('about')} · rows: {step.get('lineage')}"
                   + (f" in `{step['frame']}`" if step.get("frame") else ""))
             code = (step.get("code") or "").strip().splitlines()
             for line in code[:12]:
@@ -486,7 +487,7 @@ def cmd_coverage(a: argparse.Namespace) -> int:
     if a.name:
         obj = O.load(st, a.name)
         if not obj:
-            print(f"no object {a.name}")
+            print(f"no card {a.name}")
             return 1
         c = LIN.object_coverage(st, obj)
         if a.json:
@@ -547,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fields")
     p.add_argument("--width", type=int, default=300)
     p.set_defaults(fn=cmd_rows)
-    p = sub.add_parser("q", aliases=["query"], help="run Python over the sources and keep its lineage",
+    p = sub.add_parser("run", help="run Python over the sources and keep its lineage",
                        description=Q.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("about", nargs="?", default="", help="what the query answers, in a few words")
     p.add_argument("--code")
@@ -587,12 +588,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-answers", action="store_true", help="skip the session transcripts (Claude's cited answers)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_trace)
-    args = sys.argv[1:] if argv is None else argv
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in ("q", "query"):
+        # the names `run` had before the rename: they still work, and neither help nor usage lists them
+        args[0] = "run"
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(__doc__.strip())
         return 0
-    a = ap.parse_args(argv)
+    a = ap.parse_args(args)
     if not getattr(a, "fn", None):
         print(__doc__.strip())
         return 0

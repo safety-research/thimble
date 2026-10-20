@@ -30,7 +30,7 @@ function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; sav
   on('turn.complete', () => ({ text: '' }))
   on('session.cwd', () => ({ value: ROOT }))
   on('session.id', () => ({ value: 's-1' }))
-  const files: Record<string, string> = { [`${ROOT}/thimble/queries/q1.json`]: '{}' }
+  const files: Record<string, string> = { [`${ROOT}/thimble/queries/r1.json`]: '{}' }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/queries` }))
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? (e.path.endsWith('/draw/TOOLKIT.md') ? 'THE TOOLKIT' : promptStub(e.path) ?? '') }))
@@ -53,13 +53,13 @@ function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; sav
     if (e.argv.some(a => a.endsWith('/bin/thimble'))) {
       const args = e.argv.slice(1)
       lean.push({ args, stdin: String(e.init?.stdin ?? ''), env: e.init?.env ?? {} })
-      if (args[0] === 'q') return ok(`q7 · ${args[1]}\n   day     n\n0  06-18  6543\nq7 done in 0.1s`)
+      if (args[0] === 'run') return ok(`r7 · ${args[1]}\n   day     n\n0  06-18  6543\nr7 done in 0.1s`)
       if (args[0] === 'save') {
         saves += 1
         const object = JSON.parse(files[args[3]!] ?? '{}')
         files[`${ROOT}/thimble/objects/02-${args[1]}.json`] = JSON.stringify({ id: `02-${args[1]}`, version: saves, session: 's-1', updated: new Date(Date.now()).toISOString(), lineage: {}, ...object })
         files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: `02-${args[1]}`, version: saves }) + '\n'
-        return ok(o.save ? o.save(saves) : `saved 02-${args[1]} v${saves}: thimble/objects/02-${args[1]}.json\n  /days ← q7 (exact)\n  1 of 1 citations hold`)
+        return ok(o.save ? o.save(saves) : `saved 02-${args[1]} v${saves}: thimble/objects/02-${args[1]}.json\n  /days ← r7 (exact)\n  1 of 1 citations hold`)
       }
       return ok('')
     }
@@ -94,17 +94,17 @@ function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; sav
       files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: '01-mine', version: 1 }) + '\n'
       return { result: 'saved 01-mine v1: thimble/objects/01-mine.json' }
     }
-    return { result: /thimble q/.test(String(e.command)) ? 'q1 · saves per day\n...' : 'ok' }
+    return { result: /thimble run/.test(String(e.command)) ? 'r1 · saves per day\n...' : 'ok' }
   })
   const clock = mock.clock(on)
   return { files, lean, forks, submitted, toasts, clock, calls }
 }
 
-/** A turn of the person's: the question, a `thimble q` (or another command), the answer, its end. */
+/** A turn of the person's: the question, a `thimble run` (or another command), the answer, its end. */
 async function turn($: Any, o: { command?: string; answer?: string } = {}) {
   await $.prompt.submit({ text: 'when did they edit most?', origin: { kind: 'composer' } } as never)
   await $.turn.start({ turnId: 't1', text: 'when did they edit most?' } as never)
-  await $.tool.call({ tool: 'Bash', command: o.command ?? "thimble q \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never)
+  await $.tool.call({ tool: 'Bash', command: o.command ?? "thimble run \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never)
   const answer = o.answer ?? 'June 18 had the most saves: 6,543.'
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: answer }] } } as never)
   await $.turn.complete({ turnId: 't1', answer, durationMs: 5, reason: 'answer', isAborted: false } as never)
@@ -129,23 +129,23 @@ test('after a turn that queried, a fork writes the card: its query runs first, i
   // the query ran before the save, under the session, and the card names it by its id
   // (the thimble line's own `thimble coverage` aside)
   const mine = w.lean.filter(x => x.args[0] !== 'coverage')
-  expect(mine.map(x => x.args[0])).toEqual(['q', 'save'])
+  expect(mine.map(x => x.args[0])).toEqual(['run', 'save'])
   expect(mine[0]!.args[1]).toBe('edits per day')
   expect(mine[0]!.stdin).toBe('tally(df, "day")')
   expect(mine[0]!.env.THIMBLE_SESSION).toBe('s-1')
   const saved = JSON.parse(w.files['/home/t/.thimble/lean/cards/s-1/edits-per-day.json']!)
-  expect(saved.data.days).toBe('q7')
-  expect(saved.text).toBe('June 18: [6,543](q7#day=2026-06-18@n)')
+  expect(saved.data.days).toBe('r7')
+  expect(saved.text).toBe('June 18: [6,543](r7#day=2026-06-18@n)')
   // drawn under the answer
   expect(textOf(await reply($))).toContain('Jun 18 6,543')
   // the next prompt tells Claude which card it is
   await $.prompt.submit({ text: 'and the week after?', origin: { kind: 'composer' } } as never)
   const ctx = w.submitted.at(-1)!.context.join('\n')
   expect(ctx).toContain('After your last answer, thimble drew the card 02-edits-per-day@1 under it ("Edits peaked on June 18")')
-  expect(ctx).toContain('from q7')
+  expect(ctx).toContain('from r7')
   // the next turn's first command does not take the card for its own
   await $.turn.start({ turnId: 't2', text: 'and the week after?' } as never)
-  await $.tool.call({ tool: 'Bash', command: 'thimble q "week" <<\'PY\'\nx\nPY' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'thimble run "week" <<\'PY\'\nx\nPY' } as never)
   await $.session.append({ door: 'response', uuid: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'The week after was quiet.' }] } } as never)
   const second = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', props: { text: 'The week after was quiet.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
   expect(textOf(second)).not.toContain('Jun 18 6,543')
@@ -157,14 +157,14 @@ test('after a turn that queried, a fork writes the card: its query runs first, i
 })
 
 test('a card that does not hold asks the fork once more with what the save said, and the corrected card takes its place', async ($, on) => {
-  const fixed = { ...CARD, queries: [], object: { ...CARD.object, data: { days: 'q1' }, text: 'June 18: 6,543' } }
-  const w = world(on, { env: { THIMBLE_PROMPTS: 'card:v1' }, replies: [CARD, fixed], save: n => (n === 1 ? 'saved 02-edits-per-day v1: thimble/objects/02-edits-per-day.json\n  0 of 1 citations hold\n  problem: q7 has no row day=2026-06-18' : 'saved 02-edits-per-day v2: thimble/objects/02-edits-per-day.json\n  /days ← q1 (exact)') })
+  const fixed = { ...CARD, queries: [], object: { ...CARD.object, data: { days: 'r1' }, text: 'June 18: 6,543' } }
+  const w = world(on, { env: { THIMBLE_PROMPTS: 'card:v1' }, replies: [CARD, fixed], save: n => (n === 1 ? 'saved 02-edits-per-day v1: thimble/objects/02-edits-per-day.json\n  0 of 1 citations hold\n  problem: r7 has no row day=2026-06-18' : 'saved 02-edits-per-day v2: thimble/objects/02-edits-per-day.json\n  /days ← r1 (exact)') })
   await turn($)
   await w.clock.settle()
   expect(w.forks.length).toBe(2)
-  expect(w.forks[1]).toContain('FIX - 0 of 1 citations hold\n- problem: q7 has no row day=2026-06-18 |')
+  expect(w.forks[1]).toContain('FIX - 0 of 1 citations hold\n- problem: r7 has no row day=2026-06-18 |')
   expect(w.forks[1]).toContain('"card":"edits-per-day"')
-  expect(w.lean.filter(x => x.args[0] !== 'coverage').map(x => x.args[0])).toEqual(['q', 'save', 'save'])
+  expect(w.lean.filter(x => x.args[0] !== 'coverage').map(x => x.args[0])).toEqual(['run', 'save', 'save'])
   await $.prompt.submit({ text: 'ok', origin: { kind: 'composer' } } as never)
   expect(w.submitted.at(-1)!.context.join('\n')).toContain('the card 02-edits-per-day@2')
 })
