@@ -96,11 +96,9 @@ export function spotsIn(grid, values) {
   return out
 }
 
-/** A value's tone beside a card: the card's own color for it when the card colors the label's values (`tones`, from
- *  tonesIn), plain for a value it leaves plain; else the label's (valueTone). */
+/** A value's tone beside a card: the label's own (valueTone), the color a card made from the label's rows gives it too
+ *  (shell/node/prep.mjs labelKeys). */
 export function toneBeside(l, v) {
-  const t = (l && l.tones) || {}
-  if (Object.keys(t).length) return t[v] || 'ink'
   return valueTone(l && l.values, v)
 }
 

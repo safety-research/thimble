@@ -195,6 +195,21 @@
       }
     }
     const T = t => toneOf(t, ctx)
+    // a part made from a row that holds a label's value takes the label's color for that value (opts.labels: {query,
+    // key, tones} from the host), so the value reads the same on every card, beside it, and in the label's panel
+    const labelTone = x => {
+      if (!Array.isArray(opts.labels) || !opts.labels.length || !isObj(x)) return null
+      const ref = lineageOf(ctx, x)
+      if (!ref) return null
+      const q = String(ref).split('#')[0]
+      for (const l of opts.labels) {
+        if (!isObj(l) || l.query !== q || !isObj(l.tones)) continue
+        const row = [x, x.row, x.from].find(r => isObj(r) && r[l.key] != null)
+        const t = row ? l.tones[String(row[l.key])] : null
+        if (t) return t
+      }
+      return null
+    }
     const node = (t, props) => { tick(1); return Object.assign({ t: t }, props) }
     const isNode = v => isObj(v) && typeof v.t === 'string' && !(v instanceof Canvas)
     // anything a program hands where a node goes: a node, a canvas, a string (text), a number, an array (a stack)
@@ -382,7 +397,7 @@
         if (Array.isArray(value)) {
           n.parts = value.map((p, pi) => {
             p = isObj(p) ? p : { value: p }
-            const q = { value: Math.max(0, num(p.value) || 0), tone: T(p.tone || CATS[pi % 6]) }
+            const q = { value: Math.max(0, num(p.value) || 0), tone: T(labelTone(p) || p.tone || CATS[pi % 6]) }
             if (p.label != null) q.label = clean(p.label)
             // a part made from a row of the card's data (the row, a spread of it, or {row}) is a part by itself, as a
             // bar item is: selected, it opens its own rows, with no ref written
@@ -427,7 +442,7 @@
         const rows = items.map((it, i) => {
           const row = k.beside(
             k.text(it.label == null ? '' : it.label, { w: labelW, tone: it.labelTone || o.labelTone || 'ink', raw: !o.markup, wrap: false }),
-            Array.isArray(it.parts) ? k.bar(it.parts, { max: max }) : isFinite(vals[i]) ? k.bar(vals[i], { max: max, tone: it.tone || o.tone }) : k.unseen(),
+            Array.isArray(it.parts) ? k.bar(it.parts, { max: max }) : isFinite(vals[i]) ? k.bar(vals[i], { max: max, tone: labelTone(it) || it.tone || o.tone }) : k.unseen(),
             k.text(texts[i], { w: valW, align: 'right', bold: !!(it.bold || o.bold), tone: isFinite(vals[i]) ? 'ink' : 'unseen', raw: true }),
             notes && k.text(' ' + (noteOf(it, i) == null ? '' : noteOf(it, i)), { w: noteW + 1, tone: 'dim', wrap: false }),
             { gap: 1 })
@@ -444,7 +459,7 @@
         const key = []
         items.forEach(it => { if (Array.isArray(it.parts)) it.parts.forEach((p, pi) => {
           if (!isObj(p) || p.label == null || String(p.label).trim() === '' || key.some(e => e.label === String(p.label))) return
-          const t = T(p.tone || CATS[pi % 6])
+          const t = T(labelTone(p) || p.tone || CATS[pi % 6])
           if (t !== 'unseen') key.push({ label: String(p.label), tone: t })
         }) })
         const list = k.stack(rows, { gap: o.gap ? 1 : 0 })

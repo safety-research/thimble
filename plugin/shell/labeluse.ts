@@ -76,7 +76,7 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; theme:
 
 /** The row beside a card (its refs: [the card's id]) or an answer (its citations' refs), as shell.tsx draws it under
  *  them; null while the labels are read and when they rest on none. `root` defaults to the folder under analysis.
- *  Under a card (`grid`, its cells), the values take the colors the card gives them (tonesIn). */
+ *  Its values have the label's colors, the ones a card made from the label's rows draws them in too. */
 export async function labelsRow($: Engine, els: Any, key: string, refs: string[], root?: string | null, o: { marginLeft?: number; grid?: Any; card?: string; except?: string[] } = {}): Promise<Any | null> {
   const where = root ?? (await rootHere($))
   const found = await labelsBeside($, `${key}|${hash(refs.join(' '))}`, refs, where)

@@ -11,6 +11,9 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { answersOf, failedCall, readLabel, summary } from '../labelreads.mjs'
+import { prep } from '../node/prep.mjs'
+import { renderTerm } from '../../draw/term.js'
+import { toneBeside, valueTone } from '../../panes/labels.js'
 
 const LEAN = fileURLToPath(new URL('../../bin/thimble', import.meta.url))
 const LABEL = { name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: true }
@@ -83,4 +86,21 @@ test('reads: the calls of a wave go out together; with their answers the values 
   const failed = await readLabel({ name: 'apology', kernel, callAll: busy, template: '{{RECORDS}}' })
   assert.equal(failed.failed, true)
   assert.match(failed.text, /^apology: 0 of 4 records have a value\. 4 have no value \(1 call failed: api-error 529 \(overloaded_error\)\): `thimble label apology --again` asks the model again\.$/)
+})
+
+test('a label\'s values have one color: on a chart made from its rows, in the row beside the chart, and in its panel', async () => {
+  const label = { name: 'is-urgent', values: ['yes', 'no'] }
+  const rows = [['Mon', 'yes', 4], ['Mon', 'no', 9], ['Tue', 'yes', 2], ['Tue', 'no', 5]].map(([day, urgent, n]) => ({ day, urgent, n, _ref: `r7#day=${day}&urgent=${urgent}` }))
+  // the program picks colors of its own, and words that are not the values
+  const object = { id: '03-urgent', title: 'Urgent tickets per day', lineage: { queries: { r7: { labels: ['is-urgent'] } } }, data: { rows }, program: `
+    const days = [...new Set(data.rows.map(r => r.day))]
+    return k.bars(days.map(d => ({ id: 'day-' + d, label: d, parts: data.rows.filter(r => r.day === d).map(r => ({ ...r, value: r.n, tone: r.urgent === 'yes' ? 'c1' : 'dim', label: r.urgent === 'yes' ? 'urgent' : 'not urgent' })) })))` }
+  const { drawing } = await prep({ object, w: 60, labels: [{ ...label, queries: ['r7'] }] })
+  const grid = renderTerm(drawing, { w: 60 })
+  const at = word => { const y = grid.rows.findIndex(r => r.map(c => c.ch).join('').includes(word)); const x = grid.rows[y].map(c => c.ch).join('').indexOf(word); return grid.rows[y][x - 2].tone }
+  const panel = Object.fromEntries(label.values.map(v => [v, valueTone(label.values, v)]))
+  assert.deepEqual({ yes: at('urgent'), no: at('not urgent') }, panel)
+  const bars = new Set(grid.rows.flat().filter(c => c.ch === '█' || c.ch === '▆' || c.ch === '▇').map(c => c.tone))
+  assert.deepEqual([...bars].sort(), Object.values(panel).sort())
+  assert.deepEqual(label.values.map(v => toneBeside({ ...label, tones: { no: 'dim' } }, v)), label.values.map(v => panel[v]))
 })

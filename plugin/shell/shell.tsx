@@ -29,7 +29,7 @@ import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
 import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
-import { cardFrame, frameWidth } from './cardframe.js'
+import { bodyRows, cardFrame, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withObserver } from './message.js'
@@ -174,6 +174,25 @@ export async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
+/** The labels the object's queries read (its lineage), each with its values and the queries that read it: a part made
+ *  from such a query's row is drawn in the label's color (prep.mjs labelKeys). */
+async function labelsRead($: Engine, root: string, object: Any): Promise<{ name: string; values: string[]; queries: string[] }[]> {
+  const by = new Map<string, string[]>()
+  for (const [q, info] of Object.entries((object?.lineage?.queries || {}) as Record<string, Any>)) {
+    for (const name of Array.isArray(info?.labels) ? info.labels : []) if (typeof name === 'string' && /^[\w.-]+$/.test(name)) by.set(name, [...(by.get(name) || []), q])
+  }
+  const out: { name: string; values: string[]; queries: string[] }[] = []
+  for (const [name, queries] of by) {
+    const f = `${root}/thimble/labels/${name}.json`
+    try {
+      if (!(await $.fs.exists(f))) continue
+      const values = JSON.parse(String(await $.fs.read(f)))?.values
+      if (Array.isArray(values) && values.length) out.push({ name, values: values.map(String), queries })
+    } catch { /* a label file that cannot be read leaves the card's own colors */ }
+  }
+  return out
+}
+
 const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, all: string | null = null) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}${all ? '|all=' + all : ''}`
 
 /** The object drawn at `w` columns (with the knobs at `state`): the program runs in a Node child, in the
@@ -198,7 +217,8 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
     }
     if (!object) return { object: null, drawing: null, grid: null, error: `no card ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}), ...(all ? { all } : {}) }), timeoutMs: 30000 })
+    const labels = await labelsRead($, ref.root, object)
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}), ...(all ? { all } : {}), ...(labels.length ? { labels } : {}) }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     // under a reply a card is its title, its chart and its takeaway: the words at the right of its frame (its sources)
@@ -2380,8 +2400,9 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(ref)} cannot be drawn: ${p.error || 'no drawing'}` })
   const fullscreen = e.viewport?.isFullscreen !== false
   const said = ((await $.state.get({ ...SAID, id: ref.id })).value ?? null) as Said | null
-  // calm: under a reply an object takes at most about half a screen; the rest waits in the detail view
-  const rows = Math.min(p.grid.h, inlineRows(e.viewport?.rows ?? 48))
+  // under a reply a card is drawn whole when it fits on the screen; a taller one is cut, and says how much is below
+  const { rows, more } = bodyRows(p.grid.h, e.viewport?.rows ?? 48)
+  const openAll = fullscreen ? () => openDetail($, ref, null) : undefined
   // a click on a part its program answers is the program's (k.on('press:<id>')), here as in the detail; on any other
   // part it opens the detail view on it, and on a link to a cite or to examples the detail opens on its rows or its
   // examples; on a knob's dial (or a link to a knob) it turns the knob here, a step back on its left half and a step
@@ -2404,12 +2425,12 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const pages = pk ? pagesRow(els, pk, focus === 'focus', fullscreen ? () => openDetail($, ref, null, { pages: PAGES_DEFAULT }) : null) : null
   const o = p.object || {}
   const fw = frameWidth(outer, p.grid.w, o.title)
-  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: Math.min(rows, p.grid.h), color: ring })
+  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: rows, more, onMore: openAll, color: ring })
   // the labels its data came through, beside it (labeluse.ts)
   const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id })
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
-    children: [body, ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
+    children: [body, ...(framed && more ? [moreRow(els, moreText(more), openAll)] : []), ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
   })
 }
 
@@ -2551,8 +2572,6 @@ async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unkno
   }
 }
 
-/** The rows a card takes under a reply: about half a screen, the rest in its detail view. */
-const inlineRows = (screen: number) => Math.max(12, Math.min(30, Math.floor(screen * 0.55)))
 const FOCUS = { dark: '#9a93ff', light: '#4f46e5' }
 
 /** A knob of a card under a reply turned one step where the card is drawn (a click on its dial's half, or , and . while
