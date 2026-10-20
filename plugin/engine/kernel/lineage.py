@@ -736,6 +736,9 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
 # What counts as read: a query loaded its rows, or some of its lines or rows were in front of Claude. Everything else
 # (searched, named, not read) is not read, whatever touched it.
 READ = ("computed", "read")
+# the line ranges and search hits kept per file for the coverage pane
+RANGES_MAX = 300
+HITS_MAX = 400
 ORDER = ["computed", "read", "searched", "named", "not read"]
 # each status as the coverage text says it
 SAID = {"computed": "computed", "read": "read", "searched": "searched", "named": "named", "not read": "untouched"}
@@ -751,9 +754,32 @@ def _ranges_len(ranges: list[tuple[int, int]]) -> int:
     return n
 
 
+def _merged(ranges: list[tuple[int, int]], cap: int = RANGES_MAX) -> list[list[int]]:
+    """Line ranges joined where they touch or overlap, in order, at most `cap` of them."""
+    out: list[list[int]] = []
+    for a, b in sorted((min(a, b), max(a, b)) for a, b in ranges):
+        if out and a <= out[-1][1] + 1:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out[:cap]
+
+
+def _line_of(ref: str) -> int | None:
+    m = re.search(r"(?:^|#)L(\d+)", ref)
+    return int(m.group(1)) if m else None
+
+
+def type_of(path: str) -> str:
+    """A file's type as the coverage pane groups it: its extension (`jsonl`, `py`), else `no extension`."""
+    return Path(path).suffix.lower().lstrip(".") or "no extension"
+
+
 def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
-    """What this session (or `session`, or all sessions for None) read of every source file, file by file and by
-    group of like files."""
+    """What this session (or `session`, or all sessions for None) read of every source file, file by file, by group
+    of like files (S.group_of, as the text says them; S.pattern_of, as the coverage pane does) and by file type. Each
+    file also says which of its lines were read
+    (`ranges`) and which lines a search showed (`hit_lines`), for the coverage pane."""
     files = S.list_sources(st.root)
     cnt = S.counts(st.root, files, st.cache / "counts.json")
     per: dict[str, dict[str, Any]] = {f: {"computed": 0, "queries": [], "shown": set(), "lines": [], "searched": False,
@@ -831,6 +857,8 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                 x["searched" if how == "searched" else "named"] = True
                 x["searched_by" if how == "searched" else "by"].add(prog)
     out_files = []
+    group = S.group_of(files)
+    pattern = S.pattern_of(files)
     for f in files:
         c, x = cnt.get(f, {}), per[f]
         rows, lines = c.get("rows", 0), c.get("lines", 0)
@@ -846,22 +874,33 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                           "queries": sorted(set(q for q in x["queries"] if q)), "read_lines": read_lines,
                           "shown": len(x["shown"]), "searched": x["searched"], "matched": x["matched"],
                           "hits": len(x["hits"]), "named": x["named"], "by": sorted(x["by"]),
-                          "searched_by": sorted(x["searched_by"])})
+                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "group": group.get(f, f), "pattern": pattern.get(f, f),
+                          # which lines reached Claude (a row `thimble rows` showed counts as its line), and which
+                          # lines a search showed
+                          "ranges": _merged(x["lines"] + [(n, n) for n in map(_line_of, x["shown"]) if n]),
+                          "hit_lines": sorted({n for n in map(_line_of, x["hits"]) if n})[:HITS_MAX]})
     groups: dict[str, dict[str, Any]] = {}
-    for f, g in S.group_of(files).items():
-        e = next(o for o in out_files if o["path"] == f)
-        G = groups.setdefault(g, {"group": g, "files": 0, "rows": 0, "by_status": defaultdict(int), "computed": 0})
-        G["files"] += 1
-        G["rows"] += e["rows"]
-        G["by_status"][e["status"]] += 1
-        G["computed"] += e["computed"]
-    for G in groups.values():
+    patterns: dict[str, dict[str, Any]] = {}
+    types: dict[str, dict[str, Any]] = {}
+    for e in out_files:
+        for key, name, into in ((e["group"], "group", groups), (e["pattern"], "pattern", patterns), (e["type"], "type", types)):
+            G = into.setdefault(key, {name: key, "files": 0, "rows": 0, "read_rows": 0.0, "by_status": defaultdict(int),
+                                      "computed": 0})
+            G["files"] += 1
+            G["rows"] += e["rows"]
+            G["read_rows"] += e["share"] * e["rows"]
+            G["by_status"][e["status"]] += 1
+            G["computed"] += e["computed"]
+    for G in [*groups.values(), *patterns.values(), *types.values()]:
         G["by_status"] = dict(G["by_status"])
+        G["read_rows"] = round(G["read_rows"])
     rows_all = sum(o["rows"] for o in out_files)
     read_rows = sum(o["share"] * o["rows"] for o in out_files)
     not_read = [o for o in out_files if not o["read"]]
     return {"root": str(st.root), "session": st.session if session == "" else session, "files": out_files,
             "groups": sorted(groups.values(), key=lambda g: -g["rows"]),
+            "patterns": sorted(patterns.values(), key=lambda g: (-g["rows"], g["pattern"])),
+            "types": sorted(types.values(), key=lambda g: (-g["rows"], g["type"])),
             "total": {"files": len(files), "rows": rows_all, "read_files": len(out_files) - len(not_read),
                       "read_rows": round(read_rows), "read_share": read_rows / rows_all if rows_all else 0.0,
                       "not_read_files": len(not_read), "not_read_rows": sum(o["rows"] for o in not_read),

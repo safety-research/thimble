@@ -165,7 +165,7 @@ export function hostKeys(mode, surface = 'terminal') {
 //   barLadder(bar) -> the bar at each step, fullest first
 //   fitBar(bar, width, measure) -> the first step whose line fits `width` (measure: text -> width, default columns)
 
-const COUNT_ORDER = ['threads', 'cov']
+const COUNT_ORDER = ['threads', 'labels', 'cov']
 const GAP = 3 // between the keys and the counts
 
 /** The line a bar draws, as text (for measuring). */

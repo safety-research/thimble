@@ -535,6 +535,73 @@ def of_refs(st: Store, refs: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def head(lab: dict[str, Any]) -> dict[str, Any]:
+    """What the label viewer says of a label above its records: its definition, where it applies, its counts."""
+    return {"name": lab["name"], "kind": lab.get("kind"), "rule": str(lab.get("rule") or ""), "values": list(lab["values"]),
+            "in": lab.get("in"), "where": lab.get("where"), "within": lab.get("within"), "trial": bool(lab.get("trial")),
+            "matched": lab.get("matched"), "version": lab.get("version"), "rev": lab.get("rev"),
+            "card": lab.get("card"), **status(lab)}
+
+
+PAGE = 20  # records of one page of the label viewer
+NO_VALUE = "-"  # the viewer's filter for records with no value yet (waiting for the model, or failed)
+
+
+def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = PAGE) -> dict[str, Any]:
+    """One page of a label's records for the label viewer, in the order they were labeled: all of them, those of one
+    value, or those with none (NO_VALUE). Each record has its value, where the value came from (regex, code, model,
+    claude, or the analyst's check), the model's confidence and reason, and its words as the card's examples show them.
+    Reading them is the person's, never counted as what Claude read."""
+    from .lineage import words_of
+
+    lab = load(st, name)
+    if lab is None:
+        raise LabelError(f"no label {name!r}; labels: {', '.join(names(st)) or 'none'}")
+    units = lab.get("units") or {}
+    checks = lab.get("checks") or {}
+    refs = [r for r in units if value is None or (value_of(lab, r) or NO_VALUE) == value]
+    total = len(refs)
+    n = max(1, min(int(n), 200))
+    at = max(0, min(int(at), max(0, total - 1)))
+    want = refs[at:at + n]
+    rows: dict[str, S.Row] = {}
+    left = set(want)
+    for rel in dict.fromkeys(r.split("#")[0] for r in want):
+        mine = {r for r in left if r.split("#")[0] == rel}
+        try:
+            for row in S.iter_rows(st.root, rel):
+                if row.ref in mine:
+                    rows[row.ref] = row
+                    mine.discard(row.ref)
+                    if not mine:
+                        break
+        except OSError:
+            continue
+    out = []
+    for i, r in enumerate(want):
+        u, c = units.get(r) or {}, checks.get(r)
+        e: dict[str, Any] = {"ref": r, "i": at + i, "value": value_of(lab, r), "by": "analyst" if c else u.get("by")}
+        if u.get("c") is not None and not c and u.get("by") == "model":
+            e["confidence"] = u["c"]
+        if u.get("why"):
+            e["reason"] = str(u["why"])[:300]
+        if u.get("wait"):
+            e["waiting"] = True
+        if u.get("err") and e["value"] is None:
+            e["error"] = str(u["err"])[:200]
+        if c:
+            e["checked"] = True
+            e["was"] = c.get("was")
+        row = rows.get(r)
+        if row is not None:
+            words, meta = words_of(row)
+            e.update(words=words or unit_text(row, 240), meta=meta, text=unit_text(row, 1200))
+        else:
+            e["missing"] = "the record is no longer in its file"
+        out.append(e)
+    return {"label": head(lab), "value": value, "at": at, "total": total, "records": out}
+
+
 def breakdown(st: Store, rowsets: list[str], cap: int = 500_000) -> dict[str, Any]:
     """How the rows of a set split by each label that holds some of them: {label: {values: {value: n}, of: rows it
     holds, rows: rows in the set}}."""
