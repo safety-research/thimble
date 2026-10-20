@@ -72,8 +72,10 @@ export type LineCounts = { claims?: number; threads: number; cov: number; at: nu
  *  inside a card (panes/tray.js frameOf). */
 export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss'; gloss?: Record<string, unknown> }
 
-/** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
+/** The tray: the stack of cards it shows, the top one drawn. */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }
+/** What the side panel shows (shell/side.ts): a card's detail, or a pane of thimble's with its arguments. */
+export type SideView = { kind: 'card'; id: string; v: number | null; root: string; region?: string | null } | { kind: 'pane'; pane: string; args: Record<string, unknown>; title?: string }
 
 
 declare module 'claude-code' {
@@ -124,13 +126,15 @@ declare module 'claude-code' {
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
+      /** what the side panel shows now, and what it showed before (esc goes back to it), newest last */
+      side: { now: SideView | null; back: SideView[] } | null
       /** the detail's ask line drawn again (shell/detail.tsx): a count the pane and the bar read, so a letter of a
        *  question redraws them alone */
       askline: number
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
       events: { file: string; n: number; bytes?: number }
       /** what takes the keys, newest last (the shell's focus stack): the bar says the keys of the top one */
-      focus: ('detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card')[]
+      focus: ('detail' | 'chips' | 'proposals' | 'tray' | 'card')[]
       /** when a card's state file last changed, by root and id: a drawing that reads the card's state draws again */
       cardver: StateFamily<number>
       /** how many times a pane was asked to draw again, by the pane's instance: its drawings read it */
@@ -141,8 +145,6 @@ declare module 'claude-code' {
       labelsof: StateFamily<unknown>
       /** this session's claims (claims/store.js), as held for the drawing; thimble/claims/<session>.json on disk */
       claims: Record<string, unknown> | null
-      /** the Claims pane while it is open: the message it was opened from */
-      claimpane: { row: string } | null
     }
   }
 }

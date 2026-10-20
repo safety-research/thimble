@@ -231,3 +231,20 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
   ])
   assert.deepEqual(later.map(t => [t.role, t.text]), [['person', 'what share?'], ['claude', 'About 16%.'], ['person', 'and on one wiki alone?'], ['claude', 'About 17%.'], ['person', 'and per day?'], ['claude', ''], ['person', 'and by hour?'], ['claude', 'Mostly 20:00.']])
 })
+
+test("a pane's thread when its module says nothing: one per pane instance, each question about the part its program selected, with the part's refs", async () => {
+  const { paneScope, threadKey: key, nameOf: name, aboutOf: about, firstMessage: first } = await import('../threads.js')
+  await import('../../draw/kit.js')
+  const drawing = globalThis.DrawKit.run("k.select('f2'); return k.stack(k.region('f1', { label: 'events.jsonl', ref: 'events.jsonl#L1-9' }, k.text('events.jsonl 12%')), k.region('f2', { label: 'pages.jsonl', ref: 'pages.jsonl#L1-4' }, k.text('pages.jsonl 3%')))", {}, { w: 60 })
+  const got = paneScope({ pane: 'coverage', stateKey: 'coverage', title: 'Coverage', drawing })
+  assert.deepEqual(got, { scope: { pane: 'coverage', key: 'coverage', title: 'Coverage', region: 'f2', label: 'pages.jsonl' }, label: 'pages.jsonl', refs: ['pages.jsonl#L1-4'] })
+  assert.equal(key(got.scope), 'pane-coverage-coverage', 'one thread per pane, whatever part')
+  assert.equal(about(got.scope), 'pages.jsonl')
+  assert.equal(name({ scope: got.scope }), 'main/Coverage')
+  assert.match(first({ text: 'why so low?', scope: got.scope, refs: got.refs, about: 'the share of each file Claude read' }), /^why so low\?\n\nAbout: the part "pages\.jsonl" \(f2\) of the panel "Coverage" beside the conversation: the share of each file Claude read\.\nIts rows: pages\.jsonl#L1-4/)
+  // nothing selected: about the pane, by its title
+  const none = paneScope({ pane: 'coverage', stateKey: 'coverage', title: 'Coverage', drawing: globalThis.DrawKit.run("return k.text('x')", {}, { w: 20 }) })
+  assert.deepEqual(none, { scope: { pane: 'coverage', key: 'coverage', title: 'Coverage' }, label: 'Coverage', refs: [] })
+  assert.equal(name({ scope: { object: '01-saves' }, card: 'Saves per day' }), 'main/Saves per day')
+  assert.equal(name({ scope: { row: 'r', mark: { kind: 'cite', ref: 'q1', label: '6,543 saves' } } }), 'main/6,543 saves')
+})

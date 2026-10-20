@@ -1,47 +1,58 @@
-// thread.ts: side threads (CONTRACT 6). A thread answers the person's questions about one part of a card, or one mark
-// of a message, with turns of its own, and can query the data with `thimble`. Main's conversation learns nothing of it
-// unless the person sends the result there (`m` in the detail).
+// thread.ts: side threads (CONTRACT 6). Whatever opens in the side panel is a thread (side.ts): a card's detail, a
+// citation or an explainer, the thread list, any pane of thimble's. The person asks it in the panel's input bar; it
+// answers about the part they selected, with turns of its own, and can query the data with `thimble`. Main's
+// conversation learns nothing of it unless the person sends the result there (`m` in the panel).
 //
 // The mechanism: one subagent of the session per thread, started by this module with $.agent.spawn, no turn of main.
 //   - It is the lightest thing that can query the data. $.model.complete and $.model.fork have no tools; a loop of our
 //     own around them would run Bash on the model's behalf, outside Claude Code's permission checks. A subagent's Bash
 //     calls go through the same checks as main's: Manual mode asks, auto mode classifies.
 //   - Its type is registered once, on the first question (`thimble:thread`: a short system prompt, Bash, Read,
-//     Grep and Glob, no CLAUDE.md), and is offered to no model except while a thread is asked or the detail is open,
+//     Grep and Glob, no CLAUDE.md), and is offered to no model except while a thread is asked or the panel is open,
 //     since Claude Code checks the offer again when it resumes an agent. So main's agent listing does not name it.
-//   - A later question resumes the same agent ($.session.send), so a thread keeps its context; asked in the terminal,
-//     the thread's transcript takes the main view ($.ui.view), and the prompt then writes to it directly.
+//   - A later question resumes the same agent ($.session.send), so a thread keeps its context across questions. Its
+//     answers show in the panel, under what it is on, never in the main column.
 //   - Its end never reaches main: Claude Code's hand-back of it (auto mode) and its task notifications are dropped as
 //     they enter main's queue.
 //   - It is written to <root>/thimble/threads/<session>/<id>.json at each turn, which the browser reads:
 //     {id, session, scope, title (its first question, short), at, turns: [{role: 'person' | 'claude', text, at}], ...}
-//     with the agent, the status, the card's title and the questions as asked beside them.
+//     with the agent, the status, the card's title, the questions as asked, and its anchor (what to open to show it
+//     again: a card, or a pane with its arguments) beside them. The cards its agent saved are kept with the question
+//     they answer, and drawn under that answer.
 //   - The part the person has selected now is kept in threads/<session>/sel/<id>.json, which the agent reads for a
-//     message typed in its own view (that message carries no part of its own).
-//   - The bar above the prompt (shell.tsx) counts the session's threads, again at each change.
+//     message that names no part.
+//   - The bar above the prompt (shell.tsx) counts the session's threads, again at each change; `t` or a click on the
+//     count lists them (side.ts), and opening one shows its panel again with its conversation.
 // The plugin's server never starts `claude`; nothing here runs unless the person asked a question.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { recount } from './shell'
 import { promptText } from '../prompts/prompts'
 import { claimAgent } from '../telemetry/telemetry'
-import { aboutOf, firstMessage, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
+import { aboutOf, firstMessage, nameOf, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
 import { sessionKey } from '../hooks/conversation'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Scope = { object?: string; v?: number | null; region?: string | null; label?: string; row?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string }; claim?: string; said?: string }
-export type Ask = { text: string; scope: Scope; refs?: string[]; root?: string; card?: { id: string; v: number | null; title?: string; file?: string } | null }
-export type Turn = { role: 'person' | 'claude'; text: string; at: string; calls?: string[]; about?: string }
+export type Scope = { object?: string; v?: number | null; region?: string | null; label?: string; row?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string }; pane?: string; key?: string; title?: string }
+export type CardRef = { id: string; v: number | null; root: string }
+/** What to open to show a thread again: a card's detail (on a part), or a pane of thimble's with its arguments. */
+export type Anchor = { kind: 'card'; id: string; v: number | null; root: string; region?: string | null } | { kind: 'pane'; pane: string; args: Record<string, unknown>; title?: string }
+export type Ask = { text: string; scope: Scope; refs?: string[]; root?: string; card?: { id: string; v: number | null; title?: string; file?: string } | null; anchor?: Anchor | null; about?: string }
+export type Turn = { role: 'person' | 'claude'; text: string; at: string; calls?: string[]; about?: string; cards?: CardRef[] }
 export type Thread = {
   id: string; key: string; session: string; agentId: string | null; scope: Scope; title: string; card: string; root: string
   status: 'asking' | 'running' | 'done' | 'failed'
-  asks: { text: string; scope: Scope; sent: string; at: string }[]
+  asks: { text: string; scope: Scope; sent: string; at: string; refs?: string[]; cards?: CardRef[] }[]
   turns: Turn[]
+  anchor?: Anchor | null
+  info?: { card?: Ask['card']; about?: string }
   error?: string; at: string
 }
+/** A thread as a pane reads it (the thread list, the panel's conversation). */
+export type ThreadRow = { key: string; name: string; scope: Scope; status: string; asks: number; at: string; anchor: Anchor | null; turns: { role: string; text: string; about?: string; calls?: string[]; cards?: CardRef[] }[]; error?: string }
 
 export const TYPE = 'thimble:thread'
 const THREAD = { plugin: 'thimble', key: 'thread' } as const
@@ -58,9 +69,12 @@ let windowOpen = false
 // while a thread answers, its turns are read again every few seconds, so its steps show as they come
 let poll: { cancel: () => void } | null = null
 
-/** This session's side threads, as a pane reads them (the tray shows a mark's): key, scope, status, turns, error. */
-export function threadList(): { key: string; scope: Scope; status: string; turns: { role: string; text: string }[]; error?: string }[] {
-  return [...threads.values()].map(t => ({ key: t.key, scope: t.scope, status: t.status, turns: t.turns.map(x => ({ role: x.role, text: x.text })), ...(t.error ? { error: t.error } : {}) }))
+/** This session's side threads, as a pane reads them, the newest first: key, name, scope, status, the questions asked,
+ *  the anchor, the turns and the error. */
+export function threadList(): ThreadRow[] {
+  return [...threads.values()]
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)))
+    .map(t => ({ key: t.key, name: nameOf(t), scope: t.scope, status: t.status, asks: t.asks.length, at: t.at, anchor: t.anchor ?? null, turns: t.turns.map(x => ({ role: x.role, text: x.text, ...(x.about ? { about: x.about } : {}), ...(x.calls?.length ? { calls: x.calls } : {}), ...(x.cards?.length ? { cards: x.cards } : {}) })), ...(t.error ? { error: t.error } : {}) }))
 }
 
 /** How many side threads this session has. */
@@ -68,7 +82,7 @@ export function threadCount(): number {
   return threads.size
 }
 
-/** The detail tells the module when it opens and closes: while it is open a thread can be resumed from its view. */
+/** The side panel tells the module when it opens and closes: while it is open a thread can be resumed. */
 export function setThreadWindow(open: boolean): void {
   windowOpen = open
 }
@@ -86,16 +100,20 @@ export async function restoreThreads($: Engine, root?: string): Promise<void> {
   restored.add(dir)
   let names: string[] = []
   try { names = (await $.fs.list(dir)).filter(x => x.name.endsWith('.json')).map(x => x.name) } catch { names = [] }
+  let got = 0
   for (const n of names) {
     try {
       const t = JSON.parse(String(await $.fs.read(`${dir}/${n}`))) as Thread
       if (!t?.key || threads.has(t.key)) continue
       threads.set(t.key, t)
       if (t.agentId) byAgent.set(t.agentId, t.key)
+      got++
     } catch {
       // a file being written: the next question writes it whole again
     }
   }
+  // the bar counts them
+  if (got) $.clock.after(0, () => { void recount($) })
 }
 
 export function threadOf(key: string): Thread | null {
@@ -128,24 +146,59 @@ export async function noteSelection($: Engine, key: string, sel: { region: strin
   const t = threads.get(key)
   if (!t) return
   try {
-    await $.fs.write(`${dirOf(t)}/sel/${t.id}.json`, JSON.stringify({ ...sel, card: t.scope.object, at: new Date().toISOString() }, null, 1))
+    await $.fs.write(`${dirOf(t)}/sel/${t.id}.json`, JSON.stringify({ ...sel, ...(t.scope.object ? { card: t.scope.object } : { pane: t.scope.pane ?? null }), at: new Date().toISOString() }, null, 1))
   } catch {
     // the agent reads the part of the last question instead
   }
 }
 
 /** The thread's turns as the person reads them: each question they asked, with its part, in place of the prompt the
- *  agent got; a message they typed in the agent's own view as it is. */
+ *  agent got; a message they typed in the agent's own view as it is. A resumed agent's transcript may begin where it
+ *  was resumed, or a new agent's where it started again: the turns before the first question it holds are kept as the
+ *  thread had them. */
 function display(t: Thread, turns: { role: 'person' | 'claude'; text: string; calls?: string[] }[]): Turn[] {
   let a = 0
+  let first = -1
   const now = new Date().toISOString()
-  return turns.map((x, i) => {
+  const matches = (x: { text: string }, ask: Thread['asks'][number]) => x.text === ask.sent || x.text.startsWith(ask.text.trim())
+  const fresh: Turn[] = turns.map((x, i) => {
     const at = t.turns[i]?.at ?? now
-    if (x.role !== 'person') return { ...x, at }
-    const ask = t.asks[a]
-    if (ask && (x.text === ask.sent || x.text.startsWith(ask.text.trim()))) { a++; return { role: 'person', text: ask.text, about: aboutOf(ask.scope), at: ask.at } }
+    if (x.role !== 'person') {
+      // the cards its agent saved while it answered the question before
+      const cards = t.asks[a - 1]?.cards
+      return { ...x, at, ...(cards?.length ? { cards } : {}) }
+    }
+    let j = a
+    while (j < t.asks.length && !matches(x, t.asks[j]!)) j++
+    if (j < t.asks.length) {
+      const ask = t.asks[j]!
+      if (first < 0) first = j
+      a = j + 1
+      return { role: 'person', text: ask.text, about: aboutOf(ask.scope), at: ask.at }
+    }
     return { ...x, at }
   })
+  if (first <= 0) return fresh
+  // the turns before the question the transcript begins with: the thread's own, up to that question's
+  let seen = 0
+  const upTo = t.turns.findIndex(x => x.role === 'person' && seen++ === first)
+  return [...(upTo < 0 ? t.turns : t.turns.slice(0, upTo)), ...fresh]
+}
+
+/** A card a thread's agent saved (`thimble save` in its Bash): kept with the question it answers, and drawn under that
+ *  answer as a card under a reply is (side.ts). */
+export async function noteThreadSaves($: Engine, agentId: string, saves: CardRef[]): Promise<void> {
+  const key = byAgent.get(agentId)
+  const t = key ? threads.get(key) : null
+  if (!t || !t.asks.length || !saves.length) return
+  const asks = t.asks.slice()
+  const last = asks[asks.length - 1]!
+  const cards = [...(last.cards ?? []).filter(c => !saves.some(x => x.id === c.id && x.root === c.root)), ...saves.map(x => ({ id: x.id, v: x.v ?? null, root: x.root }))]
+  asks[asks.length - 1] = { ...last, cards }
+  const turns = t.turns.slice()
+  const answer = turns.length && turns[turns.length - 1]!.role === 'claude' ? turns.length - 1 : -1
+  if (answer >= 0) turns[answer] = { ...turns[answer]!, cards }
+  await keep($, { ...t, asks, turns })
 }
 
 async function ensureType($: Engine): Promise<string | null> {
@@ -169,12 +222,11 @@ async function ensureType($: Engine): Promise<string | null> {
 }
 
 /**
- * Ask a side thread: the tray's `↵ ask`, the detail's prompt, the browser page's question. A first question starts the
- * thread's agent; a later one resumes it, naming its part again when the part changed. `view`: show the thread's
- * transcript in the main view (only while answering the person's own prompt or press). Never throws: a question that
- * cannot be asked comes back with `problem`, which the caller shows in one line with its fix.
+ * Ask a side thread: the side panel's input bar, a card's own ask, the browser page's question. A first question
+ * starts the thread's agent; a later one resumes it, naming its part again when the part changed. Never throws: a
+ * question that cannot be asked comes back with `problem`, which the caller shows in one line with its fix.
  */
-export async function askThread($: Engine, ask: Ask, o: { view?: boolean } = {}): Promise<{ thread: Thread | null; problem?: string }> {
+export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread | null; problem?: string }> {
   const text = String(ask.text || '').trim()
   if (!text) return { thread: null, problem: 'an empty question' }
   const scope = ask.scope || {}
@@ -189,6 +241,9 @@ export async function askThread($: Engine, ask: Ask, o: { view?: boolean } = {})
     const session = await sessionKey($)
     const title = text.replace(/\s+/g, ' ').slice(0, 60)
     let t: Thread = threads.get(key) ?? { id: key, key, session, agentId: null, scope, title, card: ask.card?.title || '', root, status: 'asking', asks: [], turns: [], at: now }
+    // what it is on, to open it again from the list, and what its agent is told when it starts again
+    if (ask.anchor) t = { ...t, anchor: ask.anchor }
+    if (ask.card || ask.about) t = { ...t, info: { card: ask.card ?? t.info?.card ?? null, about: ask.about ?? t.info?.about ?? '' } }
     const last = t.asks.at(-1)?.scope ?? null
     let sent = ''
     let delivered = false
@@ -200,9 +255,9 @@ export async function askThread($: Engine, ask: Ask, o: { view?: boolean } = {})
     if (!delivered) {
       // a first question, or a thread whose agent is gone: a new agent, told the earlier turns
       const earlier = t.turns.map(x => `${x.role === 'person' ? 'Q' : 'A'}: ${x.text}`).join('\n').slice(-EARLIER_CHARS)
-      const refs = ask.refs ?? (scope.mark?.ref ? [scope.mark.ref] : [])
-      const selFile = scope.object ? `${dirOf(t)}/sel/${t.id}.json` : ''
-      sent = firstMessage({ text, scope, card: ask.card || null, refs, root, selFile }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : '')
+      const refs = ask.refs ?? t.asks.at(-1)?.refs ?? (scope.mark?.ref ? [scope.mark.ref] : [])
+      const selFile = scope.object || scope.pane ? `${dirOf(t)}/sel/${t.id}.json` : ''
+      sent = firstMessage({ text, scope, card: ask.card || t.info?.card || null, refs, root, selFile, about: ask.about || t.info?.about || '' }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : '')
       const r = await $.agent.spawn({ subagentType: TYPE, prompt: sent, description: `thread · ${aboutOf(scope)}`.slice(0, 60), cwd: root } as Any).catch((err: unknown) => ({ deny: String((err as Error)?.message || err) }))
       if ((r as Any)?.deny || !(r as Any)?.model) {
         t = { ...t, status: 'failed', error: String((r as Any)?.deny || 'no agent started').slice(0, 300) }
@@ -217,10 +272,9 @@ export async function askThread($: Engine, ask: Ask, o: { view?: boolean } = {})
       // its turns are filed under the thread in the session's events
       if (id) claimAgent(id, 'thread', promptId)
     }
-    t = { ...t, scope, status: 'running', error: undefined, asks: [...t.asks, { text, scope, sent, at: now }], turns: [...t.turns, { role: 'person', text, about: aboutOf(scope), at: now }] }
+    t = { ...t, scope, status: 'running', error: undefined, asks: [...t.asks, { text, scope, sent, at: now, ...(ask.refs?.length ? { refs: ask.refs.slice(0, 50) } : {}) }], turns: [...t.turns, { role: 'person', text, about: aboutOf(scope), at: now }] }
     await keep($, t)
     if (scope.region) await noteSelection($, key, { region: scope.region, label: aboutOf(scope), refs: ask.refs || [] })
-    if (o.view && t.agentId) await $.ui.view({ agentId: t.agentId }).catch(() => undefined)
     follow($)
     return { thread: t }
   } finally {

@@ -1,24 +1,28 @@
-// atlas.js: the Claims pane, a program on the card runtime (draw/kit.js) over the session's claims (store.js). It is
-// docked at the right, where the card detail opens, and shows the claims as the atlas did, fitted to cells:
+// atlas.js: the Claims pane, a program on the card runtime (draw/kit.js) over the session's claims (store.js). It opens
+// in the side panel, where the card detail opens (claims/term.ts openSide), and shows the claims as the atlas did,
+// fitted to cells:
 //
 //   the map      one row per cluster: its name, a dot per claim in the color of its kind (fact, finding, judgment
 //                call, event, claim), how many, and its lead claim. At its left an arc joins two clusters whose claims
 //                bear on each other (a correction, a relation of the folder's map, a row both cite); the arcs of the
 //                selected cluster are bright, a correction's in amber.
 //   the cluster  the selected cluster's claims, one row each; a corrected claim is a hollow dot, one said twice or more
-//                a heavier one
-//   the claim    what the selected claim means (precisely, judgment, not stated, based on), where it was said, its
-//                evidence rows (each citation with what its rows say; a press or its digit opens it as a citation
-//                opens, in the tray), the claims it bears on (a press goes there), and its side thread
+//                a heavier one. The selected claim is open under its row: what it means (precisely, judgment, not
+//                stated, based on), where it was said, its evidence rows (each citation with what its rows say; a
+//                press or its digit opens it as a citation opens, over the pane) and the claims it bears on (a press
+//                goes there)
 //
-// The ring (Claude Code's focus, ↑↓) walks the rows; a cluster or a claim it lands on is selected. A question typed
-// while the pane is open goes to the selected claim's side thread (the host's: claims/term.ts).
+// The side panel holds the keys: the ring (↑↓) walks the rows and selects what it lands on (k.select), a cluster, a
+// claim or one of the claim's rows (↵ on a cluster goes into its claims), and the panel's thread asks about that row,
+// with its refs. So a question with the
+// ring on a claim is about the claim and its citations, and one on an evidence row about that evidence.
 //
-//   state: {cluster, claim}
-//   reads: claims (the store with the folder's offer), threads (the session's side threads)
+//   state: {cluster, claim, part: the row selected}
+//   reads: claims (the store with the folder's offer), threads (whether the panel's thread has a conversation, which
+//          takes rows under the pane)
 //   wants: {rows: [ref]} for each evidence row of the selected claim (what its rows say, through the kernel)
-//   asks of the host: cite {ref, label} (opens the tray), said {row} (the message where it was said), folder (asks
-//   Claude to map the folder's claims, a press on its row, never a key: it starts a turn), ring {region}, close
+//   asks of the host: open {mark} (a citation, over the pane), said {row} (the message where it was said), folder
+//   (asks Claude to map the folder's claims: a press on its row, never a key, since it starts a turn)
 import { chainWords } from '../shell/object.js'
 import { threadKey } from '../shell/threads.js'
 import { KINDS, clusterLinks, kindName, kindRank, kindTone, laneLinks, related, viewOf } from './store.js'
@@ -76,15 +80,24 @@ export default {
     const store = stores.claims && Array.isArray(stores.claims.claims) ? stores.claims : { claims: [], clusters: [], gaps: [] }
     const view = viewOf({ clusters: [], gaps: [], ...store })
     const groups = view.groups.map(g => ({ id: g.id ?? null, name: g.name, folder: g.from === 'folder', claims: g.claims.map(c => c.id) }))
+    // the panel's thread (one per pane: shell/side.ts) and whether it has a conversation, which takes rows under the pane
+    const key = threadKey({ pane: 'claims', key: 'claims' })
+    const talk = (Array.isArray(stores.threads) ? stores.threads : []).some(t => t && t.key === key && (t.turns || []).length)
     const kinds = {}
     for (const c of view.flat) kinds[c.kind] = (kinds[c.kind] || 0) + 1
-    const threads = (Array.isArray(stores.threads) ? stores.threads : []).filter(t => /^claim-/.test(String(t.key || '')))
     return {
-      total: view.total, clusters: view.clusters, last: view.last, gaps: (view.gaps || []).slice(-3),
+      talk, total: view.total, clusters: view.clusters, last: view.last, gaps: (view.gaps || []).slice(-3),
       claims: view.flat.map(slim), groups, links: clusterLinks(view), kinds,
       offer: store.offer || null, folder: store.folder || null, asked: store.folderAsked || null,
-      threads: threads.map(t => ({ key: t.key, status: t.status || '', error: t.error || '', turns: (t.turns || []).slice(-4).map(x => ({ role: x.role, text: String(x.text || '') })) })),
     }
+  },
+  // what the panel's thread is about, beside the row selected (shell/side.ts): the claim open in the pane. Text a
+  // model reads (the thread's agent), logged with the prompts
+  thread(args, state, data) {
+    const c = ((data && data.claims) || []).find(x => x.id === (state && state.claim))
+    if (!c) return { about: 'the claims of this session, in clusters' }
+    const said = (c.said || []).find(x => x.sentence || x.quote)
+    return { about: `the claims of this session, in clusters; the claim open in it is "${cut(c.text, 200)}" (${kindName(c.kind)}, ${whenOf(c) || 'this session'}${said ? `, said as "${cut(said.sentence || said.quote, 240)}"` : ''})` }
   },
   program,
 }
@@ -112,14 +125,14 @@ export function program(k, data) {
   const rel = claim ? related(claims, claim.id, MAX_RELATED) : []
   const evidence = claim ? (claim.sources || []).slice(0, MAX_EVIDENCE) : []
 
-  // ---- what the person does
+  // ---- what the person does: each a new selection, the row selected among them (`part`)
   const pickCluster = id => {
     const g = groupOf(id)
-    return g ? { cluster: g.id, claim: leadOf(g)?.id ?? null } : null
+    return g ? { cluster: g.id, claim: leadOf(g)?.id ?? null, part: clusterRegion(g.id) } : null
   }
   const pickClaim = id => {
     const c = byId.get(id)
-    return c ? { cluster: c.cluster ?? null, claim: c.id } : null
+    return c ? { cluster: c.cluster ?? null, claim: c.id, part: claimRegion(c.id) } : null
   }
   const regionOf = r => {
     const s = String(r || '')
@@ -131,22 +144,22 @@ export function program(k, data) {
     if (ev) return { evidence: evidence[Number(ev[1]) - 1] || null }
     return { other: s }
   }
-  // the ring on a cluster or a claim of the list selects it; on a row under the claim it selects nothing
+  // the ring on a cluster or a claim selects it; on one of the open claim's rows it selects that row, the claim kept
+  const rowsHere = new Set(['said', ...evidence.map((_, i) => `ev-${i + 1}`), ...rel.map(r => `rel-${r.id}`)])
   k.on('focus', e => {
     const r = regionOf(e.region)
     if (r.cluster) return pickCluster(r.cluster.id)
     if (r.claim && !r.related) return pickClaim(r.claim.id)
+    if (rowsHere.has(String(e.region))) return { cluster: group?.id ?? null, claim: claim?.id ?? null, part: String(e.region) }
     return null
   })
-  const openEvidence = s => { if (s) k.do('cite', { ref: s.ref, label: s.label || s.ref }) }
+  const openEvidence = s => { if (s) k.do('open', { mark: { kind: 'cite', ref: s.ref, label: s.label || s.ref } }) }
   k.on('press', e => {
     const r = regionOf(e.region)
-    if (r.cluster) return pickCluster(r.cluster.id)
-    if (r.claim) {
-      // a related claim: it is selected, and the ring goes to its row
-      if (r.related) k.do('ring', { region: claimRegion(r.claim.id) })
-      return pickClaim(r.claim.id)
-    }
+    // ↵ (or a click) on a cluster goes into it: its lead claim selected, open under its row, the ring there
+    if (r.cluster) { const p = pickCluster(r.cluster.id); return p && p.claim ? { ...p, part: claimRegion(p.claim) } : p }
+    // a claim, or a claim the open one bears on: it is selected, open under its row
+    if (r.claim) return pickClaim(r.claim.id)
     if (r.evidence) { openEvidence(r.evidence); return null }
     if (r.other === 'said' && claim?.said?.[0]?.row) { k.do('said', { row: claim.said[0].row }); return null }
     if (r.other === 'folder') { k.do('folder'); return null }
@@ -163,25 +176,25 @@ export function program(k, data) {
   // ↵ presses the row the ring is on (Claude Code's own press); named here so the bar says it
   k.on('return', () => null, 'open')
   evidence.forEach((s, i) => k.on(String(i + 1), () => { openEvidence(s); return null }, 'evidence'))
-  k.on('esc', () => { k.do('close'); return null }, 'close')
 
   // ---- the head: "Claims  14 claims · 4 clusters · turn 3", and the kinds present with how many
   const lines = []
   const counts = `${data.total} claim${data.total === 1 ? '' : 's'} · ${data.clusters} cluster${data.clusters === 1 ? '' : 's'}${data.last != null ? ` · to turn ${data.last}` : ''}`
   lines.push(k.text(`{c2:**Claims**}  {dim:${k.escape(counts)}}`, { wrap: false }))
+  const extra = []
   const kinds = KINDS.filter(x => data.kinds && data.kinds[x.id])
-  if (kinds.length) lines.push(k.text(kinds.map(x => `{${x.tone}:●} {dim:${x.name} ${data.kinds[x.id]}}`).join('   '), { wrap: false }))
-  for (const g of data.gaps || []) lines.push(k.text(`{bad:Turn ${g.turn} was not read:} {dim:${k.escape(cut(g.why || 'the check of the answer failed', W - 24))}}`, { wrap: false }))
+  if (kinds.length) extra.push(k.text(kinds.map(x => `{${x.tone}:●} {dim:${x.name} ${data.kinds[x.id]}}`).join('   '), { wrap: false }))
+  for (const g of data.gaps || []) extra.push(k.text(`{bad:Turn ${g.turn} was not read:} {dim:${k.escape(cut(g.why || 'the check of the answer failed', W - 24))}}`, { wrap: false }))
   // the folder: its map, the offer to make one, or that Claude is making it
   const folderLine = folderWords(k, data)
-  if (folderLine) lines.push(folderLine)
+  if (folderLine) extra.push(folderLine)
 
   if (!claims.length) {
-    lines.push(k.text(' '))
+    lines.push(...extra, k.text(' '))
     lines.push(k.text('{dim:No claims yet. After each turn of work, the claims Claude and you made come here, in clusters.}'))
     return k.stack(lines)
   }
-  lines.push(k.text(' '))
+  extra.push(k.text(' '))
 
   // ---- the map: one row per cluster, the arcs of their links at its left
   const rowOf = new Map(groups.map((g, i) => [String(g.id), i]))
@@ -191,6 +204,7 @@ export function program(k, data) {
   if (lanes > 6) ({ links, lanes } = laneLinks((data.links || []).filter(touches), id => rowOf.get(String(id))))
   const P = lanes ? lanes + 1 : 0
   const arcs = arcRows(groups.length, links, P, touches)
+  const mapRows = []
   const nameW = Math.min(26, Math.max(12, ...groups.map(g => Array.from(String(g.name)).length + (g.folder ? 9 : 0) + 2)))
   const dotsW = Math.min(16, Math.max(4, ...groups.map(g => g.claims.length + 1)))
   groups.forEach((g, i) => {
@@ -208,14 +222,14 @@ export function program(k, data) {
       k.text(lead ? `{dim:${k.escape(cut(lead.text, rest))}}` : '', { wrap: false, grow: 1 }),
       { gap: 1 })
     const region = k.region(clusterRegion(g.id), { label: `cluster: ${g.name}` }, row)
-    lines.push(P ? k.beside(k.text(arcs[i], { w: P, wrap: false }), region, { gap: 0 }) : region)
+    mapRows.push(P ? k.beside(k.text(arcs[i], { w: P, wrap: false }), region, { gap: 0 }) : region)
   })
 
   // ---- the selected cluster's claims, the selected one open under its row: what it means, where it was said, its
   // evidence, what it bears on and its thread, so the ring walks from a claim into its own rows and on to the next
   const list = (group?.claims || []).map(id => byId.get(id)).filter(Boolean)
-  lines.push(k.text(' '))
-  lines.push(k.text(`{dim:── ${k.escape(cut(group?.name || 'between clusters', W - 30))} · ${list.length} claim${list.length === 1 ? '' : 's'} ${'─'.repeat(Math.max(2, W - Array.from(String(group?.name || '')).length - 22))}}`, { wrap: false }))
+  const mid = [k.text(' ')]
+  mid.push(k.text(`{dim:── ${k.escape(cut(group?.name || 'between clusters', W - 30))} · ${list.length} claim${list.length === 1 ? '' : 's'} ${'─'.repeat(Math.max(2, W - Array.from(String(group?.name || '')).length - 22))}}`, { wrap: false }))
   const rows = []
   let cutRow = false
   for (const c of list) {
@@ -228,9 +242,11 @@ export function program(k, data) {
         k.text(`{dim:${k.escape(when)}}`, { wrap: false, align: 'right' }),
         { gap: 2 })))
   }
-  if (claim) k.select(claimRegion(claim.id))
+  // the row selected: the one the state names while it is drawn, else the selected claim's
+  const part = st.part && (st.part === clusterRegion(group?.id) || st.part === claimRegion(claim?.id) || rowsHere.has(st.part) || (st.part === 'said' && claim)) ? st.part : claim ? claimRegion(claim.id) : null
+  if (part) k.select(part)
 
-  const head = lines
+  const top = lines
   const panel = []
   const thread = []
   if (claim) {
@@ -242,7 +258,7 @@ export function program(k, data) {
     const meta = [kindName(claim.kind), whenOf(claim), (claim.n || 1) >= 2 ? `said ${claim.n} times` : '', claim.revised_by ? `corrected by turn ${byId.get(claim.revised_by)?.turn ?? '?'}` : '', typeof claim.n_of === 'number' ? `in ${claim.n_of}${typeof claim.of === 'number' ? ` of ${claim.of}` : ''}` : ''].filter(Boolean)
     add(`{dim:${k.escape(meta.join(' · '))}}`)
     const said = claim.said?.find(s => s.by !== 'folder' && (s.sentence || s.quote))
-    if (said) add(`{dim:“${k.escape(cut(said.sentence || said.quote, PW - 2))}”}`, 'said', { label: 'where it was said' })
+    if (said) add(`{dim:“${k.escape(cut(said.sentence || said.quote, PW - 2))}”}`, 'said', { label: `where "${cut(claim.text, 60)}" was said`, ref: (claim.sources || []).map(x => x.ref).slice(0, 6) })
     const part = (label, text, tone = 'dim') => {
       const body = wrap(text, PW - LABEL - 1)
       body.slice(0, 2).forEach((l, i) => add(`{${tone}:${(i ? '' : label).padEnd(LABEL)}}${k.escape(i === 1 && body.length > 2 ? cut(l + ' ' + body.slice(2).join(' '), PW - LABEL - 1) : l)}`))
@@ -273,60 +289,55 @@ export function program(k, data) {
       for (const r of rel) {
         const c = byId.get(r.id)
         if (!c) continue
-        add(`{${kindTone(c.kind)}${c.revised_by ? '-faint' : ''}:${dotOf(c)}} {dim:${k.escape(r.why.padEnd(16))}}${k.escape(cut(c.text, PW - 20))}`, `rel-${c.id}`, { label: `${r.why}: ${c.text}` })
+        add(`{${kindTone(c.kind)}${c.revised_by ? '-faint' : ''}:${dotOf(c)}} {dim:${k.escape(r.why.padEnd(16))}}${k.escape(cut(c.text, PW - 20))}`, `rel-${c.id}`, { label: `claim: ${c.text} (${r.why} "${cut(claim.text, 40)}")`, ref: (c.sources || []).map(x => x.ref).slice(0, 6) })
       }
-    }
-    const t = (data.threads || []).find(x => x.key === threadKey({ claim: claim.id }))
-    if (t && t.turns.length) {
-      const say = markup => thread.push(k.text(I + markup, { wrap: false }))
-      say('{dim:thread}')
-      const last = t.turns.map(x => x.role).lastIndexOf('person')
-      for (const x of t.turns.slice(Math.max(0, last))) {
-        const text = String(x.text || '').replace(/`/g, '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1')
-        // the answer keeps its lines (a list stays a list), each wrapped
-        const body = text.split(/\n+/).map(l => l.trim()).filter(Boolean).flatMap(l => wrap(l, PW - 3)).slice(0, x.role === 'person' ? 1 : 5)
-        body.forEach((l, i) => say(x.role === 'person' ? `{accent:❯} **${k.escape(l)}**` : `${i ? '  ' : '⏺ '}${k.escape(l)}`))
-      }
-      if (t.status === 'running') say('{warn:✻ answering…}')
-      if (t.status === 'failed') say(`{bad:× ${k.escape(cut(t.error || 'the thread stopped', PW - 4))}}`)
     }
   }
-  return k.stack(fit(k, head, rows, list.findIndex(c => c.id === claim?.id), panel, thread))
+  return k.stack(fit(k, { top, extra, map: mapRows, mapAt: groups.findIndex(g => String(g.id) === String(group?.id)), mid, rows, at: list.findIndex(c => c.id === claim?.id), panel }, data.talk))
 }
 
 /**
  * The pane in the rows it has, never taller (a pane taller than its rows would scroll on ↑↓ instead of moving the
- * ring): the head and the map whole; the selected claim with its rows open under it (cut at their end, the thread's
- * last lines kept); and as many of the cluster's other claims around it as fit, with how many more above and below.
+ * ring), and the selected claim's own rows first: the title; the selected claim with its rows open under it (cut at
+ * their end); the map as a window around the selected cluster, at most a third of the rows; the legend and the folder's
+ * line while they fit; and as many of the cluster's other claims around the selected one as fit. A side cut short says
+ * how many more it has. o: {top, extra, map, mapAt, mid, rows, at, panel}.
  */
-export function fit(k, head, rows, at, panel, thread) {
-  const H = Math.max(12, k.h || 40)
-  const room = H - head.length
-  const sel = Math.max(0, at)
-  const open = at < 0 ? [] : [...panel, ...thread]
-  const all = [...rows.slice(0, sel + 1), ...open, ...rows.slice(sel + 1)]
-  if (all.length <= room) return [...head, ...all]
-  // the open claim's rows first, leaving a row for the claim and room for one claim and a count on each side
-  const pRoom = Math.max(1, room - 1 - 4)
-  const keepT = Math.min(thread.length, 6, Math.max(0, pRoom - 2))
-  const t = at < 0 ? [] : thread.slice(thread.length - keepT)
-  const p = at < 0 ? [] : panel.slice(0, Math.max(0, Math.min(panel.length, pRoom - t.length)))
-  // the other claims around it, as many above as below; a side cut short says how many more it has
+export function fit(k, o, talk = false) {
+  // the side panel's input bar takes its rows under the pane, and a conversation about two fifths of the rest
+  const all0 = k.h || 40
+  const H = Math.max(12, all0 - 4 - (talk ? Math.floor(all0 * 0.4) : 0))
+  const sel = Math.max(0, o.at)
+  const open = o.at < 0 ? [] : o.panel
+  const whole = [...o.top, ...o.extra, ...o.map, ...o.mid, ...o.rows.slice(0, sel + 1), ...open, ...o.rows.slice(sel + 1)]
+  if (whole.length <= H) return whole
+  const more = (n, dir) => k.text(`{dim:  ${dir} ${n} more}`)
+  // a window of at most n rows of a list around its item `at`, a row saying how many more on each side cut
+  const windowOf = (list, at, n) => {
+    if (list.length <= n) return list
+    const m = Math.max(1, n - 2)
+    const from = Math.max(0, Math.min(list.length - m, at - Math.floor(m / 2)))
+    return [...(from ? [more(from, '↑')] : []), ...list.slice(from, from + m), ...(from + m < list.length ? [more(list.length - from - m, '↓')] : [])]
+  }
+  const map = windowOf(o.map, Math.max(0, o.mapAt), Math.max(3, Math.floor(H / 3)))
+  let left = H - o.top.length - map.length - o.mid.length - 1
+  const p = open.slice(0, Math.max(0, Math.min(open.length, left - 2)))
+  left -= p.length
+  const extra = o.extra.length <= left - 2 ? o.extra : []
+  left -= extra.length
+  // the other claims around it, as many above as below
   const aboveAll = sel
-  const belowAll = rows.length - sel - 1
-  let left = room - 1 - p.length - t.length
+  const belowAll = o.rows.length - sel - 1
   const both = aboveAll + belowAll > left
   if (both) left -= 2
-  let up = Math.min(aboveAll, Math.ceil(left / 2))
-  let down = Math.min(belowAll, left - up)
-  up = Math.min(aboveAll, left - down)
-  if (both && up === aboveAll) down = Math.min(belowAll, down + 1)
-  if (both && down === belowAll) up = Math.min(aboveAll, up + 1)
-  const out = [...head]
-  if (up < aboveAll) out.push(k.text(`{dim:  ↑ ${aboveAll - up} more}`))
-  out.push(...rows.slice(sel - up, sel + 1), ...p, ...t, ...rows.slice(sel + 1, sel + 1 + down))
-  if (down < belowAll) out.push(k.text(`{dim:  ↓ ${belowAll - down} more}`))
-  return out.slice(0, head.length + room)
+  let up = Math.min(aboveAll, Math.ceil(Math.max(0, left) / 2))
+  let down = Math.min(belowAll, Math.max(0, left - up))
+  up = Math.min(aboveAll, Math.max(0, left - down))
+  const out = [...o.top, ...extra, ...map, ...o.mid]
+  if (up < aboveAll) out.push(more(aboveAll - up, '↑'))
+  out.push(...o.rows.slice(sel - up, sel + 1), ...p, ...o.rows.slice(sel + 1, sel + 1 + down))
+  if (down < belowAll) out.push(more(belowAll - down, '↓'))
+  return out.slice(0, H)
 }
 
 /** The folder's line under the head: its map (how much it read), Claude making it, or the offer to make one. */

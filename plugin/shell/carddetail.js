@@ -156,7 +156,7 @@ export function beganWord(lastKey, ms, typed) {
   return !!lastKey && /^[a-z]$/.test(lastKey) && ms < 700 && typeof typed === 'string' && /^[\p{L}' ]$/u.test(typed)
 }
 
-/** What a field of the ask line reports as typed, joined to the question being typed (`draft`). The letters a field
+/** What a field of the input bar reports as typed, joined to the question being typed (`draft`). The letters a field
  *  took after `seen` (what it held when drawn, or when last heard) join the end of the question, in the order they
  *  came: so letters that reached the question at the prompt while the field was drawn again are kept. In the field of
  *  the question now (`current`) any other change (a letter deleted, the cursor moved back) is the question as it reads.

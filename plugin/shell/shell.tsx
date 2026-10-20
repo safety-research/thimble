@@ -2,12 +2,14 @@
 //
 //   inline     when Claude saves an object (`thimble save` in Bash), the object is drawn under the turn's last reply, in
 //              cells (draw/term.js, draw/paint.js); a click on a part opens it in the detail.
-//   detail     one pane, the card detail (detail.tsx): header, the card with its parts, one "from" line, the
-//              examples of the selected part, the program behind p, and a side thread (thread.ts): while it is open,
-//              a prompt is a question for the card's thread, which main does not see.
+//   side       one panel beside the conversation (side.ts, detail.tsx): whatever opens there is a thread (thread.ts),
+//              the thing itself at the top (a card's detail, a citation or an explainer, the thread list, a pane), its
+//              conversation under it, an input bar like the prompt at the bottom. Main does not see a thread unless
+//              the person sends its answer there (m).
 //   keys       the bar under the prompt names them: v asks Claude for another view of the answer (visualize.js), as
 //              a turn whose row reads as the press; s opens the squeeze chips (squeeze/); c opens the Claims pane
-//              (claims/); ] steps through the marks and cards; 1 opens the card in focus.
+//              in the side panel (claims/); ] steps through the marks and cards; 1 opens the card in focus; t lists
+//              the session's threads in the side panel.
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
 //              `claude -c` and `--resume` draw the objects under the same replies again. <session> is the
 //              conversation's key (hooks/conversation.ts): a conversation Claude Code continues under a new session id
@@ -28,8 +30,8 @@ import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
-import { askThread, registerThreads, restoreThreads, threadCount, threadList } from './thread'
-import type { Scope as ThreadScope } from './thread'
+import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList } from './thread'
+import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteSeen, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop } from './tray.js'
@@ -47,7 +49,7 @@ import { frameOf as trayFrameOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { mix } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
-import { askClaimThread, claimCount, claimThreadLabel, claimsAction, claimsKeys, claimsOpen, claimsPaneStore, claimsTakeKeys, closeClaims, foldInSaves, toggleClaims } from '../claims/term'
+import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
 import { viewRequest } from './visualize.js'
@@ -445,9 +447,12 @@ async function openCard($: Engine, ref: ObjRef): Promise<void> {
   await openDetail($, ref, null, pk ? { pages: PAGES_DEFAULT } : {})
 }
 
-/** Open a card's detail, on a part (`region`), with its pages all at once or one at a time when `how.pages` says. */
-export async function openDetail($: Engine, at: ObjRef, region: string | null = null, how: { pages?: 'all' | 'one' } = {}): Promise<void> {
+/** Open a card's detail in the side panel, on a part (`region`), with its pages all at once or one at a time when
+ *  `how.pages` says. `how.side`: in place of what the panel shows (the default), over it (esc goes back to it), or as
+ *  it (going back). */
+export async function openDetail($: Engine, at: ObjRef, region: string | null = null, how: { pages?: 'all' | 'one'; side?: 'replace' | 'push' | 'keep' } = {}): Promise<void> {
   const ref = await withVersion($, at)
+  await setSide($, { kind: 'card', id: ref.id, v: ref.v, root: ref.root, region }, how.side ?? 'replace')
   const cur = (await $.state.get(SEL)).value
   // the knobs stay where the person turned them, here or under the reply or in the browser (the card's kept state),
   // else where the detail last had them while it is the same object
@@ -456,8 +461,6 @@ export async function openDetail($: Engine, at: ObjRef, region: string | null = 
   if (how.pages) await patchPaneState($, 'detail', { id: ref.id }, { pages: how.pages })
   await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}), ...(how.pages ? { pages: how.pages } : {}) })
   const o = await loadObject($, ref)
-  // the Claims pane and the detail share the place at the right
-  if (await claimsOpen($)) await closeClaims($)
   await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
 }
 
@@ -693,7 +696,7 @@ async function drawnRecord($: Engine, at: string, text: string): Promise<MsgReco
   return recordFor(kept, { row: at, session: await sessionKey($), text }) as MsgRecord
 }
 
-/** The keys of the row: v and s, and c, which opens the Claims pane. */
+/** The keys of the row: v and s, and c, which opens the Claims pane in the side panel. */
 const ROW_KEYS = [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }, { key: 'c', name: 'claims' }]
 
 /** Whether a person is at this session: `now` (an interactive session), `later` (one Claude Code's background service
@@ -939,6 +942,14 @@ async function focusOrder($: Engine): Promise<{ row: string; i?: number; card?: 
   return out
 }
 
+/** The session's side threads, listed in the side panel (t, a click on the bar's count). */
+async function listThreads($: Engine): Promise<void> {
+  await restoreThreads($, (await rootHere($)) || undefined).catch(() => undefined)
+  await setTray($, null)
+  await setCardFocus($, null)
+  await openThreads($)
+}
+
 async function stepMark($: Engine, dir: number): Promise<void> {
   const list = await focusOrder($)
   const tray = (await $.state.get(TRAY)).value as Tray | null
@@ -959,6 +970,20 @@ async function stepMark($: Engine, dir: number): Promise<void> {
   else await openMark($, next.row, next.i!)
 }
 
+/** ] and [ with a mark of a message in the side panel: the next mark or card in reading order, in the panel in its
+ *  place (esc still goes back to what was under it). */
+async function stepSide($: Engine, frame: TrayFrame | null, dir: number): Promise<void> {
+  if (!frame || frame.row == null) return
+  const list = await focusOrder($)
+  const at = list.findIndex(p => p.row === frame.row && p.i === frame.i)
+  const next = at >= 0 ? list[(at + dir + list.length) % list.length] : null
+  if (!next) return
+  if (next.card) { await openDetail($, next.card, null, { side: 'keep' }); return }
+  const rec = await recordNow($, next.row)
+  const f = rec ? (trayFrameOf(rec, next.i!) as TrayFrame | null) : null
+  if (f) await openMarkSide($, f, { keep: true })
+}
+
 /** A card under a message takes the keys (] reached it): its own keys win while it has the focus, and the bar names
  *  them; 0 gives the keys back. */
 async function focusCard($: Engine, row: string, card: ObjRef): Promise<void> {
@@ -967,14 +992,6 @@ async function focusCard($: Engine, row: string, card: ObjRef): Promise<void> {
   await setCardFocus($, { id: card.id, v: card.v, root: card.root, row })
   await $.state.set(SELROW, row === (await restRow($)) ? null : row)
   await quietly($.ui.scroll({ to: { key: `row-${row}-card-${card.id}` }, block: 'nearest' }))
-}
-
-/** A citation opened in the tray from elsewhere (the Claims pane's evidence rows): its source card, as a citation
- *  inside a card opens. */
-export async function openCite($: Engine, ref: string, label: string): Promise<void> {
-  await setPick($, null)
-  await setCardFocus($, null)
-  await setTray($, trayOpen({ kind: 'cite', ref, label }) as Tray)
 }
 
 /** The tray closes as esc closes it: it leaves the focus stack, and the browser's tray closes with it. */
@@ -986,13 +1003,10 @@ export async function closeTray($: Engine): Promise<void> {
  *  kept where the browser reads it (panes/tray.js). */
 async function setTray($: Engine, tray: Tray | null): Promise<void> {
   const next = tray && tray.stack && tray.stack.length ? tray : null
-  const was = (await $.state.get(TRAY)).value as Tray | null
   await $.state.set(TRAY, next)
   if (next) await pushFocus($, 'tray')
   else await popFocus($, 'tray')
-  // the tray closed over the Claims pane (a claim's evidence opened in it): the pane takes the keys again
-  if (was && !next && (await claimsOpen($))) $.clock.after(0, () => { void claimsTakeKeys($).catch(() => undefined) })
-  await patchPaneState($, 'tray', {}, { stack: next?.stack ?? [], asking: !!next?.asking })
+  await patchPaneState($, 'tray', {}, { stack: next?.stack ?? [] })
 }
 
 /** A pane's shared state changed (here, or in the browser): the terminal's own copies follow it. */
@@ -1000,11 +1014,9 @@ export async function paneStateChanged($: Engine, name: string, _args: Record<st
   if (name !== 'tray') return
   const stack = Array.isArray(state.stack) ? (state.stack as TrayFrame[]) : []
   const now = (await $.state.get(TRAY)).value as Tray | null
-  const next = stack.length ? { stack, asking: !!state.asking } : null
+  const next = stack.length ? { stack } : null
   if (JSON.stringify(now ?? null) !== JSON.stringify(next)) await $.state.set(TRAY, next)
   if (next) { await setCardFocus($, null); await pushFocus($, 'tray') } else await popFocus($, 'tray')
-  // the tray closed over the Claims pane: the pane takes the keys again
-  if (now && !next && (await claimsOpen($))) $.clock.after(0, () => { void claimsTakeKeys($).catch(() => undefined) })
 }
 
 /** The card a tray frame shows, as the tray program wants it (panes/tray.js): its parts and its sections' parts drawn
@@ -1048,6 +1060,8 @@ async function sourceSpec($: Engine, ref: string, label: string, room: number): 
 const WORD_MS = 700
 /** v pressed with nothing proposed, waiting out WORD_MS before it asks Claude (a letter typed meanwhile cancels it). */
 let pendingV: { row: string; cancelled: boolean } | null = null
+/** t pressed at rest, waiting out WORD_MS before it lists the threads (a letter typed meanwhile makes it a word). */
+let pendingT: { cancelled: boolean } | null = null
 
 /** A key of the row under a message, v or s: its line opens (a press on the open one closes it). v with no view
  *  proposed asks Claude for another view at once, once the moment in which it could begin a word has passed. */
@@ -1060,8 +1074,8 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   void recordEvent($, { kind: 'press', verb: key, row, lit: !!v?.lit })
   await setTray($, null)
   await setCardFocus($, null)
-  // c: the Claims pane, at the right
-  if (key === 'c') { await setPick($, null); await toggleClaims($, row); return }
+  // c: the Claims pane, in the side panel
+  if (key === 'c') { await setPick($, null); await openClaims($); return }
   if (key === 'v' && rec && !(v?.lit && Array.isArray(v.proposals) && v.proposals.length)) {
     await setPick($, null)
     const wait = { row, cancelled: false }
@@ -1129,8 +1143,8 @@ export async function answerRow($: Engine): Promise<string | null> {
   return ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
 }
 
-/** The tray as the band draws it: the tray program (panes/tray.js) on its state, the card on top of its stack, or the
- *  mark's side thread once 1 was pressed. Its keys are in the bar. */
+/** The tray as the band draws it: the tray program (panes/tray.js) on its state, the card on top of its stack (1 opens
+ *  it in the side panel as the mark's thread). Its keys are in the bar. */
 async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
   if (!trayTop(tray)) return null
   const w = Math.max(40, Math.min(104, (e.props.bodyColumns ?? 100) - 3))
@@ -1138,7 +1152,7 @@ async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
   const t = await trayScope($)
   if (t) await $.state.get({ plugin: 'thimble', key: 'thread', id: threadKeyOf(t.scope) })
   const { Box } = $.ui.resolve(e) as Any
-  const link = tray.asking ? null : await trayFileLink($, e, trayTop(tray) as TrayFrame)
+  const link = await trayFileLink($, e, trayTop(tray) as TrayFrame)
   return Box({ marginLeft: 2, flexDirection: 'column', children: [await paneEl($, e, 'tray', {}, { w, h: 14 }), ...(link ? [link] : [])] })
 }
 
@@ -1153,20 +1167,6 @@ async function trayFileLink($: Engine, e: Any, top: TrayFrame | null): Promise<A
   if (!Markdown) return null
   const words = link.label.replace(/[[\]\\]/g, c => '\\' + c)
   return Markdown({ key: 'tray-file', text: `↗ [${words}](${link.href})` })
-}
-
-/** A question asked with the tray open: the side thread of its mark (thread.ts), which main does not see. The tray
- *  then shows that thread. Returns the reason Claude Code shows for the dropped prompt. */
-async function askTrayThread($: Engine, text: string): Promise<string | null> {
-  const t = await trayScope($)
-  if (!t) return null
-  const root = (await rootHere($)) || String(await $.session.cwd())
-  const r = await askThread($, { text, root, scope: t.scope as ThreadScope, refs: t.refs, card: null })
-  if (r.problem) return `${r.problem}. Your words are back in the prompt; 0 closes the panel, and the prompt then goes to Claude here.`
-  const tray = (await $.state.get(TRAY)).value as Tray | null
-  if (tray) await setTray($, { ...tray, asking: true })
-  $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-  return `asked the thread of ${cut(t.label, 40)}`
 }
 
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
@@ -1208,8 +1208,8 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 // keys act on (a lit one with its note in place of its name), `] cite & explain` when that message has marks, `1 open
 // detail` when a card is under it. While a pane, the tray or the chips have focus, the
 // left side is their keys instead, and it comes back after. At its right, the session's counts that are not zero: a
-// count that changed is drawn bright for a moment, then dims. Inside a thread (the card detail, a mark's thread) its
-// label names the thread the prompt goes to, `thimble:main/<it>`.
+// count that changed is drawn bright for a moment, then dims; `t N threads` is a press (and t its key) that lists the
+// threads in the side panel. While the side panel is open its label names the thread it shows, `thimble:main/<it>`.
 
 const BRIGHT_MS = 1600
 
@@ -1269,20 +1269,17 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
   }
 }
 
-/** The thread the prompt goes to now, as `thimble:main/<it>`: the open card's, or the tray's mark's. Null in main. */
+/** The thread the side panel shows, as `thimble:main/<it>` (the thread list as `thimble:threads`). Null in main. */
 async function threadInFront($: Engine): Promise<string | null> {
-  const claim = await claimThreadLabel($)
-  if (claim) return claim
-  if (detailIsOpen()) {
-    const sel = (await $.state.get(SEL)).value as Sel | null
-    return sel && !sel.cite && !sel.cites ? `thimble:main/${sel.id}` : null
+  if (!detailIsOpen()) return null
+  const v = await sideNow($)
+  if (v?.kind === 'pane') {
+    if (v.pane === 'threads') return 'thimble:threads'
+    const s = paneSubject(v)
+    return s ? `thimble:${s.name}` : null
   }
-  const tray = (await $.state.get(TRAY)).value as Tray | null
-  if (tray?.asking) {
-    const t = await trayScope($)
-    if (t) return `thimble:main/${cut(t.label, 32)}`
-  }
-  return null
+  const sel = (await $.state.get(SEL)).value as Sel | null
+  return sel && !sel.cite && !sel.cites ? `thimble:main/${sel.id}` : null
 }
 
 // ------------------------------------------------------------------------------------------------ the focus stack
@@ -1290,9 +1287,9 @@ async function threadInFront($: Engine): Promise<string | null> {
 /** What takes the keys, newest last: each surface pushes itself as it opens and leaves as it closes (the detail, the
  *  squeeze chips, v's proposals, the tray, a card under a reply). The bar says the keys of
  *  the top one alone, read from this one state, so it redraws whenever the stack changes. */
-type FocusKind = 'detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card'
+type FocusKind = 'detail' | 'chips' | 'proposals' | 'tray' | 'card'
 const FSTACK = { plugin: 'thimble', key: 'focus' } as const
-const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'claims', 'detail']
+const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'detail']
 
 export async function pushFocus($: Engine, kind: FocusKind): Promise<void> {
   const now = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
@@ -1329,11 +1326,6 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   if (kind === 'detail') {
     const d = await detailKeys($)
     return d ? { keys: d } : undefined
-  }
-  if (kind === 'claims') {
-    // the Claims pane's own keys, as its program names them (claims/atlas.js), and where a typed question goes
-    const keys = await claimsKeys($)
-    return keys ? { keys } : undefined
   }
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (kind === 'chips') {
@@ -1392,7 +1384,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
     if (lit) return { key: lit[1]!, words: `● ${lit[2]}`, color: keyColor(lit[1]!, theme), short: `● ${lit[2]!.split(/\s+/)[0]}` }
     const t = seg.split(' ')
     // a phrase with no key (`type to ask about the part`): words alone, which a narrow bar cuts to the word that says
-    // what it is for (`ask`; the ask line in the pane says the rest)
+    // what it is for (`ask`; the input bar in the side panel says the rest)
     if (t[0]!.length > 3 && /^[a-z]+$/.test(t[0]!)) return { key: '', words: seg, ...(/^type to ask\b/.test(seg) ? { short: 'ask' } : {}) }
     // the key, and the keys after it that share its words: symbols (`[ ]`, `↑ ↓`) and single letters (`n p`)
     let n = 1
@@ -1508,7 +1500,8 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   noteBar(now, left)
   const items: [string, number, string][] = c ? [
     ['claims', c.claims ?? 0, c.claims === 1 ? '1 claim' : `${fmtN(c.claims ?? 0)} claims`],
-    ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
+    // t is its key: the list of them in the side panel
+    ['threads', c.threads, c.threads === 1 ? 't 1 thread' : `t ${fmtN(c.threads)} threads`],
     ['cov', c.cov, `coverage ${percent(c.cov)}`],
   ] : []
   const counts = items.filter(([, n]) => n > 0).map(([id, , text]) => ({ id, text, bright: now - (c!.changed[id] ?? 0) < BRIGHT_MS }))
@@ -1525,7 +1518,14 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), ...(g.bold ? { bold: true } : {}), children: `${g.key ? ' ' : ''}${g.words}` })] : []),
     ]),
   ]
-  const countEls = fit.counts.flatMap((x, i) => [...(i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []), Text({ key: `count-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.text })])
+  // the threads' count is a press (and t is its key): the list of them in the side panel
+  const countEls = fit.counts.flatMap((x, i) => {
+    const words = Text({ key: `count-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.id === 'threads' ? x.text.slice(2) : x.text })
+    const el = x.id === 'threads' && !fit.cut
+      ? Button({ key: 'bar-threads', plain: true, label: 'list the threads', onPress: () => listThreads($), children: [Text({ key: 'count-key', color: FOCUS[theme], children: 't ' }), words] })
+      : x.id === 'threads' ? Text({ key: 'count-threads', children: [Text({ color: FOCUS[theme], children: 't ' }), words] }) : words
+    return [...(i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []), el]
+  })
   if (fit.cut) {
     // narrower than the shortest form: one line, cut at its end (no presses: the keys still work)
     return Box({ width: w, children: [Text({ key: 'bar-cut', wrap: 'truncate-end', children: [...label, ...fit.left.flatMap(segText), ...(countEls.length ? [Text({ children: '   ' }), ...countEls] : [])] })] })
@@ -1536,7 +1536,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
     : segText(g, i))
   return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [...label, ...leftEls] }),
-    ...(countEls.length ? [Box({ key: 'bar-counts', flexShrink: 0, children: [Text({ key: 'bar-right', wrap: 'truncate-end', children: countEls })] })] : []),
+    ...(countEls.length ? [Box({ key: 'bar-counts', flexShrink: 0, flexDirection: 'row', children: countEls })] : []),
   ] })
 }
 
@@ -1626,6 +1626,10 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   if (pendingV && opened && opened.key === 'v' && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
     return { box: { text: `v${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingV) { pendingV.cancelled = true; pendingV = null } } }
   }
+  // and straight after t, while t waits to list the threads
+  if (pendingT && opened && opened.key === 't' && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
+    return { box: { text: `t${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingT) { pendingT.cancelled = true; pendingT = null } } }
+  }
   // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-3 chip,
   // 0 original, s done)
   if (pick && pick.verb === 's' && !tray && (await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k }))) {
@@ -1640,18 +1644,11 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     if (was && now - was.at < 700 && /^\p{L}$/u.test(k)) {
       return { box: { text: `${was.key}${e.inputText}`, cursor: was.key.length + e.inputText.length }, work: () => paneFire($, 'tray', {}, keyEvent(was.key)) }
     }
-    const ev = k === 'backspace' ? (tray.asking ? null : keyEvent('0')) : k.length === 1 ? keyEvent(k) : null
+    const ev = k === 'backspace' ? keyEvent('0') : k.length === 1 ? keyEvent(k) : null
     if (ev && (await paneTakes($, 'tray', {}, ev))) {
       const letter = /^\p{L}$/u.test(k)
       return { box: consume, work: async () => { await paneFire($, 'tray', {}, ev); if (letter) trayKeyed = { key: k, at: now } }, ...(letter ? { word: () => paneFire($, 'tray', {}, ev) } : {}) }
     }
-    return { box: null }
-  }
-  // the Claims pane open: its program's keys (claims/atlas.js: 1–9 open the selected claim's evidence); any other key
-  // types, since a question typed now goes to the selected claim's side thread
-  if (await claimsOpen($)) {
-    const ev = /^[0-9]$/.test(k) ? keyEvent(k) : null
-    if (ev && (await paneTakes($, 'claims', {}, ev))) return { box: consume, work: () => paneFire($, 'claims', {}, ev).then(() => undefined) }
     return { box: null }
   }
   // v's line open under a message: the proposals program's keys (1–9 pick, 0 close)
@@ -1700,6 +1697,17 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     let made: string | null = null
     const undo = async () => { keyOpened = null; if (made) await dismissNow($, made, true) }
     return { box: consume, work: async () => { made = await catchUpNow($); keyOpened = { key: k, at: now, undo } }, word: undo }
+  }
+  // t with threads: the list of them in the side panel (the bar's `t N threads`), once WORD_MS has passed with no
+  // letter after it (a letter makes t the start of a word, as after v)
+  if (k === 't' && !pick && threadCount() > 0) {
+    const wait = { cancelled: false }
+    const undo = () => { wait.cancelled = true; if (pendingT === wait) pendingT = null; keyOpened = null }
+    return { box: consume, work: () => {
+      pendingT = wait
+      keyOpened = { key: 't', at: now }
+      $.clock.after(WORD_MS, () => { if (wait.cancelled || pendingT !== wait) return; pendingT = null; void listThreads($) })
+    }, word: undo }
   }
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
   if (k.length === 1 && ROW_KEYS.some(v => v.key === k)) {
@@ -1839,8 +1847,10 @@ async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unkno
   await writeCardState($, ref.root, ref.id, { state: got.state, region }, 'terminal')
   if (got.ask?.text) {
     const refs = got.ask.refs?.length ? got.ask.refs : got.ask.region ? regionRefs(o, got.drawing, got.ask.region).refs : []
-    const r = await askThread($, { text: got.ask.text, scope: { object: ref.id, v: o.version ?? ref.v, ...(got.ask.region ? { region: got.ask.region } : {}), label: got.ask.label }, refs, root: ref.root, card: { id: o.id, v: o.version, title: o.title, file: `${ref.root}/thimble/objects/${o.id}.json` } })
+    const r = await askThread($, { text: got.ask.text, scope: { object: ref.id, v: o.version ?? ref.v, ...(got.ask.region ? { region: got.ask.region } : {}), label: got.ask.label }, refs, root: ref.root, card: { id: o.id, v: o.version, title: o.title, file: `${ref.root}/thimble/objects/${o.id}.json` }, anchor: { kind: 'card', id: ref.id, v: null, root: ref.root, region: got.ask.region ?? region } })
     if (r.problem) $.ui.toast(`× ${r.problem}`)
+    // its answer shows in the card's panel, under the card
+    else await openDetail($, { ...ref, v: o.version ?? ref.v }, got.ask.region ?? region)
   } else if (got.ask) {
     // a selection to ask about: the card's detail opens on it, and the next question goes to its thread with it
     await openDetail($, { ...ref, v: o.version ?? ref.v }, got.ask.region ?? region)
@@ -1954,7 +1964,7 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': return arg ? cardStore($, arg) : null
-    // the session's side threads: the tray shows a mark's, the Claims pane a claim's
+    // the session's side threads: the tray shows a mark's
     case 'threads': return threadList()
     // the session's claims, with the folder's offer (claims/term.ts)
     case 'claims': return claimsPaneStore($)
@@ -2028,6 +2038,12 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   if (pane === 'tray') {
     if (name === 'close') { await setTray($, null); return }
     if (name === 'step') { await stepMark($, Number(a.dir) < 0 ? -1 : 1); return }
+    // 1: the card in the side panel as the mark's thread, the input bar holding the keys; the tray gives way to it
+    if (name === 'thread' && a.frame && typeof a.frame === 'object') {
+      const placed = await openMarkSide($, a.frame as TrayFrame, { ask: true })
+      if (placed) await setTray($, null)
+      return
+    }
     if (name === 'input') return
   }
   if (pane === 'proposals') {
@@ -2038,14 +2054,24 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
       return (await pickOption($, row, verb, a.choice)) ? undefined : '× That message is not in this session, so nothing ran. Press v under a message here.'
     }
   }
+  // ] and [ on a mark in the side panel: the next mark or card in its place
+  if (pane === 'mark' && name === 'step') { await stepSide($, (_args.frame ?? null) as TrayFrame | null, Number(a.dir) < 0 ? -1 : 1); return }
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
-  if (pane === 'claims') return claimsAction($, a)
+  // the Claims pane's own actions (claims/term.ts); its citations open as any pane's do (open, below)
+  if (pane === 'claims') { const said = await claimsAction($, a); if (said !== false) return said }
   if (pane === 'detail') return detailAction($, a)
   if (name === 'open') {
+    // what a pane in the side panel opens goes over it there (esc comes back to it)
+    const v = detailIsOpen() ? await sideNow($) : null
+    const push = v?.kind === 'pane' && v.pane === pane
+    // a thread (the thread list): what it is on, its conversation under it
+    if (typeof a.thread === 'string') return (await openThread($, a.thread, { push })) ?? undefined
+    // a citation (a mark's card in the panel, as its thread)
+    if (a.mark && typeof a.mark === 'object') { await openMarkSide($, a.mark as TrayFrame, { push }); return }
     // a place a program opens: a card (its detail), a message (the keys act on it now)
     if (typeof a.object === 'string' && ID.test(a.object)) {
       const root = await rootHere($)
-      if (root) await openDetail($, { id: a.object, v: typeof a.v === 'number' ? a.v : null, root }, typeof a.region === 'string' ? a.region : null)
+      if (root) await openDetail($, { id: a.object, v: typeof a.v === 'number' ? a.v : null, root }, typeof a.region === 'string' ? a.region : null, { side: push ? 'push' : 'replace' })
       return
     }
     if (typeof a.row === 'string' && (await recordNow($, a.row))) {
@@ -2070,6 +2096,7 @@ export const registerShell: Register = (on, options) => {
     const r = await next(e)
     try {
       await $.command.register({ name: 'card', description: "Open a card's detail: /card [card] [part] (no card: the newest)", argumentHint: '[card] [part]', immediate: true })
+      await $.command.register({ name: 'threads', description: "List this session's side threads in the side panel, or open the one a key could not open", immediate: true })
       const row = (await $.config.list()).find(x => x.key === 'theme')
       theme = String(row?.value ?? 'dark').startsWith('light') ? 'light' : 'dark'
     } catch {
@@ -2082,6 +2109,8 @@ export const registerShell: Register = (on, options) => {
       // its message index, and the answers the keys can act on
       await msgFilesNow($)
       await restoreAnswers($)
+      // its side threads, so the bar counts them and t lists them (a resumed conversation's are on disk)
+      await restoreThreads($, (await rootHere($)) || undefined)
     } catch {
       // a session that cannot read its placements draws its new objects only
     }
@@ -2129,6 +2158,8 @@ export const registerShell: Register = (on, options) => {
       const saves = await newSaves($)
       // a map of the folder's claims, saved by main or by the subagent that made it, joins the session's claims
       if (saves.length) await foldInSaves($, saves).catch(() => undefined)
+      // a side thread's saves are kept with its question, and drawn under its answer in the side panel
+      if (input.agentId && saves.length) await noteThreadSaves($, input.agentId, saves.map(x => ({ id: x.id, v: x.v ?? null, root: x.root })))
       if (input.agentId || !saves.length) return r
       if (turn) turn.saves = [...(turn.saves ?? []), ...saves]
       notes = []
@@ -2328,8 +2359,7 @@ export const registerShell: Register = (on, options) => {
       if (e.props.hasSurvey) return next(e)
       const els = $.ui.resolve(e) as Any
       const { Box, Text } = els
-      // the terminal's width, while no pane of ours is docked beside the chat (the band then has the chat's column)
-      if (!(await claimsOpen($))) noteViewport(e.viewport)
+      noteViewport(e.viewport)
       // the conversation's width now, which a long message is measured against (Squeeze's `6 of 24 lines`): the band
       // draws first when a docked pane closes, so the verb row never counts at the width the pane left
       if (e.viewport?.columns) seeView(e.viewport.columns, e.viewport.rows ?? 48)
@@ -2395,21 +2425,6 @@ export const registerShell: Register = (on, options) => {
     // the person's first prompt in a session whose start found no person (a pre-warmed spare, a background job)
     if (person === 'later' && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) await startForPerson($)
     if (e.command) return next(e)
-    try {
-      // a question typed with the tray open asks the mark's side thread; it never reaches main
-      const tray = (await $.state.get(TRAY)).value as Tray | null
-      if (tray && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind === 'composer' && String(e.text || '').trim() && !detailIsOpen()) {
-        const drop = await askTrayThread($, e.text)
-        if (drop) return { drop }
-      }
-      // a question typed with the Claims pane open asks the selected claim's side thread; it never reaches main
-      if (!tray && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind === 'composer' && String(e.text || '').trim() && !detailIsOpen() && (await claimsOpen($))) {
-        const drop = await askClaimThread($, e.text)
-        if (drop) return { drop }
-      }
-    } catch {
-      // a prompt goes in as typed when the chips cannot take it
-    }
     const context: string[] = []
     try {
       context.push(...(await sqNotes($)))
@@ -2461,7 +2476,18 @@ export const registerShell: Register = (on, options) => {
     return {}
   })
 
-  // the detail view (detail.tsx)
+  // /threads: the side panel on what a key could not open there (the terminal too narrow for it then), else the list of
+  // the session's side threads. A command's pane is placed at any width.
+  on('command.run', { command: 'threads' }, async ($, e) => {
+    await restoreThreads($, (await rootHere($)) || undefined).catch(() => undefined)
+    const v = detailIsOpen() ? null : await sideNow($)
+    if (v?.kind === 'pane') { await openSide($, { pane: v.pane, args: v.args, ...(v.title ? { title: v.title } : {}) }); return {} }
+    if (!threadCount()) return { text: 'No side threads yet. Open a card (1) or a citation (] then 1) and type a question in the side panel: its thread is listed here.' }
+    await openThreads($)
+    return {}
+  })
+
+  // the side panel (detail.tsx)
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     try {
       markOpen(true)
@@ -2486,6 +2512,7 @@ export function resetShell(): void {
   person = 'now'
   keyOpened = null
   pendingV = null
+  pendingT = null
   cardKeyed = null
   trayKeyed = null
   placeNext = null

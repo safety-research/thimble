@@ -252,7 +252,8 @@ test('the pane: the head, the map of clusters with their dots and lead claims, t
   assert.match(text, /not stated {2}Of all June edits, or of the reverts\?/)
   assert.match(text, /“The tilt is one editor\.”/)
   // its keys, as the bar names them: no key hint in the pane itself
-  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', 'esc close'])
+  // its keys, as the side panel's bar names them (esc is the panel's own: back, then close)
+  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open'])
   assert.ok(!/esc|↵/.test(text))
 })
 
@@ -261,7 +262,9 @@ test('the pane: the ring on a cluster or a claim selects it; a claim shows its e
   const data = pane.data({ claims: store, threads: [] })
   const run = (state, event, got) => DK.run(pane.program, data, { w: 90, h: 44, mode: 'pane', state, event, got })
   let st = run({}, { type: 'focus', region: 'cl-k2' }).state
-  assert.deepEqual(st, { cluster: 'k2', claim: 'c2' })
+  assert.deepEqual(st, { cluster: 'k2', claim: 'c2', part: 'cl-k2' })
+  // the row selected is what the panel's thread asks about: here the cluster
+  assert.equal(run(st).selected, 'cl-k2')
   const want = run(st).wants.map(w => w.request.rows[0])
   assert.deepEqual(want, ['q4#user=Kestrel@share', 'q7#user=Kestrel@n'])
   const got = { [JSON.stringify({ rows: ['q4#user=Kestrel@share'] })]: { chain: [{ step: 'query', id: 'q4', about: 'share by user' }], rows: ['revisions.jsonl#L28'], count: 517, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }] } }
@@ -270,25 +273,28 @@ test('the pane: the ring on a cluster or a claim selects it; a claim shows its e
   assert.match(text, /“Kestrel saved Lexicon”/)
   assert.match(text, /2 212 of them +reading its rows…/)
   assert.match(text, /precisely {3}41% of the 517 edits saved in June were Kestrel's/)
-  // the digits open the evidence in the tray (the host's cite), the related claim's press goes there
-  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', '1 2 evidence', 'esc close'])
+  // the digits open the evidence as a citation opens (over the pane, in the side panel)
+  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', '1 2 evidence'])
   const opened = run(st, { type: 'key', key: '2' })
-  assert.deepEqual(opened.effects, [{ ref: 'q7#user=Kestrel@n', label: '212 of them', do: 'cite' }])
-  // the ring on an evidence row selects nothing; a press on a cluster selects it
-  assert.deepEqual(run(st, { type: 'focus', region: 'ev-1' }).state, st)
-  assert.deepEqual(run(st, { type: 'press', region: 'cl-k3' }).state, { cluster: 'k3', claim: 'c3' })
-  // a press on the claim's sentence shows the message; esc asks the host to close the pane
+  assert.deepEqual(opened.effects, [{ mark: { kind: 'cite', ref: 'q7#user=Kestrel@n', label: '212 of them' }, do: 'open' }])
+  // the ring on an evidence row selects that row, the claim kept: a question there is about that evidence
+  const ev = run(st, { type: 'focus', region: 'ev-1' })
+  assert.deepEqual(ev.state, { cluster: 'k2', claim: 'c2', part: 'ev-1' })
+  assert.equal(run(ev.state).selected, 'ev-1')
+  assert.deepEqual(run(ev.state).regions.find(r => r.id === 'ev-1').meta.ref, 'q4#user=Kestrel@share')
+  // ↵ on a cluster goes into it: its lead claim selected
+  assert.deepEqual(run(st, { type: 'press', region: 'cl-k3' }).state, { cluster: 'k3', claim: 'c3', part: 'c-c3' })
+  // a press on the claim's sentence shows the message; the pane takes no esc (the panel's own)
   assert.deepEqual(run(st, { type: 'press', region: 'said' }).effects, [{ row: 'r2', do: 'said' }])
-  assert.deepEqual(run(st, { type: 'key', key: 'esc' }).effects, [{ do: 'close' }])
+  assert.ok(!(run(st, { type: 'key', key: 'esc' }).effects || []).length)
 })
 
-test('the pane: a claim with a thread shows its last exchange; with no claims it says how they come; the folder being mapped says so', () => {
+test('the pane: its thread\'s conversation is the panel\'s, under it; with no claims it says how they come; the folder being mapped says so', () => {
   const { store } = turn1()
-  const thread = { key: 'claim-c1', status: 'running', turns: [{ role: 'person', text: 'is this all of June?' }, { role: 'claude', text: 'Yes: all [517](q4#x@n) June edits.' }] }
-  const { text } = draw(pane.data({ claims: store, threads: [thread] }))
-  assert.match(text, /❯ is this all of June\?/)
-  assert.match(text, /⏺ Yes: all 517 June edits\./)
-  assert.match(text, /✻ answering…/)
+  const thread = { key: 'pane-claims-claims', status: 'done', turns: [{ role: 'person', text: 'is this all of June?' }, { role: 'claude', text: 'Yes.' }] }
+  const data = pane.data({ claims: store, threads: [thread] })
+  assert.equal(data.talk, true)
+  assert.ok(!draw(data).text.includes('is this all of June'))
   assert.match(draw(pane.data({ claims: emptyStore('s'), threads: [] })).text, /No claims yet\./)
   assert.match(draw(pane.data({ claims: { ...store, folderAsked: 'T' }, threads: [] })).text, /Claude is mapping the folder's claims/)
   const folder = emptyStore('s')
@@ -315,6 +321,17 @@ test('the pane is never taller than its rows: the cluster\'s claims are a window
   const mid = draw(data, { h: 24, state: { claim: 'c15' } }).text
   assert.match(mid, /↑ \d+ more/)
   assert.match(mid, /↓ \d+ more/)
+  // many clusters and a conversation under the pane: the map is a window, and the selected claim keeps its rows
+  const many = emptyStore('s')
+  const t2 = Array.from({ length: 24 }, (_, i) => `Wiki ${i + 1} had [${i + 10} saves](q${i + 1}#n).`).join(' ')
+  applyTurn(many, { places: [{ row: 'r1', by: 'claude', turn: 1, text: t2 }], turn: 1, out: { claims: Array.from({ length: 24 }, (_, i) => ({ quote: `Wiki ${i + 1} had ${i + 10} saves`, kind: 'finding', cluster: `wiki group ${Math.floor(i / 2) + 1}` })) } })
+  const talk = pane.data({ claims: many, threads: [{ key: 'pane-claims-claims', turns: [{ role: 'person', text: 'q' }] }] })
+  const { d: dm, text: tm } = draw(talk, { h: 44, state: { claim: 'c13' } })
+  assert.ok(tm.split('\n').length <= 44 - 4 - 17, `${tm.split('\n').length} rows`)
+  assert.equal(dm.selected, 'c-c13')
+  assert.match(tm, /evidence/)
+  assert.match(tm, /▸wiki group 7/)
+  assert.match(tm, /more/)
 })
 
 // ------------------------------------------------------------------------------------------------ the folder's estimate

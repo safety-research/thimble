@@ -1,25 +1,29 @@
 // threads.js: side threads, as pure functions. No `$`, no Node, no DOM: the hooks module (thread.ts) and the browser
 // page both use it.
 //
-// A side thread is a question the person asks about one part of a card (or one mark of a message, from the tray),
-// answered by a subagent of the session that can query the data with `thimble`. It has its own turns. Main's
+// A side thread is the conversation of whatever opens in the side panel: a card's detail, a citation or an explainer
+// (a mark of a message), or any other pane. The person asks it in the panel's input bar, about the part they selected;
+// a subagent of the session answers, and can query the data with `thimble`. It has its own turns. Main's
 // conversation gets nothing of it unless the person sends the result there.
 //
-//   scope        {object?, v?, region?, label?, row?, mark?: {kind, ref?, gloss?, label?, term?}, claim?, said?}
-//   threadKey(scope)              one thread per card, per mark or per claim: 'card-<object>', 'mark-<row>-<ref|gloss>'
-//                                 or 'claim-<id>' (a claim of the session's Claims pane, claims/term.ts)
+//   scope        {object?, v?, region?, label?, row?, mark?: {kind, ref?, gloss?, label?, term?}, pane?, key?, title?}
+//   threadKey(scope)              one thread per card, per mark, or per pane: 'card-<object>', 'mark-<row>-<ref|gloss>'
+//                                 or 'pane-<pane>-<its state key>'
 //   aboutOf(scope)                the words "about …" the thread shows under a question
+//   nameOf(thread)                its name in the list and the bar: 'main/<what it is on>'
 //   firstMessage({text, scope, card, refs, root})   the subagent's first prompt: the question, then what it is about
 //   nextMessage({text, scope, last})               a later question: its part named again when the part changed
 //   turnsOf(messages)             the subagent's transcript ($.session.messages, as: 'api') as the thread's turns
 //   answerOf(messages)            its last answer: its last words, or the report it handed back
 //   ownReport(text, ids)          the thread a hand-back or a task notification in main's queue belongs to, or null
 
+import { regionMeta, regionRefs } from './object.js'
+
 const safe = s => String(s || '').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'x'
 
 export function threadKey(scope = {}) {
   if (scope.object) return `card-${safe(scope.object)}`
-  if (scope.claim) return `claim-${safe(scope.claim)}`
+  if (scope.pane) return `pane-${safe(scope.pane)}-${safe(scope.key || 'main')}`
   const m = scope.mark || {}
   return `mark-${safe(scope.row)}-${safe(m.ref || m.gloss || m.term || m.label)}`
 }
@@ -27,12 +31,43 @@ export function threadKey(scope = {}) {
 export function aboutOf(scope = {}) {
   const m = scope.mark
   if (m && !scope.object) return String(m.term || m.label || m.ref || 'this mark')
+  if (scope.pane && !scope.object) return String(scope.label || scope.region || scope.title || scope.pane)
   return String(scope.label || scope.region || 'this card')
+}
+
+const cutTo = (s, n) => (Array.from(String(s)).length <= n ? String(s) : Array.from(String(s)).slice(0, Math.max(1, n - 1)).join('') + '…')
+
+/** What a thread is on, in a few words: the card's title, the mark's words, the pane's title. */
+export function subjectOf(thread) {
+  const s = thread?.scope || {}
+  if (s.object) return String(thread.card || s.object)
+  if (s.mark) return String(s.mark.term || s.mark.label || s.mark.ref || 'a mark')
+  if (s.pane) return String(s.title || s.pane)
+  return String(thread?.title || 'a thread')
+}
+
+/** The thread's name in the list and the bar, as 0.9 names a side thread: `main/<what it is on>`. */
+export function nameOf(thread) {
+  return `main/${cutTo(subjectOf(thread).replace(/\s+/g, ' ').trim(), 32)}`
+}
+
+/**
+ * A pane's side thread when its module says nothing of it (side.ts): one thread per pane instance (its state key),
+ * each question about the part its program selected (k.select), named by the part's label and carrying the part's refs
+ * (its region's meta ref or refs). Nothing selected: about the pane, by its title.
+ *   {pane, stateKey, title, drawing} -> {scope, label, refs}
+ */
+export function paneScope({ pane, stateKey, title, drawing }) {
+  const region = typeof drawing?.selected === 'string' ? drawing.selected : null
+  const meta = region ? regionMeta(drawing, region) : null
+  const part = region ? String(meta?.label || region) : ''
+  const scope = { pane: String(pane), key: String(stateKey), title: String(title || pane), ...(region ? { region, label: part } : {}) }
+  return { scope, label: part || String(title || pane), refs: region ? regionRefs(null, drawing, region).refs : [] }
 }
 
 /** Whether two scopes name the same part (a later question about the same part needs no "about"). */
 export function samePart(a = {}, b = {}) {
-  return (a.object || '') === (b.object || '') && (a.claim || '') === (b.claim || '') && (a.region || '') === (b.region || '') && (a.mark?.ref || a.mark?.gloss || '') === (b.mark?.ref || b.mark?.gloss || '')
+  return (a.object || '') === (b.object || '') && (a.region || '') === (b.region || '') && (a.mark?.ref || a.mark?.gloss || '') === (b.mark?.ref || b.mark?.gloss || '')
 }
 
 /**
@@ -40,18 +75,19 @@ export function samePart(a = {}, b = {}) {
  * at, so "this" and "here" resolve. The subagent's own instructions (the registry's thread prompt) say how to answer.
  *   card: {id, v, title, file}   refs: the kernel refs the part rests on   root: the folder of the data
  */
-export function firstMessage({ text, scope = {}, card = null, refs = [], root = '', selFile = '' }) {
+export function firstMessage({ text, scope = {}, card = null, refs = [], root = '', selFile = '', about = '' }) {
   const lines = [String(text || '').trim(), '']
   if (card) {
     // a part of the card, or a selection the card's program named (k.ask: a brushed range, several rows)
     const part = scope.region ? `the part "${aboutOf(scope)}" (${scope.region}) of ` : scope.label ? `the selection "${scope.label}" in ` : ''
     lines.push(`About: ${part}the card "${card.title || card.id}" (${card.id}@${card.v ?? card.version}, ${card.file || `thimble/objects/${card.id}.json`}).`)
-  } else if (scope.claim) {
-    // a claim of the Claims pane: its words, and the sentence where it was said
-    lines.push(`About: the claim "${scope.label || scope.claim}" of this session${scope.said ? `, said as "${scope.said}"` : ''}.`)
   } else if (scope.mark) {
     const m = scope.mark
     lines.push(m.kind === 'gloss' ? `About: the term "${m.term || m.label}" in Claude's message.` : `About: Claude's citation "${m.label || m.ref}" (${m.ref}).`)
+  } else if (scope.pane) {
+    // a pane of thimble's (coverage, a label, the claims): the part selected in it, and what the pane shows
+    const part = scope.region ? `the part "${aboutOf(scope)}" (${scope.region}) of ` : ''
+    lines.push(`About: ${part}the panel "${scope.title || scope.pane}" beside the conversation${about ? `: ${about}` : ''}.`)
   }
   if (refs.length) lines.push(`Its rows: ${refs.slice(0, 6).join(', ')}${refs.length > 6 ? ` and ${refs.length - 6} more` : ''} (\`thimble rows <ref>\` opens them).`)
   if (root) lines.push(`The data: ${root}`)

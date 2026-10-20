@@ -6,9 +6,9 @@
 //   a turn       claimsDigest (what the lens reads: the claims so far that bear on the turn) and turnClaims (the
 //                lens's claims placed by their words in the turn's messages, with the citations near them); c lights
 //                under the answer only when a new claim reads two ways or one was corrected (noteFor)
-//   the pane     toggleClaims (c), docked beside the chat as the detail is, focused: the ring (↑↓) walks its rows and
-//                selects what it lands on; 1–9 open the selected claim's evidence as citations open (the tray); a
-//                question typed while it is open goes to the selected claim's side thread (thread.ts), never to main
+//   the pane     c (or /claims) opens the Claims pane in the side panel (shell/side.ts openSide), where the card
+//                detail opens: the panel draws the program, holds its keys (the ring walks its rows), and gives it a side
+//                thread with an input bar like the prompt, each question about the row selected
 //   the folder   a press on the pane's folder row (or /claims folder) asks Claude, as a turn of main, to have one
 //                subagent map the claims of the whole folder, offered with its estimate (estimate.mjs); the subagent
 //                saves the map as the card folder-claims (prompts/claims-folder/), and the save brings its claims into
@@ -17,17 +17,11 @@
 // It registers no model tool and starts no `claude`; the folder's map is built only when the person asks for it.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { renderTerm } from '../draw/term.js'
-import { barText } from '../panes/host.js'
-import { paintRegions, regionOfKey } from '../shell/cells'
-import { noteDock, paneColumns } from '../shell/detail'
-import { paneClosed, paneDrawing, paneFire, paneNow, paneRun, paneState } from '../shell/panes'
-import { ask, currentTheme, keysMoved, openCite, personPrompt, popFocus, pushFocus, recordNow, recount, rootHere, sessionIndex } from '../shell/shell'
-import { askThread, restoreThreads } from '../shell/thread'
+import { ask, recordNow, recount, rootHere, sessionIndex, personPrompt } from '../shell/shell'
+import { openSide } from '../shell/side'
 import { promptFile } from '../prompts/prompts'
 import { sessionKey } from '../hooks/conversation'
 import { turnWords } from '../observer/turn.mjs'
-import { claimRegion } from './atlas.js'
 import { applyTurn, clearGap, emptyStore, grownClusters, isFolderCard, mergeFolder, noteFor, noteGap, readStore } from './store.js'
 
 type Engine = EngineInterface
@@ -36,19 +30,13 @@ type Any = any
 type Store = ReturnType<typeof emptyStore> & Record<string, Any>
 type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: string }
 
-export const CPANE = 'claims'
 const CLAIMS = { plugin: 'thimble', key: 'claims' } as const
-const CLAIMPANE = { plugin: 'thimble', key: 'claimpane' } as const
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
 const cut = (s: string, n: number) => ([...s].length <= n ? s : [...s].slice(0, Math.max(0, n - 1)).join('') + '…')
 
 // the folder's estimate, read once per folder for a few minutes (a Node child lists the files and their sizes)
 let offer: { root: string; at: number; value: Any | null } | null = null
 const OFFER_MS = 5 * 60 * 1000
-// the ring in the pane: the element it stands on, so a drawing puts it back on the selected claim only when it left
-let ringAt: string | null = null
-// a ring asked for by the program (a press on a related claim), or a row that moved: the region it goes to once drawn
-let ringWant: string | null = null
 
 // ------------------------------------------------------------------------------------------------ the store
 
@@ -162,152 +150,12 @@ export async function claimsGap($: Engine, turnNo: number, why: string): Promise
 
 // ------------------------------------------------------------------------------------------------ the pane
 
-export async function claimsOpen($: Engine): Promise<boolean> {
-  return !!(await $.state.get(CLAIMPANE)).value
-}
-
-/** c: open the Claims pane, focused, beside the chat (the detail closes: they share the place); c again closes it. */
-export async function toggleClaims($: Engine, row: string | null): Promise<void> {
-  if (await claimsOpen($)) { await closeClaims($); return }
+/** c, or /claims: the Claims pane in the side panel, where the card detail opens, as a thread of its own. Its folder
+ *  offer is read meanwhile (a Node child lists the files) and the pane draws again with it. */
+export async function openClaims($: Engine): Promise<void> {
   await reloadClaims($)
-  await $.state.set(CLAIMPANE, { row: row ?? '' })
-  await pushFocus($, 'claims')
-  ringAt = null
-  if ((await $.ui.panes().catch(() => [] as Any[])).some((x: Any) => x.id === 'object' && x.isPlaced)) await $.ui.close({ id: 'object' }).catch(() => undefined)
-  // after the key that asked for it is done, so the pane takes the keyboard from the prompt
-  $.clock.after(0, () => { void openClaimsPane($) })
-  // the folder's offer, read outside the key (a Node child lists the files)
+  await openSide($, { pane: 'claims', args: {}, title: 'Claims' })
   $.clock.after(0, () => { void folderOffer($).catch(() => undefined) })
-}
-
-async function openClaimsPane($: Engine): Promise<void> {
-  const r = await $.ui.open({ id: CPANE, title: 'Claims', focus: true, closeOnEscape: true, columns: paneColumns() })
-  if (r && (r as Any).isPlaced === false) {
-    await closeClaims($)
-    $.ui.toast(`The Claims pane needs a wider terminal${(r as Any).reason ? ` (${(r as Any).reason})` : ''}. Widen it, then press c again.`)
-  }
-}
-
-/** The pane closes; the keys go back to the bar. */
-export async function closeClaims($: Engine): Promise<void> {
-  if (!(await claimsOpen($))) return
-  await $.state.set(CLAIMPANE, null)
-  await popFocus($, 'claims')
-  paneClosed('claims')
-  ringAt = null
-  await $.ui.close({ id: CPANE }).catch(() => undefined)
-}
-
-/** The keys the pane takes now, as the bar says them, with where a typed question goes. */
-export async function claimsKeys($: Engine): Promise<string | undefined> {
-  if (!(await claimsOpen($))) return undefined
-  // the program run now, at the room it was last drawn in: the bar follows each new selection
-  const d = await paneNow($, 'claims')
-  const keys = barText([d]).split(' · ').filter(Boolean)
-  const c = await selectedClaim($)
-  const typed = c ? `type to ask about ${cut(String(c.text), 32)}` : ''
-  const esc = keys.findIndex(x => x.startsWith('esc '))
-  if (typed) keys.splice(esc >= 0 ? esc : keys.length, 0, typed)
-  return keys.join(' · ')
-}
-
-/** The claim the pane has selected (its program's selection), or null. */
-export async function selectedClaim($: Engine): Promise<Any | null> {
-  if (!(await claimsOpen($))) return null
-  const d = paneDrawing('claims')
-  const id = typeof d?.selected === 'string' && d.selected.startsWith('c-') ? d.selected.slice(2) : ((await paneState($, 'claims')).claim as string | undefined)
-  if (!id) return null
-  const store = await claimsStore($)
-  return store.claims.find((c: Any) => c.id === id || claimRegion(c.id) === `c-${id}`) ?? null
-}
-
-/** The thread's label in the bar (`thimble:main/<claim>`), while the pane is open on a claim. */
-export async function claimThreadLabel($: Engine): Promise<string | null> {
-  const c = await selectedClaim($)
-  return c ? `thimble:main/${cut(String(c.text), 32)}` : null
-}
-
-/** A question typed while the pane is open: the selected claim's side thread, which main never sees. Returns the
- *  reason Claude Code shows for the dropped prompt, or null when no claim is selected (the prompt goes to main). */
-export async function askClaimThread($: Engine, text: string): Promise<string | null> {
-  const c = await selectedClaim($)
-  if (!c) return null
-  const root = (await rootHere($)) || String(await $.session.cwd())
-  await restoreThreads($, root)
-  const said = (c.said || []).find((s: Any) => s.sentence || s.quote)
-  const r = await askThread($, {
-    text, root, card: null,
-    scope: { claim: c.id, label: cut(String(c.text), 120), ...(said?.row ? { row: said.row } : {}), ...(said ? { said: cut(String(said.sentence || said.quote), 240) } : {}) },
-    refs: (c.sources || []).map((s: Any) => s.ref).slice(0, 6),
-  })
-  if (r.problem) return `${r.problem}. Your words are back in the prompt; esc closes the Claims pane, and the prompt then goes to Claude here.`
-  $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-  // the pane takes the keys again, the ring on the claim
-  $.clock.after(60, () => { void claimsTakeKeys($).catch(() => undefined) })
-  return `asked the thread of the claim "${cut(String(c.text), 40)}"`
-}
-
-/** The pane takes the keys again (after the tray closed over it, or a question went to a claim's thread): the ring on
- *  the selected claim. */
-export async function claimsTakeKeys($: Engine, tries = 3): Promise<void> {
-  if (!(await claimsOpen($))) return
-  ringAt = null
-  // Claude Code grants the keys only over an empty prompt, and the key that closed the tray may still stand in it: so
-  // the keys are asked for again a moment later, until the ring is on the claim
-  await $.ui.open({ id: CPANE, focus: true, closeOnEscape: true, columns: paneColumns() }).catch(() => null)
-  const focused = (await $.ui.panes().catch(() => [] as Any[])).some((x: Any) => x.id === CPANE && x.isFocused)
-  if (focused) await ringToSelected($)
-  else if (tries > 1) $.clock.after(250, () => { void claimsTakeKeys($, tries - 1).catch(() => undefined) })
-}
-
-/** The ring onto the selected claim's row, when the drawing has it. */
-async function ringToSelected($: Engine, region?: string): Promise<void> {
-  const d = paneDrawing('claims')
-  const want = region ?? (typeof d?.selected === 'string' ? d.selected : null)
-  if (!want || !lastKeys.has(want)) return
-  const key = lastKeys.get(want)!
-  if (ringAt === key) return
-  const r = await $.ui.focus({ requestId: CPANE, key }).catch(() => ({ deny: 'failed' }))
-  if (!(r as Any)?.deny) ringAt = key
-}
-
-// the cell key of each region's first row in the last drawing (`r|p-claims|<row>|<region>`)
-const lastKeys = new Map<string, string>()
-
-/** The pane drawn: the program on the store, in the room the dock gives, each row a press and a place for the ring. */
-async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
-  noteDock(e)
-  await $.state.get(CLAIMS)
-  await $.state.get(CLAIMPANE)
-  const els = $.ui.resolve(e) as Any
-  const w = Math.max(40, (e.props.bodyColumns ?? 100) - 1)
-  const h = Math.max(12, e.props.scroll?.bodyRows ?? 40)
-  const d = await paneRun($, 'claims', {}, { w, h })
-  const grid = renderTerm(d, { w })
-  lastKeys.clear()
-  const keys = new Set<string>()
-  for (const r of grid.regions as Any[]) {
-    for (const q of r.rects || []) for (let y = q.y; y < q.y + q.h; y++) keys.add(`r|p-claims|${y}|${r.id}`)
-    if (r.rects?.length && !lastKeys.has(r.id)) lastKeys.set(r.id, `r|p-claims|${r.rects[0].y}|${r.id}`)
-  }
-  // the ring stays on what it was on: a row that moved (a line came in above it) takes it to the row's new place, and
-  // a row that went puts it back on the selected claim
-  if (ringAt && !keys.has(ringAt)) {
-    const was = regionOfKey(ringAt)
-    ringAt = null
-    if (was && lastKeys.has(was)) ringWant = was
-  }
-  // the ring follows the selection: a drawing that moved it (a press on a related claim) puts it back on the claim
-  if (e.props.isFocused) $.clock.after(0, () => { void ringFollow($).catch(() => undefined) })
-  return paintRegions(grid as Any, els, {
-    theme: currentTheme(), key: 'p-claims', painted: true, selected: typeof d?.selected === 'string' ? d.selected : null,
-    onPress: (id: string) => { void paneFire($, 'claims', {}, { type: 'press', region: id }) },
-  })
-}
-
-async function ringFollow($: Engine): Promise<void> {
-  if (ringWant && lastKeys.has(ringWant)) { const w = ringWant; ringWant = null; await ringToSelected($, w); return }
-  if (!ringAt) await ringToSelected($)
 }
 
 // ------------------------------------------------------------------------------------------------ what the pane asks
@@ -320,19 +168,16 @@ export async function claimsPaneStore($: Engine): Promise<unknown> {
   return { ...store, offer: store.folder ? null : o?.offer ?? null }
 }
 
-/** What the pane's program asks for (k.do): a citation opened in the tray, the message where a claim was said, the
- *  folder's map, the ring on a row, closing. */
+/** What the pane's program asks for (k.do) that every pane does not have: the message where a claim was said, and the
+ *  folder's map. False for any other (a citation opens as any pane's does, over the pane). */
 export async function claimsAction($: Engine, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
-  if (name === 'cite' && typeof a.ref === 'string') { await openCite($, a.ref, typeof a.label === 'string' ? a.label : a.ref); return }
   if (name === 'said' && typeof a.row === 'string') {
     await $.ui.scroll({ to: { key: `msg-${a.row}-b0` }, block: 'nearest' }).catch(() => undefined)
     return
   }
   // the turn is asked outside the press (as v asks for a view)
   if (name === 'folder') { $.clock.after(0, () => { void askFolder($).then(said => { if (said) $.ui.toast(said) }).catch(() => undefined) }); return }
-  if (name === 'ring' && typeof a.region === 'string') { ringWant = a.region; return }
-  if (name === 'close') { await closeClaims($); return }
   return false
 }
 
@@ -412,7 +257,7 @@ export async function foldInSaves($: Engine, saves: { id: string; v: number | nu
 // ------------------------------------------------------------------------------------------------ hooks
 
 export const registerClaims: Register = on => {
-  // /claims: the pane; /claims folder: the folder's map, as f in the pane
+  // /claims: the pane; /claims folder: the folder's map, as a press on the pane's offer
   on('session.start', { cwd: /\// }, async ($, e, next) => {
     const r = await next(e)
     try {
@@ -428,53 +273,12 @@ export const registerClaims: Register = on => {
       $.clock.after(0, () => { void askFolder($).then(said => { if (said) $.ui.toast(said) }).catch(() => undefined) })
       return {}
     }
-    if (!(await claimsOpen($))) await toggleClaims($, null)
+    await openClaims($)
     return {}
   })
-
-  on('ui.render', { component: 'Pane', requestId: CPANE }, async ($, e) => {
-    try {
-      return await claimsPaneNow($, e)
-    } catch (err) {
-      const { Text } = $.ui.resolve(e) as Any
-      return Text({ color: 'error', wrap: 'wrap', children: `The claims could not be drawn (${cut(String((err as Error)?.message || err), 120)}). Press esc, then c to open them again.` })
-    }
-  })
-
-  on('ui.close', { id: CPANE }, async ($, e, next) => {
-    try {
-      if ((e.origin as { kind?: string }).kind === 'person') keysMoved(await $.clock.now())
-      await $.state.set(CLAIMPANE, null)
-      await popFocus($, 'claims')
-      paneClosed('claims')
-      ringAt = null
-    } catch {
-      // the pane closes whatever the shell makes of it
-    }
-    return next(e)
-  })
-
-  // the ring on a row of the pane: a cluster or a claim it lands on is selected (the program's focus event)
-  on('ui.focus', { requestId: CPANE }, async ($, e, next) => {
-    const r = await next(e)
-    try {
-      const el = typeof e.element === 'string' ? e.element : ''
-      if (!r.deny && el) {
-        ringAt = el
-        const region = regionOfKey(el)
-        if (region && (e.origin as { kind?: string }).kind === 'person') await paneFire($, 'claims', {}, { type: 'focus', region })
-      }
-    } catch {
-      // the ring moves whatever the shell makes of it
-    }
-    return r
-  }).catch(($, e, next) => next(e))
 }
 
 /** For tests: the module's memory, cleared. */
 export function resetClaims(): void {
   offer = null
-  ringAt = null
-  ringWant = null
-  lastKeys.clear()
 }

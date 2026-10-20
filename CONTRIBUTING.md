@@ -43,9 +43,9 @@ wording or layout.
 | the manifest, with the plugin's one setting (the side agent) | `plugin/.claude-plugin/plugin.json` |
 | the `thimble` command and the kernel it runs: sources, queries, cards, lineage, labels | `plugin/bin/thimble`, `plugin/engine/` |
 | the hooks module: what it registers, in order | `plugin/hooks/register.ts` |
-| the shell: cards under replies, citations, the tray, the bar, the card detail, side threads, labels | `plugin/shell/` |
+| the shell: cards under replies, citations, the tray, the bar, the side panel (a card's detail, a citation, any pane) and its side thread, labels | `plugin/shell/` |
 | the card runtime that a card's program draws through, and its terminal renderer | `plugin/draw/` |
-| the panes thimble draws as programs on that runtime (detail, tray, chips, proposals) | `plugin/panes/` |
+| the panes thimble draws as programs on that runtime (detail, tray, chips, proposals, the side panel's mark and thread list) | `plugin/panes/` |
 | the side agent that reads each reply, and its lenses | `plugin/observer/` |
 | the rewrite behind `s`, and the catch-up | `plugin/squeeze/` |
 | Claims: the session's claims, the Claims pane behind `c`, and the map of the folder's claims | `plugin/claims/` |

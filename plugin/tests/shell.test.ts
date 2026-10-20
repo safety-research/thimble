@@ -479,17 +479,11 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   expect(await hintOf($)).toContain('thimble  1 ask · 0 close · ] next')
-  // 1 asks: the panel turns to the mark's side thread, and the hint line says how to ask it
-  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(BAND))).toContain('ask about 6,543 saves…')
-  expect(await hintOf($)).toContain('type to ask · ↵ asks this thread · 0 back')
-  // the bar names the thread the prompt goes to
-  expect(textOf(await $.ui.render(BAND))).toContain('thimble:main/6,543 saves')
   await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
   await press($, clock, edit('['))
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  // with the tray open the prompt is its question: letters are typed
+  // with the tray open the prompt is main's: letters are typed
   expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   // 0 on an empty prompt closes the tray
   expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
@@ -593,35 +587,30 @@ test('a letter typed straight after s is a word however long s\'s work takes: th
   expect(await lineOpen($)).toBe(false)
 })
 
-test('a question asked with the tray open goes to the side thread of its mark: main never sees it, and the panel shows the thread', async ($, on) => {
+test('with the tray open, 1 opens the citation in the side panel as its thread, its input bar holding the keys; a prompt typed in the prompt is main\'s, with the citation as context', async ($, on) => {
   const w = world(on)
-  const spawns: Any[] = []
-  on('agent.register', () => ({ value: { agent: 'thimble:thread' } }))
-  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-test' } as never })
-  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble:thread', description: 'thread', status: 'running' })) }))
-  on('session.messages', () => ({ value: [] }))
-  on('ui.status', () => ({ value: undefined }))
-  on('prompt.fill', () => ({ isFilled: true }))
+  const opened: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
+  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Cite', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] : [] }))
+  on('ui.focus', () => ({}))
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   await press($, clock, edit(']'))
+  // a prompt typed with the tray open goes to main, carrying the citation (main's prompt is main's)
   const before = w.submitted.length
   const r = await $.prompt.submit({ text: 'why so high?', origin: { kind: 'composer' } } as never)
-  // dropped from main, with where it went; the thread's agent got the question and what it is about
-  expect(String((r as Any).drop)).toBe('asked the thread of 6,543 saves')
-  expect(w.submitted.length).toBe(before)
-  expect(spawns[0].subagent_type).toBe('thimble:thread')
-  expect(spawns[0].prompt).toContain('why so high?')
-  expect(spawns[0].prompt).toContain('About: Claude\'s citation "6,543 saves" (q1#day=2026-06-18@n).')
-  // the panel shows the thread: the question, and that it is being answered
-  await clock.settle()
-  const band = textOf(await $.ui.render(BAND))
-  expect(band).toContain('❯ why so high?')
-  expect(await hintOf($)).toContain('0 back')
-  // the bar counts the thread
-  expect(band).toContain('1 thread')
-  // its thread file is written for the browser
-  expect(Object.keys(w.files).some(f => f.includes('/thimble/threads/s-1/'))).toBe(true)
+  expect((r as Any).drop).toBeUndefined()
+  expect(w.submitted.length).toBe(before + 1)
+  expect(String(w.submitted.at(-1)!.context)).toContain('a citation of your reply open in the tray: 6,543 saves (q1#day=2026-06-18@n)')
+  // 1: the side panel on the citation's card, as its thread; the tray gives way to it
+  await press($, clock, edit(']'))
+  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
+  expect(opened.some(x => x.id === 'object' && /Cite · 6,543 saves/.test(String(x.title)))).toBe(true)
+  expect(textOf(await $.ui.render(BAND))).not.toContain('╭─ 6,543 saves')
+  // the bar names the thread and says what typing does
+  const bar = await hintOf($)
+  expect(bar).toContain('thimble:main/6,543 saves')
+  expect(bar).toContain('type to ask about 6,543 saves')
 })
 
 test("a resumed session finds its messages on disk: their marks open from the keys, and the keys act on its latest answer", async ($, on) => {
@@ -655,6 +644,8 @@ test('a failure reads as plain words, never JSON; a refusal that needs nothing f
 
 test('the bar is one row above the prompt: the verbs in words at its left, a lit one with its note; at its right the threads and coverage (the share read), when not zero; a changed count bright for a moment; a blank row above it; its label plain', async ($, on) => {
   world(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.focus', () => ({}))
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   const bar = textOf(await $.ui.render(HINT))
@@ -680,12 +671,12 @@ test('the bar is one row above the prompt: the verbs in words at its left, a lit
   let underlined = false
   walk(rest, x => { if (x.type === 'Text' && x.props?.underline && textOf(x) === 'thimble') underlined = true })
   expect(underlined).toBe(false)
-  // inside a thread the bar's label names it, and its left side is that thread's keys
+  // inside a thread (the side panel on a citation) the bar's label names it, and its left side is that thread's keys
   await press($, clock, edit(']'))
   await press($, clock, edit('1'))
   const inThread = textOf(await $.ui.render(HINT))
   expect(inThread).toContain('thimble:main/6,543 saves')
-  expect(inThread).toContain('type to ask · ↵ asks this thread · 0 back')
+  expect(inThread).toContain('type to ask about 6,543 saves · esc close')
 })
 
 /** One more answer of Claude's: a turn (the person's prompt or not) whose last words are `text`, ended as `reason`. */

@@ -1,11 +1,11 @@
 // Claims in a session (claims/: store.js, lens.mjs, atlas.js on shell/panes.ts, term.ts): the observer's one look
 // after a turn of work gives the turn's claims, each placed in the message that said it with the citations near it, in
 // the session's store (thimble/claims/<session>.json); the bar counts them, and c lights only when a new claim reads
-// two ways or one was corrected. c opens the Claims pane at the right, focused: the map of clusters, the selected
-// cluster's claims and the selected claim with its evidence rows (read through the kernel) and what it bears on; the
-// ring selects what it lands on; a digit opens a piece of evidence in the tray; a question typed while the pane is open
-// goes to the claim's side thread and never to main; /claims folder asks Claude for the folder's map, and its save
-// brings the folder's claims in.
+// two ways or one was corrected. c opens the Claims pane in the side panel: the map of clusters, the selected
+// cluster's claims and the selected claim open under its row with its evidence rows (read through the kernel) and what
+// it bears on; the ring selects what it lands on; a digit opens a piece of evidence over the pane, as a citation opens;
+// a question in the panel's input bar goes to the panel's thread, about the row selected, and never to main; /claims
+// folder asks Claude for the folder's map, and its save brings the folder's claims in.
 // `claude plugin test plugin`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -147,20 +147,21 @@ async function turn($: Any, w: Any, o: { id: string; user: string; prompt: strin
   await w.clock.settle()
 }
 
-const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 92, placement: 'dock', scroll: { bodyRows: 44 }, isFocused: true, title: 'Claims' }, viewport: { columns: 58, rows: 50, isFullscreen: true } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 92, placement: 'dock', scroll: { bodyRows: 44, offset: 0 }, isFocused: true, title: 'Claims', view: {} }, viewport: { columns: 58, rows: 50, isFullscreen: true } } as never
 const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k.length === 1 ? k : '' }) as never
 const hint = async ($: Any) => textOf(await $.ui.render(HINT))
-/** The cell key of a region's row in the pane's drawing (`r|p-claims|<row>|<region>`). */
+/** The cell key of a region's row in the side panel's drawing (`r|side|<row>|<region>`). */
 async function rowKey($: Any, region: string): Promise<string> {
-  const m = new RegExp(`"key":"(r\\|p-claims\\|\\d+\\|${region})"`).exec(JSON.stringify(await $.ui.render(PANE)))
+  const m = new RegExp(`"key":"(r\\|side\\|\\d+\\|${region})"`).exec(JSON.stringify(await $.ui.render(PANE)))
   if (!m) throw new Error(`no row for ${region}`)
   return m[1]!
 }
 const ringOn = async ($: Any, w: Any, region: string) => {
-  await $.ui.focus({ requestId: 'claims', element: await rowKey($, region), origin: { kind: 'person' } } as never)
+  await $.ui.focus({ requestId: 'object', element: await rowKey($, region), origin: { kind: 'person' } } as never)
   await w.clock.settle()
 }
+const askKeyOf = async ($: Any) => /"key":"(ask-\d+)"/.exec(JSON.stringify(await $.ui.render(PANE)))?.[1] ?? ''
 
 async function twoTurns($: Any, on: Any) {
   const w = world(on, [FORK1, FORK2])
@@ -207,11 +208,11 @@ test('a later turn: a claim said again counts ×N, a correction is linked both w
   expect(bar).toContain('4 claims')
 })
 
-test('c opens the Claims pane at the right, focused: the map of clusters, the selected cluster and its claim; the bar names its keys and where a question goes', async ($, on) => {
+test('c opens the Claims pane in the side panel: the map of clusters, the selected cluster and its claim; the bar names its keys and where a question goes', async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))
   await w.clock.settle()
-  expect(w.opened.at(-1)).toMatchObject({ id: 'claims', focus: true, closeOnEscape: true })
+  expect(w.opened.some(x => x.id === 'object' && x.title === 'Claims' && x.focus === true)).toBe(true)
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain('Claims  4 claims · 3 clusters · to turn 2')
   for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst']) expect(t).toContain(name)
@@ -219,14 +220,15 @@ test('c opens the Claims pane at the right, focused: the map of clusters, the se
   expect(t).toContain('▸testing for bias')
   expect(t).toContain('The tilt is two editors, Kestrel and Wren, not one')
   expect(t).toMatch(/corrects\s+The tilt in the edits is one editor/)
-  // no key hints in the pane: they are in the bar, with where a typed question goes
+  // no key hints in the pane: they are in the bar, with what a typed question is about
   expect(t).not.toContain('esc')
   const bar = await hint($)
-  expect(bar).toContain('thimble:main/The tilt is two editors, Kestre…')
-  expect(bar).toContain('↑↓ move · ↵ open · type to ask about The tilt is two editors, Kestre… · esc close')
+  expect(bar).toContain('thimble:main/Claims')
+  expect(bar).toContain('↑↓ move · ↵ open')
+  expect(bar).toContain('type to ask about claim: The tilt is two editors')
 })
 
-test('the ring on a cluster selects it and its lead; a claim shows its evidence read through the kernel; a digit opens it in the tray', async ($, on) => {
+test('the ring on a cluster selects it and its lead; a claim shows its evidence read through the kernel; a digit opens it over the pane', async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))
   await w.clock.settle()
@@ -235,40 +237,39 @@ test('the ring on a cluster selects it and its lead; a claim shows its evidence 
   await w.clock.settle()
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
-  expect(t).toContain("precisely   41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts")
+  expect(t).toContain("precisely   41% of the 517 edits saved in June were Kestrel's")
   expect(t).toContain('q4 · share by user ← 4 source rows in revisions.jsonl')
   expect(t).toContain('“Kestrel saved Lexicon”')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q4#user=Kestrel@share'))).toBe(true)
   expect(await hint($)).toContain('1 2 evidence')
-  // 2 opens the second piece of evidence as a citation opens: the tray, with its ref
+  // 2 opens the second piece of evidence as a citation opens: over the pane, in the side panel
   await press($, w.clock, key('2'))
   await w.clock.settle()
-  expect(JSON.parse(w.files[`${ROOT}/thimble/panes/s-1/tray.json`]!).state.stack).toEqual([{ kind: 'cite', ref: 'q7#user=Kestrel@n', label: '212 of them' }])
+  expect(w.opened.some(x => x.id === 'object' && x.title === 'Cite · 212 of them')).toBe(true)
 })
 
-test('a question typed while the pane is open goes to the selected claim\'s side thread, never to main', async ($, on) => {
+test("a question in the panel's input bar goes to the Claims pane's thread, about the row selected, never to main", async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))
   await w.clock.settle()
   await ringOn($, w, 'cl-k2')
   await ringOn($, w, 'c-c2')
-  // a letter types into the prompt (no key of the pane)
-  expect((await press($, w.clock, key('i'))).text).toBe('i')
+  // a letter starts the question in the input bar, never in the prompt
+  expect((await press($, w.clock, key('i'))).text).toBe('')
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"i"')
   const before = w.submitted.length
-  const r = await $.prompt.submit({ text: 'is 41% of all June edits or of the relay edits?', origin: { kind: 'composer' } } as never)
-  expect(String((r as Any).drop)).toContain('asked the thread of the claim "Kestrel made 41% of June\'s edits')
+  const ui = await $.ui.mount({ ...(PANE as Any) } as never)
+  await ui.input({ key: await askKeyOf($), text: 'is 41% of all June edits or of the relay edits?' })
+  await w.clock.settle()
   expect(w.submitted.length).toBe(before)
   expect(w.spawns.length).toBe(1)
-  expect(w.spawns[0].prompt).toContain('About: the claim "Kestrel made 41% of June\'s edits, 212 of them reverts" of this session')
+  expect(w.spawns[0].prompt).toContain('is 41% of all June edits or of the relay edits?')
+  expect(w.spawns[0].prompt).toContain('About: the part "claim: Kestrel made 41% of June\'s edits, 212 of them reverts" (c-c2) of the panel "Claims"')
+  expect(w.spawns[0].prompt).toContain('the claim open in it is "Kestrel made 41% of June\'s edits, 212 of them reverts" (finding, turn 1')
   expect(w.spawns[0].prompt).toContain('q4#user=Kestrel@share')
-  // the pane shows the thread under the claim
-  await w.clock.advance(100)
-  await w.clock.settle()
+  // the question shows in the panel's conversation, under the pane
   expect(textOf(await $.ui.render(PANE))).toContain('❯ is 41% of all June edits or of the relay edits?')
-  // a second question goes to the same thread
-  await $.prompt.submit({ text: 'and in July?', origin: { kind: 'composer' } } as never)
-  expect(w.spawns.length).toBe(1)
-  expect(w.sent.at(-1).text).toBe('and in July?')
+  await ui.unmount()
 })
 
 test('a turn whose pass failed is said in the pane, with why', async ($, on) => {
