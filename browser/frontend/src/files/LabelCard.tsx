@@ -26,7 +26,7 @@ import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelAskShown, Lab
 import { LabelAsk } from '../chat/LabelRun'
 import { examplesNote } from '../canvas/details'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
-import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
+import { classesOf, colourVar, draftClasses, freeColour, globPatterns, howMade, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 import { ValuePalette } from './ValuePalette'
 
@@ -567,7 +567,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
       <>
         <div className="label-card-grid label-card-facts">
           <span className="label-card-key">Type</span>
-          <span className="label-card-fact">{CLASSIFIERS.find((c) => c.value === draft.kind)?.label ?? draft.kind}</span>
+          <span className="label-card-fact">{howMade(draft.kind)}</span>
           {label && scopeLine(label, draft.glob) && (
             <>
               <span className="label-card-key">Scope</span>

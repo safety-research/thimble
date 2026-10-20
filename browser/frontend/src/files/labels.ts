@@ -32,6 +32,14 @@ export const marksOf = (k: Pick<Concept, 'unit' | 'marks'>): LabelMarks => k.mar
 /** What a label over files marks, as the canvas label card's chip says it: `marks spans`, `marks records`, `marks files`. */
 export const marksWord = (k: Pick<Concept, 'unit' | 'marks'>): string => `marks ${marksOf(k)}s`
 
+/** What made a label, in the words the terminal says it with (plugin/panes/labels.js howMade): regex, code, or read by
+ * Claude (a model reads each record). Pure. */
+export const howMade = (kind: string): string => (kind === 'regex' ? 'regex' : kind === 'code' ? 'code' : 'read by Claude')
+
+/** A label's definition, what its run applies: the pattern, the code, or the model's question (a prompt label keeps
+ * it in its description, backend labels/classify.py). Pure. */
+export const labelDefinition = (k: Pick<Concept, 'kind' | 'spec' | 'description'>): string => ((k.kind === 'prompt' ? k.description || k.spec : k.spec) ?? '').trim()
+
 /** The patterns of a label's glob, comma-separated as the server keeps them. */
 export const globPatterns = (glob: string | null | undefined): string[] => (glob ?? '').split(',').map((p) => p.trim()).filter(Boolean)
 

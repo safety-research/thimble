@@ -4,20 +4,21 @@
 // label alone opens on itself), and the row beside a card or an answer that counts by a label opens that label
 // (shell/labeluse.ts), with a value's records when the value was clicked.
 //
-// It opens on what the label tells: its values over its records (each a bar and a count, a press filters the records to
-// it), then the records themselves with their values in color, the one selected whole, and a row of the values to
-// check it with. How the label was made (a rule or a model, its definition) and where Claude made it are actions
-// above the input bar, in words (Definition, Where Claude made it): the definition opens as the `side:opened` region, which
-// the side panel draws right above them. The colors are the label card's (labels.py CARD_PROGRAM), so a value reads
-// the same on the card and here.
+// It opens on what the label is: its name, what made it (regex, code, or read by Claude) and its definition under the
+// head (the pattern, the code's first lines, or the model's question, wrapped). Then what the label tells: its values
+// over its records (each a bar and a count, a press filters the records to it), then the records themselves with their
+// values in color, the one selected whole, and a row of the values to check it with. The actions above the input bar
+// fold the definition (Definition) and show where Claude made the label (Where Claude made it). The colors are the
+// label card's (labels.py CARD_PROGRAM), so a value reads the same on the card and here.
 //
 //   state: {open: the label open, from: 'list' when the list opened it (esc goes back there), filter: the value its
 //          records are filtered to ('-': no value yet), rec: the record selected (its place among the filtered ones),
-//          at: the part selected, def: the definition shown}
+//          at: the part selected, fold: the definition folded, whole: the whole definition shown, past its first lines}
 //   presses: a label in the list opens it · a value filters the records to it (again: every record) · a record opens
 //            it as a citation, over this pane · a value of the check row is the person's check of the record selected
-//   actions: Definition (how it was made, and its definition, open or closed: `act:def:on` while open) · Where Claude
-//            made it (the label's card in the conversation)
+//            · the definition's `… more lines` shows it whole (again: its first lines)
+//   actions: Definition (the definition shown or folded: `act:def:on` while shown) · Where Claude made it (the
+//            label's card in the conversation)
 //   keys: none of its own. The side panel's ring walks the parts (↑ ↓, tab), ↵ presses the one it is on, esc goes back
 //   wants: {records: name, value, at, n, gen} (a page of the records, read by the host)
 //   asks of the host: check {label, ref, value} (the person's check), open {mark: {kind: 'cite', ref, label}} (a record
@@ -102,12 +103,25 @@ export function toneBeside(l, v) {
   return valueTone(l && l.values, v)
 }
 
-/** How a label was made, in a few plain words for the row beside a card and the panel's head: a rule (a regex or code)
- *  went over the text, or Claude read each record (a model label, or values Claude gave records it read). */
+/** How a label was made, in a few plain words for the row beside a card and the panel's head: a regex, code, or Claude
+ *  read each record (a model label, or values Claude gave records it read). */
 export function howMade(kind) {
   if (kind === 'prompt' || kind === 'set') return 'read by Claude'
-  if (kind === 'regex' || kind === 'code') return 'a rule over the text'
+  if (kind === 'regex') return 'regex'
+  if (kind === 'code') return 'code'
   return ''
+}
+
+/** A label's definition in one line of at most `room` columns, cut with … : the pattern, the start of the model's
+ *  question, or the code's lines after its `def label(unit):`, joined as one line of Python (`; `, or a space after a
+ *  `:`). Empty when it has none. */
+export function defLine(l, room) {
+  const def = String((l && l.rule) || '').trim()
+  if (!def || room < 2) return ''
+  const one = l.kind === 'code'
+    ? def.split('\n').map(x => x.trim()).filter(x => x && !/^def\s+label\s*\(/.test(x)).reduce((s, x) => (!s ? x : s.endsWith(':') ? `${s} ${x}` : `${s}; ${x}`), '')
+    : def.replace(/\s+/g, ' ')
+  return cut(one, room)
 }
 
 /** What made a label, in plain words. */
@@ -212,7 +226,7 @@ function listView(k, data, st, W) {
   const ids = list.map((_, i) => `lb-${i}`)
   const at = ids.includes(st.at) ? st.at : ids[0] || null
   const idx = ids.indexOf(at)
-  const open = i => (list[i] ? { open: list[i].name, from: 'list', filter: null, rec: 0, at: null, def: false } : null)
+  const open = i => (list[i] ? { open: list[i].name, from: 'list', filter: null, rec: 0, at: null } : null)
   k.on('focus', e => (e.region && ids.includes(e.region) ? { at: e.region } : null))
   k.on('press', e => (ids.includes(e.region) ? open(ids.indexOf(e.region)) : null))
   if (at) k.select(at)
@@ -266,6 +280,7 @@ function labelView(k, data, st, lab, W) {
     // (show all goes once pressed: the first record takes the selection, so a question is never about the press)
     if (r === 'filter-all') return { filter: null, rec: 0, at: null }
     if (r === 'filter-none') return setFilter(NO_VALUE)
+    if (r === 'def-more') return { whole: !st.whole, at: r }
     const v = /^val-(\d+)$/.exec(r)
     if (v) return setFilter(values[Number(v[1])])
     const c = /^chk-(\d+)$/.exec(r)
@@ -285,22 +300,24 @@ function labelView(k, data, st, lab, W) {
     }
     return null
   })
-  // the actions above the input bar: how it was made, and where Claude made it
-  k.on(st.def ? 'act:def:on' : 'act:def', () => ({ def: !st.def }), 'Definition')
+  // the actions above the input bar: the definition shown or folded, and where Claude made the label
+  const hasDef = !!String(lab.rule || '').trim()
+  const shown = hasDef && !st.fold
+  if (hasDef) k.on(shown ? 'act:def:on' : 'act:def', () => ({ fold: shown, ...(shown && st.at === 'def-more' ? { at: null } : {}) }), 'Definition')
   if (lab.card) k.on('act:made', () => { k.do('reveal', { card: lab.card }); return null }, 'Where Claude made it')
-  // esc closes the definition, then goes back to the list when the list opened this label; else the panel's esc
-  // (back, or close)
-  if (st.def) k.on('esc', () => ({ def: false }), lab.name)
-  else if (st.from === 'list' && (data.list || []).length > 1) k.on('esc', () => ({ open: null, from: null, filter: null, rec: 0, at: null, def: false }), 'labels')
-  const at = st.at || `rec-${rec}`
+  // esc goes back to the list when the list opened this label; else the panel's esc (back, or close)
+  if (st.from === 'list' && (data.list || []).length > 1) k.on('esc', () => ({ open: null, from: null, filter: null, rec: 0, at: null }), 'labels')
+  const at = st.at === 'def-more' && !shown ? `rec-${rec}` : st.at || `rec-${rec}`
   k.select(at)
 
   const out = []
-  // ---- the subject: the label, and how far it is in plain words
+  // ---- the subject: the label, what made it and how far it is in plain words, and its definition under them
+  const defs = shown ? defRows(k, lab, W, !!st.whole) : []
   out.push(subjectBlock(k, {
     glyph: `{${valueTone(values, values[0])}:●}`,
     title: k.escape(lab.name),
-    line: `label over ${k.escape(lab.in || 'the records Claude named')}${howMade(lab.kind) ? ` · ${howMade(lab.kind)}` : ''} · ${k.escape(stateWords(lab))}${data.refreshing ? ' · ◌' : ''}`,
+    line: `label over ${k.escape(scopeOf(lab))}${howMade(lab.kind) ? ` · ${howMade(lab.kind)}` : ''} · ${k.escape(stateWords(lab))}${data.refreshing ? ' · ◌' : ''}`,
+    rows: defs,
   }))
 
   // ---- the values: each its color, bar, count and share; a press filters the records to it
@@ -327,13 +344,12 @@ function labelView(k, data, st, lab, W) {
     k.text(total ? `{dim:${n(rec + 1)} of ${n(total)}}` : ' ', { grow: 1, wrap: false, align: 'right' }),
     { gap: 1 },
   ))
-  // how it was made, when Definition is open: under the conversation, above the actions
-  const foot = st.def ? [k.region('side:opened', { label: 'how the label was made' }, k.stack(madeRows(k, lab, W)))] : []
-  if (!total) { out.push(k.text('{dim:  no record has this value}'), ...foot); return k.stack(out) }
-  if (!got) { out.push(k.text('{dim:  reading the records…}'), ...foot); return k.stack(out) }
-  if (got.error) { out.push(k.text(`{bad:  × ${k.escape(got.error)}}`), ...foot); return k.stack(out) }
+  if (!total) { out.push(k.text('{dim:  no record has this value}')); return k.stack(out) }
+  if (!got) { out.push(k.text('{dim:  reading the records…}')); return k.stack(out) }
+  if (got.error) { out.push(k.text(`{bad:  × ${k.escape(got.error)}}`)); return k.stack(out) }
   const detail = cur ? recordDetail(k, lab, cur, W) : []
-  const room = Math.max(3, k.h - out.length - detail.length - (st.def ? 8 : 0) - 2 - chromeOf(k, data.chat))
+  // (the subject is one part of `out` and three rows, with the definition's under them)
+  const room = Math.max(3, k.h - out.length - 2 - defs.length - detail.length - 2 - chromeOf(k, data.chat))
   const i0 = Math.max(0, recs.findIndex(r => r.i === rec))
   const top = Math.max(0, Math.min(recs.length - room, i0 - Math.floor(room / 2)))
   const placeW = Math.min(30, Math.max(8, ...recs.map(r => len(place(r.ref)))))
@@ -349,21 +365,36 @@ function labelView(k, data, st, lab, W) {
   }
   out.push(k.text(' '))
   out.push(...detail)
-  out.push(...foot)
   return k.stack(out)
 }
 
-/** How the label was made, when Definition is open: what made it, over which records, and its definition (the
- *  model's question, the pattern, the code) whole, up to a dozen rows. */
-function madeRows(k, lab, W) {
+/** The records a label is over, in words: its glob, and where it keeps only some of them. */
+function scopeOf(lab) {
+  return [lab.in || 'the records Claude named', lab.where ? `where ${lab.where}` : '', lab.within ? `within ${lab.within[0]} = ${lab.within[1]}` : ''].filter(Boolean).join(' ')
+}
+
+// the rows of a definition shown before `… more lines`: the code's first lines, a pattern or a question whole while it
+// is short; and the most shown whole, past which `thimble label NAME` prints it
+const DEF_SHORT = { code: 4, other: 6 }
+const DEF_WHOLE = 40
+
+/** A label's definition under the panel's head, wrapped at the panel's width: the pattern, the code (its first lines,
+ *  and a press that shows the rest), or the model's question. `whole`: every line, up to DEF_WHOLE. */
+function defRows(k, lab, W, whole) {
   const def = String(lab.rule || '').replace(/\s+$/, '')
-  const scope = [lab.in || 'the records Claude named', lab.where ? `where ${lab.where}` : '', lab.within ? `within ${lab.within[0]} = ${lab.within[1]}` : ''].filter(Boolean).join(' ')
-  const out = [k.text(`{dim:made by} ${k.escape(madeBy(lab))}`, { wrap: false }), k.text(`{dim:over} ${k.escape(scope)}`, { wrap: false })]
-  if (!def) return out
-  const rows = lab.kind === 'code' ? def.split('\n') : wrap(def.replace(/\s+/g, ' '), W - 2)
+  if (!def.trim()) return []
+  const w = Math.max(20, W - 2)
+  const rows = lab.kind === 'prompt' ? wrap(def.replace(/\s+/g, ' ').trim(), w) : wrap(def, w)
   const tone = lab.kind === 'prompt' ? 'ink' : 'c1'
-  out.push(...rows.slice(0, 12).map(r => k.text(`{dim:▎} {${tone}:${k.escape(cut(r, W - 2))}}`, { wrap: false })))
-  if (rows.length > 12) out.push(k.text(`{dim:▎ … ${n(rows.length - 12)} more lines: thimble label ${k.escape(lab.name)}}`, { wrap: false }))
+  const short = lab.kind === 'code' ? DEF_SHORT.code : DEF_SHORT.other
+  const most = whole ? DEF_WHOLE : short
+  const out = rows.slice(0, most).map(r => k.text(`{${tone}:${k.escape(r)}}`, { wrap: false }))
+  if (rows.length > short) {
+    const left = rows.length - most
+    const words = !whole ? `{dim:… ${n(left)} more line${left === 1 ? '' : 's'} ·} {accent:show all}`
+      : left > 0 ? `{dim:… ${n(left)} more lines: thimble label ${k.escape(lab.name)} ·} {accent:show less}` : '{accent:show less}'
+    out.push(k.region('def-more', { label: whole ? 'the first lines of the definition' : 'the whole definition' }, k.text(words, { wrap: false })))
+  }
   return out
 }
 

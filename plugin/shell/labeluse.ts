@@ -1,6 +1,7 @@
 // labeluse.ts: the labels a card or an answer rests on, shown once, where they add something. A card whose data came
 // through a label (its lineage's queries read it with use() or label_rows()) gets one row under it: each label's name,
-// how it was made in plain words (a rule over the text, or read by Claude), and its values in their colors. A card that
+// what made it in plain words (regex, code, or read by Claude), its definition in one line (cut with … where it does
+// not fit), and its values in their colors. A card that
 // names the label's values in its own colors (a chart's legend) gets no row: its legend opens the label instead
 // (cardLegend), and the label's own card gets none either. An answer gets a row only for the labels its citations rest
 // on that none of its cards shows. A click on the name opens the label in the side panel; a click on a value opens it
@@ -15,14 +16,14 @@
 import type { EngineInterface } from 'claude-code'
 
 import { termColor } from '../draw/palette.js'
-import { howMade, spotsIn, toneBeside, tonesIn } from '../panes/labels.js'
+import { defLine, howMade, spotsIn, toneBeside, tonesIn } from '../panes/labels.js'
 import { openLabel } from './dock'
 import { currentTheme, leanEnv, rootHere } from './shell'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-export type UsedLabel = { name: string; values: string[]; tones?: Record<string, string>; kind?: string; card?: string | null }
+export type UsedLabel = { name: string; values: string[]; tones?: Record<string, string>; kind?: string; rule?: string; card?: string | null }
 
 const USE = { plugin: 'thimble', key: 'labeluse' } as const
 /** The keys being read now, so a drawing asks once. */
@@ -48,24 +49,32 @@ async function readUsed($: Engine, refs: string[], root: string): Promise<UsedLa
   const dir = $.plugin.root.replace(/\/+$/, '')
   const r = await $.process.run([`${dir}/bin/thimble`, 'label', '--used-by', ...refs, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 30000 })
   if ((r.exitCode ?? 1) !== 0) return []
-  const got = JSON.parse(String(r.stdout || '{}')) as { labels?: { name?: unknown; values?: unknown; kind?: unknown; card?: unknown }[] }
+  const got = JSON.parse(String(r.stdout || '{}')) as { labels?: { name?: unknown; values?: unknown; kind?: unknown; rule?: unknown; card?: unknown }[] }
   return (got.labels || []).filter(l => typeof l.name === 'string' && Array.isArray(l.values)).map(l => ({
     name: String(l.name), values: (l.values as unknown[]).map(String),
-    ...(typeof l.kind === 'string' ? { kind: l.kind } : {}), card: typeof l.card === 'string' ? l.card : null,
+    ...(typeof l.kind === 'string' ? { kind: l.kind } : {}), ...(typeof l.rule === 'string' && l.rule.trim() ? { rule: l.rule } : {}),
+    card: typeof l.card === 'string' ? l.card : null,
   }))
 }
 
-/** The row under a card or an answer: `label editor_kind · read by Claude  ● agent  ● person  ● unclear`, each name and
- *  value a press. */
-export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; theme: 'dark' | 'light'; onOpen: (name: string, value: string | null) => unknown }): Any | null {
+/** The row under a card or an answer: `label has-link · regex · https?://\S+  ● yes  ● no`, each name and value a
+ *  press. The definition takes the room the rest of a label's words leave in `width` columns (at least DEF_MIN), cut
+ *  with … where it does not fit. */
+export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; theme: 'dark' | 'light'; width?: number; onOpen: (name: string, value: string | null) => unknown }): Any | null {
   if (!used.length) return null
   const { Box, Button, Text } = els
-  const kids: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' })]
+  const lead = used.length === 1 ? 'label ' : 'labels '
+  const kids: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: lead })]
   used.forEach((l, i) => {
     if (i) kids.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
     kids.push(Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ bold: true, children: l.name })] }))
-    if (howMade(l.kind)) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${howMade(l.kind)}` }))
-    l.values.slice(0, 8).forEach((v, j) => {
+    const how = howMade(l.kind)
+    if (how) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how}` }))
+    const shownValues = l.values.slice(0, 8)
+    const rest = cols(lead) + cols(l.name) + (how ? cols(` · ${how}`) : 0) + cols(' · ') + shownValues.reduce((s, v) => s + cols(`  ● ${v}`), 0)
+    const def = defLine(l, Math.max(DEF_MIN, (o.width ?? 80) - rest))
+    if (def) kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ' · ' }), Text({ key: `${o.key}-dd${i}`, children: def }))
+    shownValues.forEach((v, j) => {
       const color = termColor(toneBeside(l, v), o.theme)
       kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
       kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: [Text({ ...(color ? { color } : {}), children: `● ${v}` })] }))
@@ -74,10 +83,16 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; theme:
   return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: kids })
 }
 
+/** The fewest columns a definition takes in the row beside a card, however little room the rest leaves. */
+const DEF_MIN = 16
+/** A text's width in columns, as the row counts it. */
+const cols = (s: string) => Array.from(s).length
+
 /** The row beside a card (its refs: [the card's id]) or an answer (its citations' refs), as shell.tsx draws it under
  *  them; null while the labels are read and when they rest on none. `root` defaults to the folder under analysis.
- *  Its values have the label's colors, the ones a card made from the label's rows draws them in too. */
-export async function labelsRow($: Engine, els: Any, key: string, refs: string[], root?: string | null, o: { marginLeft?: number; grid?: Any; card?: string; except?: string[] } = {}): Promise<Any | null> {
+ *  Its values have the label's colors, the ones a card made from the label's rows draws them in too. `width`: the
+ *  columns the row has, which a label's definition fits in. */
+export async function labelsRow($: Engine, els: Any, key: string, refs: string[], root?: string | null, o: { marginLeft?: number; grid?: Any; card?: string; except?: string[]; width?: number } = {}): Promise<Any | null> {
   const where = root ?? (await rootHere($))
   const found = await labelsBeside($, `${key}|${hash(refs.join(' '))}`, refs, where)
   let used = found && o.grid ? withTones(found, o.grid) : found
@@ -85,7 +100,7 @@ export async function labelsRow($: Engine, els: Any, key: string, refs: string[]
   // card of the answer shows
   if (used && o.card) used = used.filter(l => l.card !== o.card && !inLegend(l))
   if (used && o.except) used = used.filter(l => !o.except!.includes(l.name))
-  const row = used ? labelRowEl(els, used, { key: `lu-${key}`, theme: currentTheme(), onOpen: (name, value) => { void openLabel($, name, value) } }) : null
+  const row = used ? labelRowEl(els, used, { key: `lu-${key}`, theme: currentTheme(), ...(o.width ? { width: o.width - (o.marginLeft ?? 0) } : {}), onOpen: (name, value) => { void openLabel($, name, value) } }) : null
   return row ? els.Box({ key: `lu-box-${key}`, marginLeft: o.marginLeft ?? 0, children: [row] }) : null
 }
 

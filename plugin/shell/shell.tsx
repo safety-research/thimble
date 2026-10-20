@@ -2446,7 +2446,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const fw = frameWidth(outer, p.grid.w, o.title)
   const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: rows, more, onMore: openAll, color: ring })
   // the labels its data came through, beside it (labeluse.ts)
-  const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id })
+  const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id, width: framed ? Math.max(p.grid.w, 40) : fw })
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
     children: [body, ...(framed && more ? [moreRow(els, moreText(more), openAll)] : []), ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
@@ -3225,7 +3225,7 @@ export const registerShell: Register = (on, options) => {
       // the labels its citations rest on, beside it (labeluse.ts)
       // (not those a card of this answer shows: null while the cards' labels are read)
       const shownByCards = rec.marks.length && !hidden ? await cardsLabels($, list) : []
-      const used = rec.marks.length && !hidden && shownByCards ? await labelsRow($, els, `msg-${at}`, rec.marks.map(m => String((m as Any).ref || '')).filter(Boolean), null, { marginLeft: 2, except: shownByCards }) : null
+      const used = rec.marks.length && !hidden && shownByCards ? await labelsRow($, els, `msg-${at}`, rec.marks.map(m => String((m as Any).ref || '')).filter(Boolean), null, { marginLeft: 2, except: shownByCards, width: cols }) : null
       if (used) parts.push(used)
       if (open && open !== 's') {
         // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar
