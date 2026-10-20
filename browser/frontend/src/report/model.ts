@@ -384,6 +384,15 @@ export function sameWire(a: DocBlocks, b: DocBlocks): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
+/** The id of the last block of `next` that is new or changed from the block at its place in `prev`: where a write
+ * streaming in grows. Null when nothing changed. Pure. */
+export function lastChanged(prev: DocBlocks, next: DocBlocks): string | null {
+  for (let i = next.blocks.length - 1; i >= 0; i--) {
+    if (JSON.stringify(next.blocks[i]) !== JSON.stringify(prev.blocks[i])) return next.blocks[i].id ?? null
+  }
+  return null
+}
+
 /** Where a card dropped at `y` goes among the page's top-level blocks: before the first block whose middle is below
  * `y`, else after the last; never before the title. Null without blocks. */
 export function dropSlot(blocks: readonly { id: string; top: number; bottom: number }[], y: number, titleId = TITLE_ID): { at: number; before: string | null } | null {

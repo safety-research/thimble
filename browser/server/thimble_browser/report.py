@@ -128,6 +128,23 @@ def delete(ws: str, slug: str) -> None:
     hub.publish(ws, {"type": "report", "slug": slug, "status": "deleted"})
 
 
+# Claude's write as it streams in, before its tool saves it (features/report.py): what the page shows meanwhile, kept
+# in memory only, by (workspace, slug)
+_DRAFTS: dict[tuple[str, str], str] = {}
+
+
+def draft(ws: str, slug: str, md: str | None) -> None:
+    """Show `md` as the document while Claude writes it, or (None) show the saved document again."""
+    if md is None:
+        if _DRAFTS.pop((ws, slug), None) is None:
+            return
+    elif _DRAFTS.get((ws, slug)) == md:
+        return
+    else:
+        _DRAFTS[(ws, slug)] = md
+    hub.publish(ws, {"type": "report", "slug": slug, "status": "drafting"})
+
+
 def markdown(ws: str, slug: str = DOC) -> str | None:
     try:
         return _path(ws, "md", slug).read_text(encoding="utf-8")
@@ -285,13 +302,15 @@ def parse(md: str) -> dict[str, Any]:
 
 
 def writeup(ws: str, slug: str = DOC) -> dict[str, Any]:
-    """A document as the page reads it; an empty one before anything is written. The report alone takes what feature
-    modules add (SERVE, DECORATE), such as the lenses' marks."""
-    md = markdown(ws, slug) or ""
+    """A document as the page reads it; an empty one before anything is written, and while Claude writes it, its draft
+    so far (`drafting`). The report alone takes what feature modules add (SERVE, DECORATE), such as the lenses'
+    marks."""
+    drafting = _DRAFTS.get((ws, slug))
+    md = drafting if drafting is not None else markdown(ws, slug) or ""
     st = _state(ws, slug)
     doc = parse(md)
     out = {"id": slug, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
-           "frame": False, "comments": []}
+           "frame": False, "comments": [], **({"drafting": True} if drafting is not None else {})}
     if slug == DOC:
         for fn in [*SERVE, *DECORATE]:
             fn(ws, out)
@@ -394,6 +413,7 @@ def save(ws: str, md: str, *, by: str, slug: str = DOC) -> dict[str, Any]:
         keep_version(ws, before, by="analyst", slug=slug)
     md = attribute(before, md.strip(), by)
     _path(ws, "md", slug).write_text(md.strip() + "\n", encoding="utf-8")
+    _DRAFTS.pop((ws, slug), None)
     for fn in SAVED:
         try:
             fn(ws, before, md.strip() + "\n", by, slug=slug)

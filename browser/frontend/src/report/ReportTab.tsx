@@ -175,9 +175,14 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   useEffect(() => {
     let timer: number | null = null
     let typesTimer: number | null = null
+    // one read at most every REFETCH_DEBOUNCE_MS, which never waits for the events to stop: a write streaming in
+    // sends one every quarter second, and the page shows it as it grows
     const later = () => {
-      if (timer != null) window.clearTimeout(timer)
-      timer = window.setTimeout(() => void read(), REFETCH_DEBOUNCE_MS)
+      if (timer != null) return
+      timer = window.setTimeout(() => {
+        timer = null
+        void read()
+      }, REFETCH_DEBOUNCE_MS)
     }
     const typesLater = () => {
       if (typesTimer != null) window.clearTimeout(typesTimer)

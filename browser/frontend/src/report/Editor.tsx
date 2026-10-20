@@ -37,10 +37,12 @@ import { CARD_MIME } from './cards'
 import { ReportContext, type ReportCtx } from './context'
 import { marksExtension, refreshMarks, type Flag, type MarksCtx, type TermMark } from './decorations'
 import { mergeUnsaved } from './merge'
-import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
+import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, lastChanged, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
 import { schema, type ReportPartialBlock } from './schema'
 
 export const SAVE_DEBOUNCE_MS = 800
+/** a write streaming in stops keeping its growing block in view for this long after the analyst scrolls */
+const FOLLOW_AFTER_SCROLL_MS = 4000
 
 /** Run `fn` once `el` is laid out: on the next frame when it is, else once the hidden tab that holds it is shown (the
  * element's box grows from nothing). Returns the cancel. */
@@ -472,6 +474,7 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
   }, [flush])
 
   const zone = useRef<HTMLDivElement | null>(null)
+  const scrolledAt = useRef(0)
 
   // the chat about a block, on the block's anchor. A block typed since the last save has no anchor yet, so the document
     // is saved first and the marks rebuilt from it
@@ -560,6 +563,17 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
     if (doc === own.current) return
     const wire = blocksFromDoc(doc)
     const current = wireFromEditor(editor.document as EditorBlockLike[], orig.current)
+    // Claude's write as it streams in: shown as it grows, its growing block kept in view unless the analyst scrolls,
+    // and never saved from here; the saved document that ends it comes through the paths below
+    if (doc.drafting) {
+      if (sameWire(wire, current)) return
+      const grows = lastChanged(current, wire)
+      showStored(wire)
+      if (grows && Date.now() - scrolledAt.current > FOLLOW_AFTER_SCROLL_MS) {
+        zone.current?.querySelector(`[data-id="${CSS.escape(grows)}"]`)?.scrollIntoView({ block: 'nearest' })
+      }
+      return
+    }
     if (!dirty.current && !inflight.current) {
       if (!sameWire(wire, current)) showStored(wire)
       lastSaved.current = wire
@@ -765,6 +779,8 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
       <div
         className={['wu-zone', empty ? 'wu-zone-empty' : ''].filter(Boolean).join(' ')}
         ref={zone}
+        onWheelCapture={() => (scrolledAt.current = Date.now())}
+        onTouchMoveCapture={() => (scrolledAt.current = Date.now())}
         onDragOverCapture={onDragOver}
         onDragLeaveCapture={onDragLeave}
         onDropCapture={onDrop}
@@ -772,6 +788,7 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
         {line && <div className="wu-dropline" style={{ top: line.top }} />}
         <BlockNoteView
           editor={editor}
+          editable={!doc.drafting}
           theme={resolved}
           className="wu-editor"
           slashMenu={false}
