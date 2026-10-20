@@ -848,6 +848,10 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                 print(f"{name}: no session has started the model's calls. They run in a Claude Code session with the "
                       "thimble plugin; outside one, label with --regex or --code, or give values with --set.")
                 return 1
+            if run.get("state") == "running" and time.time() - float(run.get("at") or run.get("started") or t0) > 900:
+                print(f"{name}: the model's calls stopped 15 minutes ago with {s['waiting']:,} records still waiting (the "
+                      f"session that made them may have ended). `thimble label {name} --again` asks for them again.")
+                return 1
             time.sleep(1.0)
     lab, _, _ = _recount(st, name)
     if a.json:

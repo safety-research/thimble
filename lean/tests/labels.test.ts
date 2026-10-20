@@ -23,6 +23,12 @@ const DRAWING = {
   cites: {}, examples: { 'ex-0': { label: 'apology = yes', total: 3, records: SAMPLES }, 'ex-1': { label: 'apology = no', total: 3, records: [] } },
   regions: [{ id: 'value-0', meta: { label: 'yes', examples: 'ex-0' } }, { id: 'value-1', meta: { label: 'no', examples: 'ex-1' } }], warnings: [], ms: 1,
 }
+// another card, whose parts are agents: each part's rows split by the label
+const PER_AGENT = {
+  kit: 1, w: 98, h: 24, mode: 'detail', cites: {}, examples: {}, warnings: [], ms: 1,
+  root: { t: 'stack', kids: [{ t: 'region', id: 'agent-29', meta: { label: 'agent-29', ref: 'q5#author=agent-29@n' }, kid: { t: 'text', runs: [{ s: 'agent-29 ▆▆▆▆ 16', tone: 'ink' }], wrap: false, w: 20 } }] },
+  regions: [{ id: 'agent-29', meta: { label: 'agent-29', ref: 'q5#author=agent-29@n' } }],
+}
 const PANE = { component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 100, scroll: { bodyRows: 40, offset: 0 }, isFocused: true, placement: 'dock', title: 'apology', view: {} } } as never
 const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: { key }, text, cursor: text.length, start: text.length, end: text.length, inputText: key.length === 1 ? key : '' }) as never
 const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -32,12 +38,17 @@ const ok = (stdout: unknown) => ({ value: { exitCode: 0, stdout: typeof stdout =
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Verb = (input: Any) => Any
+// the test runner's timer: a real wait lets the work the hooks left running go on
+declare const setTimeout: (fn: (value?: unknown) => void, ms: number) => unknown
 
 function world(on: Any, verb: Verb = () => ({ verb: 'label', text: 'ok' })) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('session.cwd', () => ({ value: ROOT }))
   on('session.id', () => ({ value: SESSION }))
-  const files: Record<string, string> = { [CARD]: JSON.stringify(OBJECT(1)), [`${ROOT}/thimble/objects/.versions/02-label-apology/v1.json`]: JSON.stringify(OBJECT(1)) }
+  const files: Record<string, string> = {
+    [CARD]: JSON.stringify(OBJECT(1)), [`${ROOT}/thimble/objects/.versions/02-label-apology/v1.json`]: JSON.stringify(OBJECT(1)),
+    [`${ROOT}/thimble/objects/03-per-agent.json`]: JSON.stringify({ id: '03-per-agent', version: 1, title: 'Messages per agent', program: 'return k.text("card")', data: {}, lineage: { cites: [] } }),
+  }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` || e.path.endsWith('/verbs/label/verb.json') }))
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
@@ -52,7 +63,7 @@ function world(on: Any, verb: Verb = () => ({ verb: 'label', text: 'ok' })) {
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     runs.push([...e.argv])
     if (e.argv[0] === 'tail') return ok((files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1))
-    if (e.argv.some(a => a.endsWith('prep.mjs'))) return ok({ drawing: DRAWING, verbs: [], problems: [] })
+    if (e.argv.some(a => a.endsWith('prep.mjs'))) return ok({ drawing: JSON.parse(String(e.init?.stdin || '{}')).object?.id === '03-per-agent' ? PER_AGENT : DRAWING, verbs: [], problems: [] })
     if (e.argv.some(a => a.endsWith('verb.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       inputs.push(input)
@@ -71,7 +82,11 @@ function world(on: Any, verb: Verb = () => ({ verb: 'label', text: 'ok' })) {
       files[CARD] = JSON.stringify(OBJECT(3))
       return ok({ name: 'apology', query: 'q9', card: '02-label-apology', card_version: 3 })
     }
-    if (e.argv.includes('resolve')) return ok({ ref: e.argv[2], chain: [], rows: [], count: 0, records: [], notes: [] })
+    if (e.argv.includes('resolve')) {
+      // the rows behind a part of another card: how they split by the label
+      if (String(e.argv[2]).startsWith('q5#')) return ok({ ref: e.argv[2], chain: [{ step: 'query', id: 'q5', about: 'messages per agent' }], rows: ['chat/room.jsonl#L1-16'], count: 16, records: [{ ref: 'chat/room.jsonl#L1', text: 'x', words: 'I am sorry, I broke the build.' }], notes: [], labels: { apology: { values: { yes: 3, no: 13 }, of: 16, rows: 16, none: 0 } } })
+      return ok({ ref: e.argv[2], chain: [], rows: [], count: 0, records: [], notes: [] })
+    }
     if (e.argv.includes('coverage')) return ok({ files: [] })
     return ok({})
   })
@@ -107,7 +122,7 @@ async function pane($: Any, clock: { settle: () => Promise<void> }): Promise<str
 }
 
 const need = (key: string, units = 50) => ({ kind: 'complete', key, request: { model: 'sonnet', prompt: `batch ${key}`, units, telemetry: { feature: 'labels' } } })
-const answered = { isAnswered: true, text: '[]', usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }
+const answered: Any = { isAnswered: true, text: '[]', usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }
 
 test('calls a verb starts together are made side by side, at most `parallel` at once; a busy one is tried again; the verb runs once more with every answer', async ($, on) => {
   const w = world(on, (input: Any) => (input.answers?.k1 && input.answers?.k2 && input.answers?.k3
@@ -124,8 +139,8 @@ test('calls a verb starts together are made side by side, at most `parallel` at 
     most = Math.max(most, running)
     await new Promise(r => setTimeout(r, 5))
     running--
-    if (e.prompt === 'batch k2' && busy-- > 0) return { value: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error' } }
-    return { value: answered }
+    if (e.prompt === 'batch k2' && busy-- > 0) return { value: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error' } } as never
+    return { value: answered } as never
   })
   const r = $.command.run({ command: 'verb', args: 'label 02-label-apology apology' } as never)
   for (let i = 0; i < 20; i++) { await clock.advance(1000); await new Promise(res => setTimeout(res, 10)) }
@@ -146,7 +161,7 @@ test("a --prompt label asks for the label verb in the change feed: it runs besid
     ? (w.files[CARD] = JSON.stringify(OBJECT(2)), { verb: 'label', saved: { id: '02-label-apology', v: 2 }, text: 'apology: 3 of 6 records have a value (3 yes).', note: 'The model finished reading the records of the label apology.' })
     : { verb: 'label', need: need('k1', 6), limits: { parallel: 4, rounds: 60 } }))
   const clock = mock.clock(on)
-  on('model.complete', async () => { await gate; return { value: answered } })
+  on('model.complete', async () => { await gate; return { value: answered } as never })
   // Claude's `thimble label apology --prompt …`: the kernel saved the card and asked for the verb
   on('tool.call', () => {
     const t = Date.now() / 1000
@@ -176,12 +191,42 @@ test("a --prompt label asks for the label verb in the change feed: it runs besid
   expect(w.toasts).toEqual([])
 })
 
+test('a verb asked for while the command still runs starts then: a chained `--wait` waits on calls already being made, and the card is drawn at the version the verb saved', async ($, on) => {
+  const w = world(on, (input: Any) => (input.answers?.k1
+    ? (w.files[CARD] = JSON.stringify(OBJECT(2)), { verb: 'label', saved: { id: '02-label-apology', v: 2 }, text: 'apology: 6 of 6 records have a value.' })
+    : { verb: 'label', need: need('k1', 6) }))
+  const clock = mock.clock(on)
+  on('model.complete', () => ({ value: answered }) as never)
+  let during = false
+  on('tool.call', async () => {
+    const t = Date.now() / 1000 + 5
+    w.files[EVENTS] = JSON.stringify({ t, kind: 'save', session: SESSION, root: ROOT, object: '02-label-apology', version: 1 }) + '\n'
+      + JSON.stringify({ t, kind: 'verb', verb: 'label', session: SESSION, root: ROOT, object: '02-label-apology', version: 1, args: 'apology' }) + '\n'
+    for (let i = 0; i < 100 && w.inputs.length < 2; i++) await new Promise(r => setTimeout(r, 10))
+    during = w.inputs.length === 2
+    return { result: 'apology: 6 of 6 records have a value' }
+  })
+  await $.turn.start({ turnId: 't1', text: 'which are apologies?' } as never)
+  const call = $.tool.call({ tool: 'Bash', command: 'thimble label apology --in chat.jsonl --prompt "x" && thimble label apology --wait' } as never)
+  for (let i = 0; i < 20 && !during; i++) { await clock.advance(1000); await new Promise(r => setTimeout(r, 20)) }
+  await call
+  await clock.settle()
+  // the verb ran, and its calls were made, before the command ended; reading the feed after it starts it no second time
+  expect(during).toBe(true)
+  expect(w.inputs.length).toBe(2)
+  // the save the command made (v1) is read after it; the card is drawn at v2, which the verb saved meanwhile
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'I labeled the messages.' }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: 'I labeled the messages.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  expect(JSON.parse(w.files['/home/t/.thimble/lean/shown/s-1.json']!).under[ROW.slice(0, 24)].map((x: Any) => `${x.id}@${x.v}`)).toEqual(['02-label-apology@2'])
+})
+
 test('a call that fails says so plainly: a toast with what failed, and the verb keeps what the other calls gave', async ($, on) => {
   const w = world(on, (input: Any) => (input.answers?.k1
     ? { verb: 'label', saved: { id: '02-label-apology', v: 2 }, failed: true, text: 'apology: 3 of 6 records have a value (3 yes). 3 have no value (1 call failed: api-error 400): `thimble label apology --again` asks the model again.' }
     : { verb: 'label', need: need('k1', 3), needs: [need('k1', 3), need('k2', 3)] }))
   const clock = mock.clock(on)
-  on('model.complete', (_$: unknown, e: Any) => ({ value: e.prompt === 'batch k2' ? { isAnswered: false, reason: 'api-error', status: 400, error: 'invalid_request_error' } : answered }))
+  on('model.complete', (_$: unknown, e: Any) => ({ value: e.prompt === 'batch k2' ? { isAnswered: false, reason: 'api-error', status: 400, error: 'invalid_request_error' } : answered }) as never)
   w.files[EVENTS] = JSON.stringify({ t: Date.now() / 1000 + 5, kind: 'verb', verb: 'label', session: SESSION, root: ROOT, object: '02-label-apology', version: 1, args: 'apology' }) + '\n'
   on('tool.call', () => ({ result: '' }))
   await $.tool.call({ tool: 'Bash', command: 'thimble label apology --again' } as never)
@@ -224,4 +269,15 @@ test("the detail of a label's card: each example shows its labels; a number key 
   const note = w.submitted.at(-1)!.context.join('\n')
   expect(note).toContain('The person checked 2 records of the label apology: they agree with 1 and changed 1: chat/room.jsonl#L3 (the label said yes, the person says no)')
   expect(note).toContain('its counts are now query q9')
+})
+
+test('a label shows on what is drawn: the details of any card\'s part say how its rows split by each label that holds them', async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  await $.command.run({ command: 'obj', args: '03-per-agent agent-29' } as never)
+  await pane($, clock)
+  expect(await press($, clock, edit('enter'))).toEqual({ text: '', cursor: 0 })
+  const t = await pane($, clock)
+  expect(t).toContain('16 rows')
+  expect(t).toContain('label apology: 3 yes · 13 no')
 })

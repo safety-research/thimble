@@ -297,6 +297,10 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
   $.clock.after(0, () => { void recount($) })
 }
 
+/** The newest version a verb saved of each object (by folder and id): a save of an older one, read from the feed
+ *  later, is drawn at this one. */
+const newestVersion = new Map<string, number>()
+
 /** The saves the kernel wrote to this session's change feed since the feed was last read: one JSON line per save in
  *  $THIMBLE_HOME/lean/events/<session>.jsonl, each naming its object, version and folder. Read from the feed, a save
  *  is seen however the command was written (`thimble save … | tail -3`, a script that saves, a `cd` first). */
@@ -346,8 +350,37 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
       // a line that does not parse is skipped; the feed's later lines still count
     }
   }
-  // an object saved twice in one call is drawn once, at its latest version
+  // an object saved twice in one call is drawn once, at its latest version; one a verb has saved again meanwhile (the
+  // label verb, while the command still ran) is drawn at the verb's version
   return out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root))
+    .map(x => { const v = newestVersion.get(`${x.root}|${x.id}`); return v != null && x.v != null && v > x.v ? { ...x, v } : x })
+}
+
+
+/** How far the look for verbs in the feed has read it, while a command runs (newSaves reads it after). */
+let verbScan: { file: string; bytes: number } | null = null
+
+/** The verbs the kernel asked for in the feed since it was last read, started now (each runs once: runFromFeed). The
+ *  saves are left for newSaves, which places them after the command. */
+async function verbsInFeed($: Engine): Promise<void> {
+  const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+  const file = `${home.replace(/\/+$/, '')}/lean/events/${safe(await sessionKey($))}.jsonl`
+  const size = await $.fs.stat(file).then(x => (x.kind === 'file' ? x.size : -1), () => -1)
+  if (size < 0) return
+  const read = (await $.state.get(EVENTS)).value as { file: string; bytes?: number } | undefined
+  const from = Math.max(verbScan?.file === file ? verbScan.bytes : 0, read?.file === file ? read.bytes ?? 0 : 0)
+  if (size <= from) return
+  const text = await feedTail($, file, from)
+  const whole = text.slice(0, text.lastIndexOf('\n') + 1)
+  verbScan = { file, bytes: from + utf8Bytes(whole) }
+  for (const line of whole.split('\n').filter(Boolean)) {
+    try {
+      const ev = JSON.parse(line)
+      if (ev?.kind === 'verb' && typeof ev.object === 'string' && ID.test(ev.object) && typeof ev.root === 'string' && Number(ev.t) >= LOADED - 2) runFromFeed($, ev)
+    } catch {
+      // a line that does not parse is skipped
+    }
+  }
 }
 
 /** UTF-8 bytes of a text (the feed's offsets are bytes). */
@@ -616,6 +649,7 @@ async function feedVerb($: Engine, ev: Any): Promise<void> {
 /** A new version of an object: drawn where the object is drawn now, in its place; one the turn has not placed yet is
  *  placed at the new version. */
 export async function showVersion($: Engine, ref: ObjRef): Promise<void> {
+  if (ref.v != null) newestVersion.set(`${ref.root}|${ref.id}`, Math.max(ref.v, newestVersion.get(`${ref.root}|${ref.id}`) ?? 0))
   const where = (await $.state.get({ ...WHERE, id: ref.id })).value as string | undefined
   if (where) { await place($, where, ref); return }
   if (turn) turn.unplaced = turn.unplaced.map(x => (x.id === ref.id && x.root === ref.root ? { ...x, v: ref.v } : x))
@@ -2728,7 +2762,12 @@ export const registerShell: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const r = await next(e)
+    // a verb the kernel asks for while the command still runs (`thimble label … --prompt … && thimble label … --wait`
+    // waits on it): the feed is looked at each second until the command ends
+    let watch: { cancel?: () => void } | null = null
+    try { watch = $.clock.every(1000, () => { void verbsInFeed($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { watch = null }
+    let r: Awaited<ReturnType<typeof next>>
+    try { r = await next(e) } finally { watch?.cancel?.() }
     let notes: string[] = []
     try {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
@@ -3208,6 +3247,7 @@ export const registerShell: Register = (on, options) => {
 
 /** For tests: the module's memory, cleared. */
 export function resetShell(): void {
+  newestVersion.clear()
   objects.clear()
   preps.clear()
   pending.clear()

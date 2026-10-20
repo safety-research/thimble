@@ -49,6 +49,11 @@ export async function run(ctx) {
   let template, promptId
   try { const t = textOf('labels'); template = t.text; promptId = t.id } catch (e) { return { error: `the labels prompt could not be read: ${String(e.message || e).slice(0, 200)}` } }
   const wave = Math.max(1, Number(cfg.wave) || 16)
+  // the calls are picked up: `thimble label NAME --wait` waits for them from here on
+  if (ctx.round === 0) {
+    const r = ctx.kernel.run(['label', name, '--answers', '-'], { input: JSON.stringify({ run: { state: 'running', started: Date.now() / 1000 } }) })
+    if (r.code !== 0) return { error: `the label ${name} could not be read: ${(r.stdout + r.stderr).trim().slice(0, 300)}` }
+  }
   let last = null
   let calls = 0
   let failedCalls = 0

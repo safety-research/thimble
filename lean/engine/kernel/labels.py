@@ -469,6 +469,10 @@ def answers(st: Store, name: str, payload: dict[str, Any]) -> dict[str, Any]:
                 failed += 1
         if isinstance(payload.get("run"), dict):
             lab["run"] = {**(lab.get("run") or {}), **payload["run"], "at": time.time()}
+            if payload["run"].get("state") == "running" and not (took or failed):
+                # picked up, nothing written yet: the label's values have not changed
+                st.write_json(path(st, lab["name"]), {**lab, "updated": time.time()})
+                return {"label": lab, "took": 0, "failed": 0}
         if not any(u.get("wait") for u in units.values()) and (lab.get("run") or {}).get("state") not in ("done", "failed"):
             lab["run"] = {**(lab.get("run") or {}), "state": "done", "at": time.time()}
         write(st, lab, change=bool(took or failed))
@@ -631,14 +635,8 @@ def samples(st: Store, lab: dict[str, Any], n: int = SAMPLES, seed: int = 0) -> 
             if row is None:
                 continue
             words, meta = words_of(row)
-            u = lab["units"][r]
-            how = u.get("by") or ""
-            if u.get("c") is not None and u.get("by") == "model":
-                how += f" {u['c']:.2f}"
-            if u.get("why"):
-                how += f": {u['why']}"
-            recs.append({"ref": r, "words": words or unit_text(row, 240), "meta": " · ".join(x for x in (meta, how) if x),
-                         "text": unit_text(row, 600)})
+            # the label's value, its source and reason are the detail's to show, from the label as it is now
+            recs.append({"ref": r, "words": words or unit_text(row, 240), "meta": meta, "text": unit_text(row, 600)})
         out[v] = recs
     return out
 

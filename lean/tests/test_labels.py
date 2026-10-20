@@ -201,3 +201,15 @@ def test_wait_says_plainly_when_no_session_makes_the_calls(root: Path, monkeypat
         LB.write(st, lab, change=False)
     r = run(root, "label", "apology", "--wait", "5")
     assert r.returncode == 1 and "no session has started the model's calls" in r.stdout
+
+
+def test_wait_waits_once_the_calls_are_picked_up(root: Path):
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "running"}}))
+    st = Store(root)
+    with LB.locked(st, "apology"):
+        lab = LB.load(st, "apology")
+        lab["run"]["asked"] -= 600
+        LB.write(st, lab, change=False)
+    r = run(root, "label", "apology", "--wait", "2")
+    assert r.returncode == 0 and "still 6 records waiting after 2s" in r.stdout

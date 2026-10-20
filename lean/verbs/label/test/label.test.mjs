@@ -70,7 +70,7 @@ test('a run: the calls of a wave are handed back together; with their answers th
     const needs = out.needs || [out.need]
     assert.equal(needs.length, 1)
     assert.equal(needs[0].request.units, 4)
-    assert.deepEqual(out.limits, { parallel: 4, rounds: 60 })
+    assert.deepEqual(out.limits, { parallel: 8, rounds: 60 })
     for (const n of needs) {
       const recs = n.request.prompt.split('### record ').slice(1)
       answers[n.key] = { isAnswered: true, text: JSON.stringify(recs.map((r, i) => ({ i: i + 1, value: /sorry|mistake/i.test(r) ? 'yes' : 'no', confidence: 0.8 }))) }

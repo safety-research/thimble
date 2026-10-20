@@ -8,7 +8,7 @@
   "effort": "low",
   "maxTokens": 8000,
   "timeoutMs": 180000,
-  "parallel": 4,
+  "parallel": 8,
   "wave": 16,
   "rounds": 60,
   "store": "thimble/labels/<name>.json (engine/kernel/labels.py): the answers go back with `thimble label NAME --answers -`"
