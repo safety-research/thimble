@@ -410,7 +410,8 @@ export function parseClaims(list) {
     const links = (Array.isArray(x.links) ? x.links : []).map(l => ({ to: str(String(l?.to ?? ''), 20), how: howOf(l?.how ?? l?.type) })).filter(l => l.to && l.how).slice(0, 4)
     out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null, links })
   }
-  return out.slice(0, 40)
+  // every claim the turn gave: a long answer can state many
+  return out
 }
 
 const samePlace = (a, b) => a.row === b.row && a.start < b.end && b.start < a.end
