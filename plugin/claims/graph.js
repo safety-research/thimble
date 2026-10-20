@@ -187,7 +187,8 @@ export function layout(nodes, clusters, edges, { w, h }) {
   const P = []
   for (const sl of slots) {
     // the rectangle a cluster's dots may use, and the island they start in: its rows, and the columns they need at its left
-    const box = { x0: sl.x, x1: Math.max(sl.x, sl.x + sl.w - 6), y0: sl.y + 1, y1: Math.max(sl.y + 1, sl.y + sl.h - 1) }
+    // (its last row stays blank, the gap over the next row of names, so the graph never grows past its rows)
+    const box = { x0: sl.x, x1: Math.max(sl.x, sl.x + sl.w - 6), y0: sl.y + 1, y1: Math.max(sl.y + 1, sl.y + sl.h - 2) }
     const n = sl.g.nodes.length
     const isl = { x0: box.x0, x1: Math.min(box.x1, box.x0 + 8 * Math.ceil(Math.sqrt(n)) + 2), y0: box.y0, y1: box.y1 }
     sl.g.nodes.forEach((nd, i) => {
@@ -230,13 +231,14 @@ export function layout(nodes, clusters, edges, { w, h }) {
   }
   const pos = new Map()
   const taken = []
-  const free = (x, y, b) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && !taken.some(t => (t.y === y && Math.abs(t.x - x) < 4) || (Math.abs(t.y - y) === 1 && Math.abs(t.x - x) < 2))
-  const near = (x0, y0, b) => {
+  // gap: the fewest cells from a dot to the next in its row (four leaves three blank; two, when a rectangle is full)
+  const free = (x, y, b, gap) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && !taken.some(t => (t.y === y && Math.abs(t.x - x) < gap) || (Math.abs(t.y - y) === 1 && Math.abs(t.x - x) < 2))
+  const near = (x0, y0, b, gap = 4) => {
     for (let r = 0; r <= Math.max(W, H); r++) {
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -2 * r; dx <= 2 * r; dx++) {
           if (Math.abs(dy) !== r && Math.abs(dx) < 2 * r - 1) continue
-          if (free(x0 + dx, y0 + dy, b)) return { x: x0 + dx, y: y0 + dy }
+          if (free(x0 + dx, y0 + dy, b, gap)) return { x: x0 + dx, y: y0 + dy }
         }
       }
     }
@@ -246,7 +248,9 @@ export function layout(nodes, clusters, edges, { w, h }) {
   let fits = true
   for (const p of P) {
     const x0 = Math.round(p.x), y0 = Math.round(p.y)
-    let got = near(x0, y0, p) || near(x0, y0, p.box)
+    // its island, else its rectangle, else its rectangle with the dots closer together: the graph keeps the rows it was
+    // given, so the pane's head and the claim under it stay in view
+    let got = near(x0, y0, p) || near(x0, y0, p.box) || near(x0, y0, p.box, 2)
     if (!got) { fits = false; got = near(x0, y0, all) || { x: Math.max(0, Math.min(W - 2, x0)), y: Math.max(1, Math.min(H - 1, y0)) } }
     taken.push(got)
     pos.set(p.id, got)
@@ -571,11 +575,10 @@ function needOf(claims, groups, edges, W, most) {
   return most
 }
 
-/** One graph of clusters: their names, their claims as dots, and the links between them. As many rows as `h`; a graph
- *  that does not fit there takes more rows, and the side panel shows the rows around the dot selected. */
+/** One graph of clusters: their names, their claims as dots, and the links between them, in at most `h` rows, so the
+ *  pane's head (the count) and the claim selected under the graph always stand in the side panel's rows. */
 function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num }) {
-  let lay = layOf(claims, groups, edges, W, h, num).lay
-  for (let hh = h + 4; !lay.fits && hh <= h + 200; hh += 4) lay = layOf(claims, groups, edges, W, hh, num).lay
+  const lay = layOf(claims, groups, edges, W, h, num).lay
   const c = k.canvas(W, lay.h)
   for (const nm of lay.names) {
     const gg = groups.find(x => String(x.id) === nm.id)

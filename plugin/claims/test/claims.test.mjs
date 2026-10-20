@@ -401,6 +401,13 @@ test('the pane: the ring on a dot selects its claim; ↵ opens where it was said
   assert.ok(!run({ claim: 'c2' }).on.some(x => x.name === 'h'))
   // the pane takes no esc (the panel's own)
   assert.ok(!(run(st, { type: 'key', key: 'esc' }).effects || []).length)
+  // ↑ ↓ walk the dots: the side panel moves the ring from part to part, and each dot it lands on is selected, the
+  // claim under the graph with it
+  for (const id of ['c1', 'c3', 'c4', 'c6']) {
+    const moved = run({ claim: 'c2', part: 'n-c2' }, { type: 'focus', region: `n-${id}` }).state
+    assert.equal(moved.claim, id)
+    assert.match(draw(data, { state: moved }).text, new RegExp(`\\n[●○◉] ${store.claims.find(c => c.id === id).text.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+  }
   // the dots keep their places while the ring walks them, whatever the claim under the graph
   const dots = state => draw(data, { state }).text.split('\n').slice(0, 8).join('\n').replace(/[─│╱╲]/g, ' ')
   assert.equal(dots({ claim: 'c1' }), dots({ claim: 'c3' }))
@@ -478,6 +485,20 @@ test('the pane is never taller than its rows: the graph takes the rows the claim
     assert.ok(t.split('\n').length <= 44, `${claim}: ${t.split('\n').length} rows`)
     assert.equal(d.selected, `n-${claim}`)
     assert.equal(d.regions.filter(r => /^n-/.test(r.id)).length, 150)
+  }
+  // uneven clusters with links, as a long session makes them: the count stays on the first row and the pane stays
+  // within the side panel's rows (the input bar and the actions above it take six), so nothing scrolls the count away
+  const uneven = emptyStore('s')
+  for (let from = 0, turn = 1; from < 155; from += 31, turn++) {
+    const ids = Array.from({ length: Math.min(31, 155 - from) }, (_, i) => from + i + 1)
+    const t = ids.map(i => `Wiki ${i} had [${i + 10} saves](q${i % 7}#n).`).join(' ')
+    applyTurn(uneven, { places: [{ row: `r${turn}`, by: 'claude', turn, text: t }], turn, out: { claims: ids.map(i => ({ quote: `Wiki ${i} had ${i + 10} saves`, cluster: `group ${i % 3 ? (i % 9) + 1 : 1}`, ...(i > 1 ? { links: [{ to: `c${i - 1}`, how: 'supports' }] } : {}) })) } })
+  }
+  for (const h of [46, 40, 34]) {
+    const { d: du, text: tu } = draw(pane.data({ claims: uneven, threads: [] }), { w: 106, h, state: { claim: 'c155' } })
+    assert.match(tu, /^155 claims/)
+    assert.ok(tu.split('\n').length <= h - 6, `${h}: ${tu.split('\n').length} rows`)
+    assert.equal(du.selected, 'n-c155')
   }
   // a conversation under the pane: about two fifths of the rows are its, and the input bar's
   const talk = pane.data({ claims: many, threads: [{ key: 'pane-claims-claims', turns: [{ role: 'person', text: 'q' }] }] })
