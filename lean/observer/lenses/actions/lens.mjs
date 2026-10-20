@@ -1,5 +1,5 @@
 // The actions lens: the actions it lights under the answer, today v (visualize) with one or two named proposals. Its
-// merge puts them in the answer's record (shell/message.js verbsOf checks them); c is lit by thimble from the claims.
+// merge puts them in the answer's record (shell/message.js verbsOf checks them).
 import { verbsOf } from '../../../shell/message.js'
 
 export default {

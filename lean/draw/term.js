@@ -13,7 +13,7 @@
 // renderTerm(drawing, {w}) -> grid {w, h, rows, regions, marks, cut}
 //   rows     h rows of w cells {ch, tone, b?, bg?, ref?, px?, w2?, cont?}; tone is a palette.js tone
 //   regions  [{id, meta, rects: [{x, y, w, h}]}] in the drawing's order; links ([words](#id)) add rects to `id`
-//   marks    what was drawn, in tree order and renderer-free (text, values, rows, regions): svg.js returns the same
+//   marks    what was drawn, in tree order and renderer-free (text, values, rows, regions)
 //   cut      what did not fit: text cut with …, notes left out, cells clipped
 // No `$`, no DOM, no Node: the mod imports it (paint.js turns the rows into Text and Raster elements).
 import { distribute } from './flex.js'

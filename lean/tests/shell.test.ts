@@ -1,10 +1,8 @@
 // The shell's hooks (shell/shell.tsx): an object Claude saves is placed under the turn's next words, a prompt asked
-// while the detail view is open carries the object and its selected part, /verb lists the verbs for an object, a verb
-// of the message row draws what it made under the same message, a verb's call to the model is made by the module,
-// what a verb says for Claude goes with the next prompt, a verb's request to Claude reads as one line, and a resumed
-// session draws its objects again. The message layer: each message's record on disk, its marks drawn inline, the verb
-// row under the answer, the keys of an empty prompt, the tray and a question asked from it. `claude plugin test lean`.
-// The Node children (the drawing, a verb's run, `thimble resolve`) are answered here, at process.run.
+// while the detail view is open carries the object and its selected part, v's request to Claude reads as one line, and
+// a resumed session draws its objects again. The message layer: each message's record on disk, its marks drawn inline,
+// the bar under the prompt, the keys of an empty prompt, the tray and a question asked from it. `claude plugin test`.
+// The Node children (the drawing, `thimble resolve`) are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { plainWhy } from '../shell/shell'
@@ -18,11 +16,6 @@ const OBJECT = {
   lineage: { cites: [] },
 }
 const DRAWING = { kit: 1, w: 40, h: 24, mode: 'inline', root: { t: 'stack', kids: [{ t: 'region', id: 'day-2026-06-18', meta: { ref: 'q1#day=2026-06-18@n', label: 'Jun 18 6,543' }, kid: { t: 'beside', kids: [{ t: 'text', runs: [{ s: 'Jun 18', tone: 'ink' }], wrap: false, w: 6 }, { t: 'bar', tone: 'accent', value: 6543, max: 6543 }, { t: 'text', runs: [{ s: '6,543', tone: 'ink' }], align: 'right', w: 5 }], gap: 1 } }] }, cites: {}, examples: {}, regions: [{ id: 'day-2026-06-18', meta: { ref: 'q1#day=2026-06-18@n', label: 'Jun 18 6,543' } }], warnings: [], ms: 2 }
-const VERBS = [
-  { key: 's', name: 'squeeze', line: 'shorter', phrase: null, picked: false },
-  { key: 'x', name: 'explore', line: 'a view to explore', phrase: 'explore 1 day', picked: true },
-  { key: 't', name: 'trace', line: 'where it came from', phrase: 'where these numbers come from', picked: true },
-]
 const RESOLVED = { ref: 'q1#day=2026-06-18@n', chain: [{ step: 'query', id: 'q1', about: 'saves per day' }], rows: ['revisions.jsonl#L28-31'], count: 4, records: [{ ref: 'revisions.jsonl#L28', text: 'x' }], notes: [] }
 // a quote's row, as `thimble resolve --json` gives its span: the rows around it, the quoted words placed in their field
 const QUOTED = {
@@ -36,7 +29,7 @@ let realCards = false
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const partWords = (d: any): string => String(d?.head ?? (Array.isArray(d?.rows) ? d.rows.map((r: { n: string; hot: boolean; text: string }) => `${r.n} ${r.hot ? '▌ ' : ''}${String(r.text).replace(/\{\w+:|\}|\*\*/g, '')}`).join(' / ') : ''))
 
-const TRACE = { ...OBJECT, id: '02-trace', title: 'Trace · Jun 18', verb: 'trace' }
+const TRACE = { ...OBJECT, id: '02-trace', title: 'Trace · Jun 18' }
 // what prep.mjs answers for a save's check (its interactions tried once): all ran, unless a test sets a failure
 const ALL_RAN = { line: null, tried: 2, total: 2, failed: 0, cut: 0, ms: 3 }
 let checked: unknown = ALL_RAN
@@ -53,9 +46,7 @@ function saving(files: Record<string, string>, id = '01-saves', v = 1, root = RO
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Verb = (input: any) => unknown
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), drawing: unknown = DRAWING, env: Record<string, string> = {}, session = 's-1') {
+function world(on: any, drawing: unknown = DRAWING, env: Record<string, string> = {}, session = 's-1') {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...env })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -71,7 +62,6 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
     return { value: undefined }
   })
   const runs: string[][] = []
-  const inputs: unknown[] = []
   const stdins: string[] = []
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     runs.push([...e.argv])
@@ -87,13 +77,9 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
       return { value: { exitCode: 0, stdout: `saved ${id} v1: thimble/objects/${id}.json`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     const prep = e.argv.some(a => a.endsWith('prep.mjs')) ? JSON.parse(String(e.init?.stdin || '{}')) : null
-    if (prep && realCards && prep.noVerbs) out = { drawing: { ...DRAWING, w: prep.w, h: 1, root: { t: 'text', runs: [{ s: partWords(prep.object.data), tone: 'ink' }], wrap: false }, regions: [] }, verbs: [], problems: [] }
-    else if (prep) out = { drawing, verbs: VERBS, problems: [], ...(prep.check ? { check: checked } : {}) }
-    else if (e.argv.some(a => a.endsWith('verb.mjs'))) {
-      const input = JSON.parse(String(e.init?.stdin || '{}'))
-      inputs.push(input)
-      out = verb(input)
-    } else if (e.argv.includes('resolve')) out = e.argv.includes('revisions.jsonl#L28') ? QUOTED : RESOLVED
+    if (prep && realCards && prep.object?.version == null) out = { drawing: { ...DRAWING, w: prep.w, h: 1, root: { t: 'text', runs: [{ s: partWords(prep.object.data), tone: 'ink' }], wrap: false }, regions: [] } }
+    else if (prep) out = { drawing, ...(prep.check ? { check: checked } : {}) }
+    else if (e.argv.includes('resolve')) out = e.argv.includes('revisions.jsonl#L28') ? QUOTED : RESOLVED
     else if (e.argv.includes('coverage')) out = { files: [{ path: 'revisions.jsonl', rows: 300, lines: 300, status: 'computed', computed: 102 }, { path: 'events.jsonl', rows: 300, lines: 300, status: 'named', computed: 0 }], total: { files: 2, rows: 600, read_share: 102 / 600 } }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -111,7 +97,7 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   // Claude Code's hint line under the prompt, as a hook leaves it
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
-  return { runs, inputs, files, submitted, toasts, reads, stdins }
+  return { runs, files, submitted, toasts, reads, stdins }
 }
 
 // every string a drawn tree holds, in order
@@ -127,7 +113,6 @@ const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const AT = ROW.slice(0, 24)
 const MOUNT = { plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
-const verbKey = (k: string) => `vr-${AT}-verb-${k}`
 const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
@@ -149,7 +134,7 @@ const markdowns = (t: Node) => { const out: string[] = []; walk(t, x => { if (x.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const reply = ($: any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
-test('an object Claude saves is drawn under the next words of the turn; its verbs and 1 open detail are in the thimble line', async ($, on) => {
+test('an object Claude saves is drawn under the next words of the turn; its verbs and 1 open detail are in the bar', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   const opened: string[] = []
@@ -169,7 +154,7 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   expect(drawn).toContain('the reply')
   expect(drawn).toContain('Jun 18')
   expect(drawn).toContain('6,543')
-  // the message, then the object with nothing under it; the keys act on this answer, so the thimble line above the
+  // the message, then the object with nothing under it; the keys act on this answer, so the bar above the
   // prompt names its verbs and what 1 does, and 1 on an empty prompt opens the card's detail view
   expect(drawn).not.toContain('visualize')
   expect(drawn).not.toContain('1 open detail')
@@ -273,7 +258,7 @@ test('while the detail view is open, a prompt carries the object and its selecte
   const { runs } = w
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: false, isPlaced: true, plugin: 'thimble' }] }))
-  await $.command.run({ command: 'obj', args: 'saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: 'saves day-2026-06-18' } as never)
   // the region's rows were resolved for the view, as the person's, not as what Claude read
   const resolve = runs.find(a => a.includes('resolve'))
   expect(resolve).toBeDefined()
@@ -284,17 +269,6 @@ test('while the detail view is open, a prompt carries the object and its selecte
   expect(carried[0]).toContain('01-saves@1')
   expect(carried[0]).toContain('day-2026-06-18')
   expect(carried[0]).toContain('q1#day=2026-06-18@n')
-})
-
-test('/verb ? lists every verb for the object, the picked ones marked', async ($, on) => {
-  const w = world(on)
-  on('tool.call', saving(w.files))
-  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
-  const r = await $.command.run({ command: 'verb', args: '?' } as never)
-  expect(String(r.text)).toContain('● x  explore')
-  expect(String(r.text)).toContain('where these numbers come from')
-  expect(String(r.text)).toContain('  s  squeeze')
 })
 
 test('a reply draws its citations inline, each underlined and a press that opens its source card in the tray', async ($, on) => {
@@ -319,7 +293,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   await clock.settle()
   const card = textOf(await $.ui.render(BAND))
   expect(card).toContain('Jun 18')
-  // the tray's keys are in the thimble line under it, not on its frame
+  // the tray's keys are in the bar under it, not on its frame
   expect(card.split('╯')[0]).not.toContain('1 ask')
   // with the keys of the card's sections: the rows behind the value, and its code
   expect(await hintOf($)).toContain('thimble  1 ask · r rows · c code · 0 close · ] next')
@@ -373,7 +347,7 @@ test('a quote opens its span under a link to its file, drawn as Claude Code draw
   }
 })
 
-// ------------------------------------------------------------------------------------------------ verbs, pressed
+// ------------------------------------------------------------------------------------------------ keys, pressed
 
 
 /** A turn that saves 01-saves and ends with words: the object is drawn under them. */
@@ -388,108 +362,33 @@ async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }
   await clock.settle()
 }
 
-test('a verb of the message row: v opens its line, a pick runs it on the message, and what it made is drawn under the same message; Claude reads what it did with the next prompt', async ($, on) => {
-  const w = world(on, () => ({ verb: 'visualize', saved: { id: '02-trace', v: 1 }, note: 'It drew the message as 2 bars.' }))
-  const clock = mock.clock(on)
-  await savedTurn($, on, clock, w.files)
-  const ui = await $.ui.mount(MOUNT)
-  await clock.settle()
-  expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
-  // v on an empty prompt, as the thimble line names it
-  await press($, clock, edit('v'))
-  expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
-  await ui.press({ key: 'r|p-proposals|0|opt-0' })
-  await clock.settle()
-  // the verb ran with the message: its record, as an object with its words, and the pick as its words
-  const input = w.inputs[0] as { object: { kind: string; text: string; row: string }; message: { row: string; final: boolean }; args: string }
-  expect(input.object.kind).toBe('message')
-  expect(input.object.text).toBe('June 18 had the most saves.')
-  expect(input.message.row).toBe(AT)
-  expect(input.message.final).toBe(true)
-  expect(input.args).toBe('')
-  // what it made is drawn under the same message, after the object there
-  expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(2)
-  expect(JSON.parse(w.files[SHOWN]!).under[AT].map((x: { id: string }) => x.id)).toEqual(['01-saves', '02-trace'])
-  expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${AT}.json`]!).objects).toEqual(['01-saves', '02-trace'])
-  // no prompt was sent; Claude reads it beside the next one, once
-  expect(w.submitted.length).toBe(0)
-  await $.prompt.submit({ text: 'and this?' } as never)
-  const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('The analyst ran the verb visualize on the message "June 18 had the most saves."')
-  expect(context).toContain('It drew the message as 2 bars.')
-  await $.prompt.submit({ text: 'more?' } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('ran the verb visualize')
-  await ui.unmount()
-})
-
-test('a verb that needs the model: the module makes the call, and the verb runs again with the answer', async ($, on) => {
-  const w = world(on, (input: { answers?: Record<string, { text: string }> }) => input.answers?.k1
-    ? { verb: 'squeeze', text: `squeezed to: ${input.answers.k1.text}` }
-    : { verb: 'squeeze', need: { kind: 'complete', request: { model: 'sonnet', prompt: 'the spans', maxTokens: 8000 }, key: 'k1' } })
-  const asked: { model?: string; prompt?: string }[] = []
-  on('model.complete', (_$: unknown, e: { model?: string; prompt?: string }) => {
-    asked.push(e)
-    return { value: { isAnswered: true, text: 'two lines', usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }
-  })
-  const r = await $.command.run({ command: 'verb', args: 'squeeze saves' } as never)
-  expect(asked.length).toBe(1)
-  expect(asked[0]!.model).toBe('sonnet')
-  expect(asked[0]!.prompt).toBe('the spans')
-  expect(w.inputs.length).toBe(2)
-  expect(String(r.text)).toContain('squeezed to: two lines')
-})
-
-test("with the card from a fork (card:v2), v asks main nothing: a fork writes the card, it is drawn under the same message, and Claude reads which card it is", async ($, on) => {
-  const w = world(on, () => ({ verb: 'visualize', text: 'never run', ask: 'never asked' }), DRAWING, { THIMBLE_PROMPTS: 'card:v2' })
-  const forks: string[] = []
-  on('model.fork', (_$: unknown, e: { prompt: string }) => {
-    forks.push(String(e.prompt))
-    return { value: { isAnswered: true, text: JSON.stringify({ card: 'by-hour', object: { title: 'Saves by hour', program: 'return k.text("x")', data: { days: 'q1' } } }), usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 9 } } }
-  })
-  const clock = mock.clock(on)
-  await savedTurn($, on, clock, w.files)
-  const ui = await $.ui.mount(MOUNT)
-  await clock.settle()
-  await press($, clock, edit('v'))
-  await ui.press({ key: 'r|p-proposals|0|opt-0' })
-  await clock.settle()
-  // the verb's child never ran, and no prompt went to main
-  expect(w.inputs.length).toBe(0)
-  expect(w.submitted.length).toBe(0)
-  expect(forks.length).toBe(1)
-  expect(forks[0]).toContain('VIEW June 18 had the most saves. | It has the card 01-saves already: make a different view, not a copy.')
-  // drawn under the same message, after the card there
-  expect(JSON.parse(w.files[SHOWN]!).under[AT].map((x: { id: string }) => x.id)).toEqual(['01-saves', '03-by-hour'])
-  await $.prompt.submit({ text: 'and this?' } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).toContain('The analyst pressed v under your last answer, and thimble drew the card 03-by-hour@1 under it ("Saves by hour")')
-  await ui.unmount()
-})
-
 test("v asks Claude for a card of the message: the row reads as the person's pick, the request beside it for Claude alone", async ($, on) => {
-  const ask = 'The person pressed v (visualize) on your reply that begins "June 18 had the most saves.". Make a card of it.'
-  const w = world(on, () => ({ verb: 'visualize', text: 'Claude is making a card of this message.', ask }))
+  const ask = 'The analyst pressed v (visualize) on your answer that begins "June 18 had the most saves.". They want another view of it'
+  const w = world(on)
   const session = mock.session(on)
   const clock = mock.clock(on)
   await savedTurn($, on, clock, w.files)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
-  // v on an empty prompt, as the thimble line names it
+  // v on an empty prompt, as the bar names it
   await press($, clock, edit('v'))
-  expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
-  await ui.press({ key: 'r|p-proposals|0|opt-0' })
+  // with no view proposed v opens no line: it asks once a letter could no longer make it the start of a word
+  expect(textOf(await ui.drawn())).not.toContain('another view of this answer')
+  await clock.advance(700)
   await clock.settle()
-  expect((w.inputs[0] as { args: string }).args).toBe('')
   // the row reads as the press; Claude reads the request in a row before it that the person does not see
   expect(w.submitted.map(x => x.text)).toEqual(['visualize another view of this answer'])
   const rows = session.appended() as unknown as { door: string; message: { type: string; content: { text?: string }[] } }[]
   const hidden = rows.filter(r => r.door === 'note' && r.message.type === 'user' && r.message.content.some(b => String(b.text).includes(ask)))
   expect(hidden.length).toBe(1)
+  // the card guide is named by its file in this plugin, for Claude to read first
+  expect(String(hidden[0]!.message.content[0]!.text)).toMatch(/Read the card guide first, unless you have it from earlier in this session: \S+\/skills\/thimble\/cards\.md\./)
   await ui.unmount()
 })
 
-test('a view that fails to draw: no prompt and no row; Claude reads why, at once after its save and with /verb explore', async ($, on) => {
+test('a view that fails to draw: no prompt and no row; Claude reads why, at once after its save', async ($, on) => {
   const failed = { ...DRAWING, error: { name: 'TypeError', message: 'data.days is undefined', line: 3 } }
-  const w = world(on, () => ({ verb: 'explore', saved: { id: '01-saves', v: 1 }, text: 'The view\'s program failed (TypeError).', note: 'The explore view 01-saves failed to draw: TypeError. Fix its program and save it again under the same name.' }), failed)
+  const w = world(on, failed)
   on('ui.open', () => ({ value: { isPlaced: true } }))
   const clock = mock.clock(on)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
@@ -499,10 +398,7 @@ test('a view that fails to draw: no prompt and no row; Claude reads why, at once
   expect(String((saved as { context?: string[] }).context)).toContain('Fix the program and save it again under the same name now')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never)
   await clock.settle()
-  // explore is a card form now, still run by /verb: Claude reads why, with the command's row
-  const r = await $.command.run({ command: 'verb', args: 'explore saves' } as never)
   expect(w.submitted.length).toBe(0)
-  expect(String((r as { context?: string[] }).context)).toContain('Fix its program and save it again under the same name')
 })
 
 test('an object whose file cannot be read is not drawn in silence: Claude reads why with the save', async ($, on) => {
@@ -569,15 +465,15 @@ test("each row is written to the messages folder: an index line per row, and a r
   expect(MARKED.slice(rec.marks[0].start, rec.marks[0].end)).toBe('[6,543 saves](q1#day=2026-06-18@n)')
 })
 
-test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back; v opens its line, and a letter typed straight after gives v back to the prompt', async ($, on) => {
-  world(on)
+test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back; a letter typed straight after v gives v back to the prompt', async ($, on) => {
+  const w = world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   // the hint line names the key that opens the answer's marks; the verb row does not
   expect(textOf(await $.ui.render({ ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never))).not.toContain('marks')
   expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] cite & explain')
-  // the thimble line above the prompt counts what the session holds
-  expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
+  // the bar above the prompt says how much of the data the session read
+  expect(textOf(await $.ui.render(BAND))).toContain('coverage 17%')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
@@ -587,7 +483,7 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('ask about 6,543 saves…')
   expect(await hintOf($)).toContain('type to ask · ↵ asks this thread · 0 back')
-  // the thimble line names the thread the prompt goes to
+  // the bar names the thread the prompt goes to
   expect(textOf(await $.ui.render(BAND))).toContain('thimble:main/6,543 saves')
   await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
@@ -597,13 +493,15 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   // 0 on an empty prompt closes the tray
   expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
+  expect(textOf(await $.ui.render(BAND))).toContain('v visualize')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
-  // v opens its line under the answer; i typed straight after was the start of a word
+  // v waits a moment before it asks; i typed straight after was the start of a word, so v comes back and asks nothing
+  const asked = w.submitted.length
   expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(MOUNT))).toContain('▸ 1 another view of this answer')
   expect(await press($, clock, edit('i'))).toEqual({ text: 'vi', cursor: 2 })
-  expect(textOf(await $.ui.render(MOUNT))).not.toContain('▸ 1 another view')
+  await clock.advance(700)
+  await clock.settle()
+  expect(w.submitted.length).toBe(asked)
   // a key in a prompt with words in it is typed
   expect(await press($, clock, edit('s', 'so'))).toEqual({ text: 'sos', cursor: 3 })
 })
@@ -625,7 +523,8 @@ function slowWrites(on: any) {
   })
   return { next: (n: number) => { ms = n } }
 }
-const lineOpen = async ($: Any) => textOf(await $.ui.render(MOUNT)).includes('▸ 1 another view of this answer')
+// the squeeze chips under the answer: the line a key opens in these tests
+const lineOpen = async ($: Any) => textOf(await $.ui.render(MOUNT)).includes('Length ○○○● full')
 
 test('a key is answered before its work runs; a key pressed while that work runs waits for it, past the hook\'s 50 ms, and is still taken: the .catch gives what the hook decided', async ($, on) => {
   const w = world(on)
@@ -633,12 +532,12 @@ test('a key is answered before its work runs; a key pressed while that work runs
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   writes.next(300)
-  // v answers at once, while its work (the line it opens) still runs
-  expect(await Promise.race([($ as Any).prompt.edit(edit('v')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
-  // 1 straight after: decided once v's work is done, so it picks in v's line; it never lands in the prompt
+  // s answers at once, while its work (the chips it opens) still runs
+  expect(await Promise.race([($ as Any).prompt.edit(edit('s')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
+  // 1 straight after: decided once s's work is done, so it picks a chip; it never lands in the prompt
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
-  expect(w.inputs.length).toBe(1)
-  expect(await lineOpen($)).toBe(false)
+  expect(w.submitted.length).toBe(0)
+  expect(await lineOpen($)).toBe(true)
 })
 
 test('a key whose answer misses even the .catch\'s grace types, and its work never runs: a key is taken or typed, never both', async ($, on) => {
@@ -647,13 +546,13 @@ test('a key whose answer misses even the .catch\'s grace types, and its work nev
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   writes.next(1400)
-  expect(await Promise.race([($ as Any).prompt.edit(edit('v')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
-  // 1 waits for v's work longer than the hook's budget and the .catch's grace together: Claude Code types it
+  expect(await Promise.race([($ as Any).prompt.edit(edit('s')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
+  // 1 waits for s's work longer than the hook's budget and the .catch's grace together: Claude Code types it
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '1', cursor: 1 })
-  // v's work ends; the 1 that typed picks nothing, and v's line stays open
+  // s's work ends; the 1 that typed picks nothing, and the chips stay open
   await sleep(500)
   await clock.settle()
-  expect(w.inputs.length).toBe(0)
+  expect(w.submitted.length).toBe(0)
   expect(await lineOpen($)).toBe(true)
 })
 
@@ -662,34 +561,34 @@ test('a key whose answer misses even the .catch\'s grace types, and its work nev
 // change from the edit's own "vi": what the editor shows then is the answer with the taken v out of it too.
 const shows = (answer: { text: string; cursor: number }, taken: string) => answer.text.slice(taken.length)
 
-test('a letter typed before v\'s answer came, on the box with the v still in it, is the start of a word: the v comes back and its line closes', async ($, on) => {
-  const w = world(on)
+test('a letter typed before s\'s answer came, on the box with the s still in it, is the start of a word: the s comes back and its line closes', async ($, on) => {
+  world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
-  // i, typed while the editor still showed the v: answered at once, so the editor shows "vi"
-  const i = await ($ as Any).prompt.edit(edit('i', 'v'))
-  expect(shows(i, 'v')).toBe('vi')
+  expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
+  // o, typed while the editor still showed the s: answered at once, so the editor shows "so"
+  const o = await ($ as Any).prompt.edit(edit('o', 's'))
+  expect(shows(o, 's')).toBe('so')
   await clock.settle()
   expect(await lineOpen($)).toBe(false)
-  // a key so typed that v's line takes is decided on the empty box, once v's line is open: 1 picks, no letter lands
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
-  expect(shows(await press($, clock, edit('1', 'v')), 'v')).toBe('')
-  expect(w.inputs.length).toBe(1)
+  // a key so typed that the chips take is decided on the empty box, once they are open: 1 picks a chip, no letter lands
+  expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
+  expect(shows(await press($, clock, edit('1', 's')), 's')).toBe('')
+  expect(await lineOpen($)).toBe(true)
 })
 
-test('a letter typed straight after v is a word however long v\'s work takes: the time counts from when each key came', async ($, on) => {
+test('a letter typed straight after s is a word however long s\'s work takes: the time counts from when each key came', async ($, on) => {
   world(on)
   const writes = slowWrites(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   writes.next(300)
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
-  // i comes at once, and waits for v's work, which takes longer than the gap a word allows
-  const i = ($ as Any).prompt.edit(edit('i'))
+  expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
+  // o comes at once, and waits for s's work, which takes longer than the gap a word allows
+  const o = ($ as Any).prompt.edit(edit('o'))
   await sleep(20)
   await clock.advance(1000)
-  expect(await i).toEqual({ text: 'vi', cursor: 2 })
+  expect(await o).toEqual({ text: 'so', cursor: 2 })
   await clock.settle()
   expect(await lineOpen($)).toBe(false)
 })
@@ -719,7 +618,7 @@ test('a question asked with the tray open goes to the side thread of its mark: m
   const band = textOf(await $.ui.render(BAND))
   expect(band).toContain('❯ why so high?')
   expect(await hintOf($)).toContain('0 back')
-  // the thimble line counts the thread
+  // the bar counts the thread
   expect(band).toContain('1 thread')
   // its thread file is written for the browser
   expect(Object.keys(w.files).some(f => f.includes('/thimble/threads/s-1/'))).toBe(true)
@@ -754,19 +653,20 @@ test('a failure reads as plain words, never JSON; a refusal that needs nothing f
   expect(plainWhy('Traceback (most recent call last):\n  File "x"')).toBe('Traceback (most recent call last):')
 })
 
-test('the thimble line is the one bar: the verbs in words at its left, a lit one with its note; the non-zero counts at its right, coverage the share read; a changed count bright for a moment; a blank row above it; its label plain', async ($, on) => {
+test('the bar is one row above the prompt: the verbs in words at its left, a lit one with its note; at its right the threads and coverage (the share read), when not zero; a changed count bright for a moment; a blank row above it; its label plain', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   const bar = textOf(await $.ui.render(HINT))
   expect(bar).toContain('thimble  v visualize · s squeeze · ] cite & explain')
   // 102 of 600 rows read, as the kernel counts them (events.jsonl was only named): 17%; no zero count shows
-  expect(bar).toContain('2 cites · coverage 17%')
+  expect(bar).toContain('coverage 17%')
+  expect(bar).not.toContain('cites')
   expect(bar).not.toContain('card')
   expect(bar).not.toContain('thread')
   expect(bar).not.toContain('claims')
   // the counts that just changed are bright, then dim
-  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x) === '2 cites') on = true }); return on }
+  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x) === 'coverage 17%') on = true }); return on }
   expect(lit(await $.ui.render(HINT))).toBe(true)
   for (let i = 0; i < 40; i++) await clock.advance(50)
   expect(lit(await $.ui.render(HINT))).toBe(false)
@@ -828,8 +728,8 @@ test('the keys act on the newest answer, never on an error; { and } pick another
   expect(await hintOf($)).not.toContain('cite & explain')
 })
 
-test('a conversation continued in a new session (moved to the background, --fork-session) finds its records: the cards under its replies, its answers and its claims', async ($, on) => {
-  const w = world(on, undefined, undefined, {}, 's-2')
+test('a conversation continued in a new session (moved to the background, --fork-session) finds its records: the cards under its replies and its answers', async ($, on) => {
+  const w = world(on, undefined, {}, 's-2')
   const clock = mock.clock(on)
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
@@ -837,38 +737,35 @@ test('a conversation continued in a new session (moved to the background, --fork
   on('session.usage', () => ({ value: { startedAt: 1700000000000, context: {}, rateLimits: [] } }))
   on('session.messages', () => ({ value: [{ role: 'user', text: 'when?', toolUses: [] }, { role: 'assistant', text: 'June 18 had the most saves.', toolUses: [] }] }))
   const CONV = '/home/t/.thimble/lean/conversations/1700000000000.json'
-  // what the first session (s-1) kept: its conversation, the card under its answer, the answer's record, its claims
+  // what the first session (s-1) kept: its conversation, the card under its answer, the answer's record
   w.files[CONV] = JSON.stringify({ key: 's-1', sessions: ['s-1'] })
   w.files[SHOWN] = JSON.stringify({ under: { [AT]: [{ id: '01-saves', v: 1, root: ROOT }] } })
   const dir = `${ROOT}/thimble/messages/s-1`
   w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'when?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
   w.files[`${dir}/${AT}.json`] = JSON.stringify({ v: 1, row: AT, session: 's-1', text: 'June 18 had the most saves.', shown: null, marks: [], glosses: {}, verbs: {}, objects: ['01-saves'], final: true })
-  w.files[`${ROOT}/thimble/claims/s-1.json`] = JSON.stringify({ v: 1, session: 's-1', claims: [{ id: 'c1', text: 'June 18 had the most saves', kind: 'finding', said: [{ row: AT, by: 'claude', turn: 1 }], sources: [] }], clusters: [], gaps: [] })
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
   await clock.settle()
-  // the card is drawn under the same reply (once its drawing is ready), the keys act on its answer, and the line counts
-  // its claim
+  // the card is drawn under the same reply (once its drawing is ready), and the keys act on its answer
   await reply($)
   await clock.settle()
   expect(textOf(await reply($))).toContain('6,543')
   const bar = await hintOf($)
   expect(bar).toContain('v visualize')
-  expect(bar).toContain('1 claim')
   // the new session joined the conversation, and its commands file their records under its key
   expect(JSON.parse(w.files[CONV]!).sessions).toEqual(['s-1', 's-2'])
 })
 
 test('a session of the background service starts no Node child until the person\'s first prompt', async ($, on) => {
-  const w = world(on, undefined, undefined, { CLAUDE_CODE_SESSION_KIND: 'bg' })
+  const w = world(on, undefined, { CLAUDE_CODE_SESSION_KIND: 'bg' })
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   const clock = mock.clock(on)
-  const children = () => w.runs.filter(r => r.some(a => a.endsWith('verb.mjs')) || r.includes('coverage')).length
+  const children = () => w.runs.filter(r => r.includes('coverage')).length
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
   await clock.settle()
   expect(children()).toBe(0)
   await $.prompt.submit({ text: 'when?', origin: { kind: 'composer' } } as never)
   await clock.settle()
-  expect(w.runs.some(r => r.some(a => a.endsWith('verb.mjs')) && r.includes('list'))).toBe(true)
+  expect(children()).toBe(1)
 })
 
 test('a -p run starts no Node child for the line nobody reads', async ($, on) => {
@@ -878,5 +775,5 @@ test('a -p run starts no Node child for the line nobody reads', async ($, on) =>
   await $.session.start({ cwd: ROOT, surface: null, isInteractive: false } as never)
   await $.prompt.submit({ text: 'when?', origin: { kind: 'sdk' } } as never)
   await clock.settle()
-  expect(w.runs.filter(r => r.some(a => a.endsWith('verb.mjs')) || r.includes('coverage')).length).toBe(0)
+  expect(w.runs.filter(r => r.includes('coverage')).length).toBe(0)
 })

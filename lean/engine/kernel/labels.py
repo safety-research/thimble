@@ -9,7 +9,7 @@ A label is defined once and applied to every record of the files a glob names (o
     code     `label(unit)` in Python returns the value, (value, confidence) or None; a unit is the record as a dict
              (a line of text is {"text": ...}), with `_ref` and `_text` (the line as the file holds it)
     prompt   a model reads each record against the definition: the records wait in the label (`waiting`) until the
-             label verb (verbs/label/) makes the calls through the session's own model and writes the answers back
+             shell (shell/labels.ts) makes the calls through the session's own model and writes the answers back
     set      values Claude gives records itself, after reading them (`--set REF=VALUE`)
 
 A value has its source (`by`: regex, code, model, claude), and a person's check stands over it: what the person said a
@@ -22,8 +22,8 @@ use("apology"): each record's `_ref` and value (with `confidence`, `reason`, `by
 person made since is in it. The label's card (save_card) draws the counts; its examples are records of each value
 chosen at random, the unchecked first, so the person checks a sample before trusting the counts.
 
-Every change bumps `rev`. Writes take a lock (the label verb, the person's checks and Claude's commands may write at
-once).
+Every change bumps `rev`. Writes take a lock (the model's reads, the person's checks and Claude's commands may write
+at once).
 """
 from __future__ import annotations
 

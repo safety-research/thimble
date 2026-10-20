@@ -20,7 +20,6 @@ from kernel import objects as O  # noqa: E402
 from kernel import query as Q  # noqa: E402
 from kernel import refs as R  # noqa: E402
 from kernel import store as STORE  # noqa: E402
-from kernel import trace as T  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
 
@@ -134,8 +133,8 @@ def test_a_packed_record_is_a_fraction_of_the_whole_one() -> None:
 
 def test_every_ref_resolves_to_the_same_rows_from_a_packed_record_as_from_a_whole_one(root: Path) -> None:
     """The same queries in two copies of a folder: one keeps its records whole (as before), one packed. Every ref of
-    every query, whole, by row and by cell, and every value of an object bound to them, resolves the same; trace finds
-    the same uses; and use() gives a later query the same table."""
+    every query, whole, by row and by cell, and every value of an object bound to them, resolves the same; and use()
+    gives a later query the same table."""
     import shutil
 
     other = root.parent / "data-whole"
@@ -169,11 +168,6 @@ def test_every_ref_resolves_to_the_same_rows_from_a_packed_record_as_from_a_whol
     for ref in refs:
         assert a[ref] == b[ref], ref
     assert sum(1 for r in a.values() if r["count"]) > 20
-    # trace: what uses a block the tally rests on
-    one = Q.get(sts["packed"], "r1")["rows"][0][0]
-    untimed = lambda u: {k: [{a: b for a, b in e.items() if a != "t"} for e in v] if isinstance(v, list) else v for k, v in u.items()}  # noqa: E731
-    used = untimed(T.uses(sts["packed"], one, answers=False))
-    assert used == untimed(T.uses(sts["whole"], one, answers=False)) and len(used["queries"]) >= 2
     # use() of each result, and of the kept frame, as a later query reads it
     for q in got["packed"]:
         x = Q.run(sts["packed"], "use it", f'use("{q["id"]}")')

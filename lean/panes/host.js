@@ -1,5 +1,5 @@
 // host.js: what every surface does with a program on the runtime (draw/kit.js), as pure functions. A program is a card
-// Claude saved or a pane of thimble's own (the card detail, the Claims graph, the squeeze chips): the same API, the same
+// Claude saved or a pane of thimble's own (the card detail, the tray, the squeeze chips): the same API, the same
 // drawing, and the same rules for what reaches it. No `$`, no DOM, no Node: the terminal (shell/panes.ts) and the
 // browser (shell/browser/src/panes/) both import this file, so the two read a program's keys the same way.
 //
@@ -157,15 +157,15 @@ export function hostKeys(mode, surface = 'terminal') {
 }
 
 // ---------------------------------------------------------------- the one bar, in the room it has
-// The bar is one line: `thimble  v visualize · s squeeze · c claims · ] cite & explain      2 cards · coverage 34%`. With
+// The bar is one line: `thimble  v visualize · s squeeze · ] cite & explain      2 cards · coverage 34%`. With
 // less room it gives up, in this order: the counts (coverage last), then each key's words beyond their first word
-// (`visualize`, `squeeze`, `claims`, `cite`), then the label, then the end of the line (an ellipsis). It never wraps.
+// (`visualize`, `squeeze`, `cite`), then the label, then the end of the line (an ellipsis). It never wraps.
 //
 //   bar: {label, left: [{key, words, short?, ...}], counts: [{id, text, ...}]}
 //   barLadder(bar) -> the bar at each step, fullest first
 //   fitBar(bar, width, measure) -> the first step whose line fits `width` (measure: text -> width, default columns)
 
-const COUNT_ORDER = ['cards', 'threads', 'cites', 'claims', 'cov']
+const COUNT_ORDER = ['threads', 'cov']
 const GAP = 3 // between the keys and the counts
 
 /** The line a bar draws, as text (for measuring). */

@@ -9,26 +9,10 @@ export type ObjRef = { id: string; v: number | null; root: string }
  *  cites, each a press from its rows. */
 export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null; prog?: boolean; pages?: 'all' | 'one' }
 
-/** A verb's run, as the /verb command's row draws it. */
-export type Ran = { verb: string; text?: string; note?: string; ask?: string; error?: string; saved?: ObjRef | null; on?: string; failed?: boolean }
-
-/** A verb running on an object (the row under it says `<verb>… <text>`, its progress), or what it said last. */
+/** Work running on a card (the row under it says `<verb>… <text>`, its progress: the model's reads of a label), or
+ *  what it said last. */
 export type Said = { verb: string; text?: string; error?: string; running?: boolean }
 
-/** The hint row of one object version as the observer ranked it: its 2-3 verbs, each with a few words for this object. */
-export type Ranking = { verbs: { verb: string; phrase?: string }[]; at: number; by: 'observer' }
-
-/** The observer's one line above the prompt: the line, then (after Learn more) its explanation, written already. */
-export type ObserverLine = {
-  kind: 'offer' | 'explained'
-  line: string
-  title: string
-  explanation: string
-  decision: string
-  shownAt: number
-  /** prompts the person submitted while it was open: it clears at the second */
-  prompts: number
-}
 
 /** One mark in a message (CONTRACT 1): a citation, a gloss or a sparkline, as offsets into the shown markdown. */
 export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; anchor?: 'form' | 'word' }
@@ -52,7 +36,7 @@ export type MsgRecord = {
   objects: string[]
   /** the turn's answer: the row its verb row is drawn under */
   final?: boolean
-  /** the squeeze chips' state (verbs/squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
+  /** the squeeze chips' state (squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
   squeeze?: Squeeze
   /** a catch-up's own record (it is no row of the transcript): what it covers, drawn under `host` */
   catchup?: CatchUp
@@ -65,11 +49,10 @@ export type MsgRecord = {
  *  `prompt` its row. A dismissed one is drawn no more; one that showed a version counts as read. */
 export type CatchUp = { host: string; rows: string[]; replies: number; question: string; prompt: string | null; dismissed?: boolean }
 
-/** A message's squeeze: where its chips are, the person's stretches, every version written by its levels, the
+/** A message's squeeze: where its chips are, every version written by its levels, the
  *  original's marks, whether it arrived squeezed, what a rewrite said that the original does not, and each call made. */
 export type Squeeze = {
   at?: Record<string, number>
-  own?: { id: string; kind?: 'stretch'; from: string; to: string }[]
   versions?: Record<string, string>
   orig?: { marks: Mark[] }
   auto?: boolean
@@ -77,14 +60,13 @@ export type Squeeze = {
   made?: { key: string; ms: number; model: string; usage?: unknown; at?: string }[]
 }
 
-/** The chips' line of one message as the person works it: the picked chip, whether they type a stretch (and what
- *  they typed), a call running (and the frame of its turning glyph), a call that failed, and the new text writing
+/** The chips' line of one message as the person works it: the picked chip, a call running (and the frame of its turning glyph), a call that failed, and the new text writing
  *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
-export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number; typing?: string; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
+export type SqzUi = { focus: string; running: { since: number } | null; error: string | null; tick: number; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
 
-/** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
+/** The bar's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */
-export type LineCounts = { cards: number; threads: number; cites: number; claims: number; cov: number; at: number; changed: Record<string, number> }
+export type LineCounts = { threads: number; cov: number; at: number; changed: Record<string, number> }
 
 /** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
  *  inside a card (panes/tray.js frameOf). */
@@ -93,9 +75,6 @@ export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string
 /** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }
 
-/** Browser mode (`on`, the `browser` setting) and its page server: its base URL (token included), the page opened
- *  last, why there is none, or why it stopped on its own (no page open). */
-export type Web = { on?: boolean; base?: string; root?: string; problem?: string; opened?: string; stopped?: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -104,33 +83,28 @@ declare module 'claude-code' {
       under: StateFamily<ObjRef[]>
       /** the detail view's selection */
       sel: Sel | null
-      /** the latest object drawn, which /obj opens with no argument */
+      /** the latest card drawn, which /card opens with no argument */
       last: ObjRef | null
       /** the object and region a prompt was asked about, by the prompt row's id */
       asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string }>
-      /** a verb running on an object, or what it said last, by the object's id */
+      /** work running on a card (a label's reads), or what it said last, by the card's id */
       said: StateFamily<Said | null>
       /** words for Claude alone, given with the next prompt */
       notes: string[]
-      /** the row an object is drawn under, by the object's id: a verb's object is drawn under the same row */
+      /** the row an object is drawn under, by the object's id */
       where: StateFamily<string>
       /** `thimble resolve --json` of a ref, by root and ref */
       rows: StateFamily<unknown>
-      web: Web
       /** when an object's drawing at a width became ready, by root, id, version and width: a drawing waiting on it redraws */
       ready: StateFamily<number>
-      /** the observer's ranking of an object version's hint row, by root, id and version */
-      ranked: StateFamily<Ranking | null>
       /** the observer's line above the prompt, or none */
-      line: ObserverLine | null
       /** each message's record, by its row key */
       msg: StateFamily<MsgRecord | null>
       /** the rows of Claude's messages in this session, oldest first */
       msgrows: string[]
       /** the tray above the prompt, or none */
       tray: Tray | null
-      /** the line a verb opened under a message's verb row, or none */
-      /** the line a verb opened under a message's verb row (c opens the Claims pane instead), or none */
+      /** the line a key of the row opened under a message (v's proposals, s's chips), or none */
       pick: { row: string; verb: string; open?: string | null } | null
       /** the message the keys act on, when the person picked one other than the latest */
       selrow: string | null
@@ -140,33 +114,20 @@ declare module 'claude-code' {
       answers: string[]
       /** the card under a reply that has the keys (] reached it): its own keys win over the verbs until 0 */
       cardfocus: (ObjRef & { row: string }) | null
-      /** a verb of the row running on a message, by its row */
-      running: StateFamily<string | null>
-      /** the verbs of the row, as the registry lists them */
-      rowverbs: { key: string; name: string; color?: unknown }[] | null
       /** the squeeze chips' line of a message, by its row */
       sqz: StateFamily<SqzUi | null>
       /** what Claude reads with the next prompt of the version the person reads now, by row */
       sqznote: Record<string, string>
-      /** the thimble line's counts above the prompt */
+      /** the bar's counts above the prompt */
       counts: LineCounts | null
       /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
-      /** the turns whose failed look the observer runs again now (observer.ts readAgain): the Claims pane says so */
-      reread: number[]
-      /** this session's claims (CONTRACT 7), as held for the drawing; thimble/claims/<session>.json on disk */
-      claims: Record<string, unknown> | null
-      /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */
-      turns: StateFamily<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null>
-      /** the Claims pane: the message it was opened from, the claim the ring is on (its card shows), and the replay
-       *  while one grows the graph (how many of the claims, in the order made, are shown) */
-      claimpane: { row: string; focus: string | null; replay: { gen: number; k: number; order: string[] } | null } | null
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
       events: { file: string; n: number; bytes?: number }
-      /** what takes the keys, newest last (the shell's focus stack): the thimble line says the keys of the top one */
-      focus: ('detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card')[]
+      /** what takes the keys, newest last (the shell's focus stack): the bar says the keys of the top one */
+      focus: ('detail' | 'chips' | 'proposals' | 'tray' | 'card')[]
       /** when a card's state file last changed, by root and id: a drawing that reads the card's state draws again */
       cardver: StateFamily<number>
       /** how many times a pane was asked to draw again, by the pane's instance: its drawings read it */

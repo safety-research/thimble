@@ -1,0 +1,386 @@
+// term.ts: Squeeze in the terminal: the one call per change that rewrites the message in place, the new text writing
+// itself in from the top, and the catch-up of replies that piled up. The chips
+// themselves, their keys and presses, are a pane program (panes/chips.js) that both surfaces run; what it asks for
+// (k.do('squeeze', {at | reset})) is done here. The shell (shell/shell.tsx) calls it; it imports the message
+// layer's record functions from the shell (a cycle the module system resolves at call time).
+//
+// While a change is on its way the record says where the chips go (squeeze.want), and a failed call says why
+// (squeeze.error), so the browser's chips show the same as the terminal's.
+//
+// A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
+// recorded in the session's events with the prompt version it used; the record's
+// `shown` holds the result and its marks are placed again on it, citations kept; a state seen before comes back from
+// the record with no call. While a call runs the old text dims and its first glyph turns; when the new text is there
+// it writes itself in from the top at a model's pace, and nothing else is drawn for it.
+import type { EngineInterface } from 'claude-code'
+
+import type { MsgRecord, SqzUi, Tray } from '../types'
+import { promptText as registryText } from '../prompts/prompts'
+import { newRecord, remark as remarkAny } from '../shell/message.js'
+import { modelWhy } from '../shell/why.js'
+import { tracked } from '../telemetry/telemetry'
+import { FEATURES } from '../prompts/registry.mjs'
+import { lookPending } from '../observer/observer'
+import { answerRow, closeTray, questionBefore, recordNow, saveRecord } from '../shell/shell'
+import { sessionKey } from '../hooks/conversation'
+import { ARRIVE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, termsOf, unplacedMoves } from './chips.mjs'
+
+type Engine = EngineInterface
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Any = any
+type Theme = 'dark' | 'light'
+type At = Record<string, number>
+
+const PICK = { plugin: 'thimble', key: 'pick' } as const
+const TRAY = { plugin: 'thimble', key: 'tray' } as const
+
+const SQZ = { plugin: 'thimble', key: 'sqz' } as const
+const SQZNOTE = { plugin: 'thimble', key: 'sqznote' } as const
+const remark = (rec: MsgRecord) => remarkAny(rec) as MsgRecord
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }
+const TICK = 50
+// the longest a step on Report ↔ Interpret or Familiarity waits for the observer's look to say where the original stands
+const LEVELS_WAIT_MS = 30000
+const BLANK: SqzUi = { focus: 'length', running: null, error: null, tick: 0 }
+
+// the module's memory: the call running per row and the one wanted after it; the text writing in per row; the
+// prompt's text; the last screen size
+const inflight = new Map<string, { want: Want | null }>()
+const revealing = new Map<string, number>()
+// `key`: the key the bar names for it ([ or ]), which presses it again after a failure; none for a press of the
+// pointer or a catch-up's first version
+type Want = { at: At; key?: string | null }
+let cfg: Record<string, unknown> = {}
+let view = { cols: 100, rows: 48 }
+
+/** The screen the transcript draws on, as the last message drawn saw it: `6 of 33 lines` counts at its width. */
+export function seeView(cols: number, rows: number): void {
+  if (cols > 0 && rows > 0) view = { cols, rows }
+}
+
+async function uiOf($: Engine, row: string): Promise<SqzUi> {
+  return (((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null) ?? { ...BLANK }
+}
+async function setUi($: Engine, row: string, change: Partial<SqzUi>): Promise<SqzUi> {
+  const next = { ...(await uiOf($, row)), ...change }
+  await $.state.set({ ...SQZ, id: row }, next)
+  return next
+}
+
+async function ensure($: Engine): Promise<void> {
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  if (!Object.keys(cfg).length) {
+    try { cfg = JSON.parse(String(await $.fs.read(`${dir}/squeeze/settings.json`))) } catch { cfg = {} }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ the bar
+
+/** What the bar shows for s: lit with `6 of 33 lines` while the person has the message squeezed; else what the
+ *  observer gave (dim when nothing), so a message as Claude wrote it reads `s squeeze`, however long. A catch-up is
+ *  squeezed by what it is, and says no line counts. */
+export function sLit(rec: MsgRecord, _ui: SqzUi | null): { lit: boolean; note: string } | null {
+  if (isCatchUp(rec)) return null
+  if (typeof rec.shown === 'string') return { lit: true, note: noteOf(rec, view.cols) }
+  const own = rec.verbs?.s
+  return own?.lit && own.note ? { lit: true, note: String(own.note) } : null
+}
+
+/** Whether the message is drawn dim with a turning glyph: a rewrite of it is running. */
+export function busyGlyph(ui: SqzUi | null): string | null {
+  return ui?.running ? SPIN[(ui.tick || 0) % SPIN.length]! : null
+}
+
+/** How much of the shown text is drawn now: all of it (null), or the first `n` characters while it writes itself in. */
+export function revealedOf(ui: SqzUi | null): number | null {
+  return ui?.reveal ? ui.reveal.n : null
+}
+
+// ------------------------------------------------------------------------------------------------ the rewrite
+
+/** What a failed rewrite says: what failed and why, then the key that tries again. */
+export function failedWords(why: string, key?: string | null): string {
+  return `The rewrite failed: ${why}. ${key ? `Press ${key} to try again` : 'Pick the level again to try again'}`
+}
+
+/** Set the chips of a row to `at` and show that version: from the record when it was written before, else one call.
+ *  Changes made while a call runs wait, and only the latest of them runs next. `key`: the key that asked for it. */
+export async function setLevels($: Engine, row: string, at: At, key: string | null = null): Promise<void> {
+  // the chips show where they go at once (here, and in the browser from the record); the text follows
+  await setUi($, row, { want: at, error: null })
+  await markRecord($, row, { want: at, error: null })
+  const job = inflight.get(row)
+  if (job) {
+    job.want = { at, key }
+    return
+  }
+  inflight.set(row, { want: null })
+  try {
+    let next: Want | null = { at, key }
+    while (next) {
+      next = { at: await fromObserved($, row, next.at), key: next.key }
+      await once($, row, next)
+      const j = inflight.get(row)!
+      next = j.want
+      j.want = null
+      // a change pressed while that call ran: the chips show where it goes again, since the call may have read the
+      // record before the press and saved it without
+      if (next) {
+        await setUi($, row, { want: next.at })
+        await markRecord($, row, { want: next.at, error: null })
+      }
+    }
+  } finally {
+    inflight.delete(row)
+    await setUi($, row, { running: null, want: null })
+    await markRecord($, row, { want: null, error: (await uiOf($, row)).error ?? null })
+  }
+}
+
+/**
+ * A step on Report ↔ Interpret or Familiarity of the latest answer, made before the observer said where the original
+ * stands on it, while its look still runs: it waits for that look (at most LEVELS_WAIT_MS) and then counts from the
+ * level the look gave, so a change never starts from the chip's middle when the look is about to say otherwise. A
+ * change of Length alone, or of a chip already placed, goes at once. Returns the levels to write.
+ */
+async function fromObserved($: Engine, row: string, at: At): Promise<At> {
+  const rec = await recordNow($, row)
+  if (!rec || !unplacedMoves(rec, at).length) return at
+  const look = row === (await answerRow($)) ? lookPending() : null
+  if (!look) return at
+  await Promise.race([look, new Promise<void>(done => { $.clock.after(LEVELS_WAIT_MS, () => done()) })])
+  const now = (await recordNow($, row)) || rec
+  const to = rebaseAt(rec, now, at) as At
+  // a change pressed while this one waited counted from the middle too; the chips show the latest, as counted now
+  const j = inflight.get(row)
+  if (j?.want) j.want = { at: rebaseAt(rec, now, j.want.at) as At }
+  const shows = j?.want?.at ?? to
+  await setUi($, row, { want: shows })
+  await markRecord($, row, { want: shows, error: null })
+  return to
+}
+
+/** The record's squeeze with `want` (where the chips go) and `error` (why the last call failed) set or cleared. */
+async function markRecord($: Engine, row: string, m: { want: At | null; error: string | null }): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec) return
+  const s = { ...(((rec as Any).squeeze ?? {}) as Any) }
+  const was = JSON.stringify({ w: s.want ?? null, e: s.error ?? null })
+  if (m.want) s.want = m.want
+  else delete s.want
+  if (m.error) s.error = m.error
+  else delete s.error
+  if (JSON.stringify({ w: s.want ?? null, e: s.error ?? null }) === was) return
+  await saveRecord($, { ...rec, squeeze: s } as MsgRecord)
+}
+
+async function once($: Engine, row: string, want: Want): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec) return
+  const s = ((rec as Any).squeeze ?? {}) as Any
+  const probe = { ...rec, squeeze: { ...s, at: want.at } } as MsgRecord
+  const chips = chipsOf(probe)
+  const hit = isOriginal(chips) ? restore(probe, remark) : fromVersions(rec, want.at, remark)
+  if (hit) { await settled($, row, hit as MsgRecord); return }
+  await ensure($)
+  // a short wait before a call, so keys pressed in a row are written once, at the last level (settings.json settleMs)
+  const wait = Number(cfg.settleMs || 0)
+  if (wait > 0) {
+    await new Promise<void>(done => { $.clock.after(wait, () => done()) })
+    if (inflight.get(row)?.want) return
+    // a catch-up undone meanwhile (its s began a word) is written by no call
+    if ((await recordNow($, row))?.catchup?.dismissed) return
+  }
+  revealing.delete(row)
+  await setUi($, row, { running: { since: await $.clock.now() }, error: null, reveal: null })
+  const ticker = tick($, row)
+  try {
+    // a catch-up answers the person's last prompt, whatever notification or hand-back came after it
+    const question = isCatchUp(rec) ? String(rec.catchup!.question || '') : await questionBefore($, row).catch(() => '')
+    const sp = await registryText($, 'squeeze')
+    // a version that keeps corrections (squeeze:v4): the corrections in the original are named in the request, and one
+    // the rewrite left out is put back after it
+    const keeps = !!(FEATURES.squeeze.versions as Any)?.[sp.version]?.keep
+    const keep: string[] = keeps ? mustKeep(rec.text) : []
+    // a version that keeps the terms of the explain marks (squeeze:v5): the terms are named in the request
+    const terms: string[] = (FEATURES.squeeze.versions as Any)?.[sp.version]?.terms ? termsOf(rec) : []
+    const req = request(probe, {
+      system: sp.text, question, keep, terms,
+      model: String(cfg.model || DEFAULTS.model), effort: String(cfg.effort || DEFAULTS.effort),
+      maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
+    })
+    const t0 = await $.clock.now()
+    const r = await tracked($, { feature: 'squeeze', prompt: sp.id, model: req.model, extra: { row, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(',') } }, () => $.model.complete(req as Any))
+    const ms = (await $.clock.now()) - t0
+    if (!r.isAnswered) {
+      const why = modelWhy(r)
+      await setUi($, row, { error: failedWords(why, want.key) })
+      await log($, { row, ok: false, why, reason: r.reason, ...(r.reason === 'api-error' ? { status: (r as Any).status ?? null, error: (r as Any).error ?? null } : {}), ms })
+      return
+    }
+    const reply = readReply(r.text)
+    if (!reply.text.trim()) {
+      await setUi($, row, { error: failedWords('the model wrote no text', want.key) })
+      return
+    }
+    // a heading the rewrite ends on, with nothing under it, promises what the text does not give: dropped before a
+    // correction is put back after it, and after
+    const bare = dropOrphanHeads(reply.text)
+    const back = keeps ? keepCorrections(bare.text, keep, rec.text) : { text: bare.text, back: [] }
+    const whole = dropOrphanHeads(back.text)
+    whole.dropped.unshift(...bare.dropped)
+    const checked = checkRewrite(rec.text, whole.text)
+    // the record as it is now (the observer may have written its verbs and glosses meanwhile)
+    const fresh = (await recordNow($, row)) || rec
+    const fs = ((fresh as Any).squeeze ?? {}) as Any
+    const next = applyRewrite({ ...fresh, squeeze: { ...fs, own: fs.own ?? s.own } } as MsgRecord, {
+      text: checked.text, at: want.at,
+      made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString(), prompt: sp.id }, problems: checked.problems,
+    }, remark) as MsgRecord
+    ticker.stop()
+    await setUi($, row, { running: null })
+    await settled($, row, next)
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}) })
+  } finally {
+    ticker.stop()
+  }
+}
+
+/** A version shown: the record kept, the new text writing itself in from the top, the tray off this row's moved marks,
+ *  and Claude told which version the person reads. */
+async function settled($: Engine, row: string, rec: MsgRecord): Promise<void> {
+  const before = await recordNow($, row)
+  await saveRecord($, rec)
+  await closeTrayOn($, row)
+  const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
+  // a catch-up dismissed while it was being written was never read: Claude hears nothing of it
+  const note = rec.catchup?.dismissed ? '' : noteFor(rec)
+  await $.state.set(SQZNOTE, { ...notes, [row]: note })
+  const was = before ? (typeof before.shown === 'string' ? before.shown : before.text) : ''
+  const now = typeof rec.shown === 'string' ? rec.shown : rec.text
+  if (now !== was) await writeIn($, row, now.length)
+}
+
+/** The new text writes itself in from the top: a few characters more at each tick, at a model's pace, until it is
+ *  whole. A later change starts its own. */
+async function writeIn($: Engine, row: string, total: number): Promise<void> {
+  const token = (revealing.get(row) ?? 0) + 1
+  revealing.set(row, token)
+  const step = revealStep(total, TICK)
+  await setUi($, row, { reveal: { n: Math.min(total, step), total } })
+  const next = () => {
+    void (async () => {
+      if (revealing.get(row) !== token) return
+      const ui = await uiOf($, row)
+      const n = (ui.reveal?.n ?? total) + step
+      if (n >= total) { revealing.delete(row); await setUi($, row, { reveal: null }); return }
+      await setUi($, row, { reveal: { n, total } })
+      $.clock.after(TICK, next)
+    })()
+  }
+  $.clock.after(TICK, next)
+}
+
+/** The tray closes when it stands on a mark of this row: the marks moved. It closes as esc closes it, so the focus
+ *  stack and the browser's tray follow. */
+async function closeTrayOn($: Engine, row: string): Promise<void> {
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  const b = tray?.stack?.[0]
+  if (b && b.row === row) await closeTray($)
+}
+
+/** The glyph that turns while a call runs: the row redraws a few times a second, and only while it runs. */
+function tick($: Engine, row: string): { stop: () => void } {
+  let on = true
+  const step = () => {
+    if (!on) return
+    void (async () => {
+      const ui = await uiOf($, row)
+      if (!on || !ui.running) return
+      await $.state.set({ ...SQZ, id: row }, { ...ui, tick: (ui.tick || 0) + 1 })
+      $.clock.after(160, step)
+    })()
+  }
+  $.clock.after(160, step)
+  return { stop: () => { on = false } }
+}
+
+/** The notes for Claude of every version the person changed to since its last reply: given with the next prompt. */
+export async function takeNotes($: Engine): Promise<string[]> {
+  const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
+  const out = Object.values(notes).filter(Boolean)
+  if (out.length) await $.state.set(SQZNOTE, {})
+  return out
+}
+
+/** One line per call in $THIMBLE_HOME/lean/squeeze.jsonl: its time, its tokens, what it wrote. */
+async function log($: Engine, row: Record<string, unknown>): Promise<void> {
+  try {
+    const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+    const file = `${home.replace(/\/+$/, '')}/lean/squeeze.jsonl`
+    const old = (await $.fs.exists(file)) ? String(await $.fs.read(file)) : ''
+    await $.fs.write(file, old + JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), ...row }) + '\n')
+  } catch {
+    // the log is for measuring; the rewrite stands without it
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ the catch-up
+
+/**
+ * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt, drawn under the newest reply
+ * (`host`): a record of its own whose original is those messages as written, one after another, first written at
+ * Length short (one call, as any chip change is). The host names it, so its drawing and a resumed session find it.
+ * Returns its row; the first version is on its way (the chips show it is being written).
+ */
+export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null }): Promise<string | null> {
+  const texts: string[] = []
+  for (const r of o.rows) {
+    const rec = await recordNow($, r)
+    if (rec?.text?.trim()) texts.push(rec.text)
+  }
+  const host = await recordNow($, o.host)
+  if (!texts.length || !host) return null
+  const now = await $.clock.now()
+  const row = `cu-${o.host.slice(0, 8)}-${Math.floor(now).toString(36)}`
+  const made = newRecord({ row, session: await sessionKey($), text: catchUpText(texts), at: new Date(now).toISOString() }) as MsgRecord
+  await saveRecord($, { ...made, catchup: { host: o.host, rows: [...o.rows], replies: o.replies, question: o.question, prompt: o.prompt }, squeeze: { at: {} } } as MsgRecord)
+  await saveRecord($, { ...host, caughtUp: row } as MsgRecord)
+  void setLevels($, row, { length: ARRIVE }).catch(() => undefined)
+  return row
+}
+
+/**
+ * A catch-up dismissed: drawn no more. One that never showed a version (`undo`: its key began a word; or its call
+ * failed) is as if never made, so the replies it would have covered still count as not caught up on; one the person
+ * read keeps its note for Claude unless `quiet`.
+ */
+export async function dismissCatchUp($: Engine, row: string, o: { undo?: boolean; quiet?: boolean } = {}): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec || !isCatchUp(rec)) return
+  const read = typeof rec.shown === 'string' && !o.undo
+  await saveRecord($, { ...rec, catchup: { ...rec.catchup!, dismissed: true } } as MsgRecord)
+  if (!read) {
+    const host = await recordNow($, rec.catchup!.host)
+    if (host && host.caughtUp === row) {
+      const { caughtUp: _gone, ...rest } = host
+      await saveRecord($, rest as MsgRecord)
+    }
+  }
+  if (!read || o.quiet) {
+    const notes = (((await $.state.get(SQZNOTE)).value ?? {}) as Record<string, string>)
+    if (row in notes) {
+      const { [row]: _drop, ...keep } = notes
+      await $.state.set(SQZNOTE, keep)
+    }
+  }
+}
+
+/** For tests: the module's memory, cleared. */
+export function resetSqueeze(): void {
+  inflight.clear()
+  revealing.clear()
+  cfg = {}
+  view = { cols: 100, rows: 48 }
+}

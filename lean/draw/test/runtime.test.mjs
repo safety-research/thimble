@@ -4,7 +4,6 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { runProgram } from '../sandbox-node.mjs'
-import { renderSvg } from '../svg.js'
 import { gridText, renderTerm } from '../term.js'
 import '../kit.js'
 
@@ -58,16 +57,12 @@ test('a stacked bar\'s part drawn from a row is a part by itself: it opens that 
   assert.equal(rect('run-ep01').y, rect('run-ep03').y)
   assert.equal(rect('run-ep01').x + rect('run-ep01').w, rect('run-ep03').x)
   assert.ok(rect('run-ep03').w > rect('run-ep01').w, 'the longer part has more cells')
-  // the browser: the same parts, as spans of the bar
-  const s = renderSvg(d, { w: 60 })
-  assert.deepEqual(s.regions.filter(r => r.rects.length).map(r => r.id).sort(), ['run-ep01', 'run-ep02', 'run-ep03'])
   // a part with no row stays a part of the bar only
   const plain = run(`return k.bar([{ value: 3, label: 'a' }, { value: 4, label: 'b' }], { max: 10 })`)
   assert.deepEqual(plain.regions, [])
 })
 
-test('a stacked bar\'s label stays inside its own part in both renderers, and a total beside the total is drawn once', async () => {
-  const { hex } = await import('../palette.js')
+test('a stacked bar\'s label stays inside its own part, and a total beside the total is drawn once', async () => {
   // a narrow part whose label is wide characters, a part labelled with a number, and a note that repeats the total
   const parts = [{ value: 9, label: '数据集', tone: 'c1' }, { value: 30, label: 'names 11–50', tone: 'c2' }, { value: 61, label: '1,119 other names', tone: 'c4' }]
   const program = `return k.bars([{ id: 'answers', label: 'answers', parts: data.parts, note: k.fmt(100) }, { id: 'proxy', label: 'proxy', parts: data.parts.slice(1), note: 'two kinds' }])`
@@ -89,48 +84,7 @@ test('a stacked bar\'s label stays inside its own part in both renderers, and a 
     const text = gridText(g)
     assert.equal(text.split('\n')[0].split('100').length - 1, 1, `${w}: ${text}`)
     if (w >= 90) assert.ok(text.includes('two kinds'), text)
-    // the browser: each label measured in its own size ends inside its part's span, in a face wider than the cells
-    // (a CJK face, where each character is about 1 em)
-    const wide = (t, o = {}) => [...String(t)].length * (o.size || 13)
-    const svg = renderSvg(d, { w, measure: wide }).svg
-    const fills = parts.map(p => hex(p.tone, 'light'))
-    const rects = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" fill="([^"]+)"/g)].filter(m => fills.includes(m[5])).map(m => ({ x: +m[1], y: +m[2], w: +m[3], h: +m[4] }))
-    // the size each label is drawn in: its own inline style (the drawing's stylesheet sets every other text's size)
-    const texts = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" style="font-size:(\d+)px" fill="[^"]+" xml:space="preserve">([^<]*)</g)].map(m => [m[0], m[1], m[3], m[4], +m[2]])
-    if (w >= 90) assert.ok(texts.length > 0, `${w}: no label in place`)
-    for (const t of texts) {
-      const x = +t[1]
-      const r = rects.find(q => q.x <= x && x < q.x + q.w && q.y <= t[4] && t[4] <= q.y + q.h)
-      assert.ok(r, `${w}: a label outside every part: ${t[3]}`)
-      assert.ok(x + wide(t[3], { size: +t[2] }) <= r.x + r.w, `${w}: "${t[3]}" runs past its part`)
-    }
   }
-})
-
-test('every text the browser draws is drawn in the size it was measured in, whatever the stylesheet says', () => {
-  // axis labels, a dot's label and a bar part's label each have a size of their own; the drawing's stylesheet sets every
-  // text's size, so a size of its own must be an inline style, and the size measured must be the size drawn
-  const d = run(`
-    const c = k.canvas(30, 3)
-    c.dot(2, 1, 'accent', { label: 'reviewer ×3' })
-    return k.stack(
-      k.plot([{ name: 'a', points: [[1, 40], [10, 71], [100, 88]] }, { name: 'b', points: [[1, 22], [10, 55], [100, 81]] }],
-        { h: 8, x: { label: 'learning rate', log: true }, y: { label: 'val acc', min: 0, max: 100 } }),
-      c,
-      k.bars([{ label: 'saves', parts: [{ label: 'overwrote', value: 304, tone: 'accent' }, { label: 'kept', value: 10, tone: 'good' }] }]))`)
-  const measured = new Map()
-  const measure = (t, o = {}) => {
-    const size = o.size || 13
-    if (!measured.has(String(t))) measured.set(String(t), new Set())
-    measured.get(String(t)).add(size)
-    return [...String(t)].length * size * 0.55
-  }
-  const svg = renderSvg(d, { w: 90, fs: 13, measure }).svg
-  const texts = [...svg.matchAll(/<text ([^>]*)>(.*?)<\/text>/g)].map(m => ({ attrs: m[1], s: m[2].replace(/<[^>]+>/g, ''), size: +(/style="[^"]*font-size:([\d.]+)px/.exec(m[1]) || [0, 13])[1] }))
-  assert.ok(texts.length > 8, svg)
-  for (const t of texts) assert.doesNotMatch(t.attrs, /font-size=/, `"${t.s}" sets its size by an attribute, which the stylesheet overrides`)
-  for (const s of ['100', '0', 'val acc', 'reviewer ×3']) assert.ok(texts.find(t => t.s === s && t.size < 13), `"${s}" is drawn in a size of its own`)
-  for (const t of texts) if (measured.has(t.s)) assert.ok(measured.get(t.s).has(t.size), `"${t.s}" drawn at ${t.size}px, measured at ${[...measured.get(t.s)]}`)
 })
 
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
@@ -176,9 +130,6 @@ test('a key or a press reaches the program; its handler sets the state the next 
   // a press on a part runs its onPress, the same as k.on('press:<id>')
   const pressed = run(program, { state: next.state, event: { type: 'press', region: 'pick-ep03' } })
   assert.deepEqual(pressed.state, { i: 2 })
-  // the same program in the browser: the same state, the same drawing
-  const svg = renderSvg(pressed, { w: 80 }).marks
-  assert.equal(JSON.stringify(svg), JSON.stringify(renderTerm(pressed, { w: 80 }).marks))
   // a key no handler takes changes nothing
   assert.deepEqual(run(program, { state: { i: 1 }, event: { type: 'key', key: 'z' } }).state, { i: 1 })
 })
@@ -239,19 +190,6 @@ test('the card\'s title is in every drawing, even when the program draws none', 
   assert.match(gridText(renderTerm(run('return k.text(k.title + " · " + k.surface)'), { w: 80 })), /How the episodes ended · terminal/)
 })
 
-test('the browser surface: a plot or a canvas area takes a brush, which reads in its own units', () => {
-  const d = run(`
-    const c = k.canvas(40, 2)
-    c.text(0, 0, 'May 17 → Jul 2')
-    c.brush('days', 0, 1, 40, 1, { min: 0, max: 46 })
-    return k.stack(k.plot([{ name: 'calls', points: data.runs.map((r, i) => [i + 1, r.calls]) }], { h: 5, brush: 'runs' }), c)`)
-  const s = renderSvg(d, { w: 80 })
-  assert.deepEqual(s.brushes.map(b => [b.id, b.min, b.max]), [['runs', 1, 3], ['days', 0, 46]])
-  assert.match(s.svg, /<rect class="dk-brush" data-brush="runs" data-min="1" data-max="3"/)
-  // the terminal draws the same cells and no brush: there a program binds keys to the same state
-  assert.equal(JSON.stringify(renderTerm(d, { w: 80 }).marks), JSON.stringify(s.marks))
-})
-
 test('a handler asks the host for later events (k.after), its actions (k.do) and nothing it does not have; the bar line (k.status)', () => {
   const program = `
     const n = k.state.n ?? 0
@@ -302,7 +240,6 @@ test('k.embed draws another program\'s drawing as a part, its parts and cites wi
   const g = renderTerm(page, { w: 40 })
   const row = g.rows.find(r => r.map(c => c.ch).join('').startsWith('picked'))
   assert.equal(row[0].bg, 'warn-faint')
-  assert.match(renderSvg(page, { w: 40 }).svg, /rx="5" fill="#/)
 })
 
 test('k.keys tells a program the keys that reach it where it is drawn; a key the host keeps is named at once (a warning)', () => {

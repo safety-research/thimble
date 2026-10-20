@@ -65,10 +65,10 @@ export function ownState(state: Record<string, unknown> | null | undefined): Rec
 /** The program run once more with an event: it learns its handlers, the one the event reaches patches the state, and
  *  it draws again with it. `size.all`: the card is drawn with every page of that knob at once (its parts' ids are its
  *  pages', and the kit reads them back). */
-export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<string, unknown>, size: { w: number; h: number; browser?: boolean; all?: string | null }, mode = 'detail'): Promise<{ drawing: Any; state: Record<string, unknown>; ask: CardAsk | null } | null> {
+export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<string, unknown>, size: { w: number; h: number; all?: string | null }, mode = 'detail'): Promise<{ drawing: Any; state: Record<string, unknown>; ask: CardAsk | null } | null> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], {
-    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}), browser: !!size.browser }, mode, event, noVerbs: true, ...(size.all ? { all: size.all } : {}) }),
+    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}) }, mode, event, ...(size.all ? { all: size.all } : {}) }),
     timeoutMs: 30000,
   })
   if (r.exitCode !== 0) return null
@@ -115,7 +115,7 @@ export async function writeCardState($: Engine, root: string, id: string, st: { 
 // ---------------------------------------------------------------- the versions the person saw
 // A card saved several times in one turn (Claude fixing it before its reply was done) was seen once, at the version
 // drawn under the finished reply. thimble/objects/.seen/<id>.json lists the versions the person could see: the one a
-// turn of main's left under its reply, a verb's new version drawn in place, the latest the detail drew. The detail's
+// turn of main's left under its reply, a label's new version drawn in place, the latest the detail drew. The detail's
 // header lists those; the others are drafts, still a key away (carddetail.js versionsOf).
 
 export const seenFile = (root: string, id: string) => `${root.replace(/\/+$/, '')}/thimble/objects/.seen/${id}.json`

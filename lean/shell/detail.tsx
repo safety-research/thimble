@@ -32,7 +32,7 @@ import { paintRegions } from './cells'
 import { askMerge, beganWord, examplesView, linkRuns, PAGES_DEFAULT, partsOf, versionsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { browserOn, citeLabels, currentTheme, keysMoved, loadObject, openBrowser, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { citeLabels, currentTheme, keysMoved, loadObject, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import { cardEvent, cardKey, noteSeen, ownState, pressTaken, readCardState, readSeen, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
@@ -98,7 +98,7 @@ export function noteDock(e: Any): void {
   if (e?.viewport?.columns && e.props?.placement === 'dock') viewCols = e.viewport.columns + (e.props.bodyColumns ?? 0) + 1
 }
 
-/** The columns a docked pane of ours asks for, leaving the chat its share (the detail's, the Claims pane's). */
+/** The columns a docked pane of ours asks for, leaving the chat its share. */
 export function paneColumns(): number {
   return detailColumns(viewCols)
 }
@@ -128,9 +128,25 @@ export async function openDetailPane($: Engine, title: string): Promise<void> {
   isOpen = true
   setThreadWindow(true)
   await pushFocus($, 'detail')
-  await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) })
+  const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) })
+  // a terminal too narrow for a docked pane a key opened (one a command opens is placed at any width): Claude Code
+  // would keep it waiting, undrawn, with the keys still the detail's. It is closed again, and the toast says what opens it
+  if (r && (r as Any).isPlaced === false) {
+    await $.ui.close({ id: PANE }).catch(() => undefined)
+    if (isOpen) await closed($)
+    $.ui.toast(waitingWords(String((r as Any).reason || '')))
+    return
+  }
   // asked from a key, the open lands while the key is still in the prompt: ask for the keys again once it is gone
   regrab($)
+}
+
+/** What the toast says when the detail cannot be placed: the width it needs and what opens it now. */
+export function waitingWords(reason: string): string {
+  const m = /(\d+) columns \((\d+) now\)/.exec(reason)
+  return m
+    ? `The card's detail needs ${m[1]} columns when a key opens it (${m[2]} now). Type /card to open it here, or widen the terminal.`
+    : `The card's detail cannot open here${reason ? ` (${reason})` : ''}. Type /card to open it.`
 }
 
 async function closed($: Engine): Promise<void> {
@@ -264,7 +280,7 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
   return {
     object, drawing: p ? (p.error ? { error: { name: 'Error', message: p.error } } : p.drawing) : null,
     versions: versionsOf(latest, seen), v, state: ownState(sel.state),
-    thread: !!threadFor({ object: sel.id }), browser: browserOn(), labelGen: await labelGen($),
+    thread: !!threadFor({ object: sel.id }), labelGen: await labelGen($),
   }
 }
 
@@ -295,12 +311,6 @@ async function mirror($: Engine): Promise<void> {
     }
   }
   if (region !== sel.region || moved) await writeCardState($, sel.root, sel.id, { state: next.state, region }, 'terminal')
-}
-
-/** The detail's state changed elsewhere (the browser's run of the same program): the terminal follows it. */
-export async function followDetail($: Engine, id: string): Promise<void> {
-  const sel = (await $.state.get(SEL)).value as Detail | null
-  if (sel && sel.id === id) await mirror($)
 }
 
 /** A key or a press for the detail's program; its state is mirrored. True when the program took it. */
@@ -339,10 +349,6 @@ export async function detailAction($: Engine, a: Record<string, unknown>): Promi
       const t = threadFor({ object: sel.id })
       return t ? await sendToMain($, t.key) : 'This card has no thread yet: type a question to start one.'
     }
-    case 'browser': {
-      const row = ((await $.state.get({ ...WHERE, id: sel.id })).value as string | undefined) ?? null
-      return await openBrowser($, { id: sel.id, v: sel.v, region: (typeof a.region === 'string' ? a.region : sel.region) ?? null, root: sel.root, row })
-    }
     case 'close':
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return
@@ -367,7 +373,7 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
   const mapped = ak && typeof event.region === 'string' ? ownPart(p.drawing, event.region) : null
   const ev = mapped ? { ...event, region: mapped.region ?? undefined } : event
   const at: Detail = mapped?.state ? { ...sel, state: { ...(sel.state || {}), ...mapped.state } } : sel
-  const got = await cardEvent($, p.object, at, ev, { w: drawn.w, h: drawn.h, browser: browserOn() })
+  const got = await cardEvent($, p.object, at, ev, { w: drawn.w, h: drawn.h })
   if (!got || got.drawing?.error) {
     $.ui.toast(`× The card could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return
@@ -636,7 +642,7 @@ function bodyTop(part: Any): { x: number; y: number } | null {
   return part.rects.reduce((a: Any, q: Any) => (q.w * q.h > a.w * a.h ? q : a), part.rects[0])
 }
 
-/** The detail's keys as the thimble line says them while the detail is open (shell.tsx): the card's own keys, then
+/** The detail's keys as the bar says them while the detail is open (shell.tsx): the card's own keys, then
  *  the detail's, as their programs name them, and where a question goes. */
 export async function detailKeys($: Engine): Promise<string | null> {
   if (!isOpen) return null

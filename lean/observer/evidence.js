@@ -10,8 +10,7 @@
 //   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
 //   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
-//   parseAnswer(text)          -> {notes, line, settled, hints, verbs, glosses} from the fork's reply, or null
-//   pickHints(list, verbs)     -> the 2-3 verbs the observer chose for one object, checked against the verbs that exist
+//   parseAnswer(text)          -> {notes, verbs, glosses} from the pass's reply, or null
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
 // the statuses of `thimble coverage` that count as read
@@ -248,7 +247,7 @@ export function jsonIn(text) {
   }
 }
 
-/** The fork's reply, read leniently: notes, a line, whether the open line is settled, and the hints per object. */
+/** The pass's reply, read leniently: notes, lit verbs and glosses. */
 export function parseAnswer(text) {
   const d = jsonIn(text)
   if (!d || typeof d !== 'object') return null
@@ -256,48 +255,10 @@ export function parseAnswer(text) {
     .map(n => (typeof n === 'string' ? { note: n } : n))
     .filter(n => n && typeof n.note === 'string' && n.note.trim())
     .map(n => ({ note: n.note.trim(), ...(typeof n.rests_on === 'string' && n.rests_on.trim() ? { rests_on: n.rests_on.trim() } : {}) }))
-  const L = d.line && typeof d.line === 'object' && typeof d.line.line === 'string' && d.line.line.trim() ? d.line : null
-  const line = L
-    ? {
-        line: L.line.trim(),
-        decision: typeof L.decision === 'string' ? L.decision.trim() : '',
-        title: typeof L.title === 'string' && L.title.trim() ? L.title.trim() : L.line.trim(),
-        explanation: typeof L.explanation === 'string' ? L.explanation.trim() : '',
-        rests_on: typeof L.rests_on === 'string' ? L.rests_on.trim() : '',
-      }
-    : null
-  const hints = d.hints && typeof d.hints === 'object' && !Array.isArray(d.hints) ? d.hints : {}
   // the message row: the verbs it lights and its glosses, read as given (shell/message.js verbsOf and glossesOf check them)
   const verbs = d.verbs && typeof d.verbs === 'object' && !Array.isArray(d.verbs) ? d.verbs : {}
   const glosses = Array.isArray(d.glosses) ? d.glosses : []
-  // the turn's claims and the clusters' renames, read as given (verbs/claims/claims.js applyTurn checks them)
-  const claims = Array.isArray(d.claims) ? d.claims : []
-  const clusters = Array.isArray(d.clusters) ? d.clusters : []
-  return { notes, line, settled: d.settled === true, hints, verbs, glosses, claims, clusters }
-}
-
-/** The observer's choice for one object, kept only where it names a verb that exists: at most three, each with its
- *  phrase cut to a hint's length. [] when it chose nothing usable (the shell's own rule then stays). */
-export function pickHints(list, verbs, max = 3) {
-  const out = []
-  for (const h of Array.isArray(list) ? list : []) {
-    const word = String(typeof h === 'string' ? h : h?.verb ?? h?.name ?? '').trim().toLowerCase()
-    const v = (verbs || []).find(x => x.name.toLowerCase() === word || (x.key && x.key === word))
-    if (!v || out.some(x => x.verb === v.name)) continue
-    const phrase = typeof h === 'object' && typeof h?.phrase === 'string' ? cut(h.phrase, 40) : ''
-    out.push({ verb: v.name, ...(phrase ? { phrase } : {}) })
-    if (out.length >= max) break
-  }
-  return out
-}
-
-/** The hints the fork gave for an object, found by its id or by its id without the number (`saves-per-day`). */
-export function hintsFor(hints, id) {
-  if (!hints || typeof hints !== 'object') return null
-  if (hints[id]) return hints[id]
-  const slug = String(id).replace(/^\d+-/, '')
-  for (const [k, v] of Object.entries(hints)) if (String(k).replace(/^\d+-/, '') === slug) return v
-  return null
+  return { notes, verbs, glosses }
 }
 
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()

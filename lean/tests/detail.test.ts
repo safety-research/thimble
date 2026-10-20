@@ -35,7 +35,7 @@ const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: {
 type Any = any
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
+function world(on: any, prep: (input: Any) => Any = () => DRAWING, open: Any = { isPlaced: true }) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('session.cwd', () => ({ value: ROOT }))
   on('session.id', () => ({ value: SESSION }))
@@ -53,14 +53,14 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
     if (e.argv.some(a => a.endsWith('prep.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       preps.push(input)
-      out = { drawing: prep(input), verbs: [], problems: [] }
+      out = { drawing: prep(input) }
     }
     else if (e.argv.includes('coverage')) out = COVERAGE
     else if (e.argv.includes('resolve')) out = { ref: e.argv[2], chain: [], rows: [], count: 0, records: [], notes: [] }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const opened: Any[] = []
-  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
+  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: open } })
   const focused: string[] = []
   on('ui.focus', (_$: unknown, e: Any) => { focused.push(String(e.element ?? e.key)); return { value: {} } })
   on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] : [] }))
@@ -137,7 +137,7 @@ async function pane($: any, clock: { settle: () => Promise<void> }): Promise<str
 test('overview first: the card enlarged under its title, takeaway and v1 · v2; the bar under it starts empty, and e fills it with examples labelled with what they are examples of', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await clock.settle()
   // the pane docks beside the transcript and asks for the keys
   expect(w.opened.at(-1)).toMatchObject({ id: 'object', focus: true, closeOnEscape: true })
@@ -189,7 +189,7 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
 test('keys act only while the composer is empty; a key that began a word gives its letter back; h steps to v1', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   // ] opens the bar on the first example, and flips to the next
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
@@ -228,7 +228,7 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   const w = world(on)
   const clock = mock.clock(on)
   const session = mock.session(on)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   // the question is typed in the pane's ask line: it never passes through the prompt, so main's transcript gets no row
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
@@ -258,7 +258,7 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(file.turns[0]).toMatchObject({ role: 'person', text: 'why so many links?', about: 'Jun 18' })
   expect(file.turns[1].role).toBe('claude')
   expect(typeof file.turns[1].at).toBe('string')
-  // the thimble line above the prompt counts the threads, and names the thread the prompt goes to
+  // the bar above the prompt counts the threads, and names the thread the prompt goes to
   const wideBand = textOf(await $.ui.render({ ...(BAND as Any), props: { ...(BAND as Any).props, bodyColumns: 200 } } as never))
   expect(wideBand).toContain('1 thread')
   expect(wideBand).toContain('thimble:main/01-saves')
@@ -285,7 +285,7 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(picked.length).toBeGreaterThan(0)
   expect([...new Set(picked.map(x => x.color))]).toEqual(['text'])
   // another part: the next question resumes the same agent and names the new part
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-17' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-17' } as never)
   await pane($, clock)
   // the thread's agent can read the part selected now (a message typed in its own view names none)
   expect(w.spawns[0].prompt).toContain(`${ROOT}/thimble/threads/${SESSION}/sel/card-01-saves.json`)
@@ -305,7 +305,7 @@ test('a question typed while the detail is open goes to the card\'s side thread,
 test('typing in the ask line is never interrupted: the ask line keeps the ring while the question is typed, every letter reaches the thread, and the line empties after the send', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()
@@ -376,7 +376,7 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   const w = world(on, prep)
   const clock = mock.clock(on)
   mock.session(on)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   // the bar names the card's own keys beside the detail's
   expect(await hintOf($)).toContain('j next day · a ask about these')
@@ -406,7 +406,7 @@ test('a card is a program: its own keys reach it in the open detail, the state i
 test('a prompt after the pane has gone goes to Claude, even when the module still marks the detail open', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   // the pane went without a close the module heard: Claude Code lists it no more
   w.opened.length = 0
@@ -420,13 +420,13 @@ test('the detail leaves the chat about two fifths of the terminal, so its lines 
   const clock = mock.clock(on)
   // a 144-column terminal, as the band above the prompt measured it
   await $.ui.render({ ...(BAND as Any), viewport: { columns: 144, rows: 36, isFullscreen: true } } as never)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await clock.settle()
   expect(w.opened.at(-1)).toMatchObject({ id: 'object', columns: 144 - 58 })
   // the terminal widened to 240 while the detail is docked: the pane measures it (the conversation's 140 columns, its
   // own 99 and the border), and the next open keeps the chat at 80, its most
   await $.ui.render({ ...(PANE as Any), props: { ...(PANE as Any).props, bodyColumns: 99 }, viewport: { columns: 140, rows: 60, isFullscreen: true } } as never)
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-17' } as never)
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-17' } as never)
   await clock.settle()
   expect(w.opened.at(-1)).toMatchObject({ columns: 160 })
   // no thread column in the pane: the chat beside it is the conversation
@@ -440,7 +440,7 @@ test('one selection, one highlight: the ring stands on the selected part, and st
   const w = world(on, () => TALL)
   const clock = mock.clock(on)
   const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
-  await $.command.run({ command: 'obj', args: '01-saves step-0' } as never)
+  await $.command.run({ command: 'card', args: '01-saves step-0' } as never)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(SMALL as Any) } as never)
   const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
   // the gutter cells the ring can stand on, in document order, and the one marked ▸ (the selected part's)
@@ -481,7 +481,7 @@ test('on a tall card, e shows what it opens: the window moves to the bar under t
   world(on, () => TALL)
   const clock = mock.clock(on)
   const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
-  await $.command.run({ command: 'obj', args: '01-saves step-0' } as never)
+  await $.command.run({ command: 'card', args: '01-saves step-0' } as never)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(SMALL as Any) } as never)
   const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
   await draw()
@@ -509,13 +509,11 @@ test('on a tall card, e shows what it opens: the window moves to the bar under t
   expect(textOf(await ui.drawn())).not.toContain('Step 0 ')
 })
 
-test('the thimble line says the keys of what is on top of the focus stack: the detail gone, they are gone', async ($, on) => {
+test('the bar says the keys of what is on top of the focus stack: the detail gone, they are gone', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  // the Claims pane first, then the detail on top of it: the detail's keys
-  await press($, clock, edit('c'))
-  await clock.settle()
-  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  // the detail: its keys
+  await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   expect(await hintOf($)).toContain('↑↓ part')
   // the pane goes (the module learns it as a prompt comes): the detail leaves the stack, and the bar says no key of it
@@ -524,4 +522,13 @@ test('the thimble line says the keys of what is on top of the focus stack: the d
   await clock.settle()
   expect(await hintOf($)).not.toContain('↑↓ part')
   expect(await hintOf($)).not.toContain('type to ask')
+})
+
+test('a terminal too narrow for the docked detail: the waiting pane is closed again, the keys stay the chat\'s, and a toast says what opens it', async ($, on) => {
+  const w = world(on, undefined, { isPlaced: false, reason: 'unasked below 144 columns (120 now): placed when the person opens it, or when the terminal widens' })
+  const clock = mock.clock(on)
+  await $.command.run({ command: 'card', args: '01-saves' } as never)
+  await clock.settle()
+  expect(w.toasts).toContain("The card's detail needs 144 columns when a key opens it (120 now). Type /card to open it here, or widen the terminal.")
+  expect(await hintOf($)).not.toContain('↑↓ part')
 })

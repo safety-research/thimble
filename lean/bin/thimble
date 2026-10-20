@@ -3,9 +3,10 @@
 # as a bare command, through the session's permission mode like any other. The Python it runs: THIMBLE_PYTHON, else the
 # plugin's own .venv, else python3 (only `thimble run` needs pandas).
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ "$1" = verb ] && { v=$2; shift 2; exec node "$here/verbs/$v/cli.mjs" "$@"; }
-# the prompt registry (prompts/node.mjs) and the session's cost and time per feature (telemetry/stats.mjs)
-case "$1" in prompts|guide) exec node "$here/prompts/node.mjs" "$@";; stats) shift; exec node "$here/telemetry/stats.mjs" "$@";; esac
+# for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs), and
+# `thimble dev stats`, the session's cost and time per feature (telemetry/stats.mjs); the names before dev still work
+[ "$1" = dev ] && shift
+case "$1" in prompts) exec node "$here/prompts/node.mjs" "$@";; stats) shift; exec node "$here/telemetry/stats.mjs" "$@";; esac
 py=${THIMBLE_PYTHON:-}
 if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
-exec "${py:-python3}" "$here/engine/lean.py" "$@"
+exec "${py:-python3}" "$here/engine/thimble.py" "$@"

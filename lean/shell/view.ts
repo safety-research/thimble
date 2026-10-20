@@ -7,11 +7,8 @@
 //                       as in any reply
 //   catchUpEl(els, o)   a catch-up under the newest reply: a rule down its left side, `thimble  catch-up of …`, then
 //                       its text (a message drawn as above)
-//   verbRowEl(els, o)   the verbs as keys (kept for the bar's words; the bar above the prompt draws them)
-//   verbLineEl(els, o)  the line a verb opens under its message: v's proposals (squeeze's chips are term.ts's; c opens
-//                       the Claims pane, claimsview.ts)
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
-//                       rows; its keys are in the thimble line under it, and its color says cite or explain
+//                       rows; its keys are in the bar under it, and its color says cite or explain
 import { blocks, inline, looseOf, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
 import { paintRegions } from './cells'
 
@@ -27,13 +24,8 @@ export function markColors(theme: Theme) {
     : { cite: '#a29bff', gloss: '#62d2c6', glossBg: '#173d3a', paper: '#1e1e1e', focusGloss: '#2a9d94' }
 }
 
-/** A verb's color: its verb.json `color` ({light, dark} or one hex), else the row's own for v, s and a. */
-export function verbColor(key: string, theme: Theme, color?: unknown): string {
-  if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) return color
-  if (color && typeof color === 'object') {
-    const c = (color as Record<string, unknown>)[theme]
-    if (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) return c
-  }
+/** A key's color in the bar: v's, s's and c's own, else the bar's blue. */
+export function keyColor(key: string, theme: Theme): string {
   const own: Record<string, [string, string]> = { v: ['#4f46e5', '#9a93ff'], s: ['#b7791f', '#e0a43a'], c: ['#8a4fb5', '#c792ea'] }
   const pair = own[key] || ['#2a78c4', '#5aa2e6']
   return theme === 'light' ? pair[0] : pair[1]
@@ -101,7 +93,7 @@ function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] 
 
 /** The 2 columns left of a reply: Claude Code's ● on the reply's first row, else blank. */
 function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'dark', leadColor?: string | null) {
-  if (lead) return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: leadColor || verbColor('s', theme), children: lead })] })
+  if (lead) return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: leadColor || keyColor('s', theme), children: lead })] })
   return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ children: dot ? '●' : ' ' })] })
 }
 
@@ -242,69 +234,6 @@ export function catchUpEl(els: Any, o: CatchUpOpts): Any {
     })
   }
   return Box({ key: o.key, flexDirection: 'column', marginTop: 1, children: rows })
-}
-
-// ------------------------------------------------------------------------------------------------ the verb row
-
-export type RowVerb = { key: string; name: string; color?: unknown }
-export type VerbRowOpts = {
-  key: string
-  verbs: RowVerb[]
-  lit: Record<string, { lit?: boolean; note?: string }>
-  open: string | null
-  running: string | null
-  selected: boolean
-  theme: Theme
-  onPress: (key: string) => unknown
-}
-
-/** The verb row: each verb as its key alone, in muted ink, two spaces apart; a lit verb in its color with ● and its
- *  note; the open one on its color; a running one with …. The marks and the other keys are in the hint line. */
-export function verbRowEl(els: Any, o: VerbRowOpts): Any {
-  const { Box, Button, Text } = els
-  const kids: Any[] = []
-  if (o.selected) kids.push(Text({ color: verbColor('v', o.theme), children: '▸ ' }))
-  o.verbs.forEach((v, i) => {
-    if (i) kids.push(Text({ children: '  ' }))
-    const lit = o.lit[v.key]
-    const color = verbColor(v.key, o.theme, v.color)
-    const isOpen = o.open === v.key
-    const run = o.running === v.key ? '…' : ''
-    let children: Any[]
-    if (isOpen) children = [Text({ backgroundColor: color, color: markColors(o.theme).paper, bold: true, children: ` ${v.key} ` }), ...(lit?.lit && lit.note ? [Text({ color, children: ` ● ${lit.note}${run}` })] : run ? [Text({ color, children: run })] : [])]
-    else if (lit?.lit && lit.note) children = [Text({ color, bold: true, children: v.key }), Text({ color, children: ` ● ${lit.note}${run}` })]
-    else children = [Text({ dimColor: true, children: `${v.key}${run}` })]
-    kids.push(Button({ key: `${o.key}-verb-${v.key}`, plain: true, label: v.name, children, onPress: () => o.onPress(v.key) }))
-  })
-  return Box({ flexDirection: 'row', marginLeft: 2, children: kids })
-}
-
-export type VerbLineOpts = {
-  key: string
-  verb: RowVerb
-  options: { label: string; note?: string }[]
-  note?: string
-  theme: Theme
-  onPick: (i: number) => unknown
-  onClose: () => unknown
-}
-
-/** The line a verb opens under the row: its options, each a digit and a press. */
-export function verbLineEl(els: Any, o: VerbLineOpts): Any {
-  const { Box, Button, Text } = els
-  const color = verbColor(o.verb.key, o.theme, o.verb.color)
-  const kids: Any[] = []
-  o.options.slice(0, 9).forEach((opt, i) => {
-    if (i) kids.push(Text({ children: '  ' }))
-    kids.push(Button({
-      key: `${o.key}-opt-${i}`, plain: true, label: opt.label,
-      children: [Text({ backgroundColor: i === 0 ? color : undefined, color: i === 0 ? markColors(o.theme).paper : color, bold: i === 0, children: ` ▸ ${i + 1} ${opt.label} ` }), ...(opt.note ? [Text({ dimColor: true, children: ` ${opt.note}` })] : [])],
-      onPress: () => o.onPick(i),
-    }))
-  })
-  if (o.note) kids.push(Text({ dimColor: true, children: `  ${o.note}` }))
-  // its keys (1–n pick · 0 close) are in the hint line under the prompt
-  return Box({ flexDirection: 'row', flexWrap: 'wrap', marginLeft: 2, children: kids })
 }
 
 // ------------------------------------------------------------------------------------------------ the tray

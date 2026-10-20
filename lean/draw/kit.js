@@ -7,7 +7,7 @@
 
    The toolkit draws nothing itself. It records meaning: text as styled runs, values as values (a bar keeps its
    number, a spark its series), and regions with the ids the program gave them. The terminal renderer (term.js) lays
-   the tree out in cells, the browser renderer (svg.js) in pixels, each with its own rules.
+   the tree out in cells.
 
    This file is a plain script with no imports, so it can run inside a sandbox: a Node vm context
    (sandbox-node.mjs) or a sandboxed iframe (browser/sandbox.js). It reads no clock but performance.now/Date.now for

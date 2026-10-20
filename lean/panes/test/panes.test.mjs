@@ -5,12 +5,10 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import '../../draw/kit.js'
-import { renderSvg } from '../../draw/svg.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import PANES from '../index.js'
 import { barText, keyEvent, keysOf, nextState, route, takes } from '../host.js'
-import { gapLines } from '../claims.js'
 
 const DK = globalThis.DrawKit
 const run = (pane, data, o = {}) => DK.run(pane.program, data, { w: 100, h: 30, mode: 'pane', ...o })
@@ -20,71 +18,6 @@ const act = (pane, data, state, event, surface, o = {}) => {
   return { d, state: nextState(state, d) }
 }
 
-// ---------------------------------------------------------------- claims
-const STORE = {
-  v: 1, session: 's-1', claims: [
-    { id: 'c1', text: 'June 18 had 6,543 saves', kind: 'event', by: 'claude', cluster: 'k1', turn: 1, said: [{ row: 'r1', by: 'claude', turn: 1, start: 0 }], sources: [{ ref: 'q1#day=2026-06-18@n' }], precisely: 'saves on June 18, all users' },
-    { id: 'c2', text: 'Kestrel made 41% of June edits', kind: 'finding', by: 'claude', cluster: 'k2', turn: 1, said: [{ row: 'r1', by: 'claude', turn: 1, start: 30 }], sources: [{ ref: 'q4#user=Kestrel@share' }] },
-    { id: 'c3', text: 'The tilt is two editors', kind: 'finding', by: 'claude', cluster: 'k2', turn: 2, said: [{ row: 'r2', by: 'claude', turn: 2, start: 0 }], sources: [] },
-  ],
-  clusters: [{ id: 'k1', name: 'the June 18 burst', turn: 1 }, { id: 'k2', name: 'who edited', turn: 1 }],
-}
-const claimsData = () => PANES.claims.data({ claims: STORE, index: [{ row: 'r1', kind: 'assistant' }, { row: 'r2', kind: 'assistant' }] }, {}, { w: 90, h: 24 })
-
-test('claims: the ring in the terminal and the pointer in the browser are one hover: the same state, the same card on both surfaces', () => {
-  const data = claimsData()
-  const term = act(PANES.claims, data, {}, { type: 'focus', region: 'cl-c2' }, 'terminal')
-  const web = act(PANES.claims, data, {}, { type: 'hover', region: 'cl-c2' }, 'browser')
-  assert.deepEqual(term.state, web.state)
-  assert.equal(term.state.hover, 'c2')
-  // the state the browser kept, drawn in the terminal: the card of what c2 means
-  const t = gridText(renderTerm(run(PANES.claims, data, { state: web.state, surface: 'terminal' }), { w: 90 }))
-  assert.match(t, /Kestrel made 41% of June edits/)
-  // and in the browser, from the same program: the same parts
-  const s = renderSvg(run(PANES.claims, data, { state: term.state, surface: 'browser' }), { w: 90 })
-  assert.ok(s.regions.some(r => r.id === 'cl-c2'))
-  assert.equal(barText([run(PANES.claims, data)]), 'r replay · esc close')
-})
-
-test('claims in the browser: the same program draws dots and links between cells and the card as an opaque box; the terminal keeps its cells', () => {
-  const data = claimsData()
-  const opsOf = d => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; if (n.t === 'canvas') out.push(...n.ops); (n.kids || []).forEach(walk); if (n.kid) walk(n.kid) }; walk(d.root); return out }
-  const rest = opsOf(run(PANES.claims, data, { surface: 'browser' }))
-  assert.equal(rest.filter(o => o[0] === 'dot').length, 3, 'a dot per claim')
-  assert.ok(rest.filter(o => o[0] === 'dot').every(o => /^cl-/.test(o[4].region)), 'each dot is its claim\'s part')
-  assert.equal(rest.filter(o => o[0] === 'link').length, 0, 'no line at rest')
-  assert.ok(!rest.some(o => o[0] === 'put' && /[●◉○]/.test(o[3])), 'no dot as a glyph')
-  const hov = run(PANES.claims, data, { surface: 'browser', state: { hover: 'c2' } })
-  const ops = opsOf(hov)
-  assert.ok(ops.some(o => o[0] === 'link'), 'the hovered claim\'s links')
-  assert.ok(ops.some(o => o[0] === 'box' && o[7] && o[7].fill), 'its card is an opaque box')
-  const s = renderSvg(hov, { w: 90 })
-  assert.ok(s.marks.some(m => m.k === 'text' && /Kestrel made 41% of June edits/.test(m.s)), 'the card says the claim')
-  assert.ok(s.regions.some(r => r.id === 'cl-c1'))
-  // the terminal draws the same program in cells, as before
-  const t = run(PANES.claims, data, { surface: 'terminal', state: { hover: 'c2' } })
-  assert.ok(!opsOf(t).some(o => o[0] === 'dot' || o[0] === 'link'))
-  assert.match(gridText(renderTerm(t, { w: 90 })), /┌─+┐/)
-})
-
-test('claims: r replays the graph by later events (k.after) in the order made; any key stops it', () => {
-  const data = claimsData()
-  let { d, state } = act(PANES.claims, data, { hover: 'c1' }, keyEvent('r'), 'terminal')
-  assert.deepEqual(state, { hover: null, replay: { k: 0 } })
-  const seen = []
-  for (let i = 0; i < 20 && d.after?.length; i++) {
-    assert.ok(d.after[0].ms >= 80)
-    ;({ d, state } = act(PANES.claims, data, state, d.after[0].event, 'terminal'))
-    seen.push(state.replay ? state.replay.k : 'done')
-  }
-  assert.deepEqual(seen, [1, 2, 3, 'done'])
-  // a replay running: any key ends it (the program takes every key only then)
-  const running = { replay: { k: 1 } }
-  assert.ok(takes(run(PANES.claims, data, { state: running }), keyEvent('x')))
-  assert.ok(!takes(run(PANES.claims, data), keyEvent('x')))
-  assert.deepEqual(act(PANES.claims, data, running, keyEvent('x'), 'browser').state.replay, null)
-})
-
 // ---------------------------------------------------------------- chips
 const REC = { text: 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18.\n\nThe rest spread out.', shown: null, verbs: {}, squeeze: { at: {} } }
 const chipsData = (rec = REC, w = 100) => PANES.chips.data({ 'record:r1': rec, 'sqz:r1': null }, { row: 'r1' }, { w, h: 3 })
@@ -93,7 +26,7 @@ test('chips: keys pick and change a chip; the rewrite is the host\'s action; the
   const data = chipsData()
   const d0 = run(PANES.chips, data)
   // no key reads as an arrow key: [ ] change, a digit picks a chip
-  assert.equal(barText([d0]), '[ ] change · 1–3 chip · + new stretch · 0 close · s done')
+  assert.equal(barText([d0]), '[ ] change · 1–3 chip · 0 close · s done')
   let { d, state } = act(PANES.chips, data, {}, keyEvent('['), 'terminal')
   // the step names the key the bar names, so a rewrite that fails says which key tries again
   assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
@@ -105,12 +38,8 @@ test('chips: keys pick and change a chip; the rewrite is the host\'s action; the
   const web = act(PANES.chips, data, state, { type: 'press', region: 'lvl-familiarity-4' }, 'browser')
   assert.deepEqual(web.d.effects, [{ row: 'r1', at: { familiarity: 4 }, do: 'squeeze' }])
   assert.equal(web.state.focus, 'familiarity')
-  // + asks the host for the two ends (the terminal's prompt, the browser's field), and the ends make a stretch
-  const plus = act(PANES.chips, data, web.state, keyEvent('+'), 'browser')
-  assert.equal(plus.d.effects[0].do, 'input')
-  const made = act(PANES.chips, data, plus.state, { type: 'stretch', text: '+engineer and manager' }, 'browser')
-  assert.deepEqual(made.d.effects, [{ row: 'r1', stretch: '+engineer and manager', do: 'squeeze' }])
-  assert.equal(made.state.focus, 'x-engineer-manager')
+  // + is no key of the chips
+  assert.equal(takes(run(PANES.chips, data), keyEvent('+')), false)
 })
 
 test('chips: a change on its way shows at once from the record (squeeze.want), and the bar says it is rewriting', () => {
@@ -124,7 +53,7 @@ test('chips on a catch-up: 0 dismisses it, no step lands on its original (the re
   const CU = { ...REC, shown: 'Mostly [6,543 saves](q1#day=2026-06-18@n).', catchup: { host: 'r0', rows: ['r0'], replies: 3, question: 'when?', prompt: 'p0' }, squeeze: { at: { length: 1 } } }
   const data = chipsData(CU)
   const d0 = run(PANES.chips, data)
-  assert.equal(barText([d0]), '[ ] change · 1–3 chip · + new stretch · 0 dismiss · s done')
+  assert.equal(barText([d0]), '[ ] change · 1–3 chip · 0 dismiss · s done')
   assert.equal(d0.status.text, 's ● catch-up of 3 replies')
   assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: ']', do: 'squeeze' }])
   // at medium, a step up would be its original: none, and a press on full's dot neither
@@ -149,7 +78,7 @@ const OBJECT = {
 }
 const detailData = () => {
   const drawing = runProgram(OBJECT, { w: 80, h: 20, mode: 'detail' })
-  return PANES.detail.data({ 'card:01-saves': { object: OBJECT, drawing, versions: [{ v: 1 }, { v: 2 }], v: 2, state: {}, thread: true, browser: true } }, { id: '01-saves' }, { w: 90, h: 30 })
+  return PANES.detail.data({ 'card:01-saves': { object: OBJECT, drawing, versions: [{ v: 1 }, { v: 2 }], v: 2, state: {}, thread: true } }, { id: '01-saves' }, { w: 90, h: 30 })
 }
 
 test('detail: one page on both surfaces; the part selected and the bar are its state, and a state from either surface draws the same', () => {
@@ -170,9 +99,8 @@ test('detail: one page on both surfaces; the part selected and the bar are its s
   assert.deepEqual(ring.state, click.state)
   // a click on the part already selected opens its details (the ring resting on it does not)
   assert.equal(act(PANES.detail, data, click.state, { type: 'press', region: 'day-2026-06-18' }, 'browser').state.bar, 'details')
-  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h versions · t thread · m send to main · o browser · esc back')
+  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h versions · t thread · m send to main · esc back')
   // the browser has no o: it is the browser
-  assert.ok(!barText([run(PANES.detail, data, { surface: 'browser' })]).includes('o browser'))
 })
 
 test('detail: what the card does is the host\'s (k.do): a version, the thread, closing; rows behind a part are wanted (k.want)', () => {
@@ -212,14 +140,14 @@ test('the focus stack: a key goes to the top program that takes it, then down; t
 // ---------------------------------------------------------------- the bar in the room it has
 test('the bar is always one line: it drops the counts first (coverage last), then says each key by its first word, then its label, then cuts', async () => {
   const { barLine, fitBar } = await import('../host.js')
-  const bar = { label: 'thimble', left: [{ key: 'v', words: 'visualize' }, { key: 's', words: '● 6 of 24 lines', short: '● squeeze' }, { key: 'c', words: 'claims' }, { key: ']', words: 'cite & explain' }, { key: '1', words: 'open detail' }], counts: [{ id: 'cov', text: 'coverage 34%' }, { id: 'cards', text: '2 cards' }, { id: 'claims', text: '22 claims' }] }
+  const bar = { label: 'thimble', left: [{ key: 'v', words: 'visualize' }, { key: 's', words: '● 6 of 24 lines', short: '● squeeze' }, { key: ']', words: 'cite & explain' }, { key: '1', words: 'open detail' }], counts: [{ id: 'threads', text: '2 threads' }, { id: 'cov', text: 'coverage 34%' }] }
   const at = w => barLine(fitBar(bar, w))
-  assert.equal(at(200), 'thimble  v visualize · s ● 6 of 24 lines · c claims · ] cite & explain · 1 open detail   coverage 34% · 2 cards · 22 claims')
+  assert.equal(at(200), 'thimble  v visualize · s ● 6 of 24 lines · ] cite & explain · 1 open detail   2 threads · coverage 34%')
   // the counts go first, coverage last
-  assert.ok(at(110).endsWith('coverage 34%') && !at(110).includes('cards'))
-  assert.ok(!at(90).includes('coverage'))
+  assert.ok(at(90).endsWith('coverage 34%') && !at(90).includes('threads'))
+  assert.ok(!at(70).includes('coverage'))
   // then the words: each key keeps its first word (a lit verb its dot and name)
-  assert.equal(at(60), 'v visualize · s ● squeeze · c claims · ] cite · 1 open')
+  assert.equal(at(50), 'v visualize · s ● squeeze · ] cite · 1 open')
   for (const w of [200, 140, 110, 90, 75, 60]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
   // narrower than the shortest form: the last form, marked to be cut at its end (never a second line)
   const narrow = fitBar(bar, 30)
@@ -230,15 +158,15 @@ test('the bar is always one line: it drops the counts first (coverage last), the
 test('a status in the bar is cut at its end, never to its first word, and the keys keep their words longest', async () => {
   const { barLine, fitBar } = await import('../host.js')
   const status = '! "55" is not in the original, so it shows as plain words'
-  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '[ ]', words: 'change' }, { key: '1–3', words: 'chip' }, { key: '+', words: 'new stretch' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'claims', text: '19 claims' }] }
+  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '[ ]', words: 'change' }, { key: '1–3', words: 'chip' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'threads', text: '19 threads' }] }
   const at = w => barLine(fitBar(bar, w))
-  assert.equal(at(200), `thimble  ${status} · [ ] change · 1–3 chip · + new stretch · 0 original · s done   22 cites · 19 claims`)
+  assert.equal(at(200), `thimble  ${status} · [ ] change · 1–3 chip · 0 original · s done   22 cites · 19 threads`)
   // short of room: the counts go, then the status is cut at its end and every key keeps its words
   const mid = at(110)
   assert.ok(mid.length <= 110, mid)
   assert.ok(mid.startsWith('thimble  ! "55" is not in'), mid)
   assert.ok(mid.includes('…'), mid)
-  assert.ok(mid.endsWith('[ ] change · 1–3 chip · + new stretch · 0 original · s done'), mid)
+  assert.ok(mid.endsWith('[ ] change · 1–3 chip · 0 original · s done'), mid)
   assert.ok(!/! "55 ·/.test(mid) && !/! "55$/.test(mid), mid)
   for (const w of [200, 140, 110, 90, 80]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
 })
@@ -257,8 +185,9 @@ test('keys in a row of digits read as a range; the keys a host keeps where a car
 
 test('local state: a hover and a replay stay on the surface they were set on; the rest is shared', async () => {
   const { joinShared, localKeys, shared } = await import('../host.js')
-  const d = run(PANES.claims, { claims: [], total: 0, clusters: 0, order: [], groups: [], pos: {}, names: [] })
-  assert.deepEqual(localKeys(d, PANES.claims).sort(), ['hover', 'replay'])
+  const pane = { local: ['replay'], program: k => { k.local('hover'); return k.text('x') } }
+  const d = run(pane, {})
+  assert.deepEqual(localKeys(d, pane).sort(), ['hover', 'replay'])
   assert.deepEqual(shared({ hover: 'c1', replay: { k: 2 }, zoom: 3 }, ['hover', 'replay']), { zoom: 3 })
   // the other surface's state, with this surface's own hover kept
   assert.deepEqual(joinShared({ hover: 'c4', zoom: 1 }, { hover: 'c9', zoom: 3 }, ['hover', 'replay']), { zoom: 3, hover: 'c4' })
@@ -288,8 +217,8 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   // back from the first card closes the tray; ] asks the host for the next mark or card
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('0'), 'terminal').d.effects, [{ do: 'close' }])
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent(']'), 'terminal').d.effects, [{ dir: 1, do: 'step' }])
-  // 1 asks: in the browser the question is typed in the tray (an input), in the terminal in the prompt
-  assert.equal(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'browser').d.effects[0].do, 'input')
+  // 1 asks: the question is typed in the prompt
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'terminal').state.asking, true)
   const asking = run(PANES.tray, data, { state: { stack: [f0], asking: true }, w: 70, got })
   assert.equal([asking.status?.text, barText([asking])].filter(Boolean).join(' · '), 'type to ask · ↵ asks this thread · 0 back')
 })
@@ -336,14 +265,6 @@ test('proposals: v\'s line is a program on the message\'s record: 1–9 pick (th
   assert.deepEqual(act(PANES.proposals, data, {}, { type: 'press', region: 'opt-0' }, 'browser').d.effects[0].choice, 'saves per day around June 18')
   // none proposed: one option, another view of this answer
   assert.deepEqual(PANES.proposals.data({ 'record:r1': { verbs: {} } }, { row: 'r1', verb: 'v' }).options, ['another view of this answer'])
-})
-
-test('claims: a turn the observer could not read is said under the head, with why and whether it is read again', () => {
-  const lines = gapLines([{ turn: 3, why: "the observer's call failed: the sign-in failed or expired", again: true }, { turn: 1, why: 'old {gap}' }, { turn: 4, why: 'x', again: true, reading: true }, { turn: 5, why: 'y' }])
-  assert.equal(lines[0], '{bad:Turn 1 was not read: old \\{gap\\}.}')
-  assert.equal(lines[1], "{bad:Turn 3 was not read: the observer's call failed: the sign-in failed or expired.} {dim:Press c twice to read it again.}")
-  assert.equal(lines[2], '{dim:Turn 4 was not read (x). Reading it again…}')
-  assert.equal(lines[3], '{dim:1 more turn not read.}')
 })
 
 test('the keys Claude Code keeps never reach a program in the terminal: ← and → among them, so no bar names them there', async () => {

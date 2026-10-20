@@ -80,7 +80,7 @@ function world(on: any) {
       preps.push(input)
       const o = input.object
       const drawing = (globalThis as Any).DrawKit.run(PROGRAM, o.data, { w: input.w, h: input.h, state: input.state, mode: input.mode, event: input.event, all: input.all, id: o.id, title: o.title })
-      out = { drawing, verbs: [], problems: [] }
+      out = { drawing }
     } else if (e.argv.includes('resolve')) out = { ref: e.argv[2], chain: [], rows: [], count: 0, records: [], notes: [] }
     else if (e.argv.includes('coverage')) out = { files: [] }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }

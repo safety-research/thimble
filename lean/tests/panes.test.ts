@@ -62,9 +62,8 @@ function world(on: Any, serverLines: unknown[] = [], draw: (input: Any) => unkno
     if (e.argv.some(a => a.endsWith('prep.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       preps.push(input)
-      out = { drawing: draw(input), verbs: [], problems: [] }
-    } else if (e.argv.some(a => a.endsWith('verb.mjs')) && e.argv.includes('list')) out = { verbs: [{ key: 'v', name: 'visualize', row: true, order: 0 }, { key: 's', name: 'squeeze', row: true, order: 1 }] }
-    else if (e.argv.includes('coverage')) out = { feeding: [{ path: 'revisions.jsonl' }], not_feeding: [] }
+      out = { drawing: draw(input) }
+    } else if (e.argv.includes('coverage')) out = { feeding: [{ path: 'revisions.jsonl' }], not_feeding: [] }
     else if (e.argv.includes('resolve')) out = { ref: e.argv[2], chain: [], rows: [], count: 3, records: [{ text: 'Hello agents' }], notes: [] }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -154,13 +153,14 @@ test('a card whose key is a verb\'s letter: at rest the verb takes it, with the 
   await savedTurn($, clock)
   await reply($)
   await clock.settle()
-  // at rest v opens the views line under the message, and the card's state is as it was
+  // at rest v is the verb's: it asks Claude for another view (no line opens when none is proposed), and the card's
+  // state is as it was
   expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(700)
   await clock.settle()
-  expect(textOf(await reply($))).toContain('▸ 1 another view of this answer')
+  expect(textOf(await reply($))).not.toContain('another view of this answer')
   expect(w.preps.some(p => p.event?.key === 'v')).toBe(false)
-  // 0 closes the line; ] gives the card the focus, and v is its flip now, named in the bar
-  await press($, clock, edit('0'))
+  // ] gives the card the focus, and v is its flip now, named in the bar
   await press($, clock, edit(']'))
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('v flip · 1 open detail · ] next · 0 back')
@@ -172,34 +172,4 @@ test('a card whose key is a verb\'s letter: at rest the verb takes it, with the 
   await press($, clock, edit('0'))
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('v visualize')
-})
-
-test('the detail is one program for both surfaces: the browser\'s state draws here, and the terminal\'s is kept where the page reads it', { options: { browser: true } }, async ($, on) => {
-  const w = world(on, [{ panestate: { pane: 'detail', args: { id: '01-saves' }, state: { region: 'day-2026-06-17', bar: 'details' } } }])
-  const clock = mock.clock(on)
-  mock.session(on)
-  await $.command.run({ command: 'obj', args: '01-saves' } as never)
-  await clock.settle()
-  // the card draws, then draws again with the state it was left at (each drawing a child run, settled here)
-  for (let i = 0; i < 3; i++) {
-    await $.ui.render(PANE)
-    await clock.settle()
-  }
-  // the terminal's e: the examples of the part, kept in the pane's state file for the page
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
-  await clock.settle()
-  const kept = JSON.parse(w.files[`${ROOT}/thimble/panes/${SESSION}/detail-01-saves.json`]!)
-  expect(kept).toMatchObject({ pane: 'detail', state: { bar: 'examples' }, by: 'terminal' })
-  // the page's run of the same program selects Jun 17 and shows its details: the terminal's pane draws the same
-  await $.command.run({ command: 'browser', args: '' } as never)
-  await clock.settle()
-  await $.ui.render(PANE)
-  await clock.settle()
-  const t = textOf(await $.ui.render(PANE))
-  expect(t).toContain('Jun 17')
-  expect(t).toContain('from revisions.jsonl')
-  expect(t).not.toContain('examples of')
-  // and the card under the reply marks the same part
-  expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!)).toMatchObject({ region: 'day-2026-06-17', by: 'browser' })
-  expect(textOf(await $.ui.render(HINT))).toContain('j next day · ↑↓ part · e examples · 0 clear')
 })

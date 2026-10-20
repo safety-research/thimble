@@ -18,7 +18,7 @@
 //     with the agent, the status, the card's title and the questions as asked beside them.
 //   - The part the person has selected now is kept in threads/<session>/sel/<id>.json, which the agent reads for a
 //     message typed in its own view (that message carries no part of its own).
-//   - The thimble line above the prompt (shell.tsx) counts the session's threads, again at each change.
+//   - The bar above the prompt (shell.tsx) counts the session's threads, again at each change.
 // The plugin's server never starts `claude`; nothing here runs unless the person asked a question.
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -118,7 +118,7 @@ async function keep($: Engine, t: Thread): Promise<void> {
   } catch {
     // the browser misses this thread; the terminal draws it from $.state
   }
-  // the thimble line counts the threads
+  // the bar counts the threads
   $.clock.after(0, () => { void recount($) })
   $.ui.invalidate('ui.render')
 }

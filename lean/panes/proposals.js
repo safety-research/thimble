@@ -1,6 +1,6 @@
-// proposals.js: the line a verb opens under a message (v's proposed views), a program on the card runtime (draw/kit.js)
-// over the message's record. The terminal draws it under the message and the browser under the same message in the
-// chat, from this one file. Picking an option asks the host to run the verb on the message with it (k.do('pick')).
+// proposals.js: the line v opens under a message (its proposed views), a program on the card runtime (draw/kit.js)
+// over the message's record. The terminal draws it under the message. Picking an option asks the host to ask Claude
+// for that view (k.do('pick')).
 //
 //   args: {row, verb}            the message and the verb whose line it is (v)
 //   reads: record:<row>          its lit verbs: v's proposals, as the post-turn pass named them

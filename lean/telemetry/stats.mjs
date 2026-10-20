@@ -1,11 +1,11 @@
-// stats.mjs: `thimble stats`, a session's cost and time per feature, from its events (events.mjs), and against a plain
+// stats.mjs: `thimble dev stats`, a session's cost and time per feature, from its events (events.mjs), and against a plain
 // Claude Code transcript when given one. Cost is price-weighted tokens: input 1, cache write 1.25, cache read 0.1,
 // output 5.
 //
-//   thimble stats                         the newest session under $THIMBLE_HOME/lean/events
-//   thimble stats SESSION|FILE            that session (an id, or its events file)
-//   thimble stats ... --against PLAIN     beside a plain Claude Code transcript (.jsonl) of the same questions
-//   thimble stats ... --json              the numbers as JSON
+//   thimble dev stats                         the newest session under $THIMBLE_HOME/lean/events
+//   thimble dev stats SESSION|FILE            that session (an id, or its events file)
+//   thimble dev stats ... --against PLAIN     beside a plain Claude Code transcript (.jsonl) of the same questions
+//   thimble dev stats ... --json              the numbers as JSON
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'

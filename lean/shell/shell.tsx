@@ -1,29 +1,17 @@
-// The shell of thimble: it puts the kernel's objects in front of the person, in the terminal and the browser.
+// The shell of thimble: it puts the kernel's objects in front of the person, in the terminal.
 //
 //   inline     when Claude saves an object (`thimble save` in Bash), the object is drawn under the turn's last reply, in
-//              cells (draw/term.js, draw/paint.js), with one quiet row under it: the 2-3 verbs picked for it, `? all`,
-//              and `open`. A click on a verb runs it, and what it makes is drawn under the same reply.
+//              cells (draw/term.js, draw/paint.js); a click on a part opens it in the detail.
 //   detail     one pane, the card detail (detail.tsx): header, the card with its parts, one "from" line, the
 //              examples of the selected part, the program behind p, and a side thread (thread.ts): while it is open,
 //              a prompt is a question for the card's thread, which main does not see.
-//   verbs      found by folder (lean/verbs/<name>/, shell/node/registry.mjs) and run in a Node child
-//              (shell/node/verb.mjs) by a press, a key or /verb. What a verb makes is drawn where the person pressed;
-//              what it says for Claude goes with the next prompt; a call it makes to the model is made here, with
-//              $.model, and handed back to it; a request it has for Claude (`ask`) goes as a prompt, drawn as one line.
-//   browser    off by default: the plugin's `browser` setting (/config) turns it on. While it is off nothing of it
-//              shows and no server starts. While it is on, `o` (the detail view's key, a press on `o browser` under a
-//              card or a reply) and /browser open this session's pages: a server on 127.0.0.1 with a token
-//              (shell/node/serve.mjs), alive while a page is open and ended with the session. What the person does
-//              on a page comes back as one line: an `ask` goes to Claude as a prompt that carries its scope, a `verb`
-//              presses that verb on the message's card.
-//   claims     the session's claims (thimble/claims/<session>.json), which the observer's look adds each turn's to:
-//              c opens the Claims pane, focused (panes/claims.js, a program on the card runtime): the clusters with their claims as a graph; the
-//              claim the ring is on (arrow keys, or a click) shows what it means and its links; r replays the graph
-//              in the order the claims were made.
+//   keys       the bar under the prompt names them: v asks Claude for another view of the answer (visualize.js), as
+//              a turn whose row reads as the press; s opens the squeeze chips (squeeze/); ] steps through the marks
+//              and cards; 1 opens the card in focus.
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
 //              `claude -c` and `--resume` draw the objects under the same replies again. <session> is the
 //              conversation's key (hooks/conversation.ts): a conversation Claude Code continues under a new session id
-//              (moved to the background, `--fork-session`) finds its cards, records, squeezes and claims again.
+//              (moved to the background, `--fork-session`) finds its cards, records and squeezes again.
 //
 // What it never does: it registers no model tool (a plugin's tool skips the asks of Manual mode), starts no
 // `claude`, and allows nothing on anyone's behalf. Everything it runs is the person's press or command, or a pure
@@ -31,45 +19,42 @@
 // object's program runs only in the drawing contract's sandbox.
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { LineCounts, MsgRecord, ObjRef, Ran, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
-import { knobOf, pageKnob, toHash, turn as turnKnob } from '../draw/handoff.js'
+import type { LineCounts, MsgRecord, ObjRef, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
+import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
 import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
-import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, followDetail, markOpen, noteDock, noteViewport, openDetailPane, paneColumns, registerDetail } from './detail'
-import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
-import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
-import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadList, threadOf } from './thread'
+import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
+import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
+import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
+import { askThread, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import type { Scope as ThreadScope } from './thread'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteSeen, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
-import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
-import { catchUpEl, markColors, messageEl, verbColor } from './view'
-import { markNextTurn, record as recordEvent, tracked, turnFeature } from '../telemetry/telemetry'
-import { ownTurn, readAgain } from '../observer/observer'
-import { cardAfter as cardVersion, promptText } from '../prompts/prompts'
-import { bindQueries, fixText, problemsOf, queryIdOf, readReply, requestText, viewText } from './cardfork.mjs'
-import type { RowVerb } from './view'
-import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, stretchMarks, takeNotes as sqNotes } from '../verbs/squeeze/term'
-import { catchUpStands, endsOf, isCatchUp, revealCut } from '../verbs/squeeze/chips.mjs'
-import { HEAD_ROWS } from '../panes/claims.js'
+import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop } from './tray.js'
+import { catchUpEl, keyColor, markColors, messageEl } from './view'
+import { markNextTurn, record as recordEvent } from '../telemetry/telemetry'
+import { ownTurn } from '../observer/observer'
+
+
+import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, takeNotes as sqNotes } from '../squeeze/term'
+import { catchUpStands, isCatchUp, revealCut } from '../squeeze/chips.mjs'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
-import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, paneTakes, paneTry, patchPaneState, setPaneState, setTheme } from './panes'
+import { act, paneDrawing, paneEl, paneFire, paneNow, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { mix } from '../draw/palette.js'
-import { emptyStore, readStore } from '../verbs/claims/claims.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
-import { modelWhy } from './why.js'
-import { checksDone, checksPending, labelsOf } from './labels'
+
+import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
+import { viewRequest } from './visualize.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Verb = { key: string | null; name: string; line: string; phrase: string | null; picked: boolean; hint?: string | null; extra?: Record<string, unknown> }
-type Prepared = { object: Any; drawing: Any; grid: Any; verbs: Verb[]; problems: string[]; error?: string; check?: { line: string | null; tried: number; total: number; failed: number; cut: number; ms: number } }
+type Prepared = { object: Any; drawing: Any; grid: Any; error?: string; check?: { line: string | null; tried: number; total: number; failed: number; cut: number; ms: number } }
 type Placed = ObjRef & { from?: string }
 
 export const PANE = 'object'
@@ -78,12 +63,10 @@ const SEL = { plugin: 'thimble', key: 'sel' } as const
 const LAST = { plugin: 'thimble', key: 'last' } as const
 const ASKED = { plugin: 'thimble', key: 'asked' } as const
 const ROWS = { plugin: 'thimble', key: 'rows' } as const
-const WEB = { plugin: 'thimble', key: 'web' } as const
 const READY = { plugin: 'thimble', key: 'ready' } as const
 const SAID = { plugin: 'thimble', key: 'said' } as const
 const NOTES = { plugin: 'thimble', key: 'notes' } as const
 const WHERE = { plugin: 'thimble', key: 'where' } as const
-const RANKED = { plugin: 'thimble', key: 'ranked' } as const
 const MSG = { plugin: 'thimble', key: 'msg' } as const
 const MSGROWS = { plugin: 'thimble', key: 'msgrows' } as const
 const TRAY = { plugin: 'thimble', key: 'tray' } as const
@@ -92,16 +75,8 @@ const SELROW = { plugin: 'thimble', key: 'selrow' } as const
 const ANSWER = { plugin: 'thimble', key: 'answer' } as const
 const ANSWERS = { plugin: 'thimble', key: 'answers' } as const
 const CARDFOCUS = { plugin: 'thimble', key: 'cardfocus' } as const
-const RUNNING = { plugin: 'thimble', key: 'running' } as const
-const ROWVERBS = { plugin: 'thimble', key: 'rowverbs' } as const
 const SQZ = { plugin: 'thimble', key: 'sqz' } as const
-const LINE = { plugin: 'thimble', key: 'line' } as const
 const COUNTS = { plugin: 'thimble', key: 'counts' } as const
-const CLAIMS = { plugin: 'thimble', key: 'claims' } as const
-const TURNS = { plugin: 'thimble', key: 'turns' } as const
-const CLAIMPANE = { plugin: 'thimble', key: 'claimpane' } as const
-const REREAD = { plugin: 'thimble', key: 'reread' } as const
-export const CPANE = 'claims'
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
@@ -120,20 +95,9 @@ const objects = new Map<string, Any>()
 export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; rows: string[]; oriented: number; leaned: boolean; saved: number; at?: string | null; saves?: ObjRef[] } | null = null
-// the person's latest question (the card after the answer reads it), and the card after the answer while it is made:
-// the observer's look waits for it, so the pass reads the card; the saves it made, which the feed never places again
-let question = ''
-let cardWork: Promise<void> | null = null
-const forkMade = new Set<string>()
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; at?: string | null; saves?: ObjRef[] } | null = null
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
-let server: { base: string; root: string } | null = null
-let serverStarting: Promise<{ base: string } | { problem: string }> | null = null
-// the server's stream: leaving it (return()) ends the server
-let serverStream: { return?: (v?: unknown) => unknown } | null = null
-// browser mode: the `browser` setting as the module loaded with it, then as /config changes it
-let browserFlag = false
 
 let shown: { file: string; under: Record<string, Placed[]> } | null = null
 // the message layer's memory: the records' folder and index, the tray's drawn cards, the verb key that opened a line
@@ -143,7 +107,7 @@ let keyOpened: { key: string; at: number; undo?: () => unknown } | null = null
 let cardKeyed: { key: string; at: number; ref: ObjRef; undo: { state: Record<string, unknown>; region: string | null } | null } | null = null
 // the tray's letter key pressed last from the empty prompt (r rows, c code): a letter typed straight after it began a word
 let trayKeyed: { key: string; at: number } | null = null
-// the row the next turn's cards are drawn under, when a verb's ask was about a catch-up (v on it): under the catch-up,
+// the row the next turn's cards are drawn under, when v asked about a catch-up: under the catch-up,
 // not under the turn's own last words
 let placeNext: string | null = null
 
@@ -182,14 +146,14 @@ export async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
-const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, all: string | null = null) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}|${browserFlag ? 'web' : ''}${all ? '|all=' + all : ''}`
+const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, all: string | null = null) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}${all ? '|all=' + all : ''}`
 
-/** The object drawn at `w` columns (with the knobs at `state`), with its verbs: the program runs in a Node child, in the
+/** The object drawn at `w` columns (with the knobs at `state`): the program runs in a Node child, in the
  *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
  *  a program may show more, in the `h` rows the detail gives it (k.h). Kept per object version, width, state, mode and
  *  rows; a failed one stays failed until the module reloads. `check` (a save) also tries the card's interactions once
  *  (draw/exercise.mjs), in the same child. `all` (the detail's "all at once") draws every page of that knob, one after
- *  another, with no verbs. */
+ *  another. */
 export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, check = false, all: string | null = null): Promise<Prepared> {
   const key = prepKey(ref, w, state, mode, h, all)
   const hit = preps.get(key)
@@ -202,18 +166,18 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
       object = await loadObject($, ref)
     } catch (err) {
       // a file over the 4 MiB one read takes, or one that is not JSON: Claude hears it at once, so the turn fixes it
-      return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `its file could not be read (${String((err as Error)?.message || err).slice(0, 160)}); an object over 4 MiB cannot be drawn, so bind query outputs (r3) in its data rather than writing rows out` }
+      return { object: null, drawing: null, grid: null, error: `its file could not be read (${String((err as Error)?.message || err).slice(0, 160)}); an object over 4 MiB cannot be drawn, so bind query outputs (r3) in its data rather than writing rows out` }
     }
-    if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
+    if (!object) return { object: null, drawing: null, grid: null, error: `no card ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}), browser: browserFlag }, mode, ...(check ? { check: true } : {}), ...(all ? { all, noVerbs: true } : {}) }), timeoutMs: 30000 })
-    if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}) }, mode, ...(check ? { check: true } : {}), ...(all ? { all } : {}) }), timeoutMs: 30000 })
+    if (r.exitCode !== 0) return { object, drawing: null, grid: null, error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     // under a reply a card is its title, its chart and its takeaway: the words at the right of its frame (its sources)
     // wait in the detail's from line
     const root = out.drawing?.root
     const bare = mode === 'inline' && root && root.t === 'frame' && root.right && !out.drawing.error ? { ...out.drawing, root: { ...root, right: undefined } } : out.drawing
-    return { object, drawing: out.drawing, grid: renderTerm(bare, { w }), verbs: out.verbs || [], problems: out.problems || [], ...(out.check ? { check: out.check } : {}) }
+    return { object, drawing: out.drawing, grid: renderTerm(bare, { w }), ...(out.check ? { check: out.check } : {}) }
   })()
   pending.set(key, p)
   void p.then(x => { preps.set(key, x); pending.delete(key) }, () => pending.delete(key))
@@ -238,27 +202,12 @@ async function withVersion($: Engine, ref: ObjRef): Promise<ObjRef> {
   return { ...ref, v: o?.version != null ? Number(o.version) : null }
 }
 
-/** The verbs for an object as the registry's rule picks them, each with its hint.mjs phrase (what the observer reads). */
-export async function verbsOf($: Engine, ref: ObjRef): Promise<Verb[]> {
-  return (await prepared($, ref, 96)).verbs
-}
-
 /** The object as the person sees it under a reply, as plain text at 96 columns (what the observer reads). */
 export async function drawnTextOf($: Engine, ref: ObjRef): Promise<string> {
   const p = await prepared($, ref, 96)
   if (p.error || !p.grid) return `(it cannot be drawn: ${p.error || 'no drawing'})`
   const err = p.drawing?.error ? `\n(its program failed: ${p.drawing.error.name}: ${p.drawing.error.message})` : ''
   return gridText(p.grid) + err
-}
-
-/** The state key of an object version's ranking. */
-export const rankedId = (ref: ObjRef) => `${ref.root}|${ref.id}|${ref.v ?? ''}`
-
-/** The verbs as the hint row shows them: as the observer ranked them for this version, once it has, else the rule's. A
- *  drawing that reads it redraws when the ranking comes. */
-async function rankedVerbs($: Engine, ref: ObjRef, verbs: Verb[]): Promise<Verb[]> {
-  const r = (await $.state.get({ ...RANKED, id: rankedId(ref) })).value
-  return r ? (rankRow(verbs, r) as Verb[]) : verbs
 }
 
 // ------------------------------------------------------------------------------------------------ where objects are drawn
@@ -304,8 +253,8 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
   $.clock.after(0, () => { void recount($) })
 }
 
-/** The newest version a verb saved of each object (by folder and id): a save of an older one, read from the feed
- *  later, is drawn at this one. */
+/** The newest version shown of each object (by folder and id): a save of an older one, read from the feed later, is
+ *  drawn at this one. */
 const newestVersion = new Map<string, number>()
 
 /** The saves the kernel wrote to this session's change feed since the feed was last read: one JSON line per save in
@@ -346,44 +295,42 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
   for (const line of lines) {
     try {
       const ev = JSON.parse(line)
-      // a verb the kernel asked for (a --prompt label asks for the label verb): run beside the session
-      if (ev?.kind === 'verb' && typeof ev.object === 'string' && ID.test(ev.object) && typeof ev.root === 'string' && Number(ev.t) >= since) { runFromFeed($, ev); continue }
+      // a --prompt label's records, for the model to read beside the session
+      if (ev?.kind === 'label' && Number(ev.t) >= since) { labelFromFeed($, ev); continue }
       if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
       const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
-      // a save the card after the answer made: it placed that card itself
-      if (forkMade.has(`${ref.root}|${ref.id}|${ref.v}`)) continue
       out.push(ref)
     } catch {
       // a line that does not parse is skipped; the feed's later lines still count
     }
   }
-  // an object saved twice in one call is drawn once, at its latest version; one a verb has saved again meanwhile (the
-  // label verb, while the command still ran) is drawn at the verb's version
+  // an object saved twice in one call is drawn once, at its latest version; one saved again meanwhile (a label's card,
+  // as the model's reads of it ended while the command still ran) is drawn at that version
   return out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root))
     .map(x => { const v = newestVersion.get(`${x.root}|${x.id}`); return v != null && x.v != null && v > x.v ? { ...x, v } : x })
 }
 
 
-/** How far the look for verbs in the feed has read it, while a command runs (newSaves reads it after). */
-let verbScan: { file: string; bytes: number } | null = null
+/** How far the look for labels in the feed has read it, while a command runs (newSaves reads it after). */
+let labelScan: { file: string; bytes: number } | null = null
 
-/** The verbs the kernel asked for in the feed since it was last read, started now (each runs once: runFromFeed). The
- *  saves are left for newSaves, which places them after the command. */
-async function verbsInFeed($: Engine): Promise<void> {
+/** The labels the kernel wrote in the feed since it was last read, for the model to read now (each once:
+ *  labelFromFeed). The saves are left for newSaves, which places them after the command. */
+async function labelsInFeed($: Engine): Promise<void> {
   const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
   const file = `${home.replace(/\/+$/, '')}/lean/events/${safe(await sessionKey($))}.jsonl`
   const size = await $.fs.stat(file).then(x => (x.kind === 'file' ? x.size : -1), () => -1)
   if (size < 0) return
   const read = (await $.state.get(EVENTS)).value as { file: string; bytes?: number } | undefined
-  const from = Math.max(verbScan?.file === file ? verbScan.bytes : 0, read?.file === file ? read.bytes ?? 0 : 0)
+  const from = Math.max(labelScan?.file === file ? labelScan.bytes : 0, read?.file === file ? read.bytes ?? 0 : 0)
   if (size <= from) return
   const text = await feedTail($, file, from)
   const whole = text.slice(0, text.lastIndexOf('\n') + 1)
-  verbScan = { file, bytes: from + utf8Bytes(whole) }
+  labelScan = { file, bytes: from + utf8Bytes(whole) }
   for (const line of whole.split('\n').filter(Boolean)) {
     try {
       const ev = JSON.parse(line)
-      if (ev?.kind === 'verb' && typeof ev.object === 'string' && ID.test(ev.object) && typeof ev.root === 'string' && Number(ev.t) >= LOADED - 2) runFromFeed($, ev)
+      if (ev?.kind === 'label' && Number(ev.t) >= LOADED - 2) labelFromFeed($, ev)
     } catch {
       // a line that does not parse is skipped
     }
@@ -408,8 +355,8 @@ async function feedTail($: Engine, file: string, from: number): Promise<string> 
   return String(r.stdout)
 }
 
-/** One object under a row: a new version of one already there takes its place; a verb's object goes after the
- *  object it came from (and after what came from it before). */
+/** One object under a row: a new version of one already there takes its place; one placed `from` another goes after
+ *  it (and after what came from it before). */
 async function place($: Engine, at: string, ref: Placed): Promise<void> {
   const cur = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as Placed[]
   const i = cur.findIndex(x => x.id === ref.id && x.root === ref.root)
@@ -456,7 +403,7 @@ async function restoreShown($: Engine): Promise<void> {
 
 /** The env of the shell's own `thimble` calls: the person's, never counted as what Claude read (coverage). */
 export async function leanEnv($: Engine, root: string): Promise<Record<string, string>> {
-  // the prompt versions in use (prompts/prompts.ts set THIMBLE_PROMPTS), so a verb's child reads the same ones
+  // the prompt versions in use (prompts/prompts.ts set THIMBLE_PROMPTS), so a child reads the same ones
   const prompts = String((await $.env.get('THIMBLE_PROMPTS')) || '')
   return { THIMBLE_ROOT: root, THIMBLE_SESSION: `person-${(await sessionKey($)).slice(0, 8)}`, ...(prompts ? { THIMBLE_PROMPTS: prompts } : {}) }
 }
@@ -526,143 +473,6 @@ async function rootHere($: Engine): Promise<string | null> {
   return null
 }
 
-/** One call a verb made to the model, made here: the verb's Node child has no $. It is a line in the session's events,
- *  under the feature and prompt version the verb named (`request.telemetry`), else under the verb. `units` (how many
- *  things the call covers, for the progress line) is the verb's note to the shell, never sent. */
-async function modelCall($: Engine, need: { kind: string; request: Any }, word = 'verb'): Promise<unknown> {
-  const { telemetry: tag, units: _units, ...req } = (need.request && typeof need.request === 'object' ? need.request : {}) as Any
-  try {
-    const r = await tracked($, { feature: String(tag?.feature || word), prompt: tag?.prompt ?? null, model: need.kind === 'fork' ? 'fork' : String(req.model ?? '') }, () =>
-      need.kind === 'fork' ? $.model.fork({ prompt: String(req.prompt ?? '') }) : $.model.complete(req))
-    return r ?? { isAnswered: false, reason: 'empty-reply' }
-  } catch (err) {
-    return { isAnswered: false, reason: 'refused', error: String((err as Error)?.message || err).slice(0, 300) }
-  }
-}
-
-/** Whether a call came back without text because the API was busy (a rate limit, an overload, a server error): such a
- *  call is tried again after a pause. */
-const busyReply = (r: Any) => !!r && r.isAnswered === false && r.reason === 'api-error' && [429, 500, 502, 503, 529].includes(Number(r.status))
-
-/** How far a verb's calls are: of this run's calls (`calls`, `done`, `failed`), and, when the calls cover units (records
- *  a label reads), of those (`units`, `of`). */
-export type CallProgress = { calls: number; done: number; failed: number; units?: number; of?: number; round: number }
-
-/** The calls one run of a verb asked for, made side by side, at most `parallel` at once (verb.json, default 4). A call
- *  the API turned away while busy is tried again after 2, 4 and 8 seconds. Each answer goes under its call's key. */
-async function modelCalls($: Engine, needs: { kind: string; request: Any; key: string }[], word: string, parallel: number, progress?: (p: Omit<CallProgress, 'round'>) => unknown): Promise<Record<string, unknown>> {
-  const out: Record<string, unknown> = {}
-  let next = 0
-  let done = 0
-  let lost = 0
-  let units = 0
-  const of = needs.reduce((n, x) => n + (Number(x.request?.units) || 0), 0)
-  const pause = (ms: number) => new Promise<void>(resolve => { $.clock.after(ms, () => resolve()) })
-  const worker = async () => {
-    while (next < needs.length) {
-      const need = needs[next++]!
-      let r = (await modelCall($, need, word)) as Any
-      for (let t = 0; t < 3 && busyReply(r); t++) {
-        await pause(2000 * 2 ** t)
-        r = (await modelCall($, need, word)) as Any
-      }
-      out[need.key] = r
-      done++
-      units += Number(need.request?.units) || 0
-      if (!r?.isAnswered) lost++
-      try { await progress?.({ calls: needs.length, done, failed: lost, ...(of ? { units, of } : {}) }) } catch { /* the calls go on */ }
-    }
-  }
-  try { await progress?.({ calls: needs.length, done: 0, failed: 0, ...(of ? { units: 0, of } : {}) }) } catch { /* the calls go on */ }
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, needs.length)) }, worker))
-  return out
-}
-
-/** Run a verb on an object (and region): its run.mjs in a Node child (shell/node/verb.mjs), again after the calls to
- *  the model it needs, with the answers so far. Calls a run starts together are made side by side (modelCalls), and
- *  `progress` hears how far they are. A verb runs at most `rounds` times (verb.json, default 8), and a run that asks
- *  again for calls it has the answers to stops it. What it made is saved by the kernel. */
-async function execVerb($: Engine, word: string, ref: ObjRef, region: string | null, cols: number, o: { state?: Record<string, unknown> | null; args?: string; extra?: Record<string, unknown>; progress?: (p: CallProgress) => unknown } = {}): Promise<Ran> {
-  const p = await prepared($, ref, 96, o.state)
-  const on = `${refText(ref)}${region ? ' ▸ ' + region : ''}`
-  if (!p.object) return { verb: word, on, error: `no object ${refText(ref)}: ${p.error}` }
-  const { refs } = region ? regionRefs(p.object, p.drawing, region) : { refs: objectRefs(p.object).map((c: Any) => c.ref) }
-  const dir = $.plugin.root.replace(/\/+$/, '')
-  const input = {
-    object: p.object, region, regionMeta: region ? regionMeta(p.drawing, region) : null, refs, drawing: p.drawing,
-    state: o.state || {}, args: o.args || '', root: ref.root, w: Math.max(40, Math.min(120, cols)), ...(o.extra || {}),
-  }
-  const answers: Record<string, unknown> = {}
-  let out: Any = null
-  let rounds = 8
-  for (let round = 0; round < rounds; round++) {
-    const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', word], { stdin: JSON.stringify({ ...input, answers, round }), cwd: ref.root, env: await leanEnv($, ref.root), timeoutMs: 600000 })
-    try { out = JSON.parse(r.stdout) } catch { out = { verb: word, error: (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400) || `exit ${r.exitCode}` } }
-    if (!out.need) break
-    rounds = Math.max(1, Math.min(200, Number(out.limits?.rounds) || 8))
-    const needs = (Array.isArray(out.needs) && out.needs.length ? out.needs : [out.need]) as { kind: string; request: Any; key: string }[]
-    const fresh = needs.filter(x => !(String(x.key) in answers))
-    if (!fresh.length) { out = { verb: out.verb || word, error: 'it asked again for calls it already has the answers to' }; break }
-    const parallel = Math.max(1, Math.min(16, Number(out.limits?.parallel) || 4))
-    Object.assign(answers, await modelCalls($, fresh, word, parallel, o.progress ? p => o.progress!({ ...p, round }) : undefined))
-  }
-  if (out?.need) out = { verb: out.verb || word, error: `it asked the model for more than ${rounds} rounds of calls` }
-  const ran: Ran = { verb: String(out.verb || word), text: out.text, note: out.note, ask: out.ask, error: out.error, on, saved: out.saved ? { id: out.saved.id, v: out.saved.v ?? null, root: ref.root } : null, ...(out.failed ? { failed: true } : {}) }
-  if (ran.saved) await $.state.set(LAST, ran.saved)
-  return ran
-}
-
-// ------------------------------------------------------------------------------------------------ verbs the kernel asks for
-
-/** The verbs the change feed asked for that have started, so each runs once. */
-const fromFeed = new Set<string>()
-
-/** A verb the kernel asked for in the change feed (`thimble label NAME --prompt …` asks for the label verb), run once,
- *  in the background, on the object the event names. Only a verb whose verb.json says `"feed": true` runs so. */
-function runFromFeed($: Engine, ev: Any): void {
-  const key = `${ev.root}|${ev.object}|${ev.verb}|${ev.t}`
-  if (fromFeed.has(key)) return
-  fromFeed.add(key)
-  $.clock.after(0, () => { void feedVerb($, ev).catch(err => failed($, `The ${String(ev.verb)} verb`, err, `run it again with /verb ${String(ev.verb)} ${String(ev.object)}`)) })
-}
-
-/** How far a verb's calls are, in a few words: `120 of 412 records`, or `3 of 9 calls`, and how many failed. */
-export function progressText(p: CallProgress, base = { units: 0, calls: 0 }): string {
-  const main = p.of ? `${fmtN(base.units + (p.units ?? 0))} of ${fmtN(base.units + p.of)} records` : `${fmtN(base.calls + p.done)} of ${fmtN(base.calls + p.calls)} calls`
-  return p.failed ? `${main} · ${fmtN(p.failed)} call${p.failed === 1 ? '' : 's'} failed` : main
-}
-
-/** The feed's verb at work: `<verb>… <progress>` under its object while its calls run; then its new object in the old
- *  one's place, its words for Claude with the next prompt, and a toast that says plainly what failed. */
-async function feedVerb($: Engine, ev: Any): Promise<void> {
-  const word = String(ev.verb || '')
-  if (!/^[a-z][a-z0-9_-]{0,40}$/.test(word)) return
-  const dir = $.plugin.root.replace(/\/+$/, '')
-  let spec: Any = null
-  try { spec = JSON.parse(String(await $.fs.read(`${dir}/verbs/${word}/verb.json`))) } catch { spec = null }
-  if (!spec || spec.feed !== true) return
-  const ref: ObjRef = { id: String(ev.object), v: null, root: String(ev.root).replace(/\/+$/, '') }
-  const at = { ...SAID, id: ref.id }
-  await $.state.set(at, { verb: word, running: true, text: 'starting' })
-  // the calls of each round add to those of the rounds before
-  const base = { units: 0, calls: 0, round: 0 }
-  let last: CallProgress | null = null
-  const ran = await execVerb($, word, ref, null, 96, {
-    args: String(ev.args || ''),
-    progress: async p => {
-      if (last && p.round !== last.round) { base.units += last.of ?? 0; base.calls += last.calls }
-      last = p
-      await $.state.set(at, { verb: word, running: true, text: progressText(p, base) })
-    },
-  })
-  await $.state.set(at, ran.error ? { verb: word, error: ran.error } : { verb: word, text: ran.text })
-  if (ran.saved) await showVersion($, ran.saved)
-  const said = ran.error ? `It failed: ${ran.error}` : ran.note || ran.text || ''
-  await noteForClaude($, `The ${word} verb ran on ${ref.id}, as \`thimble ${word}\` asked. ${said}`.trim())
-  if (ran.error) $.ui.toast(`× ${word} ${String(ev.args || ref.id)}: ${cut(ran.error, 200)}`)
-  else if (ran.failed) $.ui.toast(`! ${cut(ran.text || `${word} ran, and some of its calls failed`, 240)}`)
-}
-
 /** A new version of an object: drawn where the object is drawn now, in its place; one the turn has not placed yet is
  *  placed at the new version. */
 export async function showVersion($: Engine, ref: ObjRef): Promise<void> {
@@ -687,20 +497,14 @@ async function noteSeenSaves($: Engine, refs: ObjRef[]): Promise<void> {
   }
 }
 
-/** What Claude reads of a verb the person ran, with their next prompt. */
-function ranNote(r: Ran): string {
-  const said = r.error ? ` It failed: ${r.error}` : r.text ? ` It said: ${cut(r.text, 1200)}` : ''
-  return `The analyst ran the verb ${r.verb} on ${r.on}.${r.saved ? ` It shows them ${refText(r.saved)}.` : ''}${said}${r.note ? ' ' + r.note : ''}`
-}
-
 /** Words for Claude alone, given with the next prompt (prompt.submit's context): no row of the transcript. */
 export async function noteForClaude($: Engine, text: string): Promise<void> {
   const cur = ((await $.state.get(NOTES)).value ?? []) as string[]
   await $.state.set(NOTES, [...cur, text].slice(-12))
 }
 
-/** A turn this plugin starts: `rows` (what verbs said since Claude's last reply, the request, what the observer has for
- *  Claude) go just before it as a row the person does not see, for Claude alone; the prompt is `t.text`, as the person
+/** A turn this plugin starts: `rows` (what the shell has for Claude since its last reply, the request, what the
+ *  observer has for Claude) go just before it as a row the person does not see, for Claude alone; the prompt is `t.text`, as the person
  *  would type it. Claude Code labels its row as the plugin's. */
 async function startTurn($: Engine, rows: string[], t: { text: string; typed: boolean; verb: string }): Promise<void> {
   // with what the person reads now (a squeeze's version, a catch-up), as a prompt of theirs carries it
@@ -712,148 +516,13 @@ async function startTurn($: Engine, rows: string[], t: { text: string; typed: bo
   await $.prompt.submit({ text: t.text, asUser: true })
 }
 
-/** A verb's request to Claude, as a turn the person started: its row is the person's press in a few words (`explore
- *  01-saves`), as they would type it; the request itself goes just before it, for Claude alone (startTurn). */
+/** A request to Claude, as a turn the person started: its row is the person's press in a few words (`visualize
+ *  another view of this answer`), as they would type it; the request itself goes just before it, for Claude alone
+ *  (startTurn). */
 export async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
   // the turn it starts is filed under the verb in the session's events (v's card is a turn of main's)
   markNextTurn(verb)
   await startTurn($, [request], { text: `${verb} ${on}`, typed: false, verb })
-}
-
-// ------------------------------------------------------------------------------------------------ the card after the answer
-
-/** Whether `thimble` ran a data command or a save (what a card after the answer could draw from). */
-const LEAN_WORK = /(^|[\s;&|(])thimble\s+(run|q|rows|resolve|sources|save)\b/
-
-/** The card after the answer while one is being made (else null): the observer's look waits for it, so its pass reads
- *  the card. */
-export function cardSettled(): Promise<void> | null {
-  return cardWork
-}
-
-/** One `thimble` command of the card after the answer, filed under the session (it is Claude's work, in a fork). */
-async function leanRun($: Engine, root: string, args: string[], stdin?: string): Promise<{ ok: boolean; out: string }> {
-  const dir = $.plugin.root.replace(/\/+$/, '')
-  const prompts = String((await $.env.get('THIMBLE_PROMPTS')) || '')
-  const py = String((await $.env.get('THIMBLE_PYTHON')) || '')
-  const env: Record<string, string> = { THIMBLE_ROOT: root, THIMBLE_SESSION: await sessionKey($), ...(prompts ? { THIMBLE_PROMPTS: prompts } : {}), ...(py ? { THIMBLE_PYTHON: py } : {}) }
-  const r = await $.process.run([`${dir}/bin/thimble`, ...args], { cwd: root, env, timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) })
-  return { ok: r.exitCode === 0, out: `${r.stdout || ''}${r.stderr ? `\n${r.stderr}` : ''}`.trim() }
-}
-
-/**
- * A card from a fork of the session (it shares main's prompt cache): after a turn that ran `thimble` and saved nothing, the
- * fork decides whether a card would help the person see why the answer holds, and writes it (`after`); when the person
- * presses v and the version says so, it writes v's card (`v`). thimble runs the queries the card asks for, saves it
- * under the session, draws it once as a save does (its interactions tried), and asks the fork once more when something
- * does not hold. The card is drawn under the answer, and Claude reads which card it is with the next prompt. Every call
- * and its outcome is in the session's events (feature `card`).
- */
-async function forkCard($: Engine, o: { row: string; version: { text: string; id: string }; via: 'after' | 'v'; ask: (c: { answer: string; cards: string[]; guidance: string; toolkit: string }) => string }): Promise<void> {
-  const t0 = Date.now()
-  const outcome: Record<string, unknown> = { kind: 'card', prompt: o.version.id, via: o.via }
-  try {
-    const root = await rootHere($)
-    if (!root) { outcome.skip = 'no folder under analysis'; return }
-    const rec = await recordNow($, o.row)
-    const answer = String(rec?.shown ?? rec?.text ?? '')
-    if (!answer.trim()) { outcome.skip = 'no answer'; return }
-    const dir = $.plugin.root.replace(/\/+$/, '')
-    const guidance = (await promptText($, 'forms')).text
-    const toolkit = String(await $.fs.read(`${dir}/draw/TOOLKIT.md`).catch(() => ''))
-    const cards = [...new Set([...Object.values((await shownNow($)).under).flat().map(x => x.id), ...(rec?.objects ?? [])])]
-    const ask = async (prompt: string, round: number): Promise<Any> => tracked($, { feature: 'card', prompt: o.version.id, extra: { round, via: o.via } }, () => $.model.fork({ prompt }))
-    const r = await ask(o.ask({ answer: String(rec?.text ?? answer), cards, guidance, toolkit }), 1)
-    if (!r.isAnswered) {
-      outcome.error = String(r.reason)
-      // v's card is the person's press: they hear why nothing came (the card after an answer is thimble's own)
-      if (o.via === 'v') failed($, "thimble could not draw v's card", modelWhy(r), 'Press v again, or ask Claude for the card')
-      return
-    }
-    let reply = readReply(r.text)
-    outcome.rounds = 1
-    if (reply.kind === 'none') { outcome.drawn = false; outcome.why = reply.why; return }
-    if (reply.kind !== 'card') { outcome.error = reply.why ?? 'no card in the reply'; return }
-    let ref: ObjRef | null = null
-    let made: { problems: string[]; reply: Any; p: Prepared | null } = { problems: [], reply, p: null }
-    for (let round = 1; round <= 2; round++) {
-      // its queries, run in order; each name in the card becomes the id the query got
-      const ids: Record<string, string> = {}
-      const problems: string[] = []
-      for (const q of reply.queries) {
-        const run = await leanRun($, root, ['run', q.label], q.code)
-        const id = run.ok ? queryIdOf(run.out) : null
-        if (id) ids[q.name] = id
-        else problems.push(`the query ${q.name} ("${q.label}") did not run: ${cut(run.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
-      }
-      const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
-      const file = `${home.replace(/\/+$/, '')}/lean/cards/${safe(await sessionKey($))}/${reply.name}.json`
-      await $.fs.write(file, JSON.stringify(bindQueries(reply.object, ids), null, 1))
-      const saved = await leanRun($, root, ['save', reply.name, '--from', file])
-      const m = /^saved (\S+) v(\d+)/m.exec(saved.out)
-      if (!m) {
-        problems.push(`thimble save did not save it: ${cut(saved.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
-        made = { problems, reply, p: null }
-      } else {
-        ref = { id: m[1]!, v: Number(m[2]), root }
-        forkMade.add(`${root}|${ref.id}|${ref.v}`)
-        const p = await prepared($, ref, 96, null, 'inline', 24, true)
-        problems.push(...problemsOf(saved.out, drawnNote(p, ref)))
-        made = { problems, reply, p }
-      }
-      if (!problems.length || round === 2) break
-      // once more, with what does not hold
-      const again = await ask(fixText(o.version.text, { problems, card: JSON.stringify({ card: reply.name, queries: reply.queries, object: reply.object }), toolkit }), 2)
-      outcome.rounds = 2
-      if (!again.isAnswered) break
-      const next = readReply(again.text)
-      if (next.kind !== 'card') break
-      reply = { ...next, name: reply.name }
-    }
-    outcome.problems = made.problems
-    const p = made.p
-    if (!ref || !p || p.error || !p.grid || p.drawing?.error) {
-      outcome.drawn = false
-      outcome.error = made.problems[0] ?? p?.error ?? 'it did not draw'
-      failed($, `thimble could not draw ${o.via === 'v' ? "v's card" : 'a card for this answer'}`, outcome.error, o.via === 'v' ? 'Press v again, or ask Claude for the card' : 'Press v under the answer to ask for one')
-      return
-    }
-    // under the answer, as a verb's card is drawn; Claude reads which card it is with the next prompt
-    await place($, o.row, ref)
-    await $.state.set(LAST, ref)
-    const cur = await recordNow($, o.row)
-    if (cur && !cur.objects.includes(ref.id)) await saveRecord($, { ...cur, objects: [...cur.objects, ref.id] })
-    const data = Object.values((p.object?.data ?? {}) as Record<string, unknown>).filter(v => typeof v === 'string' && /^[qr]\d+(?:[#@]|$)/.test(v))
-    const lead = o.via === 'v' ? 'The analyst pressed v under your last answer, and thimble drew the card' : 'After your last answer, thimble drew the card'
-    await noteForClaude($, `${lead} ${refText(ref)} under it ("${p.object?.title || ref.id}"), written by a fork of this conversation${data.length ? ` from ${[...new Set(data)].join(', ')}` : ''}. It is in thimble/objects/${ref.id}.json.${made.problems.length ? ` What did not hold: ${cut(made.problems.join(' '), 400)}` : ''}`)
-    outcome.drawn = true
-    outcome.object = refText(ref)
-    outcome.queries = made.reply.queries.length
-  } catch (err) {
-    outcome.error = cut(String((err as Error)?.message || err), 300)
-  } finally {
-    outcome.ms = Date.now() - t0
-    await recordEvent($, outcome)
-  }
-}
-
-/** The card after the answer: the fork's request is the version's "The request". */
-function cardAfterTurn($: Engine, o: { row: string; question: string; version: { text: string; id: string } }): Promise<void> {
-  return forkCard($, { row: o.row, version: o.version, via: 'after', ask: c => requestText(o.version.text, { question: o.question, ...c }) })
-}
-
-/** v's card from a fork, when the card version has the section for it: true when it took the press (the card comes
- *  from the fork), false when v asks main as before. */
-async function viewFromFork($: Engine, rec: MsgRecord, choice: string): Promise<boolean> {
-  const version = await cardVersion($)
-  if (!version || !viewText(version.text, {})) return false
-  const proposals = ((rec.verbs?.v as { proposals?: unknown[] } | undefined)?.proposals ?? []).filter((x): x is string => typeof x === 'string' && x.trim() !== '' && x !== choice)
-  const what = String(rec.shown ?? rec.text).replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
-  const work: Promise<void> = forkCard($, { row: rec.row, version, via: 'v', ask: c => viewText(version.text, { what: cut(what, 80), choice: choice === ANOTHER_VIEW ? '' : choice, has: c.cards.filter(id => rec.objects.includes(id)), proposals, ...c }) })
-    .finally(() => { if (cardWork === work) cardWork = null })
-  cardWork = work
-  await work
-  return true
 }
 
 // ------------------------------------------------------------------------------------------------ failures, in words
@@ -893,292 +562,11 @@ async function quietly(p: Promise<unknown>): Promise<void> {
   try { await p } catch { /* a refusal: the tray shows the mark anyway */ }
 }
 
-// ------------------------------------------------------------------------------------------------ the browser
-
-/** Whether browser mode is on: the plugin's `browser` setting, false at install. */
-export function browserOn(): boolean {
-  return browserFlag
-}
+// ------------------------------------------------------------------------------------------------ the theme
 
 /** The theme the person picked (dark or light): the cards' palette follows it. */
 export function currentTheme(): 'dark' | 'light' {
   return theme
-}
-
-/** The folder whose thimble/ the pages read: the latest object's, else the nearest with a thimble/ folder, else the
- *  session's own. */
-async function webRoot($: Engine): Promise<string> {
-  return (await rootHere($)) || String(await $.session.cwd()).replace(/\/+$/, '')
-}
-
-async function startServer($: Engine, root: string): Promise<{ base: string } | { problem: string }> {
-  if (server && server.root === root) return { base: server.base }
-  if (serverStarting) return serverStarting
-  if (server) stopServer()
-  const dir = $.plugin.root.replace(/\/+$/, '')
-  const session = await sessionKey($)
-  serverStarting = new Promise(resolve => {
-    void (async () => {
-      let buf = ''
-      let ready = false
-      let why = ''
-      try {
-        const child = $.process.spawn({ argv: ['node', `${dir}/shell/node/serve.mjs`, '--root', root, '--session', session, '--lean', `${dir}/bin/thimble`], env: await leanEnv($, root) })
-        serverStream = child as unknown as { return?: (v?: unknown) => unknown }
-        for await (const piece of child) {
-          if (piece.stream !== 'stdout') continue
-          buf += piece.text
-          let nl = buf.indexOf('\n')
-          while (nl >= 0) {
-            const line = buf.slice(0, nl)
-            buf = buf.slice(nl + 1)
-            nl = buf.indexOf('\n')
-            let msg: Any
-            try { msg = JSON.parse(line) } catch { continue }
-            if (msg.ready) {
-              server = { base: `http://127.0.0.1:${msg.ready.port}/${msg.ready.token}`, root }
-              ready = true
-              await $.state.set(WEB, { base: server.base, root, on: true })
-              resolve({ base: server.base })
-            } else if (typeof msg.ask === 'string') {
-              void askFromBrowser($, root, msg.ask, msg.scope || {})
-            } else if (typeof msg.verb === 'string') {
-              void verbFromBrowser($, root, String(msg.verb), String(msg.row || ''), typeof msg.proposal === 'string' ? msg.proposal : null)
-            } else if (msg.squeeze && typeof msg.squeeze === 'object') {
-              // a squeeze chip pressed under a message in the browser: the same rewrite in place as a press here
-              void paneActFromBrowser($, { ...msg.squeeze, pane: 'chips', args: { row: msg.squeeze.row }, do: 'squeeze', ...(msg.squeeze.custom ? { stretch: msg.squeeze.custom } : {}), ...(msg.squeeze.chip != null ? { at: { [msg.squeeze.chip]: msg.squeeze.level } } : {}) })
-            } else if (msg.cardstate) {
-              await stateFromBrowser($, root, msg.cardstate)
-            } else if (msg.panestate && typeof msg.panestate === 'object') {
-              // the browser's run of a pane's program answered with a state: the same pane here shows it
-              await paneFromBrowser($, msg.panestate)
-            } else if (msg.act && typeof msg.act === 'object') {
-              // an action the browser's run of a pane's program asked for, done here as the terminal's run would
-              void paneActFromBrowser($, msg.act)
-            } else if (msg.back) {
-              await backFromBrowser($, root, msg.back)
-            } else if (msg.stopped) {
-              why = String(msg.stopped)
-            }
-          }
-        }
-      } catch (err) {
-        if (!ready) resolve({ problem: String((err as Error)?.message || err).slice(0, 200) })
-      }
-      server = null
-      serverStarting = null
-      serverStream = null
-      if (!ready) resolve({ problem: 'the page server stopped before it was ready' })
-      // it stops on its own once no page is open (`why`), or with the module: the next `o` starts it again
-      await $.state.set(WEB, { on: browserFlag, ...(why ? { stopped: why } : {}) })
-    })()
-  })
-  const r = await serverStarting
-  if ('problem' in r) serverStarting = null
-  return r
-}
-
-/** End the page server, if one runs (browser mode turned off). */
-function stopServer(): void {
-  try { serverStream?.return?.() } catch { /* it ends with the module anyway */ }
-  serverStream = null
-  server = null
-  serverStarting = null
-}
-
-/** The old page's "back to terminal": the detail view opens on the object and part the page had selected. */
-async function backFromBrowser($: Engine, root: string, back: { object: string; v: number | null; region: string | null; state?: Record<string, unknown> }): Promise<void> {
-  if (!ID.test(back.object)) return
-  const region = back.region && REGION.test(back.region) ? back.region : null
-  const ref = await withVersion($, { id: back.object, v: back.v ?? null, root })
-  const state = back.state && typeof back.state === 'object' && !Array.isArray(back.state) ? back.state : undefined
-  await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}) })
-  const o = await loadObject($, ref)
-  await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
-}
-
-/** A card's interaction state the browser's program answered with: kept where both surfaces read it, and the open
- *  detail here follows it (the same selection in the terminal and the browser). */
-async function stateFromBrowser($: Engine, root: string, c: { object: string; region: string | null; state: Record<string, unknown> }): Promise<void> {
-  if (!ID.test(c.object)) return
-  await writeCardState($, root, c.object, { state: c.state, region: c.region }, 'browser')
-  const sel = (await $.state.get(SEL)).value as Sel | null
-  if (sel && sel.id === c.object && sel.root === root && !sel.cite && !sel.cites) await $.state.set(SEL, { ...sel, state: c.state, region: c.region ?? sel.region })
-}
-
-/** A pane's state from the browser's run of its program: kept and drawn here (the same pane, the same state). */
-async function paneFromBrowser($: Engine, q: { pane: string; args?: Record<string, unknown>; state: Record<string, unknown> }): Promise<void> {
-  try {
-    paneOf(q.pane)
-  } catch {
-    return
-  }
-  await setPaneState($, q.pane, q.args || {}, q.state || {}, 'browser')
-  if (q.pane === 'detail' && typeof q.args?.id === 'string' && ID.test(q.args.id)) {
-    // the part selected in the browser's detail is the card's selection everywhere: its card under the reply marks it
-    const root = await webRoot($)
-    const kept = await readCardState($, root, q.args.id)
-    if (typeof q.state?.region === 'string') await writeCardState($, root, q.args.id, { state: kept?.state ?? {}, region: q.state.region }, 'browser')
-    await followDetail($, q.args.id)
-  }
-}
-
-/** An action a pane's program asked for in the browser (k.do), done as the terminal's run would do it. */
-async function paneActFromBrowser($: Engine, q: Record<string, unknown>): Promise<void> {
-  const pane = String(q.pane || '')
-  try {
-    paneOf(pane)
-  } catch {
-    return
-  }
-  await act($, instance(pane, (q.args as Record<string, unknown>) || {}), q)
-}
-
-/** The record of one of Claude's messages in this session (CONTRACT 1), or null. */
-async function recordOf($: Engine, root: string, row: string): Promise<Any | null> {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(row)) return null
-  const file = `${root}/thimble/messages/${safe(await sessionKey($))}/${row}.json`
-  try { return (await $.fs.exists(file)) ? JSON.parse(String(await $.fs.read(file))) : null } catch { return null }
-}
-
-type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; claim?: string; refs?: string[]; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
-
-/** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
-export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
-  const lines = ['The analyst asked this in the browser page of this session, not in the terminal.']
-  if (scope.object && ID.test(scope.object)) {
-    const ref = await withVersion($, { id: scope.object, v: scope.v ?? null, root })
-    const p = await prepared($, ref, 96)
-    const o = p.object
-    const region = scope.region && REGION.test(scope.region) ? scope.region : null
-    const label = region ? String(regionMeta(p.drawing, region)?.label || scope.label || region) : ''
-    lines.push(`They asked it on the page of ${ref.id}@${o?.version ?? ref.v} "${o?.title || ''}" (${root}/thimble/objects/${ref.id}.json)${region ? `, with its part ${region} ("${label}") selected. "This" may mean that part.` : '.'}`)
-    const refs = o && region ? regionRefs(o, p.drawing, region).refs : o ? objectRefs(o).map((c: Any) => c.ref) : []
-    if (refs.length) lines.push(`${region ? 'That part rests' : 'Its words rest'} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${ref.id}\` the object's lineage.`)
-  }
-  if (scope.claim && /^c\d{1,6}$/.test(scope.claim)) {
-    const store = await claimsStore($)
-    const c = store.claims.find((x: Any) => x.id === scope.claim)
-    if (c) {
-      const first = (c.said || [])[0]
-      const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
-      lines.push(`They asked it about the claim ${c.id} "${c.text}" on the page of this session's claims${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}${first?.quote ? `, first said as "${first.quote}"` : ''}.${refs.length ? ` It rests on ${refs.join(', ')}.` : ''} "This" may mean that claim.`)
-    }
-  }
-  const m = scope.mark
-  if (m && m.kind === 'gloss') {
-    lines.push(`They asked about the term "${m.term || m.label || ''}", which the page explains under your message.`)
-  } else if (m && m.ref && isRef(m.ref)) {
-    lines.push(`They asked about your citation "${m.label || m.ref}" (${m.ref}). \`thimble resolve ${m.ref}\` shows its rows.`)
-  }
-  if (scope.row) {
-    const rec = await recordOf($, root, scope.row)
-    const text = rec ? String(rec.shown ?? rec.text ?? '') : ''
-    if (text && !scope.object) lines.push(`It is about your message that begins: "${cut(text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/\s+/g, ' '), 240)}"`)
-  }
-  return lines.join('\n')
-}
-
-/** A question asked in the browser. About a card or a mark it is a side thread (thread.ts), which main does not see;
- *  about a message as a whole it is a turn the person started, their words as the prompt, what it was asked about
- *  just before it as a row for Claude alone (as a verb's request is). Claude Code labels that prompt's row as the
- *  plugin's. */
-async function askFromBrowser($: Engine, root: string, text: string, scope: WebScope): Promise<void> {
-  try {
-    // a question asked in a thread the page shows (its tree, its column): that thread again, on the part it is about
-    if (scope.thread) {
-      await restoreThreads($, root)
-      const t = threadOf(scope.thread)
-      if (t) {
-        const r = await askThread($, { text, root: t.root || root, scope: t.scope as ThreadScope, card: t.scope.object ? { id: t.scope.object, v: t.scope.v ?? null, title: t.card || undefined, file: `${t.root || root}/thimble/objects/${t.scope.object}.json` } : null })
-        if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
-        return
-      }
-    }
-    if ((scope.object && ID.test(scope.object)) || scope.mark) {
-      const card = scope.object && ID.test(scope.object) ? await withVersion($, { id: scope.object, v: scope.v ?? null, root }) : null
-      const p = card ? await prepared($, card, 96) : null
-      const region = scope.region && REGION.test(scope.region) ? scope.region : null
-      // a selection the card's program asked about (k.ask) names its own rows
-      const picked = Array.isArray(scope.refs) ? scope.refs.filter(x => isRef(x)) : []
-      const refs = picked.length ? picked : p?.object ? (region ? regionRefs(p.object, p.drawing, region).refs : objectRefs(p.object).map((c: Any) => c.ref)) : undefined
-      const r = await askThread($, {
-        text, root, ...(refs ? { refs } : {}),
-        scope: { ...(card ? { object: card.id, v: card.v } : {}), ...(region ? { region, label: scope.label || String(regionMeta(p?.drawing, region)?.label || region) } : picked.length && scope.label ? { label: scope.label } : {}), ...(scope.row ? { row: scope.row } : {}), ...(scope.mark ? { mark: scope.mark } : {}) },
-        card: p?.object ? { id: p.object.id, v: p.object.version, title: p.object.title, file: `${root}/thimble/objects/${p.object.id}.json` } : null,
-      })
-      if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
-      return
-    }
-    // the person's own question, typed in the page
-    await startTurn($, [await webContext($, root, scope)], { text, typed: true, verb: '' })
-  } catch (err) {
-    $.ui.toast(`A question from the browser did not reach Claude${plainWhy(err) ? ` (${plainWhy(err)})` : ''}. Type it here instead.`)
-  }
-}
-
-/** A verb pressed under a message in the browser: run here as the terminal's verb row runs it, on the message. */
-async function verbFromBrowser($: Engine, root: string, key: string, row: string, proposal: string | null): Promise<void> {
-  if (key === 'c') {
-    // the claims are the browser's own tab; pressed on a message there, the list opens under it here too
-    if (await recordNow($, row)) await pressRowVerb($, row, 'c')
-    return
-  }
-  const verb = (await rowVerbs($)).find(v => v.key === key)
-  if (!verb) { $.ui.toast(`The browser pressed ${key}, but no verb of the row is on that key, so nothing ran.`); return }
-  const rec = (await recordNow($, row)) ?? ((await recordOf($, root, row)) as MsgRecord | null)
-  if (!rec) { $.ui.toast(`${verb.name}: the message pressed in the browser is not in this session's records. Press ${key} under it here.`); return }
-  $.clock.after(0, () => { void runOnMessage($, verb.name, key, rec, proposal || '') })
-}
-
-/** Open a page of this session in the browser: the mirror (at a row), or a card's detail (on a part). */
-export async function openBrowser($: Engine, at: { id?: string; v?: number | null; region?: string | null; row?: string | null; root?: string; view?: string; claim?: string | null } = {}): Promise<string> {
-  if (!browserFlag) return 'Browser mode is off. Turn on Browser in /config (thimble), then press o or type /browser.'
-  const root = at.root || (await webRoot($))
-  const s = await startServer($, root)
-  if ('problem' in s) {
-    await $.state.set(WEB, { on: true, problem: s.problem })
-    return `No page: ${s.problem}. Try /browser again; if it fails twice, turn Browser off and on in /config.`
-  }
-  const q = (o: Record<string, unknown>) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
-  // the page opens where the person is: a card's detail on its part, the Claims graph on the claim the ring is on, or
-  // the session at the message the keys act on
-  const url = at.id
-    ? `${s.base}/card/?${q({ o: at.id, v: at.v, from: at.row })}${at.region ? `#r=${encodeURIComponent(at.region)}` : ''}`
-    : at.view
-      ? `${s.base}/app/?${q({ view: at.view, claim: at.claim })}`
-      : `${s.base}/mirror/${at.row ? `#row=${encodeURIComponent(at.row)}` : ''}`
-  const what = at.id ? `${at.id}${at.region ? ' ▸ ' + at.region : ''}` : at.view === 'claims' ? `the claims${at.claim ? ` at ${at.claim}` : ''}` : 'this session'
-  const browser = await $.env.get('BROWSER')
-  const tries = browser ? [[browser, url]] : [['xdg-open', url], ['open', url]]
-  for (const argv of tries) {
-    const r = await $.process.run(argv, { timeoutMs: 15000 }).catch(() => null)
-    if (r && r.exitCode === 0) {
-      await $.state.set(WEB, { on: true, base: s.base, root, opened: url })
-      return `Opened ${what} in the browser.`
-    }
-  }
-  await $.state.set(WEB, { on: true, base: s.base, root, opened: url, problem: 'no browser opened here; open the link yourself' })
-  return `No browser opened here. The page: ${url}`
-}
-
-/** Browser mode turned on or off in /config: on, /browser is there; off, the server ends and nothing of it shows. */
-async function setBrowser($: Engine, on: boolean): Promise<void> {
-  const was = browserFlag
-  browserFlag = on
-  if (on && !was) await registerBrowserCommand($)
-  if (!on) stopServer()
-  await $.state.set(WEB, { on })
-}
-
-async function registerBrowserCommand($: Engine): Promise<void> {
-  await $.command.register({ name: 'browser', description: "Open this session in the browser: /browser · /browser <object> [region] opens a card's page", argumentHint: '[object] [region]', immediate: true })
-}
-
-/** `o browser`, a press that opens a page: under a card (its detail page) or under a reply (the mirror at it). */
-function browserChip(els: Any, key: string, onPress: () => unknown) {
-  const { Button, Text } = els
-  return Button({ key, plain: true, label: 'open in the browser', children: [Text({ color: 'suggestion', children: 'o' }), Text({ dimColor: true, children: ' browser' })], onPress })
 }
 
 // ------------------------------------------------------------------------------------------------ the message layer
@@ -1302,20 +690,8 @@ async function drawnRecord($: Engine, at: string, text: string): Promise<MsgReco
   return recordFor(kept, { row: at, session: await sessionKey($), text }) as MsgRecord
 }
 
-/** The verbs of the row, as the registry lists them: those whose verb.json says `"row": true`, in their `order`. */
-async function rowVerbs($: Engine): Promise<RowVerb[]> {
-  const held = (await $.state.get(ROWVERBS)).value as RowVerb[] | null | undefined
-  if (held) return held
-  return [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }]
-}
-
-async function loadRowVerbs($: Engine): Promise<void> {
-  const dir = $.plugin.root.replace(/\/+$/, '')
-  const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'list'], { timeoutMs: 30000 })
-  const list = JSON.parse(r.stdout).verbs as Any[]
-  const row = list.filter(v => v.row === true && v.key).sort((a, b) => (Number(a.order ?? 1e6) - Number(b.order ?? 1e6))).map(v => ({ key: String(v.key), name: String(v.name), ...(v.color ? { color: v.color } : {}) }))
-  await $.state.set(ROWVERBS, row)
-}
+/** The keys of the row: v and s. */
+const ROW_KEYS = [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }]
 
 /** Whether a person is at this session: `now` (an interactive session), `later` (one Claude Code's background service
  *  runs, a pre-warmed spare or a background job, until the person's first prompt), `never` (a `-p` run, the SDK). */
@@ -1326,16 +702,10 @@ export function personHere(): 'now' | 'later' | 'never' {
   return person
 }
 
-/** The work of a person's session that starts Node children: the verbs of the message row, and the thimble line's
- *  counts with the share of the data Claude read. */
+/** The work of a person's session that starts a child: the bar's counts with the share of the data Claude read. */
 async function startForPerson($: Engine): Promise<void> {
   person = 'now'
   $.clock.after(0, () => { void recount($, { coverage: true }) })
-  try {
-    await loadRowVerbs($)
-  } catch (err) {
-    failed($, 'thimble: the verb row could not read its verbs', err, 'v and s still work; start the session again to get the rest')
-  }
 }
 
 // ------------------------------------------------------------------------------------------------ the answers
@@ -1343,7 +713,7 @@ async function startForPerson($: Engine): Promise<void> {
 // The keys act on one of Claude's answers: the last words of a turn that answered (a turn that ended in an error
 // answers nothing: its last row is Claude Code's error). By default the newest; { and } pick an earlier or a later one,
 // so a long answer stays in reach when short replies came after it (a subagent's report, a follow-up), and the
-// thimble line says which reply the keys act on whenever more than one came since the person's last prompt.
+// bar says which reply the keys act on whenever more than one came since the person's last prompt.
 
 /** The session's answers, oldest first: held for this load, rebuilt from the records at a resume. */
 async function answerRows($: Engine): Promise<string[]> {
@@ -1639,7 +1009,7 @@ async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: 
 async function drawPart($: Engine, part: { program: string; data: unknown; id?: string }, w: number, h: number): Promise<Any> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   // a card drawn whole (a value of a card) keeps its id, so its rows' refs read as the card's own
-  const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object: { id: part.id || 'card', program: part.program, data: part.data }, w, h, mode: 'inline', noVerbs: true }), timeoutMs: 30000 })
+  const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object: { id: part.id || 'card', program: part.program, data: part.data }, w, h, mode: 'inline' }), timeoutMs: 30000 })
   if (r.exitCode !== 0) throw new Error((r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 200) || `exit ${r.exitCode}`)
   const out = JSON.parse(r.stdout)
   return { drawing: out.drawing, grid: renderTerm(out.drawing, { w }) }
@@ -1653,87 +1023,59 @@ async function sourceSpec($: Engine, ref: string, label: string, room: number): 
   return citeCard({ ref, label, root, room }, { resolve: (r: string, n: number, l?: string) => resolveJson($, root, r, n, l), read: (p: string) => $.fs.read(p) })
 }
 
-/** The message as an object a verb reads: its words as shown, its row and its session. */
-function messageObject(rec: MsgRecord): Any {
-  const text = shownOf(rec)
-  const first = text.replace(/\s+/g, ' ').trim()
-  return { id: `msg-${rec.row.slice(0, 8)}`, version: 1, kind: 'message', row: rec.row, session: rec.session, title: first.length > 60 ? first.slice(0, 59) + '…' : first, text }
-}
+/** How long v waits before it asks: a letter typed within it makes the key the start of a word. */
+const WORD_MS = 700
+/** v pressed with nothing proposed, waiting out WORD_MS before it asks Claude (a letter typed meanwhile cancels it). */
+let pendingV: { row: string; cancelled: boolean } | null = null
 
-/** A verb key under a message: its line opens (a press on the open one closes it). */
+/** A key of the row under a message, v or s: its line opens (a press on the open one closes it). v with no view
+ *  proposed asks Claude for another view at once, once the moment in which it could begin a word has passed. */
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
   if (cur && cur.row === row && cur.verb === key) { await setPick($, null); return }
-  // c: the Claims pane, read again (the orientation may have added claims), opened or closed
   // what the person pressed, with whether the post-turn pass had lit it (thimble stats: how often a lit verb is used)
-  const lit = !!((await recordNow($, row))?.verbs as Record<string, Any> | undefined)?.[key]?.lit
-  void recordEvent($, { kind: 'press', verb: key, row, lit })
-  if (key === 'c') { await toggleClaims($, row); return }
+  const rec = await recordNow($, row)
+  const v = (rec?.verbs as Record<string, Any> | undefined)?.[key]
+  void recordEvent($, { kind: 'press', verb: key, row, lit: !!v?.lit })
   await setTray($, null)
   await setCardFocus($, null)
+  if (key === 'v' && rec && !(v?.lit && Array.isArray(v.proposals) && v.proposals.length)) {
+    await setPick($, null)
+    const wait = { row, cancelled: false }
+    pendingV = wait
+    $.clock.after(WORD_MS, () => {
+      if (wait.cancelled || pendingV !== wait) return
+      pendingV = null
+      void (async () => { const now = (await recordNow($, row)) ?? rec; await askForView($, now, ANOTHER_VIEW) })()
+    })
+    return
+  }
   await setPick($, { row, verb: key })
   await $.state.set(SELROW, row === (await restRow($)) ? null : row)
   // the line in view, when a key opened it under a message above the screen
   await quietly($.ui.scroll({ to: { key: `vl-${row}-opt-0` }, block: 'nearest' }))
 }
 
-/** An option of the open line picked (the proposals program's k.do('pick')): the verb runs on the message, outside the
+/** An option of the open line picked (the proposals program's k.do('pick')): v asks for that view, outside the
  *  press. */
-async function pickOption($: Engine, row: string, verbKey: string, choice: string): Promise<boolean> {
+async function pickOption($: Engine, row: string, key: string, choice: string): Promise<boolean> {
   const rec = await recordNow($, row)
-  if (!rec) return false
+  if (!rec || key !== 'v') return false
   await setPick($, null)
-  const verb = (await rowVerbs($)).find(v => v.key === verbKey)
-  if (!verb) return false
-  $.clock.after(0, () => { void runOnMessage($, verb.name, verbKey, rec, choice) })
+  $.clock.after(0, () => { void askForView($, rec, choice) })
   return true
 }
 
-/** Run a verb of the row on a message: its run.mjs in a Node child, with the message record in its ctx. What it made is
- *  drawn under the message, what it asks of Claude goes as a turn, what it says shows as a toast. */
-async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord, choice: string): Promise<void> {
-  const at = { ...RUNNING, id: rec.row }
-  if ((await $.state.get(at)).value) return
-  await $.state.set(at, key)
+/** v on a message: Claude is asked for another view of it (visualize.js), as a turn whose row reads as the press. What
+ *  Claude makes for a catch-up is drawn under the catch-up, not under the words of the turn it asks for. */
+async function askForView($: Engine, rec: MsgRecord, choice: string): Promise<void> {
   try {
-    // v's card from a fork of the session, when the card version draws it (main is not asked)
-    if (word === 'visualize' && (await viewFromFork($, rec, choice))) return
-    const root = (await rootHere($)) || String(await $.session.cwd())
-    const dir = $.plugin.root.replace(/\/+$/, '')
-    const input = {
-      object: messageObject(rec), message: rec, row: rec.row, session: rec.session, root, region: null, regionMeta: null,
-      refs: rec.marks.filter(m => m.ref).map(m => m.ref), drawing: null, state: {}, args: key === 'v' && choice !== ANOTHER_VIEW ? choice : '', w: 96,
-    }
-    const answers: Record<string, unknown> = {}
-    let out: Any = null
-    for (let round = 0; round < 8; round++) {
-      const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', word], { stdin: JSON.stringify({ ...input, answers }), cwd: root, env: await leanEnv($, root), timeoutMs: 600000 })
-      try { out = JSON.parse(r.stdout) } catch { out = { verb: word, error: (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400) || `exit ${r.exitCode}` } }
-      if (!out.need) break
-      answers[String(out.need.key)] = await modelCall($, out.need, word)
-    }
-    if (out?.need) out = { verb: word, error: 'it asked the model more than eight times' }
-    const on = `the message ${messageObject(rec).title ? `"${messageObject(rec).title}"` : rec.row}`
-    if (out.saved) {
-      const saved = { id: String(out.saved.id), v: out.saved.v ?? null, root }
-      await place($, rec.row, saved)
-      await $.state.set(LAST, { id: saved.id, v: saved.v, root: saved.root })
-      const cur = (await recordNow($, rec.row)) || rec
-      if (!cur.objects.includes(saved.id)) await saveRecord($, { ...cur, objects: [...cur.objects, saved.id] })
-    }
-    if (out.error) failed($, `${word} did not run`, out.error, `Press ${key} under the message again, or ask Claude`)
-    else if (out.ask) {
-      // what Claude makes for a catch-up is drawn under the catch-up, not under the words of the turn it asks for
-      placeNext = isCatchUp(rec) ? rec.row : null
-      void ask($, String(out.ask), word, choice || on)
-    }
-    else if (out.text && !out.saved) $.ui.toast(cut(String(out.text).split('\n')[0] || '', 200))
-    if (!out.ask && !out.error) await noteForClaude($, `The analyst ran the verb ${word} on ${on}.${out.saved ? ` It shows them ${out.saved.id}.` : ''}${out.text ? ` It said: ${cut(String(out.text), 600)}` : ''}${out.note ? ' ' + out.note : ''}`)
-    else if (out.note) await noteForClaude($, String(out.note))
+    const guide = `${$.plugin.root.replace(/\/+$/, '')}/skills/thimble/cards.md`
+    const request = viewRequest({ message: rec, choice: choice !== ANOTHER_VIEW ? choice : '', guide })
+    placeNext = isCatchUp(rec) ? rec.row : null
+    await ask($, request, 'visualize', choice || 'another view of this answer')
   } catch (err) {
-    failed($, `${word} did not run`, err, `Press ${key} under the message again, or ask Claude`)
-  } finally {
-    await $.state.set(at, null)
+    failed($, 'v did not ask for a view', err, 'Press v under the message again, or ask Claude')
   }
 }
 
@@ -1751,8 +1093,6 @@ export async function applyObserver($: Engine, row: string, out: { verbs: Record
   if (!rec) return null
   const next = withObserver(rec, out) as MsgRecord
   await saveRecord($, next)
-  // the observer's look may have kept this turn's claims: the thimble line counts them again
-  $.clock.after(0, () => { void recount($) })
   return next
 }
 
@@ -1806,154 +1146,6 @@ async function askTrayThread($: Engine, text: string): Promise<string | null> {
   return `asked the thread of ${cut(t.label, 40)}`
 }
 
-// ------------------------------------------------------------------------------------------------ claims
-//
-// The session's claims (CONTRACT 7) are kept in <root>/thimble/claims/<session>.json, beside its messages, so the
-// browser's page server reads the same. The observer's one look adds each turn's claims (observer.ts); `thimble verb
-// claims save` adds the corpus orientation's. c under a message opens the list there; a claim opens in the tray.
-
-type ClaimsStore = ReturnType<typeof emptyStore> & Record<string, Any>
-type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: string; sparks?: Record<string, number[]> }
-
-/** The claims file of this session, or null while there is no folder under analysis. */
-async function claimsFile($: Engine): Promise<string | null> {
-  const root = await rootHere($)
-  return root ? `${root.replace(/\/+$/, '')}/thimble/claims/${safe(await sessionKey($))}.json` : null
-}
-
-/** This session's claims: as held, else as on disk, else none yet. A copy: the caller may change it. */
-export async function claimsStore($: Engine): Promise<ClaimsStore> {
-  const session = await sessionKey($)
-  const held = (await $.state.get(CLAIMS)).value as ClaimsStore | null | undefined
-  if (held && held.session === session) return JSON.parse(JSON.stringify(held))
-  return reloadClaims($)
-}
-
-/** The claims read again from disk (the orientation's CLI wrote them, or a resumed session), and held. */
-async function reloadClaims($: Engine): Promise<ClaimsStore> {
-  const session = await sessionKey($)
-  const file = await claimsFile($)
-  let store = emptyStore(session) as ClaimsStore
-  try {
-    if (file && (await $.fs.exists(file))) store = readStore(String(await $.fs.read(file)), session) as ClaimsStore
-    else {
-      const held = (await $.state.get(CLAIMS)).value as ClaimsStore | null | undefined
-      if (held && held.session === session) store = held
-    }
-  } catch {
-    // a file it cannot read: the claims start again, and the next save writes a whole one
-  }
-  await $.state.set(CLAIMS, store)
-  return JSON.parse(JSON.stringify(store))
-}
-
-/** The claims kept: held for the drawing, and written for the browser and a resumed session. With no folder yet they
- *  are held only, and the next save writes them. */
-export async function saveClaims($: Engine, store: ClaimsStore): Promise<void> {
-  await $.state.set(CLAIMS, store)
-  const file = await claimsFile($)
-  if (file) await $.fs.write(file, JSON.stringify(store, null, 1))
-  // the thimble line counts the claims again
-  $.clock.after(0, () => { void recount($) })
-}
-
-/** A turn's prompt row, its turn number (the person's prompts so far) and Claude's message rows. */
-async function turnOf($: Engine, rows: string[]): Promise<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null }> {
-  const idx = (await msgFilesNow($)).index
-  const first = rows.length ? idx.findIndex(x => x.row === rows[0]) : -1
-  let p = -1
-  for (let i = (first < 0 ? idx.length : first) - 1; i >= 0; i--) if (idx[i].kind === 'user') { p = i; break }
-  const prompt = p >= 0 ? { row: String(idx[p].row), text: String(idx[p].text || '') } : null
-  return { prompt, rows: [...rows], turn: p >= 0 ? idx.slice(0, p + 1).filter(x => x.kind === 'user').length : null }
-}
-
-/** Where a turn's claims can have been said: the person's prompt, then each of Claude's messages in the turn. */
-export async function turnPlaces($: Engine, turnId: string): Promise<{ turn: number | null; rows: string[]; places: Place[] }> {
-  const t = (await $.state.get({ ...TURNS, id: turnId })).value as { prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null | undefined
-  if (!t) return { turn: null, rows: [], places: [] }
-  const places: Place[] = []
-  if (t.prompt?.text) places.push({ row: t.prompt.row, by: 'person', turn: t.turn, text: t.prompt.text })
-  for (const row of t.rows) {
-    const rec = await recordNow($, row)
-    // each sparkline's values ride along, so a claim that rests on one draws it in its card with no lookup
-    const sparks = Object.fromEntries((rec?.marks || []).filter(m => m.kind === 'spark' && Array.isArray(m.values) && m.ref).map(m => [m.ref!, (m.values as number[]).slice(0, 48)]))
-    if (rec?.text) places.push({ row, by: 'claude', turn: t.turn, text: rec.text, ...(Object.keys(sparks).length ? { sparks } : {}) })
-  }
-  return { turn: t.turn, rows: t.rows, places }
-}
-
-/** One verb of a message's row lit (or dimmed, with null), its other verbs kept. */
-export async function setVerb($: Engine, row: string, key: string, v: Record<string, unknown> | null): Promise<void> {
-  const rec = await recordNow($, row)
-  if (!rec) return
-  const verbs = { ...(rec.verbs || {}) } as Record<string, Any>
-  if (v) verbs[key] = v
-  else delete verbs[key]
-  await saveRecord($, { ...rec, verbs })
-}
-
-/** The claims the list marks as new under a message: those the observer counted for it. */
-function freshOf(rec: MsgRecord | null): string[] {
-  const c = (rec?.verbs as Any)?.c
-  return Array.isArray(c?.claims) ? c.claims.map(String) : []
-}
-
-/** The Claims pane is open, from the message it was opened from (its new claims are marked). What the person does in
- *  it (the claim hovered, a replay) is the pane program's state (panes/claims.js, shell/panes.ts). */
-type ClaimPane = { row: string }
-
-/** Open the Claims pane, focused, from a message; a second c closes it. */
-async function toggleClaims($: Engine, row: string): Promise<void> {
-  if ((await $.state.get(CLAIMPANE)).value) { await closeClaims($); return }
-  const store = await reloadClaims($)
-  await $.state.set(CLAIMPANE, { row } as ClaimPane)
-  await pushFocus($, 'claims')
-  // after the key that asked for it is done, so the pane takes the keyboard from the prompt
-  $.clock.after(0, () => { void openClaimsPane($) })
-  // a turn the observer could not read (its call failed) is read again now; the pane says so while it runs
-  if ((store.gaps || []).some((g: Any) => g?.again)) $.clock.after(0, () => { void readAgain($) })
-}
-
-/** The pane takes the keyboard. */
-async function openClaimsPane($: Engine): Promise<void> {
-  // docked beside the conversation, leaving it its share of the terminal (as the detail does)
-  const r = await $.ui.open({ id: CPANE, title: 'Claims', focus: true, closeOnEscape: true, columns: paneColumns() })
-  if (r && (r as Any).isPlaced === false) $.ui.toast(`Claims: ${(r as Any).reason || 'the pane was not placed'}. Widen the terminal, then press c again.`)
-}
-
-async function closeClaims($: Engine): Promise<void> {
-  await $.state.set(CLAIMPANE, null)
-  await popFocus($, 'claims')
-  paneClosed('claims')
-  await quietly($.ui.close({ id: CPANE }))
-}
-
-/** The Claims pane: the claims program (panes/claims.js) on the session's store, in the room the pane has. */
-async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
-  noteDock(e)
-  const st = ((await $.state.get(CLAIMPANE)).value as ClaimPane | null) ?? { row: '' }
-  const w = Math.max(30, (e.props.bodyColumns ?? 120) - 1)
-  const h = Math.max(6 + HEAD_ROWS, e.props.scroll?.bodyRows ?? 40)
-  return paneEl($, e, 'claims', { row: st.row || '' }, { w, h }, { painted: true })
-}
-
-/** A question asked with the ring on a claim of the Claims pane: what it carries for Claude, and the row's few words. */
-async function claimScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
-  if (!(await $.state.get(CLAIMPANE)).value) return null
-  const id = (await paneState($, 'claims')).hover as string | null | undefined
-  if (!id) return null
-  const store = await claimsStore($)
-  const c = store.claims.find((x: Any) => x.id === id)
-  if (!c) return null
-  const first = (c.said || [])[0]
-  const where = first ? (first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'} by ${first.by === 'person' ? 'the analyst' : 'you'}: "${first.quote}"`) : ''
-  const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
-  return {
-    label: `claim: ${c.text}`, scope: { claim: c.id, ...(first?.row ? { row: first.row } : {}) },
-    context: `The analyst asked this with the ring on a claim of this session in the Claims pane: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`thimble resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
-  }
-}
-
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
 async function trayScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown>; refs: string[] } | null> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
@@ -1962,7 +1154,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   if (frame.row == null) {
     return {
       label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } }, refs: [frame.ref!],
-      context: `The analyst asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`thimble resolve ${frame.ref}\` shows its rows.`,
+      context: `The analyst asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`thimble rows ${frame.ref}\` shows its rows.`,
     }
   }
   const rec = await recordNow($, frame.row)
@@ -1979,19 +1171,19 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)
   return {
     label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } }, refs: [seriesRef(m.ref!)?.query ?? m.ref!],
-    context: `The analyst asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`thimble resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
+    context: `The analyst asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`thimble rows ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the thimble line
+// ------------------------------------------------------------------------------------------------ the bar
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-//   thimble  v visualize · s ● 6 of 24 lines · c claims · ] cite & explain · 1 open detail      2 cards · 11 cites · coverage 34%
+//   thimble  v visualize · s squeeze · ] cite & explain · 1 open detail                     2 threads · coverage 34%
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
 // keys act on (a lit one with its note in place of its name), `] cite & explain` when that message has marks, `1 open
-// detail` when a card is under it, `o browser` in browser mode. While a pane, the tray or the chips have focus, the
+// detail` when a card is under it. While a pane, the tray or the chips have focus, the
 // left side is their keys instead, and it comes back after. At its right, the session's counts that are not zero: a
 // count that changed is drawn bright for a moment, then dims. Inside a thread (the card detail, a mark's thread) its
 // label names the thread the prompt goes to, `thimble:main/<it>`.
@@ -2019,26 +1211,13 @@ export function percent(part: number): string {
   return `${Math.min(99, Math.round(p))}%`
 }
 
-/** This session's counts for the thimble line, counted again: the cards drawn, the side threads, the citations in
- *  Claude's words, the claims kept, and (with `coverage`) the share of the folder's data Claude has read, by rows. A
- *  count that changed is stamped, so it brightens. */
+/** This session's counts for the bar, counted again: the side threads, and (with `coverage`) the share of the
+ *  folder's data Claude has read. A count that changed is stamped, so it brightens. */
 export async function recount($: Engine, o: { coverage?: boolean } = {}): Promise<void> {
   try {
     const old = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
     const now = await $.clock.now()
-    const s = await shownNow($)
-    const cards = new Set(Object.values(s.under).flat().map(x => `${x.root}|${x.id}`)).size
-    let cites = 0
-    for (const row of await messageRows($)) {
-      const rec = await recordNow($, row)
-      if (rec) cites += linkMarks(rec.text).length
-    }
     const root = await rootHere($)
-    let claims = old?.claims ?? 0
-    if (root) {
-      const file = `${root.replace(/\/+$/, '')}/thimble/claims/${safe(await sessionKey($))}.json`
-      try { claims = (await $.fs.exists(file)) ? (JSON.parse(String(await $.fs.read(file))).claims || []).length : 0 } catch { /* a file being written: the last count stands */ }
-    }
     let cov = old?.cov ?? 0
     if (o.coverage && root && person === 'now') {
       const dir = $.plugin.root.replace(/\/+$/, '')
@@ -2054,8 +1233,8 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         // the line keeps the last share it had
       }
     }
-    const next: LineCounts = { cards, threads: threadCount(), cites, claims, cov, at: now, changed: { ...(old?.changed || {}) } }
-    const keys = ['cards', 'threads', 'cites', 'claims', 'cov'] as const
+    const next: LineCounts = { threads: threadCount(), cov, at: now, changed: { ...(old?.changed || {}) } }
+    const keys = ['threads', 'cov'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : next[k] > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
     await $.state.set(COUNTS, next)
@@ -2083,11 +1262,11 @@ async function threadInFront($: Engine): Promise<string | null> {
 // ------------------------------------------------------------------------------------------------ the focus stack
 
 /** What takes the keys, newest last: each surface pushes itself as it opens and leaves as it closes (the detail, the
- *  Claims pane, the squeeze chips, v's proposals, the tray, a card under a reply). The thimble line says the keys of
+ *  squeeze chips, v's proposals, the tray, a card under a reply). The bar says the keys of
  *  the top one alone, read from this one state, so it redraws whenever the stack changes. */
-type FocusKind = 'detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card'
+type FocusKind = 'detail' | 'chips' | 'proposals' | 'tray' | 'card'
 const FSTACK = { plugin: 'thimble', key: 'focus' } as const
-const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'claims', 'detail']
+const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'detail']
 
 export async function pushFocus($: Engine, kind: FocusKind): Promise<void> {
   const now = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
@@ -2125,21 +1304,10 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
     const d = await detailKeys($)
     return d ? { keys: d } : undefined
   }
-  if (kind === 'claims') {
-    // the Claims pane's own keys, as its program names them (panes/claims.js)
-    if (!(await $.state.get(CLAIMPANE)).value) return undefined
-    return { keys: [barText([await paneNow($, 'claims')]) || 'esc close', ...(browserFlag ? ['o browser'] : [])].join(' · ') }
-  }
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (kind === 'chips') {
     if (pick?.verb !== 's') return undefined
     // the chips' own keys, as their program names them (panes/chips.js), after what it says of the message now
-    const ui = ((await $.state.get({ ...SQZ, id: pick.row })).value ?? null) as SqzUi | null
-    if (ui?.adding) {
-      const ends = endsOf(String(ui.typing || '+'))
-      if (!ends) return { keys: 'type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels' }
-      return { keys: ends.from === 'as written' ? 'then and, and the other end · ↵ makes the stretch' : `↵ makes ${ends.from} ↔ ${ends.to} · ⌫ the + cancels` }
-    }
     const d = await paneNow($, 'chips', { row: pick.row })
     return { status: status(d), keys: barText([d]) }
   }
@@ -2190,7 +1358,7 @@ async function focusKeys($: Engine): Promise<FocusWords | null> {
 function keySegments(keys: string): { key: string; words: string; color?: string; short?: string; onPress?: () => unknown }[] {
   return keys.split(' · ').map(seg => {
     const lit = /^([a-z]) ● (.*)$/.exec(seg)
-    if (lit) return { key: lit[1]!, words: `● ${lit[2]}`, color: verbColor(lit[1]!, theme), short: `● ${lit[2]!.split(/\s+/)[0]}` }
+    if (lit) return { key: lit[1]!, words: `● ${lit[2]}`, color: keyColor(lit[1]!, theme), short: `● ${lit[2]!.split(/\s+/)[0]}` }
     const t = seg.split(' ')
     // a phrase with no key (`type to ask about the part`): words alone, which a narrow bar cuts to the word that says
     // what it is for (`ask`; the ask line in the pane says the rest)
@@ -2205,7 +1373,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
 type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown }
 
-/** The keys each thimble line named, oldest first, with when it first showed them. A key the line named a moment ago
+/** The keys each bar named, oldest first, with when it first showed them. A key the line named a moment ago
  *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
  *  person was closing): the person pressed what the line said. */
 const barSeen: { at: number; keys: Set<string> }[] = []
@@ -2245,7 +1413,7 @@ function barNamed(k: string, now: number, since: number): boolean {
   return false
 }
 
-/** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
+/** The bar: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
  *  It is always one line: with less room it drops the counts (coverage last), then says each key's words by their
  *  first word, then drops its label, then cuts its end (panes/host.js fitBar). Beside a docked pane Claude Code gives
  *  the band only the transcript's column, so there it is the narrow form. */
@@ -2264,8 +1432,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
     const row = await actingRow($)
     const rec = row ? await recordNow($, row) : null
     if (row && rec) {
-      const verbs = await rowVerbs($)
-      const running = ((await $.state.get({ ...RUNNING, id: row })).value ?? null) as string | null
+      const verbs = ROW_KEYS
       const sqUi = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
       const lit: Record<string, { lit?: boolean; note?: string }> = { ...(rec.verbs || {}) }
       const sv = sLit(rec, sqUi)
@@ -2274,12 +1441,11 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       // replies piled up since the person's last prompt, and the keys on the newest: s catches up on them, lit and bold
       const pile = !(await $.state.get(SELROW)).value ? await pileUp($) : null
       for (const v of verbs) {
-        const color = verbColor(v.key, theme, v.color)
+        const color = keyColor(v.key, theme)
         const on = lit[v.key]
-        const more = running === v.key ? '…' : ''
         if (v.key === 's' && pile) left.push({ key: 's', words: `catch up on ${pile.n} replies`, short: 'catch up', color, wordsColor: color, bold: true, label: 'catch up', onPress: () => catchUpNow($) })
-        else if (on?.lit && on.note) left.push({ key: v.key, words: `● ${on.note}${more}`, short: `● ${v.name}`, color, wordsColor: color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
-        else left.push({ key: v.key, words: `${v.name}${more}`, color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
+        else if (on?.lit && on.note) left.push({ key: v.key, words: `● ${on.note}`, short: `● ${v.name}`, color, wordsColor: color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
+        else left.push({ key: v.key, words: v.name, color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
       }
       // ] steps through what the answer holds: its marks, then its cards (a card focused takes its own keys)
       const cardsHere = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]
@@ -2292,7 +1458,6 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
         const words = pk ? (PAGES_DEFAULT === 'all' ? `read all ${pagesWord(pk)}` : `open ${pagesWord(pk)}`) : 'open detail'
         left.push({ key: '1', words, short: pk ? (PAGES_DEFAULT === 'all' ? 'read all' : 'open') : 'open', color: FOCUS[theme], onPress: () => openCard($, ref) })
       }
-      if (browserFlag) left.push({ key: 'o', words: 'browser', color: FOCUS[theme], onPress: async () => $.ui.toast(await openBrowser($, { row })) })
       // which reply the keys act on, once more than one came since the person's last prompt or an earlier one is
       // picked: { and } pick another (as ] and [ step through the marks; never < >, which read as the arrow keys)
       const place = await answerPlace($, row)
@@ -2311,10 +1476,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   const now = await $.clock.now()
   noteBar(now, left)
   const items: [string, number, string][] = c ? [
-    ['cards', c.cards, c.cards === 1 ? '1 card' : `${fmtN(c.cards)} cards`],
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
-    ['cites', c.cites, c.cites === 1 ? '1 cite' : `${fmtN(c.cites)} cites`],
-    ['claims', c.claims, c.claims === 1 ? '1 claim' : `${fmtN(c.claims)} claims`],
     ['cov', c.cov, `coverage ${percent(c.cov)}`],
   ] : []
   const counts = items.filter(([, n]) => n > 0).map(([id, , text]) => ({ id, text, bright: now - (c!.changed[id] ?? 0) < BRIGHT_MS }))
@@ -2350,19 +1512,10 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
  *  faster than one by one), and any key in a prompt with words in it. */
 const typesAnyway = (e: KeyEdit) => !e.key || !!e.key.ctrl || !!e.key.meta || e.text !== ''
 
-/** A key that types: the edit as Claude Code made it, with the squeeze chips' colors on a stretch being typed (the
- *  key that begins one carries them, as its work starts the stretch after the answer). */
-async function keyTyped($: Engine, e: Any, next: (e: Any) => Promise<Any>, begun?: unknown[]): Promise<Any> {
+/** A key that types: the edit as Claude Code made it. */
+async function keyTyped($: Engine, e: Any, next: (e: Any) => Promise<Any>): Promise<Any> {
   const out = await next(e)
-  if (detailIsOpen()) { detailTyped($, e, out); return out }
-  if (begun?.length) return { ...out, decorations: [...(out.decorations ?? []), ...begun] }
-  try {
-    const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-    const dec = await sqAfterEdit($, pick?.verb === 's' ? pick.row : null, out.text, theme)
-    if (dec) return { ...out, decorations: [...(out.decorations ?? []), ...dec] }
-  } catch {
-    // the edit lands whatever the chips make of it
-  }
+  if (detailIsOpen()) detailTyped($, e, out)
   return out
 }
 
@@ -2380,8 +1533,13 @@ async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<
   const t = await k.turn
   const inTime = !next.signal.aborted
   keyAnswered(shellKey, k, t, inTime)
+  // a key thimble took is a line in the session's events, with what had the keys: what people use, for measuring
+  if (t.box && inTime && e.key?.key && !e.key.ctrl && !e.key.meta) {
+    const key = String(e.key.key)
+    $.clock.after(0, () => { void (async () => { const stack = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]; await recordEvent($, { kind: 'key', key, on: detailIsOpen() ? 'detail' : stack.at(-1) ?? 'rest' }) })().catch(() => undefined) })
+  }
   if (t.box || !inTime) return t.box ?? { text: e.text, cursor: e.cursor }
-  return keyTyped($, e, next, t.decorations)
+  return keyTyped($, e, next)
 }
 
 /** What a key pressed in the prompt comes to (keys.ts): decided from reads alone, its work run after the answer. `at`:
@@ -2395,8 +1553,6 @@ async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
     return { box: null, work: async () => {
       await d?.work?.()
       keyOpened = null
-      // typing while a replay runs: the whole graph at once (the program's any-key), and the key types
-      if (key && !key.ctrl && !key.meta && (await $.state.get(CLAIMPANE)).value && (await paneState($, 'claims')).replay) await paneFire($, 'claims', {}, { type: 'key', key: key.key })
     } }
   }
   if (d) return d
@@ -2404,7 +1560,7 @@ async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
   const since = keyDecided
   keyDecided = now
   const t = await emptyPromptKey($, key.key, e, at)
-  // a key the thimble line named a moment ago is the line's, even when what it named has gone meanwhile: it does
+  // a key the bar named a moment ago is the line's, even when what it named has gone meanwhile: it does
   // nothing then, and never lands in the prompt
   if (!t.box && barNamed(key.key, now, since)) return { box: { text: e.text, cursor: e.cursor }, work: () => { keyOpened = null; cardKeyed = null } }
   // a key from the empty prompt ends what the key before it began (a word after v, or after a card's key)
@@ -2434,36 +1590,14 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   if (keyed && now - keyed.at < 700 && /^\p{L}$/u.test(k)) {
     return { box: { text: `${keyed.key}${e.inputText}`, cursor: keyed.key.length + e.inputText.length }, work: () => writeCardState($, keyed.ref.root, keyed.ref.id, { state: keyed.undo?.state ?? {}, region: keyed.undo?.region ?? null }, 'terminal') }
   }
-  // the Claims pane open: the keys a focused pane does not take come through here (its own are the arrow keys, ↵ and
-  // esc) and go to its program (r replays, any key stops a replay); c (the verb key, below) closes the pane
-  if ((await $.state.get(CLAIMPANE)).value) {
-    const was = opened
-    opened = null
-    const replaying = !!(await paneState($, 'claims')).replay
-    // a letter typed straight after r: the r was the start of a word (a question about the claim the ring is on)
-    if (replaying && was?.key === 'r' && now - was.at < 700 && /^\S$/.test(k)) {
-      return { box: { text: `r${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => paneFire($, 'claims', {}, { type: 'key', key: k }) }
-    }
-    // the tray opened over the pane takes its own keys first (r its rows, not the replay)
-    const trayFirst = !!tray && k.length === 1 && (await paneTakes($, 'tray', {}, keyEvent(k)))
-    if (k !== 'c' && !trayFirst && (await paneTakes($, 'claims', {}, { type: 'key', key: k }))) {
-      return { box: consume, work: async () => {
-        await paneFire($, 'claims', {}, { type: 'key', key: k })
-        if (k === 'r' && !replaying) keyOpened = { key: 'r', at: now }
-      } }
-    }
+  // a letter typed straight after v, while v waits to ask: v began a word, so it comes back and asks nothing
+  if (pendingV && opened && opened.key === 'v' && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
+    return { box: { text: `v${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingV) { pendingV.cancelled = true; pendingV = null } } }
   }
-  // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-9 chip, + a
-  // stretch, 0 original, s done); the + of a stretch, which asks for the prompt, types into it
-  if (pick && pick.verb === 's' && !tray) {
-    const d = await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k })
-    if (d) {
-      const types = k === '+' && ((d.effects || []) as { do?: string }[]).some(x => x.do === 'input')
-      return { box: types ? null : consume, ...(types ? { decorations: stretchMarks(`${e.text}${e.inputText}`, theme) } : {}), work: async () => {
-        typedKey = k
-        try { await paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k }) } finally { typedKey = null }
-      } }
-    }
+  // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-3 chip,
+  // 0 original, s done)
+  if (pick && pick.verb === 's' && !tray && (await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k }))) {
+    return { box: consume, work: () => paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k }).then(() => undefined) }
   }
   // the tray open: its program's keys (panes/tray.js: 1 ask, r and c a section of the card, 2–9 open a citation in it,
   // 0 back, ] [ step); any other letter types the question for the mark's thread
@@ -2511,7 +1645,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   }
   if (k === ']' || k === '[') return { box: consume, work: async () => { await setPick($, null); await stepMark($, k === ']' ? 1 : -1) } }
   // { and } at rest: the answer before or after the one the keys act on (a letter typed at once after it: a word)
-  if ((k === '{' || k === '}') && !pick && !(await $.state.get(CLAIMPANE)).value && (await keyRows($)).length > 1) {
+  if ((k === '{' || k === '}') && !pick && (await keyRows($)).length > 1) {
     const was = (await $.state.get(SELROW)).value as string | null | undefined
     return { box: consume, work: () => stepAnswer($, k === '{' ? -1 : 1), word: () => $.state.set(SELROW, was ?? null) }
   }
@@ -2523,27 +1657,17 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   }
   // s with replies piled up (the bar says `s catch up on N replies`): the catch-up, its chips open; a letter typed at once
   // after it makes s the start of a word, and the catch-up is undone
-  if (k === 's' && !pick && !(await $.state.get(SELROW)).value && !(await $.state.get(CLAIMPANE)).value && (await pileUp($))) {
+  if (k === 's' && !pick && !(await $.state.get(SELROW)).value && (await pileUp($))) {
     let made: string | null = null
     const undo = async () => { keyOpened = null; if (made) await dismissNow($, made, true) }
     return { box: consume, work: async () => { made = await catchUpNow($); keyOpened = { key: k, at: now, undo } }, word: undo }
   }
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
-  if (k.length === 1 && (await rowVerbs($)).some(v => v.key === k)) {
+  if (k.length === 1 && ROW_KEYS.some(v => v.key === k)) {
     const row = await actingRow($)
     // a letter typed at once after it (before its answer came) makes it the start of a word: its line closes again
-    const word = k === 'c' ? {} : { word: async () => { keyOpened = null; await setPick($, null) } }
+    const word = { word: async () => { keyOpened = null; if (pendingV) { pendingV.cancelled = true; pendingV = null }; await setPick($, null) } }
     if (row) return { box: consume, work: async () => { await pressRowVerb($, row, k); keyOpened = { key: k, at: now } }, ...word }
-  }
-  // o: this session in the browser, at the message the keys act on (browser mode only; `o browser` on the verb row)
-  if (k === 'o' && browserFlag && !(pick && opened && now - opened.at < 700)) {
-    return { box: consume, work: async () => {
-      if (pick) await setPick($, null)
-      const row = await actingRow($)
-      // from the Claims pane: the graph in the browser, on the claim the ring is on here
-      const claims = (await $.state.get(CLAIMPANE)).value ? { view: 'claims', claim: String((await paneState($, 'claims')).hover || '') || null } : {}
-      $.clock.after(0, () => { void openBrowser($, { row, ...claims }).then(said => $.ui.toast(said)) })
-    } }
   }
   if (pick && k.length === 1) {
     // typed straight after the verb key: the letter was the start of a word, and the line closes (a catch-up s began is
@@ -2556,8 +1680,9 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
 
 // ------------------------------------------------------------------------------------------------ drawing
 
-/** The one quiet row under an object while a verb runs on it (`map…`); nothing at rest. Its keys (`1 open detail`)
- *  are in the hint line under the prompt, and the card the keys act on shows it by its frame. */
+/** The one quiet row under a label's card while the model reads its records (`label… 120 of 412 records`); nothing at
+ *  rest. Its keys (`1 open detail`) are in the hint line under the prompt, and the card the keys act on shows it by
+ *  its frame. */
 function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
 }
@@ -2667,7 +1792,7 @@ async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unkno
   if (!o) return
   const kept = await readCardState($, ref.root, ref.id)
   const region = typeof event.region === 'string' ? event.region : kept?.region ?? null
-  const got = await cardEvent($, o, { ...ref, region, ex: 0, all: false, state: kept?.state || {} } as Sel, { ...event, ...(region && !event.region ? { region } : {}) }, { w: inlineCols, h: 24, browser: browserFlag }, 'inline')
+  const got = await cardEvent($, o, { ...ref, region, ex: 0, all: false, state: kept?.state || {} } as Sel, { ...event, ...(region && !event.region ? { region } : {}) }, { w: inlineCols, h: 24 }, 'inline')
   if (!got || got.drawing?.error) {
     $.ui.toast(`× ${o.title || ref.id} could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return
@@ -2743,15 +1868,6 @@ function drawnNote(p: Prepared, ref: ObjRef): string {
   return lines.join('\n')
 }
 
-/** The words a /verb run leaves in the transcript and for Claude. */
-function ranText(r: Ran): string {
-  if (r.error) return `${r.verb}: ${r.error}`
-  const lines = [r.text || `${r.verb} ran${r.on ? ' on ' + r.on : ''}.`]
-  if (r.saved) lines.push(`It shows ${refText(r.saved)}.`)
-  if (r.ask) lines.push('It asked Claude to do the rest.')
-  return lines.join('\n')
-}
-
 /** "<id>[@v] [region]" → the object and region, the id matched as the kernel does (with or without its number). */
 async function parseTarget($: Engine, words: string[]): Promise<{ ref: ObjRef | null; region: string | null; problem?: string }> {
   const [first, region] = words
@@ -2759,10 +1875,10 @@ async function parseTarget($: Engine, words: string[]): Promise<{ ref: ObjRef | 
   const last = (await $.state.get(LAST)).value
   if (!first) {
     const ref = sel && !sel.cite ? sel : last
-    return ref ? { ref: { id: ref.id, v: ref.v, root: ref.root }, region: sel && ref === sel ? sel.region : null } : { ref: null, region: null, problem: 'no object yet' }
+    return ref ? { ref: { id: ref.id, v: ref.v, root: ref.root }, region: sel && ref === sel ? sel.region : null } : { ref: null, region: null, problem: 'no card yet' }
   }
   const m = /^([^@\s]+)(?:@(\d+))?$/.exec(first)
-  if (!m || !m[1] || !ID.test(m[1])) return { ref: null, region: null, problem: `"${first}" is not an object id` }
+  if (!m || !m[1] || !ID.test(m[1])) return { ref: null, region: null, problem: `"${first}" is not a card's id` }
   const here = await rootHere($)
   const hints = [...new Set([sel?.root, last?.root, here].filter(Boolean))] as string[]
   let id: string = m[1]
@@ -2775,21 +1891,8 @@ async function parseTarget($: Engine, words: string[]): Promise<{ ref: ObjRef | 
       if (hit) { id = hit.name.replace(/\.json$/, ''); root = r; break }
     }
   }
-  if (!root) return { ref: null, region: null, problem: `no object ${first} here` }
+  if (!root) return { ref: null, region: null, problem: `no card ${first} here` }
   return { ref: await withVersion($, { id, v: m[2] ? Number(m[2]) : null, root }), region: region && REGION.test(region) ? region : null }
-}
-
-/** /verb's words after the verb: an object and a region when they name one, and the rest as the verb's own words
- *  (`/verb squeeze fuller` moves the open squeeze). */
-async function verbTarget($: Engine, rest: string[]): Promise<{ ref: ObjRef | null; region: string | null; args: string; problem?: string }> {
-  const t = await parseTarget($, rest.slice(0, 1))
-  if (rest.length && t.ref) {
-    const p = await prepared($, t.ref, 96)
-    const region = rest[1] && p.drawing && regionMeta(p.drawing, rest[1]) ? rest[1] : null
-    return { ref: t.ref, region, args: rest.slice(region ? 2 : 1).join(' ') }
-  }
-  const here = await parseTarget($, [])
-  return { ref: here.ref, region: here.region, args: rest.join(' '), problem: here.problem }
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
@@ -2803,14 +1906,12 @@ export async function paneWhere($: Engine): Promise<{ root: string | null; sessi
   return { root: await rootHere($), session: await sessionKey($) }
 }
 
-/** One store a pane reads: `claims`, `index` (the session's rows in order), `record` (record:<row>) and the rest. */
+/** One store a pane reads: `index` (the session's rows in order), `record` (record:<row>) and the rest. */
 export async function paneStore($: Engine, kind: string, arg: string): Promise<unknown> {
   switch (kind) {
-    // the claims, with the turns the observer reads again now (the pane says so)
-    case 'claims': return { ...(await claimsStore($)), reading: ((await $.state.get(REREAD)).value ?? []) as number[] }
     case 'index': return (await msgFilesNow($)).index.map(x => ({ row: String(x.row), kind: x.kind }))
     case 'record': return arg ? await recordNow($, arg) : null
-    // the squeeze's own state of a message (a stretch being typed, a call running, a failure): the terminal's alone
+    // the squeeze's own state of a message (a call running, a failure): the terminal's alone
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': return arg ? cardStore($, arg) : null
@@ -2854,24 +1955,12 @@ export async function paneWant($: Engine, _name: string, _args: Record<string, u
   return { error: 'the terminal cannot read that' }
 }
 
-/** The key the chips' program is answering now, set while it runs: an input it asks for with the key's own letter
- *  (the + of a stretch) leaves the key in the prompt (null here then). */
-let typedKey: string | null = null
-/** What the last stretch made says, for the prompt's drop line. */
-let stretchSaid: string | null = null
-
-/** What the squeeze chips' program asks for: a rewrite at levels, the original, a stretch, the prompt for a stretch's
- *  ends, a line said, or closing the chips. */
+/** What the squeeze chips' program asks for: a rewrite at levels, the original, a line said, or closing the chips. */
 async function chipsAction($: Engine, row: string, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
   if (!row || !(await recordNow($, row))) return '× That message is not in this session, so the chips cannot change it. Press s under a message here.'
   if (name === 'squeeze') {
     if (a.reset === true) { void sqSetLevels($, row, {}); return }
-    if (typeof a.stretch === 'string') {
-      const r = await sqAddStretch($, row, a.stretch)
-      stretchSaid = r.said ?? null
-      return r.problem ? `× ${r.problem}` : undefined
-    }
     if (a.at && typeof a.at === 'object') {
       const at: Record<string, number> = {}
       for (const [k, v] of Object.entries(a.at as Record<string, unknown>)) if (Number.isInteger(v)) at[k] = v as number
@@ -2880,20 +1969,11 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
     }
     return '× The chips asked for a squeeze with no levels.'
   }
-  if (name === 'input') {
-    await sqStartStretch($, row)
-    // pressed as the + key, the + is typed into the prompt by the key itself; pressed with the pointer, it is put there
-    if (typedKey === '+') typedKey = null
-    else await $.prompt.fill({ text: '+', mode: 'replace' })
-    return
-  }
   if (name === 'close') {
-    await sqStopStretch($, row)
     await setPick($, null)
     return
   }
   if (name === 'dismiss') {
-    await sqStopStretch($, row)
     await dismissNow($, row)
     return
   }
@@ -2904,17 +1984,9 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
 /** An action a pane's program asked for (k.do). False: the terminal has none by that name. */
 export async function paneAction($: Engine, pane: string, _args: Record<string, unknown>, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
-  if (pane === 'claims' && name === 'close') { await closeClaims($); return }
   if (pane === 'tray') {
     if (name === 'close') { await setTray($, null); return }
     if (name === 'step') { await stepMark($, Number(a.dir) < 0 ? -1 : 1); return }
-    if (name === 'ask' && typeof a.text === 'string') {
-      // a question typed in the browser's tray: the mark's side thread, as one typed here would be
-      const t = await trayScope($)
-      if (!t) return '× The tray has no mark open to ask about.'
-      const r = await askThread($, { text: a.text, root: (await rootHere($)) || String(await $.session.cwd()), scope: t.scope as ThreadScope, refs: t.refs, card: null })
-      return r.problem ? `× ${r.problem}` : undefined
-    }
     if (name === 'input') return
   }
   if (pane === 'proposals') {
@@ -2945,31 +2017,17 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
 
 export const registerShell: Register = (on, options) => {
   setTheme(() => theme)
-  browserFlag = (options as Any)?.browser === true
 
   // the side threads and the card detail first: their hooks sit outside the shell's, so a question for a thread and a
   // thread's report never reach the shell's prompt hooks (or main)
   registerThreads(on, options)
   registerDetail(on)
 
-  // /config turns browser mode on or off: on, /browser is there and `o` shows; off, the server ends
-  on('config.set', { key: /^thimble(@[\w.-]+)?\.browser$/ }, async ($, e, next) => {
-    const r = await next(e)
-    try {
-      if (!(r as Any)?.deny) await setBrowser($, (r as Any)?.value === true || ((r as Any)?.value === undefined && e.value === true))
-    } catch {
-      // the setting is stored whatever the shell makes of it
-    }
-    return r
-  })
-
   // (a matcher, as the kernel's module hooks session.start without one and the engine takes one bare hook per event)
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
     const r = await next(e)
     try {
-      await $.command.register({ name: 'obj', description: browserFlag ? 'Open an object in the detail view: /obj [object] [region] · /obj browser opens it in the browser' : 'Open an object in the detail view: /obj [object] [region]', argumentHint: '[object] [region]', immediate: true })
-      await $.command.register({ name: 'verb', description: 'Run a verb on an object: /verb <verb> [object] [region] [words] · /verb ? lists the verbs', argumentHint: '<verb> [object] [region] [words]' })
-      if (browserFlag) await registerBrowserCommand($)
+      await $.command.register({ name: 'card', description: "Open a card's detail: /card [card] [part] (no card: the newest)", argumentHint: '[card] [part]', immediate: true })
       const row = (await $.config.list()).find(x => x.key === 'theme')
       theme = String(row?.value ?? 'dark').startsWith('light') ? 'light' : 'dark'
     } catch {
@@ -2996,7 +2054,7 @@ export const registerShell: Register = (on, options) => {
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [], rows: [], oriented: 0, leaned: false, saved: 0, at: placeNext, saves: [] }
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext, saves: [] }
       placeNext = null
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
@@ -3013,29 +2071,22 @@ export const registerShell: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    // a verb the kernel asks for while the command still runs (`thimble label … --prompt … && thimble label … --wait`
-    // waits on it): the feed is looked at each second until the command ends
+    // a label the kernel asks the model to read while the command still runs (`thimble label … --prompt … && thimble
+    // label … --wait` waits on it): the feed is looked at each second until the command ends
     let watch: { cancel?: () => void } | null = null
-    try { watch = $.clock.every(1000, () => { void verbsInFeed($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { watch = null }
+    try { watch = $.clock.every(1000, () => { void labelsInFeed($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { watch = null }
     let r: Awaited<ReturnType<typeof next>>
     try { r = await next(e) } finally { watch?.cancel?.() }
     let notes: string[] = []
     try {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
       const text = typeof r.text === 'string' ? r.text : typeof r.result === 'string' ? r.result : ''
-      // the corpus orientation's claims went into the store: the list reads it again, and c lights under the answer
-      if (r.deny === undefined && !r.isError && !input.agentId && /\bthimble\s+verb\s+claims\s+save\b/.test(String(input.command))) {
-        const m = /(\d+) new claims? from the corpus/.exec(text)
-        if (m && turn) turn.oriented += Number(m[1])
-        await reloadClaims($)
-      }
       if (r.deny !== undefined) return r
-      if (turn && !input.agentId && LEAN_WORK.test(String(input.command))) turn.leaned = true
       // the saves this call made, from the kernel's change feed (never from what the call printed, which a pipe cuts);
       // a subagent's saves (a side thread's) are read and left where its card is
       const saves = await newSaves($)
       if (input.agentId || !saves.length) return r
-      if (turn) { turn.saved += saves.length; turn.saves = [...(turn.saves ?? []), ...saves] }
+      if (turn) turn.saves = [...(turn.saves ?? []), ...saves]
       notes = []
       for (const ref of saves) {
         const id = ref.id
@@ -3106,8 +2157,6 @@ export const registerShell: Register = (on, options) => {
           await indexRow($, { row, kind: 'assistant', at })
           await saveRecord($, rec)
           $.clock.after(0, () => { void recount($) })
-          // the turn's messages, where its claims are found
-          if (turn && !turn.rows.includes(row)) turn.rows.push(row)
         }
       }
     } catch {
@@ -3150,26 +2199,11 @@ export const registerShell: Register = (on, options) => {
         await $.state.set(ANSWER, row)
         const answers = await answerRows($)
         if (!answers.includes(row)) await $.state.set(ANSWERS, [...answers, row])
-        // the thimble line: what this turn read, saved and cited
+        // the bar: what this turn read, saved and cited
         $.clock.after(0, () => { void recount($, { coverage: true }) })
-        // claims the corpus orientation saved in this turn light c under its answer
-        if (turn.oriented) await setVerb($, row, 'c', { lit: true, note: `${turn.oriented} claims from the corpus` })
-        // the card after the answer: a turn of the person's that ran thimble and saved nothing (a verb's turn draws its own)
-        const card = person === 'now' && turn.leaned && !turn.saved && !turn.unplaced.length && !turn.placed.length && turnFeature() === 'main' ? await cardVersion($) : null
-        if (card) {
-          const q = question
-          const work: Promise<void> = new Promise<void>(done => { $.clock.after(0, () => { void cardAfterTurn($, { row, question: q, version: card }).finally(() => { if (cardWork === work) cardWork = null; done() }) }) })
-          cardWork = work
-        }
       }
     } catch {
       // a turn with no verb row is better than one that does not end
-    }
-    try {
-      // the turn's prompt and messages, for the observer's claims
-      if (e.agentId === undefined && turn) await $.state.set({ ...TURNS, id: e.turnId }, await turnOf($, turn.rows))
-    } catch {
-      // the claims of this turn are then read from its answer alone
     }
     if (e.agentId === undefined) turn = null
     return done
@@ -3178,7 +2212,7 @@ export const registerShell: Register = (on, options) => {
   // one of Claude's messages drawn from its record: its marks inline (a citation underlined, a gloss on a teal fill, a
   // sparkline in place, each a press that opens the tray), while a squeeze rewrites it its new text writing in from the
   // top, the line a verb opened under it (squeeze's chips, v's proposals), then the objects its turn saved. Its verbs
-  // and keys are in the thimble line above the prompt. A message with none of these is Claude Code's own drawing.
+  // and keys are in the bar above the prompt. A message with none of these is Claude Code's own drawing.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     try {
       const at = rowKey(e.requestId)
@@ -3191,7 +2225,6 @@ export const registerShell: Register = (on, options) => {
         const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))
         return Box({ flexDirection: 'column', children: [own, ...drawn] })
       }
-      await $.state.get(WEB)
       const drawnRec = await drawnRecord($, at, e.props.text)
       const rec: MsgRecord = drawnRec.uuid ? drawnRec : { ...drawnRec, uuid: e.requestId }
       // the screen a long message is measured against (Squeeze), a rewrite of this message running, and its new text
@@ -3221,10 +2254,10 @@ export const registerShell: Register = (on, options) => {
         : await next(e))
       if (open === 's') {
         // the chips under the message (panes/chips.js, the browser draws the same program); their keys are in the
-        // thimble line
+        // bar
         parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row: at }, { w: Math.max(30, cols - 2), h: 3 })] }))
       } else if (open) {
-        // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the thimble line
+        // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar
         parts.push(Box({ key: `vl-${at}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row: at, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
       }
       if (list.length) {
@@ -3243,16 +2276,15 @@ export const registerShell: Register = (on, options) => {
   })
 
   // the band above the prompt: the tray when it is open (one small panel, a fixed number of rows, so the transcript
-  // scrolls above it; it shows the card on top of its stack: a citation's source card or a gloss's explainer card),
-  // else the observer's line when one is open; then the thimble line, the one bar: what the keys do now at its left,
-  // the session's counts at its right. A blank row stands between the bar and what is above it, at rest as while
+  // scrolls above it; it shows the card on top of its stack: a citation's source card or a gloss's explainer card);
+  // then the bar: what the keys do now at its left, the session's counts at its right. A blank row stands between the bar and what is above it, at rest as while
   // Claude works.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     try {
       if (e.props.hasSurvey) return next(e)
       const els = $.ui.resolve(e) as Any
       const { Box, Text } = els
-      if (!(await $.state.get(CLAIMPANE)).value) noteViewport(e.viewport)
+      noteViewport(e.viewport)
       // the conversation's width now, which a long message is measured against (Squeeze's `6 of 24 lines`): the band
       // draws first when a docked pane closes, so the verb row never counts at the width the pane left
       if (e.viewport?.columns) seeView(e.viewport.columns, e.viewport.rows ?? 48)
@@ -3260,13 +2292,10 @@ export const registerShell: Register = (on, options) => {
       const line = await barEl($, els, bw, !!e.props.isWorking)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       const above = trayTop(tray) ? await trayBand($, e, tray!) : null
-      // the observer's line (observer.ts, inside this hook): drawn by its own hook when it has one open
-      const own = above ?? ((await $.state.get(LINE)).value ? await next(e) : null)
-      if (!line) return own ?? next(e)
-      // one blank row between what stands above (Claude Code's spinner or its last status row, the tray, the
-      // observer's line) and the bar
+      if (!line) return above ?? next(e)
+      // one blank row between what stands above (Claude Code's spinner or its last status row, the tray) and the bar
       const rows: Any[] = []
-      if (own) rows.push(own)
+      if (above) rows.push(above)
       rows.push(Text({ key: 'bar-gap', children: ' ' }), line)
       return Box({ flexDirection: 'column', children: rows })
     } catch {
@@ -3275,11 +2304,9 @@ export const registerShell: Register = (on, options) => {
     }
   })
 
-  // keys while the prompt is empty: v and s open their line under the message the keys act on, and c the claims list;
-  // { and } pick the answer the keys act on; ] and [ move through the marks, opening the tray (through the claims while
-  // the list or a claim is open); a digit
-  // picks in the open line, opens a cluster of the list, or opens a mark or a source inside the card; 0 closes the
-  // card, then the line or list. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
+  // keys while the prompt is empty: v and s open their line under the message the keys act on; { and } pick the answer
+  // the keys act on; ] and [ move through the marks, opening the tray; a digit picks in the open line, or opens a mark
+  // or a source inside the card; 0 closes the card, then the line. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
   // to delete stay its own), so these are the keys. A verb key that began a word being typed (`visualize …`, `so …`)
   // gives its letter back to the prompt. While the detail is open its keys come first (detail.tsx detailKey). Keys are
   // read one at a time, in the order pressed. Each is answered from reads alone and its work runs after the answer
@@ -3323,17 +2350,7 @@ export const registerShell: Register = (on, options) => {
     // the person's first prompt in a session whose start found no person (a pre-warmed spare, a background job)
     if (person === 'later' && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) await startForPerson($)
     if (e.command) return next(e)
-    if (!e.isMeta && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) question = String(e.text || '')
     try {
-      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-      if (pick?.verb === 's' && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin' && /^\s*\+/.test(String(e.text || ''))) {
-        // the two ends of a stretch, typed after the chips' +: the chips' program makes it (no prompt for Claude)
-        await paneFire($, 'chips', { row: pick.row }, { type: 'stretch', text: String(e.text) })
-        const said = stretchSaid
-        stretchSaid = null
-        $.clock.after(50, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-        return { drop: said || 'stretch' }
-      }
       // a question typed with the tray open asks the mark's side thread; it never reaches main
       const tray = (await $.state.get(TRAY)).value as Tray | null
       if (tray && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind === 'composer' && String(e.text || '').trim() && !detailIsOpen()) {
@@ -3355,9 +2372,8 @@ export const registerShell: Register = (on, options) => {
       }
       const sel = (await $.state.get(SEL)).value
       // a question asked with the tray open is about its card's mark (CONTRACT 6: a prompt to main carrying the scope)
-      // a source card in the tray first, then the claim the Claims pane has the ring on
       const mine = !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin'
-      const scoped = mine ? (await trayScope($)) ?? (await claimScope($)) : null
+      const scoped = mine ? await trayScope($) : null
       await setPick($, null)
       const open = !scoped && !e.isMeta && (await $.ui.panes()).some(x => x.id === PANE && x.isPlaced)
       if (scoped) {
@@ -3366,7 +2382,7 @@ export const registerShell: Register = (on, options) => {
         await closeTray($)
       } else if (sel && open && sel.cite) {
         pendingAsk = { text: e.text, about: { id: sel.cite, v: null, region: null, label: citeLabels.get(sel.cite) || sel.cite } }
-        context.push(`The analyst asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`thimble resolve ${sel.cite}\` shows its rows.`)
+        context.push(`The analyst asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`thimble rows ${sel.cite}\` shows its rows.`)
       } else if (sel && open && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {
         const p = await prepared($, sel, 96, sel.state)
         const meta = sel.region ? regionMeta(p.drawing, sel.region) : null
@@ -3376,7 +2392,7 @@ export const registerShell: Register = (on, options) => {
         context.push([
           `The analyst asked this with a card open in the detail view: ${p.object?.id}@${p.object?.version} "${p.object?.title || ''}" (${sel.root}/thimble/objects/${sel.id}.json).${knobs}`,
           sel.region ? `They had selected its part ${sel.region} ("${label}"). "This", "here" or "it" may mean that part.` : 'No part of it was selected.',
-          refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${sel.id}\` the object's lineage.` : `\`thimble list ${sel.id}\` shows the object's lineage.`,
+          refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`thimble rows <ref>\` opens the rows, \`thimble rows card:${sel.id}\` the card's lineage.` : `\`thimble rows card:${sel.id}\` shows the card's lineage.`,
         ].join('\n'))
         pendingAsk = { text: e.text, about: { id: sel.id, v: p.object?.version ?? sel.v, region: sel.region, label } }
       }
@@ -3386,71 +2402,13 @@ export const registerShell: Register = (on, options) => {
     return context.length ? next({ ...e, context: [...(e.context ?? []), ...context] }) : next(e)
   }).catch(($, e, next) => next(e))
 
-  // /obj [object] [region] · /obj browser [object] [region]
-  on('command.run', { command: 'obj' }, async ($, e) => {
+  // /card [card] [part]: a card's detail (no card: the one selected, else the newest)
+  on('command.run', { command: 'card' }, async ($, e) => {
     const words = e.args.trim().split(/\s+/).filter(Boolean)
-    const toWeb = words[0] === 'browser'
-    const t = await parseTarget($, toWeb ? words.slice(1) : words)
-    if (!t.ref) return { text: `Nothing to open: ${t.problem}. An object Claude saves with \`thimble save\` shows under its reply.` }
-    if (toWeb) {
-      const cur = (await $.state.get(SEL)).value
-      const sel: Sel = cur && cur.id === t.ref.id && !words[2] ? cur : { ...t.ref, region: t.region, ex: 0, all: false }
-      return { text: await openBrowser($, { id: sel.id, v: sel.v, region: sel.region, root: sel.root }) }
-    }
+    const t = await parseTarget($, words)
+    if (!t.ref) return { text: `Nothing to open: ${t.problem}. A card Claude saves with \`thimble save\` shows under its reply.` }
     await openDetail($, t.ref, t.region)
     return {}
-  })
-
-  // /browser: this session's mirror page · /browser <object> [region]: a card's detail page (browser mode only)
-  on('command.run', { command: 'browser' }, async ($, e) => {
-    const words = e.args.trim().split(/\s+/).filter(Boolean)
-    if (!browserFlag) return { text: await openBrowser($) }
-    if (!words.length) return { text: await openBrowser($) }
-    const t = await parseTarget($, words)
-    if (!t.ref) return { text: `Nothing to open: ${t.problem}. /browser alone opens this session.` }
-    return { text: await openBrowser($, { id: t.ref.id, v: t.ref.v, region: t.region, root: t.ref.root }) }
-  })
-
-  // /verb <verb> [object] [region] [words] · /verb ? (or /verb alone) lists the verbs for the object
-  on('command.run', { command: 'verb' }, async ($, e) => {
-    const [word = '', ...rest] = e.args.trim().split(/\s+/).filter(Boolean)
-    if (!word || word === '?' || word === 'all') {
-      const t = await parseTarget($, rest)
-      if (!t.ref) return { text: 'No object yet: the verbs work on an object Claude saved.' }
-      const verbs = await rankedVerbs($, t.ref, await verbsOf($, t.ref))
-      const lines = verbs.map(v => `${v.picked ? '●' : ' '} ${v.key || ' '}  ${v.name.padEnd(10)} ${v.phrase || v.line}`)
-      return { text: verbs.length ? `The verbs for ${refText(t.ref)} (● picked for it):\n${lines.join('\n')}` : 'No verbs yet: a verb is a folder in lean/verbs/.' }
-    }
-    const t = await verbTarget($, rest)
-    if (!t.ref) return { text: `No object to run ${word} on: ${t.problem}.` }
-    const sel = (await $.state.get(SEL)).value
-    const ran = await execVerb($, word, t.ref, t.region, (e.presentation?.columns ?? 100) - 4, { args: t.args, state: sel && sel.id === t.ref.id ? sel.state : null })
-    const at = `cmd|${e.args.trim().slice(0, 300)}`
-    if (ran.saved) await setUnder($, at, [ran.saved])
-    if (ran.ask) {
-      const request = ran.ask
-      const what = ran.on || refText(t.ref)
-      // the request is a turn of its own, which can start only once this command is done
-      $.clock.after(50, () => { void ask($, request, ran.verb, what) })
-    }
-    return { text: ranText(ran), context: [ranNote(ran)] }
-  })
-
-  // a verb's row: its words, then the object it made, drawn with its own hint row
-  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
-    try {
-      if (e.props.command !== 'verb' || e.props.isErrored) return next(e)
-      const at = `cmd|${e.props.args.trim().slice(0, 300)}`
-      const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
-      if (!list.length) return next(e)
-      const { Box } = $.ui.resolve(e) as Any
-      const own = await next(e)
-      const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `verb-${e.requestId.slice(-10)}-${i}`, at)))
-      return Box({ flexDirection: 'column', children: [own, ...drawn] })
-    } catch (err) {
-      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
-      return next(e)
-    }
   })
 
   // the detail view (detail.tsx)
@@ -3463,45 +2421,6 @@ export const registerShell: Register = (on, options) => {
       return paneProblem($, e, 'The card', err)
     }
   })
-
-  // the Claims pane (c), and its close by the person (esc, the close mark)
-  on('ui.render', { component: 'Pane', requestId: CPANE }, async ($, e) => {
-    try {
-      await $.state.get(CLAIMS)
-      await $.state.get(CLAIMPANE)
-      return await claimsPaneNow($, e)
-    } catch (err) {
-      // a graph that cannot draw says so in one plain line
-      return paneProblem($, e, 'The claims', err)
-    }
-  })
-  on('ui.close', { id: CPANE }, async ($, e, next) => {
-    try {
-      if ((e.origin as { kind?: string }).kind === 'person') keysMoved(await $.clock.now())
-      await $.state.set(CLAIMPANE, null)
-      await popFocus($, 'claims')
-      paneClosed('claims')
-    } catch {
-      // the pane closes whatever the shell makes of it
-    }
-    return next(e)
-  })
-
-
-  // the Claims pane: the ring on a claim shows its card and its links (the detail's own ring is detail.tsx's); an
-  // arrow key during a replay stops it, as any key does
-  on('ui.focus', async ($, e, next) => {
-    const r = await next(e)
-    try {
-      if (e.requestId === CPANE && !r.deny && typeof e.element === 'string' && (await $.state.get(CLAIMPANE)).value) {
-        // the ring on a claim is the program's focus event (its card shows); off the claims (the close mark), none
-        if (!(await paneFocus($, 'claims', {}, e.element)) && (await paneState($, 'claims')).hover) await paneFire($, 'claims', {}, { type: 'focus', region: null })
-      }
-    } catch {
-      // the ring moves whatever the shell makes of it
-    }
-    return r
-  }).catch(($, e, next) => next(e))
 }
 
 /** For tests: the module's memory, cleared. */
@@ -3512,13 +2431,11 @@ export function resetShell(): void {
   pending.clear()
   turn = null
   pendingAsk = null
-  server = null
-  serverStarting = null
-  serverStream = null
   shown = null
   msgFiles = null
   person = 'now'
   keyOpened = null
+  pendingV = null
   cardKeyed = null
   trayKeyed = null
   placeNext = null

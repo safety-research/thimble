@@ -1,5 +1,5 @@
 // Pages: a card whose knob turns pages (chapters of a guide) is read one page at a time or every page at once, its keys
-// are named by what they do, and its versions count only as the person saw them. node --test lean/draw/test
+// are named by what they do, and its versions count only as the person saw them. node --test draw/test
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -7,7 +7,6 @@ import '../kit.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf, turn } from '../handoff.js'
 import { runProgram } from '../sandbox-node.mjs'
 import { gridText, renderTerm } from '../term.js'
-import { renderSvg } from '../svg.js'
 import { barText, keysOf } from '../../panes/host.js'
 import PANES from '../../panes/index.js'
 import { shownVersions, stepVersion, versionsOf } from '../../shell/carddetail.js'
@@ -80,7 +79,6 @@ test('every page at once: each page under its heading, its parts and cites its o
   assert.equal(d.cites['pg1~~count'].text, '2 trees')
   assert.equal(d.cites['pg2~~count'].text, '3 trees')
   assert.ok(t.regions.some(r => r.id === 'pg2~~count' && r.link))
-  assert.deepEqual(renderSvg(d, { w: 60 }).regions.map(r => r.id), t.regions.map(r => r.id))
   // a page's part read back as the card's own: its id, the knob at its page; a heading is its page
   assert.deepEqual(pageOf('pg2~~tree-1'), { page: 2, id: 'tree-1' })
   assert.deepEqual(ownPart(d, 'pg3~~tree-0'), { region: 'tree-0', state: { chapter: 3 } })
