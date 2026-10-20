@@ -50,7 +50,7 @@ export const SWITCHES = [
     costs: 'No model call: thimble counts the files after each turn.',
   },
   {
-    key: 'squeezeCards', title: 'Squeeze changes cards', label: 'Squeeze changes cards (experimental)', group: 'Experimental', default: true, lenses: [], surfaces: ['terminal'],
+    key: 'squeezeCards', title: 'Squeeze changes cards', label: 'Squeeze changes cards (experimental)', default: true, lenses: [], surfaces: ['terminal'],
     does: 'When s makes an answer much shorter or longer, or writes it for another reader, it may edit, add or leave out a card with the text. 0 brings the cards back as they were.',
     costs: 'Each rewrite also reads the cards and the outputs they draw on.',
   },
