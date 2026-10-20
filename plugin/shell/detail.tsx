@@ -116,6 +116,9 @@ let ringY = -1
 let draft = ''
 let refocus = false
 let drawnSig = ''
+// the part a pane's last drawing selected: a drawing that selects another puts the ring on it again, even where the
+// ring was last put there, since a drawing that adds or drops presses can leave Claude Code's ring on the part it left
+let drawnPart: string | null = null
 // the presses drawn before the input bar's field, in order, as the last drawing had them (pressesBefore)
 let drawnAbove = ''
 let paneFocused = false
@@ -151,7 +154,8 @@ export function detailColumns(cols: number): number {
 }
 
 /** The columns a pane that wants the room asks for (its module's `wide`, such as the Claims graph): the terminal less a
- *  narrow strip of the chat, so the pane is nearly the whole terminal wide. */
+ *  narrow strip of the chat, so the pane is nearly the whole terminal wide. The strip is the least Claude Code leaves the
+ *  transcript beside a docked pane (24 columns): a wider ask is cut to it. */
 export function wideColumns(cols: number): number {
   return cols > 0 ? Math.max(detailColumns(cols), cols - WIDE_CHAT) : 96
 }
@@ -956,6 +960,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   // press drawn above it hands it to another element): the input bar asks for it again, and a part's ring goes back
   // on the selected part
   if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
+  if (region !== drawnPart) { drawnPart = region; if (!isAsk(ringAt)) ringAt = null }
   ringAbove($, kids)
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
   paneFocused = !!e.props.isFocused
@@ -1514,6 +1519,7 @@ export function resetDetail(): void {
   refocus = false
   paneFocused = false
   drawnSig = ''
+  drawnPart = null
   drawnAbove = ''
   win.follow = 'part'; win.bar = ''; win.region = null; win.by = 0
   viewCols = 0
