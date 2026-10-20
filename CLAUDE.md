@@ -18,3 +18,6 @@ https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
 
 The plugin is `plugin/`. [CONTRIBUTING.md](CONTRIBUTING.md) says how it is laid out and how to test it.
 `scripts/check.sh` runs every check CI runs.
+
+The repository is public. The pre-push hook stops a push whose commits hold private details (CONTRIBUTING.md, "Keep
+private details out of commits"). When it does, fix the commit as it says. Never push with `--no-verify`.

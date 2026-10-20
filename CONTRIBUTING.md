@@ -59,5 +59,36 @@ A change to a text the model reads goes in a new version of that prompt (`plugin
 
 A contribution is licensed under Apache-2.0, as section 5 of the LICENSE says.
 
-`git config core.hooksPath scripts/hooks` turns on a commit-msg hook that refuses a message linking a Claude Code
-session (`git commit --no-verify` skips it).
+`git config core.hooksPath scripts/hooks` turns on the repository's two hooks: the pre-push guard below, and a
+commit-msg hook that refuses a message linking a Claude Code session.
+
+## Keep private details out of commits
+
+The repository is public, and so is every commit in its history: a later commit that deletes a line does not take it
+out of the commit that added it. Never commit:
+
+- absolute paths from your machine, such as your home folder or paths under /mnt (tests use the made-up home
+  `/home/t/`);
+- the names, email addresses or host names of real people and machines, other than the author and owner in the plugin
+  manifests (tests use made-up names);
+- an organization's internal details: names of its teams, orgs, accounts or credential tiers, and how its machines or
+  credentials are set up;
+- keys, tokens, passwords, or any value from a private env file.
+
+The pre-push hook runs `scripts/scan.sh` on every commit a push sends, before anything leaves your machine. It reads
+the lines each commit adds, the names of the files it adds, and its message, and looks for:
+
+- absolute home and mount paths, private key headers, and the shapes of common tokens;
+- what gitleaks finds, if you have it installed;
+- the patterns in your own deny-list, `~/.config/thimble/deny-patterns` (one Python regular expression per line), and
+  the values in the env files that `~/.config/thimble/deny-env-files` lists (one path or glob per line). Both files
+  are optional and stay outside the repository; the top of `scripts/scan.sh` describes their format.
+
+When it finds something, it stops the push and names the commit, the file and line, and the pattern, never the text
+that matched. Take the text out of the commit that holds it (`git commit --amend` for the last commit, `git rebase -i`
+for an older one) and push again. If a finding is wrong, change the line so it no longer matches, or add an
+allow-pattern, a line that starts with `!`, to your deny-list. Never push with `--no-verify`, which skips the check;
+an agent never uses it. CI runs the same scan with the generic patterns only.
+
+To scan by hand, `scripts/scan.sh origin/main..HEAD` scans a range of commits, `scripts/scan.sh --all` every commit of
+the remote branches and tags, and `scripts/scan.sh --tree HEAD` every file at a commit.
