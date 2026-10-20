@@ -35,14 +35,22 @@ From another machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:842
 - Generative views: ask for a view in the chat, and a builder writes one (a reader and a page on thimble's view kit) that
   appears in the Files tab when it passes its checks. Its reader runs in the sandbox, its page in a frame with no network.
 
-Not yet: labels, the orientation, checks, settings, and card code on macOS.
+- The orientation: ask for one in the chat, and an agent explores the folder and leaves a deck of cards in the group
+  Orientation. Before it finishes, a critic reviews its work for files it never opened, rival accounts and claims no
+  call supports, and it revises. A message in its thread continues it.
+- The card check: once an agent's card has its takeaway, one model reading checks it against five criteria and can
+  replace it in place, with Undo in the card's details.
+- Report checks: each check (Important details, Judgment calls, Unverifiable, or your own) runs as an agent over the
+  report and leaves comments beside the passages it applies to. Checks that are on run again after the writer saves.
+
+Not yet: labels, settings, and card code on macOS.
 
 ## How it works
 
 - `frontend/` is the page (React), from thimble 0.8.
 - `server/` is the server (Python). It serves the page, reads the folder, keeps the workspace in
   `~/.thimble-browser` (never in the folder), and runs card code in the sandbox. It runs each agent (the chat, its
-  threads, the report writer, the view builder) as its own loop on the Messages API: it streams Claude's reply, runs
+  threads, the report writer, the view builder, the orientation and its critic, the report checks) as its own loop on the Messages API: it streams Claude's reply, runs
   the tools Claude calls as its own Python functions, and loops until the turn ends. The tools read inside the folder,
   run Python in the sandbox and change the workspace's cards, report and views; nothing else, so nothing asks for a
   permission.

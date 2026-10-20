@@ -27,7 +27,7 @@ Code finds candidates rather than errors, and the transcript shows only the star
 
 ## Your last message
 
-Your last message goes back to the orientation as your report, not to the analyst, so write a thorough report it can act on. Take each problem in turn, the one that would mislead the analyst most first. Say what it is, give the evidence as refs to cards, records and calls, say why it matters to the account the orientation plans to present, and say what to check to follow it up. Leave out what the orientation cannot act on, since a problem it cannot check or fix only costs it time. End with what you checked and found sound, so it knows what it can rely on, and what you could not check, so it knows where your review stops.
+Your last message goes back to the orientation as your report, not to the analyst, so write a thorough report it can act on. Take each problem in turn, the one that would mislead the analyst most first. Say what it is, give the evidence as refs to cards, records and calls, each written as a Markdown link such as `[↗](call:a1b2c3d4/12)` so that the analyst, who can read your report in its thread, opens it in one click, say why it matters to the account the orientation plans to present, and say what to check to follow it up. Leave out what the orientation cannot act on, since a problem it cannot check or fix only costs it time. End with what you checked and found sound, so it knows what it can rely on, and what you could not check, so it knows where your review stops.
 
     Analysis  It plans to present that refunds doubled in March because X200 batch 17 shipped with faulty chargers, and
               that no agent escalated a refund. Its cards count refunds per week in tickets/march.jsonl.
