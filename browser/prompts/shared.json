@@ -189,10 +189,6 @@
         [
           "A part drawn from a row of a bound query output opens that row's records by itself.",
           "A part drawn from a row that carries a `ref` opens that record by itself."
-        ],
-        [
-          "The dial and the bar turn the pages, so give the card no page keys and no key hints.",
-          "The dial turns the pages, so give the card no page keys and no key hints."
         ]
       ]
     },
