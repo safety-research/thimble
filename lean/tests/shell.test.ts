@@ -439,32 +439,6 @@ test('a verb that needs the model: the module makes the call, and the verb runs 
   expect(String(r.text)).toContain('squeezed to: two lines')
 })
 
-test("with the card from a fork (card:v2), v asks main nothing: a fork writes the card, it is drawn under the same message, and Claude reads which card it is", async ($, on) => {
-  const w = world(on, () => ({ verb: 'visualize', text: 'never run', ask: 'never asked' }), DRAWING, { THIMBLE_PROMPTS: 'card:v2' })
-  const forks: string[] = []
-  on('model.fork', (_$: unknown, e: { prompt: string }) => {
-    forks.push(String(e.prompt))
-    return { value: { isAnswered: true, text: JSON.stringify({ card: 'by-hour', object: { title: 'Saves by hour', program: 'return k.text("x")', data: { days: 'q1' } } }), usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 9 } } }
-  })
-  const clock = mock.clock(on)
-  await savedTurn($, on, clock, w.files)
-  const ui = await $.ui.mount(MOUNT)
-  await clock.settle()
-  await press($, clock, edit('v'))
-  await ui.press({ key: 'r|p-proposals|0|opt-0' })
-  await clock.settle()
-  // the verb's child never ran, and no prompt went to main
-  expect(w.inputs.length).toBe(0)
-  expect(w.submitted.length).toBe(0)
-  expect(forks.length).toBe(1)
-  expect(forks[0]).toContain('VIEW June 18 had the most saves. | It has the card 01-saves already: make a different view, not a copy.')
-  // drawn under the same message, after the card there
-  expect(JSON.parse(w.files[SHOWN]!).under[AT].map((x: { id: string }) => x.id)).toEqual(['01-saves', '03-by-hour'])
-  await $.prompt.submit({ text: 'and this?' } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).toContain('The person pressed v under your last answer, and thimble drew the card 03-by-hour@1 under it ("Saves by hour")')
-  await ui.unmount()
-})
-
 test("v asks Claude for a card of the message: the row reads as the person's pick, the request beside it for Claude alone", async ($, on) => {
   const ask = 'The person pressed v (visualize) on your reply that begins "June 18 had the most saves.". Make a card of it.'
   const w = world(on, () => ({ verb: 'visualize', text: 'Claude is making a card of this message.', ask }))

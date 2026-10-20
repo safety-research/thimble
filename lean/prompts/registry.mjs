@@ -84,14 +84,6 @@ export const FEATURES = {
     reads: 'beside the toolkit when Claude reads it before a card, and `thimble guide cards` (v asks for it)', default: 'v3',
     base: 'verbs/visualize',
   },
-  card: {
-    about: "the card after the answer: a fork of the session that shares main's prompt cache draws the answer's card after its text, so main neither reads the card guidance nor writes the program inside its turn",
-    reads: 'shell/shell.tsx after a turn that ran thimble, and the thimble skill in place of its card section (prompts.ts)', default: 'off', optional: true,
-    versions: {
-      v1: { about: 'the fork decides whether a card helps and writes it, with queries for thimble to run first; one fix round when the save or the drawing finds a problem' },
-      v2: { about: "v1, and v's card from a fork too: a press of v asks the fork for the card, not main, so main never reads the card guidance unless the person asks for a card in words" },
-    },
-  },
   thread: {
     about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v2',
     versions: { v1: { about: 'as before' }, v2: { about: "v1 with thimble's purpose and the 0.9 words on answering and citing" } },

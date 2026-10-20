@@ -54,7 +54,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
-import { answerRow, applyObserver, cardSettled, claimsStore, drawnTextOf, leanEnv, messageRecord, personHere, saveClaims, setVerb, turnPlaces } from '../shell/shell'
+import { answerRow, applyObserver, claimsStore, drawnTextOf, leanEnv, messageRecord, personHere, saveClaims, setVerb, turnPlaces } from '../shell/shell'
 import { glossesOf } from '../shell/message.js'
 import { applyTurn, basedOnFrom, clearGap, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
 import { promptText, promptTextAt, shadowVersions } from '../prompts/prompts'
@@ -402,9 +402,7 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
     if (t.typed && !again) S.decision = stated
     const decision = t.typed ? stated : S.decision
 
-    // 2. the objects and their lineage (a card drawn after the answer, by a fork, is one of them once it is done)
-    const card = cardSettled()
-    if (card) await Promise.race([card, new Promise<void>(done => $.clock.after(180000, () => done()))])
+    // 2. the objects and their lineage
     const root = await rootNow($)
     const objs = root ? await objectsNow($, root, t.since) : []
     const fresh = objs.filter(x => x.isNew)
