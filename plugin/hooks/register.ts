@@ -1,33 +1,27 @@
-// thimble's one hooks module: the agent bridge and file guard (thimble.ts) first, then the terminal UI (term/).
-// Claude Code takes one `modules` entry per plugin, so this file registers both parts, thimble.ts first: a plugin's
-// registrations nest in order, first outermost, so the file guard sees every tool call before the terminal UI does.
-// Claude Code also refuses a second registration of an event without a matcher in one module, so the terminal UI's
-// hooks on an event thimble.ts hooks too carry a matcher every event matches (term/register.tsx ANY).
-//
-// A failure in the terminal UI's register never stops the file guard or the bridge. A hooks module has no console, so
-// the failure goes to the debug log ($.ui.log) at the session's start. Every file under term/ has no top-level side
-// effects (only imports, constants, types and function declarations), so loading this module cannot fail at run time.
-// Claude Code loads only registrations it can read in the source: each part is called by its imported name, never
-// passed in. The tests are tests/one-module.test.ts.
+// thimble's plugin: its one hooks module. The kernel's watching hook (kernel.ts: which files Claude's own calls
+// read, for `thimble coverage`), the shell (../shell/shell.tsx: objects drawn under replies, the detail view, verb
+// hints, the browser handoff), the observer (../observer/observer.ts: one quiet look after each turn of work, notes
+// to Claude, a rare line above the prompt, and the ranking of each object's hint row), the prompt registry
+// (../prompts/prompts.ts: which version of each text a model reads) and the telemetry (../telemetry/telemetry.ts:
+// each model call and each turn in the session's events, with the time thimble's hooks took inside each main turn)
+// register side by side, with path.ts, which puts the plugin's bin/ first on the PATH of the session's commands. The
+// telemetry registers twice, before and after the others, so its two hooks of each event inside a main turn bracket
+// thimble's other hooks and time them.
 import type { Register } from 'claude-code'
 
-import { register as term } from './term/register'
-import { register as bridge } from './thimble'
+import { registerObserver } from '../observer/observer'
+import { registerPrompts } from '../prompts/prompts'
+import { registerShell } from '../shell/shell'
+import { registerTelemetry } from '../telemetry/telemetry'
+import { register as registerKernel } from './kernel'
+import { registerPath } from './path'
 
 export const register: Register = (on, options) => {
-  bridge(on, options)
-  let failed = ''
-  try {
-    term(on, options)
-  } catch (err) {
-    failed = String(err).slice(0, 500) || 'an unknown error'
-  }
-  // a matcher every session matches (an empty RegExp), since thimble.ts hooks session.start without one
-  if (failed) {
-    on('session.start', { cwd: /(?:)/ }, async ($, e, next) => {
-      const r = await next(e)
-      $.ui.log(`thimble: the terminal UI did not load: ${failed}`)
-      return r
-    })
-  }
+  registerTelemetry(on, 'first')
+  registerPath(on, options)
+  registerPrompts(on, options)
+  registerKernel(on, options)
+  registerShell(on, options)
+  registerObserver(on, options)
+  registerTelemetry(on, 'last')
 }

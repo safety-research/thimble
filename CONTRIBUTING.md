@@ -4,92 +4,56 @@ Bug reports, suggestions and pull requests are welcome.
 
 ## Set up a checkout
 
-You need Claude Code, macOS or Linux, Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended) and Node 20.19+, 22.13+ or 24+ (the frontend's tests need it).
+You need Claude Code 2.1.301 or later, Node.js 22.18 or later, and a Python 3.10 or later with pandas and pytest.
 
 ```
 git clone https://github.com/safety-research/thimble.git
 cd thimble
-bash scripts/install.sh   # backend/.venv with the test extras, frontend/dist, ~/.local/bin/thimble
+python3 -m venv .venv && .venv/bin/pip install pandas pytest
+export THIMBLE_PYTHON="$PWD/.venv/bin/python"
 ```
 
-## Run it
+To try your checkout, start Claude Code in a folder of data files with the plugin loaded from it:
 
 ```
-thimble server up                  # the server on port 8300, detached; prints the URL. Where 8300 is taken, a free
-                                   # port, which server.json records; THIMBLE_PORT names the one port to use
-THIMBLE_DEV=1 thimble server up    # plus Vite on 5300 with hot reload; the URL is Vite's
-thimble server status | stop | restart
-thimble status                     # one line: the server, the orientation, the queue
-thimble doctor --verbose           # the install state, versions, port and the log's recent errors, with the lines
-                                   # only a development install prints: the turn endings, the source changed since
-                                   # the server started, the validation stack, the last apply and the dev tickets
-thimble fix                        # the server will not start: what doctor finds, to repair in your own Claude Code
-thimble revert                     # undo the last change thimble's dev agent applied
-thimble launch-args | prompt <name>   # what a session starts with, and a prompt as a session gets it
-thimble open [--ref REF] [--json]  # the press: the browser workbench on this folder's session, signed in (no code printed)
-thimble state <surface> | act <kind>  # the terminal UI's data: a surface's JSON, or a click's effect, with no server
-thimble view text <slug> --width 120  # a view's terminal program (view.term.js) drawn as text (docs/terminal-views.md)
+cd your-data-folder
+claude --plugin-dir /path/to/thimble/plugin
 ```
 
-`thimble help` lists the commands an analyst uses, and in a development install `fix` and `revert` too; the ones above
-run whether or not they are listed. `fix` and `revert` refuse on a release install, since they change thimble's own
-code.
-
-`thimble` alone starts a Claude Code session in the current folder with the plugin loaded and opens the browser
-workbench. Edits to `prompts/main.md` or `prompts/shared.md` reach a session when thimble next gives Claude its guidance
-(when it turns on, after `/compact` or `/clear`, or after a feature switch that changes it).
-
-State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log`, the registry of opened folders and
-`tour.json`, which records that the product tour was offered (delete it to see the first-launch welcome again).
-Per-workspace state is `workspaces/<c>/` in the checkout (`THIMBLE_WORKSPACES_DIR`). To run a scratch stack beside the
-live one, set `THIMBLE_HOME`, `THIMBLE_WORKSPACES_DIR`, `THIMBLE_DATA_DIR` and `THIMBLE_DEV_DIR` under /tmp and
-`THIMBLE_PORT` above 8400 (`THIMBLE_UI_PORT` above 5400 with Vite). `scripts/dev/make_toy_corpus.py` writes a synthetic
-corpus to try it on, and `scripts/dev/examples.py <folder>` opens the worked examples of custom views there, each on its
-sample with its sample labels (`labels.json`) on. `thimble demo --examples` opens them on the server `thimble demo` uses,
-as the workspaces `example-<name>` on copies of their samples in `$THIMBLE_HOME/examples`, and opens the start page,
-whose rows open each at its view; `--refresh` copies the views and samples again after you edit them.
+Claude Code reloads the plugin's hooks module when its files change, so most edits show in a running session.
 
 ## Run the tests
 
-`bash scripts/check.sh` runs everything CI runs: the content check, the backend's tests, the frontend's type check,
-tests and build, and the browser tests. Make it pass before you open a pull request. While you work, run the tests of
-what you changed:
+`scripts/check.sh` runs everything CI runs. Make it pass before you open a pull request. Each step can run alone:
 
 ```
-cd backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest tests_public/test_<module>.py -q
-cd frontend && npm run typecheck && npx vitest run tests/public/<name>
-cd frontend && npx vitest run --config vitest.browser.config.ts tests/public/browser/<name>   # headless Chromium
-cd plugin && claude plugin validate . && claude plugin test .   # the hooks module; the frontend's vitest runs it too
+scripts/check.sh validate   # claude plugin validate plugin
+scripts/check.sh plugin     # the hooks tests, plugin/tests/*.test.ts, with claude plugin test
+scripts/check.sh node       # node --test over plugin/**/*.test.mjs
+scripts/check.sh python     # pytest over plugin/ (the kernel)
 ```
 
-The backend's tests run on a small synthetic corpus (`backend/tests_public/mini_corpus.py`) and fake every model call
-and Claude Code session. The tests cover what must not break, not every feature: install and update, the server, the
-security boundaries, the permission flow, the analysis loop and views. A change to one of these comes with a test on
-synthetic data; a test does not pin wording, copy or layout.
-
-Before a release, `bash scripts/e2e_release.sh --ref <branch>` installs a fresh clone of the branch into a new
-THIMBLE_HOME and walks the UI in headless Chromium on a copy of a synthetic corpus. It writes a report with a screenshot
-of each step (`--help` lists its options). It uses your own Claude login for its one model call, a one-turn `claude -p`,
-and it leaves your Claude Code settings and your `thimble` command as they were.
-
-`node scripts/e2e/cookie_path.mjs` checks, in Chromium, Firefox and WebKit, that the browser's sign-in reaches thimble
-and no other server on 127.0.0.1 or localhost: it starts this checkout's server with the built UI in a temporary home,
-signs a browser in with a link, and opens another server's page that asks for thimble's API paths. It needs
-`frontend/dist` and Playwright's three browsers (`cd frontend && npx playwright install chromium firefox webkit`).
+The tests run on small made-up data and fake every model call. They cover what must not break; a test does not pin
+wording or layout.
 
 ## Layout
 
-| what | where |
+| What | Where |
 |---|---|
-| the server (FastAPI, one router per module, mounted under `/api` by `main.py`) | `backend/app/` |
-| the tools the agents call | `backend/app/tools.py`, their descriptions and schemas in `prompts/tools.md` |
-| an extension's program that runs a role: how it starts, and the `thimble` modules it imports | `backend/app/harness.py`, `backend/agent_kit/`, `docs/agents.md` |
-| every model-facing prompt | `prompts/` (rendered by `backend/app/prompts.py`) |
-| the browser (React, Vite); the types it shares with the backend | `frontend/src/`, `frontend/src/lib/types.ts` |
-| the Claude Code plugin: launcher, MCP server, skills, hooks | `plugin/` |
-| the worked examples of custom views, which the dev agent reads and thimble never installs | `plugin/viewers/` |
-| install, update, release and dev scripts | `scripts/` |
-| tests | `backend/tests_public/` (pytest), `frontend/tests/public/` (vitest), `frontend/tests/public/browser/` |
+| the manifest, with the plugin's one setting (the side agent) | `plugin/.claude-plugin/plugin.json` |
+| the `thimble` command and the kernel it runs: sources, queries, cards, lineage, labels | `plugin/bin/thimble`, `plugin/engine/` |
+| the hooks module: what it registers, in order | `plugin/hooks/register.ts` |
+| the shell: cards under replies, citations, the tray, the bar, the card detail, side threads, labels | `plugin/shell/` |
+| the card runtime that a card's program draws through, and its terminal renderer | `plugin/draw/` |
+| the panes thimble draws as programs on that runtime (detail, tray, chips, proposals) | `plugin/panes/` |
+| the side agent that reads each reply, and its lenses | `plugin/observer/` |
+| the rewrite behind `s`, and the catch-up | `plugin/squeeze/` |
+| the texts the model reads: the skill and card guide, and the versioned prompts | `plugin/skills/`, `plugin/prompts/` |
+| the session's events and its cost per feature (`thimble dev stats`) | `plugin/telemetry/` |
+| tests | `plugin/tests/` (hooks tests and pytest), and a `test/` folder beside the code it tests (node) |
+
+A change to a text the model reads goes in a new version of that prompt (`plugin/prompts/<feature>/`), and
+`thimble dev prompts` lists the versions and which is active.
 
 ## Pull requests
 

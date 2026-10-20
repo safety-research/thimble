@@ -1,6 +1,0 @@
-{
-  "name": "vote-labels",
-  "version": "0.1.0",
-  "description": "Three models label every item, and the value most of them give wins.",
-  "thimble": ">=0.4"
-}

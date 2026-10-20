@@ -1,50 +1,22 @@
 {
   "name": "thimble",
-  "displayName": "thimble",
-  "description": "thimble beside a Claude Code session for making sense of a corpus of files. In every session the plugin loads with about 21 tokens (one deferred tool, load_thimble) and starts no server; thimble turns on at the first data-file read, /thimble or a call of load_thimble, and then draws its cards, citations, coverage and checks in the terminal and keeps its panel there. /thimble browser, or a press in the panel, opens the browser workbench (chat, files, a canvas of cards and a report) on the same session, signed in. One MCP server (the thimble tools), one hooks module (hooks/register.ts: the agent bridge and file guard, then the terminal UI), the /thimble skill and the skills of thimble's commands. The orientation, its critic, a writer, the builder and the reviewer of a view, each run of a check and the agent of a code ticket are subagents of the session, of the types the hooks module registers.",
-  "version": "0.9.1",
+  "version": "0.10.0",
+  "description": "thimble for Claude Code: the `thimble` command reads and queries any files and keeps the code, inputs and source rows behind every value. Each card Claude saves is drawn under its reply and opens in a detail view that keeps the chat going; each citation opens the rows it cites. After each turn an observer leaves notes for Claude, lights v when another view would help, and marks the terms the person may not know.",
   "author": {
     "name": "Matthew Joerke"
   },
+  "homepage": "https://github.com/safety-research/thimble",
   "repository": "https://github.com/safety-research/thimble",
   "license": "Apache-2.0",
-  "mcpServers": "./.mcp.json",
-  "types": "./hooks/term/types/index.d.ts",
+  "skills": [
+    "./skills/"
+  ],
+  "types": "./types/index.d.ts",
   "userConfig": {
-    "viewProposals": {
+    "observer": {
       "type": "boolean",
-      "title": "View proposals",
-      "description": "After a turn, thimble may propose a view of the files: a page that shows their records in a form the files hide.",
-      "default": true
-    },
-    "labels": {
-      "type": "boolean",
-      "title": "Labels",
-      "description": "Labels that a model applies to every record of a file, and their lists of records no category fit.",
-      "default": true
-    },
-    "checks": {
-      "type": "boolean",
-      "title": "Checks",
-      "description": "Checks that read Claude's answers and documents and comment on passages, which the terminal highlights.",
-      "default": true
-    },
-    "citationMarks": {
-      "type": "boolean",
-      "title": "Citation marks",
-      "description": "A check mark or a red cross on each citation, after thimble checks that the cited place holds the value.",
-      "default": true
-    },
-    "coverage": {
-      "type": "boolean",
-      "title": "Coverage",
-      "description": "What Claude read or searched of the data files in this session, under answers and in the panel.",
-      "default": true
-    },
-    "cardCheck": {
-      "type": "boolean",
-      "title": "Card check",
-      "description": "After a card is made or changed, a check of its takeaway and its citations against its output.",
+      "title": "Observer",
+      "description": "After each turn of work, a side agent reads the answer and the objects behind it: it leaves notes for Claude, lights v when another view would help, and marks the terms you may not know.",
       "default": true
     }
   }
