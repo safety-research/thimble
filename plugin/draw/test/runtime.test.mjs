@@ -115,6 +115,16 @@ test('a stacked bar keeps one height whatever its parts are: wide or narrow, lab
   }
 })
 
+test('the key k.bars adds is left out where the program names the parts in a legend of its own', () => {
+  const rows = `[{ id: 'a', label: 'a', parts: [{ value: 3, label: 'added', tone: 'c2' }, { value: 5, label: 'deleted', tone: 'c4' }] }]`
+  const count = program => gridText(renderTerm(runProgram({ program, data: {} }, { w: 60, h: 12 }), { w: 60 })).split('deleted').length - 1
+  assert.equal(count(`return k.bars(${rows})`), 1)
+  assert.equal(count(`return k.stack(k.bars(${rows}), k.legend([{ label: 'added', tone: 'c2' }, { label: 'deleted', tone: 'c4' }]))`), 1)
+  assert.equal(count(`return k.stack(k.text('{c2:■} added  {c4:■} deleted'), k.bars(${rows}))`), 1)
+  // words that only mention the parts are no legend: the key stays
+  assert.equal(count(`return k.stack(k.text('more deleted than added'), k.bars(${rows}))`), 2)
+})
+
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
   const d = run(`
     const rust = data.runs.filter(r => r.lang === 'Rust')

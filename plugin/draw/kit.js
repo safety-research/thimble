@@ -448,13 +448,18 @@
           if (t !== 'unseen') key.push({ label: String(p.label), tone: t })
         }) })
         const list = k.stack(rows, { gap: o.gap ? 1 : 0 })
-        return key.length && o.key !== false ? k.stack(k.legend(key), list) : list
+        if (!key.length || o.key === false) return list
+        const kn = k.legend(key)
+        kn.key = true
+        return k.stack(kn, list)
       },
       // ■ label   ■ label : one text
       legend(items, o) {
         o = o || {}
         const its = (Array.isArray(items) ? items : []).map(it => Array.isArray(it) ? { label: it[0], tone: it[1] } : it).filter(isObj)
-        return k.text(its.map(it => { const t = T(it.tone); return `{${t}:${t === 'unseen' ? '░' : '■'}} {dim:${escapeMarkup(it.label)}}` }).join('   '), o)
+        const n = k.text(its.map(it => { const t = T(it.tone); return `{${t}:${t === 'unseen' ? '░' : '■'}} {dim:${escapeMarkup(it.label)}}` }).join('   '), o)
+        n.legend = its.map(it => String(it.label))
+        return n
       },
       // ●●●○○ : n of total, or a list of tones (an entry {tone, on: false} is hollow)
       dots(a, b, o) {
@@ -2551,6 +2556,23 @@
     const src = line && typeof program === 'string' ? (program.split('\n')[line - 1] || '').trim().slice(0, 160) : ''
     return { name: name, message: msg.slice(0, 400), line: line, source: src }
   }
+  // the key k.bars adds above its rows is left out where the program drew a legend of its own that names the same parts:
+  // a k.legend, or a line of text with a color mark (■ ● ▆ █) and every one of the names
+  function dropKeys(root) {
+    const legends = [], keys = []
+    const walk = (n, parent) => {
+      if (!n || typeof n !== 'object') return
+      if (n.key && Array.isArray(n.legend)) keys.push({ n, parent })
+      else if (n.t === 'text') { const s = plain(n.runs); if (Array.isArray(n.legend) || /[■●▆█▪]/.test(s)) legends.push(s) }
+      ;(n.kids || []).forEach(c => walk(c, n))
+      if (n.kid) walk(n.kid, n)
+    }
+    walk(root, null)
+    keys.forEach(({ n, parent }) => {
+      if (parent && parent.kids && legends.some(s => n.legend.every(l => s.indexOf(l) >= 0))) parent.kids = parent.kids.filter(c => c !== n)
+    })
+    return root
+  }
   function toRoot(ret, k) {
     if (ret && typeof ret.then === 'function') {
       try { ret.then(null, () => {}) } catch (e) { /* nothing to wait for */ }
@@ -2559,7 +2581,7 @@
       throw e
     }
     if (ret instanceof Canvas) return ret.node()
-    if (ret && typeof ret === 'object' && typeof ret.t === 'string') return ret
+    if (ret && typeof ret === 'object' && typeof ret.t === 'string') return dropKeys(ret)
     if (typeof ret === 'string' || typeof ret === 'number') return k.text(String(ret))
     if (Array.isArray(ret)) return k.stack.apply(null, ret)
     const e = new Error('the program returned ' + (ret === undefined ? 'nothing' : typeof ret) + '; return a node, such as k.stack(...), k.frame(...) or a canvas')
