@@ -808,13 +808,19 @@ function bodyTop(part: Any): { x: number; y: number } | null {
 }
 
 /** The panel's own keys, as the bar says them: t the thread list (while there is a thread and the list is not shown),
- *  m the thread's last answer to main (once it has one). */
-async function hostKeyWords($: Engine, view: SideView | null, subject: { key: string } | null): Promise<string[]> {
+ *  m the thread's last answer to main (once it has one). A key the program shown takes is its own, as at a key
+ *  (detailKey asks the program first), so the bar never names one key twice. */
+async function hostKeyWords($: Engine, view: SideView | null, subject: { key: string } | null, taken: Set<string>): Promise<string[]> {
   const out: string[] = []
-  if (threadCount() > 0 && !(view?.kind === 'pane' && view.pane === 'threads')) out.push('t threads')
+  if (!taken.has('t') && threadCount() > 0 && !(view?.kind === 'pane' && view.pane === 'threads')) out.push('t threads')
   const t = subject ? threadOf(subject.key) : null
-  if (t && t.turns.some(x => x.role === 'claude' && x.text)) out.push('m send to main')
+  if (!taken.has('m') && t && t.turns.some(x => x.role === 'claude' && x.text)) out.push('m send to main')
   return out
+}
+
+/** The keys these drawings' programs take (k.on), by name. */
+function keysTaken(...drawings: Any[]): Set<string> {
+  return new Set(drawings.flatMap(d => (Array.isArray(d?.on) ? d.on : []).map((h: Any) => String(h?.name || ''))))
 }
 
 /** The panel's keys as the bar says them while it is open (shell.tsx): the card's own keys, then the detail's or the
@@ -829,7 +835,7 @@ export async function detailKeys($: Engine): Promise<string | null> {
     if (draft) return subject ? `↵ ask about ${cut(subject.label, 40)} · esc back to ${it}` : 'esc back'
     const d = await paneNow($, view.pane, view.args)
     const parts = barText([d]).split(' · ').filter(Boolean).filter(x => !/^esc\b/.test(x))
-    parts.push(...(await hostKeyWords($, view, subject)))
+    parts.push(...(await hostKeyWords($, view, subject, keysTaken(d))))
     if (subject) parts.push(`type to ask about ${cut(subject.label, 40)}`)
     parts.push(`esc ${await backWord($)}`)
     return parts.join(' · ')
@@ -844,14 +850,15 @@ export async function detailKeys($: Engine): Promise<string | null> {
   const taken = hostKeys('detail', 'terminal')
   // (before the pane has drawn the card, the card as it draws now: the line draws again once it has)
   const card = drawn?.card ?? (await shownCard($, sel, room.w, room.h))?.drawing ?? null
-  const keys = barText([{ on: (card?.on || []).filter((h: Any) => !(String(h?.name) in taken)), controls: card?.controls || [] }, d])
+  const cardOn = { on: (card?.on || []).filter((h: Any) => !(String(h?.name) in taken)), controls: card?.controls || [] }
+  const keys = barText([cardOn, d])
   // what typing does, in plain words: a question about the selected part (or the card)
   const part = drawn?.selected ? drawn.parts.find((x: Any) => x.id === drawn!.selected) : null
   const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : 'this card'
   const ask = `type to ask about ${cut(about, 40)}`
   const parts = keys.split(' · ').filter(Boolean)
   const esc = parts.findIndex(x => x.startsWith('esc '))
-  const own = await hostKeyWords($, view, threadFor({ object: sel.id }))
+  const own = await hostKeyWords($, view, threadFor({ object: sel.id }), keysTaken(cardOn, d))
   if (esc >= 0) parts.splice(esc, 0, ...own, ask)
   else parts.push(...own, ask)
   return parts.join(' · ')

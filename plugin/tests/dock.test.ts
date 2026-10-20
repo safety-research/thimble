@@ -134,10 +134,18 @@ test('the bar names the coverage with a small bar of its file types and the labe
   expect(drawn).toContain('runs/*.jsonl')
   // the panel's input bar is under it, about the group selected
   expect(JSON.stringify(await $.ui.render(PANEL))).toContain('Ask about runs/*.jsonl')
-  // t is the pane's: it groups the files by type, and never reaches the prompt
-  expect(await key($, clock, 't')).toEqual({ text: '', cursor: 0 })
+  // the bar names each key once: g groups (t stays the panel's thread list), and while the panel holds the keys the
+  // counts name none (r and l there begin a question); a click on a count still opens it
+  const held = textOf(await $.ui.render(HINT))
+  expect(held).toContain('g by type')
+  expect(held).not.toContain('t by')
+  expect(held).toContain('seen 17%')
+  expect(held).not.toContain('r seen')
+  expect(held).not.toContain('l 2 labels')
+  // g is the pane's: it groups the files by type, and never reaches the prompt
+  expect(await key($, clock, 'g')).toEqual({ text: '', cursor: 0 })
   expect(await panel($, clock)).toContain('▸ jsonl')
-  await key($, clock, 't')
+  await key($, clock, 'g')
   // ↵ opens the group, then its first file: the file's read lines
   await key($, clock, 'return')
   await panel($, clock)

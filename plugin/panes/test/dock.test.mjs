@@ -60,7 +60,7 @@ test('coverage: files touched and files seen apart; the rows seen, apart from th
   const star = after.root.kids.flatMap(k => k.kids || []).flatMap(k => k.kid?.runs || []).find(r => r.s === '*')
   assert.equal(star.tone, 'accent')
   // at the top esc is the panel's (back to what it showed, or close)
-  assert.equal(barText([after]), '[ ] step · t by type')
+  assert.equal(barText([after]), '[ ] step · g by type')
   assert.equal(takes(after, keyEvent('esc')), false)
   // the group selected carries its pattern, and the pane's thread says what the pane shows, in the kernel's words
   assert.equal(after.regions.find(r => r.id === 'g-0').meta.ref, 'runs/*.jsonl')
@@ -68,10 +68,11 @@ test('coverage: files touched and files seen apart; the rows seen, apart from th
   assert.match(about, /what this session did with the folder's files, by `thimble coverage`: 60 of 1,500 rows seen \(4%\), from 1 of 5 source files; 4 files touched; 300 rows computed over and not seen/)
 })
 
-test('coverage: t groups by type; a group opens its files with what happened to each; a file opens its seen lines, which the host reads; esc goes back', () => {
-  let { state, text } = turn(PANES.coverage, covData(), {}, keyEvent('t'))
+test('coverage: g groups by type (t is the panel\'s thread list); a group opens its files with what happened to each; a file opens its seen lines, which the host reads; esc goes back', () => {
+  assert.equal(takes(turn(PANES.coverage, covData(), {}, null).after, keyEvent('t')), false)
+  let { state, text } = turn(PANES.coverage, covData(), {}, keyEvent('g'))
   assert.match(text, /▸ jsonl\s+4/)
-  ;({ state, text } = turn(PANES.coverage, covData(), state, keyEvent('t')))
+  ;({ state, text } = turn(PANES.coverage, covData(), state, keyEvent('g')))
   assert.match(text, /▸ runs\/\*\.jsonl/)
   // a press on the selected group opens it: each file by its name (the pattern in the header names its folder)
   ;({ state, text } = turn(PANES.coverage, covData(), state, { type: 'press', region: 'g-0' }))

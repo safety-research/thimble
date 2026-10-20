@@ -1564,10 +1564,21 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     // key in their words)
     ...dockCounts(c, percent),
   ] : []
-  const counts = items.filter(([, n]) => n > 0).map(([id, , words, key]) => ({ id, text: key ? `${key} ${words}` : words, ...(key ? { key } : {}), bright: now - (c!.changed[id] ?? 0) < BRIGHT_MS }))
+  // a count names its key only while that key acts on it: no surface holds the keys (the side panel, the tray, the
+  // chips and a focused card take them, and there a letter is theirs or asks), and the left names no other use of it,
+  // so the bar never names one key twice. Unnamed, a click on the count still opens it.
+  const named = namedKeys(left)
+  const keyed = (k: string | null | undefined) => !!k && !focus && !named.has(k)
+  const counts = items.filter(([, n]) => n > 0).map(([id, , words, key]) => {
+    const bright = now - (c!.changed[id] ?? 0) < BRIGHT_MS
+    // (coverage's and the labels' words begin with their key: dock.ts)
+    const dk = id === 'cov' ? DOCK_KEY.coverage : id === 'labels' ? DOCK_KEY.labels : null
+    if (dk) return keyed(dk) ? { id, text: words, bright } : { id, text: words.slice(dk.length + 1), bare: true, bright }
+    return keyed(key) ? { id, text: `${key} ${words}`, key, bright } : { id, text: words, bright }
+  })
   const where = await threadInFront($)
   if (!left.length && !counts.length && !where) return null
-  const fit = fitBar({ label: where ?? 'thimble', left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bright: boolean }[]; cut: boolean }
+  const fit = fitBar({ label: where ?? 'thimble', left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bare?: boolean; bright: boolean }[]; cut: boolean }
   // the label names whose keys these are; it is no link and no press, so it is drawn plain (an underline is a
   // citation's look)
   const label = fit.label ? [Text({ key: 'bar-label', color: FOCUS[theme], bold: !where, children: fit.label }), Text({ key: 'bar-gap', children: '  ' })] : []

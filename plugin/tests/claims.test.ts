@@ -188,6 +188,8 @@ test('after a turn of work its claims are in the store, each where it was said w
   const bar = await hint($)
   expect(bar).toContain('c ● 1 claim reads two ways')
   expect(bar).toContain('3 claims')
+  // the count's key is the lit c at the left, so the bar names it once
+  expect(bar).not.toContain('c 3 claims')
   const rec = JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${R1.slice(0, 24)}.json`]!)
   expect(rec.verbs.c).toEqual({ lit: true, note: '1 claim reads two ways', claims: ['c1', 'c2', 'c3'] })
   const log = JSON.parse(w.files['/home/t/.thimble/lean/observer/s-1.json']!).log.find((r: Any) => r.kind === 'look')
