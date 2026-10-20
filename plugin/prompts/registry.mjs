@@ -49,14 +49,14 @@ export const FEATURES = {
     about: "lens: the turn's claims (statements), each placed by a quote, in a cluster", reads: 'the pass', default: 'v4', optional: true,
     versions: {
       v3: { about: "written clean in the 0.9 style from v2 (the quote names the claim, the digest holds the claims that bear on the turn): five principles and one example, good and bad; a part only when the claim's words leave it open" },
-      v4: { about: "one kind, a statement: no kinds and no parts (precisely, unstated, judgment, based on); four principles (what a claim is, the quote, said again and corrections, clusters) and one example, good and bad" },
+      v4: { about: "one kind, a statement: four short principles (what a claim is, found by its words, its history, clusters) and one example, good and bad; no kinds, parts, counts or case rules" },
     },
   },
   'claims-folder': {
     about: 'the guide of the subagent that maps the claims of the whole folder', reads: 'claims/term.ts: the brief main hands the subagent names its file', default: 'v2',
     versions: {
       v1: { about: "the coh-atlas skill in the 0.9 style, for thimble's five commands: the map saved as the card folder-claims, its citations checked by the save" },
-      v2: { about: 'v1 with one kind, a statement: no kinds and no relations; the pane shows the map as a graph in clusters' },
+      v2: { about: 'v1 as short principles: one kind, a statement; no kinds, relations, counts or step lists; the pane shows the map as a graph in clusters' },
     },
   },
   squeeze: {
