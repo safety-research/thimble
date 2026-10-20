@@ -17,7 +17,7 @@
   'use strict'
 
   const KIT = 1
-  const TONES = ['ink', 'dim', 'accent', 'good', 'bad', 'warn', 'unseen', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'cite', 'explain']
+  const TONES = ['ink', 'dim', 'accent', 'good', 'bad', 'warn', 'unseen', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'cite', 'explain', 'heads']
   const CATS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
   const ALIAS = {
     default: 'ink', normal: 'ink', text: 'ink', black: 'ink', fg: 'ink',

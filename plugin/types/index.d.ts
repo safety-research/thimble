@@ -18,7 +18,9 @@ export type Said = { verb: string; text?: string; error?: string; running?: bool
 export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; inLink?: boolean; code?: boolean; anchor?: 'form' | 'word' }
 
 /** A gloss the observer wrote for a message: the term as it stands in the text, what it is, where it mattered here. */
-export type Gloss = { term: string; title?: string; body?: string; here?: string; program?: string; refs?: string[] }
+/** A term explained (an explain mark), or, of kind 'heads', an important detail the analyst should know (its title, its
+ *  bullets with citations, what to do). `expanded`: written again at more length (e), the short one kept in `short`. */
+export type Gloss = { term: string; kind?: 'heads'; title?: string; body?: string; here?: string; program?: string; data?: Record<string, unknown>; refs?: string[]; bullets?: string[]; todo?: string; expanded?: boolean; short?: { body: string; here: string; program: string } }
 
 /** The record of one of Claude's messages (CONTRACT 1), kept in thimble/messages/<session>/<row>.json. */
 export type MsgRecord = {
@@ -83,7 +85,7 @@ export type LineCounts = { claims?: number; threads: number; cov: number; labels
 
 /** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
  *  inside a card (panes/tray.js frameOf). */
-export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss'; gloss?: Record<string, unknown> }
+export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss'; gloss?: Record<string, unknown>; open?: string | null; expanding?: boolean; full?: boolean }
 
 /** The tray: the stack of cards it shows, the top one drawn. */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }

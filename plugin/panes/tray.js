@@ -19,19 +19,22 @@
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
 //          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
 //          label}], problem} (cards.js drawnCard)
-//   keys: a ask (or thread: the side panel) · the sections' keys (r rows, c code) · o open the first citation inside the
-//         card (the rest by a click; 2–9 still open them, unnamed) · ] [ the next and the one before (the host's order of
-//         marks and cards: k.do('step')) · 0 back (or close): esc at the prompt never reaches a plugin, so 0 stays named.
-//         Letters for what the person does, so the line reads as words (`a ask · o open … · 0 close`), never as a
-//         number; 1 still asks, unnamed
-//   asks of the host: thread {frame} (the side panel on this card, its input bar holding the keys), step, close
+//   keys: ↵ or e expand (a citation: its whole source in the side panel; an explainer: a longer one in its place) · the
+//         sections' keys (r rows, when rows stand behind it; c code) · a ask (or thread: the side panel; 1 too, unnamed)
+//         · o open the first citation inside the card (the rest by a click; 2–9 still open them, unnamed) · 0 back (or
+//         close; esc too): esc at the prompt never reaches a plugin, so 0 stays named · ] [ the next and the one before
+//         (the host's order of marks and cards: k.do('step')). Letters for what the person does, so the line reads as
+//         words (`a ask · o open … · 0 close`), never as a number
+//   asks of the host: thread {frame} (the side panel on this card, its input bar holding the keys), expand {frame},
+//         step, close
 import { threadKey } from '../shell/threads.js'
 
 /** A label cut to `n` characters, with … where it was cut. */
 const short = (s, n) => (String(s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s))
 
-/** The rows a card may take in the tray. */
+/** The rows a card may take in the tray: a citation's, and an explainer's, which may hold a picture beside its words. */
 export const BODY = 9
+export const BODY_EXPLAIN = 16
 
 /** A mark of a message's record as a frame of the tray: what it shows, whatever surface opens it. */
 export function frameOf(rec, i) {
@@ -39,7 +42,7 @@ export function frameOf(rec, i) {
   if (!m) return null
   if (m.kind === 'gloss') {
     const g = (rec.glosses && rec.glosses[m.gloss]) || { term: m.label || '' }
-    return { row: rec.row, i, kind: 'gloss', label: String(g.term || m.label || ''), gloss: { id: m.gloss, term: g.term, title: g.title, body: g.body, here: g.here, program: g.program, data: g.data, refs: g.refs } }
+    return { row: rec.row, i, kind: 'gloss', label: String(g.term || m.label || ''), gloss: { id: m.gloss, kind: g.kind, term: g.term, title: g.title, body: g.body, here: g.here, program: g.program, data: g.data, refs: g.refs, bullets: g.bullets, todo: g.todo, expanded: g.expanded } }
   }
   return { row: rec.row, i, kind: m.kind === 'spark' ? 'spark' : 'cite', ref: m.ref, label: m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label || m.ref || '') }
 }
@@ -90,10 +93,11 @@ export function program(k, data) {
   const stack = Array.isArray(st.stack) ? st.stack.filter(f => f && typeof f === 'object') : []
   const top = stack[stack.length - 1]
   if (!top) return k.text('')
-  const kind = top.kind === 'gloss' ? 'explain' : top.kind === 'spark' ? 'series' : 'cite'
-  const tone = top.kind === 'gloss' ? 'explain' : 'cite'
+  const heads = top.kind === 'gloss' && top.gloss && top.gloss.kind === 'heads'
+  const kind = heads ? 'heads up' : top.kind === 'gloss' ? 'explain' : top.kind === 'spark' ? 'series' : 'cite'
+  const tone = heads ? 'heads' : top.kind === 'gloss' ? 'explain' : 'cite'
   const inner = Math.max(20, k.w - 4)
-  const card = k.want({ card: cardRequest(top), w: inner, h: BODY })
+  const card = k.want({ card: cardRequest(top), w: inner, h: top.kind === 'gloss' ? BODY_EXPLAIN : BODY })
   const key = threadKey(scopeOf(top))
   const thread = (data.threads || []).find(t => t.key === key) || null
   const links = card && Array.isArray(card.links) ? card.links.slice(0, 8) : []
@@ -110,12 +114,24 @@ export function program(k, data) {
     return { stack: [] }
   }
   const openLink = l => ({ stack: [...stack, { kind: 'cite', ref: l.ref, label: l.label }].slice(-12) })
-  // a: the card in the side panel, as the mark's thread, its input bar holding the keys (the question is typed there)
+  // a: the card in the side panel, as the mark's thread, its input bar holding the keys (the question is typed there);
+  // 1, its key before, still does it, unnamed
   const toThread = () => { k.do('thread', { frame: { ...top, open: null } }) }
-  k.on('a', toThread, thread ? 'thread' : 'ask')
-  k.on('1', toThread)
+  // ↵ or e: more of it. A citation's whole source in the side panel, with its thread (a query's full output); an
+  // explainer written again at more length in its place, from the turn and the files it cites (one side call)
+  if (top.kind !== 'gloss') {
+    const full = () => { k.do('expand', { frame: { ...top, open: null } }) }
+    k.on('return', full, 'expand')
+    k.on('e', full, 'expand')
+  } else if (!heads && !(top.gloss && top.gloss.expanded)) {
+    const longer = () => { k.do('expand', { frame: top }); return withTop({ expanding: true }) }
+    k.on('return', longer, 'expand')
+    k.on('e', longer, 'expand')
+  }
   // a section's key opens it in place of the card, and closes it again
   sections.forEach(s => k.on(s.key, () => withTop({ open: open && open.id === s.id ? null : s.id }), s.words))
+  k.on('a', toThread, thread ? 'thread' : 'ask')
+  k.on('1', toThread)
   // o: the first citation inside the card, over it; the others by a click, or 2–9, unnamed
   if (links.length) k.on('o', () => openLink(links[0]), `open ${short(links[0].label || links[0].ref || '', 28)}`)
   links.forEach((l, j) => k.on(String(j + 2), () => openLink(l)))
@@ -132,6 +148,7 @@ export function program(k, data) {
 
   // ---- the card
   const parts = cardBody(k, card, top, open)
+  if (top.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text('{dim:writing a longer explanation…}'))
   if (thread && thread.turns.length && !open && card && !card.problem && !card.error) {
     const q = (thread.turns.find(t => t.role === 'person') || {}).text || ''
     parts.push(k.region('thread', { label: 'the thread about this mark' }, k.text(`{dim:↳ thread:} ${k.escape(q.length > 60 ? q.slice(0, 59) + '…' : q)} {dim:· a opens it}`, { wrap: false })))
@@ -166,7 +183,7 @@ export function cardBody(k, card, top, open) {
     // a value of a card: the card's part that holds it, marked as a selection is
     const marked = markedPart((card.drawings || [])[0], card.mark)
     if (marked) k.select(marked)
-    if (card.why) parts.push(k.text(`{dim:${k.escape(card.why)}}`))
+    // why a value has no rows behind it is the code section's to say, not the card's
   }
   return parts
 }

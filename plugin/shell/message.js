@@ -115,10 +115,14 @@ export function linkMarks(text) {
   return out.sort((x, y) => x.start - y.start)
 }
 
-/** A citation's words, without its markdown; one whose words are only a sign (`↗`) is named by its place. */
+// a citation's words that name nothing: a pronoun, or a sign such as an arrow
+const VAGUE = /^(here|there|this|that|it|link|source|see|see here|see this|this line|these lines|this file)$/i
+
+/** A citation's words, without its markdown; one whose words name nothing (a pronoun, an arrow) is named by its
+ *  place, as editors write it (`plugin/hooks/path.ts:12`). */
 function labelOf(words, ref) {
   const w = String(words).replace(/[*_`]/g, '').trim()
-  return /[\p{L}\p{N}]/u.test(w) ? w : String(ref).replace(/#L(\d+)/, ':$1').replace(/^obj:/, '')
+  return /[\p{L}\p{N}]/u.test(w) && !VAGUE.test(w) ? w : String(ref).replace(/#L(\d+)(?:-L?(\d+))?.*$/, (_, a, b) => `:${a}${b && b !== a ? `-${b}` : ''}`).replace(/^obj:/, '')
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -608,6 +612,19 @@ export function glossesOf(list, text, skip = []) {
     if (n >= 3) break
   }
   return out
+}
+
+/**
+ * The observer's heads-up as the record keeps it, `{h1: {kind: 'heads', term, title, bullets, todo, refs}}`: one at most,
+ * placed on its term like a gloss (a term the text does not hold is dropped, so it never points at nothing).
+ */
+export function headsOf(item, text) {
+  if (!item || typeof item !== 'object') return {}
+  const term = str(termOf(item.term), 80)
+  const bullets = (Array.isArray(item.bullets) ? item.bullets : []).map(b => str(b, 400)).filter(Boolean).slice(0, 4)
+  if (!term || !bullets.length || !(findTerm(text, term) || inLinkWords(text, term))) return {}
+  const refs = [...new Set(bullets.flatMap(b => [...b.matchAll(/\]\(([^)\n]+)\)/g)].map(m => citeRef(m[1])).filter(Boolean)))].slice(0, 6)
+  return { h1: { kind: 'heads', term, title: str(item.title, 80) || term, bullets, todo: str(item.todo, 240), refs } }
 }
 
 /** The record with what the observer gave for it: its lit verbs and its glosses, the marks placed again. */

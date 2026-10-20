@@ -145,8 +145,8 @@ test('overview first: the card enlarged under its title, takeaway and "edited"; 
   expect(w.opened.at(-1)).toMatchObject({ id: 'object', focus: true, closeOnEscape: true })
   const t = await pane($, clock)
   expect(t).toContain('Saves per day')
-  // the card's id shows here only, in the header, beside "edited" once the analyst asked for a change
-  expect(t).toContain('card:01-saves')
+  // no card id and no status lines in the header: its title, and "edited" once the analyst asked for a change
+  expect(t).not.toContain('card:01-saves')
   expect(t).toContain('edited')
   expect(t).not.toContain('v1 · v2')
   expect(t).toContain('June 18 had 6,543 saves.')
@@ -161,26 +161,27 @@ test('overview first: the card enlarged under its title, takeaway and "edited"; 
   expect(t).not.toContain('details')
   expect(t).not.toContain('esc back')
   expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h earlier version · type to ask about Jun 18 · esc back')
-  // ↵ on the selected part (the ring's press) fills the bar with its details: where it comes from, and its examples one key away
+  // ↵ on the selected part (the ring's press) fills the bar with its details: its claim, and its examples one key away
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()
   await ui.press({ key: 'r|pane|1|day-2026-06-18' })
   await clock.settle()
   const d = textOf(await ui.drawn())
-  expect(d).toContain('from revisions.jsonl')
+  // its claim, and no status lines: where it comes from is one key away (p)
+  expect(d).not.toContain('from revisions.jsonl')
   expect(d).not.toContain('e examples')
   // esc clears the bar (the panel catches it): 0 still does, unnamed
   expect(await hintOf($)).toContain('↑↓ part · e examples · ')
   expect(await hintOf($)).not.toContain('0 clear')
   expect(d).not.toContain('Hello agents')
-  // e: the examples of the selected part, labelled, with their from line; each reads as its words, never as field: value
+  // e: the examples of the selected part, with their labels; each reads as its words, never as field: value
   expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   const b = await pane($, clock)
-  expect(b).toContain('examples of saves on Jun 18 · 1 of 6,543')
+  expect(b).toContain('1 of 6,543')
+  expect(b).not.toContain('examples of')
   expect(await hintOf($)).toContain('[ ] flip · e hide examples · ')
-  expect(b).toContain('from revisions.jsonl')
-  expect(b).toContain('label purpose')
-  expect(b).toContain('1 of 2 files read')
+  expect(b).not.toContain('from revisions.jsonl')
+  expect(b).not.toContain('files read')
   expect(b).toContain('Hello agents, sign below.')
   expect(b).toContain('Lexicon · Scout')
   expect(b).not.toContain('rev_id')
@@ -198,9 +199,9 @@ test('keys act only while the composer is empty; a key that began a word gives i
   await pane($, clock)
   // ] opens the bar on the first example, and flips to the next
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
-  expect(await pane($, clock)).toContain('· 1 of 6,543')
+  expect(await pane($, clock)).toContain('1 of 6,543')
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
-  expect(await pane($, clock)).toContain('· 2 of 6,543')
+  expect(await pane($, clock)).toContain('2 of 6,543')
   // p lays the program over the card; a letter straight after it was the start of a word: both go to the ask line,
   // never into the prompt
   expect(await press($, clock, edit('p'))).toEqual({ text: '', cursor: 0 })
@@ -507,7 +508,7 @@ test('on a tall card, e shows what it opens: the window moves to the bar under t
   expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   await draw()
   const shown = textOf(await ui.drawn())
-  expect(shown).toContain('examples of saves on Jun 18')
+  expect(shown).toContain('1 of 6,543')
   expect(shown).toContain('Hello agents, sign below.')
   expect(shown).toContain('Step 29')
   // the wheel up over the pane: the window moves up, rows of the card come back into view

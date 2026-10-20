@@ -31,18 +31,30 @@ export const FEATURES = {
     versions: { v2: { about: 'written clean in the 0.9 style: two principles and one example, good and bad' } },
   },
   'lens-actions': {
-    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v4', optional: true,
-    versions: { v4: { about: "dim by default, lit only for a claim no card shows; written clean in the 0.9 style: two principles and one example, good and bad" } },
+    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v5', optional: true,
+    versions: {
+      v4: { about: "dim by default, lit only for a claim no card shows; written clean in the 0.9 style: two principles and one example, good and bad" },
+      v5: { about: "v4 with its principle as when a view is worth it (a claim a view shows faster than words, no card yet), its list of what needs no view gone" },
+    },
   },
   'lens-squeeze': {
     about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v3', optional: true,
     versions: { v2: { about: 'written clean in the 0.9 style' }, v3: { about: 'the chips as squeeze v7 names them: Interpretation (facts only · some meaning · full meaning) and Background (new · learning · working · expert), each in one sentence' } },
   },
+  'lens-heads': {
+    about: 'lens: an important detail of the answer, an orange mark that opens a heads-up card', reads: 'the pass', default: 'v1', optional: true,
+    versions: { v1: { about: "a detail the analyst should know before they rely on the answer: one principle (mark it when missing it would change what they conclude or do) and one example" } },
+  },
+  'explain-expand': {
+    about: "an explainer written again at more length (e on an explainer): one side call over the term, the answer and the files it cites", reads: 'shell/expand.ts', default: 'v1',
+    versions: { v1: { about: 'what it is, what it does here and how it connects, cited, with an example of a drawn explanation' } },
+  },
   'lens-explain': {
-    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v4', optional: true,
+    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v5', optional: true,
     versions: {
       v3: { about: "written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" },
       v4: { about: "v3 with names from the files (a function, a hook, a field) among the words that stop a reader, a code example, and a backoff that gives one" },
+      v5: { about: "v4 with its lists of words and counts gone: the 0.9 principle and its reason, a body with no length, and an example with a drawn explainer beside one in words" },
     },
   },
   'lens-claims': {
@@ -61,16 +73,20 @@ export const FEATURES = {
     },
   },
   context: {
-    about: "the block thimble adds to a conversation's first message: thimble is on here, so load its skill for a question about these files, code included",
-    reads: 'prompts/prompts.ts (prompt.context), once per conversation', default: 'v1', optional: true,
-    versions: { v1: { about: "thimble's purpose in the 0.9 preamble's words, and the skill to load before an answer about the files" } },
+    about: "the block thimble adds to a conversation's first message: thimble is on here, so load its skill for a question about these files",
+    reads: 'prompts/prompts.ts (prompt.context), once per conversation', default: 'v2', optional: true,
+    versions: {
+      v1: { about: "thimble's purpose in the 0.9 preamble's words, and the skill to load before an answer about the files, code included" },
+      v2: { about: 'v1 without naming code: before any answer about the files' },
+    },
   },
   forms: {
     about: 'the card guide: what makes a good card, the toolkit, and worked examples',
-    reads: 'beside the result of the first data command of a session (prompts.ts); v asks Claude to read it', default: 'v4',
+    reads: 'beside the result of the first data command of a session (prompts.ts); v asks Claude to read it', default: 'v5',
     versions: {
       v3: { about: 'the card guide in the 0.9 words, with its four takeaway failures and four programs (kept as prompts/forms/v3.md)' },
-      v4: { about: "skills/thimble/cards.md: the 0.9 principles in fewer words, one takeaway example, every part opening what it stands for, guides taught with pictures, seven worked programs that each show another form on another kind of data, and one sequence of cards", file: 'skills/thimble/cards.md' },
+      v4: { about: "the 0.9 principles in fewer words, one takeaway example, guides as pages, seven worked programs and one sequence of cards (kept as prompts/forms/v4.md)" },
+      v5: { about: "skills/thimble/cards.md: v4 without its list of forms, its pages and the links in a card's words; six worked programs", file: 'skills/thimble/cards.md' },
     },
   },
   thread: {

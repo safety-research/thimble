@@ -22,7 +22,8 @@ test('the index has every feature with its default and the versions on disk', ()
   const idx = indexOf({ observer: ['v3.md', 'mine.md', 'notes.txt', '.draft.md'] })
   assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['mine', 'v3', 'v3-low', 'v4', 'v4-low'])
   assert.equal(idx.observer.versions.mine.file, 'prompts/observer/mine.md')
-  assert.equal(idx.forms.versions.v4.file, 'skills/thimble/cards.md')
+  assert.equal(idx.forms.versions.v5.file, 'skills/thimble/cards.md')
+  assert.equal(idx.forms.versions.v4.file, 'prompts/forms/v4.md')
   assert.equal(idx.forms.versions.v3.file, 'prompts/forms/v3.md')
   for (const [name, f] of Object.entries(FEATURES)) assert.ok(idx[name].versions[f.default], `${name} has its default`)
 })
@@ -83,7 +84,7 @@ test('every version file on disk is in the index, every default exists and has t
 
 test('textOf reads the active text: the card guide is skills/thimble/cards.md', () => {
   const t = textOf('cards', ROOT, {})
-  assert.equal(t.id, 'forms:v4')
+  assert.equal(t.id, 'forms:v5')
   assert.match(t.text, /^# The card guide\n/)
   assert.equal(t.file, join(ROOT, 'skills/thimble/cards.md'))
 })

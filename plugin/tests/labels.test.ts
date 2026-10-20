@@ -249,7 +249,7 @@ test("the detail of a label's card: each example shows its labels; a number key 
   await pane($, clock)
   expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   const t = await pane($, clock)
-  expect(t).toContain('examples of apology = yes · 1 of 3')
+  expect(t).toContain('1 of 3')
   expect(t).toContain('I am sorry, I broke the build.')
   expect(t).toContain('apology: yes · model 0.90: says sorry')
   // the bar names the keys that check it, by the label's values
@@ -262,7 +262,7 @@ test("the detail of a label's card: each example shows its labels; a number key 
   const after = await pane($, clock)
   const checks = w.runs.filter(r => r.includes('--check')).map(r => r.slice(r.indexOf('label')).join(' '))
   expect(checks).toEqual(['label apology --check chat/room.jsonl#L1 yes --json', 'label apology --check chat/room.jsonl#L3 no --json'])
-  expect(after).toContain('· 3 of 3')
+  expect(after).toContain('3 of 3')
   // flipped back, the checked records say so
   await press($, clock, edit('['))
   expect(await pane($, clock)).toContain('apology: yes → you: no')
@@ -283,6 +283,6 @@ test('a label shows on what is drawn: the details of any card\'s part say how it
   await pane($, clock)
   expect(await press($, clock, edit('enter'))).toEqual({ text: '', cursor: 0 })
   const t = await pane($, clock)
-  expect(t).toContain('16 rows')
+  expect(t).not.toContain('16 rows')
   expect(t).toContain('label apology: 3 yes · 13 no')
 })

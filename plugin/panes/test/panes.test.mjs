@@ -153,7 +153,9 @@ test('detail: one page on both surfaces; the part selected and the bar are its s
   const d = run(PANES.detail, data, { state, surface: 'terminal' })
   assert.equal(d.selected, 'day-2026-06-18')
   const t = gridText(renderTerm(d, { w: 90 }))
-  assert.match(t, /examples of saves on Jun 18 · 1 of 3/)
+  assert.match(t, /Jun 18\n1 of 3\n/)
+  // no status lines: where its values come from, how many rows, how much was read are one key away (p)
+  assert.doesNotMatch(t, /examples of|files read|no records|from /)
   assert.match(t, /Hello agents/)
   // the terminal's ring on a part is the same selection the browser's click makes
   const ring = act(PANES.detail, data, {}, { type: 'focus', region: 'day-2026-06-18' }, 'terminal')
@@ -182,8 +184,9 @@ test('detail: what the card does is the host\'s (k.do): a version, the thread, c
   const both = act(PANES.detail, data, { bar: 'examples', prog: true }, keyEvent('esc'), 'terminal')
   assert.equal(both.state.prog, false)
   assert.equal(both.state.bar, 'examples')
+  // the details want the part's rows, and nothing about where the card's values come from
   const d = run(PANES.detail, data, { state: { region: 'day-2026-06-17', bar: 'details' } })
-  assert.ok(d.wants.some(w => w.request.facts === '01-saves'))
+  assert.ok(!(d.wants || []).some(w => w.request.facts))
 })
 
 // ---------------------------------------------------------------- the focus stack and the bar
@@ -273,7 +276,7 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   assert.match(gridText(renderTerm(full, { w: 70 })), /Jun 18 6,543/)
   // letters for what the person does, so the line reads as words, never as a number: a asks, o opens the first citation
   // inside the card (2–9 still open them, unnamed)
-  assert.equal(barText([full]), 'a ask · o open A · 0 close · ] next')
+  assert.equal(barText([full]), '↵ e expand · a ask · o open A · 0 close · ] next')
   // o opens the first citation inside the card over it; 0 goes back to the card under it
   const opened = act(PANES.tray, data, { stack: [f0] }, keyEvent('o'), 'terminal', { got, w: 70 })
   assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('2'), 'terminal', { got, w: 70 }).state.stack.at(-1), { kind: 'cite', ref: 'q1#user=A@n', label: 'A' })
@@ -290,7 +293,7 @@ test('tray: a mark is a frame that carries what it shows; the card comes from th
   const withThread = PANES.tray.data({ threads: [{ key: 'mark-r1-q3-day-2026-06-18-n', turns: [{ role: 'person', text: 'why so high?' }] }] })
   const t = run(PANES.tray, withThread, { state: { stack: [f0] }, w: 70, got })
   assert.match(gridText(renderTerm(t, { w: 70 })), /↳ thread: why so high\? · a opens it/)
-  assert.equal(barText([t]), 'a thread · o open A · 0 close · ] next')
+  assert.equal(barText([t]), '↵ e expand · a thread · o open A · 0 close · ] next')
 })
 
 test('tray: a citation opens on its most readable form; each section the card names (r rows, c code) is a key away in the same panel, never shown first', async () => {
@@ -304,14 +307,14 @@ test('tray: a citation opens on its most readable form; each section the card na
   const shown = gridText(renderTerm(full, { w: 70 }))
   assert.match(shown, /day 06-18 6,543/)
   assert.doesNotMatch(shown, /tally|L28/)
-  assert.equal(barText([full]), 'a ask · r rows · c code · 0 close · ] next')
+  assert.equal(barText([full]), '↵ e expand · r rows · c code · a ask · 0 close · ] next')
   // c shows the code in place of the card, in the same panel; the frame says which; c again or 0 brings the card back
   const code = act(PANES.tray, data, { stack: [f0] }, keyEvent('c'), 'terminal', { got, w: 70 })
   assert.equal(code.state.stack.at(-1).open, 'code')
   const drawn = run(PANES.tray, data, { state: code.state, w: 70, got })
   assert.match(gridText(renderTerm(drawn, { w: 70 })), /6,543.*cite · code[\s\S]*tally\(df, "day"\)/)
   assert.doesNotMatch(gridText(renderTerm(drawn, { w: 70 })), /day 06-18 6,543/)
-  assert.equal(barText([drawn]), 'a ask · r rows · c code · 0 back · ] next')
+  assert.equal(barText([drawn]), '↵ e expand · r rows · c code · a ask · 0 back · ] next')
   assert.equal(act(PANES.tray, data, code.state, keyEvent('c'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('0'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, null)
   assert.equal(act(PANES.tray, data, code.state, keyEvent('r'), 'terminal', { got, w: 70 }).state.stack.at(-1).open, 'rows')

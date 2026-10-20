@@ -132,7 +132,7 @@ test('a card made and saved again in one turn, a re-save after a citation that d
   await drawn($, clock, reply)
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
   const t = await drawn($, clock, PANE)
-  expect(t).toContain('card:01-orchard')
+  expect(t).toContain('Trees per row')
   // (the title names its version for the test; the header names none)
   expect(t).not.toMatch(/\bv\d\b(?!\))|edited/)
   expect(textOf(await $.ui.render(HINT))).not.toMatch(/\bh (earlier|newest|versions)/)

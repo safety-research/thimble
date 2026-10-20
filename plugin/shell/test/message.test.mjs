@@ -3,8 +3,8 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { drawnCard, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
-import { anchorTerm, blocks, findTerm, glossesOf, inLinkWords, inline, linkMarks, looseOf, marksIn, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
+import { citeCard, citeWords, drawnCard, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
+import { anchorTerm, blocks, findTerm, glossesOf, headsOf, inLinkWords, inline, linkMarks, looseOf, marksIn, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
@@ -132,7 +132,7 @@ const draw = (part, w = 90, h = 9) => { const d = runProgram(part, { w, h }); as
 // code, or a record as the file holds it are sections a key away in the same panel, never shown first.
 const sectionText = (card, id) => card.sections.find(x => x.id === id).parts.map(p => gridText(draw(p, 90, 20))).join('\n')
 
-test("a number from a query opens as the query's output table, its row and cell marked, with how many rows stand behind the cell; the rows and the code are sections", () => {
+test("a number from a query opens as the query's output table, its row and cell marked, and no lines about where it comes from; the rows and the code are sections", () => {
   const query = { id: 'q3', about: 'notes per day', keys: ['day'], code: 'df = load("notes.jsonl")\ntally(df, "day")\n', lineage: 'exact', inputs: [{ path: 'notes.jsonl', rows_read: 9120 }], table: [['06-16', 1546], ['06-17', 870], ['06-18', 132], ['06-19', 322], ['06-20', 558], ['06-21', 500], ['06-22', 5], ['06-23', 7], ['06-24', 9]].map(([day, n]) => ({ day, n })) }
   const resolved = { count: 132, rows: ['notes.jsonl#L1-132'], chain: [{ step: 'query', id: 'q3', about: 'notes per day' }], records: [{ ref: 'notes.jsonl#L40', text: 'user: bot-7, label: note', words: 'the totals do not match', meta: 'bot-7 · note' }] }
   const card = sourceCard({ ref: 'q3#day=06-18@n', label: '132 notes', query, resolved })
@@ -142,7 +142,8 @@ test("a number from a query opens as the query's output table, its row and cell 
   assert.match(text, /day +n/, 'the table has its header')
   assert.match(text, /▌ +06-18 +132/, 'the cited row is marked')
   assert.match(text, / {2}06-17 +870/)
-  assert.match(text, /132 rows behind it · notes\.jsonl/)
+  // where the value comes from is the code section's: no "rows behind it", no "rows 1–9 of 9" on the card
+  assert.doesNotMatch(text, /behind it|rows \d+–\d+ of/)
   assert.doesNotMatch(text, /tally|notes\.jsonl#L40/, 'neither the code nor the rows show first')
   assert.ok(g.h <= 9)
   // the cited cell is lit: the accent, in bold
@@ -166,14 +167,14 @@ test('a query whose output is one value opens as the value and one line on what 
   const query = { id: 'q5', about: 'saves in all', keys: [], table: [{ value: 14591 }], code: 'len(load("edits.jsonl"))' }
   const card = sourceCard({ ref: 'q5#row=1@value', label: '14,591 saves', query, resolved: { count: 14591, rows: ['edits.jsonl#L1-14591'], records: [], chain: [{ step: 'query', id: 'q5', value: 14591 }] } })
   const text = gridText(draw(card.parts[0]))
-  assert.match(text, /^14,591\nq5 · saves in all\n14,591 rows behind it · edits\.jsonl/)
+  assert.match(text, /^14,591\nq5 · saves in all$/)
   assert.deepEqual(card.sections.map(x => x.key), ['r', 'c'])
 })
 
 test('a sparkline opens as its series, a small table when it is short and a plot when it is long', () => {
   const short = { id: 'q3', about: 'notes per day', keys: ['day'], table: [{ day: '06-16', n: 4 }, { day: '06-17', n: 9 }] }
   const card = sourceCard({ ref: 'q3@n', label: 'sparkline', query: short, resolved: { count: 13, rows: ['notes.jsonl#L1-13'], records: [] } })
-  assert.match(gridText(draw(card.parts[0])), /notes per day\n06-16 ▆+ +4\n06-17 ▆+ +9\n13 rows behind it · notes\.jsonl/)
+  assert.match(gridText(draw(card.parts[0])), /notes per day\n06-16 ▆+ +4\n06-17 ▆+ +9$/)
   const long = { ...short, table: Array.from({ length: 30 }, (_, i) => ({ day: `d${i}`, n: i * i })) }
   const plot = gridText(draw(sourceCard({ ref: 'q3@n', label: 'sparkline', query: long, resolved: { count: 9, rows: [], records: [] } }).parts[0]))
   assert.match(plot, /^notes per day · 30 values of n\n/)
@@ -222,14 +223,14 @@ test('a line of a code file opens its lines with the cited one marked, and needs
   assert.match(bad, /q9#row=1@n does not resolve: no query q9/)
 })
 
-test('a value of a card opens the card itself, its part that holds the value marked, with the value and the rows behind it', () => {
+test('a value of a card opens the card itself, its part that holds the value marked, with the value; the rows behind it are a section', () => {
   const object = { id: '03-saves', title: 'Saves per day', program: "return k.stack(data.days.map(d => k.region('day-' + d.day, { ref: d._ref }, k.text(d.day + ' ' + d.n))))", data: { days: [{ day: '06-17', n: 870, _ref: 'q1#day=06-17' }, { day: '06-18', n: 132, _ref: 'q1#day=06-18' }] } }
   const resolved = { count: 132, rows: ['notes.jsonl#L1-132'], records: [], chain: [{ step: 'object', id: '03-saves', title: 'Saves per day', at: '/days/1/n', value: 132, marks: ['obj:03-saves#/days/1/n', 'obj:03-saves#/days/1', 'q1#day=06-18'] }] }
   const card = sourceCard({ ref: 'obj:saves#/days/1/n', label: '132', resolved, object })
   assert.equal(card.parts[0].program, object.program)
   assert.equal(card.parts[0].id, '03-saves')
   assert.deepEqual(card.mark, ['obj:03-saves#/days/1/n', 'obj:03-saves#/days/1', 'q1#day=06-18'])
-  assert.match(gridText(draw(card.parts[1])), /value 132 at \/days\/1\/n\n132 rows behind it · notes\.jsonl/)
+  assert.match(gridText(draw(card.parts[1])), /^value 132 at \/days\/1\/n$/)
   assert.equal(card.right, 'cite · Saves per day')
   assert.deepEqual(card.sections.map(x => x.id), ['rows', 'code'])
 })
@@ -255,7 +256,7 @@ test('a card is drawn with its sections at once; a section that fails says so in
   assert.equal(failed.problem, 'the card could not be drawn: no node')
 })
 
-test("a gloss's explainer card: what it is, its drawing, where it mattered, each citation a nested mark with its digit", () => {
+test("a gloss's explainer card: what it is, its drawing, where it mattered, each citation a nested mark as a citation looks in the answer", () => {
   const gloss = { term: 'fixture scope', body: 'How long pytest keeps one fixture object. Every test inside that span gets the **same** object.', here: 'In r17, [conftest.py:14](tests/conftest.py#L14) set "module"; the cart turned up at [step 1,812](runs/r17.jsonl#L1812).', program: "return k.beside(k.text('**module** {dim:one cart per file}'), k.text('**default** {dim:a cart per test}'), { gap: 4 })" }
   const card = explainerCard({ gloss })
   assert.deepEqual(card.links.map(l => l.ref), ['tests/conftest.py#L14', 'runs/r17.jsonl#L1812'])
@@ -263,7 +264,11 @@ test("a gloss's explainer card: what it is, its drawing, where it mattered, each
   const text = card.parts.map(p => gridText(draw(p))).join('\n')
   assert.match(text, /gets the same\s+object/)
   assert.match(text, /module one cart per file {4}default a cart per test/)
-  assert.match(text, /conftest\.py:14² set "module"; the cart turned up at step 1,812³/)
+  assert.match(text, /conftest\.py:14 set "module"; the cart turned up at step 1,812\./)
+  // no digits: the words are the citation, in the cite tone and underlined, as in the answer
+  assert.doesNotMatch(text, /[²³⁴]/)
+  assert.ok(draw(card.parts[2]).regions.length === 2)
+  assert.deepEqual([...new Set(draw(card.parts[2]).rows.flat().filter(c => c.ref).map(c => c.tone))], ['cite'])
   // the nested marks are parts of the drawing a press reaches
   const here = draw(card.parts[2])
   assert.deepEqual(here.regions.map(r => r.id).sort(), ['n1', 'n2'])
@@ -380,4 +385,34 @@ test('an explain finds its term written with backticks, or in part as code, and 
   const runs = inline(text, 0, text.length, rec.marks)
   assert.deepEqual(runs.filter(r => r.mark !== undefined).map(r => [r.s, rec.marks[r.mark].kind]), [['barEl()', 'gloss'], ['the narrow-bar rule in fitBar', 'cite']])
   assert.deepEqual(looseOf(rec.marks).map(m => [rec.glosses[m.gloss].term, m.inLink]), [['fitBar', true]])
+})
+
+test('a citation whose words name nothing shows the place it opens; a whole file opens at its top, with no line about rows', async () => {
+  assert.equal(citeWords('here', 'plugin/hooks/path.ts#L9-13'), 'plugin/hooks/path.ts:9-13')
+  assert.equal(citeWords('↗', 'plugin/hooks/path.ts'), 'plugin/hooks/path.ts')
+  assert.equal(citeWords('the hook', 'plugin/hooks/path.ts'), 'the hook')
+  assert.deepEqual(linkMarks('see [here](app/x.ts#L9) and [the hook](app/x.ts#L2)').map(m => m.label), ['app/x.ts:9', 'the hook'])
+  const file = 'line one\nline two\nline three'
+  const card = await citeCard({ ref: 'notes/prompt.md', label: 'the prompt', root: '/r', room: 9 }, { resolve: async () => ({ why: 'notes/prompt.md names a whole file, not rows of it' }), read: async p => (p === '/r/notes/prompt.md' ? file : '') })
+  const text = gridText(draw(card.parts[0]))
+  assert.match(text, /1 +line one\n2 +line two\n3 +line three/)
+  assert.doesNotMatch(JSON.stringify(card), /whole file|rows of it|behind/)
+  assert.equal(card.file.label, 'notes/prompt.md')
+})
+
+test('a heads-up is placed on its words and opens a card of its title, its points with citations, and what to do', () => {
+  const text = 'Refunds fell 40% in March, after the new policy.'
+  const h = headsOf({ term: 'fell 40% in March', title: 'March is half a month', bullets: ['[refunds.csv](refunds.csv) ends on Mar 14.', 'Per day they fell [12%](r4#month=03@per_day).'], todo: 'Quote the per-day drop.' }, text)
+  assert.deepEqual(Object.keys(h), ['h1'])
+  assert.equal(h.h1.kind, 'heads')
+  assert.deepEqual(h.h1.refs, ['refunds.csv', 'r4#month=03@per_day'])
+  assert.deepEqual(headsOf({ term: 'not in the text', bullets: ['x'] }, text), {})
+  assert.deepEqual(headsOf({ term: 'fell 40% in March', bullets: [] }, text), {})
+  const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: h })
+  assert.equal(at(text, rec.marks.find(m => m.kind === 'gloss')), 'fell 40% in March')
+  const card = explainerCard({ gloss: h.h1 })
+  assert.equal(card.right, 'heads up')
+  const drawn = gridText(draw(card.parts[0]))
+  assert.match(drawn, /March is half a month\n• refunds\.csv ends on Mar 14\.\n• Per day they fell 12%\.\n→ Quote the per-day drop\./)
+  assert.deepEqual(card.links.map(l => l.ref), ['refunds.csv', 'r4#month=03@per_day'])
 })

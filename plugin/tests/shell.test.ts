@@ -301,7 +301,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   // the tray's keys are in the bar under it, not on its frame
   expect(card.split('╯')[0]).not.toContain('a ask')
   // with the keys of the card's sections: the rows behind the value, and its code
-  expect(await hintOf($)).toContain('thimble  a ask · r rows · c code · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  ↵ e expand · r rows · c code · a ask · 0 close · ] next')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
 })
@@ -322,15 +322,15 @@ test('a quote opens its span under a link to its file, drawn as Claude Code draw
     // the cited row in full, the quoted words in their field, the row before it stepped back
     expect(textOf(band)).toContain('27 an earlier save / 28 ▌ change_summary: the totals do not match')
     // the file, as a link Claude Code's own Markdown draws: an OSC 8 hyperlink to the file, its line as the fragment
-    expect(markdowns(band)).toContain('↗ [revisions.jsonl:28](file:///data/revisions.jsonl#L28)')
-    expect(await hintOf($)).toContain('thimble  a ask · c raw · 0 close · ] next')
+    expect(markdowns(band)).toContain('[revisions.jsonl:28](file:///data/revisions.jsonl#L28)')
+    expect(await hintOf($)).toContain('thimble  ↵ e expand · c raw · a ask · 0 close · ] next')
     // c: the record as the file holds it, in place of the span, in the same panel
     expect(await press($, clock, edit('c'))).toEqual({ text: '', cursor: 0 })
     let now = textOf(await $.ui.render(BAND))
     expect(now).toContain('revisions.jsonl:28, as the file holds it')
     expect(now).not.toContain('27 an earlier save')
     expect(now).toContain('cite · revisions.jsonl · raw')
-    expect(await hintOf($)).toContain('thimble  a ask · c raw · 0 back · ] next')
+    expect(await hintOf($)).toContain('thimble  ↵ e expand · c raw · a ask · 0 back · ] next')
     // 0 brings the span back; the tray stays open
     expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
     now = textOf(await $.ui.render(BAND))
@@ -484,7 +484,7 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  expect(await hintOf($)).toContain('thimble  a ask · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  ↵ e expand · a ask · 0 close · ] next')
   await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
   await press($, clock, edit('['))

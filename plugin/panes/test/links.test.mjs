@@ -33,7 +33,8 @@ test('in the detail a click on a link opens what it points at: a cite its rows, 
   assert.deepEqual(press('c1').state, { region: 'c1', ex: 0, bar: 'details' })
   assert.match(gridText(renderTerm(run(press('c1').state, null), { w: 90 })), /42 runs/)
   assert.deepEqual(press('ex1').state, { region: 'ex1', ex: 0, bar: 'examples' })
-  assert.match(gridText(renderTerm(run(press('ex1').state, null), { w: 90 })), /examples of runs that failed · 1 of 2/)
+  // the examples show as records, with their place among them, and no caption that repeats the part's label
+  assert.match(gridText(renderTerm(run(press('ex1').state, null), { w: 90 })), /1 of 2\n.*\n  ▸ run 7/)
   // a knob: on with a click on its right half (or words that point at it), back with one on its left half
   assert.deepEqual(press('page').effects, [{ state: { page: 2 }, knob: 'page', do: 'card' }])
   assert.deepEqual(press('page', -1, { region: 'b2' }).effects.length, 1)

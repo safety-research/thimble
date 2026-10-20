@@ -57,6 +57,7 @@ import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } fr
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
 import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
+import { expandGloss } from './expand'
 import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
@@ -1281,7 +1282,9 @@ async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
   if (t) await $.state.get({ plugin: 'thimble', key: 'thread', id: threadKeyOf(t.scope) })
   const { Box } = $.ui.resolve(e) as Any
   const link = await trayFileLink($, e, trayTop(tray) as TrayFrame)
-  return Box({ marginLeft: 2, flexDirection: 'column', children: [await paneEl($, e, 'tray', {}, { w, h: 14 }), ...(link ? [link] : [])] })
+  // an explainer may carry a picture beside its words: it takes a few more rows than a citation's card
+  const h = (trayTop(tray) as TrayFrame).kind === 'gloss' ? 22 : 14
+  return Box({ marginLeft: 2, flexDirection: 'column', children: [await paneEl($, e, 'tray', {}, { w, h }), ...(link ? [link] : [])] })
 }
 
 /** Under a citation of rows of a file, the file as a link that opens it, the way Claude Code links a file in a reply:
@@ -1289,12 +1292,14 @@ async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
  *  the terminal takes one (else the words, then the address). Null for any other frame, or a file not there. */
 async function trayFileLink($: Engine, e: Any, top: TrayFrame | null): Promise<Any | null> {
   if (!top || top.kind === 'gloss' || typeof top.ref !== 'string') return null
-  const link = fileLink(top.ref, await rootHere($))
+  // a file's place opens from the session's folder when there is no thimble/ folder yet (a codebase Claude only read)
+  const link = fileLink(top.ref, (await rootHere($)) || String(await $.session.cwd()).replace(/\/+$/, ''))
   if (!link || !(await $.fs.exists(link.path).catch(() => false))) return null
   const { Markdown } = $.ui.resolve(e) as Any
   if (!Markdown) return null
+  // the place as terminals and editors make it clickable (`plugin/shell/shell.tsx:2282`), and an OSC 8 link to the file
   const words = link.label.replace(/[[\]\\]/g, c => '\\' + c)
-  return Markdown({ key: 'tray-file', text: `↗ [${words}](${link.href})` })
+  return Markdown({ key: 'tray-file', text: `[${words}](${link.href})` })
 }
 
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
@@ -2496,6 +2501,34 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
   return false
 }
 
+/** The tray's frame `f` with `patch` laid over it, wherever it stands in the tray's stack. */
+async function patchTrayFrame($: Engine, f: TrayFrame, patch: Partial<TrayFrame>): Promise<void> {
+  const stack = ((await $.state.get(TRAY)).value as Tray | null)?.stack ?? []
+  await patchPaneState($, 'tray', {}, { stack: stack.map(x => (x === f || (x.row === f.row && x.i === f.i) ? { ...x, ...patch } : x)) })
+}
+
+/** An explainer written again at more length (expand.ts), shown in the side panel in place of the short one; from the
+ *  tray, the tray gives way to it, or shows it in place when the terminal has no room for the panel. A failure says
+ *  why in the tray's place, with the key that tries again. */
+async function expandFrame($: Engine, f: TrayFrame, fromTray: boolean): Promise<string | void> {
+  // a citation: its whole source (a query's full output) in the side panel, with its thread
+  if (f.kind !== 'gloss') {
+    const placed = await openMarkSide($, { ...f, full: true }, { push: false })
+    if (placed && fromTray) await setTray($, null)
+    return
+  }
+  const g = await expandGloss($, f)
+  if (typeof g === 'string') {
+    if (fromTray) await patchTrayFrame($, f, { expanding: false })
+    return g
+  }
+  const next = { ...f, gloss: { ...(f.gloss || {}), ...g }, expanding: false } as TrayFrame
+  const placed = await openMarkSide($, next, { push: false })
+  if (!fromTray) return
+  if (placed) await setTray($, null)
+  else await patchTrayFrame($, f, { gloss: next.gloss, expanding: false })
+}
+
 /** An action a pane's program asked for (k.do). False: the terminal has none by that name. */
 export async function paneAction($: Engine, pane: string, _args: Record<string, unknown>, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
@@ -2509,6 +2542,8 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
       return
     }
     if (name === 'input') return
+    // e on an explainer: written again at more length in its place, then shown in the side panel, which has the room
+    if (name === 'expand' && a.frame && typeof a.frame === 'object') return expandFrame($, a.frame as TrayFrame, true)
   }
   if (pane === 'proposals') {
     if (name === 'close') { await setPick($, null); return }
@@ -2518,6 +2553,8 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
       return (await pickOption($, row, verb, a.choice)) ? undefined : '× That message is not in this session, so nothing ran. Press v under a message here.'
     }
   }
+  // e on an explainer in the side panel: written again at more length, in its place there
+  if (pane === 'mark' && name === 'expand' && a.frame && typeof a.frame === 'object') return expandFrame($, a.frame as TrayFrame, false)
   // ] and [ on a mark in the side panel: the next mark or card in its place
   if (pane === 'mark' && name === 'step') { await stepSide($, (_args.frame ?? null) as TrayFrame | null, Number(a.dir) < 0 ? -1 : 1); return }
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)

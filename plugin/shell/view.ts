@@ -19,11 +19,14 @@ type Any = any
 type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number }
 export type Theme = 'dark' | 'light'
 
-/** The marks' colors: a citation's indigo, a gloss's teal and its fill, per theme. */
+/** The marks' colors, per theme: a citation's indigo; an explained term as a highlighter pen marks it, dark text on a
+ *  light teal, and an important detail the same on a light orange, so both read in a light and a dark terminal; the
+ *  focused one a deeper shade of its own. `gloss` and `heads` are their frames' colors in the tray. */
 export function markColors(theme: Theme) {
+  const pen = { glossInk: '#10201e', glossBg: '#9fe0d5', focusGloss: '#4fc3b2', headsInk: '#2a1600', headsBg: '#ffcf94', focusHeads: '#f5a142' }
   return theme === 'light'
-    ? { cite: '#4f46e5', gloss: '#1f8a85', glossBg: '#dcefec', paper: '#ffffff', focusGloss: '#1f8a85' }
-    : { cite: '#a29bff', gloss: '#62d2c6', glossBg: '#173d3a', paper: '#1e1e1e', focusGloss: '#2a9d94' }
+    ? { cite: '#4f46e5', gloss: '#1f8a85', heads: '#c2610f', paper: '#ffffff', ...pen, glossBg: '#c4eee6', headsBg: '#ffe0b8' }
+    : { cite: '#a29bff', gloss: '#62d2c6', heads: '#f2a24b', paper: '#1e1e1e', ...pen }
 }
 
 /** A key's color in the bar: v's, s's and c's own, else the bar's blue. */
@@ -75,12 +78,14 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (m.kind === 'cite') {
     if (on) { p.backgroundColor = c.cite; p.color = c.paper } else { p.color = c.cite; p.underline = true }
   } else if (m.kind === 'gloss') {
-    if (on) { p.backgroundColor = c.focusGloss; p.color = c.paper } else { p.color = c.gloss; p.backgroundColor = c.glossBg }
+    const heads = o.rec.glosses?.[m.gloss as string]?.kind === 'heads'
+    p.color = heads ? c.headsInk : c.glossInk
+    p.backgroundColor = on ? (heads ? c.focusHeads : c.focusGloss) : heads ? c.headsBg : c.glossBg
   } else {
     p.color = on ? 'text' : 'inactive'
     if (on) p.backgroundColor = 'selectionBg'
   }
-  const label = m.kind === 'gloss' ? `explain ${r.s}` : m.kind === 'spark' ? `cite sparkline ${m.ref}` : `cite ${m.label}`
+  const label = m.kind === 'gloss' ? `${o.rec.glosses?.[m.gloss as string]?.kind === 'heads' ? 'heads up' : 'explain'} ${r.s}` : m.kind === 'spark' ? `cite sparkline ${m.ref}` : `cite ${m.label}`
   // the first run of a mark has a key of its own, `mk-<row>-<i>`, so the keys can scroll it into view
   const seen = (o as MessageOpts & { seen?: Set<number> }).seen
   const own = seen && !seen.has(r.mark as number) ? `mk-${o.rec.row}-${r.mark}` : key
@@ -289,7 +294,7 @@ export function trayEl(els: Any, o: TrayOpts): Any {
   const title = cutTo(o.title, Math.max(8, inner - 6))
   const fill = Math.max(1, o.w - 2 - 2 - width(title) - 1 - 2)
   const titleText = o.kind === 'gloss'
-    ? Text({ color: c.gloss, backgroundColor: c.glossBg, bold: true, children: title })
+    ? Text({ color: c.glossInk, backgroundColor: c.glossBg, bold: true, children: title })
     : Text({ color: c.cite, underline: o.kind === 'cite', bold: true, children: title })
   const top = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╭─ ' }), titleText, Text({ color: tone, children: ' ' + '─'.repeat(fill) + '─╮' })] })
   const bottom = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╰' + '─'.repeat(Math.max(1, o.w - 2)) + '╯' })] })

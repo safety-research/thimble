@@ -60,16 +60,24 @@
           ""
         ],
         [
-          "; and an optional \"program\" of at most six lines on thimble's drawing toolkit, only when a tiny drawing says it better than words.",
+          "; and an optional \"program\" on thimble's drawing toolkit.",
           ". thimble browser draws no \"program\", so give none."
         ],
         [
-          ", \"program\": \"<optional, at most six lines>\"",
+          ", \"program\": \"<optional>\"",
           ""
         ],
         [
           "(app/session.ts#L40-52)",
           "(app/session.ts#L40-L52)"
+        ],
+        [
+          ", \"program\": \"return k.beside(...[['server HTML', 'app/server.ts#L30-44'], ['hydrate()', 'app/main.ts#L18'], ['page responds', 'app/page.ts#L5-20']].map(([s, ref], i) => k.region('step-' + i, { label: s, ref }, k.frame(k.text(s), { tone: i === 1 ? 'explain' : 'dim' }))), { gap: 2 })\"",
+          ""
+        ],
+        [
+          " In the good ones, hydrate() is a step in a flow, which a picture shows at a glance; SuspenseBoundary reads well as words.",
+          ""
         ]
       ],
       "until": "<!-- digest -->"

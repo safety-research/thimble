@@ -21,15 +21,24 @@
 //   drawnCard(spec, draw)                           -> the card as a tray wants it: {title, right, drawings, sections:
 //       [{id, key, words, drawings}], mark, links, why, problem}, each part drawn by `draw(part)` (a host's sandbox)
 //   explainerCard({gloss})                          -> {title, right, parts, links}
-//       a gloss's card: what the term is, a tiny drawing when the observer gave a program, where it mattered here
+//       a gloss's card: what the term is, its picture when the observer drew one, where it mattered here; a gloss of
+//       kind 'heads' (an important detail) is a heads-up: its title, its bullets and what to do
 //   linksIn(markdown)                               -> the kernel refs a card's words cite, each a nested mark
 // A card is drawn part by part (`parts`, each a program and its data), a blank row between parts.
-// `links` are the nested marks a card holds, in reading order: [{id, ref, label}]. Their words carry a small digit
-// (² ³ ⁴), the key that opens one from an empty prompt; 1 is the tray's ask.
+// `links` are the nested marks a card holds, in reading order: [{id, ref, label}]. They look as a citation looks in the
+// answer (the cite tone, underlined), with no digit of their own: 2 opens the first, 3 the next, and a click opens any.
 import { citeRef } from './object.js'
 import { seriesRef } from './message.js'
 
-const SUP = ['¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹']
+const MAX_LINKS = 8
+// a citation's words that name nothing (a pronoun, an arrow): the place it opens is shown in their stead
+const VAGUE = /^(here|there|this|that|it|link|source|see|see here|see this|this line|these lines|this file|↗|→|\W*)$/i
+
+/** A citation's words as shown: its own words, or, when they name nothing, the place it opens (`path:12`). */
+export function citeWords(words, ref) {
+  const w = String(words ?? '').replace(/[*_`]/g, '').trim()
+  return VAGUE.test(w) ? placeOf(ref) : w
+}
 const CODE = /\.(py|pyi|js|mjs|cjs|jsx|ts|tsx|go|rs|java|kt|c|cc|cpp|h|hpp|rb|php|sh|bash|zsh|sql|r|jl|scala|swift|cs|lua|pl|toml|ya?ml|ini|cfg|conf|md|rst|txt|log|html|css|scss|vue|svelte|tf|dockerfile)$/i
 
 /** The keys of a citation card's sections, the same for every card: r the rows behind a value, c its code (or, for a
@@ -53,12 +62,13 @@ export function linksIn(md) {
   for (const m of String(md || '').matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
     const ref = citeRef(m[2])
     if (!ref || out.some(x => x.ref === ref)) continue
-    out.push({ id: `n${out.length + 1}`, ref, label: String(m[1]).replace(/[*_`]/g, '') })
+    out.push({ id: `n${out.length + 1}`, ref, label: citeWords(m[1], ref) })
   }
-  return out.slice(0, SUP.length - 1)
+  return out.slice(0, MAX_LINKS)
 }
 
-/** Card words with each nested mark as a toolkit link to its cite (`[words¹](#n1)`), other markup escaped. */
+/** Card words with each nested mark as a toolkit link to its cite in the cite tone (`{cite:[words](#n1)}`), as a
+ *  citation in the answer looks, other markup escaped. */
 export function linkedText(md, links) {
   const esc = s => String(s).replace(/`([^`\n]+)`/g, '$1').replace(/[\\{}[\]*]/g, c => '\\' + c)
   let out = ''
@@ -67,7 +77,7 @@ export function linkedText(md, links) {
   for (const m of s.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
     out += esc(s.slice(i, m.index)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
     const k = links.findIndex(x => x.ref === citeRef(m[2]))
-    out += k >= 0 ? `[${esc(String(m[1]).replace(/[*_`]/g, ''))}${SUP[k + 1]}](#${links[k].id})` : esc(m[1])
+    out += k >= 0 ? `{cite:[${esc(citeWords(m[1], links[k].ref))}](#${links[k].id})}` : esc(m[1])
     i = m.index + m[0].length
   }
   return out + esc(s.slice(i)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
@@ -128,7 +138,7 @@ for (const r of data.rows) {
   const gutter = k.text((r.hot ? '{accent:' : '{dim:') + k.escape(r.n.padStart(nw)) + '}' + (r.hot ? ' {accent:▌}' : '  '), { w: nw + 2, wrap: false })
   const body = r.hot
     ? k.stack(k.text(r.text || ' ', { max: data.hotMax }), r.meta ? k.text('{dim:' + k.escape(r.meta) + '}', { wrap: false }) : false)
-    : k.text('{dim:' + (r.text || ' ') + '}' + (r.meta ? '  {dim:' + k.escape(r.meta) + '}' : ''), { wrap: false })
+    : k.text((data.plain ? (r.text || ' ') : '{dim:' + (r.text || ' ') + '}') + (r.meta ? '  {dim:' + k.escape(r.meta) + '}' : ''), { wrap: false })
   parts.push(k.beside(gutter, body, { gap: 1 }))
 }
 if (data.more) parts.push(k.text('{dim:' + k.escape(data.more) + '}', { wrap: false }))
@@ -248,7 +258,7 @@ function spanPart(sp, room) {
   const hot = rows.filter(r => r.hot).length || 1
   const metas = rows.filter(r => r.hot && r.meta).length
   const hotMax = Math.max(1, Math.min(8, Math.floor((room - (rows.length - hot) - metas) / hot)))
-  const more = sp.cited > hot ? `${hot} of the ${fmtN(sp.cited)} cited ${sp.unit || 'row'}s` : ''
+  const more = sp.cited > hot ? `showing ${hot} of the ${fmtN(sp.cited)} ${sp.unit || 'row'}s it cites` : ''
   return { program: SPAN_PROGRAM, data: { rows, hotMax, more } }
 }
 
@@ -306,9 +316,9 @@ function rawSection(sp, room) {
 }
 
 /** How many rows stand behind a value, in one line: `6,543 rows behind it · revisions.jsonl`. */
-function behindLine(r, files) {
-  if (r.count != null && r.count > 0) return `**${fmtN(r.count)}** ${r.count === 1 ? 'row' : 'rows'} behind it${files ? ` {dim:· ${esc(files)}}` : ''}`
-  if (r.count == null && files) return `{dim:behind it: all of} ${esc(files)}`
+// where a value comes from (its rows, its files, its lineage) is the code section's, one key away: a card's own words
+// carry none of it
+function behindLine() {
   return ''
 }
 
@@ -334,7 +344,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   const about = query?.about ? esc(short(query.about, 80)) : ''
   if (kind === 'query' || kind === 'series') {
     const { table, cols, col, hot, keyCols, labelOf } = columnOf(query, ref)
-    const sections = [rowsSection(r, kind === 'series' ? 'the series' : 'this value', deep), codeSection(r, query, ref, deep)]
+    const sections = [...(r.count > 0 ? [rowsSection(r, kind === 'series' ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
     if (kind === 'series') {
       const rows = table.map(t => ({ label: short(labelOf(t), 24), value: typeof t[col] === 'number' ? t[col] : Number(t[col]) || 0 }))
       const labelW = Math.max(4, ...rows.map(x => x.label.length))
@@ -355,7 +365,8 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
     if (table.length > fit) start = Math.max(0, Math.min(table.length - fit, hot - Math.floor(fit / 2)))
     const win = table.slice(start, start + fit)
     const rows = win.map((t, j) => ({ cells: order.map(c => cellText(t[c])), hot: start + j === hot }))
-    const more = table.length > win.length ? `rows ${start + 1}–${start + win.length} of ${fmtN(table.length)}` : ''
+    // the rows around the cited one; the whole output is one key away (expand)
+    const more = ''
     return {
       title: label, right, sections, links: [],
       parts: [{ program: QUERY_PROGRAM, data: { about, cols: order.map(c => ({ label: short(c, 20), align: table.some(t => typeof t[c] === 'number') ? 'right' : 'left' })), rows, hotCol: order.indexOf(col), more, behind: behindLine(r, files) } }],
@@ -363,7 +374,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   }
   if (kind === 'object') {
     const step = (r.chain || []).find(c => c.step === 'object') || {}
-    const sections = [rowsSection(r, 'this value', deep), codeSection(r, null, ref, deep)]
+    const sections = [...(r.count > 0 ? [rowsSection(r, 'this value', deep)] : []), codeSection(r, null, ref, deep)]
     const value = 'value' in step ? `{dim:value} **${esc(short(typeof step.value === 'object' ? JSON.stringify(step.value) : step.value, 60))}**${step.at ? ` {dim:at ${esc(step.at)}}` : ''}` : ''
     if (object && typeof object.program === 'string' && object.program.trim()) {
       const parts = [{ program: object.program, data: object.data ?? {}, id: object.id || step.id }]
@@ -396,13 +407,26 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
  *  drawn one under the other with a blank row between: a drawing that fails leaves the words as they are. */
 export function explainerCard({ gloss }) {
   const g = gloss || {}
+  if (g.kind === 'heads') return headsCard(g)
   const links = linksIn(`${g.body || ''}\n${g.here || ''}`)
   const words = md => ({ program: WORDS_PROGRAM, data: { text: linkedText(md, links), links: links.filter(l => String(md).includes(`(${l.ref})`)) } })
   const parts = [words(g.body || g.title || '')]
   if (typeof g.program === 'string' && g.program.trim()) parts.push({ program: g.program, data: g.data && typeof g.data === 'object' ? g.data : {}, pic: true })
   if (g.here) parts.push(words(g.here))
-  return { title: g.term || g.title || 'explain', right: 'explain', parts, links }
+  return { title: g.term || g.title || 'explain', right: g.expanded ? 'explain · expanded' : 'explain', parts, links }
 }
+
+/** An important detail's card (a gloss of kind 'heads'): its title, two to four bullets with their citations, and one
+ *  line on what to do, as a "heads up" note reads. */
+function headsCard(g) {
+  const bullets = (Array.isArray(g.bullets) ? g.bullets : []).filter(x => typeof x === 'string' && x.trim()).slice(0, 4)
+  const links = linksIn([...bullets, g.todo || ''].join('\n'))
+  const md = [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', ...bullets.map(x => `• ${x}`), g.todo ? `→ ${g.todo}` : ''].filter(Boolean).join('\n')
+  return { title: g.term || g.title || 'heads up', right: 'heads up', parts: [{ program: WORDS_PROGRAM, data: { text: linkedText(md, links), links } }], links }
+}
+
+/** A citation of a whole file: a path with no `#`, not a query's or a card's value. */
+export const wholeFile = ref => { const r = String(ref || ''); return !!r && !r.includes('#') && !/^([qr]\d+(@|$)|obj:|card:)/.test(r) && /\.[A-Za-z0-9]{1,10}$/.test(r) }
 
 /** A citation's card, its inputs read through `io` ({resolve(ref, n, label), read(path)}): the ref resolved (a series
  *  by its query), the query's record, the object's record for a value of a card, the code file's lines. */
@@ -422,6 +446,18 @@ export async function citeCard({ ref, label, root, room = 9 }, io) {
   }
   let lines
   const path = ref.split('#')[0]
+  // a whole file (`plugin/prompts/context/v1.md`): its top, read as it is, as a citation of its lines shows them
+  if (wholeFile(ref)) {
+    try {
+      const all = String(await io.read(path.startsWith('/') ? path : `${root}/${path}`)).split('\n')
+      const top = all.slice(0, room).map((text, i) => ({ n: i + 1, text: String(text).replace(/\t/g, '    ').slice(0, 300), hot: false }))
+      const more = all.length > top.length ? `the first ${top.length} of its ${fmtN(all.length)} lines` : ''
+      const file = fileLink(ref, root)
+      return { title: label, right: `cite · ${short(path, 40)}`, parts: [{ program: SPAN_PROGRAM, data: { rows: top.map(r => ({ ...r, n: String(r.n), text: esc(r.text) })), hotMax: 1, more, plain: true } }], sections: [], links: [], ...(file ? { file } : {}) }
+    } catch {
+      // a file it cannot read: the kernel's card, below
+    }
+  }
   if (cardKind(ref) === 'code' && !resolved?.span) {
     const m = /#L(\d+)(?:-L?(\d+))?$/.exec(ref)
     const a = Number(m?.[1] || 1)

@@ -1,6 +1,6 @@
 // detail.js: the card detail, a program on the card runtime (draw/kit.js) over the card Claude saved: its object, its
 // versions and its drawing (run by the host in the card's own sandbox, at the detail's width, with the card's state).
-// "Overview first, zoom and filter, details on demand": a header (the title, the card's id, "edited"), the takeaway with
+// "Overview first, zoom and filter, details on demand": a header (the title, "edited"), the takeaway with
 // its citations, the card enlarged with its parts, and a bar under it that starts empty and fills on demand with the
 // selected part's details (its claim and where it comes from) and its examples, labelled with what they are examples
 // of. The program the card is behind p. The card's thread is the host's: in the terminal the side panel draws it under
@@ -18,7 +18,7 @@
 //   events: focus (the ring on a part), press (a part; the selected one opens its details; a version; a knob's ◂ ▸)
 //   asks of the host: card {state} (a knob of the card turned), version {v}, close,
 //         check {label, ref, value} (the person's check of a record's label value)
-//   wants: {rows: refs} (the rows behind the selected part), {facts: id} (where the card's values come from),
+//   wants: {rows: refs} (the rows behind the selected part),
 //          {labels: refs, gen} (the labels of the examples shown, read again after each check)
 //
 // Labels: each example shows the values labels gave it (`thimble label`), and the details say how the part's rows
@@ -27,7 +27,7 @@
 // beside the value the label gave, counts in its place, and the examples step on to the next record.
 //
 // The card's own keys and presses (its program's k.on) come before these: the host routes them to the card first.
-import { barAfter, cycleKnob, examplesView, exampleSet, fromLine, linkRuns, namedKnob, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
+import { barAfter, cycleKnob, examplesView, exampleSet, linkRuns, namedKnob, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
 import { pageId, pageOf, turn as turnKnob } from '../draw/handoff.js'
 import { chainWords, regionRefs } from '../shell/object.js'
 import { renderTerm } from '../draw/term.js'
@@ -226,7 +226,7 @@ export function program(k, data) {
 
   if (region) k.select(region)
 
-  // ---- the header: the title, the card's id and its versions
+  // ---- the header: the title, and "edited" or the version shown
   const W = Math.max(30, k.w)
   // no version numbers: a card the analyst asked to change says "edited", quietly; stepped back with h, where it stands
   const latestV = versions.length ? versions[versions.length - 1].v : null
@@ -234,18 +234,18 @@ export function program(k, data) {
   const where = !versions.length ? '' : !older ? '{dim:edited}' : at === 0 ? '{accent:as first made}' : at > 0 ? `{accent:after change ${versions[at].n}}` : '{accent:an earlier version}'
   const head = k.beside(
     k.text(`**${k.escape(data.title)}**`, { grow: 1, wrap: false }),
-    k.text(`{dim:card:${k.escape(cut(data.id, 30))}}`, { wrap: false }),
     where ? k.text(where, { wrap: false }) : false,
     { gap: 2 },
   )
-  // the takeaway: its citations of a part select that part (and the selected part's are bold)
+  // the takeaway: its citations look as citations do everywhere (the cite tone), and one of a part selects that part
+  // (the selected part's bold)
   const take = String(data.text || data.question || '').replace(/\s+/g, ' ').trim()
   const refsOf = id => data.refs[id] || []
   const takeaway = take ? k.text(linkRuns(take).map(r => {
     const s = k.escape(r.s)
     if (!r.link) return r.bold ? `**${s}**` : s
     const to = partOfLink(r.link, parts, refsOf)
-    return to ? (to === region ? `**[${s}](#${to})**` : `[${s}](#${to})`) : `{accent:${s}}`
+    return to ? (to === region ? `**{cite:[${s}](#${to})}**` : `{cite:[${s}](#${to})}`) : `{cite:${s}}`
   }).join('')) : false
 
   if (prog) return k.stack(head, takeaway, k.text(' '), programView(k, data, part, W))
@@ -350,34 +350,25 @@ function barView(k, data, part, bar, ex, W) {
   const refs = data.refs[part.id] || []
   const resolved = refs.length ? k.want({ rows: refs, n: 8 }) : null
   const chain = resolved ? chainWords(resolved) : null
-  const facts = k.want({ facts: data.id })
   const records = set ? set.records : chain && !chain.error ? chain.records : []
   const total = set ? (set.total ?? set.records.length) : resolved?.count ?? records.length
-  // the part's claim, where it comes from, and the filter the card has on
+  // the part's claim, and the filter the card has on; where its values come from is one key away (p, its program)
   const claim = String(cite?.text || part.label || part.id).replace(/\*\*/g, '')
-  const nrows = resolved?.count ?? (set ? set.total ?? set.records.length : cite ? (cite.rows?.length || 0) + (cite.more || 0) : null)
-  const segs = fromLine(facts && !facts.error ? facts : { sources: cite?.source ? [{ path: cite.source }] : [] }, { rows: nrows, ...(cite?.source && !facts ? { source: cite.source } : {}) })
   const filter = (data.controls || []).find(c => c.id === 'filter')
-  out.push(k.text(`**${k.escape(cut(claim, W))}**`, { wrap: false }))
-  const tone = t => (t === 'warn' ? 'warn' : t === 'unseen' ? 'unseen' : 'dim')
-  out.push(k.text(segs.map(x => (x.bold ? `**${k.escape(x.t)}**` : `{${tone(x.tone)}:${k.escape(x.t)}}`)).join('') + (filter && filter.i > 0 ? `{dim: · }{accent:filter on: ${k.escape(String(filter.shown[filter.i]))}}` : ''), { wrap: false }))
+  out.push(k.text(`**${k.escape(cut(claim, W))}**` + (filter && filter.i > 0 ? `{dim: · }{accent:filter on: ${k.escape(String(filter.shown[filter.i]))}}` : ''), { wrap: false }))
   // the labels that hold the part's rows, and how the rows split by each
   const split = resolved && !resolved.error ? splitWords(resolved.labels) : []
   if (split.length && bar !== 'examples') out.push(k.text(`{accent:label} ${split.map(x => k.escape(cut(x, W - 8))).join('{dim:  ·  }')}`, { wrap: false }))
   if (bar !== 'examples') return k.stack(out)
-  // what the examples are examples of: the examples' own label, else the part's claim
-  const of = String(set?.label || claim)
+  // its records: the examples the program attached, else the rows behind it; a part with none shows nothing
   const nrec = records.length
   const at = nrec ? (((ex % nrec) + nrec) % nrec) : 0
-  const pos = nrec ? `${at + 1} of ${n(total)}` : ''
-  out.push(k.text(' '))
-  out.push(k.text(`{accent:examples of ${k.escape(cut(of, W - pos.length - 16))}}${pos ? `{dim: · ${pos}}` : ''}`, { wrap: false }))
+  out.push(k.text(nrec > 1 ? `{dim:${at + 1} of ${n(total)}}` : ' ', { wrap: false }))
   const labels = labelsOf(k, data, records)
   const body = []
   if (!nrec) {
-    if (refs.length && !resolved) body.push(k.text('{dim:   reading the rows behind it…}'))
+    if (refs.length && !resolved) body.push(k.text('{dim:   reading its records…}'))
     else if (chain && chain.error) body.push(k.text(`{bad:   ${k.escape(chain.notes[0] || 'its rows could not be read')}}`))
-    else body.push(k.text('{dim:   ░ no records behind this part}'))
   } else {
     const view = examplesView(records, { at, fit: EXR - 1, fmt: set?.fmt, fields: part.fields ?? set?.fields })
     if (view.kind === 'table') {
