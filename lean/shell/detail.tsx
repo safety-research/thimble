@@ -29,11 +29,12 @@ import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
 import { barText, hostKeys } from '../panes/host.js'
 import { paintRegions } from './cells'
-import { askMerge, beganWord, examplesView, linkRuns, partsOf, versionsOf } from './carddetail.js'
+import { askMerge, beganWord, examplesView, linkRuns, PAGES_DEFAULT, partsOf, versionsOf } from './carddetail.js'
+import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
 import { browserOn, citeLabels, currentTheme, keysMoved, loadObject, openBrowser, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
-import { cardEvent, cardKey, ownState, pressTaken, readCardState, writeCardState } from './runtime'
+import { cardEvent, cardKey, noteSeen, ownState, pressTaken, readCardState, readSeen, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
 import { type KeyEdit, type KeyTurn } from './keys'
 import { paneFire, paneNow, paneRun, paneState, paneTakes, patchPaneState, setPaneState } from './panes'
@@ -45,6 +46,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Detail = Sel & { prog?: boolean; bar?: 'details' | 'examples' | null; ask?: CardAsk | null }
+type Undo = { state: Record<string, unknown> | undefined; region: string | null; pane: Record<string, unknown> }
 
 export const PANE = 'object'
 const SEL = { plugin: 'thimble', key: 'sel' } as const
@@ -66,7 +68,9 @@ let room = { w: 98, h: 32 }
 const kept = new Map<string, string>()
 const seeded = new Set<string>()
 const askedRegion = new Map<string, string>()
-let lastKey: { key: string; at: number; undo: Record<string, unknown> | null } | null = null
+// the key that acted last: what it changed, so a letter typed straight after it gives it back (it began a word); a
+// card's own key keeps the card's state and part from before it (`card`)
+let lastKey: { key: string; at: number; undo: Record<string, unknown> | null; card?: Undo } | null = null
 let viewing: string | null = null
 const latestSeen = new Map<string, number>()
 // the terminal's columns, as the last drawing measured them: the detail leaves the chat its share of them
@@ -213,8 +217,24 @@ async function current($: Engine): Promise<{ sel: Detail; p: Any } | null> {
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return null
   if (!drawn) { $.ui.invalidate('ui.render'); return null }
-  const p = await preparedNow($, sel, drawn.w, sel.state, 'detail', drawn.h)
+  // while it draws again (a page turned, every page at once), its last drawing answers
+  const p = (await shownCard($, sel, drawn.w, drawn.h)) ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   return p?.object ? { sel, p } : null
+}
+
+/** The knob whose pages the open card shows all at once, or null: its page knob, when the person chose all at once (a),
+ *  else as PAGES_DEFAULT says. */
+function allOf(sel: Detail, drawing: Any): string | null {
+  const pk = pageKnob(drawing)
+  return pk && (sel.pages ?? PAGES_DEFAULT) === 'all' ? pk.id : null
+}
+
+/** The card as the detail shows it, at `w` columns and `h` rows: one page, or every page at once (allOf). Null while
+ *  it draws. */
+async function shownCard($: Engine, sel: Detail, w: number, h: number): Promise<Any | null> {
+  const one = await preparedNow($, sel, w, sel.state, 'detail', h)
+  const all = one?.drawing && !one.error ? allOf(sel, one.drawing) : null
+  return all ? await preparedNow($, sel, w, sel.state, 'detail', h, all) : one
 }
 
 /** The card the detail's program reads (shell.tsx's paneStore 'card'): the object at the version shown, its versions,
@@ -223,15 +243,24 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.id !== id || sel.cite || sel.cites) return null
   const latest = await loadObject($, { id: sel.id, v: null, root: sel.root })
-  // while the card draws again (a knob turned, its state from the browser), the page keeps its last drawing
-  const fresh = await preparedNow($, sel, room.w, sel.state, 'detail', room.h)
+  // while the card draws again (a knob turned, its state from the browser, every page at once), the page keeps its last
+  // drawing
+  const fresh = await shownCard($, sel, room.w, room.h)
   if (fresh?.drawing && !fresh.error) lastCard = { key: `${sel.root}|${sel.id}|${sel.v ?? ''}`, p: fresh }
   const p = fresh ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   const object = p?.object ?? latest
   if (!object) return null
+  // the latest version drawn here is one the person saw; the header lists those, and the rest are drafts (h)
+  const v = sel.v ?? latest?.version ?? null
+  let seen = await readSeen($, sel.root, sel.id)
+  // (a card with no record, saved before records were kept, lists every version, as before)
+  if (seen && fresh?.drawing && !fresh.error && v != null && v === latest?.version && !seen.includes(Number(v))) {
+    await noteSeen($, sel.root, sel.id, v)
+    seen = [...seen, Number(v)]
+  }
   return {
     object, drawing: p ? (p.error ? { error: { name: 'Error', message: p.error } } : p.drawing) : null,
-    versions: versionsOf(latest), v: sel.v ?? latest?.version ?? null, state: ownState(sel.state),
+    versions: versionsOf(latest, seen), v, state: ownState(sel.state),
     thread: !!threadFor({ object: sel.id }), browser: browserOn(), labelGen: await labelGen($),
   }
 }
@@ -242,20 +271,27 @@ async function mirror($: Engine): Promise<void> {
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return
   const st = await paneState($, 'detail', { id: sel.id })
-  const region = typeof st.region === 'string' ? st.region : sel.region
-  const next: Detail = { ...sel, region, bar: (st.bar as Detail['bar']) ?? null, prog: !!st.prog, ex: Number(st.ex) || 0 }
+  const raw = typeof st.region === 'string' ? st.region : sel.region
+  // a part of one page of a card shown all at once is the card's own part with its knob at that page, and a page's
+  // heading is that page: so the rest of the shell (the rows read, a question, the card under the reply, the browser)
+  // reads the selection as the card's own, and the card under the reply turns to the page being read
+  const own = raw && pageOf(raw) ? ownPart(drawn?.card, raw) : { region: raw, state: null }
+  const region = own.region
+  const pages = st.pages === 'all' || st.pages === 'one' ? st.pages : sel.pages
+  const next: Detail = { ...sel, region, ...(own.state ? { state: { ...(sel.state || {}), ...own.state } } : {}), bar: (st.bar as Detail['bar']) ?? null, prog: !!st.prog, ex: Number(st.ex) || 0, ...(pages ? { pages } : {}) }
   if (JSON.stringify(next) === JSON.stringify(sel)) return
   await $.state.set(SEL, next)
+  const moved = JSON.stringify(next.state ?? {}) !== JSON.stringify(sel.state ?? {})
   if (region !== sel.region) {
     $.clock.after(0, () => { void select($, next).catch(() => undefined) })
     const t = threadFor({ object: sel.id })
     if (t && region) {
       const cur = await current($)
-      const label = String(drawn?.parts.find((x: Any) => x.id === region)?.label || region)
-      await noteSelection($, t.key, { region, label, refs: cur ? regionRefs(cur.p.object, cur.p.drawing, region).refs : [] })
+      const label = String(drawn?.parts.find((x: Any) => x.id === raw)?.label || region)
+      await noteSelection($, t.key, { region, label, refs: cur ? regionRefs(cur.p.object, cur.p.drawing, raw!).refs : [] })
     }
-    await writeCardState($, sel.root, sel.id, { state: next.state, region }, 'terminal')
   }
+  if (region !== sel.region || moved) await writeCardState($, sel.root, sel.id, { state: next.state, region }, 'terminal')
 }
 
 /** The detail's state changed elsewhere (the browser's run of the same program): the terminal follows it. */
@@ -322,17 +358,28 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
   const cur = await current($)
   if (!cur || !drawn) return
   const { sel, p } = cur
-  const got = await cardEvent($, p.object, sel, event, { w: drawn.w, h: drawn.h, browser: browserOn() })
+  // every page at once: the kit reads a page's part (`pg3~~x`) back as `x` on page 3
+  const ak = allKnob(p.drawing)
+  const got = await cardEvent($, p.object, sel, event, { w: drawn.w, h: drawn.h, browser: browserOn(), all: ak?.id ?? null })
   if (!got || got.drawing?.error) {
     $.ui.toast(`× The card could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return
   }
-  const region = typeof event.region === 'string' ? event.region : sel.region
+  const region = typeof event.region === 'string' ? ownPart(p.drawing, event.region).region : sel.region
   let next: Detail = { ...(sel as Detail), state: got.state, region, ex: 0 }
+  // the card's own key (or a press on a part of a page) turned the page of a card shown all at once: the page goes to
+  // that page's heading. A press on a part runs at the part's own page, which is no turn
+  const page = ak ? pageAt(ak, got.state?.[ak.id]) : 0
+  const from = pageOf(String(event.region ?? ''))
+  const was = ak && from && from.page >= 1 ? ak.values[from.page - 1] : sel.state?.[ak?.id ?? ''] ?? ak?.values[ak.i]
+  if (ak && JSON.stringify(got.state?.[ak.id]) !== JSON.stringify(was)) {
+    next = { ...next, region: null }
+    await patchPaneState($, 'detail', { id: sel.id }, { region: pageId(page, ''), ex: 0 })
+  }
   const ask = got.ask
   if (ask && ask.text) {
     const o = p.object
-    const refs = ask.refs?.length ? ask.refs : ask.region ? regionRefs(o, p.drawing, ask.region).refs : []
+    const refs = ask.refs?.length ? ask.refs : ask.region ? regionRefs(o, got.drawing, page ? pageId(page, ask.region) : ask.region).refs : []
     const r = await askThread($, { text: ask.text, scope: { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label }, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
     if (r.problem) $.ui.toast(`× ${r.problem}`)
   } else if (ask) next = { ...next, ask }
@@ -368,7 +415,8 @@ function syncCardState($: Engine, sel: Detail): void {
   const named = sel.region ?? null
   if (named && askedRegion.get(id) !== named) {
     askedRegion.set(id, named)
-    $.clock.after(0, () => { void (async () => { const st = await paneState($, 'detail', { id: sel.id }); if (st.region !== named) await patchPaneState($, 'detail', { id: sel.id }, { region: named, ex: 0 }) })().catch(() => undefined) })
+    // (the page's selection of a part of one of its pages, `pg3~~x`, names `x` already)
+    $.clock.after(0, () => { void (async () => { const st = await paneState($, 'detail', { id: sel.id }); const at = typeof st.region === 'string' ? ownPart(drawn?.card, st.region).region : null; if (st.region !== named && at !== named) await patchPaneState($, 'detail', { id: sel.id }, { region: named, ex: 0 }) })().catch(() => undefined) })
   }
   if (kept.get(id) === now) return
   kept.set(id, now)
@@ -421,7 +469,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   // the page beside its one-cell gutter, where the ring stands on the selected part's first row
   const d = await paneRun($, 'detail', { id: sel.id }, { w: C - 1, h: pageRows })
   const grid = renderTerm(d, { w: C - 1 })
-  const card = (await preparedNow($, sel, room.w, sel.state, 'detail', room.h)) ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
+  const card = (await shownCard($, sel, room.w, room.h)) ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   const parts = partsOf({ ...grid, regions: grid.regions.filter((r: Any) => !/^ver-\d+$/.test(r.id)) })
   const region = typeof d.selected === 'string' ? d.selected : null
   const part = parts.find((x: Any) => x.id === region) ?? null
@@ -437,7 +485,9 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     const top = bodyTop(part)
     const end = grid.h - rows
     // the bar is the page's last rows
-    const at = sel.bar && win.follow === 'bar' ? end : Math.max(0, Math.min(end, (top ? top.y : 0) - Math.floor(rows / 3)))
+    // a page's heading (every page at once) goes to the top, so the page reads from its start
+    const lead = part && pageOf(part.id)?.id === '' ? 0 : Math.floor(rows / 3)
+    const at = sel.bar && win.follow === 'bar' ? end : Math.max(0, Math.min(end, (top ? top.y : 0) - lead))
     from = Math.max(0, Math.min(end, at + win.by))
     win.by = from - at
   } else win.by = 0
@@ -499,10 +549,12 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
 function askLine($: Engine, els: Any, sel: Detail, part: Any, ind: string): Any {
   const { Input } = els
   const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : ''
+  const what = about ? cut(about, 40) : 'this card'
   const key = askKey()
   const base = { seen: draft }
   return Input({
-    key, placeholder: about ? `ask about ${cut(about, 40)}…` : 'ask this card…', value: draft, submitLabel: 'ask',
+    // what will happen, in plain words: the question is about this part, and its answer shows here, under the card
+    key, placeholder: `ask about ${what}${what.endsWith('…') ? '' : '…'} · the answer shows here`, value: draft, submitLabel: 'ask',
     // while a question is being typed, the field takes the ring when the pane takes the keyboard
     ...(isAsk(ringAt) ? { autoFocus: true } : {}),
     onInput: (v: string) => askTyped($, key, base, v),
@@ -590,8 +642,13 @@ export async function detailKeys($: Engine): Promise<string | null> {
   const d = await paneNow($, 'detail', { id: sel.id })
   // the card's keys that reach it here (Claude Code keeps ← and →, so the bar never names them), then the detail's
   const taken = hostKeys('detail', 'terminal')
-  const keys = barText([{ on: (drawn?.on || []).filter((h: Any) => !(String(h?.name) in taken)) }, d])
-  const ask = sel.ask ? `type to ask about ${cut(String(sel.ask.label), 40)}` : 'type to ask this card'
+  // (before the pane has drawn the card, the card as it draws now: the line draws again once it has)
+  const card = drawn?.card ?? (await shownCard($, sel, room.w, room.h))?.drawing ?? null
+  const keys = barText([{ on: (card?.on || []).filter((h: Any) => !(String(h?.name) in taken)), controls: card?.controls || [] }, d])
+  // what typing does, in plain words: a question about the selected part (or the card)
+  const part = drawn?.selected ? drawn.parts.find((x: Any) => x.id === drawn!.selected) : null
+  const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : 'this card'
+  const ask = `type to ask about ${cut(about, 40)}`
   const parts = keys.split(' · ').filter(Boolean)
   const esc = parts.findIndex(x => x.startsWith('esc '))
   if (esc >= 0) parts.splice(esc, 0, ask)
@@ -660,6 +717,14 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
     return { box: none, work: async () => {
       lastKey = null
       if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
+      // a card's own key (a page turned on n) goes back too: its state, its part, and the page's selection
+      if (back.card) {
+        const now = ((await $.state.get(SEL)).value as Detail | null) ?? sel
+        await $.state.set(SEL, { ...now, state: back.card.state, region: back.card.region })
+        await writeCardState($, sel.root, sel.id, { state: back.card.state, region: back.card.region }, 'terminal')
+        await setPaneState($, 'detail', { id: sel.id }, back.card.pane, 'terminal')
+        await mirror($)
+      }
       toAsk($, `${back.key}${typed}`)
     } }
   }
@@ -668,7 +733,14 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
   const own = cur ? cardKey(cur.p.drawing, k) : null
   if (own) {
     const region = cur!.sel.region
-    return { box: none, work: async () => { lastKey = null; await cardAct($, { type: 'key', key: own, ...(region ? { region } : {}) }); regrab($) } }
+    // what it changes goes back when a letter follows at once: the key began a question ("now…" on a card with n)
+    const undo: Undo = { state: cur!.sel.state, region: cur!.sel.region, pane: { ...(await paneState($, 'detail', { id: sel.id })) } }
+    return { box: none, work: async () => {
+      lastKey = null
+      await cardAct($, { type: 'key', key: own, ...(region ? { region } : {}) })
+      if (/^[a-z]$/.test(k)) lastKey = { key: k, at: now, undo: null, card: undo }
+      regrab($)
+    } }
   }
   // esc, ↑ and the like never reach here: Claude Code keeps them (the pane's close and ring do them)
   const ev = { type: 'key', key: k === 'enter' ? 'return' : k }
@@ -813,16 +885,21 @@ async function askCard($: Engine, text: string): Promise<string | null> {
   const p = await prepared($, sel, drawn?.w ?? room.w, sel.state, 'detail', drawn?.h ?? room.h)
   if (!p.object) return NO_CARD
   const o = p.object
-  // the part selected: the one the page shows selected (the program's), else the shell's record of it
-  const region = drawn && drawn.id === sel.id && drawn.selected ? drawn.selected : sel.region
-  const meta = region ? regionMeta(p.drawing, region) : null
-  const label = String(meta?.label || drawn?.parts.find((x: Any) => x.id === region)?.label || region || '')
+  // the part selected: the one the page shows selected (the program's), else the shell's record of it. On a card shown
+  // all at once it is a part of one page (`pg3~~x`): the thread hears of `x`, or of the page itself (its heading)
+  const shown = drawn && drawn.id === sel.id && drawn.card ? drawn.card : p.drawing
+  const raw = drawn && drawn.id === sel.id && drawn.selected ? drawn.selected : sel.region
+  const paged = raw ? pageOf(raw) : null
+  const region = paged ? ownPart(shown, raw).region : raw
+  const meta = raw ? regionMeta(shown, raw) ?? regionMeta(p.drawing, raw) : null
+  const label = String(meta?.label || drawn?.parts.find((x: Any) => x.id === raw)?.label || region || '')
   const row = ((await $.state.get({ ...WHERE, id: sel.id })).value as string | undefined) ?? undefined
   const ask = sel.ask || null
   const scope: Scope = ask
     ? { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label, ...(row ? { row } : {}) }
-    : { object: sel.id, v: o.version ?? sel.v, ...(region ? { region, label } : {}), ...(row ? { row } : {}) }
-  const refs = ask?.refs?.length ? ask.refs : ask?.region ? regionRefs(o, p.drawing, ask.region).refs : region ? regionRefs(o, p.drawing, region).refs : objectRefs(o).map((c: Any) => c.ref)
+    : { object: sel.id, v: o.version ?? sel.v, ...(region ? { region, label } : paged ? { label } : {}), ...(row ? { row } : {}) }
+  const rowsOf = (id: string) => { const a = regionRefs(o, shown, id).refs; return a.length ? a : regionRefs(o, p.drawing, region ?? id).refs }
+  const refs = ask?.refs?.length ? ask.refs : ask?.region ? regionRefs(o, p.drawing, ask.region).refs : region ? rowsOf(raw!) : objectRefs(o).map((c: Any) => c.ref)
   if (ask) await $.state.set(SEL, { ...sel, ask: null } as Detail)
   const r = await askThread($, { text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
   lastAbout = aboutOf(scope)

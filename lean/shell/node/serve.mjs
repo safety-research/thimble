@@ -60,6 +60,7 @@ import { basename, extname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fromFacts, isRef } from '../object.js'
 import { citeCard } from '../cards.js'
+import { versionsOf } from '../carddetail.js'
 
 export { fromFacts }
 import { listVerbs } from './registry.mjs'
@@ -455,8 +456,9 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/thi
       if (!file) return json({ error: `no object ${args[0]}` }, 404)
       const object = readJson(file)
       const latest = readJson(join(root, 'thimble', 'objects', `${args[0]}.json`)) || object
-      const versions = (latest.history || []).map(h => ({ v: h.v, at: h.at, change: h.change || null }))
-      if (!versions.length) versions.push({ v: latest.version, at: latest.updated || null, change: null })
+      // every version, each saying whether the person saw it (thimble/objects/.seen/<id>.json, shell/runtime.ts)
+      const seen = readJson(join(root, 'thimble', 'objects', '.seen', `${args[0]}.json`))
+      const versions = versionsOf(latest, Array.isArray(seen?.seen) ? seen.seen : null)
       // where the person left the card's interaction (either surface): thimble/objects/.state/<id>.json
       const state = readJson(join(root, 'thimble', 'objects', '.state', `${args[0]}.json`))
       return json({ object, versions, latest: latest.version, ...(state ? { state } : {}) })

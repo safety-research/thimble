@@ -10,8 +10,8 @@
 //   color; in the transcript it is the terminal's own. The selected region's text reads in the theme's text color.
 //   frame: a color for the card's own frame (its outer ╭─╮ │ ╰─╯ cells), as the card the keys act on is drawn
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
-//   a knob's dial (`label ◂ value ▸`, k.dial) is three Buttons: ◂ calls onPress(id, -1), ▸ onPress(id, 1), the rest
-//   onPress(id), so a click turns it where the person clicks
+//   a knob's dial (`label ◂ value ▸`, k.dial) is two Buttons, its halves: a click on the left half calls onPress(id, -1),
+//   on the right half onPress(id, 1), so a click anywhere on the dial turns it
 import { paintGrid } from '../draw/paint.js'
 import { hex, selectedColor, termColor } from '../draw/palette.js'
 
@@ -112,18 +112,17 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
     }
     return Box({ flexDirection: 'row', children: kids })
 
-    // a dial: ◂ turns it down, ▸ up, a press between them selects it
+    // a dial: a click on its left half turns it back one value, on its right half on one, so the whole dial is a
+    // target and ◂ ▸ say which half does what (a link to a knob in words, with no ◂ ▸, works the same)
     function dial(run: Seg[], id: string, label: string): Any[] {
-      const subs: Seg[] = []
-      for (const g of run) for (const piece of g.s.split(/([◂▸])/)) if (piece) subs.push({ ...g, s: piece })
-      const left = subs.findIndex(x => x.s === '◂')
-      const right = subs.map(x => x.s).lastIndexOf('▸')
-      const parts: [Seg[], number, string][] = left >= 0 && right > left
-        ? [[subs.slice(0, left + 1), -1, 'down'], [subs.slice(left + 1, right), 0, 'at'], [subs.slice(right), 1, 'up']]
-        : [[subs, 0, 'at']]
+      const cells: Seg[] = []
+      for (const g of run) for (const ch of Array.from(g.s)) cells.push({ ...g, s: ch })
+      const half = Math.ceil(cells.length / 2)
+      const join = (xs: Seg[]) => xs.reduce((acc: Seg[], c) => { const last = acc[acc.length - 1]; if (last && last.k === c.k) last.s += c.s; else acc.push({ ...c }); return acc }, [])
+      const parts: [Seg[], number, string][] = [[join(cells.slice(0, half)), -1, 'back'], [join(cells.slice(half)), 1, 'next']]
       return parts.filter(([xs]) => xs.length).map(([xs, turn, what]) => Button({
-        key: turn ? `t|${key}|${y}|${id}|${what}` : `r|${key}|${y}|${id}`, plain: true, label: turn ? `${label} ${what}` : label,
-        children: xs.map(text), onPress: () => (turn ? opts.onPress!(id, turn) : opts.onPress!(id)),
+        key: `t|${key}|${y}|${id}|${what}`, plain: true, label: `${label}: ${what}`,
+        children: xs.map(text), onPress: () => opts.onPress!(id, turn),
       }))
     }
   }
