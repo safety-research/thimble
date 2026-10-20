@@ -230,11 +230,19 @@ async function takeKeys($: Engine): Promise<void> {
 /** The input bar takes the keys now, holding what is typed in it so far (a thread opened to be asked). */
 export function focusEntry($: Engine): void {
   toAsk($, draft)
-  // a click that opened the panel (on the bar, on a reply) holds the keys a moment longer than the open: the keys are
-  // asked for again a little later, while the input bar does not have them
-  const retry = () => { if (isOpen && isAsk(ringAt) && landed !== askKey()) moveSoon($) }
+  // a click that opened the panel (on the bar, on a card in a reply) holds the keys a moment longer than the open, and
+  // can take them back after they landed: the keys are asked for again a little later, while the panel does not have
+  // them
+  const gen = moveGen
+  const retry = () => { void (async () => {
+    if (!isOpen || !isAsk(ringAt) || gen !== moveGen) return
+    const here = (await $.ui.panes().catch(() => [] as Any[])).find((x: Any) => x.id === PANE)
+    if (here && here.isFocused === false) landed = null
+    if (landed !== askKey()) moveSoon($)
+  })() }
   $.clock.after(250, retry)
   $.clock.after(900, retry)
+  $.clock.after(1600, retry)
 }
 
 async function closed($: Engine, keep = false): Promise<void> {
