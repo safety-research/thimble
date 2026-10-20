@@ -328,8 +328,10 @@ test('an explain whose term a rewrite left out stays as a loose mark after the t
 test('a model call that gave no answer is said as what happened, never as its code alone', async () => {
   const { modelWhy } = await import('../why.js')
   assert.equal(modelWhy({ isAnswered: true, text: 'x' }), '')
-  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: null, error: 'unknown' }), 'no reply came from the API (the connection or the sign-in failed)')
-  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed' }), 'the sign-in failed or expired')
+  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: null, error: 'unknown' }), 'no reply came from the API. Check the connection, or sign in again with /login')
+  // a failed sign-in says its fix: trying again cannot help until the person signs in
+  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed' }), 'the sign-in failed or expired. Sign in again with /login')
+  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: null, error: 'authentication_failed' }), 'the sign-in failed or expired. Sign in again with /login')
   assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded' }), 'the API is overloaded')
   assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: 418, error: 'unknown' }), 'the API answered with an error (HTTP 418)')
   assert.equal(modelWhy({ isAnswered: false, reason: 'empty-reply' }), 'the model answered with no text')

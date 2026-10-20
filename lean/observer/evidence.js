@@ -14,6 +14,8 @@
 //   pickHints(list, verbs)     -> the 2-3 verbs the observer chose for one object, checked against the verbs that exist
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
+// the statuses of `thimble coverage` that count as read
+const READ = new Set(['computed', 'read'])
 const cut = (s, n) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim()
   return t.length <= n ? t : t.slice(0, n - 1) + '…'
@@ -143,12 +145,22 @@ export function digest(object, o = {}) {
   if (rf.length) L.push(`  source rows behind its values: ${rf.slice(0, 6).map(([f, r]) => `${f} ${fmt(r.count)}`).join(', ')}`)
   const cov = lin.coverage || {}
   if (cov.files || cov.not_read) {
+    // read: a query loaded its rows, or some of its lines were in front of Claude (kernel/lineage.py coverage). A file
+    // searched, named or counted is not read (a snapshot saved before kept those out of not_read)
+    const st = cov.files || {}
     const by = {}
-    for (const [f, st] of Object.entries(cov.files || {})) (by[st] ??= []).push(f)
-    const parts = Object.entries(by).map(([st, fs]) => `${st} ${fs.length > 4 ? `${fs.length} files` : fs.join(', ')}`)
-    const nr = cov.not_read || []
-    const nn = cov.not_read_count ?? nr.length
-    if (nn) parts.push(`not read ${nn > 6 ? `${fmt(nn)} files, as ${nr.slice(0, 4).join(', ')}` : nr.join(', ')}`)
+    for (const [f, s] of Object.entries(st)) if (READ.has(s)) (by[s] ??= []).push(f)
+    const parts = Object.entries(by).map(([s, fs]) => `${s} ${fs.length > 4 ? `${fs.length} files` : fs.join(', ')}`)
+    const nr = [...new Set([...(cov.not_read || []), ...Object.keys(st).filter(f => !READ.has(st[f]))])]
+    const nn = Math.max(cov.not_read_count ?? 0, nr.length)
+    if (nn) {
+      const how = { named: 'only named or counted', searched: 'searched' }
+      const tag = f => (how[st[f]] ? ` (${how[st[f]]})` : '')
+      const kinds = Object.entries(how).map(([k, w]) => [w, nr.filter(f => st[f] === k).length]).filter(([, n]) => n)
+      parts.push(nn > 6
+        ? `not read ${fmt(nn)} files${kinds.length ? ` (${kinds.map(([w, n]) => `${fmt(n)} ${w}`).join(', ')})` : ''}, as ${nr.slice(0, 4).join(', ')}`
+        : `not read ${nr.map(f => f + tag(f)).join(', ')}`)
+    }
     L.push(`  when it was saved the session had: ${parts.join('; ')}`)
   }
   const dec = lin.declared ?? object.declared
@@ -216,7 +228,7 @@ export function slim(o) {
     ...pick(o, ['id', 'version', 'session', 'created', 'updated', 'title', 'question', 'text', 'hints', 'verb', 'declared']),
     lineage: {
       queries, bindings: (lin.bindings || []).slice(0, 20).map(b => pick(b, ['at', 'ref', 'query', 'lineage'])), cites, rows,
-      coverage: { files: cov.files || {}, not_read: (cov.not_read || []).slice(0, 30), not_read_count: (cov.not_read || []).length },
+      coverage: { files: cov.files || {}, not_read: (cov.not_read || []).slice(0, 30), not_read_count: Math.max((cov.not_read || []).length, cov.total?.not_read_files ?? 0) },
       declared: lin.declared, problems: (lin.problems || []).slice(0, 10),
       ...(lin.cites && lin.cites.length > 40 ? { cites_count: lin.cites.length } : {}),
     },
