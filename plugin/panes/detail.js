@@ -29,7 +29,7 @@
 //
 // The card's own keys and presses (its program's k.on) come before these: the host routes them to the card first.
 import { examplesView, exampleSet, linkRuns, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
-import { valueTone } from './labels.js'
+import { toneBeside } from './labels.js'
 import { subjectBlock } from './subject.js'
 import { pageId, pageOf, turn as turnKnob } from '../draw/handoff.js'
 import { chainWords, regionRefs } from '../shell/object.js'
@@ -192,7 +192,7 @@ export function program(k, data) {
   const labelRows = (data.labels || []).slice(0, 3).map((l, i) => [
     k.text('{dim:label }', { wrap: false }),
     k.region(`side:label:${i}`, { label: `the label ${l.name}` }, k.text(`**${k.escape(l.name)}**`, { wrap: false })),
-    ...(l.values || []).slice(0, 6).flatMap((v, j) => [k.text('  ', { wrap: false }), k.region(`side:label:${i}:${j}`, { label: `the records of ${l.name} that are ${v}` }, k.text(`{${valueTone(l.values, v)}:● ${k.escape(v)}}`, { wrap: false }))]),
+    ...(l.values || []).slice(0, 6).flatMap((v, j) => [k.text('  ', { wrap: false }), k.region(`side:label:${i}:${j}`, { label: `the records of ${l.name} that are ${v}` }, k.text(`{${toneBeside(l, v)}:● ${k.escape(v)}}`, { wrap: false }))]),
   ])
   const head = subjectBlock(k, {
     title: k.escape(cut(data.title, W - 4)),

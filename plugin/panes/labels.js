@@ -42,6 +42,42 @@ export function valueTone(values, v) {
   return i === 0 ? 'accent' : 'c' + ((i % 5) + 2)
 }
 
+// the tones that carry no color of their own (draw/palette.js)
+const PLAIN = /^(ink|paper|dim|unseen|rule)(-faint)?$/
+
+/** The tones a drawn card gives a label's values ({value: tone}): where a value first stands as a word of its own in
+ *  a color (a legend, a bar's name), not on a fill. Empty when the card colors none of them. */
+export function tonesIn(grid, values) {
+  const out = {}
+  const left = new Set((values || []).filter(v => typeof v === 'string' && v.trim()))
+  for (const row of (grid && grid.rows) || []) {
+    if (!left.size) break
+    let text = ''
+    const at = []
+    row.forEach((c, i) => { if (c && !c.cont) { for (const ch of String(c.ch || ' ')) { text += ch; at.push(i) } } })
+    for (const v of [...left]) {
+      let i = text.indexOf(v)
+      while (i >= 0) {
+        const before = text[i - 1]
+        const after = text[i + v.length]
+        const word = !(before && /[\p{L}\p{N}_]/u.test(before)) && !(after && /[\p{L}\p{N}_]/u.test(after))
+        const c = row[at[i]]
+        if (word && c && c.tone && !PLAIN.test(c.tone) && !c.bg) { out[v] = c.tone; left.delete(v); break }
+        i = text.indexOf(v, i + 1)
+      }
+    }
+  }
+  return out
+}
+
+/** A value's tone beside a card: the card's own color for it when the card colors the label's values (`tones`, from
+ *  tonesIn), plain for a value it leaves plain; else the label's (valueTone). */
+export function toneBeside(l, v) {
+  const t = (l && l.tones) || {}
+  if (Object.keys(t).length) return t[v] || 'ink'
+  return valueTone(l && l.values, v)
+}
+
 /** What made a label, in plain words. */
 export function madeBy(l) {
   const vs = l.values || []

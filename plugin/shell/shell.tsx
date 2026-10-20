@@ -2246,7 +2246,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const fw = frameWidth(outer, p.grid.w, o.title)
   const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: Math.min(rows, p.grid.h), color: ring })
   // the labels its data came through, beside it (labeluse.ts)
-  const used = await labelsRow($, els, `card-${ref.id}-${p.object?.version ?? ref.v ?? ''}`, [ref.id], ref.root)
+  const used = await labelsRow($, els, `card-${ref.id}-${p.object?.version ?? ref.v ?? ''}`, [ref.id], ref.root, { grid: p.grid })
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
     children: [body, ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],

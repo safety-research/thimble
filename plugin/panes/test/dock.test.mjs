@@ -12,6 +12,7 @@ import '../../draw/kit.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import PANES from '../index.js'
 import { barCells, mixCells, typeMix } from '../coverage.js'
+import { toneBeside, tonesIn } from '../labels.js'
 import { actionsOf, backOf, barText, keyEvent, nextState, takes } from '../host.js'
 
 const DK = globalThis.DrawKit
@@ -232,4 +233,21 @@ test('labels: a rule label says it was a rule, its pattern under Definition; one
   assert.match(one.text, /▎ ● fails/)
   const none = turn(PANES.labels, PANES.labels.data({ labels: { list: [] } }, {}, SIZE), {}, null)
   assert.match(none.text, /No labels here yet/)
+})
+
+test("a label beside a chart says its values in the chart's colors: where a value first stands as a word in a color, not on a fill; plain for one the chart leaves plain", () => {
+  const cell = (ch, tone, bg) => ({ ch, ...(tone ? { tone } : {}), ...(bg ? { bg } : {}) })
+  const row = (parts) => parts.flatMap(([text, tone, bg]) => [...text].map(ch => cell(ch, tone, bg)))
+  const grid = { rows: [
+    row([['Edits by ', 'ink'], ['agent', 'c3'], [' · ', 'dim'], ['person', 'c5'], [' · unclear', 'ink']]),
+    row([['agent 13,355', 'paper', 'c3'], [' agents', 'c4']]),
+  ] }
+  const tones = tonesIn(grid, ['agent', 'person', 'unclear'])
+  assert.deepEqual(tones, { agent: 'c3', person: 'c5' })
+  const l = { name: 'editor_kind', values: ['agent', 'person', 'unclear'], tones }
+  assert.deepEqual(['agent', 'person', 'unclear'].map(v => toneBeside(l, v)), ['c3', 'c5', 'ink'])
+  // a value only on a fill, or inside a longer word, is not the chart's color for it: the label's own colors then
+  const none = tonesIn({ rows: [row([['agent 3', 'paper', 'c3'], [' agents', 'c4']])] }, ['agent', 'person'])
+  assert.deepEqual(none, {})
+  assert.deepEqual(['agent', 'person'].map(v => toneBeside({ values: ['agent', 'person'], tones: none }, v)), ['accent', 'c3'])
 })

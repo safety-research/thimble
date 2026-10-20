@@ -393,7 +393,7 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
     object, drawing: p ? (p.error ? { error: { name: 'Error', message: p.error } } : p.drawing) : null,
     versions: editsOf(latest, await readEdits($, sel.root, sel.id)), v, state: ownState(sel.state), labelGen: await labelGen($),
     // the labels its data came through, named in its subject (labeluse.ts)
-    labels: (await cardLabels($, sel.id, object?.version ?? v, sel.root)) ?? [],
+    labels: (await cardLabels($, sel.id, object?.version ?? v, sel.root, p && !p.error ? p.grid : null)) ?? [],
   }
 }
 
