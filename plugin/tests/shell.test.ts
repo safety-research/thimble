@@ -290,7 +290,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   const cite = buttons(tree).find(b => b.props.label === 'cite 6,543 saves')!
   expect(cite).toBeDefined()
   expect(JSON.stringify(cite)).toContain('"underline":true')
-  expect(buttons(tree).map(b => b.props.label)).toEqual(['cite 6,543 saves', 'cite 4,219', 'cite this one'])
+  expect(buttons(tree).map(b => b.props.label).filter(l => l.startsWith('cite'))).toEqual(['cite 6,543 saves', 'cite 4,219', 'cite this one'])
   expect(markdowns(tree)).toEqual(['A plain closing line.'])
   // a press opens the tray on it: its source card, read through the kernel
   await ui.press({ key: cite.props.key })

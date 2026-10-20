@@ -150,7 +150,7 @@ test('under a reply: the dial turns where it is clicked, ] then . or n turn it t
   expect(JSON.parse(w.files[STATE]!).state).toEqual({ chapter: 1 })
   // ] gives the card the keys: the bar names them by what they do, and . and n turn it
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(HINT))).toContain('n next chapter · p previous chapter · o read all 3 chapters · ] next · 0 back')
+  expect(textOf(await $.ui.render(HINT))).toContain('n next chapter · p previous chapter · a ask · o read all 3 chapters · ] next · 0 back')
   expect(await press($, clock, edit('.'))).toEqual({ text: '', cursor: 0 })
   expect(JSON.parse(w.files[STATE]!).state).toEqual({ chapter: 2 })
   await clock.advance(1000)

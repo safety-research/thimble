@@ -83,8 +83,8 @@ export function firstMessage({ text, scope = {}, card = null, refs = [], root = 
     lines.push(`About: ${part}the card "${card.title || card.id}" (${card.id}@${card.v ?? card.version}, ${card.file || `thimble/objects/${card.id}.json`}).`)
   } else if (scope.mark) {
     const m = scope.mark
-    lines.push(m.kind === 'gloss' ? `About: the words "${m.term || m.label}" in Claude's message.` : `About: Claude's citation "${m.label || m.ref}" (${m.ref}).`)
-    if (m.kind === 'gloss' && about) lines.push(about)
+    lines.push(m.kind === 'gloss' ? `About: the words "${m.term || m.label}" in Claude's message.` : m.kind === 'passage' ? `About: this passage of Claude's message:` : `About: Claude's citation "${m.label || m.ref}" (${m.ref}).`)
+    if ((m.kind === 'gloss' || m.kind === 'passage') && about) lines.push(about)
   } else if (scope.pane) {
     // a pane of thimble's (coverage, a label, the claims): the part selected in it, and what the pane shows
     const part = scope.region ? `the part "${aboutOf(scope)}" (${scope.region}) of ` : ''

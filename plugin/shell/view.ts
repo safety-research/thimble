@@ -53,7 +53,13 @@ export type MessageOpts = {
   leadColor?: string | null
   /** the words' color where the terminal's own may not read (a pane's background: `text`) */
   ink?: string | null
+  /** the passages a side thread can be asked about: `has` says whether one has a thread already, `ask` starts it (or
+   *  opens it). Each row of blocks is a passage, a heading's its whole section */
+  passages?: { has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null
 }
+
+/** A passage of a message a side thread can be about: its words as written, and a few words naming it. */
+export type Passage = { text: string; label: string }
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
 function runText(els: Any, r: Run, dim = false, ink: string | null = null) {
@@ -105,10 +111,34 @@ function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] 
   return els.Box({ key, flexDirection: 'row', children: kids.map(k => (typeof k === 'string' ? els.Text({ children: k }) : k)) })
 }
 
-/** The 2 columns left of a reply: Claude Code's ● on the reply's first row, else blank. */
-function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'dark', leadColor?: string | null) {
+/** The 2 columns left of a reply: Claude Code's ● on the reply's first row, else blank. A passage's cell (`ask`): a
+ *  blue ↳ once a side thread was asked about it, which opens it; else a blue ? over the ● or the blank, shown only
+ *  while the pointer is over the passage's row (the row's keyed Box scopes the hover), which asks about it. The mark
+ *  takes the ●'s own cell, so it never adds indent. */
+function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'dark', leadColor?: string | null, ask?: { key: string; label: string; has: boolean; press: () => unknown } | null) {
   if (lead) return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: leadColor || keyColor('s', theme), children: lead })] })
-  return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ children: dot ? '●' : ' ' })] })
+  const glyph = els.Text({ children: dot ? '●' : ' ' })
+  if (!ask) return els.Box({ width: 2, flexShrink: 0, children: [glyph] })
+  const blue = keyColor('?', theme)
+  if (ask.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${ask.key}-asked`, plain: true, label: `open the thread about ${ask.label}`, onPress: ask.press, children: [els.Text({ color: blue, children: '↳' })] })] })
+  const q = els.Button({ key: `${ask.key}-ask`, plain: true, label: `ask about ${ask.label}`, onPress: ask.press, children: [els.Text({ color: blue, bold: true, children: '?' })] })
+  return els.Box({ width: 2, flexShrink: 0, children: [glyph, els.Box({ width: 1, display: 'none', hover: { display: 'flex' }, position: 'absolute', top: 0, left: 0, children: [q] })] })
+}
+
+/** A passage's few words: a heading's section by its heading, else its first words. */
+function passageLabel(text: string): string {
+  const first = text.split('\n')[0]!.trim()
+  const head = /^#{1,6}\s+(.*)$/.exec(first)
+  const words = (head ? head[1]! : first).replace(/[*_`#>]|\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/^\s*(?:[-+]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim()
+  const cut = [...words].length > 40 ? [...words].slice(0, 39).join('') + '…' : words
+  return head ? `the section "${cut}"` : `"${cut}"`
+}
+
+/** A heading's whole section: from the heading to the next heading of its level or above. */
+function sectionOf(text: string, bs: Any[], i: number): string {
+  let j = i
+  while (j + 1 < bs.length && !(bs[j + 1].type === 'heading' && bs[j + 1].level <= bs[i].level)) j++
+  return text.slice(bs[i].start, bs[j].end)
 }
 
 /** A block that holds marks, as lines laid out here. */
@@ -176,22 +206,31 @@ export function messageEl(els: Any, given: MessageOpts): Any {
   const rows: Any[] = []
   let dot = o.first
   let k = 0
-  const push = (content: Any[], gap: boolean) => {
-    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot, rows.length === 0 ? o.lead : null, o.theme, o.leadColor), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+  // a row's passage (its blocks i to j; a heading's, its whole section), when side threads can be asked about them
+  const passageOf = (i: number, j: number): Passage => {
+    const words = bs[i].type === 'heading' ? sectionOf(text, bs, i) : text.slice(bs[i].start, bs[j].end)
+    return { text: words, label: passageLabel(words) }
+  }
+  const push = (content: Any[], gap: boolean, p: Passage | null) => {
+    const key = `${o.key}-b${k++}`
+    const ask = p && o.passages ? { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p) } : null
+    rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot, rows.length === 0 ? o.lead : null, o.theme, o.leadColor, ask), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
   let i = 0
   while (i < bs.length) {
     const b = bs[i]
     if (marksIn(o.rec.marks, b.start, b.end).length) {
-      push(blockLines(els, o, text, b, `${o.key}-l${i}`, w), b.gap && i > 0)
+      push(blockLines(els, o, text, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i))
       i++
       continue
     }
-    // a run of blocks with no mark: Claude Code's own Markdown, whole
+    // a run of blocks with no mark: Claude Code's own Markdown, whole. Where passages can be asked about, a run is one
+    // passage: it ends at a blank line (but a list's items stay together) and before a heading
+    const joins = (a: Any, n: Any) => !o.passages || (n.type !== 'heading' && (!n.gap || (a.type === 'item' && n.type === 'item')))
     let j = i
-    while (j + 1 < bs.length && !marksIn(o.rec.marks, bs[j + 1].start, bs[j + 1].end).length) j++
-    push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0)
+    while (j + 1 < bs.length && !marksIn(o.rec.marks, bs[j + 1].start, bs[j + 1].end).length && joins(bs[j], bs[j + 1])) j++
+    push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0, passageOf(i, j))
     i = j + 1
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
