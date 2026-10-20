@@ -59,7 +59,7 @@ async def test_the_reader_runs_in_the_sandbox(folder):
     ws = make(folder)
     got = await views.run_reader(ws, "runs", folder, "records", {})
     assert got["ok"] and got["result"]["rows"][1]["outcome"] == "merged"
-    checked = await views.check(ws, "runs", folder)
+    checked = await views.check(ws, "runs", folder, page=False)
     assert checked["ok"], checked["lines"]
 
 
@@ -67,3 +67,17 @@ def test_the_builder_prompt_is_0_8s_with_the_listed_changes():
     text = views.builder_prompt(Path("/folder"), 3)
     assert "{{" not in text and "npm install" not in text
     assert "## A good view" in text and "## Citation forms" in text
+
+
+def test_a_view_of_databases_alone_is_listed_in_the_views_bar(folder):
+    ws = home.open_folder(folder)
+    (folder / "shop.db").write_bytes(b"")
+    for name, text in (("view.json", json.dumps({"name": "Shop", "scope": ["*.db"]})), ("reader.py", READER),
+                       ("view.html", "<p>x</p>")):
+        views.write_file(ws, "shop", name, text)
+    views.write_file(ws, "runs", "view.json", json.dumps({"name": "Runs", "scope": ["*.jsonl"]}))
+    for slug in ("shop",):
+        views.mark_built(ws, slug)
+    meta = views.read_meta(views.view_dir(ws, "shop"))
+    assert views.public(ws, "shop", meta, folder)["file_type"] is False
+    assert views.public(ws, "runs", views.read_meta(views.view_dir(ws, "runs")), folder)["file_type"] is True

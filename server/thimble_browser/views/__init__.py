@@ -19,7 +19,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .. import corpus, home
 from ..cards import sandbox
@@ -30,6 +30,7 @@ RUNNER = Path(__file__).resolve().parent / "reader_runner.py"
 DIST_KIT = Path(__file__).resolve().parents[3] / "frontend" / "dist" / "kit"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 FILES = ("view.json", "reader.py", "view.html")
+CHECKED = "check.json"  # what the last check found: the claimed files, and those the reader hid with why
 MAX_FILE = 400_000
 SCRIPTS = ["viewer_bridge.js", "viewer_colour.js", "viewer_controls.js", "dist:markdown.js", "viewer_text.js",
            "viewer_side.js", "viewer_transcript.js", "viewer_messages.js", "viewer_search.js", "viewer_table.js",
@@ -37,10 +38,11 @@ SCRIPTS = ["viewer_bridge.js", "viewer_colour.js", "viewer_controls.js", "dist:m
            "viewer_range.js"]
 STYLES = ["viewer_kit.css", "viewer_parts.css"]
 FRAME_CSP = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; "
-             "img-src data: blob:; font-src data:; media-src data: blob:; worker-src blob:; "
+             "img-src data: blob:{media}; font-src data:; media-src data: blob:{media}; worker-src blob:; "
              "connect-src 'none'; form-action 'none'; base-uri 'none'")
 VEGA = {"vega": "vega/build/vega.min.js", "vega-lite": "vega-lite/build/vega-lite.min.js",
         "vega-embed": "vega-embed/build/vega-embed.min.js"}
+VEGA_NEEDS = {"vega-lite": ("vega",), "vega-embed": ("vega", "vega-lite")}
 NODE_MODULES = Path(__file__).resolve().parents[3] / "frontend" / "node_modules"
 
 
@@ -99,26 +101,33 @@ def claims_of(meta: dict[str, Any]) -> list[str]:
     return [str(x) for x in (c if isinstance(c, list) else [c]) if str(x).strip()]
 
 
-def claimed(folder: Path, claims: list[str]) -> list[str]:
-    """The folder's files that the view's globs claim, sorted."""
-    files = [f["path"] for f in corpus.walk(folder)]
-    out = set()
+def claims_path(claims: list[str], rel: str) -> bool:
+    """Whether one of the view's globs claims the file `rel`."""
     for g in claims:
         g = g.lstrip("./")
-        for p in files:
-            if fnmatch.fnmatch(p, g) or (g.startswith("**/") and fnmatch.fnmatch(p, g[3:])):
-                out.add(p)
-    return sorted(out)
+        if fnmatch.fnmatch(rel, g) or (g.startswith("**/") and fnmatch.fnmatch(rel, g[3:])):
+            return True
+    return False
+
+
+def claimed(folder: Path, claims: list[str]) -> list[str]:
+    """The folder's files that the view's globs claim, sorted."""
+    return sorted(f["path"] for f in corpus.walk(folder) if claims_path(claims, f["path"]))
 
 
 SINGLE_EXT = re.compile(r"^(?:\*\*/)?\*(\.[A-Za-z0-9_+-]{1,16})$")
+DB_EXT = (".db", ".sqlite", ".sqlite3")
 
 
 def public(ws: str, slug: str, meta: dict[str, Any], folder: Path) -> dict[str, Any]:
     claims = claims_of(meta)
     files = claimed(folder, claims)
     unit = meta.get("unit")
+    # a viewer of one file type sits in that file's modes; the page offers no modes for a database, so a view of
+    # databases alone goes in the views bar
     file_type = unit == "file" or (not unit and bool(claims) and all(SINGLE_EXT.match(c) for c in claims))
+    if file_type and all((m := SINGLE_EXT.match(c)) and m.group(1).lower() in DB_EXT for c in claims):
+        file_type = False
     d = view_dir(ws, slug)
     ok = (d / "reader.py").is_file() and (d / "view.html").is_file() and bool(claims)
     return {"slug": slug, "origin": "workspace", "name": str(meta.get("name") or slug),
@@ -143,33 +152,63 @@ def list_views(ws: str, folder: Path, path: str | None = None) -> list[dict[str,
     return out
 
 
+def lib_order(libs: list[str] | tuple[str, ...]) -> list[str]:
+    """The libraries a page names that thimble browser has, each with what it needs ahead of it, in load order."""
+    wanted = {x for x in libs if x in VEGA}
+    for name in list(wanted):
+        wanted.update(VEGA_NEEDS.get(name, ()))
+    return [name for name in VEGA if name in wanted]
+
+
 def _script(text: str) -> str:
     return "<script>" + text.replace("</script", "<\\/script") + "</script>"
 
 
-def frame(ws: str, slug: str) -> str:
-    """The view's page as its sandboxed frame loads it: the CSP, who it is, the view kit, then view.html."""
-    d = view_dir(ws, slug)
-    meta = read_meta(d) or {}
-    html = (d / "view.html").read_text(encoding="utf-8")
-    who = json.dumps({"slug": slug, "name": meta.get("name") or slug, "media": None}, ensure_ascii=False)
+# The media feature (media.py) sets this: (workspace, slug, browser) -> the key of the view's media route for that
+# browser, which the frame's URLs carry since a sandboxed frame sends no cookie. None: the page loads no URL at all.
+media_key: Callable[[str, str, str], str] | None = None
+
+
+def media_url(origin: str, ws: str, slug: str, browser: str) -> str | None:
+    """The view's media route as its frame reaches it, or None when there is none for this browser."""
+    if not (media_key and origin and browser):
+        return None
+    return f"{origin}/api/ws/{ws}/views/{slug}/media/{media_key(ws, slug, browser)}"
+
+
+def frame_document(html: str, slug: str, name: str, *, libs: list[str] | tuple[str, ...] = (),
+                   media: str | None = None) -> str:
+    """A page as its sandboxed frame loads it: the policy, who it is, the view kit, the libraries it names, then the
+    page. The policy blocks every load but the view's `media` route, when it has one."""
+    who = json.dumps({"slug": slug, "name": name, "media": media}, ensure_ascii=False)
     order = (KIT / "label_order.json").read_text().strip()
     wheel = (KIT / "label_wheel.json").read_text().strip()
-    head = [f'<meta http-equiv="Content-Security-Policy" content="{FRAME_CSP}">', '<meta charset="utf-8">',
-            f"<script>window.__thimbleView = {who}; window.__thimbleLabelOrder = {order}; "
-            f"window.__thimbleLabelWheel = {wheel}</script>"]
-    for name in SCRIPTS:
-        p = DIST_KIT / name[5:] if name.startswith("dist:") else KIT / name
+    csp = FRAME_CSP.format(media=f" {media}" if media else "")
+    head = [f'<meta http-equiv="Content-Security-Policy" content="{csp}">', '<meta charset="utf-8">',
+            _script(f"window.__thimbleView = {who}; window.__thimbleLabelOrder = {order}; "
+                    f"window.__thimbleLabelWheel = {wheel}")]
+    for script in SCRIPTS:
+        p = DIST_KIT / script[5:] if script.startswith("dist:") else KIT / script
         if p.is_file():
             head.append(_script(p.read_text(encoding="utf-8")))
-    for name in STYLES:
-        head.append("<style>" + (KIT / name).read_text(encoding="utf-8").replace("</style", "<\\/style") + "</style>")
-    for lib in [x for x in meta.get("libs") or [] if x in VEGA]:
+    for style in STYLES:
+        head.append("<style>" + (KIT / style).read_text(encoding="utf-8").replace("</style", "<\\/style") + "</style>")
+    for lib in lib_order(libs):
         p = NODE_MODULES / VEGA[lib]
         if p.is_file():
             head.append(_script(p.read_text(encoding="utf-8")))
     body = re.sub(r"^\s*<!doctype[^>]*>", "", html, count=1, flags=re.I)
     return "<!doctype html><head>" + "".join(head) + "</head>" + body
+
+
+def frame(ws: str, slug: str, *, origin: str = "", browser: str = "") -> str:
+    """The view's page as its sandboxed frame loads it (frame_document), with its media route for `browser` when the
+    page's `origin` is known."""
+    d = view_dir(ws, slug)
+    meta = read_meta(d) or {}
+    html = (d / "view.html").read_text(encoding="utf-8")
+    return frame_document(html, slug, str(meta.get("name") or slug), libs=list(meta.get("libs") or []),
+                          media=media_url(origin, ws, slug, browser))
 
 
 async def run_reader(ws: str, slug: str, folder: Path, op: str, arg: Any = None, *, timeout: float = 120) -> dict:
@@ -226,9 +265,12 @@ def source_problems(ws: str, slug: str) -> list[str]:
     return out
 
 
-async def check(ws: str, slug: str, folder: Path) -> dict[str, Any]:
-    """The view's checks: its files, its claims, and its reader on the folder (build, records, a sample resolve)."""
+async def check(ws: str, slug: str, folder: Path, *, page: bool = True) -> dict[str, Any]:
+    """The view's checks: its files, its claims, its reader on the folder (build, records, a sample resolve), then, when
+    those pass, its page drawn in headless Chromium (page_check.py). {ok, lines, shot}: `shot` the picture of the page,
+    or None. A line that starts `ok:` or `skipped:` is no failure."""
     lines = source_problems(ws, slug)
+    shot = None
     meta = read_meta(view_dir(ws, slug)) or {}
     paths = claimed(folder, claims_of(meta)) if meta else []
     if meta and not paths:
@@ -239,11 +281,18 @@ async def check(ws: str, slug: str, folder: Path) -> dict[str, Any]:
             lines.append(f"the reader failed: {got.get('error')}\n{got.get('traceback', '')[-1500:]}")
         else:
             r = got["result"]
+            home.write_json(view_dir(ws, slug) / CHECKED, {"claimed": len(paths), "hidden": r.get("hidden") or []})
             lines += r.get("problems") or []
             lines.append(f"ok: build_index read {r['read']} of {len(paths)} claimed files; records({{}}) answered "
                          f"{r['size']} bytes of JSON: {r['sample']}")
-    ok = not any(not x.startswith("ok:") for x in lines)
-    return {"ok": ok, "lines": lines}
+    if page and not any(not x.startswith("ok:") for x in lines):
+        from . import page_check  # noqa: PLC0415
+
+        drawn = await page_check.run(ws, slug, folder)
+        lines += drawn["lines"]
+        shot = drawn["shot"]
+    ok = not any(not x.startswith(("ok:", "skipped:")) for x in lines)
+    return {"ok": ok, "lines": lines, "shot": shot}
 
 
 def digest(d: Path) -> str:
@@ -271,8 +320,8 @@ BUILDER_CHANGES = [
      "- Packages: the page has the view kit and `vega`, `vega-lite` and `vega-embed`, which you list in `libs` when "
      "the page uses them, and nothing else. Draw a network, a tree or a flow in plain SVG."),
     ("Code checks every view and says what to fix when a check fails.",
-     "`view_check` checks the three files and runs the reader, and says what to fix. Of the points below it checks the "
-     "first; the others are what a good view does all the same."),
+     "`view_check` checks the three files, runs the reader and draws the page, and says what to fix. Of the points "
+     "below it checks the first; the others are what a good view does all the same."),
 ]
 VIEW_STATUS = ("building", "built", "failed")
 

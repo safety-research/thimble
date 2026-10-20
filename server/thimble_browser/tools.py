@@ -52,6 +52,7 @@ class Result:
     is_error: bool = False
     cell_id: str | None = None
     extra: dict[str, Any] | None = None  # more fields for the chat's tool_result record, such as `label_card`
+    images: list[Path] | None = None  # PNG pictures Claude sees with the text (agent.py sends them as image blocks)
 
 
 def _ok(text: str, **kw: Any) -> Result:
@@ -340,7 +341,11 @@ class Tools:
 
     async def t_view_check(self, args: dict[str, Any]) -> Result:
         got = await views.check(self.ws, str(self.view), self.folder)
-        return _ok(("The checks pass.\n" if got["ok"] else "Fix these:\n") + "\n".join(f"- {x}" for x in got["lines"]))
+        text = ("The checks pass.\n" if got["ok"] else "Fix these:\n") + "\n".join(f"- {x}" for x in got["lines"])
+        shot = Path(got["shot"]) if got.get("shot") else None
+        if shot is not None and shot.is_file():
+            text += "\n\nThe picture below is the page as the analyst first sees it. Look at it as they would."
+        return Result(text, images=[shot] if shot is not None and shot.is_file() else None)
 
     async def t_finish_view(self, args: dict[str, Any]) -> Result:
         row = next((r for r in views.proposals(self.ws) if r.get("slug") == self.view), {})

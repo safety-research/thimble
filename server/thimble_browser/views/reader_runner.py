@@ -76,7 +76,8 @@ def main() -> int:
             data = clean(mod.records(index, {}))
             text = json.dumps(data, ensure_ascii=False)
             problems = []
-            hidden = {h.get("path") for h in (mod.hidden(index) if hasattr(mod, "hidden") else []) or []}
+            said = [h for h in (mod.hidden(index) if hasattr(mod, "hidden") else []) or [] if isinstance(h, dict)]
+            hidden = {h.get("path") for h in said}
             missed = [p for p in paths if p not in read and p not in hidden]
             if missed:
                 problems.append(f"build_index did not read {len(missed)} claimed files with open(), such as "
@@ -85,7 +86,8 @@ def main() -> int:
                 got = mod.resolve(index, {"path": paths[0], "fragment": "L1"})
                 if got is not None and not isinstance(got, dict):
                     problems.append("resolve() must return a dict or None")
-            result = {"read": len(read), "size": len(text), "sample": text[:300], "problems": problems}
+            result = {"read": len(read), "size": len(text), "sample": text[:300], "problems": problems,
+                      "hidden": [{"path": str(h.get("path")), "why": str(h.get("why") or "")} for h in said][:500]}
         real_out.write(json.dumps({"ok": True, "result": clean(result)}, ensure_ascii=False, default=str))
     except BaseException as e:  # noqa: BLE001 — the answer says what failed
         real_out.write(json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}",

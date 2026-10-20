@@ -11,6 +11,10 @@ send requests to 127.0.0.1. So every request passes three checks (Guard):
    page knows, so the browser sends it to no other server on 127.0.0.1. A code works once, and for 15 minutes.
 3. Origin. A request that changes something must come from this server's own page (its Origin header).
 
+One kind of request needs no cookie: a view's media route with a key in its path (KEYED_PATHS), which a view's page
+loads in its sandboxed frame, which sends no cookie. The route (media.py) checks the key: a random one the server made
+for one view and one signed-in browser, which works only while that browser stays signed in.
+
 The server keeps only the sha256 of each code, cookie and key.
 """
 from __future__ import annotations
@@ -30,6 +34,8 @@ CODE_TTL_S = 15 * 60
 COOKIE_AGE_S = 30 * 24 * 3600  # a month; a new link signs the browser in again
 OPEN_PATHS = {("GET", "/api/health"), ("POST", "/api/ui/key"), ("GET", "/api/ui/paired")}
 BROWSER_PATH = re.compile(r"^/b/([A-Za-z0-9_-]{16,128})(/api(?:/.*)?)$")
+# GET routes that check a key in their own path, for a sandboxed frame (module doc)
+KEYED_PATHS = re.compile(r"^/api/ws/[A-Za-z0-9._-]+/views/[a-z0-9][a-z0-9-]{0,39}/media/[A-Za-z0-9_-]{32,64}$")
 
 
 def _sha(v: str) -> str:
@@ -90,6 +96,10 @@ class Auth:
                 return c[:12]
         return ""
 
+    def signed_in(self, browser: str) -> bool:
+        """Whether the browser with this id (browser()) is still signed in."""
+        return bool(browser) and any(e["cookie"][:12] == browser for e in self._entries())
+
     def sign_out(self, cookie: str | None) -> None:
         if not cookie:
             return
@@ -147,7 +157,8 @@ class Guard:
         if path == "/api" or path.startswith("/api/"):
             browser = self.auth.browser(_cookie(scope, self.auth.cookie_name), key)
             scope = {**scope, "browser": browser, "browser_key": key}
-            if (method, path) not in OPEN_PATHS and not browser:
+            keyed = method in ("GET", "HEAD") and KEYED_PATHS.match(path) is not None
+            if (method, path) not in OPEN_PATHS and not browser and not keyed:
                 return await self._deny(send, 401, "this browser is not signed in: open the link thimble browser printed",
                                         signin=True)
             if method not in ("GET", "HEAD", "OPTIONS"):

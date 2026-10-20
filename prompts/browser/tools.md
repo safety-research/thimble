@@ -200,7 +200,7 @@ Write one of the view's three files whole: `view.json`, `reader.py` or `view.htm
 
 ## view_check
 
-Check the view: its three files, the files its `scope` claims, and its reader run on the folder in thimble's sandbox. It says what to fix.
+Check the view: its three files, the files its `scope` claims, its reader run on the folder in thimble's sandbox, and its page drawn in a headless browser. It says what to fix, and gives a picture of the page.
 
 ```json
 {"type": "object", "properties": {}}

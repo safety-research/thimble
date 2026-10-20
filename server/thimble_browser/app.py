@@ -471,9 +471,12 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         return [p for p in views.proposals(ws_of(c)) if p.get("status") != "built"]
 
     @app.get("/api/ws/{c}/views/{slug}/frame")
-    def view_frame(c: str, slug: str) -> Response:
+    def view_frame(c: str, slug: str, request: Request) -> Response:
         view_of(c, slug)
-        return Response(views.frame(c, slug), media_type="text/html", headers={"cache-control": "no-cache"})
+        # the Host header is one of `hosts` (Guard), so the frame's media URLs name this server as the browser reaches it
+        doc = views.frame(c, slug, origin=f"http://{request.headers.get('host', '')}",
+                          browser=request.scope.get("browser") or "")
+        return Response(doc, media_type="text/html", headers={"cache-control": "no-cache"})
 
     @app.post("/api/ws/{c}/views/{slug}/records")
     async def view_records(c: str, slug: str, body: dict = Body(...)) -> Any:

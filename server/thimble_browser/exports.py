@@ -101,7 +101,7 @@ class Notes:
             label = f"{path}, line {got.get('line')}"
         elif kind == "range":
             label = f"{path}, lines {got.get('line')}–{(got.get('meta') or {}).get('end')}"
-        elif kind == "row":
+        elif kind in ("row", "csvrow"):
             m = re.search(r"row=(\d+)", ref)
             label = f"{path}, row {m.group(1)}" if m else f"{path}, line {got.get('line')}"
         else:

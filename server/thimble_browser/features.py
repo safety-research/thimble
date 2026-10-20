@@ -15,6 +15,11 @@ NAMES: list[str] = [
     "comments",
     "history",
     "exports",
+    "files",
+    "media",
+    "view_head",
+    "view_builds",
+    "canvas_layout",
 ]
 
 

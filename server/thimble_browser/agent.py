@@ -103,6 +103,18 @@ def complete_prefix(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _result_content(r: Any) -> Any:
+    """A tool's result as the Messages API takes it: its text, and its pictures as image blocks after the text."""
+    import base64  # noqa: PLC0415
+
+    images = [p for p in (r.images or []) if p.is_file()]
+    if not images:
+        return r.text
+    return [{"type": "text", "text": r.text}] + [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                     "data": base64.b64encode(p.read_bytes()).decode("ascii")}} for p in images]
+
+
 def _block(b: Any) -> dict[str, Any]:
     """A content block of a reply as the next request sends it back: unchanged (thinking blocks keep their
     signatures)."""
@@ -283,7 +295,7 @@ class Session:
                         except KeyError:
                             pass
                     self._append(rec)
-                    blocks.append({"type": "tool_result", "tool_use_id": b.id, "content": r.text,
+                    blocks.append({"type": "tool_result", "tool_use_id": b.id, "content": _result_content(r),
                                    **({"is_error": True} if r.is_error else {})})
                 messages.append({"role": "user", "content": blocks})
                 save_messages(self.ws, self.chat, messages)
