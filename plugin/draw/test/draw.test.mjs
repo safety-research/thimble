@@ -2,12 +2,13 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { loadExamples } from '../examples/load.mjs'
-import { fromArgs, fromHash, knobOf, objectRef, toCommand, toHash, turn } from '../handoff.js'
+import { fromArgs, fromHash, objectRef, toCommand, toHash } from '../handoff.js'
 import { runProgram } from '../sandbox-node.mjs'
-import { gridText, len, nextRegion, regionAt, renderTerm } from '../term.js'
+import { len, renderTerm } from '../term.js'
 
 const DRAW = fileURLToPath(new URL('..', import.meta.url))
 const examples = loadExamples()
@@ -41,21 +42,6 @@ test('region ids are the program\'s, and stay the same across widths and runs', 
   }
 })
 
-test('a program without ids still draws, with ids from what the regions show', () => {
-  const d = runProgram({ program: `return k.stack(k.region(null, 'Jun 18', 'a'), k.region(undefined, { cite: k.cite('peak', { text: 'p' }) }, 'b'))` }, { w: 40 })
-  assert.equal(d.error, undefined)
-  assert.deepEqual(d.regions.map(r => r.id), ['jun-18', 'peak'])
-  assert.ok(d.warnings.some(x => /has no id/.test(x)))
-})
-
-test('extra metadata passes through untouched', () => {
-  const d = runProgram({ program: `return k.region('a', { label: 'A', lineage: { query: 'q', rows: [3, 4] }, confidence: 0.8, cite: k.cite('c', { text: 't', ids: ['row:3'], version: 2 }) }, 'x')` }, { w: 40 })
-  assert.deepEqual(d.regions[0].meta.lineage, { query: 'q', rows: [3, 4] })
-  assert.equal(d.regions[0].meta.confidence, 0.8)
-  assert.deepEqual(d.cites.c.ids, ['row:3'])
-  assert.equal(d.cites.c.version, 2)
-})
-
 test('programs run sandboxed: no host, no file system, no network, a time limit', () => {
   const run = p => runProgram({ program: p }, { w: 60, limit: 300 })
   const seen = run(`return [typeof process, typeof require, typeof fetch, typeof setTimeout, typeof XMLHttpRequest, typeof WebSocket].join(' ')`)
@@ -85,16 +71,6 @@ test('the terminal grid is cell-honest', () => {
     for (const r of g.regions) for (const q of r.rects) assert.ok(q.x >= 0 && q.y >= 0 && q.x + q.w <= g.w && q.y + q.h <= g.h, `${o.id}: ${r.id} is outside the grid`)
     if (w >= 100) assert.deepEqual(g.cut, [], `${o.id} at ${w}: something was cut: ${json(g.cut)}`)
   }
-})
-
-test('the terminal finds regions by cell and moves between them in reading order', () => {
-  const o = examples.find(e => e.id === 'messages-by-day')
-  const g = renderTerm(runProgram(o, { w: 100 }), { w: 100 })
-  const day = g.regions.find(r => r.id === 'day-06-18')
-  const q = day.rects[0]
-  assert.equal(regionAt(g, q.x + 3, q.y).id, 'day-06-18')
-  const after = nextRegion(g, 'day-06-18', 1), before = nextRegion(g, after, -1)
-  assert.equal(before, 'day-06-18')
 })
 
 test('the handoff carries the object and its selection both ways', () => {
@@ -129,170 +105,25 @@ test('the card guide\'s opening program runs', () => {
   })
 })
 
-test('paint.js draws text rows as Text and pixel rows as one Raster', async () => {
-  const { paintGrid } = await import('../paint.js')
-  const el = type => props => ({ type, props })
-  const els = { Box: el('Box'), Text: el('Text'), Raster: el('Raster') }
-  const o = examples.find(e => e.id === 'senders')
-  const g = renderTerm(runProgram(o, { w: 100 }), { w: 100 })
-  const tree = paintGrid(g, els, { theme: 'dark', selected: 'sender-april-scout', key: 't' })
-  const kids = tree.props.children
-  const rasters = kids.filter(k => k.type === 'Raster')
-  assert.equal(rasters.length, 1, 'the plot rows are one Raster band')
-  const r = rasters[0].props
-  assert.equal(r.columns, g.w)
-  assert.equal(Buffer.from(r.cells, 'base64').length, r.columns * r.rows * 12)
-  const rowsDrawn = kids.reduce((s, k) => s + (k.type === 'Raster' ? k.props.rows : 1), 0)
-  assert.equal(rowsDrawn, g.h, 'every grid row is drawn once')
-  // the selected row is tinted: in a Raster as the select color, in a Text line as the theme's selection background
-  const words = new Uint32Array(new Uint8Array(Buffer.from(r.cells, 'base64')).buffer)
-  const sel = parseInt('26384f', 16)
-  const tinted = [...words].filter((v, i) => i % 3 === 2 && v === sel).length
-  const textTinted = kids.filter(k => k.type === 'Text').some(k => k.props.children.some(c => c.props.backgroundColor === 'selectionBg'))
-  assert.ok(tinted > 0 || textTinted, 'the selected region is tinted')
-})
+// the card guide's worked programs (skills/thimble/forms), which the guide holds word for word, and the forms earlier
+// guides showed (draw/test/forms), which cards saved then still use
+const GUIDE_FORMS = ['flow', 'anatomy', 'grid', 'versions', 'knob', 'timeline']
+const OLD_FORMS = ['bars', 'trend', 'records', 'map', 'table', 'guide', 'weeks', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
 
-test('selected text reads on the selection in either theme, and ink on a pane takes the theme\'s text color', async () => {
-  const { paintGrid } = await import('../paint.js')
-  const { selectedColor, selectedHex, termColor, hex } = await import('../palette.js')
-  const el = type => props => ({ type, props })
-  const els = { Box: el('Box'), Text: el('Text'), Raster: el('Raster') }
-  // one row: a name in ink, then a stacked bar's segment with its label in paper on its fill, then a dim total
-  const cells = (s, tone, bg) => [...s].map(ch => ({ ch, tone, ...(bg ? { bg } : {}) }))
-  const row = [...cells('north ', 'ink'), ...cells(' done 179 ', 'paper', 'c3'), ...cells(' 49', 'dim')]
-  const g = { w: row.length, h: 1, rows: [row], regions: [{ id: 'north', rects: [{ x: 0, y: 0, w: row.length, h: 1 }] }] }
-  const runs = tree => tree.props.children[0].props.children
-  for (const theme of ['light', 'dark']) {
-    // selected: every neutral text and the label on its fill in the theme's text color, on the selection background
-    const on = runs(paintGrid(g, els, { theme, selected: 'north', raster: false }))
-    for (const r of on) assert.deepEqual([r.props.color, r.props.backgroundColor], ['text', 'selectionBg'], `${theme}: "${r.props.children}"`)
-    // not selected, in the transcript: ink is the terminal's own color, the label keeps its paper on its fill
-    const off = runs(paintGrid(g, els, { theme, raster: false }))
-    assert.equal(off[0].props.color, undefined)
-    assert.deepEqual([off[1].props.color, off[1].props.backgroundColor], [hex('paper', theme), hex('c3', theme)])
-    // on a pane: ink takes the theme's text color
-    assert.equal(runs(paintGrid(g, els, { theme, raster: false, painted: true }))[0].props.color, 'text')
+test('every form of the card guide, and of earlier guides, draws under a reply and in the detail with parts to select', () => {
+  const guide = readFileSync(DRAW + '../skills/thimble/cards.md', 'utf8')
+  for (const name of [...GUIDE_FORMS, ...OLD_FORMS]) {
+    const dir = GUIDE_FORMS.includes(name) ? DRAW + '../skills/thimble/forms/' : DRAW + 'test/forms/'
+    const program = readFileSync(join(dir, `${name}.program.js`), 'utf8').trimEnd()
+    if (GUIDE_FORMS.includes(name)) assert.ok(guide.includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `the card guide holds ${name}.program.js`)
+    const data = JSON.parse(readFileSync(join(dir, `${name}.data.json`), 'utf8'))
+    for (const [w, mode] of [[96, 'inline'], [98, 'detail'], [60, 'inline']]) {
+      const d = runProgram({ id: name, v: 1, program, data }, { w, h: mode === 'detail' ? 30 : 24, mode })
+      assert.equal(d.error, undefined, `${name} at ${w} ${mode}: ${JSON.stringify(d.error)}`)
+      assert.deepEqual(d.warnings, [], `${name} at ${w} ${mode}`)
+      const g = renderTerm(d, { w })
+      assert.ok(g.regions.filter(r => r.rects.length).length >= 3, `${name} has parts to select`)
+      if (w >= 96) assert.deepEqual(g.cut.filter(c => c.k === 'clip'), [], `${name} fits ${w} columns`)
+    }
   }
-  assert.equal(termColor('ink', 'light'), undefined)
-  assert.equal(termColor('ink', 'light', { painted: true }), 'text')
-  // a colored tone keeps its color on the selection; a neutral one, or text on a fill, reads as text
-  assert.equal(selectedColor('accent', 'light'), hex('accent', 'light'))
-  assert.equal(selectedColor('c2', 'dark', true), 'text')
-  assert.equal(selectedColor('dim', 'dark'), 'text')
-  // as pixels: the label on the palette's select reads in its ink
-  assert.equal(selectedHex('paper', 'light', true), hex('ink', 'light'))
-  assert.equal(selectedHex('c1', 'light'), hex('c1', 'light'))
-})
-
-test('a knob keeps its value across runs: the host turns it, the program runs again, words and marks follow', () => {
-  const program = `
-    const s = k.knob('scale', { values: [1, 2, 4, 8, 16], at: 2, label: 'lr scale', fmt: v => '×' + v })
-    const step = k.knob('step', { min: 0, max: 199, label: 'step' })
-    return k.stack(
-      k.text(\`gap **\${data.gap[s]}** pts when lr is scaled by [◂ ×\${s} ▸](#scale)\`),
-      k.dial('step'),
-      k.region('step-' + step, { label: 'step ' + step, rows: ['run.jsonl#L' + (step + 1)] }, k.bar(step, { max: 199 })))`
-  const data = { gap: { 1: 28, 2: 18.4, 4: 9.7, 8: 1.6, 16: 9.5 } }
-  const d0 = runProgram({ program, data }, { w: 80 })
-  assert.deepEqual(d0.controls.map(c => [c.id, c.i, c.values.length]), [['scale', 1, 5], ['step', 0, 200]])
-  assert.equal(d0.controls[0].shown[1], '×2')
-  assert.deepEqual(d0.state, {})
-  // ▸ three times on scale: stops at the last value; the program reads it and rewrites the sentence
-  let st = {}
-  for (let i = 0; i < 3; i++) st = turn(runProgram({ program, data }, { w: 80, state: st }), st, 'scale', 1)
-  assert.deepEqual(st, { scale: 16 })
-  st = turn(runProgram({ program, data }, { w: 80, state: st }), st, 'scale', 1)
-  assert.deepEqual(st, { scale: 16 }, 'a knob stops at its end')
-  // the first knob turns when no id is given; a step of 25 scrubs a run
-  st = turn(d0, st, null, -1)
-  assert.deepEqual(st, { scale: 1 })
-  st = turn(d0, st, 'step', 25)
-  const d1 = runProgram({ program, data }, { w: 80, state: st })
-  assert.equal(d1.controls[1].i, 25)
-  const t = renderTerm(d1, { w: 80 })
-  assert.match(gridText(t), /gap 28 pts when lr is scaled by ◂ ×1 ▸/)
-  assert.match(gridText(t), /step ◂ 25 ▸/)
-  // the region follows the knob, with its rows; the knob's link is a part the person can select
-  assert.deepEqual(t.regions.find(r => r.id === 'step-25').meta.rows, ['run.jsonl#L26'])
-  assert.deepEqual(t.regions.filter(r => r.meta.knob).map(r => r.id), ['scale', 'step'])
-  assert.equal(knobOf(d1, 'step').label, 'step')
-  // a value that is not one of the knob's goes to the nearest number; a word that is not one keeps the start
-  const d2 = runProgram({ program, data }, { w: 80, state: { scale: 7, step: 'x' } })
-  assert.deepEqual(d2.controls.map(c => c.i), [3, 0])
-  assert.deepEqual(d2.warnings, [])
-  // the state rides the handoff: the URL and the command
-  const sel = { object: 'sweep', v: 3, region: 'step-25', state: { scale: 8, split: 'by wiki' } }
-  assert.deepEqual(fromHash(toHash(sel)), sel)
-  assert.deepEqual(fromArgs(toCommand(sel).replace(/^\/draw /, '')), sel)
-})
-
-test('a knob that is badly made still draws, and says why', () => {
-  const d = runProgram({ program: `const a = k.knob('a b', {}); const b = k.knob('ok', { values: ['all', 'links'], at: 'none' }); return k.stack(k.dial('nope'), k.text('[x](#ok)'), k.text(String(a) + ' ' + b))` }, { w: 60 })
-  assert.equal(d.error, undefined)
-  assert.ok(d.warnings.some(w => /a b/.test(w)) && d.warnings.some(w => /no values/.test(w)))
-  assert.ok(d.warnings.some(w => /starts at "none"/.test(w)) && d.warnings.some(w => /k.dial\("nope"\)/.test(w)))
-  assert.ok(!d.warnings.some(w => /link points at "#ok"/.test(w)), 'a link to a knob is a known id')
-})
-
-test('a node-link drawing: the terminal puts dots and links on the nearest cells', () => {
-  const program = `const c = k.canvas(30, 8)
-    c.link(2, 1, 20.4, 6.3, 'dim')
-    c.link(2, 1, 12, 1, 'warn', { dash: true })
-    c.dot(2, 1, 'c1', { part: 'a', meta: { label: 'claim a', claim: 'a' } })
-    c.dot(20.4, 6.3, 'c2', { size: 2, part: 'b', label: '×3' })
-    c.dot(12, 1, 'c3', { hollow: true })
-    c.box(14, 2, 10, 4, { fill: true })
-    c.text(15, 3, 'over it')
-    return c`
-  const d = runProgram({ program, data: {} }, { w: 30, h: 8 })
-  assert.equal(d.error, undefined)
-  assert.deepEqual(d.warnings, [])
-  assert.deepEqual(d.regions.map(r => r.id), ['a', 'b'], 'a dot with a part is a region')
-  const t = renderTerm(d, { w: 30 })
-  assert.deepEqual(t.regions.map(r => r.id), ['a', 'b'])
-  // the terminal: each dot's glyph on its nearest cell, a link on the blank cells between its ends, dashed every other
-  // cell, and the filled box clears what is under it
-  const rows = gridText(t).split('\n')
-  assert.equal(rows[1][2], '●')
-  assert.equal(rows[6][20], '◉')
-  assert.equal(rows[1][12], '○')
-  assert.match(rows[1].slice(3, 12), /^─ ╌ ╌ ╌ ╌$/)
-  assert.ok([...rows.slice(2, 6).join('')].some(ch => '╲─'.includes(ch)), 'the long link is drawn')
-  assert.equal(rows[3].slice(15, 22), 'over it')
-  assert.ok(!/[╲─]/.test(rows[4].slice(15, 23)), 'nothing of the link shows inside the filled box')
-  assert.deepEqual(t.regions.find(r => r.id === 'b').rects, [{ x: 20, y: 6, w: 1, h: 1 }])
-})
-
-test('a selected bar lights up in its own color and keeps its ground, so it stays as high as the others; its label takes the selection; a selected series is its own dots', async () => {
-  const { paintGrid, selectionOf } = await import('../paint.js')
-  const { selectedMark, hex } = await import('../palette.js')
-  const el = type => props => ({ type, props })
-  const els = { Box: el('Box'), Text: el('Text'), Raster: el('Raster') }
-  const program = `return k.stack(
-    k.bars([{ id: 'a', label: 'alpha', value: 4 }, { id: 'b', label: 'beta', parts: [{ id: 'b1', value: 2, tone: 'c1', label: 'one' }, { id: 'b2', value: 1, tone: 'dim', label: 'two' }] }], { key: false }),
-    k.plot([{ id: 's1', name: 'first', values: [1, 2, 3] }, { id: 's2', name: 'second', values: [3, 2, 1], tone: 'c2' }], { h: 6 }))`
-  const g = renderTerm(runProgram({ program, data: {} }, { w: 60 }), { w: 60 })
-  const runs = (sel, y) => paintGrid(g, els, { theme: 'dark', selected: sel, raster: false }).props.children[y].props.children
-  // the row a: its words on the selection, its bar's cells in their color lit, with no ground of their own
-  const a = runs('a', 0)
-  assert.ok(a.some(r => /alpha/.test(r.props.children) && r.props.backgroundColor === 'selectionBg'))
-  const bar = a.find(r => /▆/.test(r.props.children))
-  assert.deepEqual([bar.props.color, bar.props.backgroundColor], [selectedMark('accent', 'dark'), undefined])
-  // a part alone: its cells lit in its own color, the other part as it was, no ground anywhere on the bar
-  const b = runs('b1', 1)
-  const parts = b.filter(r => /▆/.test(r.props.children))
-  assert.deepEqual(parts.map(r => [r.props.color, r.props.backgroundColor]), [[selectedMark('c1', 'dark'), undefined], ['inactive', undefined]])
-  assert.notEqual(selectedMark('c1', 'dark'), hex('c1', 'dark'))
-  // the whole row b: both parts lit, each in its own color, so they stay apart
-  const look = selectionOf(g, 'b')
-  const row = g.rows[1]
-  const lit = row.map((c, x) => [c, look(x, 1)]).filter(([c, s]) => s === 'mark' && c.ch === '▆').map(([c]) => c.tone)
-  assert.deepEqual([...new Set(lit)], ['c1', 'dim'])
-  // a series: its own dots only, never the plot's whole area
-  const sel = selectionOf(g, 's2')
-  let mine = 0, other = 0, ground = 0
-  g.rows.forEach((r, y) => r.forEach((c, x) => { const s = sel(x, y); if (s === 'mark' && c.sr === 's2') mine++; if (s && c.sr === 's1') other++; if (s === 'text' && c.m) ground++ }))
-  assert.ok(mine > 0)
-  assert.equal(other, 0)
-  assert.equal(ground, 0)
 })

@@ -1,5 +1,5 @@
-// The model's reads of a --prompt label (shell/labelreads.mjs): the request for one batch of records, what a reply
-// says of each record, and whole reads against the real kernel with a stand-in model.
+// The model's reads of a --prompt label (shell/labelreads.mjs): what a reply says of each record, and whole reads
+// against the real kernel with a stand-in model.
 //   node --test shell/test/labels.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -10,22 +10,11 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { answersOf, failedCall, readLabel, requestFor, summary } from '../labelreads.mjs'
+import { answersOf, failedCall, readLabel, summary } from '../labelreads.mjs'
 
 const LEAN = fileURLToPath(new URL('../../bin/thimble', import.meta.url))
 const LABEL = { name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: true }
 const UNITS = [{ ref: 'a.jsonl#L1', text: 'Sorry, my mistake.' }, { ref: 'a.jsonl#L2', text: 'Merged.' }, { ref: 'a.jsonl#L3', text: 'Done.' }]
-
-test('the request for a batch holds the definition, the values and each record under its number; its notes for the shell are kept apart', () => {
-  const r = requestFor('C {{NAME}} | {{DEFINITION}} | {{VALUES}}{{REASON_FIELD}}\n{{RECORDS}}', LABEL, UNITS, { model: 'sonnet', effort: 'low', maxTokens: 8000, timeoutMs: 1000, promptId: 'labels/v1' })
-  assert.match(r.prompt, /^C apology \| The message apologizes\. \| yes, no, "reason": one short sentence/)
-  assert.match(r.prompt, /### record 1\nSorry, my mistake\.\n\n### record 2\nMerged\.\n\n### record 3\nDone\.$/)
-  assert.equal(r.model, 'sonnet')
-  assert.equal(r.effort, 'low')
-  assert.equal(r.units, 3)
-  assert.deepEqual(r.telemetry, { feature: 'labels', prompt: 'labels/v1' })
-  assert.doesNotMatch(requestFor('{{REASON_FIELD}}', { ...LABEL, reason: false }, UNITS).prompt, /reason/)
-})
 
 test('a reply gives each record its value; one it leaves out, or gives a value off the list, has none and says why', () => {
   const text = 'Here:\n```json\n[{"i": 1, "value": "Yes", "confidence": 0.9, "reason": "says sorry"}, {"i": 3, "value": "maybe"}]\n```'

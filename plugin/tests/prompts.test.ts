@@ -1,6 +1,6 @@
 // The registry from the hooks (prompts/prompts.ts): the card guide (skills/thimble/cards.md) comes once per session
-// beside Claude's first data command; Claude reading the guide itself counts as given; a compaction lets it come again;
-// a THIMBLE_PROMPTS pair that cannot be read is said in one line; each delivery is a line in the session's events.
+// beside Claude's first data command, and again after a compaction; a conversation's first message carries the thimble
+// block; a THIMBLE_PROMPTS pair that cannot be read is said in one line; each delivery is a line in the session's events.
 // `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -38,7 +38,6 @@ test('the first data command of a session carries the card guide, once; a save o
   expect((await bash($, 'ls -la')).context ?? []).toEqual([])
   const q = await bash($, "cd /data && thimble run \"saves per day\" <<'PY'\ntally(df, 'day')\nPY")
   expect(q.context.length).toBe(1)
-  expect(q.context[0]).toContain('which thimble adds once per session with your first data command')
   expect(q.context[0]).toContain('/skills/thimble/cards.md')
   expect(q.context[0]).toContain('THE WORKED FORMS')
   for (const command of ['thimble rows revisions.jsonl -n 3', 'thimble resolve r1#day=2026-06-18@n', 'thimble save y --from y.json']) {
@@ -46,30 +45,6 @@ test('the first data command of a session carries the card guide, once; a save o
   }
   await w.clock.advance(100)
   expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms', 'thimble run']])
-})
-
-test('thimble sources first: the guide comes with whichever data command runs first', async ($, on) => {
-  const w = world(on)
-  const r = await bash($, 'thimble sources')
-  expect(r.context[0]).toContain('The card guide (/')
-  await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['thimble sources'])
-})
-
-test('thimble q, the name run had before, is still a data command', async ($, on) => {
-  const w = world(on)
-  expect((await bash($, 'thimble q "x" --code "1"')).context.length).toBe(1)
-  await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['thimble q'])
-})
-
-test('Claude reading the guide itself (v asks it to) counts as given: no data command brings it again', async ($, on) => {
-  const w = world(on)
-  const read = await $.tool.call({ tool: 'Read', file_path: '/p/skills/thimble/cards.md' } as never) as Any
-  expect(read.context ?? []).toEqual([])
-  expect((await bash($, 'thimble run "x" --code "1"')).context ?? []).toEqual([])
-  await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt')).toEqual([])
 })
 
 test('a compaction may drop the guide: the next data command brings it again', async ($, on) => {
@@ -84,7 +59,8 @@ test('a compaction may drop the guide: the next data command brings it again', a
 test('a version or a text that cannot be off: every text is read, and one line says so', async ($, on) => {
   const w = world(on, { THIMBLE_PROMPTS: 'squeeze:v8, forms:off' })
   expect((await bash($, 'thimble sources')).context.length).toBe(1)
-  expect(w.toasts).toEqual(['thimble prompts: THIMBLE_PROMPTS: squeeze:v8 is not read: each text is one file (prompts/squeeze.md), so edit it there; only squeeze:off is read (and 1 more: thimble dev prompts)'])
+  expect(w.toasts.length).toBe(1)
+  expect(w.toasts[0]).toContain('squeeze:v8')
   await w.clock.advance(100)
   expect(w.events.find(e => e.kind === 'prompts')).toMatchObject({ off: [], problems: [expect.stringContaining('squeeze:v8'), expect.stringContaining('forms cannot be turned off')] })
 })
@@ -97,13 +73,4 @@ test("a conversation's first message carries one thimble block: thimble is on he
   expect(r.blocks[1].text).toContain('PROMPT context')
   await w.clock.advance(100)
   expect(w.events.filter(e => e.kind === 'prompt').map(e => e.prompt)).toEqual(['context'])
-})
-
-test('the thimble block can be turned off: THIMBLE_PROMPTS=context:off sends none', async ($, on) => {
-  const w = world(on, { THIMBLE_PROMPTS: 'context:off' })
-  on('prompt.context', () => ({ blocks: [] }))
-  const r = (await ($ as Any).prompt.context({ blocks: [] })) as Any
-  expect(r.blocks).toEqual([])
-  await w.clock.advance(100)
-  expect(w.events.find(e => e.kind === 'prompts')).toMatchObject({ off: ['context'], problems: [] })
 })

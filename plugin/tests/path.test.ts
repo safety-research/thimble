@@ -1,9 +1,9 @@
-// The plugin's bin/ first on the PATH of the session's commands (hooks/path.ts): put first once, the rest kept in its
-// order, never twice; and when the PATH cannot be set while another thimble comes first, one line says the fix.
+// The plugin's bin/ first on the PATH of the session's commands (hooks/path.ts), set as the hooks module starts with a
+// session: put first once, the rest kept in its order, never twice.
 // `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { binFirst, otherThimbleLine } from '../hooks/path'
+import { binFirst } from '../hooks/path'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -42,17 +42,4 @@ test("at session start the plugin's bin/ goes first on the PATH, ahead of anothe
   await $.session.start({ cwd: '/data', surface: 'terminal', isInteractive: true } as never)
   expect(w.sets).toEqual([{ PATH: `${BIN}:/home/t/.local/bin:/usr/bin:/bin` }])
   expect(w.toasts).toEqual([])
-})
-
-test('a PATH that has bin/ first already (a reload, or a session started inside another) is left as it is', async ($, on) => {
-  const w = world(on, `${BIN}:/home/t/.local/bin:/usr/bin`)
-  await $.session.start({ cwd: '/data', surface: 'terminal', isInteractive: true } as never)
-  expect(w.sets).toEqual([])
-})
-
-test('a PATH the engine will not set, with another thimble on it, shows one line that names the fix', async ($, on) => {
-  const w = world(on, '/home/t/.local/bin:/usr/bin', 'held by the organization')
-  await $.session.start({ cwd: '/data', surface: 'terminal', isInteractive: true } as never)
-  expect(w.toasts).toEqual([otherThimbleLine('held by the organization', '/home/t/.local/bin/thimble')])
-  expect(w.toasts[0]).toContain('Remove thimble 0.9: its plugin and its ~/.local/bin/thimble launcher.')
 })

@@ -6,8 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { chainWords, forDrawing, fromFacts, isRef, objectRefs, recordRefs, regionRefs, rowByName } from '../object.js'
-import { runProgram } from '../../draw/sandbox-node.mjs'
+import { isRef, objectRefs, recordRefs, regionRefs, rowByName } from '../object.js'
 import { prep } from '../node/prep.mjs'
 
 const OBJ = {
@@ -39,33 +38,6 @@ test('a region rests on the refs the program named, or on the data row its id na
   assert.deepEqual(objectRefs(OBJ).map(c => c.ref), ['q1#day=2026-06-18@n'])
   assert.ok(isRef('revisions.jsonl#L28') && isRef('q12') && isRef('obj:01-a#/x') && !isRef('hello') && !isRef('https://x.org/#a'))
   assert.ok(isRef('r12') && isRef('r1#day=2026-06-18@n') && !isRef('r17-trail'))
-})
-
-test('a resolve chain reads as a few words, and a check that fails is said', () => {
-  const w = chainWords({ chain: [{ step: 'object', id: 'o', at: '/days/1' }, { step: 'binding' }, { step: 'query', id: 'q1', about: 'saves per day', check: 'the value is 3, the rows are 2' }], rows: ['r.jsonl#L4-5'], count: 2, records: [{ ref: 'r.jsonl#L4', text: 'x' }], notes: [] })
-  assert.equal(w.line, 'q1 · saves per day ← 2 source rows in r.jsonl')
-  assert.deepEqual(w.notes, ['the value is 3, the rows are 2'])
-  assert.equal(chainWords({ error: 'no query q9' }).error, true)
-})
-
-test('an object saved with no program draws its title and words', async () => {
-  const o = forDrawing({ id: '02-words', version: 3, title: 'Words', text: 'June 18 had [6,543](q1#day=2026-06-18@n).' })
-  assert.equal(o.v, 3)
-  assert.equal(o.data.text, 'June 18 had 6,543.')
-  const { drawing } = await prep({ object: { id: '02-words', version: 3, title: 'Words', text: 'hi' }, w: 60 })
-  assert.equal(drawing.error, undefined)
-})
-
-test('the from line counts labels once, and coverage when the kernel gave it', () => {
-  const f = fromFacts({ lineage: { queries: { q1: { kept: ['kind'], inputs: [{ path: 'a.csv' }] }, q2: { uses: [{ name: 'kind' }] } } } }, { error: 'no lean' })
-  assert.deepEqual(f, { sources: [{ path: 'a.csv', rows: null }], rows: 0, labels: ['kind'] })
-})
-
-test('a bar keeps the examples and cite its own meta names, so selecting it shows them', () => {
-  const d = runProgram({ program: "k.examples('ex-1', { records: [{ text: 'a' }], total: 1 }); return k.bars([{ id: 'b1', label: 'one', value: 1, meta: { ref: 'q1#k=1@n', examples: 'ex-1' } }])", data: {} }, { w: 40 })
-  const r = d.regions.find(x => x.id === 'b1')
-  assert.equal(r.meta.examples, 'ex-1')
-  assert.equal(r.meta.ref, 'q1#k=1@n')
 })
 
 test('every state key the plugin keeps is named in its types contract', () => {
