@@ -94,6 +94,14 @@ export async function promptText($: Engine, feature: string): Promise<{ text: st
   return { text: R.texts.get(key)!, version: a.version, id: key, off: false }
 }
 
+/** The file of a feature's active version, for a text a model reads by its path (a subagent's guide): {file, id}. */
+export async function promptFile($: Engine, feature: string): Promise<{ file: string; id: string }> {
+  const { idx, active } = await registry($)
+  const a = active[feature]
+  const v = a && !a.off && a.file ? a : { version: idx[feature].default, file: idx[feature].versions[idx[feature].default].file as string }
+  return { file: `${$.plugin.root.replace(/\/+$/, '')}/${v.file}`, id: idOf(feature, v.version) }
+}
+
 /** The ids of the versions in use for some features: {feature: 'feature:version'}. */
 export async function promptIds($: Engine, features: string[]): Promise<Record<string, string>> {
   const { active } = await registry($)

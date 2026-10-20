@@ -40,6 +40,14 @@ export const FEATURES = {
     about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v3', optional: true,
     versions: { v3: { about: "written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" } },
   },
+  'lens-claims': {
+    about: "lens: the turn's claims, with what each leaves open", reads: 'the pass', default: 'v3', optional: true,
+    versions: { v3: { about: "written clean in the 0.9 style from v2 (the quote names the claim, the digest holds the claims that bear on the turn): five principles and one example, good and bad; a part only when the claim's words leave it open" } },
+  },
+  'claims-folder': {
+    about: 'the guide of the subagent that maps the claims of the whole folder', reads: 'claims/term.ts: the brief main hands the subagent names its file', default: 'v1',
+    versions: { v1: { about: "the coh-atlas skill in the 0.9 style, for thimble's five commands: the map saved as the card folder-claims, its citations checked by the save" } },
+  },
   squeeze: {
     about: "squeeze's rewrite along its chips", reads: 'squeeze/term.ts', default: 'v6',
     versions: { v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },

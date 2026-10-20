@@ -5,8 +5,9 @@
 // answered by a subagent of the session that can query the data with `thimble`. It has its own turns. Main's
 // conversation gets nothing of it unless the person sends the result there.
 //
-//   scope        {object?, v?, region?, label?, row?, mark?: {kind, ref?, gloss?, label?, term?}}
-//   threadKey(scope)              one thread per card, or per mark: 'card-<object>' or 'mark-<row>-<ref|gloss>'
+//   scope        {object?, v?, region?, label?, row?, mark?: {kind, ref?, gloss?, label?, term?}, claim?, said?}
+//   threadKey(scope)              one thread per card, per mark or per claim: 'card-<object>', 'mark-<row>-<ref|gloss>'
+//                                 or 'claim-<id>' (a claim of the session's Claims pane, claims/term.ts)
 //   aboutOf(scope)                the words "about …" the thread shows under a question
 //   firstMessage({text, scope, card, refs, root})   the subagent's first prompt: the question, then what it is about
 //   nextMessage({text, scope, last})               a later question: its part named again when the part changed
@@ -18,6 +19,7 @@ const safe = s => String(s || '').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+
 
 export function threadKey(scope = {}) {
   if (scope.object) return `card-${safe(scope.object)}`
+  if (scope.claim) return `claim-${safe(scope.claim)}`
   const m = scope.mark || {}
   return `mark-${safe(scope.row)}-${safe(m.ref || m.gloss || m.term || m.label)}`
 }
@@ -30,7 +32,7 @@ export function aboutOf(scope = {}) {
 
 /** Whether two scopes name the same part (a later question about the same part needs no "about"). */
 export function samePart(a = {}, b = {}) {
-  return (a.object || '') === (b.object || '') && (a.region || '') === (b.region || '') && (a.mark?.ref || a.mark?.gloss || '') === (b.mark?.ref || b.mark?.gloss || '')
+  return (a.object || '') === (b.object || '') && (a.claim || '') === (b.claim || '') && (a.region || '') === (b.region || '') && (a.mark?.ref || a.mark?.gloss || '') === (b.mark?.ref || b.mark?.gloss || '')
 }
 
 /**
@@ -44,6 +46,9 @@ export function firstMessage({ text, scope = {}, card = null, refs = [], root = 
     // a part of the card, or a selection the card's program named (k.ask: a brushed range, several rows)
     const part = scope.region ? `the part "${aboutOf(scope)}" (${scope.region}) of ` : scope.label ? `the selection "${scope.label}" in ` : ''
     lines.push(`About: ${part}the card "${card.title || card.id}" (${card.id}@${card.v ?? card.version}, ${card.file || `thimble/objects/${card.id}.json`}).`)
+  } else if (scope.claim) {
+    // a claim of the Claims pane: its words, and the sentence where it was said
+    lines.push(`About: the claim "${scope.label || scope.claim}" of this session${scope.said ? `, said as "${scope.said}"` : ''}.`)
   } else if (scope.mark) {
     const m = scope.mark
     lines.push(m.kind === 'gloss' ? `About: the term "${m.term || m.label}" in Claude's message.` : `About: Claude's citation "${m.label || m.ref}" (${m.ref}).`)

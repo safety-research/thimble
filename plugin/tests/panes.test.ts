@@ -112,7 +112,7 @@ test('a card under a reply is drawn as it was left (its state, its part); at res
   await $.ui.render(HINT)
   await clock.settle()
   const rest = textOf(await $.ui.render(HINT))
-  expect(rest).toContain('v visualize · s squeeze · ] card · 1 open detail')
+  expect(rest).toContain('v visualize · s squeeze · c claims · ] card · 1 open detail')
   expect(rest).not.toContain('next day')
   // under the reply: the state and the part the person left it at (here, in the browser)
   await reply($)

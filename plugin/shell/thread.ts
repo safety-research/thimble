@@ -32,7 +32,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Scope = { object?: string; v?: number | null; region?: string | null; label?: string; row?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
+export type Scope = { object?: string; v?: number | null; region?: string | null; label?: string; row?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string }; claim?: string; said?: string }
 export type Ask = { text: string; scope: Scope; refs?: string[]; root?: string; card?: { id: string; v: number | null; title?: string; file?: string } | null }
 export type Turn = { role: 'person' | 'claude'; text: string; at: string; calls?: string[]; about?: string }
 export type Thread = {

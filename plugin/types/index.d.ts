@@ -66,7 +66,7 @@ export type SqzUi = { focus: string; running: { since: number } | null; error: s
 
 /** The bar's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */
-export type LineCounts = { threads: number; cov: number; at: number; changed: Record<string, number> }
+export type LineCounts = { claims?: number; threads: number; cov: number; at: number; changed: Record<string, number> }
 
 /** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
  *  inside a card (panes/tray.js frameOf). */
@@ -130,7 +130,7 @@ declare module 'claude-code' {
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
       events: { file: string; n: number; bytes?: number }
       /** what takes the keys, newest last (the shell's focus stack): the bar says the keys of the top one */
-      focus: ('detail' | 'chips' | 'proposals' | 'tray' | 'card')[]
+      focus: ('detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card')[]
       /** when a card's state file last changed, by root and id: a drawing that reads the card's state draws again */
       cardver: StateFamily<number>
       /** how many times a pane was asked to draw again, by the pane's instance: its drawings read it */
@@ -139,6 +139,10 @@ declare module 'claude-code' {
       labelgen: number
       /** the labels of a set of records, by folder, generation and refs (`thimble label --of`) */
       labelsof: StateFamily<unknown>
+      /** this session's claims (claims/store.js), as held for the drawing; thimble/claims/<session>.json on disk */
+      claims: Record<string, unknown> | null
+      /** the Claims pane while it is open: the message it was opened from */
+      claimpane: { row: string } | null
     }
   }
 }

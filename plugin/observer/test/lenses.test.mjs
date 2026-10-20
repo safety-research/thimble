@@ -32,7 +32,7 @@ test("the system prompt: the frame with each enabled lens's instructions in orde
   assert.doesNotMatch(sys.text, /DIGEST/)
   assert.equal(sys.chars.notes, '## notes\nwords'.length + 2)
   assert.equal(sys.shared + Object.values(sys.chars).reduce((a, b) => a + b, 0), sys.text.length)
-  assert.equal(skeletonOf(LENSES), '{"notes": [], "verbs": {}, "glosses": []}')
+  assert.equal(skeletonOf(LENSES), '{"notes": [], "verbs": {}, "glosses": [], "claims": []}')
 })
 
 test("the message: the turn's values, each lens's digest, and a rule only when its condition holds", () => {
@@ -49,7 +49,7 @@ test('the real fragments compose: every lens of the registry has instructions, a
   const frame = textOf('observer', ROOT, {}).text
   const parts = LENSES.map(lens => ({ lens, text: textOf(lens.feature, ROOT, {}).text }))
   const sys = composeSystem(frame, parts)
-  for (const h of ['## Notes to Claude', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explainers']) assert.ok(sys.text.includes(h), h)
+  for (const h of ['## Notes to Claude', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explainers', '## The claims of this turn']) assert.ok(sys.text.includes(h), h)
   assert.doesNotMatch(sys.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(sys.text, /<!--/)
   const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { QUESTION: 'q', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, ST)
