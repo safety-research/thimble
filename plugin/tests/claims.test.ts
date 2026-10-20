@@ -1,6 +1,7 @@
 // Claims in a session (claims/, shell/panes.ts): after two turns of work, c opens the Claims pane with the ring on the
 // selected dot rather than on the input bar, so the first arrow walks the claims from it, and a letter still starts a
-// question. `claude plugin test plugin`. The model's calls and the Node children are answered here.
+// question. Coverage (r) opens the same way, on its selected group, so ↵ opens its files. `claude plugin test plugin`.
+// The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { press, promptStub } from './stubs'
@@ -30,7 +31,7 @@ const FORK2 = { notes: [], verbs: {}, glosses: [], claims: [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-function world(on: Any, forks: Record<string, unknown>[]) {
+function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
@@ -52,7 +53,7 @@ function world(on: Any, forks: Record<string, unknown>[]) {
     let out = '{}'
     if (e.argv.some(a => a.endsWith('estimate.mjs'))) out = JSON.stringify({ kind: 'runs', offer: { what: '3 trials', minutes: 4, tokens: 310000, read: 'trials/', detail: '3 transcripts · 2 KB' } })
     else if (e.argv.some(a => a.endsWith('objects.mjs'))) out = '[]'
-    else if (e.argv.includes('coverage')) out = e.argv.includes('--json') ? '{}' : 'Coverage of this session · 4 source files'
+    else if (e.argv.includes('coverage')) out = e.argv.includes('--json') ? JSON.stringify(o.cov ?? {}) : 'Coverage of this session · 4 source files'
     else if (e.argv.includes('resolve')) out = JSON.stringify({ ref: e.argv[e.argv.indexOf('resolve') + 1], chain: [{ step: 'query', id: 'q4', about: 'share by user', value: '41%' }], rows: ['revisions.jsonl#L28-31'], count: 4, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }], notes: [] })
     else if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: { kit: 1, w: 40, h: 1, root: { t: 'text', runs: [{ s: 'rows', tone: 'ink' }] }, cites: {}, examples: {}, regions: [], warnings: [] } })
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -165,4 +166,34 @@ test('the Claims pane opens with the ring on the selected dot, not on the input 
   expect(await press($, w.clock, key('w'))).toEqual({ text: '', cursor: 0 })
   await w.clock.settle()
   expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/"key":"ask-\d+"[^}]*"value":"w"|"value":"w"[^}]*"key":"ask-\d+"/)
+})
+
+// a folder of two jsonl files, three rows of one read
+const COV = {
+  session: 's-1',
+  files: [
+    { path: 'revisions.jsonl', type: 'jsonl', pattern: '*.jsonl', rows: 10, lines: 10, status: 'seen', share: 0.3, seen_lines: 3, ranges: [[2, 4]] },
+    { path: 'pages.jsonl', type: 'jsonl', pattern: '*.jsonl', rows: 10, lines: 10, status: 'not read', share: 0, seen_lines: 0, ranges: [] },
+  ],
+  patterns: [{ pattern: '*.jsonl', files: 2, rows: 20, seen_rows: 3, seen_files: 1, by_status: { seen: 1, 'not read': 1 } }],
+  types: [{ type: 'jsonl', files: 2, rows: 20, seen_rows: 3, seen_files: 1, by_status: { seen: 1, 'not read': 1 } }],
+  total: { files: 2, rows: 20, seen_rows: 3, seen_share: 0.15, seen_files: 1 },
+}
+
+test('Coverage opens with the ring on the selected group, not on the input bar: ↵ opens its files at once, as a click does', async ($, on) => {
+  const w = world(on, [FORK1], { cov: COV })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  // r opens Coverage once a moment passed with no letter after it
+  await press($, w.clock, key('r'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  const drawn = JSON.stringify(await $.ui.render(PANE))
+  expect(drawn).toContain('Ask about *.jsonl')
+  expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  // the ring stands on the selected group's row, so ↵ presses it: its files open
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
+  await ui.press({ key: await rowKey($, 'g-0') })
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(PANE))).toContain('Claude read 3 of their 20 rows (15%), from 1 of 2 files.')
 })
