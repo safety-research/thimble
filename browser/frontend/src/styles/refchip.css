@@ -89,6 +89,34 @@
   background: none;
   cursor: default;
 }
+/* the healing pass (lib/heal): a spinner right after a citation while its check runs, shown only when the check takes
+   a moment; a red × right after one whose cited place shows another value, outside its underline */
+.spinner.refchip-checking {
+  margin-left: 1px;
+  vertical-align: -0.05em;
+  animation:
+    spinner-turn var(--dur-spin) linear infinite,
+    refchip-checking-in var(--dur-base) var(--ease-out) 150ms both;
+}
+@keyframes refchip-checking-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.refchip-x {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--status-negative);
+  font-weight: 600;
+  text-decoration: none;
+}
+:root[data-links='off'] .refchip-checking,
+:root[data-links='off'] .refchip-x {
+  display: none;
+}
 /* a chip that arrived after its text fades in */
 .refchip-late {
   animation: refchip-late-in var(--dur-base) var(--ease-out) both;
