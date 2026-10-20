@@ -1,8 +1,9 @@
 """Settings in the page: the gear's popover reads and changes settings.py.
 
     GET  /api/ws/{c}/settings           the settings, with the choices the popover offers
-    PUT  /api/ws/{c}/settings           change some of them: credentials, model, effort, explain (a WIF config file
-                                        that cannot be used is refused, in words that hold none of its values)
+    PUT  /api/ws/{c}/settings           change some of them: credentials, model, effort, features ({name: on}; a
+                                        WIF config file that cannot be used is refused, in words that hold none of its
+                                        values)
     PUT  /api/ws/{c}/settings/api-key   keep an API key the analyst pasted (never sent back, never logged)
     DELETE /api/ws/{c}/settings/api-key remove it
     POST /api/ws/{c}/settings/check     one Models API call with the credentials now saved: are they good?
@@ -19,12 +20,12 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from . import home, llm, settings, wif
+from . import features, home, llm, settings, wif
 
 log = logging.getLogger("thimble_browser.settings_api")
 
 KEY_MAX = 512  # characters of an API key, which is far shorter
-ROLES = ("main", "writer", "dev")  # the 0.8 page's roles that thimble browser runs, all on the one model
+ROLES = ("main", "dev")  # the 0.8 page's roles that thimble browser runs, all on the one model
 
 
 def wif_view(c: dict[str, Any]) -> dict[str, Any] | None:
@@ -50,7 +51,7 @@ def view() -> dict[str, Any]:
         "has_api_key": settings.has_api_key(),
         "model": s["model"],
         "effort": s["effort"],
-        "explain": s["explain"],
+        "features": features.listing(),
         "choices": {"models": list(settings.MODELS), "efforts": list(settings.EFFORTS)},
         "models": {r: dict(conf) for r in ROLES},
     }
@@ -59,7 +60,7 @@ def view() -> dict[str, Any]:
 def patch_of(body: dict[str, Any]) -> dict[str, Any]:
     """What settings.write takes from the page's body: its own keys, and a 0.8 role row's model or effort as the one
     model and effort."""
-    out = {k: body[k] for k in ("credentials", "model", "effort", "explain") if k in body}
+    out = {k: body[k] for k in ("credentials", "model", "effort", "features") if k in body}
     for conf in (body.get("models") or {}).values():
         if isinstance(conf, dict):
             if conf.get("model"):
@@ -105,6 +106,8 @@ def register(ctx: Any) -> None:
         from .hub import hub  # noqa: PLC0415
 
         hub.publish(c, {"type": "chat", "chat": "main"})  # the composer's line names the model and effort
+        if "features" in patch:
+            hub.publish(c, {"type": "features"})  # the page shows the surfaces of the features that are on
         log.info("settings changed: %s", ", ".join(sorted(patch)) or "nothing")
         return view()
 

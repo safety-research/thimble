@@ -37,6 +37,16 @@ _NEWLINE = re.compile(b"\n")
 
 # ---- paths
 
+
+def share_bins(first: int, last: int, lines: int, bins: int) -> range:
+    """The bins a record covers when a file's `lines` lines are cut into `bins`: every bin that overlaps its lines,
+    `first` to `last` counted from 0. Each record fills its whole share of a strip of `bins`, so consecutive records of
+    one value draw one band with no gap between them, a few records tall bands and many records thin ones."""
+    lines, bins = max(1, lines), max(1, bins)
+    a = min(bins - 1, first * bins // lines)
+    b = min(bins, max(a + 1, -(-(last + 1) * bins // lines)))
+    return range(a, b)
+
 def safe_path(folder: Path, rel: str) -> Path:
     """The path `rel` names in the folder; ValueError for one that leaves it (corpus.inside)."""
     try:

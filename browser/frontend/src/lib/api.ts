@@ -382,7 +382,8 @@ export const api = {
     j<{ table: string; columns: string[]; rows: any[][]; pk: string; total: number }>(`${apiBase()}/corpora/${enc(c)}/forge/rows${q({ path, table, offset, limit, order, where })}`),
   forgeQuery: (c: string, path: string, sql: string) =>
     j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${apiBase()}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
-  resolveRef: (c: string, ref: string) => j<ResolvedRef>(`${apiBase()}/corpora/${enc(c)}/ref${q({ ref })}`),
+  /** `value`: a citation's own words, so a card value is read from the version of the card that states it. */
+  resolveRef: (c: string, ref: string, value?: string) => j<ResolvedRef>(`${apiBase()}/corpora/${enc(c)}/ref${q(value ? { ref, value } : { ref })}`),
   /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
    * n the number a row is cited by (`<path>#row=<n>`). */
   csvRows: (c: string, path: string, a: number, b: number) => j<{ rows: [number, number][] }>(`${apiBase()}/corpora/${enc(c)}/csv-rows${q({ path, lines: `${a}-${b}` })}`),
@@ -399,7 +400,6 @@ export const api = {
    * analyst's cookie); `done` when it had ended already, `kind` and `reason` when thimble could not pass it on (no
    * module); a subagent of main the analyst started is asked of main. */
   interrupt: (c: string, id: string) => j<{ stopped: boolean; done?: boolean; asked?: 'main'; kind?: string; reason?: string }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
-  askAgain: (c: string, id: string) => j<{ asked: string; event: string; questions: number }>(`${ws(c)}/chats/${enc(id)}/ask-again`, { method: 'POST' }),
   /**
      * Send the analyst's Claude Code session an event (`POST /ws/{c}/events {kind, payload}`), e.g. a message typed in main
      * (`main`, {text}) or in a thread (`thread`, {thread, text}). The reply arrives through the chat's log. A 409 says no
@@ -409,35 +409,13 @@ export const api = {
     j<EventPosted>(`${ws(c)}/events`, { method: 'POST', body: JSON.stringify({ kind, payload }) }),
   /** The composer's effort chip: main's effort (and its threads') from its next request (events.effort_route). */
   setEffort: (c: string, effort: MainEffort) => j<{ effort: string; choice: MainEffort }>(`${ws(c)}/session/effort`, { method: 'PUT', body: JSON.stringify({ effort }) }),
-  /** Turn fast mode off or back on for main and its threads from main's next request (events.fast_route). */
-  setFast: (c: string, fast: boolean) => j<{ fast: boolean }>(`${ws(c)}/session/fast`, { method: 'PUT', body: JSON.stringify({ fast }) }),
-  /** Allow or deny a permission prompt of main's session that its hook relayed (events.permission_route); `always` also
-     * adds what the card's "Always allow" named, where Claude Code's own "don't ask again" would keep it. */
-  answerPermission: (c: string, id: string, allow: boolean, always = false) =>
-    j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}) }) }),
-  /** Allow or deny a permission request of a code ticket's session (agent_session.permission_route), the one kind of
-     * session thimble still runs beside main; `always` also applies Claude Code's suggested "don't ask again" rules for
-     * the rest of the session, and `shown` is how many of the later calls that joined it the card listed. */
-  answerSessionPermission: (c: string, chat: string, id: string, allow: boolean, always = false, shown = 0) =>
-    j<{ answered: string }>(`${ws(c)}/chats/${enc(chat)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}), shown }) }),
-  /** The orientation thread's composer: a click, through thimble's plugin to the orientation's agent (orient_session.
-     * message_route): `sent`, or `held` while the coverage line is measured (it goes when that ends). 409 with the
-     * earlier-session text (and for a pre-cache, plan mode, or a module that did not pass it on), 410 with the
-     * earlier-version text; 403 without the analyst's cookie. */
-  messageOrientation: (c: string, text: string) =>
-    j<{ status: 'sent' | 'held' | (string & {}); chat?: string }>(`${ws(c)}/orientation/message`, { method: 'POST', body: JSON.stringify({ text }) }),
   /** Start it on a refused typed start (`POST /ws/{c}/subagents/start-it`): the same request, with the same values,
      * started through thimble's plugin as a click. */
   startIt: (c: string, request: string) => j<StartAnswer>(`${ws(c)}/subagents/start-it`, { method: 'POST', body: JSON.stringify({ request }) }).then(startAnswer),
   /** Try again, Send again and Write again (`POST /ws/{c}/subagents/again`): the request made anew as a click. */
   again: (c: string, request: string) => j<StartAnswer>(`${ws(c)}/subagents/again`, { method: 'POST', body: JSON.stringify({ request }) }).then(startAnswer),
-  /** A pending request as the refused card shows it before Start it: its role, its exact call, its values, its state. */
+  /** A pending request as the refused card shows it before Start it (chat/Refused.tsx, while the report reads it). */
   subagentRequest: (c: string, request: string) => j<SubagentRequest>(`${ws(c)}/subagents/requests/${enc(request)}`),
-  /** The numbers of an orientation's calls by tool_use id (backend calls.py's store, built from its transcript when the
-   * store has none). */
-  callIndex: (c: string, chat: string) => j<CallIndex>(`${ws(c)}/calls/${enc(chat)}`),
-  /** One call of an orientation's store: its tool, its input and its whole output. */
-  call: (c: string, chat: string, n: number) => j<StoredCall>(`${ws(c)}/calls/${enc(chat)}/${n}`),
 
   // ---- the workspace stream ----
   eventsUrl: (c: string, after?: number | string | null, log?: string | null) => {
@@ -457,17 +435,6 @@ export const api = {
   cardVersion: (c: string, id: string, entry: string) => j<CardVersion>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}`),
   /** make the card as it stood before its edit `entry` again, as an edit of the analyst's (backend notebook.restore_version) */
   restoreVersion: (c: string, id: string, entry: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/versions/${enc(entry)}/restore`, { method: 'POST' }),
-  /** `POST …/cells/{id}/fixes/{fix}/undo`: restore the card from before a check's fix (backend checkstore.undo_fix); the
-     * fix is marked undone and is not applied again. */
-  undoCardFix: (c: string, id: string, fix: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/fixes/${enc(fix)}/undo`, { method: 'POST' }),
-  /** `POST …/cells/{id}/check`: run the card's check again (Check again in its details or its ✕); 409 for a card that gets none. */
-  checkCardAgain: (c: string, id: string) => j<{ card: string; check: string }>(`${ws(c)}/cells/${enc(id)}/check`, { method: 'POST' }),
-  /** `POST …/cells/{id}/check/stop`: stop the card's check (Stop in its details); the card stays as it is. */
-  stopCardCheck: (c: string, id: string) => j<{ card: string; stopped: boolean }>(`${ws(c)}/cells/${enc(id)}/check/stop`, { method: 'POST' }),
-  /** `GET /card-checks`: whether the automatic check is on, and the checks running now with their phase. */
-  cardChecks: (c: string) => j<CardCheckStatus>(`${ws(c)}/card-checks`),
-  /** `POST /card-checks/stop`: stop every card check of the workspace. */
-  stopCardChecks: (c: string) => j<{ stopped: string[] }>(`${ws(c)}/card-checks/stop`, { method: 'POST' }),
   /** `POST /notebooks/{nb}/run`: a runnable card made and run in one call; `created_by` defaults to the analyst. */
   runCode: (c: string, nb: string, body: { code: string; title: string; created_by?: string; kind?: 'code' | 'plot' | 'table' }) =>
     j<Cell>(`${ws(c)}/notebooks/${enc(nb)}/run`, { method: 'POST', body: JSON.stringify({ created_by: 'user', ...body }) }),
@@ -499,9 +466,6 @@ export const api = {
 
   // ---- views and proposals ----
   proposals: (c: string) => j<Proposal[]>(`${ws(c)}/views/proposals`),
-  /** what thimble proposes for a file opened in the File browser: whether a viewer may be proposed for its type, and
-   * the proposal for the type when there is one (backend views.suggestion_for) */
-  viewSuggestions: (c: string, path: string) => j<ViewSuggestion>(`${ws(c)}/views/suggestions${q({ path })}`),
   /** ask for a viewer for the type of a file the analyst opened: the slug of the view proposal it wrote (which the
    * stream's `view {status: suggested}` brings to the view proposal card), or null */
   suggestView: (c: string, path: string) => j<{ slug: string | null }>(`${ws(c)}/views/suggest`, { method: 'POST', body: JSON.stringify({ path }) }),
@@ -511,11 +475,6 @@ export const api = {
   /** Reject on a view proposal: the proposal dropped as rejected (backend views.answer_offer). 403 without the
    * analyst's cookie, 409 for a row that is no open proposal. */
   rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
-  /** Try again on a notice that a check for a view proposal failed: the check that failed runs now, the file type's
-   * or the proposer's (backend views.propose_now_route, by the notice's `key`). `started: false` with the reason when it
-   * cannot run now. */
-  proposeNow: (c: string, key?: string) =>
-    j<{ started?: boolean; queued?: boolean; reason?: string }>(`${ws(c)}/views/propose-now`, { method: 'POST', ...(key ? { body: JSON.stringify({ key }) } : {}) }),
   /** The open notices (backend notices.list_route): failures of main and of thimble's agents, each with its fix,
    * oldest first. */
   notices: (c: string) => j<unknown[]>(`${ws(c)}/notices`),
@@ -605,23 +564,13 @@ export const api = {
   /** Open as view: the view of a card's type made ready, with the card's labels on, and the card and arguments it opens
    * with */
   cardAsView: (c: string, card: string) => j<{ slug: string; query: ViewQuery }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
-  // ---- orientation ----
-  /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
-  orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
 
   // ---- documents ----
-  frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
-  addFrameSection: (c: string, slug: DocumentType, heading: string) => j<Writeup>(`${inv(c, slug)}/frame/sections`, { method: 'POST', body: JSON.stringify({ heading }) }),
-  addFrameParagraph: (c: string, slug: DocumentType, sid: string, text: string) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/paragraphs`, { method: 'POST', body: JSON.stringify({ text }) }),
-  addFrameFigure: (c: string, slug: DocumentType, sid: string, body: { cell: string; caption?: string; after?: string }) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/figures`, { method: 'POST', body: JSON.stringify(body) }),
-  deleteFrameUnit: (c: string, slug: DocumentType, uid: string) => j<Writeup>(`${inv(c, slug)}/frame/units/${enc(uid)}`, { method: 'DELETE' }),
-  putFrameUnit: (c: string, slug: DocumentType, uid: string, patch: { text?: string; heading?: string; caption?: string }) => j<Writeup>(`${inv(c, slug)}/frame/units/${enc(uid)}`, { method: 'PUT', body: JSON.stringify(patch) }),
-  /** Write (`POST /ws/{c}/write`): a click, which starts the document's writer through thimble's plugin; it writes it,
-   * or revises it once written. `text` is a request typed at one place, `after` that place, and `model` and `effort`
-   * the run's values (Settings' writer row when left out). The answer is the agent id or the refusal's kind and reason;
-   * 403 without the analyst's cookie. */
-  write: (c: string, slug: DocumentType, body: { text?: string; after?: string; model?: string; effort?: string } = {}) =>
-    j<StartAnswer>(`${ws(c)}/write`, { method: 'POST', body: JSON.stringify({ doc: slug, ...body }) }).then(startAnswer),
+  /** Write (`POST /ws/{c}/write`): the analyst's request for the report, which goes to Claude in the chat; `text` is
+   * their instructions and `after_text` the words of the passage a request placed in the report follows. Answers the
+   * chat it went to, or `kind: busy` with the reason while Claude still answers there. */
+  write: (c: string, slug: DocumentType, body: { text?: string; after_text?: string } = {}) =>
+    j<{ chat?: string; kind?: string; reason?: string }>(`${ws(c)}/write`, { method: 'POST', body: JSON.stringify({ doc: slug, ...body }) }),
   /** Send the analyst's session what the analyst wrote at one place (`POST /ws/{c}/events {kind: card}`, the `card`
    * bullet of prompts/main.md): a request sent with ⌘↵ (lib/agentKey) or /card, made in document `doc` after the
    * passage `after` names, or on card `card`. A card main makes for it with add_card in the group
@@ -631,21 +580,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ kind: 'card', payload: { text: body.text, group: `request:${body.request}`, ...(body.doc ? { doc: body.doc } : {}), ...(body.after ? { after: body.after } : {}), ...(body.card ? { card: body.card } : {}) } }),
     }),
-
-  // ---- tickets ----
-  tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
-  ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),
   /** the address of a ticket's before or after shot (`GET /dev/tickets/{id}/shots/{name}`), for an <img> */
   ticketShotUrl: (id: string, name: string) => `${apiBase()}/dev/tickets/${enc(id)}/shots/${enc(name)}`,
   fileTicket: (body: NewTicketBody) => j<Ticket>(`${apiBase()}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),
-  retryTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
-  /** Start on main's ticket that waited while another ran: it starts through the plugin module once nothing else runs */
-  startTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
-  /** whether code tickets run here (`tickets` is '' in a development install), for Report a problem's File a code ticket */
-  devStatus: () => j<DevStatus>(`${apiBase()}/dev/status`),
-  dismissTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
-  /** stop a running ticket: nothing is applied and it ends `stopped`, which Retry runs again */
-  stopTicket: (id: string) => j<{ ok: boolean }>(`${apiBase()}/dev/tickets/${enc(id)}/stop`, { method: 'POST' }),
 
   // ---- settings ----
   settings: (c: string) => j<Settings>(`${ws(c)}/settings`),
@@ -656,20 +593,6 @@ export const api = {
   removeApiKey: (c: string) => j<Settings>(`${ws(c)}/settings/api-key`, { method: 'DELETE' }),
   /** `POST /settings/check`: one Models API call with the saved sign-in: whether it works, in words */
   checkSignIn: (c: string) => j<{ ok: boolean; message: string }>(`${ws(c)}/settings/check`, { method: 'POST' }),
-  /** the extensions added, found again for this workspace (backend extensions.list_route) */
-  extensions: (c: string) => j<Extensions>(`${ws(c)}/extensions`),
-  /** this workspace's switch of one extension; the analyst's browser alone may turn it */
-  switchExtension: (c: string, name: string, on: boolean) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
-  /** adds an extension thimble ships, as `thimble extension add <name>` does */
-  addExtension: (c: string, name: string) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}/add`, { method: 'POST' }),
-  /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
-  switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
-    j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
-  /** this workspace's switch of a view built for it; the analyst's browser alone may turn it (backend views.set_view_on) */
-  switchLocalView: (c: string, slug: string, on: boolean) => j<LocalExtension>(`${ws(c)}/views/${enc(slug)}/on`, { method: 'PUT', body: JSON.stringify({ on }) }),
-  /** the answer to Settings' offer to run an extension's orientation instructions now: Run now (true) or Not now */
-  answerExtensionOrientation: (c: string, name: string, run: boolean) =>
-    j<Extensions & { status: string }>(`${ws(c)}/extensions/${enc(name)}/orientation`, { method: 'POST', body: JSON.stringify({ run }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }
@@ -701,11 +624,12 @@ import type { ReportBlocksBody } from './types'
 
 /** The report editor's save route. */
 export const reportApi = {
-  /** `PUT …/types/{slug}/blocks`: the editor's whole document as blocks; answers the stored document or frame. */
+  /** `PUT …/types/{slug}/blocks`: the editor's whole document as blocks; answers the stored document. */
   putBlocks: (c: string, slug: DocumentType, body: ReportBlocksBody) => j<Writeup>(`${inv(c, slug)}/blocks`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `PUT …/types/{slug}/locks/{block}`: the analyst's lock on one block (the title's id is `title`); answers the stored document or frame. */
-  lock: (c: string, slug: DocumentType, block: string, body: { locked: boolean; client?: string }) =>
-    j<Writeup>(`${inv(c, slug)}/locks/${enc(block)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  /** `GET /lenses`: the lenses whose marks the report draws, each with its color (a viz family name). */
+  lenses: (c: string) => j<{ id: string; name: string; color: string }[]>(`${ws(c)}/lenses`),
+  /** `POST /marks/{id}/dismiss`: a mark the analyst is done with, which no longer shows. */
+  dismissMark: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/marks/${enc(id)}/dismiss`, { method: 'POST' }),
 }
 
 // ---- the problem report (shell/ProblemReport.tsx; backend feedback.py) ----
@@ -753,40 +677,28 @@ export const labelApi = {
   apply: (c: string, id: string, body: ApplyBody) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }),
 }
 
-// --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---
-import type { AnyDoc, DeckBody, DeckDoc, DocHistory, DocPreset, NewDocBody, PageDoc, ReportType, StoryBody, StoryDoc, TypesState } from './types'
+// --- the report's state and its kept drafts (report/) ---
+import type { AnyDoc, DocHistory, NewDocBody, ReportType, TypesState } from './types'
 
 export const docsApi = {
   /** `GET …/investigations/main/types`: per type, whether its document exists, its renderer and its name. */
   types: (c: string) => j<TypesState>(`${ws(c)}/investigations/main/types`),
-  /** `GET …/types/{slug}`: the stored document of any shape (404 before a write). */
+  /** `GET …/types/{slug}`: the report as stored, an empty one before anything is written. */
   document: (c: string, slug: string) => j<AnyDoc>(inv(c, slug)),
-  /** `GET …/types/{slug}/versions`: every generation of the written document, newest first (404 before a write). */
+  /** `GET …/types/{slug}/versions`: the drafts kept around Claude's changes to the report. */
   versions: (c: string, slug: string) => j<DocHistory>(`${inv(c, slug)}/versions`),
   /** `GET …/types/{slug}/versions/{n}`: generation `n` as it stood (404 when its text is not kept). */
   version: (c: string, slug: string, n: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}`),
-  /** `GET …/types/{slug}/versions/{n}/revisions/{i}`: an earlier save of the writer run that wrote generation `n`. */
-  revision: (c: string, slug: string, n: number, i: number) => j<AnyDoc>(`${inv(c, slug)}/versions/${n}/revisions/${i}`),
   /** `POST …/types/{slug}/versions/{n}[/revisions/{i}]/restore`: that draft, or that save of it, made the newest draft
    * again, as the analyst's; answers the document. The top bar's Undo reverts it. */
   restore: (c: string, slug: string, n: number, i: number | null) =>
     j<AnyDoc>(`${inv(c, slug)}/versions/${n}${i != null ? `/revisions/${i}` : ''}/restore`, { method: 'POST' }),
-  /** `GET /report-types/presets`: the presets + New offers. */
-  presets: (c: string) => j<DocPreset[]>(`${ws(c)}/report-types/presets`),
-  /** `POST /report-types/new`: a preset's document, a page, or one of the analyst's own from a name and a brief. */
+  /** `POST /report-types/new`: another document of the report's kind, from a name. */
   createDoc: (c: string, body: NewDocBody) => j<ReportType>(`${ws(c)}/report-types/new`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `PUT /report-types/{slug}`: a type of the workspace's own renamed. */
+  /** `PUT /report-types/{slug}`: a document of the person's own renamed. */
   renameType: (c: string, slug: string, name: string) => j<ReportType>(`${ws(c)}/report-types/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ name }) }),
-  /** `DELETE /report-types/{slug}`: a type of the workspace's own and its document. */
+  /** `DELETE /report-types/{slug}`: a document of the person's own, with its drafts. */
   deleteType: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/report-types/${enc(slug)}`, { method: 'DELETE' }),
-  /** `PUT …/types/{slug}/deck`: the deck editor's whole deck, into the written deck or its frame; answers what is stored. */
-  putDeck: (c: string, slug: string, body: DeckBody) => j<DeckDoc>(`${inv(c, slug)}/deck`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `PUT …/types/{slug}/story`: the story editor's whole story, into the written story or its frame; answers what is stored. */
-  putStory: (c: string, slug: string, body: StoryBody) => j<StoryDoc>(`${inv(c, slug)}/story`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `PUT …/types/{slug}/html`: the page's whole html from the code drawer; creates the page's document when none is written. */
-  putHtml: (c: string, slug: string, html: string) => j<PageDoc>(`${inv(c, slug)}/html`, { method: 'PUT', body: JSON.stringify({ html }) }),
-  /** `GET …/types/{slug}/film`: a video's film as its frame loads it, under the views' policy, with its timing and bridge. */
-  film: (c: string, slug: string) => j<{ html: string }>(`${inv(c, slug)}/film`),
 }
 
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---
@@ -850,23 +762,4 @@ export const undoApi = {
   undo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/undo`, { method: 'POST' }),
   /** `POST /ws/{c}/redo`: repeat the last step undone. */
   redo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/redo`, { method: 'POST' }),
-}
-
-// --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
-import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
-
-export const checksApi = {
-  /** `GET /checks`: every check of the workspace, the built-ins first, each with its latest run per document. */
-  list: (c: string) => j<Check[]>(`${ws(c)}/checks`),
-  /** `POST /checks`: a new check from a name and a prompt (201), which the server turns on and runs; a 409 when the
-   * name is taken. */
-  create: (c: string, body: { name: string; prompt: string; covers?: CheckCover[] }) => j<Check>(`${ws(c)}/checks`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `PATCH /checks/{id}`: turned on or off, renamed, its prompt or colour changed; answers the check. The server runs
-   * a check turned on, and one that is on given a new prompt, wherever it has passages it has not seen. */
-  update: (c: string, id: string, patch: CheckPatch) => j<Check>(`${ws(c)}/checks/${enc(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-  /** Run (`POST /checks/{id}/run`): a click that starts the check's agent on one document through thimble's plugin, for
-   * the passages that changed since it last checked them; answers the run. */
-  run: (c: string, id: string, doc: string) => j<CheckRun>(`${ws(c)}/checks/${enc(id)}/run`, { method: 'POST', body: JSON.stringify({ doc }) }),
-  /** `POST /checks/{id}/runs/{doc}/stop`: stop the check's run on one document; answers the check. */
-  stop: (c: string, id: string, doc: string) => j<Check>(`${ws(c)}/checks/${enc(id)}/runs/${enc(doc)}/stop`, { method: 'POST' }),
 }

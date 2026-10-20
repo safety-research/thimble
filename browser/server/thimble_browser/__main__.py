@@ -1,7 +1,8 @@
-"""`thimble-browser [FOLDER]`: open a folder of files in thimble browser.
+"""`thimble-browser [FOLDER]`: open a folder of files in thimble browser, the current folder when none is given.
 
-Starts the server on 127.0.0.1, prints a sign-in link and opens it in the browser. Press Enter in this window for a
-new link (a link works once, for 15 minutes); Ctrl-C stops the server.
+Starts the server on 127.0.0.1, on port 8000 or the next free port, prints a sign-in link and opens it in the browser
+when this machine has one. Press Enter in this window for a new link (a link works once, for 15 minutes); Ctrl-C stops
+the server.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import uvicorn
 from . import home, llm, sandbox_note, settings
 from .app import build
 
-DEFAULT_PORT = 8420
+DEFAULT_PORT = 8000
 
 
 def free_port(want: int) -> int:
@@ -32,10 +33,19 @@ def free_port(want: int) -> int:
     raise SystemExit("thimble browser found no free port")
 
 
+def open_page(url: str) -> None:
+    """Open the page in this machine's browser, when it has one; the link printed above works either way."""
+    try:
+        if not webbrowser.open(url):
+            print("  (no browser opened here: open the link above in yours)", flush=True)
+    except webbrowser.Error:
+        print("  (no browser opened here: open the link above in yours)", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble-browser", description=__doc__.splitlines()[0])
     ap.add_argument("folder", nargs="?", default=".", help="the folder of files to open (default: this folder)")
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
+    ap.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"the port to try first (default: {DEFAULT_PORT})")
     ap.add_argument("--no-open", action="store_true", help="print the link, do not open a browser")
     ap.add_argument("--no-sandbox", action="store_true",
                     help="run card code without a sandbox where none is found (not recommended)")
@@ -70,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     port = free_port(a.port)
     app, auth, sessions = build(port, unsandboxed=a.no_sandbox)
+    if port != a.port:
+        print(f"  port {a.port} is in use, so thimble browser uses {port}")
     print(sandbox_note.line(a.no_sandbox))
     s = settings.read()
     print(f"  Claude: {s['model']} at {s['effort']} effort, signed in with {llm.describe()}"
@@ -81,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     first = link()
     print(f"thimble browser: {folder}\n  open {first}\n  (Enter: a new link · Ctrl-C: stop)", flush=True)
     if not a.no_open:
-        threading.Timer(0.8, lambda: webbrowser.open(first)).start()
+        threading.Timer(0.8, lambda: open_page(first)).start()
 
     def on_enter() -> None:
         for _ in sys.stdin:

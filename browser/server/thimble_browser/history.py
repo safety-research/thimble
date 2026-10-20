@@ -9,7 +9,7 @@ of the first later edit that kept them, else the card's own.
     GET  /api/ws/{c}/cells/{id}/versions/{entry}           the card as it stood before edit `entry`
     POST /api/ws/{c}/cells/{id}/versions/{entry}/restore   make it so again, as an edit of the analyst's
 
-Undo. A step is one change to a card (added, deleted, edited, moved, resized, starred, locked) or one save of the report,
+Undo. A step is one change to a card (added, deleted, edited, moved, resized, starred) or one save of the report,
 by the analyst or by Claude. The two stacks are `undo.json` in the workspace, each kept to MAX_STEPS. Claude's edit of a
 card it added, with no other step on that card since, joins the step that added it, so a card Claude makes and then
 gives its takeaway is one step; a run of a card's code is no step, but its outputs join the step that changed that code,
@@ -39,11 +39,11 @@ from .hub import hub
 log = logging.getLogger("thimble_browser.history")
 
 MAX_STEPS = 100
-CONTENT = ("title", "kind", "code", "payload", "takeaway", "text")  # what a version holds of a card
+CONTENT = ("title", "kind", "code", "program", "payload", "takeaway", "text")  # what a version holds of a card
 RUN = ("outputs", "status")  # what a run changes, kept with the edit of the code it ran
 # the fields a card's step restores, by what the step is
-EDIT_FIELDS = ("title", "slug", "kind", "code", "payload", "text", "takeaway", "takeaway_author")
-TOGGLE_FIELDS = ("locked", "starred")
+EDIT_FIELDS = ("title", "slug", "kind", "code", "program", "payload", "text", "takeaway", "takeaway_author")
+TOGGLE_FIELDS = ("starred",)
 PLACE_FIELDS = ("pos", "width", "height")
 ANALYST = "analyst"
 _lock = threading.RLock()
@@ -87,7 +87,7 @@ def _keep_version(ws: str, before: dict[str, Any], after: dict[str, Any]) -> Non
         return  # this change added no entry: a move, a star, a lock
     rec: dict[str, Any] = {"id": e["id"], "ts": e.get("ts"), "by": e.get("by"), "fields": e.get("fields") or [],
                            "was": {k: copy.deepcopy(before.get(k)) for k in CONTENT if k in before}}
-    if "code" in rec["fields"] or "kind" in rec["fields"]:
+    if {"code", "program", "kind"} & set(rec["fields"]):
         rec["shown"] = {k: copy.deepcopy(before.get(k)) for k in RUN}
     with _lock, open(_history_path(ws, str(after["id"])), "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -109,6 +109,19 @@ def version_of(ws: str, cell: dict[str, Any], entry: str) -> dict[str, Any]:
     return {"entry": entries[at], "version": state}
 
 
+def earlier_outputs(ws: str, cell: dict[str, Any]) -> list[tuple[dict[str, Any], list[Any]]]:
+    """canvas.on_earlier: (edit entry, the outputs the card showed before it) for each of the card's kept edits that
+    changed what it shows, newest first, so a citation written before an edit still finds the value it cited."""
+    recs = _records(ws, str(cell["id"]))
+    out = []
+    for e in reversed([e for e in cell.get("edited") or [] if isinstance(e, dict)]):
+        if e.get("id") in recs and "shown" in recs[e["id"]]:
+            outs = (recs[e["id"]]["shown"] or {}).get("outputs")
+            if isinstance(outs, list):
+                out.append((e, outs))
+    return out
+
+
 def restore(ws: str, cid: str, entry: str) -> dict[str, Any]:
     """Make card `cid` as it stood before its edit `entry`, as an edit of the analyst's, with the outputs it showed
     then, so it shows them without a run. The card."""
@@ -117,6 +130,8 @@ def restore(ws: str, cid: str, entry: str) -> dict[str, Any]:
     args: dict[str, Any] = {"question": v.get("title") or cell["title"], "takeaway": v.get("takeaway") or ""}
     if cell["kind"] in canvas.CODE_KINDS:
         args["code"] = v.get("code") or ""
+        if v.get("program") is not None:
+            args["program"] = v["program"]
         if v.get("kind") in canvas.CODE_KINDS:
             args["kind"] = v["kind"]
     elif cell["kind"] == "note":
@@ -125,7 +140,8 @@ def restore(ws: str, cid: str, entry: str) -> dict[str, Any]:
         args["refs"] = (v.get("payload") or {}).get("refs") or []
     elif cell["kind"] == "custom":
         args["html"] = (v.get("payload") or {}).get("html") or ""
-    code_changed = cell["kind"] in canvas.CODE_KINDS and (v.get("code") or "") != (cell.get("code") or "")
+    code_changed = cell["kind"] in canvas.CODE_KINDS and ((v.get("code") or "") != (cell.get("code") or "")
+                                                          or (v.get("program") or "") != (cell.get("program") or ""))
     cell = canvas.update_card(ws, cid, args, by=ANALYST)
     if code_changed and isinstance(v.get("outputs"), list):
         cell = canvas.set_run(ws, cid, outputs=v["outputs"], status=v.get("status") or "idle")
@@ -168,8 +184,6 @@ def _card_label(op: str, fields: set[str], card: dict[str, Any]) -> str:
         return f"delete card {name}"
     if fields == {"starred"}:
         return f"{'star' if card.get('starred') else 'unstar'} card {name}"
-    if fields == {"locked"}:
-        return f"{'lock' if card.get('locked') else 'unlock'} card {name}"
     if fields <= {"pos"}:
         return f"move card {name}"
     if fields <= {"width", "height", "pos"}:
@@ -211,7 +225,7 @@ def _edited(ws: str, before: dict[str, Any], after: dict[str, Any], by: str) -> 
     fields = {k for k in keys if before.get(k) != after.get(k)}
     if not fields:
         return
-    if "code" in fields:
+    if {"code", "program"} & fields:
         fields |= set(RUN)
     undo, redo = _load(ws)
     cid = after["id"]
@@ -236,20 +250,21 @@ def _ran(ws: str, cell: dict[str, Any]) -> None:
     if step.get("op") == "created" and (step.get("after") or {}).get("code") == cell.get("code"):
         step["after"] = copy.deepcopy(cell)
     elif step.get("op") == "edited" and (step.get("after") or {}).get("code") == cell.get("code") \
-            and "code" in (step.get("after") or {}):
+            and ("code" in (step.get("after") or {}) or "program" in (step.get("after") or {})):
         step["after"].update({k: copy.deepcopy(cell.get(k)) for k in RUN})
     else:
         return
     _save(ws, undo, redo)
 
 
-def _on_report(ws: str, before: str | None, after: str, by: str) -> None:
-    """report.on_save: a save that changed the text is a step."""
+def _on_report(ws: str, before: str | None, after: str, by: str, slug: str = report.DOC) -> None:
+    """report.on_save: a save that changed the text of a document is a step."""
     if _is_applying() or (before or "").strip() == after.strip():
         return
+    what = "the report" if slug == report.DOC else report.name_of(ws, slug)
     with _lock:
-        _push(ws, {"kind": "doc", "op": "edited", "target": report.DOC, "by": by, "before": before, "after": after,
-                   "label": "edit the report" if by == ANALYST else "write the report"})
+        _push(ws, {"kind": "doc", "op": "edited", "target": slug, "by": by, "before": before, "after": after,
+                   "label": f"edit {what}" if by == ANALYST else f"write {what}"})
 
 
 # --------------------------------------------------------------------------- choosing and applying a step
@@ -336,8 +351,8 @@ def _set_card(ws: str, cid: str, fields: dict[str, Any]) -> None:
     canvas.emit(ws, cell, "edited")
 
 
-def _set_report(ws: str, md: str | None) -> None:
-    p = home.workspace_dir(ws) / "docs" / f"{report.DOC}.md"
+def _set_report(ws: str, md: str | None, slug: str = report.DOC) -> None:
+    p = home.workspace_dir(ws) / "docs" / f"{slug}.md"
     if md is None:
         try:
             p.unlink()
@@ -346,14 +361,14 @@ def _set_report(ws: str, md: str | None) -> None:
     else:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(md, encoding="utf-8")
-    hub.publish(ws, {"type": "report", "slug": report.DOC, "status": "edited", "by": "undo"})
+    hub.publish(ws, {"type": "report", "slug": slug, "status": "edited", "by": "undo"})
 
 
 def _apply(ws: str, step: dict[str, Any], forward: bool) -> None:
     _applying.on = True
     try:
         if step["kind"] == "doc":
-            _set_report(ws, step.get("after") if forward else step.get("before"))
+            _set_report(ws, step.get("after") if forward else step.get("before"), str(step.get("target") or report.DOC))
             return
         op, cid = step["op"], str(step["target"])
         if op == "created":
@@ -408,6 +423,7 @@ def register(ctx: Any) -> None:
     global _sessions
     _sessions = ctx.sessions
     canvas.on_change(_on_card)
+    canvas.on_earlier(earlier_outputs)
     report.on_save(_on_report)
     app = ctx.app
 
@@ -435,7 +451,7 @@ def register(ctx: Any) -> None:
             return restore(ws, cid, entry)
         except KeyError as e:
             raise HTTPException(404, str(e).strip("'")) from None
-        except (ValueError, PermissionError) as e:
+        except ValueError as e:
             raise HTTPException(400, str(e)) from None
 
     @app.get("/api/ws/{c}/undo")

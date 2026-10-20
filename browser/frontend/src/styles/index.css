@@ -9,6 +9,8 @@
 @import './outputs.css';
 @import './shell.css';
 @import './chat.css';
+@import './marks.css';
+@import './side.css';
 @import './canvas.css';
 @import './files.css';
 @import './report.css';

@@ -6,10 +6,12 @@ import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { Icon } from '../components/Icon'
 import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
-import { docsApi } from '../lib/api'
+import { api, docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { track } from '../lib/telemetry'
+import { teleport } from '../lib/teleport'
 import type { Concept, TypesState } from '../lib/types'
-import { BUILTIN_SLUGS, docLabel } from '../report/model'
+import { docLabel, SLUG } from '../report/model'
 
 interface BaseProps {
   onClick?: (e: MouseEvent<HTMLElement>) => void
@@ -54,7 +56,7 @@ function loadTypes(ws: string): void {
 }
 
 function useDocName(ws: string, slug: string): string {
-  const builtin = (BUILTIN_SLUGS as readonly string[]).includes(slug)
+  const builtin = slug === SLUG
   const [, bump] = useState(0)
   useEffect(() => {
     if (builtin || !ws) return
@@ -132,4 +134,17 @@ export function LabelRowChip({ ws, name, onClick, className }: { ws: string; nam
       <span className="surface-chip-name">{name}</span>
     </SurfaceChip>
   )
+}
+
+/** Open a label by its name: its section of the Labels pane, or the Files tab when it is not found. */
+export function openLabel(ws: string, name: string) {
+  track('chip-teleport', { target: `label:${name}`, detail: { kind: 'section' } })
+  api
+    .concepts(ws)
+    .then((cs) => {
+      const c = cs.find((x) => x.name === name)
+      if (c) teleport(`concept:${c.id}`)
+      else bus.emit('showTab', { tab: 'files' })
+    })
+    .catch(() => bus.emit('showTab', { tab: 'files' }))
 }

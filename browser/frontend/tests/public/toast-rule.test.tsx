@@ -5,11 +5,10 @@
 // for either.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
+import { ARM_MS } from '../../src/chat/ProposalCard.tsx'
 import { ProposalCard } from '../../src/chat/ProposalCard.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'
-import { useWriteFailures } from '../../src/report/writeFailures.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const toasts: string[] = []
@@ -47,14 +46,3 @@ test('an Accept that cannot start says why under the view proposal, once, and ma
   expect(toasts).toEqual([])
 })
 
-test('a write that failed stays on its document and makes no toast', async () => {
-  let shown: Record<string, unknown> = {}
-  function Probe() {
-    shown = useWriteFailures('mini').failures
-    return null
-  }
-  await mount(<Probe />)
-  await act(async () => bus.emit('wsEvent', { type: 'report', slug: 'report', status: 'failed', note: 'The writer stopped.', seq: 7 } as never))
-  expect(Object.keys(shown)).toEqual(['report'])
-  expect(toasts).toEqual([])
-})

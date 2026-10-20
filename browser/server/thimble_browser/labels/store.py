@@ -458,7 +458,10 @@ def presence(ws: str, cid: str) -> dict[str, dict[str, int]]:
 
 
 def ruler(ws: str, cid: str, path: str, total: int, bins: int) -> dict[str, dict[int, int]]:
-    """{value: {bin: n}}: where on a file of `total` lines the label's values fall, the lines cut into `bins`."""
+    """{value: {bin: n}}: where on a file of `total` lines the label's values fall, the lines cut into `bins`; a record
+    counts in every bin its line overlaps, so a few records fill the strip as bands, not ticks."""
+    from ..readers.base import share_bins  # noqa: PLC0415
+
     out: dict[str, dict[int, int]] = {}
     if total <= 0:
         return out
@@ -467,9 +470,9 @@ def ruler(ws: str, cid: str, path: str, total: int, bins: int) -> dict[str, dict
         v = effective(r)
         if p != path or line is None or v is None:
             continue
-        b = min(bins - 1, (line - 1) * bins // total)
         per = out.setdefault(str(v), {})
-        per[b] = per.get(b, 0) + 1
+        for b in share_bins(line - 1, line - 1, total, bins):
+            per[b] = per.get(b, 0) + 1
     return out
 
 
@@ -512,13 +515,13 @@ def label_cards(ws: str, cid: str) -> list[tuple[dict[str, Any], dict[str, Any]]
 
 def label_card(ws: str, concept: dict[str, Any], *, group: str | None, by: str, chat: str | None = None,
                question: str | None = None) -> dict[str, Any]:
-    """The label's card, kind `label` with payload {concept}: the one it has (with a new question when one is given and
-    the analyst has not locked it), else a new one in `group`: None for a group named after the label (a chat's label),
+    """The label's card, kind `label` with payload {concept}: the one it has (with a new question when one is given),
+    else a new one in `group`: None for a group named after the label (a chat's label),
     '' for the canvas's first group (the analyst's label, as 0.8 put it in the analyst's own group)."""
     title = " ".join(str(question or "").split())
     with canvas._lock:
         for nb, cell in label_cards(ws, concept["id"]):
-            if title and cell.get("title") != title and not cell.get("locked"):
+            if title and cell.get("title") != title:
                 cell["title"] = title
                 cell["ts"] = home.now()
                 canvas.save(ws, nb)
@@ -529,7 +532,7 @@ def label_card(ws: str, concept: dict[str, Any], *, group: str | None, by: str, 
         taken = {c.get("slug") for g in canvas.notebooks(ws) for c in g["cells"]}
         cell = {"id": secrets.token_hex(4), "kind": "label", "title": title or concept["name"],
                 "slug": canvas._slug(title or concept["name"], taken), "takeaway": "", "takeaway_author": None,
-                "labels": [], "locked": False, "created_by": by, "created_at_event": None, "edited": [],
+                "labels": [], "created_by": by, "created_at_event": None, "edited": [],
                 "created_ts": now, "ts": now, "width": None, "height": None, "pos": None, "starred": False,
                 "payload": {"concept": concept["id"]}, "notebook": nb["id"]}
         nb = canvas.load(ws, nb["id"])
@@ -550,8 +553,8 @@ def drop_label_cards(ws: str, cid: str) -> None:
 
 # ---- filters
 
-CARD_LISTS = ("kinds", "groups", "makers", "checks")
-CARD_FLAGS = ("starred", "locked")
+CARD_LISTS = ("kinds", "groups", "makers")
+CARD_FLAGS = ("starred",)
 
 
 def card_parts(raw: Any) -> dict[str, Any]:

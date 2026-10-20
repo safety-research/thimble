@@ -88,12 +88,6 @@ function parseCallRef(chat: string, n: number, frag: string | undefined): Parsed
   return end != null && end > line ? { kind: 'call', chat, n, line, endLine: end } : { kind: 'call', chat, n, line }
 }
 
-/** `call:<chat>/<n>`, with `#L<a>` or `#L<a>-L<b>` for lines of its output. */
-export function callRef(chat: string, n: number, line?: number, endLine?: number): string {
-  const base = `call:${chat}/${n}`
-  if (line == null) return base
-  return endLine != null && endLine > line ? `${base}#L${line}-L${endLine}` : `${base}#L${line}`
-}
 
 // A file's path may hold spaces (`run 1/agent one.jsonl`), never at its ends and never a newline or `#`, as refs.py
 // reads it. A path with a space and no line fragment counts only when it looks like a file, so bracketed prose is not

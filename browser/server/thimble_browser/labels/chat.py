@@ -191,7 +191,7 @@ async def set_filter(t: tools.Tools, args: dict[str, Any]) -> Result:
         return _err(f"`scope` is one of {', '.join(store.SCOPES)}")
     parts = {k: args[k] for k in (*store.CARD_LISTS, *store.CARD_FLAGS, "text") if k in args}
     if parts and scope != "canvas":
-        return _err("kinds, groups, makers, checks, starred, locked and text filter the canvas's cards")
+        return _err("kinds, groups, makers, starred and text filter the canvas's cards")
     label = args.get("label")
     try:
         if label:

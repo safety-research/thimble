@@ -60,6 +60,7 @@ export type ChatRecord =
   | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
   | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
+  | { type: 'marks'; ts?: string; marks: import('./marks').Mark[] }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
@@ -74,12 +75,11 @@ export interface TurnUsage {
   requests: number
 }
 
-/** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
- * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
- * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+/** What a notice's button does: open Settings (`settings`), build the failed view `slug` again (`view-retry`), or sign
+ * out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  do: 'settings' | 'view-retry' | 'sign-out' | (string & {})
   slug?: string
 }
 
@@ -234,6 +234,8 @@ export interface Cell {
   regenerating_for?: string[] | null
   verification?: unknown
   code?: string
+  /** a program card's program, on the terminal plugin's toolkit (kit/KitBody) */
+  program?: string
   outputs?: MimeBundle[]
   status?: CellStatus
   exec_count?: number | null
@@ -459,10 +461,7 @@ export interface CardFilterParts {
   groups?: string[]
   /** who made the cards, as their top row names them (layout.ts cellThread) */
   makers?: string[]
-  /** what the card check found (lib/cardCheck.ts CheckFilterState) */
-  checks?: string[]
   starred?: boolean
-  locked?: boolean
   /** words, each of which starts a word of a kept card's question or takeaway */
   text?: string
 }
@@ -688,11 +687,11 @@ export interface ViewOpen {
 
 /** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
  * these. Main's composer adds Ultracode (MainEffort). */
-export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type AgentEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** Main's effort menu in the composer: Claude Code's levels, then Ultracode, which runs main at xhigh with workflows
  * (cc_settings.EFFORTS and ultracode). thimble's agents run at a level, never Ultracode. */
-export type MainEffort = OrientEffort | 'ultracode'
+export type MainEffort = AgentEffort | 'ultracode'
 
 /** A permission request waiting for the analyst. Main's are relayed by its PermissionRequest hook (events._hold), and
  * so are those of thimble's subagents and their descendants, which the terminal answers (`terminal`); a code ticket's
@@ -903,6 +902,8 @@ export interface WriteupParagraph {
   kind?: StoryBlockKind
   /** a story quote's speaker */
   speaker?: string
+  /** a quote (`> ` in the report's Markdown), such as a record's words from the data */
+  quote?: boolean
 }
 
 export interface WriteupFigure {
@@ -1325,7 +1326,8 @@ export interface BrowserSettings extends Settings {
   has_api_key: boolean
   model: string
   effort: string
-  explain: boolean
+  /** each feature with its switch (server features.listing, features.ts) */
+  features?: import('../features').FeatureRow[]
   choices: { models: string[]; efforts: string[] }
 }
 
@@ -1766,8 +1768,8 @@ export interface CellMoveBody {
 /** One block of the report editor's save (`PUT …/types/{slug}/blocks`): `id` is the unit's id, or the editor's for a new block. */
 export interface ReportBlock {
   id: string
-  type: 'heading' | 'paragraph' | 'bullet' | 'figure'
-  /** the heading, the paragraph's sentences joined, or the bullet item, with `[[…]]` citations */
+  type: 'heading' | 'paragraph' | 'bullet' | 'quote' | 'figure'
+  /** the heading, the paragraph's sentences joined, the bullet item or the quote, with `[[…]]` citations */
   text?: string
   level?: number
   /** a figure's `card:<id>` (or legacy `cell:<id>`), '' before one is picked */
@@ -1788,6 +1790,24 @@ export interface ReportBlocksBody {
 /** A figure placed before every paragraph of its section (the reconciler's `lead`). */
 export interface WriteupFigure {
   lead?: boolean
+  /** `claude` while the figure is Claude's, as a paragraph's `by` */
+  by?: string
+}
+
+/** A lens's mark on the report (backend features/lenses.py): `term`, the exact words it marks, and what it says. */
+export interface ReportMark {
+  id: string
+  lens: string
+  surface: 'report'
+  term: string
+  title?: string
+  body: string
+  here?: string
+}
+
+export interface Writeup {
+  /** the lenses' marks on the report, served with it */
+  marks?: ReportMark[]
 }
 
 // ---- label cards: the details drawer (canvas/LabelDetails.tsx) ----

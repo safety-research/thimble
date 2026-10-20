@@ -1,5 +1,5 @@
-"""Settings in the page (settings_api.py): the sign-in, the model, the effort and explainers; an API key is kept
-readable by this user alone and never sent back."""
+"""Settings in the page (settings_api.py): the sign-in, the model, the effort and the features' switches; an API key is
+kept readable by this user alone and never sent back."""
 import stat
 
 from browser_client import Signed
@@ -12,7 +12,8 @@ MADE_UP_KEY = "sk-made-up-0123456789"
 def test_the_settings_and_their_choices(folder):
     api = Signed(folder)
     got = api("GET", "/ws/{ws}/settings").json()
-    assert got["model"] == "claude-opus-5-5" and got["effort"] == "high" and got["explain"] is True
+    assert got["model"] == "claude-opus-5-5" and got["effort"] == "high"
+    assert all(f["on"] for f in got["features"])
     assert "claude-opus-5-5" in got["choices"]["models"] and got["wif"] is None
     assert got["signed_in"] == "none" and got["has_api_key"] is False
     assert got["models"]["main"]["model"] == "claude-opus-5-5"
@@ -24,12 +25,12 @@ def test_a_change_is_saved_and_a_bad_one_refused(folder, tmp_path):
     conf.chmod(0o600)
     api = Signed(folder)
     r = api("PUT", "/ws/{ws}/settings", json={"credentials": {"source": "wif", "file": str(conf)}, "model": "claude-sonnet-5-5",
-                                              "effort": "max", "explain": False})
+                                              "effort": "max", "features": {"lenses": False}})
     assert r.status_code == 200
     got = r.json()
     assert got["credentials"] == {"source": "wif", "file": str(conf)}
     assert got["signed_in"] == f"Workload Identity Federation from {conf} (the token file /made/up/token)"
-    assert settings.read()["model"] == "claude-sonnet-5-5" and settings.read()["explain"] is False
+    assert settings.read()["model"] == "claude-sonnet-5-5" and settings.read()["features"] == {"lenses": False}
     assert api("PUT", "/ws/{ws}/settings", json={"credentials": {"source": "wif", "file": str(folder)}}).status_code == 400
     assert api("PUT", "/ws/{ws}/settings", json={"effort": "extreme"}).status_code == 400
     # a 0.8 role row's change is the one model's

@@ -10,8 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { threadRetry } from '../../src/chat/ChatPanel.tsx'
 import { foldRecords, withApiErrors, type NoticeRow as NoticeRowT, type Row } from '../../src/chat/model.ts'
 import { NoticeStrip } from '../../src/chat/Notice.tsx'
-import { PROPOSALS_OFF_LINE } from '../../src/chat/ProposalCard.tsx'
-import { ThreadRows } from '../../src/chat/ThreadRows.tsx'
+import { Rows } from '../../src/chat/Rows.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import { CODE_GONE_TEXT, noticeActions, parseNotice, setBrowserId, showCodeGone, withNotice, withoutNotice } from '../../src/lib/notices.ts'
@@ -23,8 +22,8 @@ const BLOCKED = "Couldn't check for a view proposal: Claude's safeguards blocked
 const DOWNGRADE = "Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."
 const BUILD = 'The view Agent Network failed to build: the page did not load.'
 const MANUAL = 'Manual mode: Claude Code asks before most commands. In your terminal, press shift+tab for auto mode, or start with `thimble --permission-mode auto`.'
-const TRY = { label: 'Try again', do: 'proposals-retry' }
-const OFF = { label: 'Turn off view proposals', do: 'proposals-off' }
+const TRY = { label: 'Retry', do: 'view-retry', slug: 'agent-network' }
+const OFF = { label: 'Open Settings', do: 'settings' }
 const record = (id: string, text: string, extra: Record<string, unknown> = {}): ChatRecord => ({ type: 'notice', ts: '2026-10-14T10:00:00Z', id, kind: 'proposals', text, ...extra }) as ChatRecord
 
 describe('a notice as the server sends it', () => {
@@ -141,7 +140,7 @@ describe('the strip above the composer, and the rows', () => {
     const [proposals, build] = el.querySelectorAll('.chat-notice')
     expect(proposals.querySelector('.chat-notice-agent')?.textContent).toBe('View proposals')
     expect(proposals.querySelector('.chat-notice-text')?.textContent).toBe(`View proposals ${BLOCKED}`)
-    expect([...proposals.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Try again', 'Turn off view proposals', 'Dismiss'])
+    expect([...proposals.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Retry', 'Open Settings', 'Dismiss'])
     expect(build.querySelector('.chat-notice-agent')?.textContent).toBe('View build: Agent Network')
     // Open is a link after the words, the fix a button under them
     expect([...build.querySelectorAll('button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Open', 'Retry', 'Dismiss'])
@@ -201,29 +200,14 @@ describe('the strip above the composer, and the rows', () => {
     expect(sent).toEqual(['POST /api/ws/nt-x/notices/b1/dismiss', 'POST /api/ws/nt-x/notices/p1/dismiss'])
   })
 
-  test('each fix runs: Try again checks for a view proposal now, Turn off view proposals turns them off, Retry builds the view again; the notice goes', async () => {
-    open = [
-      { id: 'a', key: 'p1', text: BLOCKED, action: TRY },
-      { id: 'b', key: 'p2', text: BLOCKED, action: OFF },
-      { id: 'c', key: 'v', chat: 'dev-1', text: BUILD, action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } },
-    ]
+  test('a fix runs: Retry builds the view again, and the notice goes', async () => {
+    open = [{ id: 'c', key: 'v', chat: 'dev-1', text: BUILD, action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } }]
     const el = await strip('nt-act')
-    const button = (label: string) => [...el.querySelectorAll('.chat-notice-act')].find((b) => b.textContent === label)
-    for (const label of ['Try again', 'Turn off view proposals', 'Retry']) {
-      await click(button(label))
-      await settle()
-      await settle()
-    }
-    expect(sent).toEqual([
-      'POST /api/ws/nt-act/views/propose-now {"key":"p1"}',
-      'POST /api/ws/nt-act/notices/a/dismiss',
-      'PUT /api/ws/nt-act/settings {"propose_views":false}',
-      'POST /api/ws/nt-act/notices/b/dismiss',
-      'POST /api/ws/nt-act/views/proposals/agent-network/retry',
-      'POST /api/ws/nt-act/notices/c/dismiss',
-    ])
+    await click([...el.querySelectorAll('.chat-notice-act')].find((b) => b.textContent === 'Retry'))
+    await settle()
+    await settle()
+    expect(sent).toEqual(['POST /api/ws/nt-act/views/proposals/agent-network/retry', 'POST /api/ws/nt-act/notices/c/dismiss'])
     expect(el.querySelector('.chat-notice')).toBeNull()
-    expect(toasts).toEqual([PROPOSALS_OFF_LINE])
   })
 
   test('Open Settings opens Settings and leaves the notice; an action this page does not know shows no button', async () => {
@@ -244,7 +228,7 @@ describe('the strip above the composer, and the rows', () => {
     const el = await strip('nt-fail')
     await click(el.querySelector('.chat-notice-act'))
     await settle()
-    expect(toasts).toEqual(["Try again didn't work: the server is busy"])
+    expect(toasts).toEqual(["Retry didn't work: the server is busy"])
     expect(el.querySelector('.chat-notice')).not.toBeNull()
   })
 
@@ -253,7 +237,7 @@ describe('the strip above the composer, and the rows', () => {
     const records = [record('d1', DOWNGRADE, { key: 'safeguards-fallback' }), record('b0', BUILD, { key: 'build' })]
     const el = await mount(
       <>
-        <ThreadRows rows={foldRecords(records)} edits={new Map()} ws="nt-rows" chat="t1" />
+        <Rows rows={foldRecords(records)} ws="nt-rows" chat="t1" />
         <NoticeStrip ws="nt-rows" current="t1" onOpen={() => undefined} />
       </>,
     )
@@ -289,7 +273,7 @@ describe('the strip above the composer, and the rows', () => {
     ]
     const el = await mount(
       <>
-        <ThreadRows rows={foldRecords(records)} edits={new Map()} ws="nt-again" chat="t2" />
+        <Rows rows={foldRecords(records)} ws="nt-again" chat="t2" />
         <NoticeStrip ws="nt-again" current="t2" onOpen={() => undefined} />
       </>,
     )
@@ -305,7 +289,7 @@ describe('the strip above the composer, and the rows', () => {
   })
 
   test("a fix the server could not start says why and the notice stays", async () => {
-    open = [{ id: 'a', key: 'proposals', text: BLOCKED, action: TRY }, { id: 'c', key: 'v', chat: 'dev-1', text: BUILD, action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } }]
+    open = [{ id: 'c', key: 'v', chat: 'dev-1', text: BUILD, action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } }]
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
       const u = String(url)
       const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -320,8 +304,8 @@ describe('the strip above the composer, and the rows', () => {
       await click(b)
       await settle()
     }
-    expect(toasts).toEqual(["Try again didn't work: A view proposal waits for the analyst.", "Retry didn't work: Leave plan mode (shift+tab), then Retry."])
-    expect(el.querySelectorAll('.chat-notice')).toHaveLength(2)
+    expect(toasts).toEqual(["Retry didn't work: Leave plan mode (shift+tab), then Retry."])
+    expect(el.querySelectorAll('.chat-notice')).toHaveLength(1)
     expect(sent.filter((x) => x.endsWith('/dismiss'))).toEqual([])
   })
 

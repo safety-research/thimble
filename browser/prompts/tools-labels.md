@@ -77,7 +77,7 @@ Delete a label, with its marks, its card and any filter that uses it. A run of t
 
 ## set_filter
 
-Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter, and the others stay.
+Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, star or words. It makes no label and no card. The parts you give replace those parts of the scope's filter, and the others stay.
 
 ```json
 {
@@ -89,9 +89,7 @@ Filter the cards, the records in Files or the report's sentences by a value of a
     "kinds": {"type": "array", "items": {"type": "string"}, "description": "Card kinds, such as table or plot."},
     "groups": {"type": "array", "items": {"type": "string"}, "description": "Groups' titles or ids."},
     "makers": {"type": "array", "items": {"type": "string"}, "description": "Who made the cards, as each card names them, such as main or a thread's name."},
-    "checks": {"type": "array", "items": {"type": "string", "enum": ["verified", "unverified", "failed", "not checked"]}, "description": "What the card check found, as each card's check mark shows it."},
     "starred": {"type": "boolean"},
-    "locked": {"type": "boolean"},
     "text": {"type": "string", "description": "Words that a card's question or takeaway holds."}
   },
   "required": ["scope"]

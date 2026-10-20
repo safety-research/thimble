@@ -21,10 +21,9 @@ import { refreshProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import type { Notice, NoticeAction } from '../lib/types'
 import type { NoticeRow as NoticeRowT } from './model'
-import { proposalsOff } from './ProposalCard'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
-export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out']
+export const NOTICE_DOS: readonly string[] = ['settings', 'view-retry', 'sign-out']
 
 /** Whether `action` is one this page can run. Pure. */
 export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && ((action.do !== 'view-retry' && action.do !== 'sign-out') || !!action.slug)
@@ -35,14 +34,6 @@ export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(a
  * Sign it out signs out the browser a sign-in notice names (its slug). */
 export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key'>): Promise<boolean> {
   switch (action.do) {
-    case 'proposals-retry': {
-      const got = await api.proposeNow(ws, notice?.key ?? undefined)
-      if (got && got.started === false) throw new Error(got.reason || 'the check could not start')
-      return true
-    }
-    case 'proposals-off':
-      await proposalsOff(ws)
-      return true
     case 'settings':
       bus.emit('openSettings', {})
       return false

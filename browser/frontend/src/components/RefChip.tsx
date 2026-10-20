@@ -7,21 +7,21 @@
 // drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) the
 // cited lines of its output under what it points at in plain words (lib/calls, chat/model callTarget). A click, on the
 // citation or on the chip that heads its label, teleports to the ref's surface (lib/teleport); a ⌘-click asks about it.
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { openCited } from '../lib/citeTargets'
-import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../lib/calls'
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
-import { callDetail, callFile, callTarget } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
 import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
+import { hhmm } from '../lib/time'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
+import { dragCard } from '../lib/cardDrag'
 import { glyphOf } from '../lib/fileGlyph'
 import { Chip, type ChipTone } from './Chip'
 import type { IconName } from './Icon'
@@ -43,11 +43,6 @@ export const kindIcon = (kind?: string): IconName => (kind && KIND_ICON[kind]) |
  * wrote one, the glyph of the file's type, as the Files tree draws it; else its kind's. */
 export function refIcon(ref: string): IconName {
   const p = parseRef(ref)
-  if (p?.kind === 'call') {
-    const w = callWords(p.chat, p.n)
-    const file = w ? callFile(w.name, w.input) : ''
-    if (file) return glyphOf(file)
-  }
   return p && 'path' in p && p.path ? glyphOf(p.path) : kindIcon(p?.kind)
 }
 /** A ref's chip tone: the evidence chip for the data, the accent chip for what the agent made (lib/refs
@@ -85,12 +80,6 @@ export function compactLabel(ref: string): string {
  * cardPartLabel), without the card's name when the chip sits in that card (`home`). Other refs read as compactLabel. */
 export function chipLabel(ref: string, home?: string | null, ws = ''): string {
   const p = parseRef(ref)
-  if (p?.kind === 'call') {
-    // what the call points at in plain words, once a thread or a read registered it; its step number until then
-    const w = callWords(p.chat, p.n)
-    const line = w ? callTarget(w.name, w.input, p.n, ws) : `step ${p.n}`
-    return p.line != null ? `${line} · ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}` : line
-  }
   if (p?.kind === 'cell') {
     const name = cellLabel(p.cellId) ?? 'card'
     return cardPartLabel(p, name, home === p.cellId) ?? name + (p.exec != null ? `@${p.exec}` : '')
@@ -106,7 +95,6 @@ export function ensureRefName(ws: string, ref: string): void {
   if (!ws || !p) return
   if (p.kind === 'cell' && !hasCellName(p.cellId)) void ensureCellName(ws, p.cellId)
   if (p.kind === 'concept' && !hasConceptName(p.conceptId)) void ensureConceptName(ws, p.conceptId)
-  if (p.kind === 'call' && !callWords(p.chat, p.n)) void fetchCall(ws, p.chat, p.n).catch(() => undefined)
 }
 
 /** A ref's chip name (chipLabel), redrawn when the name it shows becomes known. */
@@ -138,38 +126,8 @@ export function whereOf(r: ResolvedRef): string | undefined {
   return undefined
 }
 
-/** Whether a call ref names the file its call read or wrote, which the chip sets in mono; a call not registered yet
- * shows its step number in words. */
-const wordsFile = (p: { chat: string; n: number }): boolean => {
-  const w = callWords(p.chat, p.n)
-  return !!w && !!callFile(w.name, w.input)
-}
-
 /** The subscription that redraws a chip when a name it shows becomes known: a card's, a label's, a call's chip line. */
-const onNames = (fn: () => void): (() => void) => {
-  const a = onCellNames(fn)
-  const b = onCallWords(fn)
-  return () => {
-    a()
-    b()
-  }
-}
-
-/** the lines of a call's output its hover shows around the cited ones, and for a whole call from its start */
-const CALL_CONTEXT = 2
-const CALL_HEAD_LINES = 8
-
-/** The lines a call's hover shows: the cited lines with CALL_CONTEXT lines on each side, marked, or the output's first
- * CALL_HEAD_LINES lines for the whole call; null when a cited line is not in the output. Pure. */
-export function callWindow(text: string, line?: number, endLine?: number): { lines: string[]; from: number; to: number } | null {
-  const all = outputLines(text)
-  if (line == null) return { lines: all.slice(0, CALL_HEAD_LINES), from: -1, to: -2 }
-  const end = endLine ?? line
-  if (line < 1 || line > all.length) return null
-  const lo = Math.max(1, line - CALL_CONTEXT)
-  const hi = Math.min(all.length, end + CALL_CONTEXT)
-  return { lines: all.slice(lo - 1, hi), from: line - lo, to: Math.min(end, all.length) - lo }
-}
+const onNames = (fn: () => void): (() => void) => onCellNames(fn)
 
 /** the label waits this long for the pointer to settle, then arrives in --dur-fast */
 const HOVER_DELAY_MS = 90
@@ -187,7 +145,7 @@ const POP_GAP = 6
 
 type Pop =
   | { state: 'loading'; rect: DOMRect }
-  | { state: 'ok'; rect: DOMRect; excerpt: string; kind?: string; cell?: Cell; where?: string; table?: { grid: Grid; at: At }; lines?: CitedLines; parts?: QuotePart[]; facts?: RecordFact[] }
+  | { state: 'ok'; rect: DOMRect; excerpt: string; kind?: string; cell?: Cell; where?: string; note?: string; table?: { grid: Grid; at: At }; lines?: CitedLines; parts?: QuotePart[]; facts?: RecordFact[] }
   | { state: 'error'; rect: DOMRect; message: string; detail?: string; muted?: boolean }
   | { state: 'name'; rect: DOMRect }
 
@@ -205,6 +163,15 @@ function citedTable(r: ResolvedRef, col: string, row: string): { grid: Grid; at:
   const span = r.meta?.span as { col?: unknown; row?: unknown } | undefined
   const at = locateCell(grid, col, row) ?? (typeof span?.col === 'string' && typeof span?.row === 'string' ? locateCell(grid, span.col, span.row) : null)
   return at ? { grid, at } : null
+}
+
+/** Where a cited value was read when the card no longer shows it: the version before the edit that changed it
+ * (meta.version, which the server sets when it read an earlier version). */
+export function versionNote(r: ResolvedRef): string | undefined {
+  const v = r.meta?.version as { ts?: unknown } | undefined
+  if (!v) return undefined
+  const at = typeof v.ts === 'string' ? hhmm(v.ts) : ''
+  return `As the card stood before its edit${at ? ` at ${at}` : ''}`
 }
 
 /** The tables of a card's own output (components/Outputs' html tables), where an in-place citation looks for its cell,
@@ -290,7 +257,6 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const glyphCites = useContext(GlyphCites)
   const iconOnly = !asText && !broken && !!cite && (glyphCites || parsed?.kind === 'cell')
 
-  const call = parsed?.kind === 'call' ? parsed : null
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
   useEffect(
     () => () => {
@@ -370,30 +336,14 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     }
     setPop({ state: 'loading', rect })
     const seq = ++reqSeq.current
-    if (parsed.kind === 'call') {
-      // a call: its chip line over the cited lines of its whole output, the value marked, never its number in words
-      try {
-        const c = await fetchCall(ws, parsed.chat, parsed.n)
-        if (seq !== reqSeq.current) return
-        const lines = callWindow(callOutput(c), parsed.line, parsed.endLine)
-        if (!lines) return setPop({ state: 'error', rect, message: 'This line is not in the call\'s output' })
-        // an inline citation's head, and a glyph alone's, already names what the call points at; a chip's name may be
-        // cut short; a shell call's command shows under either
-        const where = callDetail(c.name, c.input, ws) ?? (asText || iconOnly ? undefined : callTarget(c.name, c.input, parsed.n, ws))
-        return setPop({ state: 'ok', rect, excerpt: '', kind: 'call', where, lines })
-      } catch (err) {
-        if (seq !== reqSeq.current) return
-        return setPop({ state: 'error', rect, message: 'Could not load this call', detail: (err as Error).message || undefined })
-      }
-    }
     try {
-      const r = await api.resolveRef(ws, ref)
+      const r = await api.resolveRef(ws, ref, value)
       resolved.current = { ref, r }
       if (seq !== reqSeq.current) return
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
         // a table's cell: the table around it, never its column and row in words
         const table = citedTable(r, parsed.col, parsed.row)
-        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table })
+        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table, note: versionNote(r) })
         return setPop({ state: 'error', rect, message: 'This cell is no longer in the card\'s table' })
       }
       if (parsed.kind === 'cell' && parsed.out != null && parsed.line != null) {
@@ -475,7 +425,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
           {shownValue(value ?? '')}
         </span>
       ) : (
-        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={(kind && NAME_KINDS.has(kind)) || (call && !wordsFile(call)) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
+        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={kind && NAME_KINDS.has(kind) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers} {...(wholeCell ? { draggable: true, onDragStart: (e: DragEvent) => dragCard(e, wholeCell) } : {})}>
           {iconOnly ? null : label}
         </Chip>
       )}
@@ -504,6 +454,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
             )}
             {pop.state === 'ok' && !pop.cell && pop.where && <div className="refchip-pop-where mono">{pop.where}</div>}
             {pop.state === 'ok' && pop.facts?.length ? <RecordFacts facts={pop.facts} className="refchip-pop-facts" /> : null}
+            {pop.state === 'ok' && pop.note && <div className="refchip-pop-where refchip-pop-version">{pop.note}</div>}
             {pop.state === 'ok' && pop.table && <TablePreview grid={pop.table.grid} at={pop.table.at} />}
             {pop.state === 'ok' && pop.lines && <LinesPreview {...pop.lines} value={value} />}
             {pop.state === 'ok' && !pop.table && !pop.lines && (pop.cell ? (

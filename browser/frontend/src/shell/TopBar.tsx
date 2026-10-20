@@ -18,6 +18,10 @@ import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
+import { listedLabels, type SideTab } from './LensSidebar'
+import { useConcepts } from '../canvas/concepts'
+import { useLenses } from '../lib/marks'
+import { useFeature } from '../features'
 
 export interface SurfaceTab extends TabOption<Tab> {
   /** `focus`: the focused pane shows it; `shown`: another pane does; `hidden`: no pane does */
@@ -29,9 +33,35 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
+  /** the Labels and Checks sidebar's tab while it is open (shell/LensSidebar.tsx), and how to open or close it */
+  side?: SideTab | null
+  onSide?: (tab: SideTab | null) => void
 }
 
-export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
+/** The top bar's two quiet buttons that open the Labels and Checks sidebar on their tab, each with its count; a button
+ * whose feature is off (features.ts) is not shown. */
+function SideButtons({ ws, side, onSide }: { ws: string; side: SideTab | null; onSide: (tab: SideTab | null) => void }) {
+  const labelsOn = useFeature('labels')
+  const lensesOn = useFeature('lenses')
+  const concepts = useConcepts(ws)
+  const lenses = useLenses(ws)
+  const nLabels = listedLabels(concepts).length
+  const button = (tab: SideTab, icon: 'label' | 'comment', word: string, n: number) => (
+    <button type="button" className={`shell-side-btn${side === tab ? ' on' : ''}`} aria-pressed={side === tab} data-side={tab} onClick={() => onSide(side === tab ? null : tab)}>
+      <Icon name={icon} size={14} />
+      {word}
+      <span className="shell-side-n">{n}</span>
+    </button>
+  )
+  return (
+    <span className="shell-side-btns">
+      {labelsOn && button('labels', 'label', 'Labels', nLabels)}
+      {lensesOn && button('checks', 'comment', 'Checks', lenses.length)}
+    </span>
+  )
+}
+
+export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)
@@ -97,6 +127,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
         ))}
       </nav>
       <span className="shell-spacer" />
+      {onSide && <SideButtons ws={ws} side={side} onSide={onSide} />}
       <span ref={setTools} className="shell-tools">
         {/* thimble browser has no problem report yet: its button comes back with it */}
         <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />

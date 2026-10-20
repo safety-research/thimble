@@ -195,7 +195,7 @@ describe('the page hears that it is signed out', () => {
     const { ExportMenu } = await import('../../src/report/ExportMenu.tsx')
     let heard = 0
     const off = bus.on('signedOut', () => heard++)
-    const el = await mount(createElement(ExportMenu, { ws: 'logs', slug: 'report', page: false }))
+    const el = await mount(createElement(ExportMenu, { ws: 'logs', slug: 'report' }))
     await act(async () => (el.querySelector('.wu-export') as HTMLButtonElement).click())
     await settle()
     off()

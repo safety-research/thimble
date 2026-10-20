@@ -59,19 +59,29 @@ def test_the_default_versions_are_the_registrys():
     assert json.loads(got.stdout) == {f: prompts.default_file(f) for f in FEATURES}
 
 
-def test_main_prompt_holds_the_shared_parts_whole():
-    text = prompts.render("main.md", {"workdir": "/folder"})
-    for part in ("communicating", "citing", "labels-guide"):
+def test_main_prompt_holds_the_shared_parts_whole(tmp_path):
+    from thimble_browser import agent
+
+    text = agent.AGENTS["main"].prompt(tmp_path)
+    for part in ("communicating", "citing", "labels-guide", "cards-good", "cards-toolkit", "cards-sequence"):
         assert prompts.shared(part) in text
 
 
-def test_explain_prompt_holds_the_lens_whole():
-    assert prompts.shared("explain") in prompts.render("explain.md")
+def test_the_lenses_hold_the_terminal_lenses_whole(folder):
+    from thimble_browser import home
+    from thimble_browser.features import lenses
+
+    ws = home.open_folder(folder)
+    text = prompts.render("lenses.md", {"lenses": lenses._lens_text(ws, lenses.lens(ws, "explain"))})
+    assert prompts.shared("explain") in text
+    text = prompts.render("lenses.md", {"lenses": lenses._lens_text(ws, lenses.lens(ws, "details"))})
+    assert prompts.shared("heads") in text
 
 
 def test_tool_schemas_parse():
     from thimble_browser import agent, tools
+    from thimble_browser.features import views  # noqa: F401  (adds the view builder)
 
     for a in agent.AGENTS.values():
-        for t in tools.definitions(a.tools):
+        for t in tools.definitions(a.tool_names()):
             assert t["description"] and t["input_schema"]["type"] == "object"

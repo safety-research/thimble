@@ -1,4 +1,5 @@
-"""Runs model-written code in a sandbox: a card's code (runner.py) and a view's reader (views/reader_runner.py).
+"""Runs model-written code in a sandbox: a card's code (runner.py), a view's reader (views/reader_runner.py), and the
+program that draws a card on the terminal plugin's toolkit (run_program: plugin/draw/sandbox-node.mjs in Node).
 
 Each run is a new process. It sees:
 - the folder of files, read-only;
@@ -42,6 +43,10 @@ from typing import Any, Sequence
 from .. import home
 
 RUNNER = Path(__file__).resolve().with_name("runner.py")
+# the terminal plugin's drawing toolkit: kit.js and the Node script that runs a program on it (one copy, both products)
+DRAW = Path(__file__).resolve().parents[4] / "plugin" / "draw"
+DRAW_SCRIPT = DRAW / "sandbox-node.mjs"
+PROGRAM_S = 15.0  # a program's whole run, Node's start included; the toolkit's own limit is far shorter
 GRACE_S = 10.0  # past the run's own timeout, before the server stops it
 STOP_S = 2.0  # between SIGTERM and SIGKILL
 
@@ -360,3 +365,57 @@ async def run_code(code: str, corpus: Path, *, timeout: float = 60.0, unsandboxe
     """{status, outputs, frame} for a card's `code` run over `corpus`."""
     req = {"code": code, "corpus": str(corpus.resolve()), "timeout": timeout}
     return await run_script(RUNNER, req, corpus, timeout=timeout, unsandboxed=unsandboxed)
+
+
+async def run_program(program: str, data: Any, *, w: int, h: int = 30, title: str = "", card_id: str = "",
+                      mode: str = "inline", unsandboxed: bool = False) -> dict[str, Any]:
+    """The drawing of `program` on `data` (the toolkit's JSON: root, regions, cites, examples, warnings, error), run in
+    Node inside the sandbox, which reads only the toolkit's folder and Node itself, writes only its own folder and has
+    no network. Inside, the program runs in a vm context of its own with the toolkit and its data alone
+    (sandbox-node.mjs, started with Node's --permission to read only that folder). A run that cannot start or does not
+    end comes back as a drawing whose `error` says why."""
+    req = {"program": program, "data": data, "w": w, "h": h, "mode": mode, "surface": "browser", "title": title,
+           "id": card_id}
+    st = status()
+    if not st.kind and not unsandboxed:
+        return _no_drawing("NoSandbox", f"thimble browser runs a card's program only in a sandbox, and found none: "
+                           f"{st.why}. {st.fix}", title, w)
+    node = st.node or shutil.which("node") or "node"
+    command = [node, "--permission", f"--allow-fs-read={DRAW}", str(DRAW_SCRIPT)]
+    run_dir = Path(tempfile.mkdtemp(prefix="thimble-draw-")).resolve()
+    try:
+        env = child_env(run_dir)
+        if st.kind:
+            prefix = Path(os.path.realpath(node)).parent.parent
+            rule = rules(platform=sys.platform, corpus=run_dir, run_dir=run_dir, python=[prefix], read=[DRAW],
+                         home_dir=Path.home(), workspaces=home.root())
+            argv = launcher_argv(node, rule, command, env)
+            env = launcher_env(run_dir)
+        else:
+            argv = command
+        proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.PIPE,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                    env=env, cwd=str(run_dir), start_new_session=True)
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(json.dumps(req, default=str).encode()), PROGRAM_S)
+        except asyncio.TimeoutError:
+            await _stop(proc)
+            return _no_drawing("TimeLimit", f"the program did not end in {PROGRAM_S:g} s", title, w)
+        try:
+            got = json.loads(out.decode() or "null")
+        except ValueError:
+            got = None
+        if not isinstance(got, dict):
+            return _no_drawing("SandboxError", (err.decode(errors="replace").strip()[-300:] or
+                                                "the program's run printed no drawing"), title, w)
+        return got
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def _no_drawing(name: str, message: str, title: str, w: int) -> dict[str, Any]:
+    """A drawing that says the program could not run, as the toolkit draws any other error."""
+    return {"kit": 1, "w": w, "h": 1, "mode": "inline", "title": title, "regions": [], "cites": {}, "examples": {},
+            "warnings": [], "error": {"name": name, "message": message, "line": None, "fix": message},
+            "root": {"t": "text", "runs": [{"s": "× ", "tone": "bad"}, {"s": "could not draw: ", "tone": "dim"},
+                                            {"s": f"{name}: {message}", "tone": "ink"}]}}

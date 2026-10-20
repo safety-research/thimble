@@ -17,7 +17,7 @@ https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
    command only when the user agrees. Then run the script again.
 4. End with a short reply: the plugin works in a new `claude` session in a folder of data files that they trust, and
    the line above the prompt lists its keys; `/plugin` turns it, or its side agent, off. The browser workbench starts
-   with `thimble-browser FOLDER`, and asks for credentials in its Settings.
+   with `thimble-browser` in a folder of files (or `thimble-browser FOLDER`), and asks for credentials in its Settings.
 
 ## Working on thimble
 

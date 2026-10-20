@@ -67,7 +67,7 @@ class FakeClient:
 def ws(folder, monkeypatch):
     name = home.open_folder(folder)
     chats.ensure_main(name)
-    monkeypatch.setattr(agent.explain, "after_turn", lambda *a, **k: asyncio.sleep(0))
+    monkeypatch.setattr(agent, "AFTER_TURN", [])
     return name
 
 

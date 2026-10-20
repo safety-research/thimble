@@ -147,21 +147,9 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<ProblemReport | null>(null)
   const [copied, setCopied] = useState(false)
-  // whether code tickets run here (a development install), asked each time the dialog opens
-  const [tickets, setTickets] = useState(false)
+  // thimble browser files no code tickets: the dialog sends the report alone
+  const tickets = false
   const [filing, setFiling] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    api
-      .devStatus()
-      .then((s) => alive && setTickets(s.tickets === ''))
-      .catch(() => alive && setTickets(false))
-    return () => {
-      alive = false
-    }
-  }, [open])
 
   // opened from a failure, the form starts with what failed
   useEffect(() => {

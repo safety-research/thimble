@@ -2,11 +2,12 @@
 
 A web page for making sense of a folder of files with Claude. You open a folder, ask a question in the chat, and Claude
 answers with cards that show the evidence: charts, tables and the records themselves. Every number and quote in an
-answer is a link that opens the file at the lines it came from. The page also has a file browser, labels, an
-orientation that explores the folder, generative views, and a report you write from the cards.
+answer is a link that opens the file at the lines it came from. The page also has a file browser, labels, views built
+for the folder when you ask for one, and a report you write with Claude from your notes and cards.
 
-It runs on your machine. A small server listens on 127.0.0.1, serves the page, and runs Claude's agents itself on the
-Claude API, with your own credentials. It never writes into the folder of files.
+It runs on your machine. A small server listens on 127.0.0.1, serves the page, and runs Claude itself on the Claude
+API, with your own credentials. Claude works in the chat, and starts nothing in the background unless you ask: the only
+other agent is a view's builder, which starts when you accept a view. It never writes into the folder of files.
 
 ## Install and start
 
@@ -15,13 +16,15 @@ browser workbench alone). It needs Node 22.12 or later, [uv](https://docs.astral
 the sandbox. Then:
 
 ```
-thimble-browser path/to/folder
+cd path/to/folder
+thimble-browser
 thimble-browser path/to/folder --wif path/to/wif.toml
 ```
 
-The server prints a sign-in link and opens it. A link works once, for 15 minutes; press Enter in the server's window
+`thimble-browser` opens the folder you are in, or the folder you name. The server listens on 127.0.0.1, port 8000 or the
+next free one (`--port N` tries another first). It prints a sign-in link and opens it when this machine has a browser. A link works once, for 15 minutes; press Enter in the server's window
 for a new one. To try it on a made-up folder of agent runs: `thimble-browser browser/samples/agent-runs`. From another
-machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:8420 <host>`). The workspace (chats, cards, report) is
+machine, reach it through an SSH tunnel (`ssh -L 8000:127.0.0.1:8000 <host>`). The workspace (chats, cards, report) is
 kept in `~/.thimble-browser`, or in `THIMBLE_BROWSER_HOME`.
 
 ## Credentials
@@ -51,7 +54,9 @@ environment. There are two kinds:
 
 Code that Claude writes, a card's code and a view's reader, runs only in a sandbox: a new process for each run that
 sees the folder (read-only), the Python libraries and an empty folder of its own. It does not see your home folder,
-`~/.thimble-browser`, the server's environment or the network, and it is stopped when its time is up. The sandbox is
+`~/.thimble-browser`, the server's environment or the network, and it is stopped when its time is up. A card's program,
+which draws the card on the terminal plugin's toolkit, runs in Node in the same sandbox, seeing only the toolkit, and
+again in the page in a sandboxed frame with no network when you turn a knob or press a part. The sandbox is
 Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime), pinned in `server/sandbox/package.json`,
 on Seatbelt (macOS) or bubblewrap (Linux). If no sandbox works, code does not run, and the card and the server's first
 lines say why. `thimble-browser --check-sandbox` tests it, one line per check.

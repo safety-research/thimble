@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { newest, STALE } from '../lib/newest'
 import type { ChatMeta, ChatRecord } from '../lib/types'
 import { foldRecords, withApiErrors, type Row } from './model'
 import { tidyRows } from './tidy'
@@ -117,4 +118,33 @@ export function useChat(ws: string, chatId: string | null): ChatState {
 
   const rows = useMemo(() => withApiErrors(tidyRows(foldRecords(records))) as Row[], [records])
   return { meta, records, rows, loading, error, streaming, running: streaming || !!meta?.running, send, interrupt, reload }
+}
+
+/** The workspace's chats, read again on the stream's `chat` events (debounced); empty while not `enabled`. */
+export function useChatMetas(ws: string, enabled = true): ChatMeta[] {
+  const [metas, setMetas] = useState<ChatMeta[]>([])
+  useEffect(() => {
+    if (!enabled) {
+      setMetas([])
+      return
+    }
+    let alive = true
+    let timer: number | null = null
+    const fresh = newest<ChatMeta[]>()
+    const load = () =>
+      fresh(api.chats(ws))
+        .then((l) => alive && l !== STALE && setMetas(Array.isArray(l) ? l : []))
+        .catch(() => undefined)
+    void load()
+    const off = bus.on('chat', () => {
+      if (timer != null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => void load(), REFETCH_DEBOUNCE_MS)
+    })
+    return () => {
+      alive = false
+      off()
+      if (timer != null) window.clearTimeout(timer)
+    }
+  }, [ws, enabled])
+  return metas
 }

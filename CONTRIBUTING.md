@@ -66,7 +66,8 @@ The browser workbench, `browser/`:
 | What | Where |
 |---|---|
 | the page (React and Vite), and its unit tests | `browser/frontend/src`, `browser/frontend/tests/public` |
-| the server: sign-in, the folder's readers, the workspace, the agents' loop and their tools; each feature is a module that adds its routes, tools and agents | `browser/server/thimble_browser/` |
+| the server: sign-in, the folder's readers, the workspace, the agents' loop and their tools | `browser/server/thimble_browser/` |
+| the features (cards, citations, lenses, labels, report, views), registered in one place, each one module with its routes, tools and prompt part | `browser/server/thimble_browser/features/` |
 | the sandbox that card code and view readers run in | `browser/server/thimble_browser/cards/sandbox.py`, `browser/server/sandbox/` |
 | the texts Claude reads, and the parts it reads from the plugin | `browser/prompts/`, `browser/prompts/shared.json` |
 | the view kit's guides and worked examples, which the view builder reads | `browser/docs/`, `browser/samples/views/` |

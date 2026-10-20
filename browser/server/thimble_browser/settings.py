@@ -5,7 +5,7 @@
                   Settings, kept in `api-key` with mode 0600), or {} for none yet
     model         the model every agent runs on, claude-opus-5-5 unless the analyst picks another
     effort        low | medium | high | xhigh | max, for the chat, its threads and thimble's agents
-    explain       whether the explain pass runs after each answer
+    features      {name: on} for each feature that is turned off or on (features/), on when not named
 
 Nothing here is read from or written to the environment.
 """
@@ -16,7 +16,7 @@ from typing import Any
 
 from . import home, wif
 
-DEFAULTS: dict[str, Any] = {"credentials": {}, "model": "claude-opus-5-5", "effort": "high", "explain": True}
+DEFAULTS: dict[str, Any] = {"credentials": {}, "model": "claude-opus-5-5", "effort": "high", "features": {}}
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 MODELS = ("claude-opus-5-5", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5-5", "claude-haiku-5-5")
 
@@ -50,8 +50,10 @@ def write(patch: dict[str, Any]) -> dict[str, Any]:
             if v not in EFFORTS:
                 raise ValueError(f"effort: one of {', '.join(EFFORTS)}")
             cur[k] = v
-        elif k == "explain":
-            cur[k] = bool(v)
+        elif k == "features":
+            if not isinstance(v, dict) or not all(isinstance(x, bool) for x in v.values()):
+                raise ValueError("features: {name: true or false}")
+            cur[k] = {**cur.get("features", {}), **{str(n): bool(x) for n, x in v.items()}}
     home.write_json(_path(), cur)
     return cur
 

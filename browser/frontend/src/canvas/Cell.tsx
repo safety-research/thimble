@@ -1,7 +1,7 @@
-// One card on the board: the card's face (CardFace.tsx) with the board's chrome around it. At rest a card is its face,
-// and its lock when locked. Hovered or selected, the chrome shows in a row above the question: `thread · time` at the
-// left, the details, chat, delete, star and lock icons at the right. Any edge or corner resizes it. A locked card is one
-// no model may change or delete. Selected alone, a click on its question or takeaway edits it in place (RefEditor); a
+// One card on the board: the card's face (CardFace.tsx) with the board's chrome around it. At rest a card is its face.
+// Hovered or selected, the chrome shows in a row above the question: `thread · time` at the left, and at the right Ask
+// (a thread about this card, where Claude changes the card in place), Code (its details: the code, the files it read,
+// the rows behind it), History, then the star and Delete. Any edge or corner resizes it. Selected alone, a click on its question or takeaway edits it in place (RefEditor); a
 // double click opens focus mode. ⌘↵ in the question typed in place saves it and sends it to main as a request on the
 // card (lib/agentKey), and the card says `sent to main` until main's turn ends. The board (Canvas.tsx) owns placement,
 // selection, drag and resize. The card is its citations' home (`data-cite-home`).
@@ -14,7 +14,6 @@ import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
 import { CardFace, type CardField } from './CardFace'
-import { checkAgain } from './checkActions'
 import { useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
 import { DOUBLE_MS, hhmm, kindOf } from './layout'
@@ -24,7 +23,7 @@ const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || 
 export const CARD_PAD_X = 28
 
 export type { CardField } from './CardFace'
-export type CardAction = 'detail' | 'history' | 'comment' | 'ask' | 'delete' | 'star' | 'lock'
+export type CardAction = 'detail' | 'history' | 'ask' | 'delete' | 'star'
 /** The edge or corner of a card a resize holds, by compass point: the opposite edge stays where it is. */
 export type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
 const EDGES: Edge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
@@ -133,7 +132,6 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   if (p.dragging) cls.push('is-dragging')
   if (p.h != null) cls.push('is-sized')
   if (dimmed) cls.push('is-dimmed')
-  if (cell.locked) cls.push('is-locked')
   return (
     <div
       className={cls.join(' ')}
@@ -160,7 +158,6 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
         asking={asking}
         onTextDown={textDown}
         onTextClick={textClick}
-        onCheckAgain={() => void checkAgain(ctx, cell)}
         chrome={
           <div className="bcell-top">
             {(thread.name || time || unread) && (
@@ -180,13 +177,17 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
               </button>
             )}
             <span className="bcell-acts" onMouseDown={(e) => e.stopPropagation()}>
-              <Button variant="icon" size="sm" icon="code" title="Details" aria-label="Details" active={p.detailOpen} onClick={act('detail')} />
-              <Button variant="icon" size="sm" icon="history" title="History" aria-label="History" className="bcell-history" onClick={act('history')} />
-              <Button variant="icon" size="sm" icon="comment" title="Comment" aria-label="Comment" className="bcell-comment" onClick={act('comment')} />
-              <Button variant="icon" size="sm" icon="chat" title="Chat about this card" aria-label="Chat about this card" onClick={act('ask')} />
+              <Button variant="ghost" size="sm" icon="chat" title="Ask about this card; Claude changes it in place" className="bcell-act bcell-ask" onClick={act('ask')}>
+                Ask
+              </Button>
+              <Button variant="ghost" size="sm" title="The card's code, the files it read and the rows behind it" className="bcell-act bcell-code" active={p.detailOpen} onClick={act('detail')}>
+                Code
+              </Button>
+              <Button variant="ghost" size="sm" title="The card's earlier versions" className="bcell-act bcell-history" onClick={act('history')}>
+                History
+              </Button>
+              <Button variant="icon" size="sm" icon="star" title={cell.starred ? 'Starred: listed first when you place cards in the report' : 'Star: list it first when you place cards in the report'} aria-label={cell.starred ? 'Starred' : 'Star'} active={!!cell.starred} className="bcell-star" onClick={act('star')} />
               <Button variant="icon" size="sm" icon="trash" title="Delete" aria-label="Delete" className="bcell-delete" onClick={act('delete')} />
-              <Button variant="icon" size="sm" icon="star" title={cell.starred ? 'Starred' : 'Star'} aria-label={cell.starred ? 'Starred' : 'Star'} active={!!cell.starred} className="bcell-star" onClick={act('star')} />
-              <Button variant="icon" size="sm" icon={cell.locked ? 'lock' : 'unlock'} title={cell.locked ? 'Locked' : 'Lock'} aria-label={cell.locked ? 'Locked' : 'Lock'} active={!!cell.locked} className="bcell-lock" onClick={act('lock')} />
             </span>
           </div>
         }

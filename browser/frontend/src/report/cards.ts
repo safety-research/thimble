@@ -1,9 +1,9 @@
-// The report's card sidebar, pure: the canvas's cards grouped into Starred, Orientation, Figures and Your work,
-// filtered by the search, plus the cards a document already uses.
+// The report's card sidebar, pure: the canvas's cards grouped into Starred, Figures and Your work, filtered by the
+// search, plus the cards a document already uses.
 import type { Cell, Group } from '../lib/types'
 import { storageKey } from '../lib/workspace'
 
-export type CardSectionKey = 'starred' | 'orientation' | 'figures' | 'yours'
+export type CardSectionKey = 'starred' | 'figures' | 'yours'
 /** what a card shows, for its glyph: a figure drawn (a chart, a timeline, a diagram, a custom page), a table, or text (a
  * note, a takeaway, a shell's output) */
 export type CardShape = 'bars' | 'table' | 'text'
@@ -22,9 +22,9 @@ export interface CardSection {
   cards: SideCard[]
 }
 
-const SECTION_NAMES: Record<CardSectionKey, string> = { starred: 'Starred', orientation: 'Orientation', figures: 'Figures', yours: 'Your work' }
-/** the orientation's deck is a group of role `exploration`, as is an older workspace's Final group */
-const ROLE_SECTION: Record<string, CardSectionKey> = { exploration: 'orientation' }
+const SECTION_NAMES: Record<CardSectionKey, string> = { starred: 'Starred', figures: 'Figures', yours: 'Your work' }
+/** the group Claude puts the figures it makes for the report in */
+const FIGURES_GROUP = 'Report figures'
 
 /** The glyph of what a card shows, from the figure it draws (components/Outputs figureKind): a table, another figure,
  * else text. */
@@ -32,18 +32,18 @@ export function cardShape(figure: string | null | undefined): CardShape {
   return figure === 'table' ? 'table' : figure ? 'bars' : 'text'
 }
 
-/** The section a group's cards list under: Orientation; Figures for a writer's figure group and its subgroups; else
- * Your work. */
-export function sectionOf(group: Pick<Group, 'role' | 'session' | 'parent'> | undefined, byId?: ReadonlyMap<string, Pick<Group, 'role' | 'session' | 'parent'>>): CardSectionKey {
+/** The section a group's cards list under: Figures for the group of the report's figures and its subgroups; else Your
+ * work. */
+export function sectionOf(group: Pick<Group, 'title' | 'parent'> | undefined, byId?: ReadonlyMap<string, Pick<Group, 'title' | 'parent'>>): CardSectionKey {
   const seen = new Set<string>()
   let g = group
   while (g) {
-    if (g.session) return 'figures'
+    if (g.title === FIGURES_GROUP) return 'figures'
     if (!g.parent || seen.has(g.parent)) break
     seen.add(g.parent)
     g = byId?.get(g.parent)
   }
-  return ROLE_SECTION[group?.role ?? ''] ?? 'yours'
+  return 'yours'
 }
 
 /** Whether a card matches the search: every word of the query in its question or its takeaway, case aside. */
@@ -54,11 +54,11 @@ export function matches(card: Pick<SideCard, 'title' | 'takeaway'>, query: strin
   return words.every((w) => hay.includes(w))
 }
 
-/** The sidebar's sections: Starred, then Orientation, Figures and Your work in canvas order, each card once. Cards
+/** The sidebar's sections: Starred, then Figures and Your work in canvas order, each card once. Cards
  * without a question are left out. With a query, only matching cards and non-empty sections. */
 export function cardSections(cells: readonly Cell[], groups: readonly Group[], query = '', figureOf: (cell: Cell) => string | null = () => null): CardSection[] {
   const byId = new Map(groups.map((g) => [g.id, g]))
-  const lists: Record<CardSectionKey, SideCard[]> = { starred: [], orientation: [], figures: [], yours: [] }
+  const lists: Record<CardSectionKey, SideCard[]> = { starred: [], figures: [], yours: [] }
   for (const c of cells) {
     const title = (c.title ?? '').trim()
     if (!title) continue
@@ -67,7 +67,7 @@ export function cardSections(cells: readonly Cell[], groups: readonly Group[], q
     if ((c as { starred?: boolean }).starred === true) lists.starred.push(card)
     lists[sectionOf(byId.get(c.notebook), byId)].push(card)
   }
-  const keys: CardSectionKey[] = ['starred', 'orientation', 'figures', 'yours']
+  const keys: CardSectionKey[] = ['starred', 'figures', 'yours']
   return keys.map((key) => ({ key, name: SECTION_NAMES[key], cards: lists[key] })).filter((s) => !query.trim() || s.cards.length > 0)
 }
 
@@ -81,8 +81,7 @@ export function usedCells(figureRefs: Iterable<string>): Set<string> {
   return out
 }
 
-/** The drag's data type: a card dragged from the sidebar carries its id under it. */
-export const CARD_MIME = 'application/x-thimble-card'
+export { CARD_MIME } from '../lib/cardDrag'
 
 /** The browser-storage keys of the sidebar's open state and of its sections', per workspace. */
 export const sideKey = (ws: string): string => storageKey(ws, 'report-side')

@@ -6,7 +6,8 @@ behind. It comes in two forms, both in this repository:
 - **The terminal plugin** (`plugin/`), for Claude Code. You ask Claude questions in the terminal as usual, and thimble
   adds cards, citations and a second reader to its replies.
 - **The browser workbench** (`browser/`), a web page for a folder of files, with a file browser, a chat with Claude, a
-  canvas of cards and a report. It runs on your machine and calls the Claude API with your own credentials.
+  canvas of cards and a report. Run `thimble-browser` in a folder of files to start it. It runs on your machine and
+  calls the Claude API with your own credentials.
 
 > [!CAUTION]
 > thimble is a research prototype and changes often. It is not an official Anthropic product.
@@ -99,8 +100,14 @@ The plugin sends nothing anywhere except through your Claude Code session, and s
 
 ## The browser workbench
 
-Start it on a folder of files with `thimble-browser path/to/folder`. It prints a sign-in link and opens the page, where
-the file browser shows the folder. You ask Claude a question in the chat, and Claude answers with cards that show the
+```
+cd path/to/folder
+thimble-browser
+```
+
+`thimble-browser` starts on the folder you are in, as `claude` does (`thimble-browser path/to/folder` names another).
+It prints a sign-in link, opens the page when this machine has a browser, and listens on 127.0.0.1, port 8000 or the
+next free one. The file browser shows the folder. You ask Claude a question in the chat, and Claude answers with cards that show the
 evidence; every number and quote in the answer links to the lines it came from. Claude's code runs in a sandbox that
 reads the folder and has no network. The browser workbench needs credentials for the Claude API, an API key or
 Workload Identity Federation. [browser/README.md](browser/README.md) says how to give them, and what else it does.

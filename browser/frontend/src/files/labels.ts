@@ -702,19 +702,6 @@ export function viewLabels(all: readonly Concept[], presence: ReadonlyMap<string
   return out
 }
 
-/** The labels a view turns on the first time it is opened, so its records open coloured: while no label that marks its
- * files is on, the orientation's labels over files that mark them (made by one of `orientChats`), oldest first, at most
- * `max`; none once any is on. Pure. */
-export function viewDefaults(all: readonly Concept[], presence: ReadonlyMap<string, Record<string, Record<string, number>>>, claims: readonly string[], orientChats: ReadonlySet<string>, max = 2): string[] {
-  const marking = viewLabels(all, presence, claims)
-  const mine = all.filter((k) => marking.has(k.id))
-  if (mine.some((k) => k.shown)) return []
-  return mine
-    .filter((k) => !k.trial && k.created_by.startsWith('chat:') && orientChats.has(k.created_by.slice(5)))
-    .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
-    .slice(0, max)
-    .map((k) => k.id)
-}
 
 /** A label's name made unique among `names`: the name, else it with the first free number after it. Pure. */
 export function freeName(name: string, names: Iterable<string>): string {

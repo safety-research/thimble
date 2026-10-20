@@ -131,6 +131,20 @@ describe('the chip that heads a citation\'s hover label', () => {
     expect(document.body.querySelector('.refchip-pop')).toBeNull()
   })
 
+  test('shows a card value in its table, read from the card as it stood when the card changed since', async () => {
+    vi.spyOn(api, 'cellNames').mockResolvedValue([])
+    const ref = 'card:c1#n/merged'
+    const table = '<table><thead><tr><th>outcome</th><th>n</th></tr></thead><tbody><tr><th>failed</th><td>1</td></tr><tr><th>merged</th><td>2</td></tr></tbody></table>'
+    const resolve = vi.spyOn(api, 'resolveRef').mockResolvedValue({ ref, kind: 'value', excerpt: 'n for merged: 2', meta: { value: '2', table_html: table, span: { col: 'n', row: 'merged' }, version: { entry: 'e1', ts: '2026-06-18T13:05:00Z' } } } as unknown as ResolvedRef)
+    await hovered(ref, '2')
+    // the citation's own words go with the ref, so the server reads the version that states them
+    expect(resolve).toHaveBeenCalledWith('ws', ref, '2')
+    const pop = document.body.querySelector('.refchip-pop')!
+    expect(pop.textContent).not.toContain('no longer')
+    expect(pop.querySelector('.refchip-table')?.textContent).toContain('merged')
+    expect(pop.querySelector('.refchip-pop-where')?.textContent).toMatch(/^As the card stood before its edit at \d\d:\d\d$/)
+  })
+
   test('opens a record of a file, a report and a view, as their citations do', async () => {
     vi.spyOn(api, 'resolveRef').mockResolvedValue({ ref: 'logs/a.jsonl#L4', kind: 'record', excerpt: 'the record' } as unknown as ResolvedRef)
     for (const ref of ['logs/a.jsonl#L4', 'report:findings', 'view:pdf']) {

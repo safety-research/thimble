@@ -103,7 +103,8 @@ The terminal plugin:
 The browser workbench:
 
 1. Run `thimble-browser --check-sandbox`. It prints one line per check of the sandbox, each `pass`.
-2. Run `thimble-browser browser/samples/agent-runs` in the checkout. The server prints a sign-in link and opens it.
+2. Run `thimble-browser` in a folder of files, or `thimble-browser browser/samples/agent-runs` in the checkout. The
+   server prints a sign-in link and opens it, on 127.0.0.1 port 8000 or the next free one.
 3. In Settings, give your credentials. Ask in the chat: "How many runs failed, and why?" Claude answers with a card,
    and the numbers in its answer are links.
 
@@ -117,7 +118,7 @@ The browser workbench:
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).
-- **The browser workbench's Settings**, in the page: the credentials, the model, the effort, and explain marks on or
+- **The browser workbench's Settings**, in the page: the credentials, the model, the effort, and each feature on or
   off. `THIMBLE_BROWSER_HOME` sets where it keeps its workspaces (default `~/.thimble-browser`).
 
 ## Update and uninstall

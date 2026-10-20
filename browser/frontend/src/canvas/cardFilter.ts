@@ -1,5 +1,5 @@
 // The board's card filter, set in the controls' menu (Controls.tsx) or by a chat's set_filter: by kind, group, maker,
-// check state, starred, locked, and by words (each must start a word of the card's question or takeaway). Within a part
+// starred, and by words (each must start a word of the card's question or takeaway). Within a part
 // any choice keeps a card; across parts a card must pass each. It combines with the label filter. The server keeps the
 // whole canvas filter so every tab and the chat see the same one, and backend filters.py reads it as this file does.
 // Pure.
@@ -9,14 +9,11 @@ export interface CardFilter {
   kinds: string[]
   groups: string[]
   makers: string[]
-  /** check states (lib/cardCheck.ts CheckFilterState) */
-  checks: string[]
   starred: boolean
-  locked: boolean
   text: string
 }
 
-export const NO_FILTER: CardFilter = { kinds: [], groups: [], makers: [], checks: [], starred: false, locked: false, text: '' }
+export const NO_FILTER: CardFilter = { kinds: [], groups: [], makers: [], starred: false, text: '' }
 
 /** What the filter reads of a card. */
 export interface FilterCard {
@@ -25,20 +22,17 @@ export interface FilterCard {
   /** its frame; null for a card on the board outside every frame */
   group: string | null
   maker: string
-  /** its check state (lib/cardCheck.ts checkState) */
-  check: string
   starred: boolean
-  locked: boolean
   /** its question and takeaway as the text part searches them (searchText) */
   text: string
 }
 
 /** The parts of the filter, each on its own: what the band's chips name and what each keeps. */
-export type FilterPart = 'kinds' | 'groups' | 'makers' | 'checks' | 'starred' | 'locked' | 'text'
-export const PARTS: FilterPart[] = ['kinds', 'groups', 'makers', 'checks', 'starred', 'locked', 'text']
+export type FilterPart = 'kinds' | 'groups' | 'makers' | 'starred' | 'text'
+export const PARTS: FilterPart[] = ['kinds', 'groups', 'makers', 'starred', 'text']
 
 export const partOn = (f: CardFilter, part: FilterPart): boolean =>
-  part === 'starred' || part === 'locked' ? f[part] : part === 'text' ? f.text.trim().length > 0 : f[part].length > 0
+  part === 'starred' ? f.starred : part === 'text' ? f.text.trim().length > 0 : f[part].length > 0
 export const filterOn = (f: CardFilter): boolean => PARTS.some((p) => partOn(f, p))
 export const activeParts = (f: CardFilter): FilterPart[] => PARTS.filter((p) => partOn(f, p))
 
@@ -72,12 +66,8 @@ export function passes(c: FilterCard, f: CardFilter, part: FilterPart): boolean 
       return !f.groups.length || (c.group != null && f.groups.includes(c.group))
     case 'makers':
       return !f.makers.length || f.makers.includes(c.maker)
-    case 'checks':
-      return !f.checks.length || f.checks.includes(c.check)
     case 'starred':
       return !f.starred || c.starred
-    case 'locked':
-      return !f.locked || c.locked
     case 'text':
       return !f.text.trim() || textMatches(c.text, f.text)
   }
@@ -98,10 +88,10 @@ export function bothKeep(a: ReadonlySet<string> | null, b: ReadonlySet<string> |
 }
 
 /** The choices the menu lists for a part, each with how many cards have it, most first, then by name. */
-export function choices(cards: readonly FilterCard[], part: 'kinds' | 'groups' | 'makers' | 'checks'): { value: string; count: number }[] {
+export function choices(cards: readonly FilterCard[], part: 'kinds' | 'groups' | 'makers'): { value: string; count: number }[] {
   const n = new Map<string, number>()
   for (const c of cards) {
-    const v = part === 'kinds' ? c.kind : part === 'groups' ? c.group : part === 'checks' ? c.check : c.maker
+    const v = part === 'kinds' ? c.kind : part === 'groups' ? c.group : c.maker
     if (v) n.set(v, (n.get(v) ?? 0) + 1)
   }
   return [...n].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0))
@@ -118,9 +108,7 @@ export function readFilter(raw: unknown): CardFilter {
     kinds: strings(o.kinds),
     groups: strings(o.groups),
     makers: strings(o.makers),
-    checks: strings(o.checks),
     starred: o.starred === true,
-    locked: o.locked === true,
     text: typeof o.text === 'string' ? o.text : '',
   }
 }
@@ -131,9 +119,7 @@ export const cardParts = (f: CardFilter): Required<CardFilterParts> => ({
   kinds: f.kinds,
   groups: f.groups,
   makers: f.makers,
-  checks: f.checks,
   starred: f.starred,
-  locked: f.locked,
   text: f.text.split(/\s+/).filter(Boolean).join(' '),
 })
 

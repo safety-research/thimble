@@ -63,21 +63,6 @@ describe("main's composer while main's turn runs", () => {
     expect(square(el).getAttribute('aria-label')).toBe('Send')
   })
 
-  test("without thimble's module in main's session, the click says to press Esc in the terminal", async () => {
-    interrupt = { stopped: false, kind: 'no-module', reason: "Claude Code did not load thimble's hooks module" }
-    const seen: { text: string; kind?: string }[] = []
-    const off = bus.on('toast', (t) => seen.push(t))
-    const el = await mount(<ChatPanel ws="mini" />)
-    await settle()
-    await act(async () => square(el).click())
-    await settle()
-    expect(seen).toEqual([{ text: 'To stop main, press Esc in your Claude Code terminal.' }])
-    // the square is Stop again, not left busy
-    expect(square(el).getAttribute('aria-label')).toBe('Stop main')
-    expect(square(el).getAttribute('aria-busy')).not.toBe('true')
-    off()
-  })
-
   test('shows Send while main is idle', async () => {
     main = { ...main, running: false }
     const el = await mount(<ChatPanel ws="mini" />)
@@ -87,7 +72,7 @@ describe("main's composer while main's turn runs", () => {
 })
 
 describe("a side thread's composer while its fork runs", () => {
-  test("shows Stop the thread, which posts the thread's interrupt; none while its question waits for a fork", async () => {
+  test("shows Stop the thread, which posts the thread's interrupt; Send again once the thread stops", async () => {
     main = { ...main, running: false }
     const el = await mount(<ChatPanel ws="mini" />)
     await settle()
@@ -97,7 +82,7 @@ describe("a side thread's composer while its fork runs", () => {
     await act(async () => square(el).click())
     await settle()
     expect(posted).toEqual(['POST /api/ws/mini/chats/th1/interrupt'])
-    thread = { ...thread, fork: null }
+    thread = { ...thread, running: false }
     await act(async () => bus.emit('chat', { chat: 'th1' }))
     await act(async () => new Promise((r) => setTimeout(r, 200)))
     expect(square(el).getAttribute('aria-label')).toBe('Send')

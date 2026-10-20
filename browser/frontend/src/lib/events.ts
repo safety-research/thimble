@@ -41,9 +41,6 @@ function fanOut(ev: WsEvent): void {
     case 'cell':
       if (typeof rest.cell === 'string') bus.emit('cell', { notebook: String(rest.notebook ?? ''), cell: rest.cell, kind: String(rest.kind ?? 'ran') })
       return
-    case 'orient':
-      bus.emit('orient', { ...rest, status: String(rest.status ?? '') })
-      return
     case 'report':
       if (typeof rest.slug === 'string') bus.emit('report', { slug: rest.slug, status: String(rest.status ?? ''), span: typeof rest.span === 'string' ? rest.span : undefined })
       return
@@ -60,8 +57,17 @@ function fanOut(ev: WsEvent): void {
           held: rest.held === true || undefined,
         })
       return
-    case 'ticket':
-      bus.emit('ticket', { id: String(rest.id ?? ''), n: Number(rest.n ?? 0), status: String(rest.status ?? '') })
+    case 'features':
+      // Settings turned a feature on or off (features.ts reads the switches again)
+      bus.emit('features', {})
+      return
+    case 'lenses':
+      // a lens's switch or scope changed, or a check of the analyst's own came or went (lib/marks.ts)
+      bus.emit('lenses', {})
+      return
+    case 'marks':
+      // a lens's reading made marks (lib/marks.ts)
+      bus.emit('marks', {})
       return
     case 'concepts':
       bus.emit('concepts', { concept: String(rest.concept ?? ''), what: String(rest.what ?? ''), rows: rest.rows !== false })

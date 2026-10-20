@@ -10,7 +10,7 @@ import { Icon } from '../components/Icon'
 import { Menu, type MenuItem } from '../components/Menu'
 import { useTooltip } from '../components/Tooltip'
 import { hasFastMode, modelLabel, sameModel } from '../lib/models'
-import type { Attached, MainEffort, OrientEffort } from '../lib/types'
+import type { AgentEffort, Attached, MainEffort } from '../lib/types'
 
 /** The efforts main's menu offers, lowest first, then ultracode (cc_settings.EFFORTS and ultracode), each named by
  * its id. */
@@ -18,7 +18,7 @@ export const EFFORT_CHOICES: readonly MainEffort[] = ['low', 'medium', 'high', '
 
 /** The efforts a run of one of thimble's agents takes: Claude Code's levels, lowest first, without Ultracode, which is
  * a mode of main only (cc_settings.EFFORTS). */
-export const AGENT_EFFORTS: readonly OrientEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+export const AGENT_EFFORTS: readonly AgentEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 /** A stored effort as an agent's line takes it: Ultracode, a mode of main only, as xhigh, the level it runs at
  * (config.LEGACY_EFFORTS); nothing as nothing. Pure. */
@@ -28,8 +28,6 @@ export const agentEffort = (e: string | null | undefined): string | null => (e =
  * (cc_settings.MAIN_DEFAULT_EFFORT). */
 export const MAIN_DEFAULT_EFFORT: MainEffort = 'high'
 
-/** The orientation's effort while Settings are not read yet (config.ORIENT_DEFAULT_EFFORT). */
-export const ORIENT_DEFAULT_EFFORT: OrientEffort = 'xhigh'
 
 /** Main's model's tip: thimble browser's one model is picked in Settings. */
 export const MODEL_TIP = 'Pick the model in Settings (the gear at the top right)'

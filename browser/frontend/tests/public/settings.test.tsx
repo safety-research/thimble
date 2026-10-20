@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx) of thimble browser: sign in with Workload Identity Federation
 // from a config file (its path and token source shown, never its IDs), or a pasted API key that is never shown again; the one model (a known id or one typed in), its effort,
-// and explainers. A save sends only what changed, the key first by its own route.
+// and each feature's switch. A save sends only what changed, the key first by its own route.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { blockedWhy, changedSettings, formOf, KEY_SAVED, SettingsPopover } from '../../src/shell/SettingsPopover.tsx'
@@ -17,7 +17,10 @@ const BASE: BrowserSettings = {
   has_api_key: false,
   model: 'claude-opus-5-5',
   effort: 'high',
-  explain: true,
+  features: [
+    { name: 'cards', title: 'Cards', does: 'Claude draws a card.', on: true },
+    { name: 'lenses', title: 'Explainers and checks', does: 'Marks passages.', on: true },
+  ],
   choices: { models: ['claude-opus-5-5', 'claude-sonnet-5-5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
 }
 
@@ -45,7 +48,7 @@ describe('the rules', () => {
     expect(changedSettings(BASE, form)).toEqual({})
     expect(changedSettings(BASE, { ...form, file: ' /made/up/other.toml ' })).toEqual({ credentials: { source: 'wif', file: '/made/up/other.toml' } })
     expect(changedSettings(BASE, { ...form, source: 'key' })).toEqual({ credentials: { source: 'key' } })
-    expect(changedSettings(BASE, { ...form, model: ' claude-sonnet-5-5 ', effort: 'max', explain: false })).toEqual({ model: 'claude-sonnet-5-5', effort: 'max', explain: false })
+    expect(changedSettings(BASE, { ...form, model: ' claude-sonnet-5-5 ', effort: 'max', features: { ...form.features, lenses: false } })).toEqual({ model: 'claude-sonnet-5-5', effort: 'max', features: { lenses: false } })
     // settings with no credentials yet: the choice shown is sent, so it is saved
     expect(changedSettings({ ...BASE, credentials: {} }, { ...formOf({ ...BASE, credentials: {} }), file: '/made/up/wif.toml' })).toEqual({ credentials: { source: 'wif', file: '/made/up/wif.toml' } })
   })
@@ -76,14 +79,14 @@ const click = async (el: Element | null | undefined) => {
 }
 
 describe('the popover', () => {
-  test('shows the sign-in, the config file and its token source, the model, the effort and explainers', async () => {
+  test('shows the sign-in, the config file and its token source, the model, the effort and the features', async () => {
     const doc = await open()
     expect(doc.querySelector('[data-setting="source"] [aria-checked="true"]')?.textContent).toBe('Workload Identity')
     expect(doc.querySelector<HTMLInputElement>('[data-setting="wif"] input')?.value).toBe('/made/up/wif.toml')
     expect(doc.querySelector('[data-setting="token"]')?.textContent).toMatch(/a Google identity token for https:\/\/api\.anthropic\.com/)
     expect(doc.querySelector('[data-setting="model"] .settings-model')?.textContent).toBe('Opus 5.5')
     expect(doc.querySelector('[data-setting="effort"] .settings-effort')?.textContent).toBe('high')
-    expect(doc.querySelector('[data-setting="explain"] [role="switch"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(doc.querySelector('[data-setting="feature-lenses"] [role="switch"]')?.getAttribute('aria-checked')).toBe('true')
     expect(doc.querySelector('.settings-signed-in')?.textContent).toMatch(/Workload Identity Federation from \/made\/up\/wif\.toml/)
   })
 
