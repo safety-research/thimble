@@ -71,7 +71,7 @@ export async function settingsStore($: Engine): Promise<Any> {
   }
   return {
     switches: SWITCHES.map(s => ({
-      key: s.key, title: s.title, group: s.group, under: s.under ?? null, does: s.does,
+      key: s.key, title: s.title, group: s.group, under: s.under ?? null, lens: s.lens ?? null, surfaces: s.surfaces ?? [], does: s.does,
       costs: costOf(s.key, s.lens, costs),
       on: valueOf(s.key),
       parentOn: s.under ? valueOf(s.under) : true,

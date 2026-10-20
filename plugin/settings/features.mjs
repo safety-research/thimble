@@ -10,57 +10,59 @@
 // A lens of the observer (observer/lenses/) is on when its switch is: the switch whose `lens` names it, or the one its
 // module names with `option`. A lens no switch names is on while the observer is.
 
-/** The switches, in the order the settings panel lists them. `title`: its name in the panel; `label`: its name in
- *  /config, where no group heads it; `under`: the switch it needs (a lens needs the observer). The manifest's field
- *  has the label as its title and `does` and `costs` as its description (a test checks). */
+/** The switches, in the order the settings panel lists them. `key`: the userConfig field; `title`: its name in the
+ *  panel; `label`: its name in /config, where no group heads it; `group`: the panel's heading over it; `lens`: the
+ *  observer lens it turns on and off; `under`: the switch it needs (a lens needs the observer); `surfaces`: the surfaces
+ *  that honor it (the terminal's panel and bar; another surface adds its name where it reads the same switch). The
+ *  manifest's field has the label as its title and `does` and `costs` as its description (a test checks). */
 export const SWITCHES = [
   {
-    key: 'observer', title: 'Observer', label: 'Observer', group: 'Observer', default: true,
+    key: 'observer', title: 'Observer', label: 'Observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: "After each of Claude's messages, a side agent reads it with the whole session and gives the parts that are on.",
     costs: 'One call per message, over the session Claude already has cached.',
   },
   {
-    key: 'notes', title: 'Notes to Claude', label: 'Observer: notes to Claude', lens: 'notes', under: 'observer', group: 'Observer', default: true,
+    key: 'notes', title: 'Notes to Claude', label: 'Observer: notes to Claude', lens: 'notes', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: 'Up to two notes Claude reads with your next prompt, such as a number that counts the wrong months. You do not see them.',
     costs: 'A small part of each look.',
   },
   {
-    key: 'visualize', title: 'v proposals', label: 'Observer: v proposals', lens: 'actions', under: 'observer', group: 'Observer', default: true,
+    key: 'visualize', title: 'v proposals', label: 'Observer: v proposals', lens: 'actions', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: 'Lights v with a named view when a view would show what the answer only tells.',
     costs: 'A small part of each look.',
   },
   {
-    key: 'explain', title: 'Explainers', label: 'Observer: explainers', lens: 'explain', under: 'observer', group: 'Observer', default: true,
+    key: 'explain', title: 'Explainers', label: 'Observer: explainers', lens: 'explain', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: 'Marks the terms of an answer you may not know; ] opens what each one means here.',
     costs: 'A small part of each look.',
   },
   {
-    key: 'details', title: 'Important details', label: 'Observer: important details', lens: 'details', under: 'observer', group: 'Observer', default: true,
+    key: 'details', title: 'Important details', label: 'Observer: important details', lens: 'details', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: 'Marks the details of an answer that are easy to miss and change what it means.',
     costs: 'A small part of each look.',
   },
   {
-    key: 'squeeze', title: 'Squeeze levels', label: 'Observer: squeeze levels', lens: 'squeeze', under: 'observer', group: 'Observer', default: true,
+    key: 'squeeze', title: 'Squeeze levels', label: 'Observer: squeeze levels', lens: 'squeeze', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: "Says where each answer stands on squeeze's chips, so your first change with s starts from the right level.",
     costs: 'A few words of each look.',
   },
   {
-    key: 'claims', title: 'Claims', label: 'Observer: claims', lens: 'claims', under: 'observer', group: 'Observer', default: true,
+    key: 'claims', title: 'Claims', label: 'Observer: claims', lens: 'claims', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: "Keeps the session's claims in the Claims pane, with c and the claims count on the bar.",
     costs: 'The largest part of each look.',
   },
   {
-    key: 'catchup', title: 'Catch-up', label: 'Catch-up', group: 'The bar', default: true,
+    key: 'catchup', title: 'Catch-up', label: 'Catch-up', group: 'The bar', default: true, surfaces: ['terminal'],
     does: 'When two or more replies came since your last prompt, s offers to catch up on all of them in one.',
     costs: 'Nothing until you press s: then one rewrite of the replies.',
   },
   {
-    key: 'coverage', title: 'Coverage count', label: 'Coverage count on the bar', group: 'The bar', default: true,
+    key: 'coverage', title: 'Coverage count', label: 'Coverage count on the bar', group: 'The bar', default: true, surfaces: ['terminal'],
     does: 'Shows on the bar how much of the data Claude read (seen 12%); r opens Coverage.',
     costs: 'No model call: thimble counts the files after each turn.',
   },
   {
-    key: 'labels', title: 'Labels count', label: 'Labels count on the bar', group: 'The bar', default: true,
+    key: 'labels', title: 'Labels count', label: 'Labels count on the bar', group: 'The bar', default: true, surfaces: ['terminal'],
     does: 'Shows on the bar how many labels the folder has; l opens them.',
     costs: 'No model call.',
   },
