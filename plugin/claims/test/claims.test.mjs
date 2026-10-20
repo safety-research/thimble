@@ -281,6 +281,10 @@ test('the layout: each cluster an island in the order said, no two dots touching
   assert.ok(big.fits)
   const bp = [...big.pos.values()]
   assert.equal(new Set(bp.map(p => `${p.x},${p.y}`)).size, 150)
+  // the dots of two clusters never stand side by side
+  const cl = id => many.find(n => n.id === id).cluster
+  const at = [...big.pos]
+  for (const [a, p] of at) for (const [b, q] of at) if (cl(a) !== cl(b) && p.y === q.y) assert.ok(Math.abs(p.x - q.x) >= 3, `${a} ${b}`)
   for (const p of bp) assert.ok(p.x >= 0 && p.x < 100 && p.y >= 0 && p.y < 30, JSON.stringify(p))
 })
 

@@ -140,8 +140,9 @@ export function slotsOf(groups, W, H) {
       row.forEach((g, gi) => {
         const sl = { g, x, y, w: ws[gi], h: hs[ri] }
         out.push(sl)
-        // the slot's top row holds the cluster's name; its dots want the airy spacing, and must fit the dense one
-        const airy = gridOf(g.nodes.length, sl.w - 2, sl.h - 1)
+        // the slot's top row holds the cluster's name, and its last two columns stay blank, so two clusters never touch;
+        // its dots want the airy spacing, and must fit the dense one
+        const airy = gridOf(g.nodes.length, sl.w - 3, sl.h - 1)
         cost += Math.log(sl.w / Math.max(1, sl.h) / 5) ** 2 + (airy.fits ? (airy.sy === 1 ? 1 : 0) + (airy.sx < 3 ? 0.5 : 0) : 20) + (Array.from(g.name).length > sl.w - 2 ? 1 : 0)
         x += ws[gi]
       })
@@ -169,7 +170,7 @@ export function layout(nodes, clusters, { w, h }) {
   const pos = new Map()
   let fits = true
   for (const sl of slots) {
-    const g = gridOf(sl.g.nodes.length, sl.w - 2, sl.h - 1)
+    const g = gridOf(sl.g.nodes.length, sl.w - 3, sl.h - 1)
     fits = fits && g.fits
     sl.g.nodes.forEach((nd, i) => pos.set(nd.id, { x: sl.x + 1 + (i % g.per) * g.sx, y: sl.y + 1 + Math.floor(i / g.per) * g.sy }))
   }
