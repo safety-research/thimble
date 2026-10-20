@@ -40,8 +40,8 @@ import { ownTurn } from '../observer/observer'
 
 
 import type { RowVerb } from './view'
-import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, stretchMarks, takeNotes as sqNotes } from '../verbs/squeeze/term'
-import { catchUpStands, endsOf, isCatchUp, revealCut } from '../verbs/squeeze/chips.mjs'
+import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, takeNotes as sqNotes } from '../verbs/squeeze/term'
+import { catchUpStands, isCatchUp, revealCut } from '../verbs/squeeze/chips.mjs'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
@@ -1484,12 +1484,6 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   if (kind === 'chips') {
     if (pick?.verb !== 's') return undefined
     // the chips' own keys, as their program names them (panes/chips.js), after what it says of the message now
-    const ui = ((await $.state.get({ ...SQZ, id: pick.row })).value ?? null) as SqzUi | null
-    if (ui?.adding) {
-      const ends = endsOf(String(ui.typing || '+'))
-      if (!ends) return { keys: 'type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels' }
-      return { keys: ends.from === 'as written' ? 'then and, and the other end · ↵ makes the stretch' : `↵ makes ${ends.from} ↔ ${ends.to} · ⌫ the + cancels` }
-    }
     const d = await paneNow($, 'chips', { row: pick.row })
     return { status: status(d), keys: barText([d]) }
   }
@@ -1688,19 +1682,10 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
  *  faster than one by one), and any key in a prompt with words in it. */
 const typesAnyway = (e: KeyEdit) => !e.key || !!e.key.ctrl || !!e.key.meta || e.text !== ''
 
-/** A key that types: the edit as Claude Code made it, with the squeeze chips' colors on a stretch being typed (the
- *  key that begins one carries them, as its work starts the stretch after the answer). */
-async function keyTyped($: Engine, e: Any, next: (e: Any) => Promise<Any>, begun?: unknown[]): Promise<Any> {
+/** A key that types: the edit as Claude Code made it. */
+async function keyTyped($: Engine, e: Any, next: (e: Any) => Promise<Any>): Promise<Any> {
   const out = await next(e)
-  if (detailIsOpen()) { detailTyped($, e, out); return out }
-  if (begun?.length) return { ...out, decorations: [...(out.decorations ?? []), ...begun] }
-  try {
-    const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-    const dec = await sqAfterEdit($, pick?.verb === 's' ? pick.row : null, out.text, theme)
-    if (dec) return { ...out, decorations: [...(out.decorations ?? []), ...dec] }
-  } catch {
-    // the edit lands whatever the chips make of it
-  }
+  if (detailIsOpen()) detailTyped($, e, out)
   return out
 }
 
@@ -1719,7 +1704,7 @@ async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<
   const inTime = !next.signal.aborted
   keyAnswered(shellKey, k, t, inTime)
   if (t.box || !inTime) return t.box ?? { text: e.text, cursor: e.cursor }
-  return keyTyped($, e, next, t.decorations)
+  return keyTyped($, e, next)
 }
 
 /** What a key pressed in the prompt comes to (keys.ts): decided from reads alone, its work run after the answer. `at`:
@@ -1770,17 +1755,10 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   if (keyed && now - keyed.at < 700 && /^\p{L}$/u.test(k)) {
     return { box: { text: `${keyed.key}${e.inputText}`, cursor: keyed.key.length + e.inputText.length }, work: () => writeCardState($, keyed.ref.root, keyed.ref.id, { state: keyed.undo?.state ?? {}, region: keyed.undo?.region ?? null }, 'terminal') }
   }
-  // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-9 chip, + a
-  // stretch, 0 original, s done); the + of a stretch, which asks for the prompt, types into it
-  if (pick && pick.verb === 's' && !tray) {
-    const d = await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k })
-    if (d) {
-      const types = k === '+' && ((d.effects || []) as { do?: string }[]).some(x => x.do === 'input')
-      return { box: types ? null : consume, ...(types ? { decorations: stretchMarks(`${e.text}${e.inputText}`, theme) } : {}), work: async () => {
-        typedKey = k
-        try { await paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k }) } finally { typedKey = null }
-      } }
-    }
+  // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] change, 1-3 chip,
+  // 0 original, s done)
+  if (pick && pick.verb === 's' && !tray && (await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k }))) {
+    return { box: consume, work: () => paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k }).then(() => undefined) }
   }
   // the tray open: its program's keys (panes/tray.js: 1 ask, r and c a section of the card, 2–9 open a citation in it,
   // 0 back, ] [ step); any other letter types the question for the mark's thread
@@ -2074,7 +2052,7 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
   switch (kind) {
     case 'index': return (await msgFilesNow($)).index.map(x => ({ row: String(x.row), kind: x.kind }))
     case 'record': return arg ? await recordNow($, arg) : null
-    // the squeeze's own state of a message (a stretch being typed, a call running, a failure): the terminal's alone
+    // the squeeze's own state of a message (a call running, a failure): the terminal's alone
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': return arg ? cardStore($, arg) : null
@@ -2118,24 +2096,12 @@ export async function paneWant($: Engine, _name: string, _args: Record<string, u
   return { error: 'the terminal cannot read that' }
 }
 
-/** The key the chips' program is answering now, set while it runs: an input it asks for with the key's own letter
- *  (the + of a stretch) leaves the key in the prompt (null here then). */
-let typedKey: string | null = null
-/** What the last stretch made says, for the prompt's drop line. */
-let stretchSaid: string | null = null
-
-/** What the squeeze chips' program asks for: a rewrite at levels, the original, a stretch, the prompt for a stretch's
- *  ends, a line said, or closing the chips. */
+/** What the squeeze chips' program asks for: a rewrite at levels, the original, a line said, or closing the chips. */
 async function chipsAction($: Engine, row: string, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
   if (!row || !(await recordNow($, row))) return '× That message is not in this session, so the chips cannot change it. Press s under a message here.'
   if (name === 'squeeze') {
     if (a.reset === true) { void sqSetLevels($, row, {}); return }
-    if (typeof a.stretch === 'string') {
-      const r = await sqAddStretch($, row, a.stretch)
-      stretchSaid = r.said ?? null
-      return r.problem ? `× ${r.problem}` : undefined
-    }
     if (a.at && typeof a.at === 'object') {
       const at: Record<string, number> = {}
       for (const [k, v] of Object.entries(a.at as Record<string, unknown>)) if (Number.isInteger(v)) at[k] = v as number
@@ -2144,20 +2110,11 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
     }
     return '× The chips asked for a squeeze with no levels.'
   }
-  if (name === 'input') {
-    await sqStartStretch($, row)
-    // pressed as the + key, the + is typed into the prompt by the key itself; pressed with the pointer, it is put there
-    if (typedKey === '+') typedKey = null
-    else await $.prompt.fill({ text: '+', mode: 'replace' })
-    return
-  }
   if (name === 'close') {
-    await sqStopStretch($, row)
     await setPick($, null)
     return
   }
   if (name === 'dismiss') {
-    await sqStopStretch($, row)
     await dismissNow($, row)
     return
   }
@@ -2528,15 +2485,6 @@ export const registerShell: Register = (on, options) => {
     if (person === 'later' && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) await startForPerson($)
     if (e.command) return next(e)
     try {
-      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-      if (pick?.verb === 's' && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin' && /^\s*\+/.test(String(e.text || ''))) {
-        // the two ends of a stretch, typed after the chips' +: the chips' program makes it (no prompt for Claude)
-        await paneFire($, 'chips', { row: pick.row }, { type: 'stretch', text: String(e.text) })
-        const said = stretchSaid
-        stretchSaid = null
-        $.clock.after(50, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-        return { drop: said || 'stretch' }
-      }
       // a question typed with the tray open asks the mark's side thread; it never reaches main
       const tray = (await $.state.get(TRAY)).value as Tray | null
       if (tray && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind === 'composer' && String(e.text || '').trim() && !detailIsOpen()) {

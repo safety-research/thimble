@@ -200,7 +200,7 @@ test("s writes one catch-up of everything since the person's last prompt: one ca
   expect(textOf(await $.ui.render(view(A1, ANSWER)))).not.toContain('catch-up')
   let bar = await hintOf($)
   expect(bar).toContain('s ● catch-up of 2 replies')
-  expect(bar).toContain('[ ] change · 1–3 chip · + new stretch · 0 dismiss · s done')
+  expect(bar).toContain('[ ] change · 1–3 chip · 0 dismiss · s done')
   expect(bar).not.toContain('lines')
   // s: done; the keys act on the catch-up, and the bar says so
   await press($, clock, edit('s'))

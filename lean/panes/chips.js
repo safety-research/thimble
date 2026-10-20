@@ -1,21 +1,19 @@
 // chips.js: the squeeze chips under a message, a program on the card runtime (draw/kit.js) over the message's record
-// (thimble/messages/<session>/<row>.json). The terminal draws it under the message and the browser under the same
-// message in the chat, from this one file; which chip is picked is the program's state, kept for both.
+// (thimble/messages/<session>/<row>.json), drawn under the message; which chip is picked is the program's state.
 //
-// One row of chips: each its name, its dots and its level (`Length ○●○○ short`); a stretch as its two ends around its
-// dots (`engineer ●○○○ manager`). The picked chip has a fill. A `+` ends the row. What a chip change does, the rewrite
+// One row of chips: each its name, its dots and its level (`Length ○●○○ short`). The picked chip has a fill. What a
+// chip change does, the rewrite
 // in place, is the host's: the program asks for it with k.do('squeeze', {at}), and the record then holds the new text
 // and the levels (and, while the call runs, where they go: record.squeeze.want).
 //
-//   state: {focus: chip id, adding: true while the person types a stretch}
-//   keys: [ ] change · 1-9 chip · + new stretch · 0 original (at the original: close) · s done. On a catch-up (a message
+//   state: {focus: chip id}
+//   keys: [ ] change · 1-3 chip · 0 original (at the original: close) · s done. On a catch-up (a message
 //         the chips wrote of several replies) 0 dismisses it: its original is the replies, in the transcript above, so
 //         no step lands on the original either. No key is labelled
 //         < >: next to Claude Code's `← for agents` it reads as the arrow keys, and ← in an empty prompt leaves the
 //         conversation for the agents view. < > and , . still change, unnamed.
-//   presses: a chip picks it (the picked one steps up); a dot sets that level; + starts a stretch
-//   events: stretch {text} (the two ends the person typed, from the host's input)
-import { chipsOf, glyph, isCatchUp, isOriginal, noteOf, stepAt, stretchChip } from '../verbs/squeeze/chips.mjs'
+//   presses: a chip picks it (the picked one steps up); a dot sets that level
+import { chipsOf, glyph, isCatchUp, isOriginal, noteOf, stepAt } from '../verbs/squeeze/chips.mjs'
 
 const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 
@@ -29,14 +27,13 @@ export default {
     const ui = stores[`sqz:${args.row}`] || null
     if (!rec) return { row: args.row, rec: null }
     const s = rec.squeeze || {}
-    const lean = { text: rec.text, shown: rec.shown ?? null, verbs: rec.verbs ? { s: rec.verbs.s || null } : {}, squeeze: { at: s.at || {}, own: s.own || [], want: s.want || null, running: !!s.running, error: s.error || null, problems: s.problems || [] } }
+    const lean = { text: rec.text, shown: rec.shown ?? null, verbs: rec.verbs ? { s: rec.verbs.s || null } : {}, squeeze: { at: s.at || {}, want: s.want || null, running: !!s.running, error: s.error || null, problems: s.problems || [] } }
     const catchup = isCatchUp(rec) ? { replies: Number(rec.catchup.replies) || 0 } : null
     return {
       row: args.row, rec: lean, catchup,
       note: catchup ? null : typeof rec.shown === 'string' || s.auto ? noteOf(rec, size.w) : null,
       lit: rec.verbs && rec.verbs.s && rec.verbs.s.lit && rec.verbs.s.note ? String(rec.verbs.s.note) : null,
-      // the terminal's own: a stretch being typed in its prompt, a call running, a call that failed
-      typing: ui && ui.adding ? String(ui.typing || '+') : null,
+      // the terminal's own: a call running, a call that failed
       running: !!(ui && ui.running) || !!s.running,
       error: (ui && ui.error) || s.error || null,
     }
@@ -63,7 +60,7 @@ export function program(k, data) {
   const step = (id, dir) => {
     const to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, id, dir)
     if (to && !toOriginal(to)) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '[' : ']' })
-    return { focus: id, adding: false }
+    return { focus: id }
   }
   k.on('[', () => step(focus, -1), 'change')
   k.on(']', () => step(focus, 1), 'change')
@@ -71,29 +68,18 @@ export function program(k, data) {
   k.on('>', () => step(focus, 1))
   k.on(',', () => step(focus, -1))
   k.on('.', () => step(focus, 1))
-  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id, adding: false }), 'chip'))
-  const stretch = () => {
-    k.do('input', { row: data.row, label: 'two ends, such as engineer and manager', event: 'stretch', prefix: '+' })
-    return { adding: true }
-  }
-  k.on('+', stretch, 'new stretch')
-  k.on('stretch', e => {
-    const chip = stretchChip(rec, String(e.text || ''))
-    if (!chip) { k.do('say', { text: 'A stretch needs two ends, such as "+engineer and manager".' }); return { adding: false } }
-    k.do('squeeze', { row: data.row, stretch: String(e.text || '') })
-    return { focus: chip.id, adding: false }
-  })
+  chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id }), 'chip'))
   if (data.catchup) {
-    k.on('0', () => { k.do('dismiss', { row: data.row }); return { adding: false } }, 'dismiss')
+    k.on('0', () => { k.do('dismiss', { row: data.row }); return {} }, 'dismiss')
   } else {
     k.on('0', () => {
       if (orig && !pending) k.do('close')
       else k.do('squeeze', { row: data.row, reset: true })
-      return { adding: false }
+      return {}
     }, orig && !pending ? 'close' : 'original')
   }
-  k.on('s', () => { k.do('close'); return { adding: false } }, 'done')
-  k.on('esc', () => { k.do('close'); return { adding: false } })
+  k.on('s', () => { k.do('close'); return {} }, 'done')
+  k.on('esc', () => { k.do('close'); return {} })
   k.on('press', e => {
     const r = String(e.region || '')
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)
@@ -101,17 +87,16 @@ export function program(k, data) {
       const c = chips.find(x => x.id === dot[1])
       const lv = Number(dot[2])
       if (c && lv !== c.level && !toOriginal({ ...at, [c.id]: lv })) k.do('squeeze', { row: data.row, at: { ...at, [c.id]: lv } })
-      return { focus: dot[1], adding: false }
+      return { focus: dot[1] }
     }
-    if (r === 'add') return stretch()
     const id = r.replace(/^(chip|word)-/, '')
     const c = chips.find(x => x.id === id)
     if (!c) return null
-    if (c.id !== focus) return { focus: c.id, adding: false }
+    if (c.id !== focus) return { focus: c.id }
     // a press on the picked chip steps it up, and from its last level back to its first
     const to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, c.id, 1) || { ...at, [c.id]: 0 }
     if (!toOriginal(to)) k.do('squeeze', { row: data.row, at: to })
-    return { focus: c.id, adding: false }
+    return { focus: c.id }
   })
 
   // ---- what the bar says while the chips have the keys
@@ -129,15 +114,12 @@ export function program(k, data) {
   const W = Math.max(30, k.w)
   const items = []
   chips.forEach(c => {
-    const picked = c.id === focus && !st.adding && !data.typing
+    const picked = c.id === focus
     const bg = picked ? 'warn-faint' : null
-    const parts = c.kind === 'stretch'
-      ? [[' ', 'dim'], [c.from, picked && c.level === 0 ? 'warn' : 'dim', picked && c.level === 0], [' ', 'dim'], ['dots'], [' ', 'dim'], [c.to, picked ? 'warn' : 'ink', picked && c.level === c.levels.length - 1], [' ', 'dim']]
-      : [[' ', 'dim'], [c.name, picked ? 'warn' : 'dim', picked], [' ', 'dim'], ['dots'], [' ', 'dim'], [c.levels[c.level] || '', 'ink', picked], [' ', 'dim']]
+    const parts = [[' ', 'dim'], [c.name, picked ? 'warn' : 'dim', picked], [' ', 'dim'], ['dots'], [' ', 'dim'], [c.levels[c.level] || '', 'ink', picked], [' ', 'dim']]
     const width = parts.reduce((n, p) => n + (p[0] === 'dots' ? c.levels.length : k.len(p[0])), 0)
     items.push({ c, parts, width, bg, picked })
   })
-  const typing = data.typing || (st.adding && k.surface === 'terminal' ? '+' : null)
   const rows = [[]]
   let x = 0
   const place = (w, it) => {
@@ -146,17 +128,9 @@ export function program(k, data) {
     x += w + 3
   }
   items.forEach(it => place(it.width, it))
-  const ends = typing ? endsWords(typing) : null
-  const tail = ends ? ` stretch between ${ends[0]} and ${ends[1]} ` : '+'
-  place(k.len(tail), { tail })
   const c = k.canvas(W, rows.length)
   rows.forEach((row, y) => {
     for (const { x: x0, it } of row) {
-      if (it.tail) {
-        if (ends) c.text(x0, y, tail, { tone: 'ink', raw: true })
-        else { c.text(x0, y, '+', { tone: 'dim', raw: true }); c.region('add', x0, y, 1, 1, { label: 'new stretch' }) }
-        continue
-      }
       let cx = x0
       // the chip's words before its dots are the chip (a press picks it), its dots each a level, its words after the
       // dots the chip again (a press there steps it, as on the picked chip)
@@ -183,12 +157,4 @@ export function program(k, data) {
     }
   })
   return c
-}
-
-/** The two ends as typed so far, for "stretch between … and …". */
-function endsWords(typed) {
-  const w = String(typed || '').replace(/^\s*\+\s*/, '').replace(/^(stretch\s+)?(between|from)\s+/i, '').trim()
-  if (!w) return ['…', '…']
-  const m = /^(.+?)\s*(?:↔|<->|<>|\/|\s(?:and|to|vs\.?|versus|-|–|—)\s)\s*(.*)$/i.exec(w)
-  return m ? [m[1], m[2] || '…'] : [w, '…']
 }

@@ -7,8 +7,6 @@
 //                       with its judgment calls. The two ends share almost no sentences.
 //   Familiarity         new to the field · beginner · working · fluent · expert: how much of the field the text
 //                       assumes. New explains each term where it stands; expert reads like a commit message.
-//   a stretch           between two ends the person types after +, such as "engineer and manager": the original
-//                       stands at the first end (0), and each of 3 steps moves the text toward the second.
 // The observer says where the original stands on Report ↔ Interpret and Familiarity (record.verbs.s.at); until it
 // has, each stands in its middle. A message arrives as Claude wrote it; the chips rewrite it on demand. A step on one
 // of them made while that look runs waits for it, and then counts from the level it gives (rebaseAt; term.ts). Every
@@ -24,7 +22,6 @@
 // The record keeps it (CONTRACT 1, beside `shown`):
 //   squeeze: {
 //     at:       {chipId: level}       the levels set now; a chip not named stands where the original does
-//     own:      [{id, kind: 'stretch', from, to, name, levels}]   the person's stretches
 //     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
 //     orig:     {marks}               the original's marks, so a sparkline's values outlive a version that dropped it
 //     auto:     true                  it arrived squeezed (a long message, in sessions before arrival squeezes ended)
@@ -42,14 +39,10 @@ export const CHIPS = Object.freeze([
 export const LENGTH = CHIPS[0]
 /** The level of Length a catch-up arrives at, and the one `/verb squeeze` with no words sets: short. */
 export const ARRIVE = 1
-/** The steps of a stretch: 0 is the original, at its first end; 3 is all the way to its second end. */
-export const STRETCH_STEPS = 3
-const MAX_OWN = 3
 // the names an observer or an older record may give a level, as the levels are named now
 const ALIAS = { interpret: { both: 1, story: 2, facts: 0 }, familiarity: { new: 0, newcomer: 0, novice: 0, familiar: 2, intermediate: 2, 'new to testing': 0 } }
 
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
-const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24)
 const sq = rec => (rec && rec.squeeze && typeof rec.squeeze === 'object' ? rec.squeeze : {})
 
 /** The dots of a chip at level v: one ● at its place among ○, as `○●○○` for Length short. */
@@ -77,16 +70,8 @@ function observed(rec, chip) {
   return levelOf(chip, at[chip.id])
 }
 
-/** A stretch as a chip: its levels are its steps, the first end at 0 (the original) and the second at the last. */
-function stretchOf(c) {
-  const from = str(c.from, 40) || 'as written'
-  const to = str(c.to, 40) || str(c.words, 40) || 'other end'
-  const levels = Array.from({ length: STRETCH_STEPS + 1 }, (_, i) => (i === 0 ? from : i === STRETCH_STEPS ? to : `${i} of ${STRETCH_STEPS} toward ${to}`))
-  return { id: c.id, kind: 'stretch', from, to, name: `${from} ↔ ${to}`, levels, level0: 0, known: true }
-}
-
-/** Every chip of the message, in the order drawn: the fixed three, then the person's stretches. Each with `level0`,
- *  where the original stands (`known` once the observer said so), and `level`, where it is now. */
+/** Every chip of the message, in the order drawn: the fixed three. Each with `level0`, where the original stands
+ *  (`known` once the observer said so), and `level`, where it is now. */
 export function chipsOf(rec) {
   const s = sq(rec)
   const at = s.at && typeof s.at === 'object' ? s.at : {}
@@ -94,8 +79,7 @@ export function chipsOf(rec) {
     const o = observed(rec, c)
     return { ...c, levels: [...c.levels], level0: o ?? c.level0, known: c.id === LENGTH.id || o != null }
   })
-  const own = (Array.isArray(s.own) ? s.own : []).filter(c => c && c.id).map(stretchOf)
-  return [...fixed, ...own].map(c => {
+  return fixed.map(c => {
     const want = at[c.id]
     const level = Number.isInteger(want) && want >= 0 && want < Math.max(1, c.levels.length) ? want : c.level0
     return { ...c, level }
@@ -143,42 +127,6 @@ export function rebaseAt(before, after, at) {
     else out[c.id] = to
   }
   return out
-}
-
-/**
- * The two ends the person typed after the +: "engineer and manager", "engineer ↔ manager", "engineer to manager",
- * "between novice and expert". One phrase alone ("for my manager") is a stretch from the text as written to it.
- * Returns {from, to} or null when nothing was typed.
- */
-export function endsOf(words) {
-  let w = String(words || '').replace(/^\s*\+\s*/, '').replace(/\s+/g, ' ').trim()
-  w = w.replace(/^(stretch\s+)?(between|from)\s+/i, '')
-  if (!w) return null
-  const m = /^(.+?)\s*(?:↔|<->|<>|\/|\s(?:and|to|vs\.?|versus|-|–|—)\s)\s*(.+)$/i.exec(w)
-  const cut = s => str(s, 40).replace(/[.,;:]+$/, '')
-  if (m && cut(m[1]) && cut(m[2])) return { from: cut(m[1]), to: cut(m[2]) }
-  return { from: 'as written', to: cut(w) }
-}
-
-/** A stretch of the person's, from what they typed after the +: no call is needed to make it, since it stands at the
- *  original until they step it. */
-export function stretchChip(rec, words) {
-  const ends = endsOf(words)
-  if (!ends) return null
-  const used = new Set(chipsOf(rec).map(c => c.id))
-  let id = `x-${slug(`${ends.from === 'as written' ? '' : ends.from + '-'}${ends.to}`) || 'stretch'}`.slice(0, 24)
-  for (let i = 2; used.has(id); i++) id = `${id.slice(0, 20)}-${i}`
-  return { id, kind: 'stretch', from: ends.from, to: ends.to }
-}
-
-/** The record's squeeze with a stretch added (the oldest of more than three goes). */
-export function withStretch(rec, chip) {
-  const s = sq(rec)
-  const own = [...(Array.isArray(s.own) ? s.own : []).filter(c => c.id !== chip.id), chip]
-  const gone = own.length > MAX_OWN ? own.shift() : null
-  const at = { ...(s.at || {}) }
-  if (gone) delete at[gone.id]
-  return { ...s, own, at }
 }
 
 // ------------------------------------------------------------------------------------------------ how long it is
@@ -232,10 +180,6 @@ export function lengthTarget(level, words, keep = 0) {
 function chipLine(c, words = 0, keep = 0) {
   const levels = c.levels.join(' · ')
   if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words, keep)} (levels ${levels}; the original is at full, ${words} words)`
-  if (c.kind === 'stretch') {
-    const where = c.level === 0 ? `0 of ${STRETCH_STEPS}, as the original` : c.level === STRETCH_STEPS ? `${STRETCH_STEPS} of ${STRETCH_STEPS}, all the way to "${c.to}"` : `${c.level} of ${STRETCH_STEPS} steps toward "${c.to}"`
-    return `- A stretch the person made, from "${c.from}" to "${c.to}": ${where} (the original stands at "${c.from}", step 0)`
-  }
   // where nobody has said where the original stands, a chip the person left alone keeps the original as it is
   if (!c.known && c.level === c.level0) return `- ${c.name}: as the original (levels ${levels})`
   return `- ${c.name}: ${c.levels[c.level]} (levels ${levels}; the original is at ${c.known ? c.levels[c.level0] : 'a level not yet known'})`

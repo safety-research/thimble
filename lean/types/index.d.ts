@@ -51,11 +51,10 @@ export type MsgRecord = {
  *  `prompt` its row. A dismissed one is drawn no more; one that showed a version counts as read. */
 export type CatchUp = { host: string; rows: string[]; replies: number; question: string; prompt: string | null; dismissed?: boolean }
 
-/** A message's squeeze: where its chips are, the person's stretches, every version written by its levels, the
+/** A message's squeeze: where its chips are, every version written by its levels, the
  *  original's marks, whether it arrived squeezed, what a rewrite said that the original does not, and each call made. */
 export type Squeeze = {
   at?: Record<string, number>
-  own?: { id: string; kind?: 'stretch'; from: string; to: string }[]
   versions?: Record<string, string>
   orig?: { marks: Mark[] }
   auto?: boolean
@@ -63,10 +62,9 @@ export type Squeeze = {
   made?: { key: string; ms: number; model: string; usage?: unknown; at?: string }[]
 }
 
-/** The chips' line of one message as the person works it: the picked chip, whether they type a stretch (and what
- *  they typed), a call running (and the frame of its turning glyph), a call that failed, and the new text writing
+/** The chips' line of one message as the person works it: the picked chip, a call running (and the frame of its turning glyph), a call that failed, and the new text writing
  *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
-export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number; typing?: string; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
+export type SqzUi = { focus: string; running: { since: number } | null; error: string | null; tick: number; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
 
 /** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */

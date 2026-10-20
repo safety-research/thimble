@@ -4,7 +4,7 @@
 //
 //   run(ctx) -> {message?, text?, note?}
 //   ctx.message   the message's record (CONTRACT 1)
-//   ctx.args      the chips to set, as words: "length=short familiarity=beginner", "+engineer and manager" (a stretch
+//   ctx.args      the chips to set, as words: "length=short familiarity=beginner" (a stretch
 //                 of the person's, which stands at the original until a level is set), "original"; '' squeezes it to
 //                 Length short, as a long message arrives
 //   ctx.model     {complete(request)}: one call to the session's model ($.model.complete, through the shell)
@@ -15,7 +15,7 @@ import { textOf } from '../../prompts/node.mjs'
 import { remark } from '../../shell/message.js'
 import { modelWhy } from '../../shell/why.js'
 import { FEATURES } from '../../prompts/registry.mjs'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, readReply, request, restore, stretchChip, termsOf, withStretch } from './chips.mjs'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, readReply, request, restore, termsOf } from './chips.mjs'
 
 /** The levels the words ask for: `name=level` for each chip named, by its id, its name or its first word. */
 export function parseWords(rec, words) {
@@ -24,7 +24,6 @@ export function parseWords(rec, words) {
   const w = String(words || '').trim()
   if (!w) return { at: { ...at, length: ARRIVE } }
   if (/^(original|restore|0)$/i.test(w)) return { at: {}, original: true }
-  if (w.startsWith('+')) return { at, own: w }
   for (const m of w.matchAll(/([\w↔ -]+?)\s*=\s*([\w -]+?)(?=\s+[\w↔-]+\s*=|$)/g)) {
     const name = m[1].trim().toLowerCase()
     const chip = chips.find(c => c.id === name || c.name.toLowerCase() === name || c.name.toLowerCase().split(/\s+/)[0] === name)
@@ -43,13 +42,6 @@ export async function run(ctx) {
   if (want.original) {
     const back = restore(rec, remark)
     return { message: back, text: back.text, note: noteFor(back) }
-  }
-  if (want.own) {
-    const chip = stretchChip(rec, want.own)
-    if (!chip) return { text: 'A stretch needs two ends after the +, such as "+ engineer and manager".' }
-    // a new stretch stands at the original: the record keeps it, and a level set later rewrites the text
-    const next = { ...rec, squeeze: withStretch(rec, chip) }
-    return { message: next, text: next.shown ?? next.text, note: noteFor(next) }
   }
   const probe = { ...rec, squeeze: { ...(rec.squeeze || {}), at: want.at } }
   if (isOriginal(chipsOf(probe))) {

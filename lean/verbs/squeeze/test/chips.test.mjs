@@ -1,5 +1,5 @@
-// The squeeze chips' pure parts (verbs/squeeze/chips.mjs): chip state with its levels, a stretch of the person's
-// combined with the fixed chips in one request, the reply read and held to the original, the marks placed again after a
+// The squeeze chips' pure parts (verbs/squeeze/chips.mjs): chip state with its levels, every chip in one request, the
+// reply read and held to the original, the marks placed again after a
 // rewrite, the text cut as it writes itself in, and the original restored. node --test lean/verbs/squeeze/test
 import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
-import { ARRIVE, CATCHUP_HEAD, CHIPS, applyRewrite, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, unplacedMoves, withStretch } from '../chips.mjs'
+import { ARRIVE, CATCHUP_HEAD, CHIPS, applyRewrite, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, termsOf, unplacedMoves } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
@@ -89,50 +89,6 @@ test("a step made before the observer placed the original counts again from the 
   assert.deepEqual(rebaseAt(placed, placed, { interpret: 1 }), { interpret: 1 })
   // the arrival's version stays the same version whatever level the observer gives: its other chips are as the original
   assert.equal(keyOf(chipsOf({ ...placed, squeeze: { at: { length: ARRIVE } } })), keyOf(chipsOf({ ...rec, squeeze: { at: { length: ARRIVE } } })))
-})
-
-test('a stretch is two ends the person types: it stands at the original, its first end, and each of 3 steps moves toward the second', () => {
-  assert.deepEqual(endsOf('+engineer and manager'), { from: 'engineer', to: 'manager' })
-  assert.deepEqual(endsOf('+ between novice and expert'), { from: 'novice', to: 'expert' })
-  assert.deepEqual(endsOf('+engineer ↔ manager'), { from: 'engineer', to: 'manager' })
-  assert.deepEqual(endsOf('+ data scientist / product lead'), { from: 'data scientist', to: 'product lead' })
-  assert.deepEqual(endsOf('+ for my manager'), { from: 'as written', to: 'for my manager' })
-  assert.equal(endsOf('+'), null)
-  let rec = record()
-  rec = { ...rec, squeeze: { at: { length: 1, familiarity: 0 } } }
-  const x = stretchChip(rec, '+engineer and manager')
-  assert.deepEqual(x, { id: 'x-engineer-manager', kind: 'stretch', from: 'engineer', to: 'manager' })
-  rec = { ...rec, squeeze: withStretch(rec, x) }
-  const chips = chipsOf(rec)
-  assert.deepEqual(chips.map(c => c.name), ['Length', 'Report ↔ Interpret', 'Familiarity', 'engineer ↔ manager'])
-  const st = chips[3]
-  assert.equal(st.levels.length, 4)
-  assert.equal(st.level, 0)
-  assert.equal(glyph(st, st.level), '●○○○')
-  // a new stretch changes nothing yet: the key is the other chips' alone
-  assert.equal(keyOf(chips), 'length=1&familiarity=0')
-  // one request carries every chip's level, the stretch by its two ends and its step
-  rec = { ...rec, squeeze: { ...rec.squeeze, at: { ...rec.squeeze.at, [x.id]: 2 } } }
-  const req = request(rec, { system: PROMPT, question: 'Why does it fail?' })
-  const tail = req.prompt[1].text
-  assert.match(tail, /- Length: short, at most \d+ words \(levels one line · short · medium · full; the original is at full, \d+ words\)/)
-  assert.match(tail, /- Familiarity: new to the field /)
-  assert.match(tail, /- Report ↔ Interpret: as the original/)
-  assert.match(tail, /- A stretch the person made, from "engineer" to "manager": 2 of 3 steps toward "manager" \(the original stands at "engineer", step 0\)/)
-  const end = request({ ...rec, squeeze: { ...rec.squeeze, at: { [x.id]: 3 } } }, { system: PROMPT })
-  assert.match(end.prompt[1].text, /3 of 3, all the way to "manager"/)
-  // the fixed text is first and marked for the cache: the prompt, then the question and the original
-  assert.equal(req.system[0].cache, true)
-  assert.equal(req.prompt[0].cache, true)
-  assert.match(req.prompt[0].text, /The person asked: Why does it fail\?/)
-  assert.ok(req.prompt[0].text.includes(TEXT))
-  // a version with the stretch is kept by its levels; a fourth stretch pushes the oldest out
-  const after = applyRewrite(rec, { text: '**Status:** fixed.', at: rec.squeeze.at }, remark)
-  assert.equal(after.squeeze.versions['length=1&familiarity=0&x-engineer-manager=2'], '**Status:** fixed.')
-  let many = after
-  for (const w of ['+a and b', '+c and d', '+e and f']) many = { ...many, squeeze: withStretch(many, stretchChip(many, w)) }
-  assert.deepEqual(many.squeeze.own.map(c => c.id), ['x-a-b', 'x-c-d', 'x-e-f'])
-  assert.ok(!('x-engineer-manager' in many.squeeze.at))
 })
 
 test('a rewrite is held to the original: a ref it never cited loses its link, and a number it never states is named', () => {
@@ -231,7 +187,6 @@ test('the new text writes itself in from the top: each cut ends a word and never
 test('run.mjs: the same rewrite from words, through ctx.model, for /verb and tools that hold a record', async () => {
   const rec = record()
   assert.deepEqual(parseWords(rec, 'length=short familiarity=new to the field').at, { length: 1, familiarity: 0 })
-  assert.deepEqual(parseWords(rec, '+engineer and manager'), { at: {}, own: '+engineer and manager' })
   assert.deepEqual(parseWords(rec, '').at, { length: ARRIVE })
   assert.throws(() => parseWords(rec, 'story=full'), /no chip "story"/)
   const asked = []
@@ -245,10 +200,6 @@ test('run.mjs: the same rewrite from words, through ctx.model, for /verb and too
   const back = await run({ message: r.message, args: 'original', model })
   assert.equal(back.message.shown, null)
   assert.equal(asked.length, 1)
-  // a stretch from words: kept on the record, standing at the original, with no call
-  const x = await run({ message: back.message, args: '+engineer and manager', model })
-  assert.equal(asked.length, 1)
-  assert.deepEqual(x.message.squeeze.own, [{ id: 'x-engineer-manager', kind: 'stretch', from: 'engineer', to: 'manager' }])
 })
 
 test('the corrections of its own earlier answer are found in the original: a list under a lead, a paragraph, a sentence; an offer is not one', () => {

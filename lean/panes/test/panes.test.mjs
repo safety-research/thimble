@@ -26,7 +26,7 @@ test('chips: keys pick and change a chip; the rewrite is the host\'s action; the
   const data = chipsData()
   const d0 = run(PANES.chips, data)
   // no key reads as an arrow key: [ ] change, a digit picks a chip
-  assert.equal(barText([d0]), '[ ] change · 1–3 chip · + new stretch · 0 close · s done')
+  assert.equal(barText([d0]), '[ ] change · 1–3 chip · 0 close · s done')
   let { d, state } = act(PANES.chips, data, {}, keyEvent('['), 'terminal')
   // the step names the key the bar names, so a rewrite that fails says which key tries again
   assert.deepEqual(d.effects, [{ row: 'r1', at: { length: 2 }, key: '[', do: 'squeeze' }])
@@ -38,12 +38,8 @@ test('chips: keys pick and change a chip; the rewrite is the host\'s action; the
   const web = act(PANES.chips, data, state, { type: 'press', region: 'lvl-familiarity-4' }, 'browser')
   assert.deepEqual(web.d.effects, [{ row: 'r1', at: { familiarity: 4 }, do: 'squeeze' }])
   assert.equal(web.state.focus, 'familiarity')
-  // + asks the host for the two ends (the terminal's prompt, the browser's field), and the ends make a stretch
-  const plus = act(PANES.chips, data, web.state, keyEvent('+'), 'browser')
-  assert.equal(plus.d.effects[0].do, 'input')
-  const made = act(PANES.chips, data, plus.state, { type: 'stretch', text: '+engineer and manager' }, 'browser')
-  assert.deepEqual(made.d.effects, [{ row: 'r1', stretch: '+engineer and manager', do: 'squeeze' }])
-  assert.equal(made.state.focus, 'x-engineer-manager')
+  // + is no key of the chips
+  assert.equal(takes(run(PANES.chips, data), keyEvent('+')), false)
 })
 
 test('chips: a change on its way shows at once from the record (squeeze.want), and the bar says it is rewriting', () => {
@@ -57,7 +53,7 @@ test('chips on a catch-up: 0 dismisses it, no step lands on its original (the re
   const CU = { ...REC, shown: 'Mostly [6,543 saves](q1#day=2026-06-18@n).', catchup: { host: 'r0', rows: ['r0'], replies: 3, question: 'when?', prompt: 'p0' }, squeeze: { at: { length: 1 } } }
   const data = chipsData(CU)
   const d0 = run(PANES.chips, data)
-  assert.equal(barText([d0]), '[ ] change · 1–3 chip · + new stretch · 0 dismiss · s done')
+  assert.equal(barText([d0]), '[ ] change · 1–3 chip · 0 dismiss · s done')
   assert.equal(d0.status.text, 's ● catch-up of 3 replies')
   assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 2 }, key: ']', do: 'squeeze' }])
   // at medium, a step up would be its original: none, and a press on full's dot neither
@@ -162,15 +158,15 @@ test('the bar is always one line: it drops the counts first (coverage last), the
 test('a status in the bar is cut at its end, never to its first word, and the keys keep their words longest', async () => {
   const { barLine, fitBar } = await import('../host.js')
   const status = '! "55" is not in the original, so it shows as plain words'
-  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '[ ]', words: 'change' }, { key: '1–3', words: 'chip' }, { key: '+', words: 'new stretch' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'threads', text: '19 threads' }] }
+  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '[ ]', words: 'change' }, { key: '1–3', words: 'chip' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'threads', text: '19 threads' }] }
   const at = w => barLine(fitBar(bar, w))
-  assert.equal(at(200), `thimble  ${status} · [ ] change · 1–3 chip · + new stretch · 0 original · s done   22 cites · 19 threads`)
+  assert.equal(at(200), `thimble  ${status} · [ ] change · 1–3 chip · 0 original · s done   22 cites · 19 threads`)
   // short of room: the counts go, then the status is cut at its end and every key keeps its words
   const mid = at(110)
   assert.ok(mid.length <= 110, mid)
   assert.ok(mid.startsWith('thimble  ! "55" is not in'), mid)
   assert.ok(mid.includes('…'), mid)
-  assert.ok(mid.endsWith('[ ] change · 1–3 chip · + new stretch · 0 original · s done'), mid)
+  assert.ok(mid.endsWith('[ ] change · 1–3 chip · 0 original · s done'), mid)
   assert.ok(!/! "55 ·/.test(mid) && !/! "55$/.test(mid), mid)
   for (const w of [200, 140, 110, 90, 80]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
 })

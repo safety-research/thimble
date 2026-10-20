@@ -1,7 +1,7 @@
 // term.ts: Squeeze in the terminal: the one call per change that rewrites the message in place, the new text writing
-// itself in from the top, the stretch typed in the prompt, and the catch-up of replies that piled up. The chips
+// itself in from the top, and the catch-up of replies that piled up. The chips
 // themselves, their keys and presses, are a pane program (panes/chips.js) that both surfaces run; what it asks for
-// (k.do('squeeze', {at | reset | stretch})) is done here. The shell (shell/shell.tsx) calls it; it imports the message
+// (k.do('squeeze', {at | reset})) is done here. The shell (shell/shell.tsx) calls it; it imports the message
 // layer's record functions from the shell (a cycle the module system resolves at call time).
 //
 // While a change is on its way the record says where the chips go (squeeze.want), and a failed call says why
@@ -23,7 +23,7 @@ import { FEATURES } from '../../prompts/registry.mjs'
 import { lookPending } from '../../observer/observer'
 import { answerRow, closeTray, questionBefore, recordNow, saveRecord } from '../../shell/shell'
 import { sessionKey } from '../../hooks/conversation'
-import { ARRIVE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, stretchChip, termsOf, unplacedMoves, withStretch } from './chips.mjs'
+import { ARRIVE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, termsOf, unplacedMoves } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,7 +42,7 @@ const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 9
 const TICK = 50
 // the longest a step on Report ↔ Interpret or Familiarity waits for the observer's look to say where the original stands
 const LEVELS_WAIT_MS = 30000
-const BLANK: SqzUi = { focus: 'length', adding: false, running: null, error: null, tick: 0 }
+const BLANK: SqzUi = { focus: 'length', running: null, error: null, tick: 0 }
 
 // the module's memory: the call running per row and the one wanted after it; the text writing in per row; the
 // prompt's text; the last screen size
@@ -95,56 +95,6 @@ export function busyGlyph(ui: SqzUi | null): string | null {
 /** How much of the shown text is drawn now: all of it (null), or the first `n` characters while it writes itself in. */
 export function revealedOf(ui: SqzUi | null): number | null {
   return ui?.reveal ? ui.reveal.n : null
-}
-
-/** The squeeze amber of the stretch typed in the prompt, per theme. */
-const amber = (theme: Theme) => (theme === 'light' ? '#9a6412' : '#e0a43a')
-
-/** After an edit of the prompt while the person types a stretch: it is still being typed while the prompt starts with
- *  +. Returns the decorations that color it and show what is left to type (` between … and …`, then ` and …`). */
-export async function afterEdit($: Engine, row: string | null, text: string, theme: Theme = 'dark'): Promise<Any[] | null> {
-  if (!row) return null
-  const ui = (await $.state.get({ ...SQZ, id: row })).value as SqzUi | null | undefined
-  if (!ui?.adding) return null
-  if (!text.startsWith('+')) { await setUi($, row, { adding: false, typing: '' }); return null }
-  await setUi($, row, { typing: text })
-  return stretchMarks(text, theme)
-}
-
-/** The decorations of a stretch being typed in the prompt: its text in amber, then what is left to type. */
-export function stretchMarks(text: string, theme: Theme = 'dark'): Any[] {
-  const out: Any[] = [{ start: 0, end: text.length, color: amber(theme) }]
-  const ends = endsOf(text)
-  if (!ends) out.push({ start: text.length, end: text.length, virtualText: ' between … and …', dimColor: true })
-  else if (ends.from === 'as written' && !/\s$/.test(text)) out.push({ start: text.length, end: text.length, virtualText: ' and …', dimColor: true })
-  return out
-}
-
-/** The person starts a stretch (the chips' + asked for it): the + they pressed stays in the prompt, and they type the
- *  two ends after it; afterEdit colors it, and ↵ makes the stretch (addStretch). */
-export async function startStretch($: Engine, row: string): Promise<void> {
-  await setUi($, row, { adding: true, error: null, typing: '+' })
-}
-
-/** The person stopped typing a stretch, or closed the chips. */
-export async function stopStretch($: Engine, row: string): Promise<void> {
-  await setUi($, row, { adding: false, typing: '' })
-}
-
-/**
- * A stretch's two ends, as the person typed them after the + (in the prompt here, in a field in the browser): a chip
- * that stands at the original, so the next < > rewrites the text toward an end; no call is made now. Returns what the
- * prompt's drop line says, or a problem.
- */
-export async function addStretch($: Engine, row: string, text: string): Promise<{ said?: string; problem?: string }> {
-  const rec = await recordNow($, row)
-  if (!rec) return { problem: 'that message is not in this session' }
-  const chip = stretchChip(rec, text)
-  if (!chip) { await stopStretch($, row); return { problem: 'a stretch needs two ends, such as "+engineer and manager"' } }
-  const squeeze = withStretch(rec, chip)
-  await saveRecord($, { ...rec, squeeze } as MsgRecord)
-  await setUi($, row, { adding: false, typing: '', error: null })
-  return { said: `stretch ${chip.from} ↔ ${chip.to}` }
 }
 
 // ------------------------------------------------------------------------------------------------ the rewrite
