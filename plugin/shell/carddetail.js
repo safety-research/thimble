@@ -1,5 +1,5 @@
 // carddetail.js: the card detail's state, as pure functions. No `$`, no Node, no DOM: the terminal (detail.tsx) and the
-// browser page (browser/card/card.js) both use it, so the two say the same thing.
+// panes (panes/detail.js) both use it, so the two say the same thing.
 //
 // The detail has one pattern for every card ("overview first, zoom and filter, details on demand"): a header (title,
 // takeaway, "edited"), the card enlarged with its parts, and a bar under it that starts empty and fills on demand with
@@ -20,6 +20,7 @@
 //   fromLine(facts, o)            the "from" line: sources · rows used · labels · coverage, as segments
 //   programLines(program, id)     the program's lines that drew a part (1-based), for the overlay behind `p`
 //   linkRuns(text)                Claude's words with their citations: [{s, link?}]
+import { linkSpans } from './message.js'
 
 const n = x => (typeof x === 'number' && isFinite(x) ? x.toLocaleString('en-US') : String(x ?? ''))
 
@@ -366,14 +367,12 @@ export function programLines(program, id) {
 
 // ---------------------------------------------------------------------------------------------- Claude's words
 
-const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
-
 /** Claude's words as runs: plain text, and each citation's words with its target. `**bold**` is kept as bold runs. */
 export function linkRuns(text) {
   const s = String(text || '')
   const out = []
   let last = 0
-  for (const m of s.matchAll(LINK)) {
+  for (const m of linkSpans(s)) {
     if (m.index > last) out.push(...boldRuns(s.slice(last, m.index)))
     out.push({ s: m[1].replace(/\*\*/g, ''), link: m[2] })
     last = m.index + m[0].length
