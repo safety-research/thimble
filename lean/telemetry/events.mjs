@@ -15,7 +15,7 @@
 //        whose request started it, such as 'visualize'), or a subagent's (feature 'thread' for a side thread).
 //        `hook_ms`: the time thimble's own hooks took inside a main turn, which is the latency thimble adds to it.
 //   {kind: 'prompts', active: {feature: version}, problems}              the versions in use, once per session
-//   {kind: 'prompt', feature, prompt, via}                               a text read on demand (`thimble guide cards`)
+//   {kind: 'prompt', feature, prompt, via}                               a text given on demand (the card guide, with the first data command)
 //   {kind: 'look', turn, lit, v, observer, prompts, skip?, shadow?}      one look of the observer after a turn: the verbs
 //        it lit (`v`: its note and proposals, or null), or why it skipped. With `shadow` (THIMBLE_PROMPTS_SHADOW), what
 //        a second pass with other versions would have lit; its call line carries the same `shadow`.

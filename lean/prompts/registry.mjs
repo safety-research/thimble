@@ -1,23 +1,13 @@
 // registry.mjs: the prompt registry. Every text a model reads is a version of a feature, one file each:
-// prompts/<feature>/<version>.md (a skill's current text stays in its SKILL.md, where Claude Code finds it, and is the
-// version `skill`). The table below names each feature, its default and what reads it; a file dropped into a feature's
-// folder is a new version with no change here. Which version is active, per feature, comes from the plugin's Prompts
-// setting and the THIMBLE_PROMPTS environment variable (the variable wins), each a list such as
-// "forms:principles, lens-explain:off". A lens can be turned off with the version `off`.
+// prompts/<feature>/<version>.md (the card guide is skills/thimble/cards.md, where the skill points to it). The table
+// below names each feature, its default and what reads it; a file dropped into a feature's folder is a new version
+// with no change here. Which version is active, per feature, comes from the THIMBLE_PROMPTS environment variable, a
+// list such as "squeeze:v7, lens-explain:off"; with none, the defaults. A lens can be turned off with the version `off`.
 //
 // Pure: no file system. The hooks module reads the files with $.fs (prompts.ts), Node with node:fs (node.mjs).
 
 /** @typedef {{about: string, default: string, reads: string, skill?: string, optional?: boolean, base?: string,
  *    versions?: Record<string, {about?: string, file?: string, mode?: string, base?: string}>}} Feature */
-
-/** The principles every variant of the card ablation shares: the thimble skill's card section (the card runtime's
- *  principles, read where it stands) and the principles of a great output. A part may keep only some of a file's ###
- *  subsections: `only` names them by the start of their headings, `pick: n` takes n of them, chosen by the session. */
-const ABLATION = [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/parts/principles.md' }]
-/** The same, with the principles' second version: parts are labelled with what they stand for, each part is drawn from
- *  its row (a stacked bar's parts too), and when interaction earns its place (a part that stands for many things; a
- *  case the person asks to see). */
-const ABLATION_V2 = [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/parts/principles-v2.md' }]
 
 /** @type {Record<string, Feature>} */
 export const FEATURES = {
@@ -55,30 +45,9 @@ export const FEATURES = {
     versions: { v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
   },
   forms: {
-    versions: {
-      runtime: {
-        about: "the thimble skill's card section (read where it stands) and the worked forms (forms:v2's examples)",
-        parts: [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
-      },
-      v3: {
-        about: "the card guide (skills/thimble/cards.md): what makes a good card, in the 0.9 words, the toolkit's parts, and worked examples",
-        parts: [{ file: 'skills/thimble/cards.md' }],
-      },
-      v1: { about: 'FORMS.md as v read it: the card forms, for another view' },
-      v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },
-      // the card ablation: the same principles in all five, which differ only in what steers quality
-      principles: { about: "ablation a: the runtime's principles (the thimble skill's card section) and the principles of a great output, no examples", parts: ABLATION },
-      few: { about: 'ablation b: a, and 3 worked examples from the pool', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', only: ['Heat strips', 'Brushable timeline', 'Curves with a knob'] }] },
-      many: { about: 'ablation c: a, and the whole pool of worked examples', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md' }] },
-      rotate: { about: "ablation d: a, and 3 worked examples from the pool, a different 3 per session (the session's id picks them)", parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', pick: 3 }] },
-      sketches: { about: 'ablation e: a, and the pool as sketches (the picture, its encoding, its interaction), no programs', parts: [...ABLATION, { file: 'prompts/forms/parts/sketches.md' }] },
-      // the interaction pass: the same two versions with the principles' second version
-      'principles-v2': { about: 'a with the principles v2: label parts with what they stand for, draw each part from its row, and when a zoom or examples earn their place', parts: ABLATION_V2 },
-      'sketches-v2': { about: 'e with the principles v2', parts: [...ABLATION_V2, { file: 'prompts/forms/parts/sketches.md' }] },
-    },
-    about: 'the card guidance: what makes a card good',
-    reads: 'beside the toolkit when Claude reads it before a card, and `thimble guide cards` (v asks for it)', default: 'v3',
-    base: 'verbs/visualize',
+    about: 'the card guide: what makes a good card, the toolkit, and worked examples',
+    reads: 'beside the result of the first data command of a session (prompts.ts); v asks Claude to read it', default: 'v3',
+    versions: { v3: { about: "skills/thimble/cards.md, in the 0.9 words", file: 'skills/thimble/cards.md' } },
   },
   thread: {
     about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v2',
@@ -88,7 +57,6 @@ export const FEATURES = {
     about: "the classifier a --prompt label's records are read with: one call per batch of up to 50 records", reads: 'verbs/label/run.mjs, for each call of a --prompt label', default: 'v2',
     versions: { v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
   },
-  thimble: { about: 'the thimble skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'thimble', versions: { skill: { file: 'skills/thimble/SKILL.md', about: 'as SKILL.md says now' } } },
 }
 
 /** Other names a person or Claude may use for a feature. */
@@ -119,7 +87,7 @@ export function indexOf(found = {}) {
   const idx = {}
   for (const [name, f] of Object.entries(FEATURES)) {
     const versions = {}
-    for (const [v, meta] of Object.entries(f.versions || {})) versions[v] = { file: meta.parts ? null : meta.file || `prompts/${name}/${v}.md`, ...meta }
+    for (const [v, meta] of Object.entries(f.versions || {})) versions[v] = { file: meta.file || `prompts/${name}/${v}.md`, ...meta }
     for (const file of found[name] || []) {
       const v = String(file).replace(/\.md$/, '')
       if (!String(file).endsWith('.md') || v.startsWith('.') || v === OFF) continue
@@ -139,11 +107,11 @@ export function indexOf(found = {}) {
 export function choose(idx, { setting = '', env = '' } = {}) {
   const active = {}
   // a feature that is off by default (an optional one whose default is `off`) is off until a setting names a version
-  for (const [name, f] of Object.entries(idx)) active[name] = f.default === OFF ? { version: OFF, file: null, source: 'default', off: true } : { version: f.default, file: f.versions[f.default]?.file ?? null, ...(f.versions[f.default]?.parts ? { parts: f.versions[f.default].parts } : {}), source: 'default' }
+  for (const [name, f] of Object.entries(idx)) active[name] = f.default === OFF ? { version: OFF, file: null, source: 'default', off: true } : { version: f.default, file: f.versions[f.default]?.file ?? null, source: 'default' }
   const problems = []
   for (const [source, spec] of [['setting', setting], ['THIMBLE_PROMPTS', env]]) {
     const p = parseSpec(spec)
-    for (const x of p.problems) problems.push(`${source}: ${x}; write it as feature:version, such as forms:principles`)
+    for (const x of p.problems) problems.push(`${source}: ${x}; write it as feature:version, such as lens-explain:off`)
     for (const [name, v] of Object.entries(p.pairs)) {
       const f = idx[name]
       if (!f) { problems.push(`${source}: no prompt feature "${name}"; the features are ${Object.keys(idx).join(', ')}`); continue }
@@ -152,7 +120,7 @@ export function choose(idx, { setting = '', env = '' } = {}) {
         problems.push(`${source}: no version ${name}:${v}, so ${name} stays at ${active[name].version}; its versions are ${Object.keys(f.versions).join(', ')}${f.optional ? ', off' : ''}`)
         continue
       }
-      active[name] = { version: v, file: f.versions[v].file, ...(f.versions[v].parts ? { parts: f.versions[v].parts } : {}), source }
+      active[name] = { version: v, file: f.versions[v].file, source }
     }
   }
   return { active, problems }
@@ -162,16 +130,9 @@ export function choose(idx, { setting = '', env = '' } = {}) {
 export const idOf = (feature, version) => `${feature}:${version}`
 
 /** The versions in use that are not the defaults, as one spec ("forms:principles,observer:attention-v1"), so a child
- *  process (a verb, `thimble guide`) picks the same ones. */
+ *  process (a verb's child) picks the same ones. */
 export function specOf(active, idx) {
   return Object.entries(active).filter(([n, a]) => idx[n] && a.version !== idx[n].default).map(([n, a]) => idOf(n, a.version)).join(',')
-}
-
-/** The feature whose text a skill serves (`thimble` -> thimble, `cards` -> forms), or null. */
-export function featureOfSkill(skill) {
-  const name = String(skill || '').split(':').pop()
-  for (const [n, f] of Object.entries(FEATURES)) if (f.skill === name) return n
-  return null
 }
 
 /** A skill file's text without its frontmatter. */
@@ -181,110 +142,9 @@ export function bodyOf(text) {
   return m ? s.slice(m[0].length) : s
 }
 
-/**
- * One section of a markdown text, by its heading's words: from that heading to the next heading of the same level or
- * higher, the heading kept. '' when the text has no such heading. A version made of parts reads other texts where
- * they stand (the thimble skill's card section), so nothing has a second copy.
- */
-export function sectionOf(text, heading) {
-  const lines = String(text ?? '').split('\n')
-  const at = lines.findIndex(l => /^#{1,6}\s/.test(l) && l.replace(/^#+\s*/, '').trim().toLowerCase().startsWith(String(heading).toLowerCase()))
-  if (at < 0) return ''
-  const level = /^#+/.exec(lines[at])[0].length
-  let end = lines.length
-  for (let i = at + 1; i < lines.length; i++) {
-    const m = /^(#{1,6})\s/.exec(lines[i])
-    if (m && m[1].length <= level) { end = i; break }
-  }
-  return lines.slice(at, end).join('\n').trim()
-}
-
-/** A text's ### subsections: what stands before the first of them (`intro`), and each one as {heading, text}. */
-export function subsectionsOf(text) {
-  const lines = String(text ?? '').split('\n')
-  const items = []
-  const intro = []
-  let cur = null
-  for (const l of lines) {
-    if (/^###\s/.test(l)) { cur = { heading: l.replace(/^###\s*/, '').trim(), lines: [l] }; items.push(cur) } else if (cur) cur.lines.push(l)
-    else intro.push(l)
-  }
-  return { intro: intro.join('\n').trim(), items: items.map(x => ({ heading: x.heading, text: x.lines.join('\n').trim() })) }
-}
-
-/** A number from 0 to 1, the same for the same seed each time (a session's id picks the same examples in the hooks
- *  and in `thimble guide`). */
-function seeded(seed) {
-  let a = 2166136261 >>> 0
-  for (const ch of String(seed)) { a ^= ch.codePointAt(0); a = Math.imul(a, 16777619) >>> 0 }
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/** The subsections a part keeps, in the order of its file: `only` (by the start of their headings), `pick` n of them
- *  chosen by `seed`, or null when it keeps the whole text. */
-export function chosenOf(part, items, seed = '') {
-  if (Array.isArray(part.only)) {
-    const want = part.only.map(h => String(h).toLowerCase())
-    return items.filter(x => want.some(w => x.heading.toLowerCase().startsWith(w)))
-  }
-  if (part.pick > 0) {
-    const r = seeded(`${seed}|${part.file}`)
-    const order = items.map((_, i) => i)
-    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]] }
-    const keep = new Set(order.slice(0, part.pick))
-    return items.filter((_, i) => keep.has(i))
-  }
-  return null
-}
-
-/** One part's text, and the headings of the subsections it chose (null when it keeps the whole text). */
-function pieceOf(p, read, seed) {
-  const raw = read(p.file)
-  const body = String(p.file).endsWith('SKILL.md') ? bodyOf(raw) : raw
-  const text = p.section ? sectionOf(body, p.section) : String(body).trim()
-  if (!Array.isArray(p.only) && !(p.pick > 0)) return { text, chosen: null }
-  const { intro, items } = subsectionsOf(text)
-  const chosen = chosenOf(p, items, seed)
-  return { text: [intro, ...chosen.map(x => x.text)].filter(Boolean).join('\n\n'), chosen: chosen.map(x => x.heading) }
-}
-
-/** A version made of parts, from the texts of its files (`read(file)`): each part's section, or the whole body, or the
- *  subsections it keeps (`seed`: the session, for a part that picks). */
-export function partsText(parts, read, skip = () => false, seed = '') {
-  return partsChoice(parts, read, skip, seed).text
-}
-
-/** partsText, and the headings of the examples the parts chose (null when no part chooses), for the session's record. */
-export function partsChoice(parts, read, skip = () => false, seed = '') {
-  const pieces = parts.filter(p => !skip(p)).map(p => pieceOf(p, read, seed))
-  const chosen = pieces.some(x => x.chosen) ? pieces.flatMap(x => x.chosen || []) : null
-  return { text: pieces.map(x => x.text).filter(Boolean).join('\n\n') + '\n', chosen }
-}
-
 /** Fill {{NAME}} placeholders from `vals` (a function value is called); unknown ones stay as written. */
 export function fill(text, vals) {
   return String(text).replace(/\{\{([A-Z_]+)\}\}/g, (all, k) => (k in vals ? String(typeof vals[k] === 'function' ? vals[k]() : vals[k] ?? '') : all))
-}
-
-/**
- * `fill` as the blocks of a $.model.complete prompt: the words before the first placeholder, which are the same on
- * every call, in a block of their own marked for the prompt cache, then the rest filled. The next call within five
- * minutes reads that first block from the cache. Joined, the blocks are `fill(text, vals)` to the character: the model
- * reads the same words in the same order. A text that opens with a placeholder is one block, with no mark.
- * @returns {{text: string, cache?: true}[]}
- */
-export function fillBlocks(text, vals) {
-  const s = String(text)
-  const at = s.search(/\{\{[A-Z_]+\}\}/)
-  if (at <= 0) return [{ text: fill(s, vals) }]
-  const rest = fill(s.slice(at), vals)
-  return rest ? [{ text: s.slice(0, at), cache: true }, { text: rest }] : [{ text: s.slice(0, at) }]
 }
 
 /** The registry in lines, for `thimble prompts` and /observe: each feature, its versions, the active one marked. */

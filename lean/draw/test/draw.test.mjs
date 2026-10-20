@@ -116,17 +116,16 @@ test('the card guide\'s opening program runs', () => {
   const md = readFileSync(DRAW + '../skills/thimble/cards.md', 'utf8')
   const blocks = [...md.matchAll(/```js\n([\s\S]*?)```/g)].map(m => m[1]).slice(0, 1)
   const rows = [{ day: '06-16', messages: 3 }]
-  // the toolkit doc keeps one program, its opening example; the worked programs are in the card guidance
-  // (prompts/forms/), whose forms the visualize tests draw
+  // the worked programs further down are skills/thimble/forms, which the visualize tests draw
   const DATA = [
     { days: [{ day: '06-16', messages: 1546 }, { day: '06-17', messages: 870 }] },
   ]
   assert.equal(blocks.length, DATA.length)
   blocks.forEach((program, i) => {
     const d = runProgram({ program, data: DATA[i] }, { w: 100 })
-    assert.equal(d.error, undefined, `TOOLKIT.md block ${i + 1}: ${d.error && d.error.message}`)
-    assert.ok(renderTerm(d, { w: 100 }).marks.length > 0, `TOOLKIT.md block ${i + 1} draws nothing`)
-    if (i > 0) assert.ok(d.regions.length > 0, `TOOLKIT.md block ${i + 1} has no regions`)
+    assert.equal(d.error, undefined, `cards.md block ${i + 1}: ${d.error && d.error.message}`)
+    assert.ok(renderTerm(d, { w: 100 }).marks.length > 0, `cards.md block ${i + 1} draws nothing`)
+    if (i > 0) assert.ok(d.regions.length > 0, `cards.md block ${i + 1} has no regions`)
   })
 })
 

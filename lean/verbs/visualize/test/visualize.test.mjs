@@ -1,6 +1,6 @@
-// Visualize (v): the request it sends Claude (another view, the proposals, the card guidance read only now), and the
-// card forms' worked programs, which must draw as the card guidance (the registry's forms) shows them, under a reply and
-// in the detail.
+// Visualize (v): the request it sends Claude (another view, the proposals, the card guide read only now), and the card
+// guide's worked programs (skills/thimble/forms), which must draw as the guide shows them, under a reply and in the
+// detail.
 //   node --test lean/verbs/visualize/test/visualize.test.mjs
 import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -13,8 +13,8 @@ import { runProgram } from '../../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../../draw/term.js'
 import { request, run } from '../run.mjs'
 
-const DIR = fileURLToPath(new URL('..', import.meta.url))
-const GUIDANCE = fileURLToPath(new URL('../../../prompts/forms/', import.meta.url))
+const FORMS_DIR = fileURLToPath(new URL('../../../skills/thimble/forms/', import.meta.url))
+const GUIDE = fileURLToPath(new URL('../../../skills/thimble/cards.md', import.meta.url))
 const FORMS = ['bars', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
 const V3 = ['bars', 'unfold', 'strips']
 
@@ -42,21 +42,12 @@ test('v on a catch-up names it as the catch-up the squeeze chips wrote of its re
   assert.match(ask, /^The analyst pressed v \(visualize\) on the catch-up of your 2 replies since their last prompt that the squeeze chips wrote, which begins "The empty label has 741 IPs\."\. They want another view of it/)
 })
 
-test('the card guidance is not a skill at rest: no SKILL.md lists it; `thimble guide cards` reads it when a card is drawn', () => {
-  assert.throws(() => readFileSync(join(DIR, 'SKILL.md')))
-  const verb = JSON.parse(readFileSync(join(DIR, 'verb.json'), 'utf8'))
-  assert.equal(verb.key, 'v')
-  assert.equal(verb.row, true)
-  assert.equal(verb.skill, 'thimble guide cards')
-})
-
 for (const name of FORMS) {
   test(`the ${name} form draws as the card guidance shows it, under a reply and in the detail, its parts selectable`, () => {
-    const program = readFileSync(join(DIR, 'forms', `${name}.program.js`), 'utf8').trimEnd()
-    for (const v of ['v1.md', 'v2.md']) assert.ok(readFileSync(join(GUIDANCE, v), 'utf8').includes(program), `forms:${v} holds ${name}.program.js as it is`)
-    // forms:v3 shows three of the forms, without their opening comment lines
-    if (V3.includes(name)) assert.ok(readFileSync(join(DIR, '..', '..', 'skills', 'thimble', 'cards.md'), 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `the card guide holds ${name}.program.js`)
-    const data = JSON.parse(readFileSync(join(DIR, 'forms', `${name}.data.json`), 'utf8'))
+    const program = readFileSync(join(FORMS_DIR, `${name}.program.js`), 'utf8').trimEnd()
+    // the card guide shows three of the forms, without their opening comment lines
+    if (V3.includes(name)) assert.ok(readFileSync(GUIDE, 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `the card guide holds ${name}.program.js`)
+    const data = JSON.parse(readFileSync(join(FORMS_DIR, `${name}.data.json`), 'utf8'))
     for (const [w, mode] of [[96, 'inline'], [98, 'detail'], [60, 'inline']]) {
       const d = runProgram({ id: name, v: 1, program, data }, { w, h: mode === 'detail' ? 30 : 24, mode })
       assert.equal(d.error, undefined, `${name} at ${w} ${mode}: ${JSON.stringify(d.error)}`)
@@ -69,7 +60,7 @@ for (const name of FORMS) {
 }
 
 test('a knob inside a card changes its words: the curves meet at ×8, and the number unfolds another way', () => {
-  const load = n => ({ id: n, v: 1, program: readFileSync(join(DIR, 'forms', `${n}.program.js`), 'utf8'), data: JSON.parse(readFileSync(join(DIR, 'forms', `${n}.data.json`), 'utf8')) })
+  const load = n => ({ id: n, v: 1, program: readFileSync(join(FORMS_DIR, `${n}.program.js`), 'utf8'), data: JSON.parse(readFileSync(join(FORMS_DIR, `${n}.data.json`), 'utf8')) })
   const text = d => gridText(renderTerm(d, { w: 96 }))
   assert.match(text(runProgram(load('curves'), { w: 96 })), /◂ ×8 ▸ +max gap 1\.0 pts/)
   assert.match(text(runProgram(load('curves'), { w: 96, state: { scale: 1 } })), /◂ ×1 ▸ +max gap 26\.6 pts/)

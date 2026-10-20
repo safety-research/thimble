@@ -1,8 +1,7 @@
 // Visualize (v): another view of one of Claude's answers, as a card. Claude adds a card to an answer whenever the answer
 // is best seen, without being asked; v asks for an additional view of it. This module writes no program and calls no
-// model: it asks Claude, in the main conversation, to make the card, with the card guidance (`thimble guide cards`: the
-// registry's active version of `forms`), which Claude reads only when it draws a card, so it is never in its context at
-// rest. The observer's proposals for the message ride along, and the one the person picked leads.
+// model: it asks Claude, in the main conversation, to make the card, with the card guide (skills/thimble/cards.md),
+// which Claude reads only when it draws a card, so it is never in its context at rest. The observer's proposals for the message ride along, and the one the person picked leads.
 //
 //   ctx.message   the message's record (CONTRACT 1): its text, the cards it carries (objects) and the verbs the observer
 //                 lit, with v's proposals in verbs.v.proposals
