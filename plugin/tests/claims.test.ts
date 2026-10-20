@@ -159,9 +159,17 @@ test('the Claims pane opens with the ring on the selected dot, not on the input 
   const dots = [...drawn.matchAll(/"key":"(r\|side\|\d+\|n-c\d+)"/g)].map(m => m[1]!)
   const sel = await rowKey($, 'n-c4')
   const before = dots[dots.indexOf(sel) - 1]!
+  w.focused.length = 0
   await $.ui.focus({ requestId: 'object', element: before, origin: { kind: 'person' } } as never)
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).not.toContain('The tilt is two editors, Kestrel and Wren, not one.')
+  await w.clock.settle()
+  // the drawings that select that dot (its box adds presses and covers others) leave the ring on it, never on the dot
+  // it left
+  await $.ui.render(PANE)
+  await w.clock.settle()
+  expect(w.focused.at(-1)).toBe(await rowKey($, before.split('|')[3]!))
+  expect(w.focused).not.toContain(sel)
   // a letter starts a question in the input bar
   expect(await press($, w.clock, key('w'))).toEqual({ text: '', cursor: 0 })
   await w.clock.settle()
