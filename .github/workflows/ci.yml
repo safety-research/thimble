@@ -1,5 +1,6 @@
-# thimble browser's checks: the server's tests (with bubblewrap and the sandbox runtime, so the sandbox tests run) and
-# the page's type check and build.
+# thimble browser's checks: a scan of the new commits for private paths and secrets (scripts/scan.sh's generic
+# patterns; CI has no private lists), the server's tests (with bubblewrap and the sandbox runtime, so the sandbox tests
+# run) and the page's type check and build.
 name: checks
 
 on:
@@ -15,6 +16,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # the scan reads the history of the pushed commits
+      - name: Scan the new commits for private paths and secrets
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            scripts/scan.sh --generic "$BASE..$HEAD_SHA"
+          else  # a new branch, a force push or a manual run: the commits no other branch has
+            scripts/scan.sh --generic "$HEAD_SHA" --not --exclude="origin/$GITHUB_REF_NAME" --remotes=origin
+          fi
+
   server:
     runs-on: ubuntu-latest
     timeout-minutes: 15
