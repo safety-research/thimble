@@ -217,7 +217,11 @@ def citations(ws: str, folder: Path, cell: dict[str, Any]) -> str:
     lines = []
     for ref in dict.fromkeys(_refs(str(cell.get("takeaway") or ""))):
         try:
-            if ref.startswith(("card:", "cell:")):
+            if ref.startswith("call:"):
+                from . import calls  # noqa: PLC0415
+
+                what = calls.text_of(ws, ref)
+            elif ref.startswith(("card:", "cell:")):
                 ref_ = ref.replace("card:<id>", f"card:{cell['id']}")
                 got = canvas.resolve_card_ref(ws, ref_)
                 what = got["excerpt"] if got["kind"] == "value" else f"the card {got['excerpt'].splitlines()[0]}"
@@ -385,13 +389,14 @@ def begin(ws: str, cid: str, *, author: str | None = None, again: bool = False) 
 def start(ws: str, folder: Path, cid: str, *, author: str | None = None, again: bool = False,
           unsandboxed: bool = False) -> str | None:
     """Start a check of card `cid` (one running on it is cancelled first); the check's id, or None."""
+    loop = asyncio.get_running_loop()  # before the record opens: a check needs the server's loop to run on
     old = _tasks.pop((ws, cid), None)
     if old is not None and not old.done():
         old.cancel()
     check_id = begin(ws, cid, author=author, again=again)
     if check_id is None:
         return None
-    task = asyncio.get_running_loop().create_task(_run(ws, folder, cid, check_id, unsandboxed))
+    task = loop.create_task(_run(ws, folder, cid, check_id, unsandboxed))
     _tasks[(ws, cid)] = task
     task.add_done_callback(lambda t, k=(ws, cid): _tasks.pop(k, None) if _tasks.get(k) is t else None)
     return check_id
@@ -655,7 +660,7 @@ def register(ctx: Any) -> None:
         return {"stopped": cards}
 
     @app.post("/api/ws/{c}/cells/{cid}/check")
-    def card_check_again(c: str, cid: str) -> dict[str, Any]:
+    async def card_check_again(c: str, cid: str) -> dict[str, Any]:
         folder = ctx.folder_of(c)
         try:
             _, cell = canvas.find(c, cid)

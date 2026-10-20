@@ -457,7 +457,38 @@ tools.register("start_orientation", t_start_orientation)
 tools.register("message_orientation", t_message_orientation)
 
 
+SERVER_STOPPED = "server"  # stopped_by of a run the server's stop ended
+
+
+def recover(ws: str) -> None:
+    """The orientation's chats and its critics' a server that stopped left running end `stopped`; a message continues
+    the orientation."""
+    for m in chats.listing(ws, set()):
+        if m.get("status") == "running" and (m.get("role") == ROLE or m.get("agent") == CRITIC):
+            m = chats.meta(ws, m["id"])
+            m.update(status="stopped", stopped_by=SERVER_STOPPED, ts_end=home.now())
+            m.pop("paused", None)
+            for u in m.get("followups") or []:
+                if u.get("status") == "running":
+                    u.update(status="stopped", ended=home.now())
+            chats.save_meta(ws, m)
+    run = read_run(ws)
+    if run.get("status") in RUNNING:
+        _write_run(ws, {**run, "status": "stopped", "ended": home.now(), "pending": []})
+        try:
+            m = chats.meta(ws, "main")
+            m["orientation"] = "stopped"
+            chats.save_meta(ws, m)
+        except KeyError:
+            pass
+
+
 def register(ctx: Any) -> None:
+    for w in home.list_workspaces():
+        try:
+            recover(w["name"])
+        except Exception:  # noqa: BLE001
+            log.exception("could not end the orientation left running in %s", w["name"])
     main = AGENTS["main"]
     main.tools = main.tools + tuple(n for n in MAIN_TOOLS if n not in main.tools)
     app, sessions = ctx.app, ctx.sessions

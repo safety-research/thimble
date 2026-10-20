@@ -266,13 +266,18 @@ class Tools:
             text += "\n\nRead the output, then give the card its takeaway with edit_card."
         return _ok(text, cell_id=cell["id"])
 
+    def maker(self) -> str:
+        """Who a card this agent makes or changes is by, as the page reads it (frontend canvas/layout.cellThread): main,
+        or `chat:<id>` of a thread or one of thimble's agents, which the card's face names and opens."""
+        return "main" if self.chat in ("main", "-") else f"chat:{self.chat}"
+
     async def t_add_card(self, args: dict[str, Any]) -> Result:
         if self.writer:
             args = {**args, "group": "Report figures"}
         elif self.group:
             args = {**args, "group": self.group}
         try:
-            cell = canvas.new_card(self.ws, args, chat=self.chat)
+            cell = canvas.new_card(self.ws, args, by=self.maker(), chat=self.chat)
         except ValueError as e:
             return _err(str(e))
         return await self._run_and_describe(cell)
@@ -282,7 +287,7 @@ class Tools:
             args = {**args, "group": self.group}
         try:
             before = canvas.find(self.ws, str(args.get("card") or ""))[1]
-            cell = canvas.update_card(self.ws, str(args["card"]), args)
+            cell = canvas.update_card(self.ws, str(args["card"]), args, by=self.maker())
         except KeyError:
             return _err(f"no card {args.get('card')}: list_cards names them")
         except (ValueError, PermissionError) as e:

@@ -162,3 +162,31 @@ async def test_stopping_the_critique_lets_the_orientation_go_on(ws, monkeypatch)
     assert chats.meta(ws, chat)["status"] == "done"
     result = calls.one(ws, chat, 3)
     assert result["is_error"] and "could not finish" in result["result"]
+
+
+async def test_a_server_that_stopped_leaves_the_orientation_stopped_and_a_message_continues_it(ws, monkeypatch):
+    gate = asyncio.Event()
+    fake = ScriptedClient(orientation_script(gate))
+    monkeypatch.setattr(llm, "client", lambda: fake)
+    sessions = agent.Sessions()
+    chat = (await orient.start(ws, sessions, ""))["chat"]
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if chats.meta(ws, chat).get("paused") == "critique":
+            break
+    # the server stops: its tasks end without their records, and the next server recovers
+    for s in list(sessions._s.values()):
+        s.task.cancel()
+    await asyncio.sleep(0.05)
+    for cid in (chat, next(r["chat"] for r in chats.records(ws, chat) if r["type"] == "agent")):
+        m = chats.meta(ws, cid)
+        m["status"] = "running"
+        chats.save_meta(ws, m)
+    orient._update_run(ws, status="running")
+    orient.recover(ws)
+    assert chats.meta(ws, chat)["status"] == "stopped" and orient.read_run(ws)["status"] == "stopped"
+    gate.set()
+    fresh = agent.Sessions()
+    await orient.message(ws, fresh, "Go on.")
+    await wait_idle(fresh, ws)
+    assert chats.meta(ws, chat)["status"] == "done"

@@ -415,6 +415,9 @@ def _run_finished(session: agent.Session, result: str | None) -> None:
             summary = "".join(b.get("text", "") for b in msg.get("content") or [] if b.get("type") == "text").strip()
             if summary:
                 break
+    if status == "failed" and not summary:
+        summary = next((str(r.get("message") or "") for r in reversed(chats.records(ws, chat))
+                        if r.get("type") == "error"), "")
     rec.update(status=status, ended=_now(), summary=summary[:500])
     if status == "done":
         covered = set(rec.get("covered") or [])
@@ -548,7 +551,27 @@ if decorate not in report.DECORATE:
     report.DECORATE.append(decorate)
 
 
+def recover(ws: str) -> None:
+    """The runs a server that stopped left running end `stopped`; Run starts them again."""
+    for c in list_checks(ws):
+        rec = (c.get("runs") or {}).get(DOC)
+        if isinstance(rec, dict) and rec.get("status") == "running":
+            rec.update(status="stopped", ended=_now())
+            save(ws, c)
+            try:
+                m = chats.meta(ws, str(rec.get("chat")))
+                m.update(status="stopped", stopped_by="server", ts_end=_now())
+                chats.save_meta(ws, m)
+            except KeyError:
+                pass
+
+
 def register(ctx: Any) -> None:
+    for w in home.list_workspaces():
+        try:
+            recover(w["name"])
+        except Exception:  # noqa: BLE001
+            log.exception("could not end the check runs left running in %s", w["name"])
     main = AGENTS["main"]
     main.tools = main.tools + tuple(n for n in MAIN_TOOLS if n not in main.tools)
     writer = AGENTS["writer"]

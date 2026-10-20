@@ -53,7 +53,7 @@ Work in this order.
 - Analyze until your main hypothesis is ready, as described above, and nothing you planned to check is left.
 - Draft the deck described below. The analyst sees your cards as you add them, so draft and revise freely: a card you revise changes in place.
 - Then call `critique` with your account of the folder, the hypothesis and the findings your cards present. A reviewer who did not do the analysis notices gaps that are easy to miss in your own work, and it can check what your cards claim against your calls only once they exist. The critic reads your whole thread and your cards, and its report is the call's result. Follow up each problem the report raises, and revise the cards. If the critic cannot finish, revise without its review and say so in your last message.
-- Finish with one line for the analyst, such as: Seven cards in Orientation: refunds doubled after X200 batch 17 shipped. The analyst reads your findings in the cards and your working in your thread, so a longer account would only repeat them.
+- Finish with one line for the analyst, such as: Seven cards in Orientation: refunds doubled after X200 batch 17 shipped. Your last message is that line and nothing more, with no list of findings and no account of your work, since the analyst reads your findings in the cards and your working in your thread.
 
 #### The deck
 

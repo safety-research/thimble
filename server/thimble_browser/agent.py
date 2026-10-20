@@ -205,6 +205,7 @@ class Session:
         chats.append(self.ws, self.chat, {"type": "user", "text": shown if shown is not None else text, "by": "browser",
                                           **(record or {})})
         messages = load_messages(self.ws, self.chat)
+        self._close_open_calls(messages)  # a turn a server that stopped left open
         messages.append({"role": "user", "content": text})
         save_messages(self.ws, self.chat, messages)
         self.running = True
