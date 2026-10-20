@@ -687,7 +687,8 @@ export function plainWhy(err: unknown): string | null {
   let s = o ? String(o.deny ?? o.error ?? o.message ?? o.reason ?? '') : String((err as Error)?.message ?? err ?? '')
   // a refusal or an error written as JSON inside the text reads as its words
   s = s.replace(/\{[^{}]*\}/g, j => { try { const v = JSON.parse(j); return String(v.deny ?? v.error ?? v.message ?? v.reason ?? '') } catch { return j } })
-  s = s.replace(/^[\w.-]+: \$\.[\w.]+: /, '').split('\n').map(l => l.trim()).find(Boolean) ?? ''
+  // the host's prefix: `thimble: $.fs.read: …`, or `thimble: $.process.run(<program>) …`
+  s = s.replace(/^[\w.-]+: \$\.[\w.]+(?:: |\([^)]*\) )/, '').split('\n').map(l => l.trim()).find(Boolean) ?? ''
   if (!s || QUIET.test(s)) return null
   return cut(s.replace(/\s+/g, ' ').replace(/[.\s]+$/, ''), 160)
 }
@@ -872,9 +873,27 @@ async function healNow($: Engine, rec: MsgRecord, settled: boolean): Promise<boo
   if (!settled || healRead.has(id) || !(await rootHere($))) return false
   healRead.add(id)
   healing.set(id, await $.clock.now())
-  $.clock.after(0, () => { void runHeal($, rec.row, key).catch(err => failed($, 'The citations were not checked', err, 'Open the citation to see its place')).finally(() => healing.delete(id)) })
+  $.clock.after(0, () => { void runHeal($, rec.row, key).then(() => { healing.delete(id) }, err => healLost($, id, err, 'Open the citation to see its place')) })
   $.clock.after(SPIN_AFTER, () => { if (healing.has(id)) void $.state.set(HEALTICK, id) })
   return false
+}
+
+/** The passes that started again after Claude Code cut them short. */
+const healAgain = new Set<string>()
+
+/** A pass that failed. Claude Code stops a child when the drawing that started it is abandoned, as the drawings around
+ *  it change (most often when a turn ends). Such a pass starts again once, at the next drawing, and the person hears
+ *  nothing of it. Any other failure, or a second cut, is said in one line with its fix. */
+function healLost($: Engine, id: string, err: unknown, fix: string): void {
+  healing.delete(id)
+  const cut = /\baborted$/.test(String((err as Error)?.message ?? err).trim())
+  if (cut && !healAgain.has(id)) {
+    healAgain.add(id)
+    healRead.delete(id)
+    void $.state.set(HEALTICK, id).catch(() => undefined)
+    return
+  }
+  failed($, 'The citations were not checked', err, fix)
 }
 
 /** One pass over a record's shown text, its result kept in the record (a text that changed meanwhile waits for its own
@@ -939,7 +958,7 @@ export async function healOfText($: Engine, text: string, o: { settled?: boolean
         return
       }
       healTexts.set(key, { key, of: out.of, version: out.version, changes: out.changes })
-    })().catch(err => failed($, 'The citations were not checked', err, 'Open a citation to see its place')).finally(() => {
+    })().catch(err => healLost($, id, err, 'Open a citation to see its place')).finally(() => {
       healing.delete(id)
       healTextRuns.delete(id)
       void $.state.set(HEALTICK, id).catch(() => undefined)

@@ -23,7 +23,7 @@ const EVENTS = '/home/t/.thimble/lean/events/s-1.jsonl'
 const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const ANSWER = 'June 18 had the most saves: [6,543](q1#day=2026-06-18@n).'
 
-function world(on: Any) {
+function world(on: Any, o: { heal?: () => unknown } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', HOME: '/home/t', PATH: '/usr/bin:/bin' })
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('env.set', () => ({ value: {} }))
@@ -46,13 +46,18 @@ function world(on: Any) {
     let out: unknown = {}
     if (prep) out = { drawing: DRAWING, ...(prep.check ? { check: { line: null, tried: 1, total: 1, failed: 0, cut: 0, ms: 1 } } : {}) }
     else if (e.argv.includes('resolve')) out = RESOLVED
+    else if (e.argv.includes('heal') && o.heal) {
+      out = o.heal()
+      if (out instanceof Error) return { deny: out.message } as never
+    }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('prompt.submit', (_$: unknown, e: { text: string }) => ({ text: e.text }))
-  on('ui.toast', () => ({ value: undefined }))
+  const toasts: string[] = []
+  on('ui.toast', (_$: unknown, e: { text?: string }) => { toasts.push(String(e.text ?? '')); return { value: undefined } })
   // Claude Code's own drawing of a reply's plain words
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
-  return { files }
+  return { files, toasts }
 }
 
 // every string a drawn tree holds, in order
@@ -103,4 +108,22 @@ test('a session answers a question, saves a card and draws it under the answer, 
   // a call that saved nothing draws nothing, however its output reads
   const echo = await $.tool.call({ tool: 'Bash', command: 'echo "saved 09-other v1"' } as never)
   expect((echo as { context?: string[] }).context ?? []).toEqual([])
+})
+
+test('a healing pass Claude Code cut short starts again once at the next drawing, and the person hears nothing of it', async ($, on) => {
+  let heals = 0
+  // Claude Code stops the first pass's child: the drawing that started it was abandoned as the turn ended
+  const w = world(on, { heal: () => { if (++heals === 1) return new Error('thimble: $.process.run(/p/bin/thimble) aborted'); return { of: 'v1', version: 'v1', changes: [{ label: '6,543', ref: 'q1#day=2026-06-18@n', state: 'linked', how: 'kept', to: 'q1#day=2026-06-18@n' }] } } })
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: '' }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: ANSWER }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  for (let i = 0; i < 3; i++) { await reply($); await clock.advance(10); await clock.settle() }
+  expect(heals).toBe(2)
+  expect(w.toasts).toEqual([])
+  const kept = Object.entries(w.files).find(([f]) => f.includes('/thimble/messages/') && f.endsWith('.json'))
+  expect(JSON.parse(kept![1]).heal.changes[0].state).toBe('linked')
 })
