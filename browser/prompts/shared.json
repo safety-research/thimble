@@ -169,6 +169,26 @@
         [
           "[12%](r4#month=03@per_day)",
           "[12%](card:<id>#month/03)"
+        ],
+        [
+          "Good      \"heads\": {\"term\": \"fell 40% in March\",",
+          "Good      \"heads\": [{\"where\": \"answer\", \"term\": \"fell 40% in March\","
+        ],
+        [
+          "once the rest of March is in.\"}",
+          "once the rest of March is in.\"}]"
+        ],
+        [
+          "Bad       \"heads\": {\"term\": \"the new policy\",",
+          "Bad       \"heads\": [{\"where\": \"answer\", \"term\": \"the new policy\","
+        ],
+        [
+          "\"todo\": \"Keep this in mind.\"}",
+          "\"todo\": \"Keep this in mind.\"}]"
+        ],
+        [
+          "In the reply, \"heads\" is null, or one heads-up: {\"term\": \"<exact words from the answer>\", \"title\": \"<a few words>\", \"bullets\": [\"<a point, with its citation>\"], \"todo\": \"<what to do>\"}.",
+          "Read each text on its own. The answer is what the analyst reads now, and the report is what they share with others, so a detail that would change what they share needs its heads-up in the report, even when the answer has one.\n\nIn the reply, \"heads\" holds at most one heads-up for each text, and is often empty: [{\"where\": \"<the text's place>\", \"term\": \"<exact words from that text>\", \"title\": \"<a few words>\", \"bullets\": [\"<a point, with its citation>\"], \"todo\": \"<what to do>\"}]."
         ]
       ]
     },
