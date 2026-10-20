@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
 import { askedRow, openedRow } from '../engaged.js'
-import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, inline, linkMarks, marksIn, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
+import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, inline, lineOf, linkMarks, marksIn, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
@@ -460,4 +460,17 @@ test('what the person engaged with, in a short row for Claude: an explainer, an 
   assert.match(askedRow({ text: 'which week?', scope: { object: 'saves', region: 'bar-3', label: 'week 3' }, card: { id: 'saves', title: 'Saves per week' } }).text, /about the card "Saves per week" \(week 3\)/)
   assert.equal(openedRow(null), null)
   assert.equal(askedRow({ text: '  ' }), null)
+})
+
+test('a citation\'s words keep what a code span holds: underscores and stars inside it, and an underscore inside a word', () => {
+  const text = 'It [reads `src/add_csv_export.py` first](src/add_csv_export.py#L12), then **writes** _once_ to snake_case_name.'
+  const marks = linkMarks(text)
+  assert.equal(marks[0].label, 'reads src/add_csv_export.py first')
+  assert.deepEqual(inline(text, 0, text.length, marks).filter(r => r.mark !== undefined).map(r => r.s), ['reads src/add_csv_export.py first'])
+  // an explain inside those words keeps them too
+  const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: { g1: { term: 'add_csv_export.py' } } })
+  assert.deepEqual(inline(text, 0, text.length, rec.marks).filter(r => r.mark !== undefined).map(r => r.s), ['reads src/', 'add_csv_export.py', ' first'])
+  assert.equal(plainWords('**bold** and _it_ and `a_b*c` and a_b and "*"'), 'bold and it and a_b*c and a_b and "*"')
+  assert.equal(lineOf('# The `add_csv` step\n> reads [the file](a.py#L2)'), 'The add_csv step reads the file')
+  assert.equal(citeWords('`snake_case`', 'a.py#L3'), 'snake_case')
 })

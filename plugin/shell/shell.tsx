@@ -32,7 +32,7 @@ import { paintRegions, selectable } from './cells'
 import { cardFrame, frameWidth } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
-import { newRecord, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
+import { lineOf, newRecord, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
@@ -1662,7 +1662,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
     // v's card landed under a message off screen, a moment ago: first, a click away
     const note = (await $.state.get(CARDNOTE)).value as { row: string; id: string; about: string; at: number } | null
     if (note && (await $.clock.now()) - note.at < CARDNOTE_MS) {
-      const words = `card ready under "${cut(String(note.about || '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim(), 30)}" · click to go there`
+      const words = `card ready under "${cut(lineOf(note.about), 30)}" · click to go there`
       left.push({ key: '', words, short: 'card ready', color: keyColor('v', theme), wordsColor: keyColor('v', theme), label: 'go to the card', onPress: () => goToCard($, note.row, note.id) })
     }
     // at rest the bar names the three verbs alone (v s c) and the counts: ] still steps through the marks and the cards,
@@ -1705,7 +1705,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
       } else if (place.all.length > 1 && place.at >= 0 && (place.at < place.all.length - 1 || place.since > 1)) {
         // an earlier reply picked: its first words too, since a key cannot scroll the transcript to it
         const which = `reply ${place.at + 1} of ${place.all.length}`
-        const begins = place.at < place.all.length - 1 ? cut(shownOf(rec).replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim(), 36) : ''
+        const begins = place.at < place.all.length - 1 ? cut(lineOf(shownOf(rec)), 36) : ''
         left.push({ key: '{ }', words: begins ? `${which}: ${begins}` : which, short: which, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
       }
     }

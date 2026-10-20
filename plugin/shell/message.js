@@ -121,11 +121,35 @@ const VAGUE = /^(here|there|this|that|it|link|source|see|see here|see this|this 
 /** A citation's words, without its markdown; one whose words name nothing (a pronoun, an arrow) is named by its
  *  place, as editors write it (`plugin/hooks/path.ts:12`). */
 function labelOf(words, ref) {
-  const w = String(words).replace(/[*_`]/g, '').trim()
+  const w = plainWords(words).trim()
   return /[\p{L}\p{N}]/u.test(w) && !VAGUE.test(w) ? w : String(ref).replace(/#L(\d+)(?:-L?(\d+))?.*$/, (_, a, b) => `:${a}${b && b !== a ? `-${b}` : ''}`).replace(/^obj:/, '')
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Markdown's words as a reader sees them: a code span's text as written (underscores and stars kept, its backticks
+ * gone), emphasis markers dropped where they wrap words (`**a**`, `_a_`), and an underscore or a star inside or beside
+ * a word that is no emphasis kept (`add_csv_export`, `"*"`).
+ */
+export function plainWords(md) {
+  const s = String(md ?? '')
+  const emphasisOff = t => t
+    .replace(/(\*{1,3})(?=\S)([^*\n]*?\S)\1/g, '$2')
+    .replace(/(^|[^\p{L}\p{N}_])(_{1,3})(?=\S)([^_\n]*?\S)\2(?![\p{L}\p{N}_])/gu, '$1$3')
+    .replace(/`+/g, '')
+  let out = ''
+  let last = 0
+  for (const m of s.matchAll(/(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g)) {
+    out += emphasisOff(s.slice(last, m.index)) + m[2]
+    last = m.index + m[0].length
+  }
+  return out + emphasisOff(s.slice(last))
+}
+
+/** Markdown as one line of plain words: each link as its words, a heading's or a quote's marker dropped, then
+ *  plainWords, the spaces made one. */
+export const lineOf = md => plainWords(String(md ?? '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/^[ \t]*(#{1,6}[ \t]+|>[ \t]?)/gm, '')).replace(/\s+/g, ' ').trim()
 
 /** A gloss's term as the observer wrote it, without the backticks of a code span (`hydrate()` is hydrate()). */
 const termOf = term => String(term || '').replace(/`/g, '').trim()
@@ -403,11 +427,11 @@ export function inline(text, from, to, marks = []) {
     if (!inner.length) return false
     let at = a
     for (const g of inner) {
-      push(s.slice(at, g.start).replace(/[*_`]/g, ''), own)
-      push(s.slice(g.start, g.end).replace(/[*_`]+/g, '').replace(/\s+/g, ' '), { mark: g.i, ...extra })
+      push(plainWords(s.slice(at, g.start)), own)
+      push(plainWords(s.slice(g.start, g.end)).replace(/\s+/g, ' '), { mark: g.i, ...extra })
       at = g.end
     }
-    push(s.slice(at, b).replace(/[*_`]/g, ''), own)
+    push(plainWords(s.slice(at, b)), own)
     return true
   }
   let i = from

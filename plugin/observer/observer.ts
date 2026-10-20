@@ -50,7 +50,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef } from '../types'
 import { answerRow, applyObserver, drawnTextOf, messageRecord, personHere } from '../shell/shell'
-import { glossesOf, headsOf } from '../shell/message.js'
+import { glossesOf, headsOf, lineOf } from '../shell/message.js'
 import { promptAt, promptText, registry } from '../prompts/prompts'
 import { FEATURES } from '../prompts/registry.mjs'
 import { record, tracked } from '../telemetry/telemetry'
@@ -140,7 +140,7 @@ const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof 
 const bullets = (xs: string[]) => (xs.length ? xs.map(x => `- ${x}`).join('\n') : '(none)')
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
 const cut = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n - 1) + '…')
-const oneLine = (s: string) => String(s || '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
+const oneLine = (s: string) => lineOf(s)
 // a message's record is kept by the first 24 characters of its row's id (as the shell keys it)
 const rowKey = (uuid: string) => String(uuid).slice(0, 24)
 const wait = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })

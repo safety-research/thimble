@@ -163,9 +163,10 @@ export function digest(object, o = {}) {
     }
     L.push(`  when it was saved the session had: ${parts.join('; ')}`)
   }
-  const dec = lin.declared ?? object.declared
-  if (dec && typeof dec === 'object' && Object.keys(dec).length) L.push(`  Claude declared: ${Object.entries(dec).map(([k, v]) => `${k}: ${cut(typeof v === 'string' ? v : JSON.stringify(v), 220)}`).join('; ')}`)
-  else L.push('  Claude declared nothing it read or judged by hand')
+  // what Claude declared it read or judged by hand, in the form it saved: words, a list or fields (the kernel keeps it
+  // as given)
+  const said = declaredText(lin.declared ?? object.declared)
+  L.push(said ? `  Claude declared: ${said}` : '  Claude declared nothing it read or judged by hand')
   const probs = lin.problems || []
   if (probs.length) L.push(`  problems thimble save found: ${probs.slice(0, 5).map(p => cut(p, 140)).join('; ')}`)
   if (typeof o.drawn === 'string' && o.drawn.trim()) {
@@ -181,6 +182,15 @@ export function digest(object, o = {}) {
     L.push(`  its hint row now: ${verbs.filter(v => v.picked).map(v => v.name).join(', ') || 'none'}${named.length ? ` (Claude named ${named.join(', ')})` : ''}`)
   }
   return L.join('\n')
+}
+
+/** What a card's `declared` says, in one line, whatever form Claude saved it in; '' when it says nothing. */
+export function declaredText(d) {
+  if (d == null) return ''
+  if (typeof d === 'string') return d.replace(/\s+/g, ' ').trim()
+  if (Array.isArray(d)) return d.map(declaredText).filter(Boolean).join('; ')
+  if (typeof d === 'object') return Object.entries(d).map(([k, v]) => { const t = declaredText(v); return t ? `${k}: ${cut(t, 220)}` : '' }).filter(Boolean).join('; ')
+  return String(d)
 }
 
 /** A query's inputs in a few lines: many like files (a run's 776 transcripts) as one pattern with how many files and

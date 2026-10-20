@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { bareNumbers, digest, fewInputs, isRepeat, parseAnswer, rowCount, rowsIn, slim } from '../evidence.js'
+import { bareNumbers, declaredText, digest, fewInputs, isRepeat, parseAnswer, rowCount, rowsIn, slim } from '../evidence.js'
 
 const OBJECT = {
   id: '02-orders-by-region', version: 2, session: 's-1', title: 'Refunds by region', question: 'Which region had the most refunds in March?',
@@ -95,4 +95,15 @@ test('a slimmed object keeps what the digest reads and drops its data, program a
   assert.equal(digest(s, { verbs: VERBS }), digest(OBJECT, { verbs: VERBS }))
   const inputs = Array.from({ length: 96 }, (_, i) => ({ path: `runs/sweep${1 + (i % 2)}-opus/agents/agent-${String(i).padStart(2, '0')}.jsonl`, rows_read: 10 }))
   assert.deepEqual(fewInputs(inputs), [{ path: 'runs/sweep*-opus/agents/agent-*.jsonl (96 files)', rows_read: 960 }])
+})
+
+test('what Claude declared reaches the observer in the form it saved it: words, a list or fields', () => {
+  const as = declared => digest({ ...OBJECT, lineage: { ...OBJECT.lineage, declared } }, { isNew: true })
+  assert.match(as('I read the 12 refund notes by hand.'), /Claude declared: I read the 12 refund notes by hand\./)
+  assert.match(as(['read rows 2-14 of orders.csv', 'judged tone by hand']), /Claude declared: read rows 2-14 of orders\.csv; judged tone by hand/)
+  assert.match(as({ read: 'ten refund rows by hand' }), /Claude declared: read: ten refund rows by hand/)
+  // the kernel keeps it at the card's top too
+  assert.match(digest({ ...OBJECT, declared: 'judged by hand', lineage: { ...OBJECT.lineage, declared: undefined } }, { isNew: true }), /Claude declared: judged by hand/)
+  for (const nothing of [null, '', '  ', [], {}]) assert.match(as(nothing), /Claude declared nothing it read or judged by hand/)
+  assert.equal(declaredText({ read: '', judged: 'tone' }), 'judged: tone')
 })

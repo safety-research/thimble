@@ -28,7 +28,7 @@
 // `links` are the nested marks a card holds, in reading order: [{id, ref, label}]. They look as a citation looks in the
 // answer (the cite tone, underlined), with no digit of their own: 2 opens the first, 3 the next, and a click opens any.
 import { citeRef } from './object.js'
-import { seriesRef } from './message.js'
+import { plainWords, seriesRef } from './message.js'
 
 const MAX_LINKS = 8
 // a citation's words that name nothing (a pronoun, an arrow): the place it opens is shown in their stead
@@ -36,7 +36,7 @@ const VAGUE = /^(here|there|this|that|it|link|source|see|see here|see this|this 
 
 /** A citation's words as shown: its own words, or, when they name nothing, the place it opens (`path:12`). */
 export function citeWords(words, ref) {
-  const w = String(words ?? '').replace(/[*_`]/g, '').trim()
+  const w = plainWords(words).trim()
   return VAGUE.test(w) ? placeOf(ref) : w
 }
 const CODE = /\.(py|pyi|js|mjs|cjs|jsx|ts|tsx|go|rs|java|kt|c|cc|cpp|h|hpp|rb|php|sh|bash|zsh|sql|r|jl|scala|swift|cs|lua|pl|toml|ya?ml|ini|cfg|conf|md|rst|txt|log|html|css|scss|vue|svelte|tf|dockerfile)$/i

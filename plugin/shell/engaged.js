@@ -6,8 +6,8 @@
 //   openedRow(frame, message)  -> {key, text} for a mark the person opened (a tray frame, panes/tray.js frameOf), or null
 //   askedRow(ask)              -> {key, text} for a question asked in a side thread (thread.ts askThread's ask), or null
 // `key` names what was engaged with, so the same open is told once.
+import { lineOf as oneLine } from './message.js'
 
-const oneLine = s => String(s || '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
 const cut = (s, n) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
 
 /** Where a mark stands, in a few words: the message's first words, cut where a word ends. */
