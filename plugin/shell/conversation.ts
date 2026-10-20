@@ -1,10 +1,15 @@
 // conversation.ts: a side thread's conversation and its input bar, as the side panel draws them under what it shows
-// (detail.tsx). Written as Claude Code writes main's, as thimble 0.9's panel drew a side thread:
+// (detail.tsx). Written and spaced as Claude Code writes main's: a blank row before each question and before each
+// block of an answer (its steps, its words, a card it saved), as thimble 0.9's panel drew a side thread:
 //
 //   ── main/Saves per day ─────────────       the thread's name on a dim rule, between what it is on and its turns
+//
 //   ❯ why so many links?   about Jun 18       each question after ❯ on the prompt's background, with its part
+//
 //   ● 2 steps · thimble rows "q1#…"           the steps the thread took, on one dim row
+//
 //   ● Links peaked that day: 2,994 of …       the answer after ●, its citations underlined presses (view.ts)
+//
 //     [a card it saved, drawn as under a reply]
 //   ● ◌ starting · 4s                         a question at work, until its first step; then its steps so far
 //
@@ -74,10 +79,12 @@ export function conversation(els: Any, o: ConvOpts): Item[] {
   row(Text({ key: `${o.key}-head`, dimColor: true, wrap: 'truncate-end', children: `──${head}${'─'.repeat(Math.max(2, w - [...head].length - 2))}` }))
   const status = String(o.thread?.status || '')
   const lastPerson = turns.map((t: Any) => t.role).lastIndexOf('person')
+  // a blank row between blocks, as Claude Code spaces main's messages
+  const gap = (k: string) => row(Text({ key: k, children: ' ' }))
   turns.forEach((t: Any, i: number) => {
     const k = `${o.key}-t${i}`
     if (t.role === 'person') {
-      row(Text({ key: `${k}-gap`, children: ' ' }))
+      gap(`${k}-gap`)
       // the question on the prompt's background, as Claude Code draws the person's prompt; its part after it, dim
       const about = t.about ? `about ${cut(String(t.about), 40)}` : ''
       const lines = wrapWords(String(t.text || ''), w - 2)
@@ -90,6 +97,7 @@ export function conversation(els: Any, o: ConvOpts): Item[] {
       // a question still at work, before any step of it is read: how long it has been
       if (i === lastPerson && i === turns.length - 1 && status === 'running') {
         const since = Date.parse(String(t.at || ''))
+        gap(`${k}-start-gap`)
         row(Text({ key: `${k}-start`, color: 'warning', children: `● ◌ starting${isFinite(since) ? ` · ${secs(o.now - since)}` : ''}` }))
       }
       return
@@ -98,9 +106,11 @@ export function conversation(els: Any, o: ConvOpts): Item[] {
     const calls: string[] = t.calls || []
     if (calls.length) {
       const words = `${calls.length} step${calls.length === 1 ? '' : 's'} · ${calls[calls.length - 1]}`
+      gap(`${k}-steps-gap`)
       row(Text({ key: `${k}-steps`, wrap: 'truncate-end', ...(working ? { color: 'warning' } : { dimColor: true }), children: `● ${working ? '◌ ' : ''}${cut(words, w - 4)}` }))
-    } else if (working && !t.text) row(Text({ key: `${k}-steps`, color: 'warning', children: '● ◌ starting' }))
+    } else if (working && !t.text) { gap(`${k}-steps-gap`); row(Text({ key: `${k}-steps`, color: 'warning', children: '● ◌ starting' })) }
     if (t.text) {
+      gap(`${k}-a-gap`)
       const rec = newRecord({ row: `${o.key}-a${i}`, session: '', text: String(t.text), at: null })
       const rows = messageRows(els, {
         rec, key: `${k}-a`, cols: w, first: true, theme: o.theme, focus: null, ink: 'text',
@@ -110,9 +120,10 @@ export function conversation(els: Any, o: ConvOpts): Item[] {
     }
     for (const [j, c] of ((t.cards || []) as CardRef[]).entries()) {
       const drawn = o.card?.(c, `${k}-c${j}`)
-      if (drawn) items.push(drawn)
+      if (drawn) { gap(`${k}-c${j}-gap`); items.push(drawn) }
     }
   })
+  if (status === 'failed') gap(`${o.key}-failed-gap`)
   if (status === 'failed') row(Text({ key: `${o.key}-failed`, color: 'error', wrap: 'truncate-end', children: `  ⎿ × ${cut(String(o.thread?.error || 'the thread stopped'), w - 6)} · ask again` }))
   return items
 }

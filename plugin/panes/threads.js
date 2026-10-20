@@ -1,14 +1,16 @@
-// threads.js: the session's side threads, listed in the side panel, a program on the card runtime (draw/kit.js). The
-// bar's `N threads` opens it (t, or a click on the count, or /threads). As 0.9 drew them: a tree with main at its
-// root and a row per thread, `main/<what it is on>`, the newest first, with how many questions it has and whether it
-// is answering, and its last question under it. The thread selected shows its conversation under the list, and the
-// panel's input bar asks it (shell/side.ts, through `thread`); ↵ or a click on the selected row opens it: what it is
-// on at the top of the panel again (the card, the citation, the pane), its conversation under it.
+// threads.js: the session's side threads, listed in the side panel, a program on the card runtime (draw/kit.js). Only
+// t at the prompt, a click on the bar's `N threads` or /threads opens it, never anything inside a thread. As 0.9 drew
+// them: a tree with main at its root and a row per thread, `main/<what it is on>`, the newest first, with how many
+// questions it has and whether it is answering, and its last question under it. It is no thread itself (no input bar):
+// a click on a row, or ↵ with the ring on it, opens that thread: what it is on at the top of the panel again (the
+// card, the citation, the pane), its conversation under it.
 //
 //   reads: threads (shell/thread.ts threadList: key, name, status, asks, at, turns)
 //   state: {sel: the key of the thread selected}
-//   keys: ↑↓ thread · ↵ open (the ring on a row: a press) · esc back
+//   presses: a row opens its thread. keys: none of its own (the ring walks the rows; esc is the panel's)
 //   asks of the host: open {thread: key}
+import { subjectBlock } from './subject.js'
+
 const cut = (s, n) => (Array.from(String(s)).length <= n ? String(s) : Array.from(String(s)).slice(0, Math.max(1, n - 1)).join('') + '…')
 
 /** How long ago, in a word or two: `now`, `4m`, `2h`, `3d`. */
@@ -46,40 +48,33 @@ export default {
     return { rows: rowsOf(stores.threads) }
   },
   titleOf: () => 'Threads',
-  /** Its thread is the one selected: its conversation shows under the list, and the input bar asks it. */
-  thread(_args, state, data) {
-    const key = selectedOf(state, data)
-    return key ? { key } : null
-  },
+  /** The list is no thread: no conversation and no input bar under it. */
+  thread: () => null,
   program,
 }
 
 export function program(k, data) {
   const rows = data.rows || []
-  if (!rows.length) return k.text('{dim:No threads yet. Open a card (1), or a citation (] then 1), and type a question: its thread is listed here.}')
+  if (!rows.length) return k.stack(subjectBlock(k, { title: 'Threads', line: 'none in this session yet' }), k.text('{dim:A question asked beside a card, a citation or a label starts a thread, and the thread is listed here.}'))
   const st = k.state || {}
   const sel = selectedOf(st, data)
   const ids = rows.map((_, i) => `t${i}`)
   const idOf = key => ids[rows.findIndex(r => r.key === key)] ?? null
   const keyOf = id => rows[ids.indexOf(id)]?.key ?? null
-  const at = Math.max(0, rows.findIndex(r => r.key === sel))
-  const pick = i => ({ sel: rows[(i + rows.length) % rows.length].key })
   const open = key => { if (key) k.do('open', { thread: key }) }
-  k.on('up', () => pick(at - 1), 'thread')
-  k.on('down', () => pick(at + 1), 'thread')
   k.on('focus', e => (keyOf(e.region) ? { sel: keyOf(e.region) } : null))
-  k.on('return', () => { open(sel) }, 'open')
+  k.on('return', () => { open(sel) })
   k.on('press', e => {
     const key = keyOf(e.region)
     if (!key) return null
-    if (key === sel) { open(key); return null }
+    open(key)
     return { sel: key }
   })
   const id = idOf(sel)
   if (id) k.select(id)
 
   const W = Math.max(30, k.w)
-  const lines = [k.text(`{dim:${rows.length} thread${rows.length === 1 ? '' : 's'} · ↵ opens the one selected}`), k.text('**main**', { wrap: false })]
+  const lines = [subjectBlock(k, { title: 'Threads', line: `${rows.length} thread${rows.length === 1 ? '' : 's'} in this session` }), k.text('**main**', { wrap: false })]
   rows.forEach((r, i) => {
     const lastRow = i === rows.length - 1
     const state = r.status === 'running' ? '{warn:answering…}' : r.status === 'failed' ? '{bad:stopped}' : `{dim:${r.asks} question${r.asks === 1 ? '' : 's'}${r.ago ? ` · ${r.ago}` : ''}}`

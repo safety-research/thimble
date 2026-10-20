@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { askMerge, asTable, barAfter, beganWord, cycleKnob, examplesView, exampleSet, fmtWords, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, programLines, recordWords, stepPart, stepVersion, versionsOf } from '../carddetail.js'
-import { aboutOf, answerOf, firstMessage, forkDirective, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from '../threads.js'
+import { aboutOf, answerOf, firstMessage, forkDirective, nextMessage, ownReport, samePart, threadKey, turnsOf } from '../threads.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { renderTerm } from '../../draw/term.js'
 
@@ -215,10 +215,6 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
   assert.equal(ownReport('<agent-message from="a1b2">\n[Subagent hand-back] …', ['a1b2']), 'a1b2')
   assert.equal(ownReport('<task-notification>\n<task-id>a1b2</task-id>', ['a1b2']), 'a1b2')
   assert.equal(ownReport('<task-id>zzz</task-id>', ['a1b2']), null, "another agent's report is main's")
-  const sent = toMain({ scope: { object: 'r17', region: 'rerun-loop', label: 'Rerun loop' }, card: 'Run r17', turns })
-  assert.match(sent, /side thread about Rerun loop on the card "Run r17"/)
-  assert.match(sent, /The thread answered: 480 came after\./)
-  assert.equal(toMain({ scope: {}, turns: [{ role: 'person', text: 'q' }] }), '')
   // a later question sent to the agent while it runs comes wrapped, in a reminder or not: its words are the question
   const later = turnsOf([
     { role: 'user', content: 'what share?' },

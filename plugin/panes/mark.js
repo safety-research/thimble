@@ -3,16 +3,26 @@
 // The side panel (shell/side.ts) puts the mark's side thread under it and its input bar at the bottom, as under any
 // pane: this file says only what the thread is about (`thread`).
 //
+// Its subject is drawn once, at the top, as every thread's is (subject.js): the cited words, and what they cite. The card
+// follows with no frame of its own, the part that holds the cited value selected. What reads less easily (the rows
+// behind a value, its code) is an action above the input bar, in words; what it opens is the `side:opened` region, which
+// the side panel draws right above the actions, under the thread's conversation.
+//
 //   args: {frame}: a tray frame (tray.js frameOf): {row, i, kind, ref, label, gloss} for a mark of a message, or
 //         {kind: 'cite', ref, label} for a citation inside a card or a thread's answer
 //   state: {open: the section shown in place of the card}
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host (cards.js drawnCard)
-//   keys: the sections' keys (r rows, c code) · o open the first citation inside the card (over this one, in the
-//         panel; 2–9 the others, unnamed) · e expand an explainer (written again at more length, in its place) · ] [ the
-//         next mark of the message and the one before, in its place (a mark of a message only)
-//   asks of the host: open {mark: frame} (a citation inside the card, opened over this one), expand {frame}, step {dir}
+//   presses: a citation inside the card opens it, over this one in the panel. A citation shows its whole source here,
+//            as many rows as the panel has: the panel is the one place a citation opens to read (the tray's ↵ and its
+//            a both open it here)
+//   actions: each section of the card (`act:<id>`: Rows, Code), shown above the actions and hidden again (`:on` is the
+//            one open); esc hides it, then the panel's host goes back
+//   actions: an explainer, Longer: written again at more length, in its place (one side call; the host draws it here
+//            when it lands)
+//   asks of the host: open {mark: frame} (a citation inside the card, opened over this one), expand {frame}
 import { threadKey } from '../shell/threads.js'
 import { cardBody, cardRequest, scopeOf } from './tray.js'
+import { subjectBlock } from './subject.js'
 
 /** The rows the card may take in the panel. */
 export const BODY = 16
@@ -51,42 +61,41 @@ export function saidOf(g) {
   return `thimble's explainer of them says: ${g.body || g.title || ''}${g.here ? ` ${g.here}` : ''}`
 }
 
+// what each section's action says
+const ACTION = { rows: 'Rows', code: 'Code', raw: 'As in the file' }
+
 export function program(k, data) {
   const top = data.frame
   if (!top) return k.text('{dim:Nothing is open here.}')
   const st = k.state || {}
   const heads = top.kind === 'gloss' && top.gloss && top.gloss.kind === 'heads'
-  const tone = heads ? 'heads' : top.kind === 'gloss' ? 'explain' : 'cite'
-  const inner = Math.max(20, k.w - 4)
-  // a citation expanded (↵ in the tray): its whole source, as many rows as the panel has
-  const card = k.want({ card: cardRequest(top), w: inner, h: top.full ? Math.max(BODY, (k.h || 0) - 4) : BODY })
+  const inner = Math.max(20, k.w - 2)
+  // its whole source, as many rows as the panel gives it
+  const card = k.want({ card: cardRequest(top), w: inner, h: Math.max(BODY, (k.h || 0) - 10) })
   const links = card && Array.isArray(card.links) ? card.links.slice(0, 8) : []
-  const sections = card && Array.isArray(card.sections) ? card.sections.filter(s => s && s.id && typeof s.key === 'string' && s.key.length === 1) : []
+  const sections = card && Array.isArray(card.sections) ? card.sections.filter(s => s && s.id) : []
   const open = sections.find(s => s.id === st.open) || null
   const openLink = l => { k.do('open', { mark: { kind: 'cite', ref: l.ref, label: l.label } }) }
-  sections.forEach(s => k.on(s.key, () => ({ open: open && open.id === s.id ? null : s.id }), s.words))
-  // o: the first citation inside the card (the rest by a click; 2–9 still open them, unnamed), so the line reads as words
-  if (links.length) k.on('o', () => openLink(links[0]), `open ${String(links[0].label || links[0].ref || '').slice(0, 28)}`)
-  links.forEach((l, j) => k.on(String(j + 2), () => openLink(l)))
-  // e: an explainer written again at more length, in its place (one side call; the host draws it here when it lands)
-  if (top.kind === 'gloss' && !heads && !(top.gloss && top.gloss.expanded) && top.row != null) k.on('e', () => { k.do('expand', { frame: top }); return { expanding: true } }, 'expand')
-  // esc closes the section open first; then the panel's host goes back
-  if (open) k.on('esc', () => ({ open: null }), 'back')
-  // a mark of a message: the next one and the one before (the host's order of marks and cards), in its place
-  if (top.row != null) {
-    k.on(']', () => { k.do('step', { dir: 1 }) }, 'next')
-    k.on('[', () => { k.do('step', { dir: -1 }) })
-  }
+  // each section an action above the input bar: shown in place of the card, hidden again
+  sections.forEach(s => k.on(open && open.id === s.id ? `act:${s.id}:on` : `act:${s.id}`, () => ({ open: open && open.id === s.id ? null : s.id }), ACTION[s.id] || s.words))
+  // an explainer written again at more length, in its place
+  if (top.kind === 'gloss' && !heads && !(top.gloss && top.gloss.expanded) && top.row != null) k.on('act:expand', () => { k.do('expand', { frame: top }); return { expanding: true } }, 'Longer')
+  // esc hides the section open first; then the panel's host goes back
+  if (open) k.on('esc', () => ({ open: null }), 'the citation')
   k.on('press', e => {
     const l = links.find(x => x.id === e.region)
     if (l) openLink(l)
     return null
   })
-  const parts = cardBody(k, card, top, open)
+  // the card always; what a section opened, under the conversation (`side:opened`)
+  const parts = cardBody(k, card, top, null)
   if (st.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text('{dim:writing a longer explanation…}'))
-  const kind = heads ? 'heads up' : top.kind === 'gloss' ? 'explain' : top.kind === 'spark' ? 'series' : 'cite'
-  const from = card && !card.problem && !card.error && typeof card.right === 'string' && card.right ? card.right : kind
+  const opened = open ? [...(open.problem ? [k.text(`{dim:${k.escape(String(open.problem))}}`)] : []), ...(open.drawings || []).map(d => k.embed(d))] : []
+  const kind = heads ? 'heads up' : top.kind === 'gloss' ? 'explainer' : top.kind === 'spark' ? 'series' : 'citation'
+  // what it cites, in the card's own words without its kind (`cite · revisions.jsonl` says revisions.jsonl)
+  const from = card && !card.problem && !card.error && typeof card.right === 'string' ? card.right.replace(/^(cite|explain|series|heads up)\s*·\s*/, '') : ''
   const label = String(top.label || top.ref || '')
-  const title = label.length > inner - 12 ? label.slice(0, Math.max(8, inner - 13)) + '…' : label
-  return k.frame(k.size(k.stack(parts), { w: inner }), { title: k.escape(title), right: k.escape([from, open ? open.words : ''].filter(Boolean).join(' · ')), tone })
+  const title = label.length > inner - 4 ? label.slice(0, Math.max(8, inner - 5)) + '…' : label
+  const line = [kind, from].filter(Boolean).join(' · ')
+  return k.stack(subjectBlock(k, { title: k.escape(title), line: k.escape(line) }), k.size(k.stack(parts), { w: inner }), opened.length ? k.region('side:opened', { label: String(ACTION[open.id] || open.words) }, k.size(k.stack(opened), { w: inner })) : false)
 }

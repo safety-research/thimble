@@ -15,14 +15,18 @@
 //              type (g), each group with its files, those touched and those seen, and its rows in the same shades
 //   a group    its files, each with what happened to it: the lines seen, what a label's model read, what was computed
 //              over, or why none of its lines entered a context
-//   a file     a strip of the whole file with the lines seen lit, the seen ranges to step through, and the file's own
-//              lines around the one chosen (seen lines marked ▌, those a search showed in its color); ↵ on a range opens
-//              its lines as a citation, over this pane (esc comes back)
+//   a file     a strip of the whole file with the lines seen lit, the seen ranges, and the file's own lines around the
+//              one selected (seen lines marked ▌, those a search showed in its color); a press on a range opens its
+//              lines as a citation, over this pane (esc comes back)
 //
 //   state: {by: 'pattern' | 'type', group: the group open, file: the file open, at: the part selected, range: the range}
-//   keys: g by type / by pattern · [ ] step · 0 back · esc back (at the top, esc is the panel's: back, or close)
+//   presses: a group opens its files, a file its lines, a range its lines as a citation; `by pattern` and `by type`
+//            group the files. keys: none of its own: the side panel's ring walks the parts (↑ ↓, tab), ↵ presses the one
+//            it is on, esc goes back a level (at the top, esc is the panel's: back, or close)
 //   wants: {lines: path, from, to} (the file's lines around a range, read by the host)
 //   asks of the host: open {mark: {kind: 'cite', ref, label}} (a seen range, as a citation)
+
+import { subjectBlock } from './subject.js'
 
 const STATUS = ['seen', 'model', 'searched', 'computed', 'named', 'not read']
 // each status as the pane says it, and its tone
@@ -179,7 +183,7 @@ export function program(k, data) {
   const file = st.file ? fileOf(st.file) : null
   const level = file ? 'file' : group ? 'group' : 'top'
 
-  // ---- the items of this level, in order: what the ring and [ ] step through
+  // ---- the items of this level, in order: what the ring walks
   const inGroup = g => data.files.filter(f => (by === 'type' ? f.type : f.group) === g.key)
     .sort((a, b) => STATUS.indexOf(a.status) - STATUS.indexOf(b.status) || a.path.localeCompare(b.path, 'en', { numeric: true }))
   const ranges = file ? rangesOf(file) : []
@@ -189,10 +193,8 @@ export function program(k, data) {
   const idx = ids.indexOf(at)
 
   // ---- what the person does
-  const step = dir => () => (ids.length ? { at: ids[Math.max(0, Math.min(ids.length - 1, (idx < 0 ? -1 : idx) + dir))] } : null)
   const open = id => {
     if (id === 'by-pattern' || id === 'by-type') return { by: id.slice(3), group: null, file: null, at: id }
-    if (id === 'back') return back()
     const it = items.find(x => x.id === id)
     if (!it) return null
     if (it.g) return { group: it.g.key, file: null, at: 'f-0' }
@@ -203,15 +205,12 @@ export function program(k, data) {
   }
   const back = () => (file ? { file: null, at: `f-${Math.max(0, inGroup(group || { key: null }).findIndex(f => f.path === file.path))}` }
     : group ? { group: null, at: `g-${Math.max(0, groupList.findIndex(g => g.key === group.key))}` } : null)
+  // the ring on a part selects it; a press opens it (a group, a file, a seen range as a citation)
   k.on('focus', e => (e.region ? { at: e.region } : null))
-  k.on('press', e => (e.region === at || e.region === 'back' || e.region === 'by-pattern' || e.region === 'by-type' ? open(e.region) : e.region ? { at: e.region } : null))
+  k.on('press', e => (e.region ? open(e.region) : null))
   k.on('return', () => (at ? open(at) : null))
-  k.on('[', step(-1), level === 'file' ? 'step through what was seen' : 'step')
-  k.on(']', step(1), level === 'file' ? 'step through what was seen' : 'step')
-  // (g, for grouping: t is the panel's own key, the thread list)
-  if (level === 'top') k.on('g', () => ({ by: by === 'type' ? 'pattern' : 'type', group: null, file: null, at: null }), by === 'type' ? 'by pattern' : 'by type')
-  if (level !== 'top') k.on('0', back)
-  if (level !== 'top') k.on('esc', back, 'back')
+  // esc goes back a level; the host draws the way back as a press that does the same
+  if (level !== 'top') k.on('esc', back, level === 'file' ? String(group ? group.key : 'the files') : 'Coverage')
   if (at) k.select(at)
 
   const t = data.total
@@ -222,12 +221,10 @@ export function program(k, data) {
   }
   if (level === 'group') {
     const share = group.rows ? group.seen / group.rows : 0
-    const title = k.beside(
-      k.region('back', { label: 'back to every group' }, k.text('{accent:‹}', { wrap: false })),
-      k.text(`${by === 'type' ? `**${k.escape(group.key)}** files` : patternText(k, group.key, true)}{dim: · ${n(group.files)} file${group.files === 1 ? '' : 's'} · ${n(group.rows)} rows}`, { grow: 1, wrap: false }),
-      k.text(`seen ${n(Math.round(group.seen))} rows {dim:(${pct(share)})}`, { wrap: false }),
-      { gap: 1 },
-    )
+    const title = subjectBlock(k, {
+      title: by === 'type' ? `${k.escape(group.key)} files` : String(group.key).split('*').map(x => k.escape(x)).join('{accent:\\*}'),
+      line: `files of the folder · ${n(group.files)} file${group.files === 1 ? '' : 's'} · ${n(group.rows)} rows · seen ${n(Math.round(group.seen))} rows (${pct(share)})`,
+    })
     const rows = Math.max(3, k.h - 4 - chromeOf(k, data.chat))
     const pw = pathW(items.map(x => x.f), group, by, W)
     return k.stack(title, statusLine(k, group.by), k.text(' '), listOf(k, items, idx, rows, (it, on) => fileRow(k, it.f, group, by, W, pw, on, it.id), fileHeader(k, pw)))
@@ -235,12 +232,7 @@ export function program(k, data) {
   // ---- one file
   const unit = /^(jsonl|transcript)$/.test(file.type) ? 'rows' : 'lines'
   const total = file.lines || file.rows
-  const title = k.beside(
-    k.region('back', { label: 'back to the files' }, k.text('{accent:‹}', { wrap: false })),
-    k.text(`**${k.escape(file.path)}**{dim: · ${n(total)} ${unit}}`, { grow: 1, wrap: false }),
-    k.text(`{${TONE[file.status]}:${SAID[file.status]}}`, { wrap: false }),
-    { gap: 1 },
-  )
+  const title = subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${unit} ·} {${TONE[file.status]}:${SAID[file.status]}}` })
   const out = [title, k.text(`{dim:${k.escape(fileWords(file, unit))}}`, { wrap: false }), strip(k, file, W), k.text(' ')]
   if (!ranges.length && file.status === 'model') {
     out.push(k.text(`{dim:A label's model read ${n(file.model)} of its rows (${k.escape(file.labels.join(', ') || 'a label')}); none of its lines entered Claude's context.}`))
@@ -281,11 +273,10 @@ export function rangesOf(f) {
 function overview(k, data, W) {
   const t = data.total
   const share = t.seen_share ?? t.read_share ?? 0
-  const top = k.beside(
-    k.text(`**Coverage**{dim: of ${data.session === null ? 'every session' : 'this session'} · ${n(t.files || 0)} files · ${n(t.rows || 0)} rows}${data.refreshing ? '{dim: · ◌}' : ''}`, { grow: 1, wrap: false }),
-    k.text(`{accent:seen} **${n(t.seen_rows ?? t.read_rows ?? 0)}** rows {dim:(}**${pct(share)}**{dim:)}`, { wrap: false }),
-    { gap: 2 },
-  )
+  const top = subjectBlock(k, {
+    title: 'Coverage',
+    line: `{dim:what ${data.session === null ? 'every session' : 'this session'} read of the folder · ${n(t.files || 0)} files · ${n(t.rows || 0)} rows ·} {accent:seen} **${n(t.seen_rows ?? t.read_rows ?? 0)}** rows {dim:(}**${pct(share)}**{dim:)}${data.refreshing ? '{dim: · ◌}' : ''}`,
+  })
   // files: touched in any way, and seen; content: what else went over the rows, apart
   const files = `{dim:files}  ${n(t.touched_files || 0)} of ${n(t.files || 0)} touched {dim:·} {accent:${n(t.seen_files ?? t.read_files ?? 0)} seen} {dim:(some of their lines in Claude's context)}`
   const other = [t.model_rows ? `{good:${n(t.model_rows)} read by a label's model}` : '', t.computed_rows ? `${n(t.computed_rows)} computed over, none seen` : ''].filter(Boolean)

@@ -6,23 +6,25 @@
 // on either, or its key (r, l) from the empty prompt, opens its pane, and the same again closes it. This module is what
 // the side panel does not do for them:
 //
-//   data   the coverage (`thimble coverage --json`, this session's, read again on open and after each turn) and the
-//          labels (`thimble label --json`), held here; what a program wants on demand: a file's lines around a read
-//          range, and a page of a label's records (`thimble label NAME --records …`)
-//   acts   a label value checked with the number keys is the person's check (labels.ts check), as in the card detail;
-//          when the panel closes, Claude hears of the checks in a row of its own (labels.ts checksDone, detail.tsx)
+//   data   the coverage (`thimble coverage --json`, this session's, read again on open, after each turn, and a moment
+//          after each of Claude's tool calls while it works, so the bar's `seen` follows the work) and the labels
+//          (`thimble label --json`), held here; what a program wants on demand: a file's lines around a read range,
+//          and a page of a label's records (`thimble label NAME --records …`)
+//   acts   a label value the person checks in the label panel is their check (labels.ts check), as in the card detail;
+//          when the panel closes, Claude hears of the checks in a row of its own (labels.ts checksDone, detail.tsx);
+//          `where Claude made it` scrolls the conversation to the label's card
 //   bar    the two counts, their clicks and their keys (r and l act once a moment has passed with no letter after them,
 //          as t does: a letter makes them the start of a word)
 //
 // It reads, as the person: nothing it runs counts as what Claude read (shell.tsx leanEnv), and it makes no model call.
-import type { EngineInterface } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { barCells, typeMix } from '../panes/coverage.js'
 import { termColor } from '../draw/palette.js'
 import { detailIsOpen, PANE as PANEL } from './detail'
 import { check as checkLabel, labelGen } from './labels'
-import { instance, redraw } from './panes'
-import { currentTheme, leanEnv, paneWhere } from './shell'
+import { instance, patchPaneState, redraw } from './panes'
+import { currentTheme, goToCard, leanEnv, paneWhere, recount } from './shell'
 import { threadList } from './thread'
 import { openSide, sideBack, sideNow } from './side'
 import { sessionKey } from '../hooks/conversation'
@@ -189,6 +191,13 @@ export async function dockWant($: Engine, request: Any): Promise<unknown> {
 
 /** What a pane's program asks of the host (shell.tsx paneAction): check a record's value. */
 export async function dockAction($: Engine, pane: Dock, a: Record<string, unknown>): Promise<string | boolean | void> {
+  // the label's card in the conversation, where Claude made the label
+  if (String(a.do || '') === 'reveal' && typeof a.card === 'string') {
+    const row = (await $.state.get({ plugin: 'thimble', key: 'where', id: a.card })).value as string | undefined
+    if (!row) return 'The card where Claude made this label is not in this conversation.'
+    await goToCard($, row, a.card)
+    return
+  }
   if (String(a.do || '') === 'check' && pane === 'labels') {
     const said = await checkLabel($, await rootOf($), a)
     // the counts changed: the list read again (and the pages, by the checks made)
@@ -203,8 +212,20 @@ export async function dockAction($: Engine, pane: Dock, a: Record<string, unknow
 /** The pane in the side panel, over what the panel shows (esc goes back to it), its data read again. */
 export async function openDock($: Engine, pane: Dock): Promise<boolean> {
   if (pane === 'coverage') $.clock.after(0, () => { void readCoverage($) })
-  else $.clock.after(0, () => { void readLabels($) })
+  else {
+    $.clock.after(0, () => { void readLabels($) })
+    // the bar's count opens the folder's labels (one label alone opens on itself)
+    await patchPaneState($, 'labels', {}, { open: null, filter: null, rec: 0, at: null, from: null, def: false })
+  }
   return openSide($, { pane, args: {} }, { push: detailIsOpen() })
+}
+
+/** One label in the side panel, its records filtered to `value` when one is given: from the row beside a card or an
+ *  answer (labeluse.ts). Esc goes back to what the panel showed before, else closes it. */
+export async function openLabel($: Engine, name: string, value: string | null = null): Promise<boolean> {
+  $.clock.after(0, () => { void readLabels($) })
+  await patchPaneState($, 'labels', {}, { open: name, filter: value, rec: 0, at: null, from: null, def: false })
+  return openSide($, { pane: 'labels', args: {} }, { push: detailIsOpen() })
 }
 
 /** The pane out of the side panel: back to what the panel showed before, else the panel closes. */
@@ -267,8 +288,41 @@ export function dockCountEl($: Engine, els: Any, x: Count, c: Counts, press: boo
   return Button({ key: `count-${x.id}`, plain: true, label: pane === 'coverage' ? 'open Coverage: what Claude saw' : 'open the labels', onPress: () => toggleDock($, pane), children: kids })
 }
 
+// ------------------------------------------------------------------------------------------------ coverage while Claude works
+
+/** How long after a tool call the bar's coverage is counted again, and how often at most. */
+const COVER_AFTER_MS = 1500
+const COVER_EVERY_MS = 5000
+let coverAt = 0
+let coverWaiting = false
+
+/** The bar's coverage counted again a moment after a call, at most once every few seconds (the last call of a burst
+ *  is counted too). */
+function coverSoon($: Engine, now: number): void {
+  if (coverWaiting) return
+  coverWaiting = true
+  const wait = coverAt ? Math.max(COVER_AFTER_MS, coverAt + COVER_EVERY_MS - now) : COVER_AFTER_MS
+  $.clock.after(wait, () => {
+    coverWaiting = false
+    void $.clock.now().then(t => { coverAt = Number(t) }).catch(() => undefined)
+    void recount($, { coverage: true }).catch(() => undefined)
+  })
+}
+
+export function registerDock(on: Parameters<Register>[0]): void {
+  // what Claude reads while it works counts at once: the bar's `seen` follows each call that can read the folder (a Read,
+  // a search, a command), not only the end of the turn
+  on('tool.call', { tool: /^(Read|Grep|Glob|Bash)$/ }, async ($, e, next) => {
+    const r = await next(e)
+    try { coverSoon($, Number(await $.clock.now())) } catch { /* the turn's end counts it */ }
+    return r
+  }).catch(($, e, next) => next(e))
+}
+
 /** For tests: the module's memory, cleared. */
 export function resetDock(): void {
+  coverAt = 0
+  coverWaiting = false
   held.coverage = { cov: null, loading: false, error: null, gen: 0, since: 0 }
   held.labels = { list: null, loading: false, error: null, gen: 0, since: 0 }
   pages.clear()

@@ -315,7 +315,7 @@ def build(st: Store, spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
         if not q:
             continue
         queries[qid] = {"id": qid, "about": q.get("about"), "code": q.get("code"), "inputs": q.get("inputs"),
-                        "uses": q.get("uses"), "kept": q.get("kept"), "lineage": q.get("lineage"),
+                        "uses": q.get("uses"), "labels": q.get("labels"), "kept": q.get("kept"), "lineage": q.get("lineage"),
                         "frame": q.get("frame"), "keys": q.get("keys"), "out_hash": q.get("out_hash"),
                         "t": q.get("t"), "session": q.get("session"), "rerun_of": q.get("rerun_of")}
         todo.extend(u["query"] for u in q.get("uses") or [])

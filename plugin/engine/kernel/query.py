@@ -341,6 +341,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         if lab is None:
             raise KeyError(f"no label {name!r}; labels: {', '.join(LB.names(st)) or 'none'}")
         df = LB.frame(st, name)
+        info["labels"].append(lab["name"])
         for f, n in LB.files_of(lab).items():
             info["loads"].append({"path": f, "rows": n, "table": None, "via": "label"})
         info["frames"].append(df)
@@ -357,6 +358,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
             if lab is not None:
                 # a label (thimble label): its values as they are now, a check the person made since included
                 df = LB.frame(st, name)
+                info["labels"].append(lab["name"])
                 if lab.get("query"):
                     info["uses"].append({"name": name, "query": lab["query"], "label": lab["name"], "rev": lab.get("rev")})
                 info["frames"].append(df)
@@ -1646,7 +1648,7 @@ def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
 def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
     """Run code as a notebook cell over the root folder: its printed text, then the value of its last expression."""
     info: dict[str, Any] = {"loads": [], "samples": 0, "opened": set(), "external": set(), "kept": [],
-                            "uses": [], "frames": [], "opened_log": [], "row_files": set()}
+                            "uses": [], "labels": [], "frames": [], "opened_log": [], "row_files": set()}
     root = str(st.root) + os.sep
     rec_dir = str(st.dir) + os.sep
     # the kernel's own files (its code, its cache of loaded frames) are no input of the query
@@ -1729,7 +1731,7 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
         inputs.append({"path": f, "rows_read": loaded.get(f, 0), "how": "load" if f in loaded else "opened", **fp})
     out = {"stdout": buf.getvalue(), "error": err, "seconds": round(time.time() - t0, 2), "inputs": inputs,
            "samples": info["samples"], "external": sorted(info["external"])[:20],
-           "kept": info["kept"], "uses": _dedupe(info["uses"]), **lin}
+           "kept": info["kept"], "uses": _dedupe(info["uses"]), "labels": sorted(set(info["labels"])), **lin}
     try:
         # the cache stays bounded: looked over after a query that added frames to it, else at most once a day
         prune_cache(force=bool(info.get("cached")))
@@ -1813,7 +1815,7 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
          "uses": r["uses"], "table": r["table"], "truncated": r.get("truncated", False), "rows": r["rows"],
          "keys": r["keys"], "lineage": r["mode"], "frame": r["frame"],
          "out_hash": hashlib.sha1(r["stdout"].encode()).hexdigest()[:16]}
-    for k in ("why_rows", "read", "via", "cells", "loop", "cells_by", "lineage_error"):
+    for k in ("why_rows", "read", "via", "cells", "loop", "cells_by", "lineage_error", "labels"):
         if r.get(k):
             q[k] = r[k]
     # a long row lineage is written packed; the record in hand, which `thimble run --json` prints, stays whole

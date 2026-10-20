@@ -136,7 +136,11 @@ async function pane($: any, clock: { settle: () => Promise<void> }): Promise<str
   return textOf(await $.ui.render(PANE))
 }
 
-test('overview first: the card enlarged under its title, takeaway and "edited"; the bar under it starts empty, and e fills it with examples labelled with what they are examples of', async ($, on) => {
+// the key of a part's press in the pane as drawn now (`r|pane|<row>|<id>`, its first row)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const partKey = async ($: any, id: string) => new RegExp(`"key":"(r\\|pane\\|\\d+\\|${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})"`).exec(JSON.stringify(await $.ui.render(PANE)))?.[1] ?? `r|pane|0|${id}`
+
+test('overview first: the card enlarged under its subject (title, edited) and its takeaway; its rows come on demand, and what it offers stands above the input bar', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
@@ -144,73 +148,51 @@ test('overview first: the card enlarged under its title, takeaway and "edited"; 
   // the pane docks beside the transcript and asks for the keys
   expect(w.opened.at(-1)).toMatchObject({ id: 'object', focus: true, closeOnEscape: true })
   const t = await pane($, clock)
-  expect(t).toContain('Saves per day')
-  // no card id and no status lines in the header: its title, and "edited" once the analyst asked for a change
-  expect(t).not.toContain('card:01-saves')
-  expect(t).toContain('edited')
-  expect(t).not.toContain('v1 · v2')
+  // its subject once, at the top: the title, the card's id beside its versions
+  expect(t).toContain('▎ Saves per day')
+  expect(t).toContain('▎ card · edited')
   expect(t).toContain('June 18 had 6,543 saves.')
   // the selected part is marked beside the card (the page above it is the detail's program, panes/detail.js)
   expect(t).toContain('▸')
   expect(t).toContain('Jun 18 ▆▆▆')
-  // no details up front: no examples, no rows, no from line
+  // no rows up front
   expect(t).not.toContain('Hello agents')
-  expect(t).not.toContain('[ ]')
-  expect(t).not.toContain('from revisions.jsonl')
-  // the empty bar is whitespace: no frame, no words; its keys are in the hint line
-  expect(t).not.toContain('details')
-  expect(t).not.toContain('esc back')
-  expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h earlier version · type to ask about Jun 18 · esc back')
-  // ↵ on the selected part (the ring's press) fills the bar with its details: its claim, and its examples one key away
+  // what it offers, in words, above the input bar; the bar names no key of the panel's but esc
+  expect(t).toContain('Rows · Code · Earlier version')
+  expect(await hintOf($)).toContain('esc close')
+  expect(await hintOf($)).not.toContain('examples')
+  // ↵ on the selected part (the ring's press) shows its rows: its claim and its records as words
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()
-  await ui.press({ key: 'r|pane|1|day-2026-06-18' })
+  await ui.press({ key: await partKey($, 'day-2026-06-18') })
   await clock.settle()
-  const d = textOf(await ui.drawn())
-  // its claim, and no status lines: where it comes from is one key away (p)
-  expect(d).not.toContain('from revisions.jsonl')
-  expect(d).not.toContain('e examples')
-  // esc clears the bar (the panel catches it): 0 still does, unnamed
-  expect(await hintOf($)).toContain('↑↓ part · e examples · ')
-  expect(await hintOf($)).not.toContain('0 clear')
-  expect(d).not.toContain('Hello agents')
-  // e: the examples of the selected part, with their labels; each reads as its words, never as field: value
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   const b = await pane($, clock)
-  expect(b).toContain('1 of 6,543')
-  expect(b).not.toContain('examples of')
-  expect(await hintOf($)).toContain('[ ] flip · e hide examples · ')
-  expect(b).not.toContain('from revisions.jsonl')
-  expect(b).not.toContain('files read')
+  expect(b).toContain('1–2 of 6,543')
   expect(b).toContain('Hello agents, sign below.')
   expect(b).toContain('Lexicon · Scout')
   expect(b).not.toContain('rev_id')
   expect(b).not.toContain('page_id:')
-  // 0 empties the bar again
-  await clock.advance(1000)
-  expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
+  // the rows stand under the conversation, right above the actions; Rows is the one open
+  expect(b.indexOf('Hello agents')).toBeGreaterThan(b.indexOf('Jun 18 ▆▆▆'))
+  expect(b.indexOf('Hello agents')).toBeLessThan(b.indexOf('Rows · Code'))
+  // a press on Rows again hides them
+  await ui.press({ key: 'side-act:rows' })
+  await clock.settle()
   expect(await pane($, clock)).not.toContain('Hello agents')
 })
 
-test('keys act only while the composer is empty; a key that began a word gives its letter back; h steps to v1', async ($, on) => {
+test('the panel takes no letter keys: p and h begin the question; with words in the composer every key types there; the code and a version are presses', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
-  // ] opens the bar on the first example, and flips to the next
-  expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
-  expect(await pane($, clock)).toContain('1 of 6,543')
-  expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
-  expect(await pane($, clock)).toContain('2 of 6,543')
-  // p lays the program over the card; a letter straight after it was the start of a word: both go to the ask line,
-  // never into the prompt
+  // p is no key here: it begins the question, and the letter after it joins it, never the prompt
   expect(await press($, clock, edit('p'))).toEqual({ text: '', cursor: 0 })
-  expect(await pane($, clock)).toContain('how Claude drew this')
+  expect(await pane($, clock)).not.toContain('how Claude drew this')
   expect(await press($, clock, edit('l'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
-  expect(await pane($, clock)).not.toContain('how Claude drew this')
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pl"')
-  expect(await hintOf($)).toContain('↵ ask · esc back to the card')
+  expect(await hintOf($)).toContain('esc clears the question')
   // a letter that arrives before the ask line has the keys joins the question, and so does a paste (no key)
   expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pla"')
@@ -219,21 +201,24 @@ test('keys act only while the composer is empty; a key that began a word gives i
   // with words in the composer (typed there before the detail opened), every key types there
   expect(await press($, clock, edit('p', 'what about '))).toEqual({ text: 'what about p', cursor: 12 })
   expect(await press($, clock, edit(']', 'x'))).toEqual({ text: 'x]', cursor: 2 })
-  // ↵ in the ask line asks the card's thread, and the keys go back to the card
+  // ↵ in the ask line asks the card's thread, and the line empties
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await ui.input({ key: await askKeyOf($), text: 'plants?' })
   await clock.settle()
   expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"value":"plants here?"')
-  // h steps back to v1 (the history lives in the header)
-  await clock.advance(1000)
-  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
-  expect(await pane($, clock)).toContain('Saves per day (first)')
-  // h then a letter at once began a word ("how…"): the question holds both, and the version h showed goes back
-  await clock.advance(1000)
-  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
-  expect(await press($, clock, edit('o'))).toEqual({ text: '', cursor: 0 })
+  // the code is one press, Code, above the input bar; the same press closes it
+  await ui.press({ key: 'side-act:code' })
   await clock.settle()
-  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"ho"')
+  expect(await pane($, clock)).toContain('how Claude drew this')
+  await ui.press({ key: 'side-act:code' })
+  await clock.settle()
+  expect(await pane($, clock)).not.toContain('how Claude drew this')
+  // an earlier version is a press above the input bar (h is a letter of the question now)
+  await clock.advance(1000)
+  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
+  expect(await pane($, clock)).not.toContain('Saves per day (first)')
+  await ui.press({ key: 'side-act:version' })
+  await clock.settle()
   expect(await pane($, clock)).toContain('Saves per day (first)')
 })
 
@@ -277,11 +262,12 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   const wideBand = textOf(await $.ui.render({ ...(BAND as Any), props: { ...(BAND as Any).props, bodyColumns: 200 } } as never))
   expect(wideBand).toContain('1 thread')
   expect(wideBand).toContain('thimble:main/01-saves')
-  // beside the docked detail the band is narrow: one line, the counts dropped first, the keys kept as words
+  // beside the docked detail the band is narrow: one line; it names no key of the panel's but esc, so its counts fit
   const line = textOf(await $.ui.render(BAND))
-  expect(line).not.toContain('1 thread')
   expect(line.length).toBeLessThanOrEqual(99)
-  expect(line).toContain('↑↓ part')
+  expect(line).toContain('esc close')
+  expect(line).not.toContain('↑↓ part')
+  expect(line).toContain('1 thread')
   expect(w.status.length).toBe(0)
   expect(file.turns[1].calls).toEqual(['thimble resolve "q1#day=2026-06-18@n"'])
   expect(file.turns[1].text).toContain('Links peaked that day')
@@ -311,28 +297,33 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(w.spawns.length).toBe(1)
   expect(w.sent.at(-1).text).toContain('and here?')
   expect(w.sent.at(-1).text).toContain('About the part "Jun 17" (day-2026-06-17) now.')
-  // m sends the thread's answer to main, as a row Claude reads with the next prompt, once a moment has passed with no
-  // letter after it (a letter makes m the start of a question)
+  // m is no key: it begins a question, and nothing of the thread reaches main
   expect(await press($, clock, edit('m'))).toEqual({ text: '', cursor: 0 })
-  expect(JSON.stringify(session.appended())).not.toContain('The thread answered')
   await clock.advance(800)
   await clock.settle()
-  expect(JSON.stringify(session.appended())).toContain('The thread answered: Links peaked that day')
+  expect(JSON.stringify(session.appended())).not.toContain('The thread answered')
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"m"')
 })
 
-test('typing in the ask line is never interrupted: the ask line keeps the ring while the question is typed, every letter reaches the thread, and the line empties after the send', async ($, on) => {
+test('typing in the ask line is never interrupted: the panel opens on it, the ask line keeps the ring while the question is typed, every letter reaches the thread, and the line empties after the send', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()
-  // ↵ on the selected part, then e: the bar shows its details and examples; the part's cell takes the ring
-  await ui.press({ key: 'r|pane|1|day-2026-06-18' })
-  await clock.settle()
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   // which element takes the ring when the pane takes the keyboard (its autoFocus)
   const ringer = async () => ((await ui.findAll({})) as Any[]).find(x => x.props?.autoFocus)?.key as string | undefined
+  // the panel opens on its input bar: every character typed is the question's
+  await ui.redraw()
+  expect(await ringer()).toMatch(/^ask-\d+$/)
+  // ↑ moves the ring onto the parts: the selected part's cell has it, and its rows show on a press
+  await $.ui.focus({ requestId: 'object', element: await partKey($, 'day-2026-06-18'), origin: { kind: 'person' } } as never)
+  await clock.settle()
+  await ui.press({ key: 'side-act:rows' })
+  await clock.settle()
+  await $.ui.focus({ requestId: 'object', element: await partKey($, 'day-2026-06-18'), origin: { kind: 'person' } } as never)
+  await clock.settle()
   await ui.redraw()
   expect(await ringer()).toMatch(/^g\|pane\|\d+$/)
   // the first letter reaches the prompt (the ring was on the part), and the pane draws again before the ask line has
@@ -346,7 +337,7 @@ test('typing in the ask line is never interrupted: the ask line keeps the ring w
   await clock.settle()
   await ui.redraw()
   expect(await ringer()).toBe(await askKeyOf($))
-  expect(await hintOf($)).toContain('↵ ask · esc back to the card')
+  expect(await hintOf($)).toContain('esc clears the question')
   // letters that come faster than the ring (a burst, each drawn at once) join the question in order
   for (const c of 'hich') { await $.prompt.edit(edit(c)); await ui.redraw() }
   await clock.settle()
@@ -361,7 +352,7 @@ test('typing in the ask line is never interrupted: the ask line keeps the ring w
   await ui.redraw()
   expect(await ringer()).toBe(last)
   expect(JSON.stringify(await ui.drawn())).toContain('"value":"which models"')
-  // ↵ asks the thread with the whole question; the line empties (a field drawn afresh) and the ring goes back to the part
+  // ↵ asks the thread with the whole question; the line empties (a field drawn afresh) and keeps the ring for the next
   await ui.input({ key: last, text: 'which models are these?' })
   await clock.settle()
   expect(w.spawns.length).toBe(1)
@@ -369,8 +360,8 @@ test('typing in the ask line is never interrupted: the ask line keeps the ring w
   await ui.redraw()
   expect(JSON.stringify(await ui.drawn())).not.toContain('"value":"which')
   expect(await askKeyOf($)).not.toBe(last)
-  expect(await ringer()).toMatch(/^g\|pane\|\d+$/)
-  expect(await hintOf($)).toContain('type to ask about Jun 18')
+  expect(await ringer()).toMatch(/^ask-\d+$/)
+  expect(await hintOf($)).toContain('esc close')
 })
 
 test('with no detail open, a prompt goes to Claude as always', async ($, on) => {
@@ -381,7 +372,7 @@ test('with no detail open, a prompt goes to Claude as always', async ($, on) => 
 })
 
 
-test('a card is a program: its own keys reach it in the open detail, the state it answers with is kept for the browser, and ask(selection) scopes the next question', async ($, on) => {
+test('a card is a program: its own keys reach it in the open detail, and stand as presses above the input bar; the state it answers with is kept for the browser, and ask(selection) scopes the next question', async ($, on) => {
   // the program as the sandbox would run it: j steps a day (k.on('j')), a asks about the days it has selected (k.ask)
   const prep = (input: Any) => {
     const at = Number(input.state?.at ?? 0)
@@ -395,10 +386,13 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   const clock = mock.clock(on)
   mock.session(on)
   await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
-  await pane($, clock)
-  // the bar names the card's own keys beside the detail's
-  expect(await hintOf($)).toContain('j next day · a ask about these')
-  // j is the card's: the program runs with the key, and its new state is what the detail draws and the browser opens
+  // the card's own keys stand in words above the input bar, beside what the detail offers; the bar names none
+  expect(await pane($, clock)).toContain('Rows · Code · Earlier version · next day · ask about these')
+  expect(await hintOf($)).not.toContain('next day')
+  // with the ring on the card's parts (↑ from the input bar), j is the card's: the program runs with the key, and its
+  // new state is what the detail draws and the browser opens
+  await $.ui.focus({ requestId: 'object', element: await partKey($, 'day-2026-06-18'), origin: { kind: 'person' } } as never)
+  await clock.settle()
   expect(await press($, clock, edit('j'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(x => x.event?.type === 'key' && x.event.key === 'j' && x.event.region === 'day-2026-06-18')).toBe(true)
@@ -406,11 +400,12 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   expect(kept).toMatchObject({ state: { at: 1 }, region: 'day-2026-06-18', by: 'terminal' })
   await pane($, clock)
   expect(w.preps.at(-1).state).toMatchObject({ at: 1 })
-  // a: the program asks about its own selection; the next question goes to the card's thread with those rows
-  await clock.advance(1000)
-  expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
+  // `ask about these`, a press: the program asks about its own selection; the next question goes to the card's
+  // thread with those rows
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
+  await ui.press({ key: 'side-key:a' })
   await clock.settle()
-  expect(await hintOf($)).toContain('type to ask about 2 days from Jun 17')
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about 2 days from Jun 17')
   const r = await $.prompt.submit({ text: 'what changed between them?', origin: { kind: 'composer' } } as never)
   await clock.advance(100)
   expect(String((r as Any).drop)).toContain("asked the card's thread about 2 days from Jun 17")
@@ -418,7 +413,7 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   expect(String(w.spawns[0]?.prompt)).toContain('the selection "2 days from Jun 17" in the card')
   expect(String(w.spawns[0]?.prompt)).toContain('q1#day=2026-06-17, q1#day=2026-06-18')
   // the selection was for that question: the next one is about the part again
-  expect(await hintOf($)).toContain('type to ask about Jun 18')
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about Jun 18')
 })
 
 test('a prompt after the pane has gone goes to Claude, even when the module still marks the detail open', async ($, on) => {
@@ -469,6 +464,10 @@ test('one selection, one highlight: the ring stands on the selected part, and st
   expect(await selected()).toBe(0)
   let ring = (await marked())!
   expect(ring).toMatch(/^g\|pane\|\d+$/)
+  // the panel opens on its input bar; ↑ from it lands the ring on the selected part's cell
+  await $.ui.focus({ requestId: 'object', element: ring, origin: { kind: 'person' } } as never)
+  await draw()
+  expect(await selected()).toBe(0)
   let landed = 0
   // ↓ twenty times: the engine proposes the gutter cell after the ring's; each lands on the next part, past the
   // window's edge too, and the ring is put on that part's own cell (never another part's)
@@ -492,54 +491,50 @@ test('one selection, one highlight: the ring stands on the selected part, and st
   expect(textOf(await ui.drawn())).not.toContain('Step 0 ')
 })
 
-test('on a tall card, e shows what it opens: the window moves to the bar under the card, and the wheel moves the window', async ($, on) => {
-  // a tall card: 30 steps, one row each, in a pane of 16 rows (4 of them the input bar); the first step has examples
+test('on a tall card, Rows opens the rows under the conversation while the card stays where it was; the wheel moves the card', async ($, on) => {
+  // a tall card: 30 steps, one row each, in a pane of 24 rows (4 of them the input bar); the first step has examples
   const steps = Array.from({ length: 30 }, (_, i) => region(`step-${i}`, `Step ${i}`, i, i === 0 ? 'ex-18' : undefined))
   const TALL = { ...DRAWING, root: { t: 'stack', kids: steps }, regions: steps.map(x => ({ id: x.id, meta: x.meta })) }
   world(on, () => TALL)
   const clock = mock.clock(on)
-  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 16, offset: 0 } } } as never
+  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 24, offset: 0 } } } as never
   await $.command.run({ command: 'card', args: '01-saves step-0' } as never)
   const ui = await $.ui.mount({ plugin: 'thimble', ...(SMALL as Any) } as never)
   const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
   await draw()
-  expect(textOf(await ui.drawn())).toContain('Step 0 ')
-  // e: the examples open under the card, and the window shows them
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await ui.drawn())).toContain('Step 0 ▆')
+  // Rows, a press above the input bar: the rows open right above it, and the card stays at the selected part
+  await ui.press({ key: 'side-act:rows' })
   await draw()
   const shown = textOf(await ui.drawn())
-  expect(shown).toContain('1 of 6,543')
   expect(shown).toContain('Hello agents, sign below.')
-  expect(shown).toContain('Step 29')
-  // the wheel up over the pane: the window moves up, rows of the card come back into view
-  const wheel = (by: number) => $.ui.scroll({ component: 'Pane', requestId: 'object', offset: 0, by, bodyRows: 16, contentRows: 16, origin: { kind: 'person' } } as never)
-  expect(shown).not.toContain('Step 20')
-  for (let i = 0; i < 8; i++) await wheel(-1)
+  expect(shown).toContain('Step 0 ▆')
+  expect(shown).not.toContain('Step 29')
+  // the wheel over the pane moves the card's window; the rows stay where they are
+  const wheel = (by: number) => $.ui.scroll({ component: 'Pane', requestId: 'object', offset: 0, by, bodyRows: 24, contentRows: 24, origin: { kind: 'person' } } as never)
+  for (let i = 0; i < 12; i++) await wheel(1)
   await draw()
-  expect(textOf(await ui.drawn())).toContain('Step 20')
-  expect(textOf(await ui.drawn())).not.toContain('Hello agents')
-  // past the top it stops at the top: the next tick down moves it at once
+  expect(textOf(await ui.drawn())).not.toContain('Step 0 ▆')
+  expect(textOf(await ui.drawn())).toContain('Hello agents, sign below.')
+  // past the top it stops at the top
   for (let i = 0; i < 60; i++) await wheel(-1)
   await draw()
-  expect(textOf(await ui.drawn())).toContain('Step 0 ')
-  for (let i = 0; i < 5; i++) await wheel(1)
-  await draw()
-  expect(textOf(await ui.drawn())).not.toContain('Step 0 ')
+  expect(textOf(await ui.drawn())).toContain('Step 0 ▆')
 })
 
-test('the bar says the keys of what is on top of the focus stack: the detail gone, they are gone', async ($, on) => {
+test('the bar says what is on top of the focus stack: the detail open, what esc does there; the detail gone, the verbs again', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
-  // the detail: its keys
+  // the detail: esc, and no key of the panel's
   await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
-  expect(await hintOf($)).toContain('↑↓ part')
-  // the pane goes (the module learns it as a prompt comes): the detail leaves the stack, and the bar says no key of it
+  expect(await hintOf($)).toContain('esc close')
+  expect(await hintOf($)).not.toContain('↑↓ part')
+  // the pane goes (the module learns it as a prompt comes): the detail leaves the stack, and the bar says nothing of it
   w.opened.length = 0
   await $.prompt.submit({ text: 'and across all the runs?', origin: { kind: 'composer' } } as never)
   await clock.settle()
-  expect(await hintOf($)).not.toContain('↑↓ part')
-  expect(await hintOf($)).not.toContain('type to ask')
+  expect(await hintOf($)).not.toContain('esc close')
 })
 
 test('a terminal too narrow for the docked detail: the waiting pane is closed again, the keys stay the chat\'s, and a toast says what opens it', async ($, on) => {

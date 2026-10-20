@@ -67,11 +67,17 @@ that work at that moment, so you do not need to learn them first.
 | `{` `}` | Pick an earlier or a later reply. |
 | `esc` or `0` | Close. Claude Code keeps `esc` at the prompt, so it closes the side panel and what opens over it; `0` closes the rest. |
 
-A citation opens in a tray above the prompt: `r` shows its rows, `c` the code behind it, and `a` lets you ask a
-question about it in a side thread that the main conversation does not see.
+A citation opens in a tray above the prompt: `r` shows its rows, `c` the code behind it, and `a` opens it in the
+side panel, its whole source with a side thread that the main conversation does not see.
 
-A card opens in a detail view beside the chat: arrow keys select a part, `↵` shows its details, `e` its example rows,
-`p` its program and `h` its earlier versions. Text you type there is a question for that card's side thread.
+A card opens in a side panel beside the chat, and so do a label, Coverage and the thread list. The panel works with
+clicks alone, and with the keys you would expect: what you type there is a question for its side thread, `↑` `↓` move
+through its parts, `↵` opens one, and `esc` goes back. What a thing there offers (a card's Rows and Code, a label's
+Definition) is a row of words above the panel's input bar, and what one opens shows right above it. `t` at the prompt
+lists the side threads.
+
+A card or an answer that counts by a label shows the label under it, its values in their colors; a click opens the
+label: its values over its records, the records themselves, and how it was made.
 
 If you type a word that starts with one of these letters, thimble gives the letter back to the prompt.
 

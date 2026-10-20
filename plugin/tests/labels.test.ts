@@ -41,7 +41,7 @@ type Any = any
 declare const setTimeout: (fn: (value?: unknown) => void, ms: number) => unknown
 
 /** The label the kernel holds in these tests: its records, which wait for the model until answers come for them. */
-type Kept = { waiting: { ref: string; text: string }[]; batch: number; values: Record<string, string>; failed: Record<string, string>; answers: number }
+type Kept = { waiting: { ref: string; text: string }[]; batch: number; values: Record<string, string>; failed: Record<string, string>; answers: number; broken?: boolean; run?: Any }
 const RECORDS = (n: number) => Array.from({ length: n }, (_, i) => ({ ref: `chat/room.jsonl#L${i + 1}`, text: `message ${i + 1}` }))
 
 function world(on: Any, kept: Kept = { waiting: [], batch: 50, values: {}, failed: {}, answers: 0 }) {
@@ -66,12 +66,18 @@ function world(on: Any, kept: Kept = { waiting: [], batch: 50, values: {}, faile
     const at = e.argv.indexOf('label')
     // the model's reads: the records that wait, and the answers written back (the card saved again when none wait)
     if (at >= 0 && e.argv.includes('--waiting')) {
+      if (kept.broken) return ok('{"name": "apology", "units": [')
       const refs = kept.waiting.map(u => u.ref)
-      const batches = Array.from({ length: Math.ceil(refs.length / kept.batch) }, (_, i) => refs.slice(i * kept.batch, (i + 1) * kept.batch))
-      return ok({ name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: false, units: kept.waiting, batches })
+      const all = Array.from({ length: Math.ceil(refs.length / kept.batch) }, (_, i) => refs.slice(i * kept.batch, (i + 1) * kept.batch))
+      // `--waiting N`: the records of the first N batches, and how many wait in all
+      const first = Number(e.argv[e.argv.indexOf('--waiting') + 1]) || all.length
+      const batches = all.slice(0, first)
+      const keep = new Set(batches.flat())
+      return ok({ name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: false, units: kept.waiting.filter(u => keep.has(u.ref)), waiting: refs.length, batches })
     }
     if (at >= 0 && e.argv.includes('--answers')) {
       const got = JSON.parse(String(e.init?.stdin || '{}'))
+      if (got.run) kept.run = got.run
       if (!e.argv.includes('--json')) return ok('')
       kept.answers++
       Object.assign(kept.values, Object.fromEntries(Object.entries(got.values || {}).map(([r, v]) => [r, (v as Any).value])))
@@ -226,6 +232,36 @@ test('a label written while the command still runs is read then: a chained `--wa
   expect(JSON.parse(w.files['/home/t/.thimble/lean/shown/s-1.json']!).under[ROW.slice(0, 24)].map((x: Any) => `${x.id}@${x.v}`)).toEqual(['02-label-apology@2'])
 })
 
+test('a large label is read a wave at a time: each read of the waiting records asks for one wave, so its output stays small', async ($, on) => {
+  const w = world(on, { waiting: RECORDS(40), batch: 1, values: {}, failed: {}, answers: 0 })
+  const clock = mock.clock(on)
+  on('model.complete', (_$: unknown, e: Any) => ({ value: yes(e) }) as never)
+  w.files[EVENTS] = asked(Date.now() / 1000 + 5, false)
+  on('tool.call', () => ({ result: '' }))
+  await $.tool.call({ tool: 'Bash', command: 'thimble label apology --again' } as never)
+  for (let i = 0; i < 40 && Object.keys(w.kept.values).length < 40; i++) { await new Promise(r => setTimeout(r, 5)); await clock.settle() }
+  const reads = w.runs.filter(r => r.includes('--waiting'))
+  expect(reads.every(r => r[r.indexOf('--waiting') + 1] === '16')).toBe(true)
+  // 40 records in three waves of 16, 16 and 8 calls, then one read that finds none waiting
+  expect(w.kept.answers).toBe(3)
+  expect(reads.length).toBe(4)
+  expect(Object.keys(w.kept.values).length).toBe(40)
+  expect(w.toasts).toEqual([])
+})
+
+test('reads that stop tell the label why, so a `thimble label NAME --wait` stops too, and the person sees a toast', async ($, on) => {
+  const w = world(on, { waiting: RECORDS(6), batch: 3, values: {}, failed: {}, answers: 0, broken: true })
+  const clock = mock.clock(on)
+  on('model.complete', (_$: unknown, e: Any) => ({ value: yes(e) }) as never)
+  w.files[EVENTS] = asked(Date.now() / 1000 + 5, false)
+  on('tool.call', () => ({ result: '' }))
+  await $.tool.call({ tool: 'Bash', command: 'thimble label apology --again' } as never)
+  for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 5)); await clock.settle() }
+  expect(w.kept.run.state).toBe('failed')
+  expect(w.kept.run.error).toContain('the label apology could not be read')
+  expect(w.toasts.join('\n')).toContain('label apology: the label apology could not be read')
+})
+
 test('a call that fails says so plainly: a toast with what failed, and the label keeps what the other calls gave', async ($, on) => {
   const w = world(on, { waiting: RECORDS(6), batch: 3, values: {}, failed: {}, answers: 0 })
   const clock = mock.clock(on)
@@ -241,47 +277,33 @@ test('a call that fails says so plainly: a toast with what failed, and the label
   expect(w.toasts.join('\n')).toContain('--again')
 })
 
-test("the detail of a label's card: each example shows its labels; a number key checks the record shown, which steps on; when the detail closes the card is counted again and Claude hears of the checks", async ($, on) => {
+test("the detail of a label's card: the rows behind a value show each record's labels; the panel takes no number keys (a record is checked in the label's own panel)", async ($, on) => {
   const w = world(on)
-  const session = mock.session(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '02-label-apology value-0' } as never)
   await pane($, clock)
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
+  // rows behind it, a press above the input bar: the value's records, each with the values labels gave it
+  const ui = await $.ui.mount({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 100, scroll: { bodyRows: 40, offset: 0 }, isFocused: true, placement: 'dock', title: 'apology', view: {} } } as never)
+  await ui.press({ key: 'side-act:rows' })
+  await clock.settle()
   const t = await pane($, clock)
-  expect(t).toContain('1 of 3')
+  expect(t).toContain('1–3 of 3')
   expect(t).toContain('I am sorry, I broke the build.')
   expect(t).toContain('apology: yes · model 0.90: says sorry')
-  // the bar names the keys that check it, by the label's values
+  // the bar names no key that checks it, and a number key is the start of a question, never a check
   const hint = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never))
-  expect(hint).toContain('1 yes · 2 no')
-  // 1 agrees with the first record; 2 says the second is no: each is the person's check, and the examples step on
-  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
-  await pane($, clock)
+  expect(hint).not.toContain('1 yes')
   expect(await press($, clock, edit('2'))).toEqual({ text: '', cursor: 0 })
-  const after = await pane($, clock)
-  const checks = w.runs.filter(r => r.includes('--check')).map(r => r.slice(r.indexOf('label')).join(' '))
-  expect(checks).toEqual(['label apology --check chat/room.jsonl#L1 yes --json', 'label apology --check chat/room.jsonl#L3 no --json'])
-  expect(after).toContain('3 of 3')
-  // flipped back, the checked records say so
-  await press($, clock, edit('['))
-  expect(await pane($, clock)).toContain('apology: yes → you: no')
-  // the pane is gone (a close the module did not hear): before the next prompt to main, Claude reads the checks in a row
-  // of its own
-  w.opened.length = 0
-  await $.prompt.submit({ text: 'so?', origin: { kind: 'composer' } } as never)
-  expect(w.runs.some(r => r.slice(-3).join(' ') === 'label apology --json')).toBe(true)
-  const note = (session.appended() as unknown as { message: { content: { text?: string }[] } }[]).map(r => String(r.message.content[0]?.text ?? '')).join('\n')
-  expect(note).toContain('The analyst checked 2 records of the label apology: they agree with 1 and changed 1: chat/room.jsonl#L3 (the label said yes, the analyst says no)')
-  expect(note).toContain('its counts are now query q9')
+  expect(w.runs.some(r => r.includes('--check'))).toBe(false)
 })
-
 test('a label shows on what is drawn: the details of any card\'s part say how its rows split by each label that holds them', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '03-per-agent agent-29' } as never)
   await pane($, clock)
-  expect(await press($, clock, edit('enter'))).toEqual({ text: '', cursor: 0 })
+  const ui = await $.ui.mount({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 100, scroll: { bodyRows: 40, offset: 0 }, isFocused: true, placement: 'dock', title: 'Messages', view: {} } } as never)
+  await ui.press({ key: 'side-act:rows' })
+  await clock.settle()
   const t = await pane($, clock)
   expect(t).not.toContain('16 rows')
   expect(t).toContain('label apology: 3 yes · 13 no')

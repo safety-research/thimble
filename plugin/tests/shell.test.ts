@@ -301,7 +301,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   // the tray's keys are in the bar under it, not on its frame
   expect(card.split('╯')[0]).not.toContain('a ask')
   // with the keys of the card's sections: the rows behind the value, and its code
-  expect(await hintOf($)).toContain('thimble  ↵ e expand · r rows · c code · a ask · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  a open · r rows · c code · 0 close · ] next')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
 })
@@ -325,14 +325,14 @@ test('a quote opens its span under its file\'s place, never an address; c shows 
     expect(buttons(band).map(b => b.props.label)).toContain('open revisions.jsonl:28')
     expect(textOf(band)).toContain('revisions.jsonl:28')
     expect(JSON.stringify(band)).not.toContain('file://')
-    expect(await hintOf($)).toContain('thimble  ↵ e expand · c raw · a ask · 0 close · ] next')
+    expect(await hintOf($)).toContain('thimble  a open · c raw · 0 close · ] next')
     // c: the record as the file holds it, in place of the span, in the same panel
     expect(await press($, clock, edit('c'))).toEqual({ text: '', cursor: 0 })
     let now = textOf(await $.ui.render(BAND))
     expect(now).toContain('revisions.jsonl:28, as the file holds it')
     expect(now).not.toContain('27 an earlier save')
     expect(now).toContain('cite · revisions.jsonl · raw')
-    expect(await hintOf($)).toContain('thimble  ↵ e expand · c raw · a ask · 0 back · ] next')
+    expect(await hintOf($)).toContain('thimble  a open · c raw · 0 back · ] next')
     // 0 brings the span back; the tray stays open
     expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
     now = textOf(await $.ui.render(BAND))
@@ -515,7 +515,7 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  expect(await hintOf($)).toContain('thimble  ↵ e expand · a ask · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  a open · 0 close · ] next')
   await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
   await press($, clock, edit('['))
@@ -644,10 +644,10 @@ test('with the tray open, 1 opens the citation in the side panel as its thread, 
   expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
   expect(opened.some(x => x.id === 'object' && /Cite · 6,543 saves/.test(String(x.title)))).toBe(true)
   expect(textOf(await $.ui.render(BAND))).not.toContain('╭─ 6,543 saves')
-  // the bar names the thread and says what typing does
+  // the bar names the thread and what esc does there, and no key of the panel's
   const bar = await hintOf($)
   expect(bar).toContain('thimble:main/6,543 saves')
-  expect(bar).toContain('type to ask about 6,543 saves')
+  expect(bar).toContain('esc close')
 })
 
 test("a resumed session finds its messages on disk: their marks open from the keys, and the keys act on its latest answer", async ($, on) => {
@@ -737,12 +737,14 @@ test('the bar is one row above the prompt: the verbs in words at its left, a lit
   let underlined = false
   walk(rest, x => { if (x.type === 'Text' && x.props?.underline && textOf(x) === 'thimble') underlined = true })
   expect(underlined).toBe(false)
-  // inside a thread (the side panel on a citation) the bar's label names it, and its left side is that thread's keys
+  // inside a thread (the side panel on a citation) the bar's label names it, and its left side says what esc does
+  // there and nothing more: the panel names no keys
   await press($, clock, edit(']'))
   await press($, clock, edit('1'))
   const inThread = textOf(await $.ui.render(HINT))
   expect(inThread).toContain('thimble:main/6,543 saves')
-  expect(inThread).toContain('type to ask about 6,543 saves · esc close')
+  expect(inThread).toContain('esc close')
+  expect(inThread).not.toContain('type to ask')
 })
 
 /** One more answer of Claude's: a turn (the person's prompt or not) whose last words are `text`, ended as `reason`. */

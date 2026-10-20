@@ -12,12 +12,17 @@
 //   nextState(was, drawing)    the state a program answered with, or the state it had
 //   same(a, b)                 two states the same
 //   wantsOpen(drawing, got)    the wants of a drawing the host has not got yet
+//   actionsOf(drawing)         what a pane offers above the side panel's input bar: its `act:<id>` handlers, each
+//                              [{event, words, on}] in the order defined (`act:<id>:on` is one open now); the host
+//                              draws them as presses, the open one bold, and draws the program's `side:opened` region (what
+//                              an action opened) right above them
+//   backOf(drawing)            where the pane's esc goes back to, in its words (the esc handler's label), or null
 
 /** How the bar shows a key name. */
 export const KEY_SHOW = { space: 'space', return: '↵', enter: '↵', up: '↑', down: '↓', left: '←', right: '→', esc: 'esc', escape: 'esc', tab: 'tab', backspace: '⌫', '-': '−' }
 const ARROW = /^[↑↓←→]$/
 
-const SKIP = /^(press|brush|hover|focus|key|tick|input)(:|$)/
+const SKIP = /^(press|brush|hover|focus|key|tick|input|act)(:|$)/
 
 /** The keys a program takes, as the bar says them. A key that turns a knob one step (kit.js probes each key: `turn`)
  *  says which way, in plain words: two keys a program labelled `chapter` read `n next chapter · p previous chapter`. */
@@ -40,7 +45,7 @@ export function keysOf(drawing) {
 
 /** A key's words in the bar: its label, and for a key that turns a knob one step, which way (`next chapter`), unless
  *  the label says so already. */
-function turnWords(h, drawing) {
+export function turnWords(h, drawing) {
   const label = String(h?.label || '').trim()
   const t = h?.turn
   if (!label || !t || !t.dir || /\b(next|previous|prev|back|forward|earlier|later|up|down|more|less|in|out)\b/i.test(label)) return label
@@ -105,6 +110,26 @@ export function nextState(was, drawing) {
   return drawing && drawing.state && typeof drawing.state === 'object' && !drawing.error ? drawing.state : (was || {})
 }
 
+/** What a pane offers above the side panel's input bar: its `act:<id>` handlers with their words, in order. Each is
+ *  pressed as the event {type: 'act:<id>'}. */
+export function actionsOf(drawing) {
+  const on = Array.isArray(drawing?.on) ? drawing.on : []
+  return on.filter(h => /^act:[\w.-]+(:on)?$/.test(String(h?.name || '')) && h.label).map(h => ({ event: String(h.name), words: String(h.label), on: /:on$/.test(String(h.name)) }))
+}
+
+/** The rows of a drawing's `side:opened` region, what an action opened, which the side panel draws right above its actions
+ *  and its input bar: the first of them, or the drawing's height when it has none. */
+export function belowAt(grid) {
+  const r = ((grid && grid.regions) || []).find(x => x && x.id === 'side:opened')
+  return r && r.rects && r.rects.length ? Math.min(...r.rects.map(q => q.y)) : (grid ? grid.h : 0)
+}
+
+/** Where a pane's esc goes back to, as its handler names it (`labels`), or null when esc is not the pane's. */
+export function backOf(drawing) {
+  const h = (Array.isArray(drawing?.on) ? drawing.on : []).find(x => x && x.name === 'esc')
+  return h ? String(h.label || 'back') : null
+}
+
 /** The wants of a drawing that are not in `got`. */
 export function wantsOpen(drawing, got) {
   return (Array.isArray(drawing?.wants) ? drawing.wants : []).filter(w => !got || !Object.prototype.hasOwnProperty.call(got, w.key))
@@ -158,8 +183,9 @@ export function hostKeys(mode, surface = 'terminal') {
 
 // ---------------------------------------------------------------- the one bar, in the room it has
 // The bar is one line: `thimble  v visualize · s squeeze · c 9 claims      t 2 threads · r seen 34%`. With
-// less room it gives up, in this order: the counts (coverage last), then each key's words beyond their first word
-// (`visualize`, `squeeze`, `cite`), then the label, then the end of the line (an ellipsis). It never wraps.
+// less room it gives up, in this order: the counts other than coverage, then each key's words beyond their first word
+// (`visualize`, `squeeze`, `cite`), then coverage, then the label, then the end of the line (an ellipsis). It never
+// wraps. Coverage stays longest: it is what the session has seen of the folder, which no key shows.
 //
 //   bar: {label, left: [{key, words, short?, ...}], counts: [{id, text, ...}]}
 //   barLadder(bar) -> the bar at each step, fullest first
@@ -191,9 +217,10 @@ export function barLadder(bar) {
   const steps = []
   let b = { label: bar.label || '', left: (bar.left || []).slice(), counts: (bar.counts || []).slice() }
   steps.push(b)
-  // the counts, one at a time, coverage last
+  // the counts, one at a time, all but coverage
   const order = [...b.counts].sort((x, y) => (COUNT_ORDER.indexOf(x.id) + 1 || 99) - (COUNT_ORDER.indexOf(y.id) + 1 || 99) || 0)
-  for (const c of order) {
+  const cov = order.filter(c => c.id === 'cov')
+  for (const c of order.filter(x => x.id !== 'cov')) {
     b = { ...b, counts: b.counts.filter(x => x !== c) }
     steps.push(b)
   }
@@ -206,6 +233,16 @@ export function barLadder(bar) {
     if (short === left[i].words) continue
     left[i] = { ...left[i], words: short, shortened: true }
     b = { ...b, left: left.slice() }
+    steps.push(b)
+  }
+  // a long label (the thread the panel shows) to its start, so coverage keeps its place
+  if (b.label && Array.from(b.label).length > LABEL_SHORT) {
+    b = { ...b, label: cutEnd(b.label, LABEL_SHORT) }
+    steps.push(b)
+  }
+  // then coverage
+  for (const c of cov) {
+    b = { ...b, counts: b.counts.filter(x => x !== c) }
     steps.push(b)
   }
   // the label last
@@ -228,4 +265,6 @@ export function fitBar(bar, width, measure = s => Array.from(String(s)).length) 
   return { ...steps[steps.length - 1], cut: true }
 }
 
+/** How long a label stays once the bar is short of room: `thimble:main/02-…`. */
+const LABEL_SHORT = 16
 const cutEnd = (s, n) => (Array.from(String(s)).length <= n ? String(s) : Array.from(String(s)).slice(0, Math.max(1, n - 1)).join('') + '…')

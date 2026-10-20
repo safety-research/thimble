@@ -3,8 +3,8 @@
 // prompt at the bottom. A question's answer shows in that conversation, never in place of the thing and never in main;
 // a later question joins the run of an agent still working, else starts a new fork told the earlier turns; a citation
 // in an answer opens over the thing and esc goes back; the bar's
-// `t N threads` lists the threads and opening one shows its panel again with its conversation; m sends a thread's last
-// answer to main. `claude plugin test plugin`. The drawing and `thimble resolve` are answered here, at process.run.
+// `t N threads` lists the threads (never from inside a thread) and opening one shows its panel again with its
+// conversation; nothing of a thread reaches main. `claude plugin test plugin`. The drawing and `thimble resolve` are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 import { press, promptStub } from './stubs'
 
@@ -170,6 +170,12 @@ test("a card's thread with three questions: each answer shows in the panel's con
   expect(one).toContain('about Jun 18')
   expect(one).toContain('1 step · thimble rows')
   expect(one).toContain('● Links peaked that day: 2,994 of the saves.')
+  // spaced as Claude Code spaces the main view: a blank row before the question, before its steps and before the answer
+  const rows = JSON.stringify(await $.ui.render(PANE))
+  const blank = '{"type":"Text","children":[" "]}'
+  const between = (a: string, b: string) => rows.slice(rows.indexOf(a), rows.indexOf(b))
+  expect(between('about Jun 18', '● 1 step')).toContain(blank)
+  expect(between('● 1 step', 'Links peaked')).toContain(blank)
   // the card stays at the top: the answer never takes its place
   expect(one).toContain('Jun 17 ▆')
   // a second question, after the agent ended: a new fork, told the earlier turns (an ended agent resumed would end
@@ -219,7 +225,10 @@ test('a citation in an answer opens over the card in the panel, as its own threa
   await clock.settle()
   expect(w.opened.some(x => x.title === 'Cite · 2,994')).toBe(true)
   const shown = await pane($, clock)
-  expect(shown).toContain('╭─ 2,994')
+  // its subject once, at the top, as every thread's, under the way back to the card
+  expect(shown).toContain('‹ the card')
+  expect(shown).toContain('▎ 2,994')
+  expect(shown).not.toContain('╭─ 2,994')
   expect(shown).not.toContain('v1 · v2')
   // its own thread: a question here is about the citation
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"placeholder":"Ask about 2,994…"')
@@ -232,16 +241,19 @@ test("a citation's thread: a in the tray opens the citation in the side panel wi
   const clock = mock.clock(on)
   await markedTurn($, clock)
   await press($, clock, edit(']'))
-  expect(await hintOf($)).toContain('a ask')
+  // one way to open a citation in the side panel: a open (↵ does the same where Claude Code hands it on)
+  expect(await hintOf($)).toContain('a open')
+  expect(await hintOf($)).not.toContain('expand')
   // a acts once a letter after it could no longer make it the start of a word
   expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(800)
   await clock.settle()
   expect(w.opened.some(x => x.title === 'Cite · 6,543 saves')).toBe(true)
-  // the tray gives way to the panel; the bar says how to ask, and the thread's name
+  // the tray gives way to the panel; the bar says the thread's name and what esc does, the input bar how to ask
   const bar = await hintOf($)
   expect(bar).toContain('thimble:main/6,543 saves')
-  expect(bar).toContain('type to ask about 6,543 saves')
+  expect(bar).toContain('esc close')
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"placeholder":"Ask about 6,543 saves…"')
   // the question's letters go to the input bar, never the prompt
   for (const k of 'why') expect(await press($, clock, edit(k))).toEqual({ text: '', cursor: 0 })
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"why"')
@@ -260,7 +272,7 @@ test("a citation's thread: a in the tray opens the citation in the side panel wi
   expect(w.submitted.length).toBe(0)
 })
 
-test('t lists the threads in the side panel (the bar says t N threads); the selected thread shows under the list, and opening one shows its panel again with its conversation', async ($, on) => {
+test('the thread list opens from the prompt, never from inside a thread: t in the panel is a letter of the question; the bar\'s threads opens the list, which has no input bar, and a press on a row opens that thread', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   // a card's thread, and the thread of a citation in its answer
@@ -275,88 +287,40 @@ test('t lists the threads in the side panel (the bar says t N threads); the sele
   await ask($, clock, 'from which wiki?')
   await w.answer($, clock, 'agent-2', 'Mostly wiki A.')
   await pane($, clock)
-  // t in the panel, followed at once by a letter, begins a question: no list
+  // t in the panel, alone, is a letter of the question: no list
   const opens = w.opened.length
   expect(await press($, clock, edit('t'))).toEqual({ text: '', cursor: 0 })
-  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(800)
   await clock.settle()
   expect(w.opened.slice(opens).some(x => x.title === 'Threads')).toBe(false)
-  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"th"')
-  // (the question is sent; the keys go back to the citation)
-  const ui2 = await mounted($)
-  await ui2.input({ key: await askKeyOf($), text: 'the total?' })
-  // (agent-2 had ended: a new fork answers)
-  await w.answer($, clock, 'agent-3', 'About 3,000.')
-  await pane($, clock)
-  // t alone: the list, over the citation, once a moment has passed
-  expect(await press($, clock, edit('t'))).toEqual({ text: '', cursor: 0 })
-  await clock.advance(800)
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"t"')
+  // the bar's threads opens the list
+  const band = await $.ui.mount({ ...(BAND as Any) } as never)
+  await band.press({ key: 'bar-item-threads' })
   await clock.settle()
   expect(w.opened.some(x => x.title === 'Threads')).toBe(true)
   const list = await pane($, clock)
+  expect(list).toContain('▎ Threads')
   expect(list).toContain('main/2,994')
   expect(list).toContain('main/Saves per day')
-  // the newest first, selected: its conversation under the list, and the input bar asks it
-  expect(list).toContain('About 3,000.')
-  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"placeholder":"Ask about 2,994…"')
-  // a row of two lines is one stop of the ring: ↓ onto its second line goes on to the next thread
-  await $.ui.focus({ requestId: 'object', element: 'r|side|2|t0', origin: { kind: 'person' } } as never)
-  await clock.settle()
-  await $.ui.focus({ requestId: 'object', element: 'r|side|3|t0', origin: { kind: 'person' } } as never)
-  await clock.settle()
-  expect(await pane($, clock)).toContain('Links peaked that day')
-  await $.ui.focus({ requestId: 'object', element: 'r|side|3|t0', origin: { kind: 'person' } } as never)
-  await clock.settle()
-  expect(await pane($, clock)).toContain('About 3,000.')
-  // the card's row, pressed twice (select, then open): the card at the top again, its conversation under it
+  // the list is no thread: no conversation and no input bar under it
+  expect(list).not.toContain('Mostly wiki A.')
+  expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"placeholder"')
+  // a press on the card's row opens it: the card at the top again, its conversation under it, the way back to the list
   const ui3 = await mounted($)
   const row = keysIn(await ui3.drawn()).find(k => /^r\|side\|\d+\|t1$/.test(k))!
   expect(row).toBeDefined()
-  await ui3.press({ key: row })
-  await clock.settle()
-  expect(await pane($, clock)).toContain('Links peaked that day')
   await ui3.press({ key: row })
   await clock.settle()
   const opened = await pane($, clock)
   expect(opened).toContain('Jun 17 ▆')
   expect(opened).toContain('❯ why so many links?')
   expect(opened).toContain('Links peaked that day: 2,994 of the saves.')
+  expect(opened).toContain('‹ Threads')
   expect(await hintOf($)).toContain('esc back')
-  // the bar counts both threads beside the panel's keys, and /threads lists them too
   expect(w.submitted.length).toBe(0)
   const r = await $.command.run({ command: 'threads', args: '' } as never)
   expect((r as Any).text).toBeUndefined()
-})
-
-test("m sends the thread's last answer to main once a moment has passed; a letter typed at once makes m the start of a question instead", async ($, on) => {
-  const w = world(on)
-  const clock = mock.clock(on)
-  const session = mock.session(on)
-  await markedTurn($, clock)
-  await press($, clock, edit(']'))
-  await press($, clock, edit('1'))
-  await ask($, clock, 'why so high?')
-  await w.answer($, clock, 'agent-1', 'Most were reverts.')
-  await pane($, clock)
-  expect(await hintOf($)).toContain('m send to main')
-  // m then a letter at once: the question "ma…", nothing sent
-  expect(await press($, clock, edit('m'))).toEqual({ text: '', cursor: 0 })
-  expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
-  await clock.advance(800)
-  await clock.settle()
-  expect(JSON.stringify(session.appended())).not.toContain('Most were reverts')
-  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"ma"')
-  const ui = await mounted($)
-  await ui.input({ key: await askKeyOf($), text: 'many reverts?' })
-  await w.answer($, clock, 'agent-1', 'Most were reverts.')
-  await pane($, clock)
-  // m alone: sent, as a row Claude reads with the next prompt
-  expect(await press($, clock, edit('m'))).toEqual({ text: '', cursor: 0 })
-  await clock.advance(800)
-  await clock.settle()
-  expect(JSON.stringify(session.appended())).toContain('The thread answered: Most were reverts.')
-  expect(w.toasts.some(t => t.startsWith('Sent the thread'))).toBe(true)
 })
 
 test("a card a thread's agent saves is drawn under its answer in the panel; a new version of the card shown above is named, not drawn again", async ($, on) => {
@@ -385,7 +349,7 @@ test('a terminal too narrow for the panel: 1 in the tray leaves the tray as it w
   await press($, clock, edit('1'))
   expect(w.toasts.at(-1)).toBe('The side panel needs 144 columns when a key opens it (120 now). Type /threads to open it here, or widen the terminal.')
   // the keys are the chat's again, and the tray still shows the citation
-  expect(await hintOf($)).toContain('a ask')
+  expect(await hintOf($)).toContain('a open')
   expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   const n = w.opened.length
   await $.command.run({ command: 'threads', args: '' } as never)

@@ -232,6 +232,28 @@ def test_wait_waits_once_the_calls_are_picked_up(root: Path):
     assert r.returncode == 0 and "still 6 records waiting after 2s" in r.stdout
 
 
+def test_waiting_gives_one_wave_of_batches_and_counts_every_waiting_record(root: Path, monkeypatch: pytest.MonkeyPatch):
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    st = Store(root)
+    w = LB.waiting(st, "apology")
+    assert w["waiting"] == 6 and len(w["units"]) == 6 and len(w["batches"]) == 1
+    # in batches of two records: the first two batches only, while `waiting` still counts all six
+    monkeypatch.setattr(LB, "batches", lambda units: [[u["ref"] for u in units[i:i + 2]] for i in range(0, len(units), 2)])
+    first = LB.waiting(st, "apology", first=2)
+    assert first["waiting"] == 6 and len(first["batches"]) == 2
+    assert [u["ref"] for u in first["units"]] == [r for b in first["batches"] for r in b] == [u["ref"] for u in w["units"][:4]]
+    out = json.loads(run(root, "label", "apology", "--waiting", "1").stdout)
+    assert out["waiting"] == 6 and len(out["batches"]) == 1 and len(out["units"]) == 6
+
+
+def test_wait_stops_when_the_reads_stopped_and_says_why(root: Path):
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "running"}}))
+    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "failed", "error": "the label apology could not be read"}}))
+    r = run(root, "label", "apology", "--wait", "30")
+    assert r.returncode == 1 and "the model's calls stopped: the label apology could not be read" in r.stdout and "--again" in r.stdout
+
+
 def test_the_label_viewer_reads_a_page_of_records_with_their_values_and_the_labels_with_their_definitions(root: Path):
     run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     run(root, "label", "sorry", "--check", "chat/room.jsonl#L2", "yes")
@@ -252,3 +274,31 @@ def test_the_label_viewer_reads_a_page_of_records_with_their_values_and_the_labe
     assert page["total"] == 6 and [x["i"] for x in page["records"]] == [4, 5]
     # the viewer's reads are not in --help, which Claude reads
     assert "--records" not in run(root, "label", "--help").stdout
+
+
+def test_a_card_or_a_citation_names_the_labels_it_rests_on(root: Path):
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    run(root, "label", "fixes", "--in", "chat/*.jsonl", "--regex", "(?i)fix|revert")
+    st = Store(root)
+    # a query that reads a label (use) rests on it, and one built on that query rests on it too
+    q1 = Q.run(st, "sorry per agent", 'df = load("chat/*.jsonl")\n'
+               'df = df.merge(use("sorry")[["_ref", "sorry"]], on="_ref")\n'
+               'tally(df, ["agent", "sorry"])\n')
+    assert q1["labels"] == ["sorry"]
+    q2 = Q.run(st, "agents who apologized", f'd = use("{q1["id"]}")\nd[d.sorry == "yes"]\n')
+    q3 = Q.run(st, "fixes by label_rows", 'tally(label_rows("fixes"), "fixes")\n')
+    assert q3["labels"] == ["fixes"]
+    plain = Q.run(st, "rows per agent", 'tally(load("chat/*.jsonl"), "agent")\n')
+    # a card on the first query, the label's own card, and a card that reads no label
+    card = O.save(st, "apologies", {"title": "Apologies", "program": "return k.text('x')", "data": {"rows": q1["id"]}})
+    plain_card = O.save(st, "agents", {"title": "Agents", "program": "return k.text('x')", "data": {"rows": plain["id"]}})
+    lab = LB.load(st, "sorry")
+    by = LB.used_by(st, [card["id"], lab["card"], f"{q2['id']}#agent=wren@n", f"{lab['query']}#sorry=yes@n", q3["id"],
+                         plain_card["id"], plain["id"], "chat/room.jsonl#L1", "no-such-card"])
+    assert by == {card["id"]: ["sorry"], lab["card"]: ["sorry"], f"{q2['id']}#agent=wren@n": ["sorry"],
+                  f"{lab['query']}#sorry=yes@n": ["sorry"], q3["id"]: ["fixes"]}
+    # the command answers with each label's head, for the shell to draw its values in their colors
+    got = json.loads(run(root, "label", "--used-by", card["id"], q3["id"], "--json").stdout)
+    assert got["by"] == {card["id"]: ["sorry"], q3["id"]: ["fixes"]}
+    assert [x["name"] for x in got["labels"]] == ["fixes", "sorry"] and got["labels"][1]["values"] == ["yes", "no"]
+    assert "--used-by" not in run(root, "label", "--help").stdout

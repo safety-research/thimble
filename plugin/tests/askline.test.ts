@@ -125,27 +125,27 @@ test('a field with the ring is never drawn afresh: a letter that came through th
   expect(String(w.spawns[0]?.prompt)).toMatch(/\n\nwhy\n\nAbout/)
 })
 
-test('a question sent or let go gives the keys back to the card, even when the drawing the terminal has still puts the ring on the ask line', async ($, on) => {
+test('a question sent empties the ask line, which keeps the keys for the next question; no letter is a key of the panel', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await open($, clock)
   expect(await press($, clock, edit('w'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   const field = (await askLine($)).key
-  expect(textOf(await $.ui.render(HINT))).toContain('↵ ask · esc back to the card')
-  // the question is asked: the line empties (as esc empties it), and the pane takes the keys again
+  expect(textOf(await $.ui.render(HINT))).toContain('esc clears the question')
+  // the question is asked: the line empties, a field drawn afresh that takes the ring for the next question
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await ui.input({ key: field, text: 'why' })
   await clock.settle()
   expect(w.spawns.length).toBe(1)
-  // the drawing the terminal still has puts the ring on the ask line: it goes to the selected part
-  await $.ui.focus({ requestId: 'object', element: field, origin: plugin } as never)
-  expect(w.focused.at(-1)).toMatch(/^g\|pane\|\d+$/)
   for (let i = 0; i < 2; i++) { await $.ui.render(PANE); await clock.settle() }
-  // the keys are the card's: the bar names them, and e is the detail's, never the start of a question
-  const hint = textOf(await $.ui.render(HINT))
-  expect(hint).not.toContain('↵ ask')
-  expect(hint).toContain('type to ask about Row 2')
-  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   expect((await askLine($)).value).toBe('')
+  expect((await askLine($)).key).not.toBe(field)
+  // (the field the ring starts on when the pane takes the keyboard)
+  expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  expect(textOf(await $.ui.render(HINT))).toContain('esc close')
+  // e is no key of the panel's: it begins the next question
+  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect((await askLine($)).value).toBe('e')
 })

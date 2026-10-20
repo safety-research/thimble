@@ -226,12 +226,14 @@ test('c opens the Claims pane in the side panel: the count, the graph of claims 
   expect(t).toMatch(/corrects\s+○\s+The tilt in the edits is one editor/)
   // a claim linked to it is a dot drawn on a tinted ground, not a row of words
   expect(t).not.toMatch(/same topic as|supported by|from “/)
-  // no key hints in the pane: they are in the bar, with what a typed question is about
+  // no key hints in the pane, and none of the panel's in the bar but what esc does; the input bar says what a typed
+  // question is about
   expect(t).not.toContain('esc')
   const bar = await hint($)
   expect(bar).toContain('thimble:main/Claims')
-  expect(bar).toContain('↑↓ move · ↵ message')
-  expect(bar).toContain('type to ask about claim: The tilt is two editors')
+  expect(bar).toContain('esc close')
+  expect(bar).not.toContain('↑↓ move')
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about claim: The tilt is two editors')
 })
 
 test('the ring on a dot selects its claim, with its evidence read through the kernel under it; a press on a row of evidence opens it over the pane', async ($, on) => {

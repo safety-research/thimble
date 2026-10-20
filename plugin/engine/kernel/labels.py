@@ -391,8 +391,9 @@ def check(st: Store, name: str, ref: str, value: str | None) -> dict[str, Any]:
 # ------------------------------------------------------------------ the model's part (prompt labels)
 
 
-def waiting(st: Store, name: str, cut: int = UNIT_CHARS) -> dict[str, Any]:
-    """The records that wait for the model, with the text it reads, and the label's definition."""
+def waiting(st: Store, name: str, cut: int = UNIT_CHARS, first: int | None = None) -> dict[str, Any]:
+    """The records that wait for the model, with the text it reads, and the label's definition. With `first`, only the
+    records of the first `first` batches (a wave of calls), so the answer stays small; `waiting` counts them all."""
     lab = load(st, name)
     if lab is None:
         raise LabelError(f"no label {name!r}")
@@ -411,8 +412,14 @@ def waiting(st: Store, name: str, cut: int = UNIT_CHARS) -> dict[str, Any]:
             continue
     units = [{"ref": r, "text": texts[r]} for r in refs if r in texts]
     gone = [r for r in refs if r not in texts]
+    total = len(units)
+    bs = batches(units)
+    if first:
+        bs = bs[:first]
+        keep = {r for b in bs for r in b}
+        units = [u for u in units if u["ref"] in keep]
     return {"name": lab["name"], "version": lab.get("version"), "definition": lab.get("rule") or "", "values": lab["values"],
-            "reason": bool(lab.get("reason")), "units": units, "gone": gone, "batches": batches(units)}
+            "reason": bool(lab.get("reason")), "units": units, "waiting": total, "gone": gone, "batches": bs}
 
 
 def batches(units: list[dict[str, Any]], items: int = BATCH_ITEMS, chars: int = BATCH_CHARS) -> list[list[str]]:
@@ -533,6 +540,56 @@ def of_refs(st: Store, refs: list[str]) -> dict[str, dict[str, Any]]:
                 e["was"] = c.get("was")
             out.setdefault(ref, {})[lab["name"]] = e
     return out
+
+
+def used_by(st: Store, refs: list[str]) -> dict[str, list[str]]:
+    """The labels each ref rests on, for the refs that rest on one: {ref: [label names]}. A query rests on the labels its
+    code read (use() or label_rows()), the label whose counts it is, and those of the queries it used; an object (a
+    card) on the label it draws and those of every query in its lineage; a citation on those of what it cites."""
+    from . import objects as O
+    from . import query as Q
+
+    labs = [x for x in (load(st, n) for n in names(st)) if x]
+    known = {lab["name"] for lab in labs}
+    counts_of = {lab["query"]: lab["name"] for lab in labs if lab.get("query")}
+    memo: dict[str, set[str]] = {}
+
+    def of_query(qid: str, q: dict[str, Any] | None = None, seen: frozenset[str] = frozenset()) -> set[str]:
+        if qid in memo:
+            return memo[qid]
+        if qid in seen:
+            return set()
+        q = q if q is not None else (Q.get(st, qid) or {})
+        out = set(q.get("labels") or [])
+        if qid in counts_of:
+            out.add(counts_of[qid])
+        for u in q.get("uses") or []:
+            if u.get("label"):
+                out.add(str(u["label"]))
+            used = u.get("query")
+            if used and used != qid:
+                out |= of_query(str(used), None, seen | {qid})
+        memo[qid] = out
+        return out
+
+    result: dict[str, list[str]] = {}
+    for ref in refs:
+        stem = str(ref).split("#")[0].split("@")[0]
+        found: set[str] = set()
+        if re.fullmatch(R.QUERY_ID, stem):
+            found = of_query(stem)
+        else:
+            oid = O.find_id(st, stem)
+            obj = O.load(st, oid) if oid else None
+            if obj:
+                if isinstance(obj.get("label"), str):
+                    found.add(obj["label"])
+                for qid, q in ((obj.get("lineage") or {}).get("queries") or {}).items():
+                    found |= of_query(qid, q if isinstance(q, dict) else None)
+        found_names = sorted(n for n in found if n in known)
+        if found_names:
+            result[ref] = found_names
+    return result
 
 
 def head(lab: dict[str, Any]) -> dict[str, Any]:

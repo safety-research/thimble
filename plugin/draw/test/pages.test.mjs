@@ -7,7 +7,7 @@ import '../kit.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf, turn } from '../handoff.js'
 import { runProgram } from '../sandbox-node.mjs'
 import { gridText, renderTerm } from '../term.js'
-import { barText, keysOf } from '../../panes/host.js'
+import { actionsOf, barText, keysOf } from '../../panes/host.js'
 import PANES from '../../panes/index.js'
 import { editsOf, stepVersion } from '../../shell/carddetail.js'
 
@@ -105,35 +105,22 @@ test('every page at once answers as each page would: a press on page 3 runs at p
   assert.deepEqual(turn(one, { chapter: 2 }, 'chapter', 1), { chapter: 3 })
 })
 
-test('the detail: a shows every page or one at a time, , and . go a page on or back, and a part named from outside finds its page', () => {
+test('the detail shows every page at once from the one the card is at, and a part named from outside finds its page; one page at a time, a page\'s part is the card\'s own', () => {
   const store = (drawing, state) => PANES.detail.data({ 'card:01-orchard': { object: GUIDE, drawing, versions: [{ v: 1 }], v: 1, state } }, { id: '01-orchard' }, { w: 90, h: 30 })
   const run = (data, o = {}) => globalThis.DrawKit.run(PANES.detail.program, data, { w: 90, h: 30, mode: 'pane', ...o })
   const all = store(runProgram(GUIDE, { w: 80, mode: 'detail', all: true, state: { chapter: 2 } }), { chapter: 2 })
   // at rest: the heading of the page the card is at
-  let d = run(all)
+  const d = run(all)
   assert.equal(d.selected, 'pg2~~')
-  assert.match(barText([d]), /a chapter by chapter/)
-  // the card's own keys turn the chapter, so , and . are not named, and they go to the next heading
-  assert.ok(!barText([d]).includes('next chapter'))
-  d = run(all, { event: { type: 'key', key: '.' } })
-  assert.deepEqual(d.state.region, 'pg3~~')
-  d = run(all, { state: { region: 'pg3~~tree-0' }, event: { type: 'key', key: ',' } })
-  assert.deepEqual(d.state.region, 'pg2~~')
+  // the detail names no key of its own: the pages turn by the card's own dial and keys, or a press on a heading
+  assert.equal(barText([d]), 'esc back')
   // the card's own part, named from outside, is that part on the page the card is at
   assert.equal(run(all, { state: { region: 'tree-2' } }).selected, 'pg2~~tree-2')
-  // a: one at a time, the part kept; one page at a time, a page's part is the card's own
-  assert.deepEqual(run(all, { state: { region: 'pg2~~tree-1' }, event: { type: 'key', key: 'a' } }).state, { region: 'pg2~~tree-1', pages: 'one' })
   const one = store(runProgram(GUIDE, { w: 80, mode: 'detail', state: { chapter: 2 } }), { chapter: 2 })
   assert.equal(run(one, { state: { region: 'pg2~~tree-1', pages: 'one' } }).selected, 'tree-1')
-  assert.match(barText([run(one)]), /a all chapters/)
-  // a card with no own keys for its pages: , and . are named, and turn the knob
-  const bare = { ...GUIDE, program: GUIDE.program.replace(/k\.on\('[np]'[^\n]*\n/g, '') }
-  const plain = store(runProgram(bare, { w: 80, mode: 'detail', state: { chapter: 2 } }), { chapter: 2 })
-  assert.match(barText([run(plain)]), /, previous chapter · \. next chapter/)
-  assert.deepEqual(run(plain, { event: { type: 'key', key: '.' } }).effects, [{ state: { chapter: 3 }, knob: 'chapter', do: 'card' }])
 })
 
-test('versions: none listed by number; the card as first made and after each change the analyst asked for, which h steps through', () => {
+test('versions: none listed by number; the card as first made and after each change the analyst asked for, which Earlier version steps through', () => {
   const o = { version: 7, history: [1, 2, 3, 4, 5, 6, 7].map(v => ({ v, at: String(v) })) }
   // no change the analyst asked for: nothing to step through, whatever the kernel kept
   assert.deepEqual(editsOf(o, []), [])
@@ -142,21 +129,22 @@ test('versions: none listed by number; the card as first made and after each cha
   assert.deepEqual(vs, [{ v: 3, n: 0 }, { v: 5, n: 1 }, { v: 7, n: 2 }])
   assert.equal(stepVersion(vs, 7), 5)
   assert.equal(stepVersion(vs, 3), 7)
-  // the header: no number; "edited" at the card now, where it stands when stepped back
+  // the subject: no number; "edited" at the card now, where it stands when stepped back; a step is an action in words
   const data = PANES.detail.data({ 'card:01-orchard': { object: GUIDE, drawing: runProgram(GUIDE, { w: 80, mode: 'detail' }), versions: vs, v: 7, state: {} } }, { id: '01-orchard' }, { w: 90, h: 30 })
-  const head = d => gridText(renderTerm(d, { w: 90 })).split('\n')[0]
+  const line = d => gridText(renderTerm(d, { w: 90 })).split('\n')[1]
   const now = globalThis.DrawKit.run(PANES.detail.program, data, { w: 90, h: 30, mode: 'pane' })
-  assert.match(head(now), /edited$/)
-  assert.ok(!/\bv\d/.test(head(now)), head(now))
-  assert.match(barText([now]), /h earlier version/)
-  assert.match(head(globalThis.DrawKit.run(PANES.detail.program, { ...data, v: 5 }, { w: 90, h: 30, mode: 'pane' })), /after change 1$/)
+  assert.match(line(now), /^▎ card · edited\s*$/)
+  assert.ok(!/\bv\d/.test(line(now)), line(now))
+  assert.deepEqual(actionsOf(now).map(a => a.words), ['Rows', 'Code', 'Earlier version'])
+  assert.deepEqual(globalThis.DrawKit.run(PANES.detail.program, data, { w: 90, h: 30, mode: 'pane', event: { type: 'act:version' } }).effects, [{ v: 5, do: 'version' }])
+  assert.match(line(globalThis.DrawKit.run(PANES.detail.program, { ...data, v: 5 }, { w: 90, h: 30, mode: 'pane' })), /after change 1\s*$/)
   const first = globalThis.DrawKit.run(PANES.detail.program, { ...data, v: 3 }, { w: 90, h: 30, mode: 'pane' })
-  assert.match(head(first), /as first made$/)
-  assert.match(barText([first]), /h newest version/)
-  // a card never changed so: no word in the header, and h is no key
+  assert.match(line(first), /as first made\s*$/)
+  assert.deepEqual(actionsOf(first).map(a => a.words), ['Rows', 'Code', 'Newest version'])
+  // a card never changed so: no word in the subject, and no version action
   const plain = globalThis.DrawKit.run(PANES.detail.program, { ...data, versions: [] }, { w: 90, h: 30, mode: 'pane' })
-  assert.ok(!/edited|first made/.test(head(plain)))
-  assert.ok(!/\bh /.test(barText([plain])))
+  assert.ok(!/edited|first made/.test(line(plain)))
+  assert.deepEqual(actionsOf(plain).map(a => a.words), ['Rows', 'Code'])
 })
 
 test('a page heading is its value when the value is words; a knob only one page has is still a knob of the card', () => {
