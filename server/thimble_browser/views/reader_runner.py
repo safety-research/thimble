@@ -21,7 +21,7 @@ from typing import Any
 
 def install_thimble(path: str) -> None:
     m = types.ModuleType("thimble")
-    m.__file__, m.WS = path, "/tmp"
+    m.__file__, m.WS = path, os.environ.get("TMPDIR") or "/tmp"  # the run's own folder
     with open(path, encoding="utf-8") as f:
         exec(compile(f.read(), path, "exec"), m.__dict__)
     sys.modules["thimble"] = m

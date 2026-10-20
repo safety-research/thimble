@@ -11,9 +11,10 @@ It keeps the page of thimble 0.8 and puts a new, small server behind it.
 
 ## Start
 
-You need [uv](https://docs.astral.sh/uv/), Node 20 or later, and credentials for the Claude API: Workload Identity
+You need [uv](https://docs.astral.sh/uv/), Node 22.12 or later, and credentials for the Claude API: Workload Identity
 Federation (`--wif ORG`, which reads the org's IDs from `~/.thimble/orgs/org-<org>.env`), or an API key you paste in
-Settings. Card code runs in a sandbox (on Linux, bubblewrap: `apt install bubblewrap`).
+Settings. On a Mac with Homebrew: `brew install uv node`. Card code runs in a sandbox, which on Linux also needs
+bubblewrap (`apt install bubblewrap`); see [Sandbox](#sandbox).
 
 ```
 scripts/thimble-browser path/to/folder --wif org-a
@@ -35,7 +36,7 @@ From another machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:842
 - Generative views: ask for a view in the chat, and a builder writes one (a reader and a page on thimble's view kit) that
   appears in the Files tab when it passes its checks. Its reader runs in the sandbox, its page in a frame with no network.
 
-Not yet: labels, the orientation, checks, settings, and card code on macOS.
+Not yet: labels, the orientation, checks and settings.
 
 ## How it works
 
@@ -49,6 +50,34 @@ Not yet: labels, the orientation, checks, settings, and card code on macOS.
 - `prompts/browser/` holds what Claude reads. The parts about writing for the person, citing and explaining terms are
   the terminal plugin's own text, copied into `prompts/terminal/` by `scripts/sync-terminal-prompts` and named in
   `prompts/shared.json`. A test checks that they match.
+
+## Sandbox
+
+Code that Claude writes, a card's code and a view's reader, runs only in a sandbox. Each run is a new process that
+sees the folder of files (read-only), the Python libraries, and an empty folder of its own for temporary files, which
+is deleted when the run ends. It does not see your home folder, thimble browser's own folder (`~/.thimble-browser`),
+the server's environment (no keys, no tokens), or the network, 127.0.0.1 included. A run is stopped when its time is
+up.
+
+The sandbox is Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime), pinned to one version in
+`server/sandbox/package.json`. It uses Seatbelt (`sandbox-exec`, part of macOS) on macOS and bubblewrap on Linux.
+`scripts/thimble-browser` installs it the first time (`npm ci` in `server/sandbox`), so all it needs is Node, and on
+Linux bubblewrap. If no sandbox works, code does not run, and the card and the server's first lines say why and what
+to install. `--no-sandbox` runs code without one (not recommended).
+
+To test the sandbox on your machine, with no sign-in:
+
+```
+scripts/thimble-browser --check-sandbox
+```
+
+It runs a small card, then cards that try to write into the folder, read your home folder and thimble browser's
+folder, reach the network, see the server's environment, keep a file for the next run, and run past their time. It
+prints one line per check, pass or FAIL.
+
+How the two systems differ: on Linux the sandbox shows only the system's libraries, the Python and the folder, and
+every other top folder (`/tmp` among them) is empty. On macOS it shows the system and hides where people's files are:
+`/Users`, `/Volumes` and the temp folders.
 
 ## Tests
 

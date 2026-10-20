@@ -1,7 +1,8 @@
 """Runs one card's code and prints its outputs as JSON. The server starts this file in a sandbox (sandbox.py), one
 process per run, so no state lasts between runs and a card's code is all it needs.
 
-Input, one JSON object on stdin: {"code", "corpus", "workspace", "timeout"}.
+Input, one JSON object on stdin: {"code", "corpus", "timeout"}, and "workspace", by default the run's own folder
+($TMPDIR).
 Output, one JSON object on stdout: {"status": "ok" | "error", "outputs": [bundle, ...], "frame": {...} | null}.
 
 A bundle is a dict of mime type to data, as a Jupyter kernel sends it, which the canvas draws unchanged:
@@ -155,7 +156,7 @@ def main() -> int:
     req = json.loads(sys.stdin.read() or "{}")
     code = str(req.get("code") or "")
     corpus = str(req.get("corpus") or ".")
-    workspace = str(req.get("workspace") or ".")
+    workspace = str(req.get("workspace") or os.environ.get("TMPDIR") or ".")  # the run's own folder
     timeout = float(req.get("timeout") or 60)
     os.environ.setdefault("MPLBACKEND", "Agg")
     os.environ.setdefault("MATPLOTLIBRC", str(HERE / "matplotlibrc"))
