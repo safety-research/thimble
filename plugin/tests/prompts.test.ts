@@ -45,13 +45,13 @@ test('the first data command of a session carries the card guide, once; a save o
     expect((await bash($, command)).context ?? []).toEqual([])
   }
   await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:v3', 'thimble run']])
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:v4', 'thimble run']])
 })
 
 test('thimble sources first: the guide comes with whichever data command runs first', async ($, on) => {
   const w = world(on)
   const r = await bash($, 'thimble sources')
-  expect(r.context[0]).toContain('The card guide (forms:v3')
+  expect(r.context[0]).toContain('The card guide (forms:v4')
   await w.clock.advance(100)
   expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['thimble sources'])
 })
@@ -85,4 +85,21 @@ test('a version that does not exist: the default is read, and one line says so',
   const w = world(on, { THIMBLE_PROMPTS: 'squeeze:v99' })
   expect((await bash($, 'thimble sources')).context.length).toBe(1)
   expect(w.toasts.some(t => t.includes('no version squeeze:v99, so squeeze stays at v6'))).toBe(true)
+})
+
+test("a conversation's first message carries one thimble block: thimble is on here, so the skill comes for a question about these files", async ($, on) => {
+  const w = world(on)
+  on('prompt.context', () => ({ blocks: [{ name: 'currentDate', text: 'Today is Jun 18.' }] }))
+  const r = (await ($ as Any).prompt.context({ blocks: [] })) as Any
+  expect(r.blocks.map((b: Any) => b.name)).toEqual(['currentDate', 'thimble'])
+  expect(r.blocks[1].text).toContain('PROMPT context:v1')
+  await w.clock.advance(100)
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.prompt)).toEqual(['context:v1'])
+})
+
+test('the thimble block can be turned off: THIMBLE_PROMPTS=context:off sends none', async ($, on) => {
+  world(on, { THIMBLE_PROMPTS: 'context:off' })
+  on('prompt.context', () => ({ blocks: [] }))
+  const r = (await ($ as Any).prompt.context({ blocks: [] })) as Any
+  expect(r.blocks).toEqual([])
 })

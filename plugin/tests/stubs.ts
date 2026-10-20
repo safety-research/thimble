@@ -8,6 +8,7 @@ const STUBS: Record<string, string> = {
   'lens-actions/v4': 'LENS actions',
   'lens-squeeze/v2': 'LENS squeeze',
   'lens-explain/v3': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
+  'lens-explain/v4': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive one explain mark at most this time.',
   'squeeze/v6': 'THE PROMPT',
   'thread/v2': 'THE THREAD PROMPT',
   'labels/v2': 'LABEL {{NAME}} | {{VALUES}}\n{{RECORDS}}',
@@ -15,7 +16,7 @@ const STUBS: Record<string, string> = {
 
 /** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */
 export function promptStub(path: string): string | undefined {
-  // the card guide (forms:v3 reads it whole)
+  // the card guide (forms:v4 reads it whole)
   if (/\/skills\/thimble\/cards\.md$/.test(path)) return '# The card guide\n\n## What makes a good card\n\nTHE WORKED FORMS'
   const m = /\/prompts\/([^/]+)\/([^/]+)\.md$/.exec(path)
   if (!m) return undefined

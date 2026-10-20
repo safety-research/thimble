@@ -1,6 +1,6 @@
 ---
 name: thimble
-description: Use when you read, count or explain what is in files for an analyst (agent transcripts, logs, CSV or JSONL records, databases, diffs, docs). The `thimble` command keeps where each value came from, saves what you make as a card, and says what you did not read.
+description: Use when you read, count or explain what is in files for an analyst, such as agent transcripts, logs, CSV or JSONL records, databases, code, diffs and docs. The `thimble` command keeps where each value came from, saves what you make as a card, and says what you did not read.
 ---
 
 # thimble
@@ -19,8 +19,8 @@ them valuable time and attention.
   Use their terminology whenever possible. Use simple, concise, straightforward language that a bright fifteen-year-old
   could follow. Write about 80% of the way to ASD-STE100 Simplified Technical English: short sentences, common words,
   one term for one thing, and one action per instruction. Write a date month first, as in "Jun 18" or "Jun 18 13:05".
-  When you need a term or a concept they have not used, explain it the first time, since a name you made up or a field
-  name from the data may mean nothing to them.
+  When you need a term or a concept they have not used, explain it the first time, since a name you made up, or the
+  name of a field or a function in the files, may mean nothing to them.
 - **Say what you mean in literal words.** A metaphor or a flourish, such as "a smoking gun" for a decisive record or a
   "load-bearing" observation, only makes the analyst expend more cognitive effort trying to read your outputs.
 - **Answer directly.** Answer the question they asked, with the one or two numbers it rests on, each with its base, as
@@ -53,30 +53,36 @@ The analyst never sees your shell output, so the work your answer rests on has t
 
 - **Compute every number over every record with `thimble run`.** It runs your Python over the files as a query, and
   keeps the query's code, the files it read, its output, and the records behind each output row, under an id such as
-  r3. A number read off a chart, a sample or your own reading is a number the analyst cannot check. A later query reads
-  an earlier one's output with `use("r3")`, so nothing is computed twice.
-- **Cite each number and quote your answer rests on.** A citation opens its source in one click. Write it as a
-  Markdown link whose words are the number or the quoted words, as in `[352](r3#outcome=approved@n) of the 410` or
-  `["this test is flaky"](runs/41.jsonl#L88)`, and `[↗](<ref>)` when there are no words to link. Ids appear only
-  inside refs: in prose, name a card by its question and a record by what it shows. When you are not sure where a
-  value came from, run `thimble rows` on its ref before you use it.
+  r3. A later query reads an earlier one's output with `use("r3")`, so nothing is computed twice. A number you got
+  from a shell command (`wc`, `git log`, `grep -c`) has no ref: compute it again in `thimble run`, where a `subprocess`
+  call is fine, or say in the sentence where it came from, as in "git counts 325 commits since v0.8.0".
+- **Cite what your answer rests on, in any kind of files.** A citation opens its source in one click, so the analyst
+  can check a claim without asking you. Put the link on the words the claim rests on: a number links to its query
+  row, as in `[352](r3#outcome=approved@n) of the 410`; a quote, a record or a line of code links to its place in the
+  file, as in `["this test is flaky"](runs/41.jsonl#L88)` or `[the check that drops old sessions](server/auth.py#L88-94)`.
+  A path in backticks, such as `server/auth.py:88`, is not a citation: the analyst has to find the line themselves.
+  Write `[↗](<ref>)` when there are no words to link, and name cards and records by what they show, not by their
+  ids. When you are not sure where a value came from, run `thimble rows` on its ref before you use it.
 - **Draw a shape in a sentence only when the sentence claims one.** `[~](r3@n)` draws column `n` of r3's output in
-  place. It shows a trend, a burst or a spread that the numbers alone hide. Next to a single count it takes the
-  analyst's attention and shows nothing, so one in a message is the most that helps.
-- **Say what you did not read.** Words such as "only", "all", "stopped", "from then on" and "then" are claims about
-  every record or about order, and one record the other way makes the answer false and makes the analyst doubt the
-  rest. `thimble coverage` lists the files this session read or computed over, and those it only searched, only named
-  or counted, or never touched: none of these were read. When a file you did not read could change the answer, say so.
+  place, for a trend, a burst or a spread that the numbers alone hide. One in a message is the most that helps.
+- **Say what you did not read.** Words such as "only", "all", "stopped" and "from then on" are claims about every
+  record or about order, and one record the other way makes the answer false. `thimble coverage` lists what this
+  session read and what it only searched, named or never touched. When a file you did not read could change the
+  answer, say so.
 
 ```
 Analyst   How many refund requests were approved?
 Good      [352](r3#outcome=approved@n) of the 410 refund requests were approved.
-Bad       352 of the 410 refund requests were approved, see the approvals card.
 Bad       352 of the 410 refund requests were approved [352](r3#outcome=approved@n).
+
+Analyst   Why do some users get logged out after a few minutes?
+Good      [The check that ends a session](server/auth.py#L88-94) reads the timeout as seconds, but
+          [the setting](config/app.yaml#L12) gives it in minutes, so a 30-minute timeout ends after 30 seconds.
+Bad       The check is in `server/auth.py:88`, and the timeout comes from `config/app.yaml:12`.
 ```
 
-A link shows its words where it stands. So the second bad answer reads "352 of the 410 refund requests were approved
-352.", and the first gives the analyst nothing to open.
+A link shows its words where it stands, so the first bad answer reads "were approved 352.", and the second gives the
+analyst two paths to look up by hand instead of two lines to open.
 
 ## Cards
 
@@ -85,10 +91,11 @@ takeaway. The question says what the card is for, the content shows the evidence
 representative example), and the takeaway answers the question in a sentence or two. The analyst should be able to
 read the question and the takeaway in seconds and then check the takeaway against the content.
 
-**Your cards are where your work goes, and the chat is where you talk with the analyst.** Put the analysis your answer
-rests on in a card, since the analyst never sees your shell output, and a card lets them see the pattern at a glance
-and open the records behind each part. Answer a quick question that a number or two settles in the chat, without a
-card. thimble draws the card under your reply, so do not repeat its content there.
+**Your cards are where your work goes, and the chat is where you talk with the analyst.** When an answer has a shape,
+such as a pattern, a comparison, a sequence or how parts connect, show it in a card without being asked: the analyst
+sees the shape at a glance and opens the records or the lines of code behind each part. Answer a quick question that a
+number or two settles in the chat, without a card. thimble draws the card under your reply, so do not repeat its
+content there.
 
 **A card is a short program.** Save it with `thimble save NAME --from FILE`: the question as `title`, the takeaway as
 `text` with its numbers cited, the content as `program`, and the query outputs it draws as `data`, such as

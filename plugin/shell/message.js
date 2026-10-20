@@ -21,7 +21,7 @@
 //   inline(text, from, to, marks)    -> one block's content as runs: words with their style, and each mark as one run
 //   wrapRuns(runs, width)            -> the runs cut into lines at spaces; a mark never breaks
 //   tableOf(text, block, marks)      -> a table block's cells as runs
-import { isRef } from './object.js'
+import { citeRef, isRef } from './object.js'
 
 const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
 
@@ -74,6 +74,8 @@ export function codeRanges(text) {
 }
 
 const inside = (ranges, a, b) => ranges.some(([x, y]) => a < y && b > x)
+// a span that lies within one of the ranges (a link whose words hold a code span is not inside code)
+const within = (ranges, a, b) => ranges.some(([x, y]) => a >= x && b <= y)
 
 /** A spark's series: `r4@n` or `r4#n` (the column n of r4's output, in its row order). */
 export function seriesRef(ref) {
@@ -82,25 +84,35 @@ export function seriesRef(ref) {
   return { query: m[1], col: m[2].trim() }
 }
 
-/** Whether a link target is one the layer marks: a kernel ref, or a spark's series. */
-function markable(ref) {
-  return !/^(https?|file|mailto):/i.test(ref) && (isRef(ref) || !!seriesRef(ref))
-}
-
-/** The cites and sparks Claude wrote, in text order. */
+/**
+ * The cites and sparks Claude wrote, in text order: each link to a kernel ref or a spark's series, a link to a file's
+ * line as editors write it (`[words](server/auth.py:88)`, read as `server/auth.py#L88`) or to a whole file, and a code
+ * span that is a file's line alone (`server/auth.py:88-94`), which Claude Code's own habit writes for a place in code.
+ */
 export function linkMarks(text) {
   const s = String(text || '')
   const code = codeRanges(s)
   const out = []
-  for (const m of linkSpans(s)) {
-    const ref = String(m[2]).trim()
+  const links = linkSpans(s)
+  for (const m of links) {
+    const target = String(m[2]).trim()
     const start = m.index
     const end = start + m[0].length
-    if (inside(code, start, end) || !markable(ref)) continue
-    if (SPARK_LABEL.test(m[1])) out.push({ kind: 'spark', start, end, ref, values: null })
-    else if (isRef(ref)) out.push({ kind: 'cite', start, end, ref, label: labelOf(m[1], ref) })
+    if (within(code, start, end)) continue
+    if (SPARK_LABEL.test(m[1])) { if (seriesRef(target) || isRef(target)) out.push({ kind: 'spark', start, end, ref: target, values: null }); continue }
+    const ref = citeRef(target)
+    if (ref) out.push({ kind: 'cite', start, end, ref, label: labelOf(m[1], ref) })
   }
-  return out
+  // a code span that names a file's line, outside a fenced block and outside a link's words
+  const fences = [...s.matchAll(/^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1\2[`~]*[ \t]*(?=\n|$)|$)/gm)].map(m => [m.index, m.index + m[0].length])
+  const linked = links.map(m => [m.index, m.index + m[0].length])
+  for (const [a, b] of code) {
+    if (inside(fences, a, b) || inside(linked, a, b)) continue
+    const inner = s.slice(a, b).replace(/^`+|`+$/g, '').trim()
+    const ref = citeRef(inner, { loose: true })
+    if (ref) out.push({ kind: 'cite', start: a, end: b, ref, label: inner, code: true })
+  }
+  return out.sort((x, y) => x.start - y.start)
 }
 
 /** A citation's words, without its markdown; one whose words are only a sign (`↗`) is named by its place. */
@@ -111,31 +123,48 @@ function labelOf(words, ref) {
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** Where a gloss's term first stands: a whole-word match outside links and code, the exact case first. */
+/** A gloss's term as the observer wrote it, without the backticks of a code span (`hydrate()` is hydrate()). */
+const termOf = term => String(term || '').replace(/`/g, '').trim()
+
+/**
+ * Where a gloss's term first stands: a whole-word match outside links and code, the exact case first. A term may stand
+ * as code, whole (`pytest-xdist`) or in part of its words (`AbovePrompt` hook): the match then takes in the code
+ * spans it holds, backticks and all.
+ */
 export function findTerm(text, term, taken = []) {
-  const t = String(term || '').trim()
+  const t = termOf(term)
   if (!t || t.length > 120) return null
   const s = String(text || '')
-  const blocked = [...codeRanges(s), ...taken.map(m => [m.start, m.end])]
-  // link targets are blocked too, so a term is never found inside a ref
+  const code = codeRanges(s)
+  // link spans and other marks block a term; a code span blocks it unless the match holds the whole span
+  const blocked = taken.map(m => [m.start, m.end])
   for (const m of linkSpans(s)) blocked.push([m.index, m.index + m[0].length])
-  const edge = '(?<![\\p{L}\\p{N}_])'
-  const tail = '(?![\\p{L}\\p{N}_])'
+  const edge = '(?<![\\p{L}\\p{N}_`])'
+  const tail = '(?![\\p{L}\\p{N}_`])'
+  const body = t.split(/\s+/).map(w => '`?' + escapeRe(w) + '`?').join('\\s+')
   for (const flags of ['gu', 'giu']) {
-    const re = new RegExp(edge + escapeRe(t).replace(/\s+/g, '\\s+') + tail, flags)
+    const re = new RegExp(edge + body + tail, flags)
     for (const m of s.matchAll(re)) {
       const a = m.index
       const b = a + m[0].length
-      if (!inside(blocked, a, b)) return { start: a, end: b }
+      if (inside(blocked, a, b)) continue
+      // a code span it touches must lie whole inside it, and a backtick it holds must open or close such a span
+      const touched = code.filter(([x, y]) => a < y && b > x)
+      if (touched.some(([x, y]) => x < a || y > b)) continue
+      const ticks = [...m[0].matchAll(/`/g)].map(x => a + x.index)
+      if (ticks.some(i => !touched.some(([x, y]) => i === x || i === y - 1))) continue
+      return { start: a, end: b }
     }
   }
-  // a term written as code (`pytest-xdist`): the whole code span, backticks and all
-  const want = t.toLowerCase().replace(/\s+/g, ' ')
-  for (const [a, b] of codeRanges(s)) {
-    const inner = s.slice(a, b)
-    if (/^`+[^`]/.test(inner) && inner.replace(/^`+|`+$/g, '').trim().toLowerCase().replace(/\s+/g, ' ') === want && !inside(taken.map(m => [m.start, m.end]), a, b)) return { start: a, end: b }
-  }
   return null
+}
+
+/** Whether a gloss's term stands in the words of a link (a citation), where no explain can be drawn on it. */
+export function inLinkWords(text, term) {
+  const t = termOf(term)
+  if (!t || t.length > 120) return false
+  const re = new RegExp('(?<![\\p{L}\\p{N}_])' + t.split(/\s+/).map(escapeRe).join('[`\\s]+') + '(?![\\p{L}\\p{N}_])', 'iu')
+  return linkSpans(text).some(m => re.test(String(m[1]).replace(/`/g, '')))
 }
 
 // words that never carry a term on their own: a term's other words are tried before these
@@ -214,14 +243,17 @@ export function placeMarks(text, glosses = {}, prev = [], { original = null } = 
   const loose = []
   for (const [id, g] of Object.entries(glosses || {})) {
     const term = g && g.term
+    const end = String(text || '').length
     if (original == null) {
       const at = findTerm(text, term, marks)
       if (at) marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id })
+      else if (inLinkWords(text, term)) loose.push({ kind: 'gloss', start: end, end, gloss: id, loose: true, inLink: true })
       continue
     }
     const at = anchorTerm(text, term, marks)
     if (at) marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id, ...(at.how !== 'term' ? { anchor: at.how } : {}) })
-    else if (findTerm(original, term)) loose.push({ kind: 'gloss', start: String(text || '').length, end: String(text || '').length, gloss: id, loose: true })
+    else if (inLinkWords(text, term)) loose.push({ kind: 'gloss', start: end, end, gloss: id, loose: true, inLink: true })
+    else if (findTerm(original, term) || inLinkWords(original, term)) loose.push({ kind: 'gloss', start: end, end, gloss: id, loose: true })
   }
   return [...marks.sort((a, b) => a.start - b.start), ...loose]
 }
@@ -355,8 +387,8 @@ export function inline(text, from, to, marks = []) {
     const mk = mine.find(m => m.start === i)
     if (mk) {
       const raw = s.slice(mk.start, mk.end)
-      const asCode = mk.kind === 'gloss' && raw.startsWith('`')
-      const words = mk.kind === 'gloss' ? raw.replace(/^`+|`+$/g, '').replace(/\s+/g, ' ') : mk.kind === 'spark' ? sparkChars(mk.values || []) : mk.label
+      const asCode = mk.kind === 'gloss' && /^`[^`]*`$/.test(raw)
+      const words = mk.kind === 'gloss' ? raw.replace(/`+/g, '').replace(/\s+/g, ' ') : mk.kind === 'spark' ? sparkChars(mk.values || []) : mk.label
       push(words, { mark: mk.i, ...(asCode ? { code: true } : {}) })
       i = mk.end
       continue
@@ -568,8 +600,8 @@ export function glossesOf(list, text, skip = []) {
   let n = 0
   for (const g of Array.isArray(list) ? list : []) {
     if (!g || typeof g !== 'object') continue
-    const term = str(g.term, 80)
-    if (!term || seen.has(norm(term)) || !findTerm(text, term)) continue
+    const term = str(termOf(g.term), 80)
+    if (!term || seen.has(norm(term)) || !(findTerm(text, term) || inLinkWords(text, term))) continue
     seen.add(norm(term))
     const refs = (Array.isArray(g.refs) ? g.refs : []).filter(r => typeof r === 'string' && isRef(r)).slice(0, 6)
     out[`g${++n}`] = { term, title: str(g.title, 80) || term, body: str(g.body, 500), here: str(g.here, 400), program: typeof g.program === 'string' ? g.program.slice(0, 3000) : '', refs }

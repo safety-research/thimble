@@ -67,6 +67,8 @@ function world(on: any, replies: string[] = []) {
   // the model: each squeeze call answers with the next reply given
   const calls: Any[] = []
   on('model.complete', async (_$: unknown, e: Any) => {
+    // the observer's look after a turn answers with nothing here, and is not one of the calls these tests count
+    if (/\bFRAME\b|thimble's observer/.test(JSON.stringify(e.system ?? ''))) return { value: { isAnswered: true, text: '{}', usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }
     calls.push(e)
     return { value: { isAnswered: true, text: replies[calls.length - 1] ?? '<text>(no reply left)</text>', usage: { input_tokens: 2000, output_tokens: 120, cache_creation_input_tokens: 0, cache_read_input_tokens: 1500 } } }
   })

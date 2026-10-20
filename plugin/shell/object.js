@@ -25,8 +25,29 @@ export function isRef(s) {
   return typeof s === 'string' && s.length < 2000 && !/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && KERNEL_REF.test(s)
 }
 
+// a file's place as people and editors write it: `server/auth.py:88`, `server/auth.py:88-94` or `:88:5` (a column)
+const FILE_LINE = /^((?:\.{0,2}\/)?[\w@+-][\w@+.-]*(?:\/[\w@+.-]+)*\.[A-Za-z0-9]{1,10}):(\d+)(?:[-–](\d+)|:\d+)?$/
+// a whole file: a relative path with an extension, no scheme, no spaces, no `#`
+const FILE = /^(?:\.{0,2}\/)?[\w@+-][\w@+.-]*(?:\/[\w@+.-]+)*\.[A-Za-z][A-Za-z0-9]{0,9}$/
+
+/**
+ * The kernel ref a citation's target names, or null: a kernel ref as written; a file's line as editors write it,
+ * `path:88` or `path:88-94`, as the line ref `path#L88` or `path#L88-94`; a file's path alone as the whole file.
+ * `loose` (for words that are no link, such as a code span) takes only the line form.
+ */
+export function citeRef(target, { loose = false } = {}) {
+  const t = String(target ?? '').trim()
+  if (!t || t.length >= 2000 || /^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^(mailto|file|data|javascript):/i.test(t)) return null
+  if (!loose && isRef(t)) return t
+  const m = FILE_LINE.exec(t)
+  if (m) return `${m[1]}#L${m[2]}${m[3] ? `-${m[3]}` : ''}`
+  if (!loose && FILE.test(t)) return t
+  return null
+}
+
+// a part's refs as the program named them: a kernel ref, a file's line as editors write it (`app/x.py:12`), or a file
 function listOf(v) {
-  return (Array.isArray(v) ? v : [v]).filter(isRef)
+  return (Array.isArray(v) ? v : [v]).filter(x => typeof x === 'string').map(x => citeRef(x)).filter(Boolean)
 }
 
 /** The region's meta in the drawing, or null. */

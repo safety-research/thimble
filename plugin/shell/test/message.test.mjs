@@ -4,8 +4,9 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { drawnCard, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
-import { anchorTerm, blocks, findTerm, glossesOf, inline, linkMarks, looseOf, marksIn, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
+import { anchorTerm, blocks, findTerm, glossesOf, inLinkWords, inline, linkMarks, looseOf, marksIn, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
+import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../draw/term.js'
 
@@ -304,8 +305,10 @@ test('a term is found again in a rewrite that says it in another form: its words
 test('an explain whose term a rewrite left out stays as a loose mark after the text; the original text never makes one', () => {
   const text = 'All 481 merges had their approval from [the claimer](q19#n). Emergent runs self-approved most.'
   const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: { g1: { term: 'claimer' }, g2: { term: 'Emergent vs managed' }, g3: { term: 'never said' } } })
-  // in the original a term is marked only where it stands as written, outside links: none of these does
-  assert.deepEqual(rec.marks.filter(m => m.kind === 'gloss').map(m => m.gloss), [])
+  // in the original a term is marked where it stands as written, outside links: none of these does; one that stands only
+  // in a citation's words (claimer) is drawn after the text, so the explain stays reachable
+  assert.deepEqual(rec.marks.filter(m => m.kind === 'gloss' && !m.loose).map(m => m.gloss), [])
+  assert.deepEqual(rec.marks.filter(m => m.loose).map(m => [m.gloss, m.inLink]), [['g1', true]])
   const short = 'Every flagged merge was approved by its claimer.'
   const next = remark({ ...rec, shown: short })
   assert.deepEqual(next.marks.map(m => [m.gloss, m.loose ? 'loose' : short.slice(m.start, m.end)]), [['g1', 'claimer']])
@@ -336,4 +339,45 @@ test('a model call that gave no answer is said as what happened, never as its co
   assert.equal(modelWhy({ isAnswered: false, reason: 'empty-reply' }), 'the model answered with no text')
   assert.match(modelWhy({ isAnswered: false, reason: 'aborted' }), /stopped before an answer came/)
   assert.equal(modelWhy(null), 'no answer came back')
+})
+
+test('a citation of code is a mark in the forms Claude writes it: a line ref, a line as editors write it, a whole file, and a code span that names a line', () => {
+  assert.equal(citeRef('server/auth.py#L88-94'), 'server/auth.py#L88-94')
+  assert.equal(citeRef('server/auth.py:88'), 'server/auth.py#L88')
+  assert.equal(citeRef('server/auth.py:88-94'), 'server/auth.py#L88-94')
+  assert.equal(citeRef('README.md'), 'README.md')
+  for (const t of ['docs/', 'foo', 'v0.8.0', 'https://example.com/a.md', 'a b.md']) assert.equal(citeRef(t), null, t)
+  // a code span takes only a file's line: a path alone or a name in backticks stays code
+  assert.equal(citeRef('README.md', { loose: true }), null)
+  const text = [
+    'The rule is at `app/shell.ts:1484`, and [the hook that draws it](app/shell.ts:2282) calls',
+    '[`barEl()`](app/shell.ts#L1419-1490), as [the readme](README.md) says; `README.md` and `barEl()` stay code.',
+    '',
+    '```ts',
+    'see `app/x.ts:3` and [z](r2#n)',
+    '```',
+  ].join('\n')
+  const marks = linkMarks(text)
+  assert.deepEqual(marks.map(m => [m.ref, m.label]), [
+    ['app/shell.ts#L1484', 'app/shell.ts:1484'], ['app/shell.ts#L2282', 'the hook that draws it'],
+    ['app/shell.ts#L1419-1490', 'barEl()'], ['README.md', 'the readme'],
+  ])
+  assert.equal(at(text, marks[0]), '`app/shell.ts:1484`')
+  // the card words cite the same forms
+  assert.deepEqual(linksIn('Hidden by [the check](app/shell.ts:1484).').map(l => l.ref), ['app/shell.ts#L1484'])
+})
+
+test('an explain finds its term written with backticks, or in part as code, and one that stands only in a citation is drawn after the text', () => {
+  const text = 'The `AbovePrompt` hook calls `barEl()`, and [the narrow-bar rule in fitBar](app/host.js#L219) drops the counts.'
+  assert.equal(at(text, findTerm(text, '`barEl()`')), '`barEl()`')
+  assert.equal(at(text, findTerm(text, 'AbovePrompt hook')), '`AbovePrompt` hook')
+  assert.equal(findTerm(text, 'Above'), null)
+  assert.equal(findTerm(text, 'fitBar'), null)
+  assert.equal(inLinkWords(text, 'fitBar'), true)
+  const g = glossesOf([{ term: '`barEl()`', body: 'b' }, { term: 'fitBar', body: 'f' }, { term: 'nowhere', body: 'n' }], text)
+  assert.deepEqual(Object.values(g).map(x => x.term), ['barEl()', 'fitBar'])
+  const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: g })
+  const runs = inline(text, 0, text.length, rec.marks)
+  assert.deepEqual(runs.filter(r => r.mark !== undefined).map(r => [r.s, rec.marks[r.mark].kind]), [['barEl()', 'gloss'], ['the narrow-bar rule in fitBar', 'cite']])
+  assert.deepEqual(looseOf(rec.marks).map(m => [rec.glosses[m.gloss].term, m.inLink]), [['fitBar', true]])
 })

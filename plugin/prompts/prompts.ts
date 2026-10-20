@@ -3,6 +3,9 @@
 // commands to the same choice (so a verb's child reads the same versions), names the versions in use in the session's
 // events, and says in one line when a named version does not exist (it keeps the default).
 //
+// A context block (feature `context`) goes with each conversation's first message: thimble is on here, so Claude loads the
+// thimble skill for a question about these files, a codebase included.
+//
 // The card guide (feature `forms`: skills/thimble/cards.md) comes once per session as context beside the result of
 // Claude's first data command (`thimble run`, `rows`, `resolve` or `sources`, whichever comes first): Claude queries
 // before it draws, so the guide is there before the first card, and a session that never queries never reads it.
@@ -113,6 +116,20 @@ export function registerPrompts(on: Any, _options?: Any): void {
     const r = await next(e)
     R.cardsGiven = false
     return r
+  }).catch(($: Engine, e: Any, next: Any) => next(e))
+
+  // once per conversation, a context block that says thimble is on here: the thimble skill's description alone does not
+  // bring the skill for a question about a codebase, so Claude answered as in a plain session, with nothing cited
+  on('prompt.context', async ($: Engine, e: Any, next: Any) => {
+    const r = await next(e)
+    try {
+      const t = await promptText($, 'context')
+      if (t.off || !t.text.trim()) return r
+      await record($, { kind: 'prompt', feature: 'context', prompt: t.id })
+      return { ...r, blocks: [...(r?.blocks ?? []).filter((b: Any) => b.name !== 'thimble'), { name: 'thimble', text: t.text.trim() }] }
+    } catch {
+      return r
+    }
   }).catch(($: Engine, e: Any, next: Any) => next(e))
 
   // the first data command: the card guide comes beside its result, once per session; Claude reading the guide itself
