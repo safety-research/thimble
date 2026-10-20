@@ -27,7 +27,7 @@ export const SOURCES: { value: 'wif' | 'key'; label: string }[] = [
   { value: 'key', label: 'API key' },
 ]
 export const EXPLAIN_LABEL = 'Explainers'
-export const EXPLAIN_NOTE = 'Claude marks terms in its answers and explains each on hover.'
+export const EXPLAIN_NOTE = 'Claude marks terms in its answers that you may not know; a click on one explains it.'
 export const APPLY_LINE = 'A change applies from Claude’s next request.'
 /** What the key's row shows once a key is saved: never the key. */
 export const KEY_SAVED = 'saved'
