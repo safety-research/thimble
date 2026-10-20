@@ -17,7 +17,7 @@ Settings. On a Mac with Homebrew: `brew install uv node`. Card code runs in a sa
 bubblewrap (`apt install bubblewrap`); see [Sandbox](#sandbox).
 
 ```
-scripts/thimble-browser path/to/folder --wif org-a
+scripts/thimble-browser path/to/folder --wif ORG
 ```
 
 The first run builds the page. The server listens on 127.0.0.1, prints a sign-in link and opens it. Press Enter in
@@ -26,23 +26,30 @@ From another machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:842
 
 ## What works
 
-- The file browser: the tree, readers for JSONL, CSV and Markdown, search in a file and across the folder, hover
+- **The file browser**: the tree; readers for JSONL, CSV, Markdown and agent transcripts, with a timeline mode; SQLite
+  databases, read-only; PDFs at a cited page; images and other media; search in a file and across the folder; hover
   previews of citations.
-- The chat, with threads: ⌘-click a card, a record or a passage to ask about it.
-- Cards on the canvas: plots, tables, diagrams, timelines, examples and notes. Their code runs in the sandbox.
-- Citations: a click opens the file at the cited lines, or the card at the cited value.
-- Explain marks: after each answer, terms you may not know get a teal mark that opens what they mean.
-- The report: Write drafts it from the chat and the cards, with figures and citations, and you edit it in place.
-- Generative views: ask for a view in the chat, and a builder writes one (a reader and a page on thimble's view kit) that
-  appears in the Files tab when it passes its checks. Its reader runs in the sandbox, its page in a frame with no network.
-
-- The orientation: ask for one in the chat, and an agent explores the folder and leaves a deck of cards in the group
+- **The chat**, with threads: ⌘-click a card, a record or a passage to ask about it. Each reply names its model and its
+  token use.
+- **Cards** on the canvas: plots, tables, diagrams, timelines, examples and notes, whose code runs in the sandbox; each
+  card's history, and Undo and Redo for the canvas and the report; comments on cards.
+- **Citations**: a click opens the file at the cited lines, or the card at the cited value.
+- **Explain marks**: after each answer, terms you may not know get a teal mark that opens what they mean.
+- **Labels**: Claude, or you in the label editor, define a category such as "asks for a refund" and apply it to every
+  record of a scope, by a model's reading (many at once), a regex or code. Marks in the Files tab, Color by, the
+  filter, and a label card with counts.
+- **The orientation**: ask for one in the chat, and an agent explores the folder and leaves a deck of cards in the group
   Orientation. Before it finishes, a critic reviews its work for files it never opened, rival accounts and claims no
   call supports, and it revises. A message in its thread continues it.
-- The card check: once an agent's card has its takeaway, one model reading checks it against five criteria and can
+- **The card check**: once an agent's card has its takeaway, one model reading checks it against five criteria and can
   replace it in place, with Undo in the card's details.
-- Report checks: each check (Important details, Judgment calls, Unverifiable, or your own) runs as an agent over the
-  report and leaves comments beside the passages it applies to. Checks that are on run again after the writer saves.
+- **The report**: Write drafts it from the chat and the cards, with figures and citations, and you edit it in place.
+  Report checks (Important details, Judgment calls, Unverifiable, or your own) leave comments beside the passages they
+  apply to, and so can you. Export it as Markdown, HTML or PDF.
+- **Generative views**: ask for a view in the chat, and a builder writes one (a reader and a page on thimble's view kit)
+  that appears in the Files tab when it passes its checks. Its reader runs in the sandbox, its page in a frame with no
+  network, and its check draws the page in a headless browser where one can start its own sandbox.
+- **Settings**: the sign-in, the model, the effort, and explain marks on or off.
 
 ## How it works
 

@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-open", action="store_true", help="print the link, do not open a browser")
     ap.add_argument("--no-sandbox", action="store_true",
                     help="run card code without a sandbox where none is found (not recommended)")
-    ap.add_argument("--wif", metavar="ORG", choices=settings.WIF_ORGS,
+    ap.add_argument("--wif", metavar="ORG",
                     help="sign in to Claude with Workload Identity Federation for this org (saved in Settings)")
     ap.add_argument("--model", help="the model every agent runs on (saved in Settings), such as claude-opus-5-5")
     ap.add_argument("--check-sandbox", action="store_true",

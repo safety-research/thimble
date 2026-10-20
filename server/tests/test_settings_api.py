@@ -9,24 +9,28 @@ from thimble_browser import home, settings
 MADE_UP_KEY = "sk-made-up-0123456789"
 
 
-def test_the_settings_and_their_choices(folder):
+def test_the_settings_and_their_choices(folder, tmp_path, monkeypatch):
+    (tmp_path / "wif").mkdir()
+    for org in ("team-a", "team-b"):
+        (tmp_path / "wif" / f"org-{org}.env").write_text("# made up\n")
+    monkeypatch.setattr(settings, "WIF_DIR", str(tmp_path / "wif"))
     api = Signed(folder)
     got = api("GET", "/ws/{ws}/settings").json()
     assert got["model"] == "claude-opus-5-5" and got["effort"] == "high" and got["explain"] is True
-    assert got["choices"]["orgs"] == ["org-a", "org-b", "batch"]
+    assert got["choices"]["orgs"] == ["team-a", "team-b"]
     assert got["signed_in"] == "none" and got["has_api_key"] is False
     assert got["models"]["main"]["model"] == "claude-opus-5-5"
 
 
 def test_a_change_is_saved_and_a_bad_one_refused(folder):
     api = Signed(folder)
-    r = api("PUT", "/ws/{ws}/settings", json={"credentials": {"source": "wif", "org": "batch"}, "model": "claude-sonnet-5-5",
+    r = api("PUT", "/ws/{ws}/settings", json={"credentials": {"source": "wif", "org": "team-b"}, "model": "claude-sonnet-5-5",
                                               "effort": "max", "explain": False})
     assert r.status_code == 200
     got = r.json()
-    assert got["credentials"] == {"source": "wif", "org": "batch"} and got["signed_in"] == "Workload Identity Federation (batch)"
+    assert got["credentials"] == {"source": "wif", "org": "team-b"} and got["signed_in"] == "Workload Identity Federation (team-b)"
     assert settings.read()["model"] == "claude-sonnet-5-5" and settings.read()["explain"] is False
-    assert api("PUT", "/ws/{ws}/settings", json={"credentials": {"source": "wif", "org": "elsewhere"}}).status_code == 400
+    assert api("PUT", "/ws/{ws}/settings", json={"credentials": {"source": "wif", "org": "../elsewhere"}}).status_code == 400
     assert api("PUT", "/ws/{ws}/settings", json={"effort": "extreme"}).status_code == 400
     # a 0.8 role row's change is the one model's
     api("PUT", "/ws/{ws}/settings", json={"models": {"dev": {"model": "claude-opus-5"}}})

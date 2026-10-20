@@ -1316,7 +1316,7 @@ export interface Credentials {
  * whether one is saved. `models` holds the 0.8 page's role rows, each the one model and effort. */
 export interface BrowserSettings extends Settings {
   credentials: Credentials
-  /** the sign-in in words, never an id or a key: "Workload Identity Federation (org-a)" */
+  /** the sign-in in words, never an id or a key: "Workload Identity Federation (an org)" */
   signed_in: string
   has_api_key: boolean
   model: string

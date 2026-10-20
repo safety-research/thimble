@@ -44,7 +44,7 @@ def test_the_api_key_file_is_the_users_alone():
 
 
 def test_settings_refuse_what_they_do_not_know():
-    for bad in ({"credentials": {"source": "wif", "org": "other"}}, {"effort": "huge"}, {"model": "gpt"}):
+    for bad in ({"credentials": {"source": "wif", "org": "a/b"}}, {"effort": "huge"}, {"model": "gpt"}):
         with pytest.raises(ValueError):
             settings.write(bad)
 

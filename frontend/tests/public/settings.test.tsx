@@ -11,13 +11,13 @@ import { mount, settle, unmountAll } from './mount.tsx'
 
 const BASE: BrowserSettings = {
   models: { main: { model: 'claude-opus-5-5', effort: 'high', fast: false } },
-  credentials: { source: 'wif', org: 'org-a' },
-  signed_in: 'Workload Identity Federation (org-a)',
+  credentials: { source: 'wif', org: 'team-a' },
+  signed_in: 'Workload Identity Federation (team-a)',
   has_api_key: false,
   model: 'claude-opus-5-5',
   effort: 'high',
   explain: true,
-  choices: { models: ['claude-opus-5-5', 'claude-sonnet-5-5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], orgs: ['org-a', 'org-b', 'batch'] },
+  choices: { models: ['claude-opus-5-5', 'claude-sonnet-5-5'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], orgs: ['team-a', 'team-b'] },
 }
 
 let calls: [string, string, unknown][] = []
@@ -42,11 +42,11 @@ describe('the rules', () => {
   test('a save sends only what changed; credentials whole when the source or the org changed', () => {
     const form = formOf(BASE)
     expect(changedSettings(BASE, form)).toEqual({})
-    expect(changedSettings(BASE, { ...form, org: 'batch' })).toEqual({ credentials: { source: 'wif', org: 'batch' } })
+    expect(changedSettings(BASE, { ...form, org: 'team-b' })).toEqual({ credentials: { source: 'wif', org: 'team-b' } })
     expect(changedSettings(BASE, { ...form, source: 'key' })).toEqual({ credentials: { source: 'key' } })
     expect(changedSettings(BASE, { ...form, model: ' claude-sonnet-5-5 ', effort: 'max', explain: false })).toEqual({ model: 'claude-sonnet-5-5', effort: 'max', explain: false })
     // settings with no credentials yet: the choice shown is sent, so it is saved
-    expect(changedSettings({ ...BASE, credentials: {} }, formOf({ ...BASE, credentials: {} }))).toEqual({ credentials: { source: 'wif', org: 'org-a' } })
+    expect(changedSettings({ ...BASE, credentials: {} }, formOf({ ...BASE, credentials: {} }))).toEqual({ credentials: { source: 'wif', org: 'team-a' } })
   })
 
   test('an API key is needed before a save that signs in with one; a model is a Claude id', () => {
@@ -77,11 +77,11 @@ describe('the popover', () => {
   test('shows the sign-in, the org, the model, the effort and explainers', async () => {
     const doc = await open()
     expect(doc.querySelector('[data-setting="source"] [aria-checked="true"]')?.textContent).toBe('Workload Identity')
-    expect(doc.querySelector('[data-setting="org"] .settings-org')?.textContent).toBe('org-a')
+    expect(doc.querySelector('[data-setting="org"] .settings-org')?.textContent).toBe('team-a')
     expect(doc.querySelector('[data-setting="model"] .settings-model')?.textContent).toBe('Opus 5.5')
     expect(doc.querySelector('[data-setting="effort"] .settings-effort')?.textContent).toBe('high')
     expect(doc.querySelector('[data-setting="explain"] [role="switch"]')?.getAttribute('aria-checked')).toBe('true')
-    expect(doc.querySelector('.settings-signed-in')?.textContent).toMatch(/Workload Identity Federation \(org-a\)/)
+    expect(doc.querySelector('.settings-signed-in')?.textContent).toMatch(/Workload Identity Federation \(team-a\)/)
   })
 
   test('a pasted key goes to its own route first, then the settings; the key is in no other request', async () => {

@@ -37,7 +37,7 @@ def view() -> dict[str, Any]:
         "model": s["model"],
         "effort": s["effort"],
         "explain": s["explain"],
-        "choices": {"models": list(settings.MODELS), "efforts": list(settings.EFFORTS), "orgs": list(settings.WIF_ORGS)},
+        "choices": {"models": list(settings.MODELS), "efforts": list(settings.EFFORTS), "orgs": settings.wif_orgs()},
         "models": {r: dict(conf) for r in ROLES},
     }
 

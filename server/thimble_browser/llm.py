@@ -47,7 +47,9 @@ def scrub_env() -> list[str]:
 
 def _wif_ids(org: str) -> dict[str, str]:
     ids: dict[str, str] = {}
-    with open(Path(f"~/.thimble/orgs/org-{org}.env").expanduser()) as f:
+    if not settings.ORG_RE.match(org):
+        raise OSError(org)
+    with open(Path(settings.WIF_DIR).expanduser() / f"org-{org}.env") as f:
         for line in f:
             if "=" in line and not line.startswith("#"):
                 k, v = line.strip().split("=", 1)

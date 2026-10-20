@@ -46,7 +46,7 @@ export function formOf(s: BrowserSettings): SettingsForm {
   const c = s.credentials ?? {}
   return {
     source: c.source === 'key' ? 'key' : 'wif',
-    org: c.org ?? s.choices?.orgs?.[0] ?? 'org-a',
+    org: c.org ?? s.choices?.orgs?.[0] ?? '',
     model: s.model,
     effort: s.effort,
     explain: s.explain !== false,
