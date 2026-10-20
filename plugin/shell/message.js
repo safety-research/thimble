@@ -639,7 +639,7 @@ export function verbsOf(out) {
       if (!r.proposals.length && !note) continue
     }
     if (k === 's') {
-      // where the answer stands on the squeeze's fixed chips, by a level's name: {interpret: 'report', familiarity: 'expert'}
+      // where the answer stands on the squeeze's fixed chips, by a level's name: {interpret: 'facts only'}
       if (v.at && typeof v.at === 'object' && !Array.isArray(v.at)) {
         r.at = {}
         for (const [id, lv] of Object.entries(v.at).slice(0, 6)) if (typeof lv === 'string' || Number.isInteger(lv)) r.at[str(id, 24)] = typeof lv === 'string' ? str(lv, 24).toLowerCase() : lv

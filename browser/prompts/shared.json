@@ -18,21 +18,27 @@
     },
     "citing": {
       "file": "skills/thimble/SKILL.md",
-      "section": "Computing and citing",
+      "section": "Citing",
       "heading": "Citing",
       "bullets": [
+        1,
         2,
-        4
+        3
       ],
       "tail": true,
+      "drop": [
+        " Compute every number you cite with `thimble run` over every record, so that its citation opens the records behind it.",
+        " In a transcript, one block of a line (its words, a tool call or a result) is `#L88.b2`.",
+        ", which points at column n of the line where outcome is approved in the result of query r3"
+      ],
       "replace": [
         [
           "never sees your shell output",
           "never sees your tools' output"
         ],
         [
-          "a number links to its query row",
-          "a number links to its value in a card"
+          "A number links to its value in a query's result",
+          "A number links to its value in a card"
         ],
         [
           "(r3#outcome=approved@n)",
@@ -41,14 +47,6 @@
         [
           "(server/auth.py#L88-94)",
           "(server/auth.py#L88-L94)"
-        ],
-        [
-          "run `thimble rows` on its ref before you use it",
-          "read its ref with `read_ref` before you use it"
-        ],
-        [
-          "`thimble coverage` says which files you saw (some of their lines entered your context) and which you only computed over, searched, named or never touched: none of those were seen. What a label's model read is counted apart.",
-          "You saw a file when some of its lines entered your context. A file you only computed over, searched, named or never touched was not seen, and neither was a record that only a label's model read."
         ]
       ]
     },
@@ -60,8 +58,8 @@
           ""
         ],
         [
-          "; and an optional \"program\" on thimble's drawing toolkit.",
-          ". thimble browser draws no \"program\", so give none."
+          "Give a \"program\" on thimble's drawing toolkit only when a picture shows the term better than words.",
+          "thimble browser draws no \"program\", so give none."
         ],
         [
           ", \"program\": \"<optional>\"",
@@ -72,7 +70,7 @@
           "(app/session.ts#L40-L52)"
         ],
         [
-          ", \"program\": \"return k.beside(...[['server HTML', 'app/server.ts#L30-44'], ['hydrate()', 'app/main.ts#L18'], ['page responds', 'app/page.ts#L5-20']].map(([s, ref], i) => k.region('step-' + i, { label: s, ref }, k.frame(k.text(s), { tone: i === 1 ? 'explain' : 'dim' }))), { gap: 2 })\"",
+          ",\n             \"program\": \"return k.beside(...[['server HTML', 'app/server.ts#L30-44'],\n             ['hydrate()', 'app/main.ts#L18'], ['page responds', 'app/page.ts#L5-20']]\n             .map(([s, ref], i) => k.region('step-' + i, { label: s, ref },\n             k.frame(k.text(s), { tone: i === 1 ? 'explain' : 'dim' }))), { gap: 2 })\"",
           ""
         ],
         [
@@ -80,10 +78,7 @@
           ""
         ]
       ],
-      "until": "<!-- digest -->",
-      "drop": [
-        "**Explain for this analyst.** Use what the session shows about what they know and care about: the words they use, what they opened, and what they asked in side threads. Each turn shows more."
-      ]
+      "until": "<!-- digest -->"
     },
     "explain-digest": {
       "prompt": "lens-explain",
@@ -105,56 +100,20 @@
       "heading": "Labels",
       "replace": [
         [
-          "`thimble label NAME --in GLOB` defines it",
-          "`apply_label` defines it"
+          "thimble label refund --in \"tickets/*.jsonl\" --regex \"refund|money back|chargeback|reimburse\"",
+          "apply_label refund, paths [\"tickets/*.jsonl\"], a regex \"refund|money back|chargeback|reimburse\""
         ],
         [
-          "`--regex` matches the text, `--code` is a Python function",
-          "a regex matches the text, code is a Python function"
+          "thimble rows \"tickets/*.jsonl\" --label refund=no --search \"back|return\" -n 10,",
+          "reads 10 tickets the label gave no that hold \"back\" or \"return\","
         ],
         [
-          "and `--prompt` has a model judge",
-          "and a prompt has a model judge"
+          "[612](r4#refund=yes@n)",
+          "[612](concept:<id>/yes)"
         ],
         [
-          "use `thimble label`.**",
-          "use `apply_label`.**"
-        ],
-        [
-          "(`--values`)",
-          "(`values`)"
-        ],
-        [
-          "with `--limit`, read them with `thimble rows GLOB --label NAME=VALUE`,",
-          "with `limit`, read them with `thimble.labels(\"NAME\", negatives=True)` in run_python,"
-        ],
-        [
-          "In a query, `use(\"NAME\")` gives each record's `_ref` and value.",
-          "In run_python and a card's code, `thimble.labels(\"NAME\", negatives=True)` gives each record's `ref` and its value as `effective`."
-        ],
-        [
-          "thimble rows \"tickets/*.jsonl\" -n 25, to see",
-          "reads 25 tickets, to see"
-        ],
-        [
-          "thimble label complaint --in \"tickets/*.jsonl\" --values broken,late,billing,other --limit 25",
-          "apply_label complaint, paths [\"tickets/*.jsonl\"], values broken, late, billing, other, limit 25,"
-        ],
-        [
-          "--prompt \"The main thing",
-          "a prompt \"The main thing"
-        ],
-        [
-          "the label again with the new definition and no --limit, then thimble label complaint --wait",
-          "apply_label again with the new definition and no limit"
-        ],
-        [
-          "[1,210](r4#complaint=broken@n)",
-          "[1,210](concept:<id>/broken)"
-        ],
-        [
-          "a query with cats =",
-          "run_python with cats ="
+          "a query that counts",
+          "run_python that counts"
         ]
       ]
     },
@@ -187,9 +146,12 @@
           "\"todo\": \"Keep this in mind.\"}]"
         ],
         [
-          "In the reply, \"heads\" is null, or one heads-up: {\"term\": \"<exact words from the answer>\", \"title\": \"<a few words>\", \"bullets\": [\"<a point, with its citation>\"], \"todo\": \"<what to do>\"}.",
+          "In the reply, \"heads\" is null, or one heads-up, which the analyst opens as a short card: {\"term\": \"<exact words from the answer>\", \"title\": \"<a few words>\", \"bullets\": [\"<a point, with its citation>\"], \"todo\": \"<what to do>\"}.",
           "Read each text on its own. The answer is what the analyst reads now, and the report is what they share with others, so a detail that would change what they share needs its heads-up in the report, even when the answer has one.\n\nIn the reply, \"heads\" holds at most one heads-up for each text, and is often empty: [{\"where\": \"<the text's place>\", \"term\": \"<exact words from that text>\", \"title\": \"<a few words>\", \"bullets\": [\"<a point, with its citation>\"], \"todo\": \"<what to do>\"}]."
         ]
+      ],
+      "drop": [
+        "Such details are often in the cards and in what the session read, at the end of this request. Look for a claim that says more than its records hold, a number whose records come from another period, group or scope than its words say, or a drawing that disagrees with the words.\n\n"
       ]
     },
     "heads-digest": {
@@ -198,25 +160,11 @@
     },
     "cards-good": {
       "file": "skills/thimble/cards.md",
-      "section": "What makes a good card",
-      "replace": [
-        [
-          "[212](r4#line=line-12-harbor@late)",
-          "[212](card:<id>#line-12-harbor)"
-        ],
-        [
-          "a query row, a record, or the lines of a file (`ref: 'server/auth.py#L60-94'`)",
-          "a record, or the lines of a file (`ref: 'server/auth.py#L60-L94'`)"
-        ],
-        [
-          "A part drawn from a row of a bound query output opens that row's records by itself.",
-          "A part drawn from a row that carries a `ref` opens that record by itself."
-        ]
-      ]
+      "section": "Choosing the form",
+      "replace": []
     },
     "cards-toolkit": {
       "file": "skills/thimble/cards.md",
-      "until": "**When something goes wrong.**",
       "section": "The toolkit",
       "replace": [
         [
@@ -224,18 +172,18 @@
           "`data` is the card's data, the value its code ends in, and `k` is the toolkit."
         ],
         [
-          "made from a row of a bound query output (the row, `{ ...row }` or `{ row: d }`) opens the records behind that row.",
-          "made from a row that carries a `ref` (the row, `{ ...row }` or `{ row: d }`) opens the record behind that row."
+          "`'server/auth.py#L60-94'`",
+          "`'server/auth.py#L60-L94'`"
         ],
         [
-          "A card gets its keys while it has the focus, and the bar shows each with the label you gave it, such as `c flip · , . year`, so the card draws no key hints. Claude Code keeps ← and → in the terminal, and `0` goes back, so a card never gets them; `thimble save` names a key a card cannot get.",
+          "made from a row of a bound query output opens the records behind that row by itself.",
+          "made from a row that carries a `ref` opens the record behind that row by itself."
+        ],
+        [
+          "The bar shows each key with its label, so the card draws no key hints. A card never gets ←, → or `0`.",
           "In thimble browser a card takes presses, knobs and drags but no keys, so draw a part to press or a knob to turn where a key would go."
         ]
       ]
-    },
-    "cards-sequence": {
-      "file": "skills/thimble/cards.md",
-      "section": "A sequence of cards"
     }
   }
 }

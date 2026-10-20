@@ -5,17 +5,24 @@ description: Use when you read, count or explain what is in files for an analyst
 
 # thimble
 
-thimble is a harness for Claude Code, a plugin for making sense of what happened in a corpus of files. Every part of it serves one overarching goal: augment the analyst's judgment through clear communication and verifiable analyses. You work with the `thimble` command, which you run with Bash in the folder of files. `thimble` alone lists its commands.
+thimble is a Claude Code plugin for making sense of a folder of files, such as agent transcripts, logs, records, code and docs. Its goal is to help the analyst judge what happened, with answers that are clear and that they can check. It gives you four features.
+
+- **Queries** keep the code and the records behind every number you compute.
+- **Citations** link a number, a quote or a line of code to its source, which the analyst opens in one click.
+- **Cards** show a finding as a chart, a table or a diagram under your reply.
+- **Labels** sort records into categories that the analyst can inspect and correct.
+
+You use them through the `thimble` command, which you run with Bash in the folder of files. The last section describes its commands.
 
 ## Communicating
 
-Everything you write for the analyst, in the chat or on a card, is there to serve their understanding and judgment. They read your outputs once, quickly, in the middle of other work. Every unclear sentence and every verbose reply costs them valuable time and attention.
+The analyst reads your replies once, quickly, in the middle of other work. Three principles help them most.
 
-- **Write for *this* analyst.** Infer what this particular person knows and what they want from all previous messages. Use their terminology whenever possible. Use simple, concise, straightforward language that a bright fifteen-year-old could follow. Write about 80% of the way to ASD-STE100 Simplified Technical English: short sentences, common words, one term for one thing, and one action per instruction. Write a date month first, as in "Jun 18" or "Jun 18 13:05". When you need a term or a concept they have not used, explain it the first time, since a name you made up or a field name from the data may mean nothing to them.
-- **Say what you mean in literal words.** A metaphor or a flourish, such as "a smoking gun" for a decisive record or a "load-bearing" observation, only makes the analyst expend more cognitive effort trying to read your outputs.
-- **Answer directly.** Answer the question they asked, with the one or two numbers it rests on, each with its base, as in "12 of the 40 runs". There is no need to mention every detail or caveat. Anything that does not change their understanding, such as how you worked or a restatement of the question, only delays the answer.
-- **Pair a pattern with representative examples.** When describing general trends or patterns in the corpus, it is often useful to pair them with representative examples. However, do not provide so many examples as to overwhelm the analyst.
-- **Keep each answer atomic.** One card or one paragraph answers one question. When something needs explaining, walk them through it from first principles, one step per card or paragraph, in order, so the analyst can check each step and see exactly where they disagree. Present one thing at a time, and ask for one thing at a time.
+**Write for this analyst.** Infer from their messages what they know, what they want and what they will ask next, and shape your answer for them. Use their words. When you need a term they have not used, such as a field name or a name you made up, explain it the first time.
+
+**Answer directly.** Start with the answer to the question they asked, in plain and literal words, with the one or two numbers it rests on, each with its base, as in "12 of the 40 runs". Leave out what does not change their understanding, such as how you worked, a restatement of the question, or a caveat that does not change the conclusion. One paragraph or one card answers one question. Write about 80% of the way to ASD-STE100 Simplified Technical English, with short sentences, common words and one term for one thing.
+
+**Show a pattern with an example or two.** When you describe a pattern in the records, one or two representative records often make it concrete. Quote them and cite them.
 
 ```
 Analyst   What are most of the refund requests about?
@@ -27,16 +34,18 @@ Bad       The refund-intent cluster (n=410, 33.1%, 95% CI 30.5-35.7%) is dominat
 Bad       Most refund requests are about the X200 (290). One says "stopped working after two days."
 ```
 
-The first bad reply names things the analyst never said, "refund-intent cluster" and "X200 signal", and gives six numbers where one answers the question. The second gives a count without its base, says nothing about how the requests were sorted, and quotes "one" without saying one of what.
+The first bad reply uses words the analyst never used and gives six numbers where one answers the question. The second gives a count without its base and quotes "one" without saying one of what.
 
-## Computing and citing
+## Citing
 
-The analyst never sees your shell output, so the work your answer rests on has to be where they can check it.
+The analyst never sees your shell output, so cite what your answer rests on. A citation opens its source in one click, and the analyst can check a claim without asking you. Put the link on the words of the claim itself.
 
-- **Compute every number over every record with `thimble run`.** It runs your Python over the files as a query, and keeps the query's code, the files it read, its output, and the records behind each output row, under an id such as r3. A later query reads an earlier one's output with `use("r3")`, so nothing is computed twice.
-- **Cite what your answer rests on.** A citation opens its source in one click, so the analyst can check a claim without asking you. Put the link on the words of the claim itself: a number links to its query row, as in `[352](r3#outcome=approved@n) of the 410`; a quote, a record or a line of code links to its place in the file, as in `["this test is flaky"](runs/41.jsonl#L88)` or `[drops the session after 30 seconds](server/auth.py#L88-94)`. Name cards and records by what they show, not by their ids. When you are not sure where a value came from, run `thimble rows` on its ref before you use it.
-- **Draw a shape in a sentence only when the sentence claims one.** `[~](r3@n)` draws column `n` of r3's output in place, for a trend, a burst or a spread that the numbers alone hide. One in a message is the most that helps.
-- **Say what you did not read.** Words such as "only", "all", "stopped" and "from then on" are claims about every record or about order, and one record the other way makes the answer false. `thimble coverage` says which files you saw (some of their lines entered your context) and which you only computed over, searched, named or never touched: none of those were seen. What a label's model read is counted apart. When a file you did not see could change the answer, say so.
+- A number links to its value in a query's result, as in `[352](r3#outcome=approved@n) of the 410`, which points at column n of the line where outcome is approved in the result of query r3. Compute every number you cite with `thimble run` over every record, so that its citation opens the records behind it.
+- A quote or a record links to its line in the file, as in `["this test is flaky"](runs/41.jsonl#L88)`. In a transcript, one block of a line (its words, a tool call or a result) is `#L88.b2`.
+- Code links to its lines, as in `[drops the session after 30 seconds](server/auth.py#L88-94)`.
+- A shape links to a column of a query, as in `[~](r3@n)`, which draws that column in place. Use it when the sentence claims a trend, a burst or a spread that the numbers alone hide, and at most once in a message.
+
+Name cards and records by what they show, not by their ids.
 
 ```
 Analyst   How many refund requests were approved?
@@ -49,44 +58,42 @@ Good      The check that ends a session [reads the timeout as seconds](server/au
 Bad       The bug is in [server/auth.py:88](server/auth.py#L88) and [config/app.yaml:12](config/app.yaml#L12).
 ```
 
-A link shows its words where it stands, so the first bad answer reads "were approved 352.", and the second links two places without saying what either one shows: the analyst has to open both to learn the cause.
+A link shows its words where it stands, so the first bad answer reads "were approved 352." The second links two places without saying what either one shows.
 
 ## Cards
 
-A card is how you show the analyst a piece of work. Every card has three parts, the question, the content and the takeaway. The question says what the card is for, the content shows the evidence (e.g., a chart, a table, or representative example), and the takeaway answers the question in a sentence or two. The analyst should be able to read the question and the takeaway in seconds and then check the takeaway against the content.
+Some answers are much faster to see than to read, such as a pattern, a comparison, a sequence or how parts connect. Show such an answer in a card, as a chart, a table or a diagram, without being asked. Answer a question that a number or two settles in the chat, without a card. thimble draws the card under your reply, so do not repeat its content there.
 
-**Your cards are where your work goes, and the chat is where you talk with the analyst.** When an answer has a shape, such as a pattern, a comparison, a sequence or how parts connect, show it in a card without being asked: the analyst sees the shape at a glance and opens the records or the lines of code behind each part. Answer a quick question that a number or two settles in the chat, without a card. thimble draws the card under your reply, so do not repeat its content there.
-
-**A card is a short program.** Save it with `thimble save NAME --from FILE`: the question as `title`, the takeaway as `text` with its numbers cited, the content as `program`, and the query outputs it draws as `data`, such as `"data": {"days": "r1"}`. When you read or judged records by hand, say so under `declared`. The card guide, which thimble gives you beside your first data command, says what makes a good card and lists the toolkit.
+A card is a short program that draws from your query outputs, and each part of it opens the records behind it. The card guide documents the toolkit and has a few examples. thimble gives it to you beside your first data command.
 
 ## Labels
 
-A label is a semantic category derived from the records by a classifier, such as "asks for a refund". `thimble label NAME --in GLOB` defines it and applies it to every record of that scope. Its predicate decides each record in one of three ways: `--regex` matches the text, `--code` is a Python function that returns a value and a confidence, and `--prompt` has a model judge each record against your definition. The result is a count per value and a label card, where the analyst reads the definition, opens the records of each value and checks a sample. What they say a record is counts in place of the label's value.
+A label sorts the records of a scope into a few values, such as whether a ticket asks for money back. The analyst can read its definition, open the records of each value and correct a record. When you sort records into categories, use a label, because a category made inside your own code reads to the analyst as a fact they cannot check.
 
-**Whenever you sort records into categories, use `thimble label`.** It runs many model calls in parallel, so the answer reaches the analyst quickly, and it applies the category to exactly the scope you give it. The analyst can inspect the definition and its records, while a category made inside your own code reads to them as a fact they cannot check.
-
-**Use a regex or code when matching is enough, and a prompt for judgment.** Write a prompt's definition as one or two sentences that two careful readers would apply the same way. Give values the analyst would recognize, with the positive one first (`--values`). Try a new label on a few records with `--limit`, read them with `thimble rows GLOB --label NAME=VALUE`, and make sure it also catches other ways of saying or doing the same thing, before you run it on everything. A takeaway that counts by a label names it and says whether a rule or a model made it. In a query, `use("NAME")` gives each record's `_ref` and value.
-
-**Once a label defines an outcome, use that definition everywhere.** Decide each outcome by what the analyst asked about: a command that exits with 0 has only run. Two definitions give the analyst two answers to one question and leave them unsure of both.
+Use a rule (a regex or code) when matching decides the value, and a model (a prompt) when it takes judgment. Make sure a rule also catches other ways of saying or doing the same thing. Write a model's definition as one or two sentences that two careful readers would apply the same way, and try it on a few records first. Once a label defines an outcome, use it everywhere, so the analyst gets one answer to one question.
 
 ```
-Analyst   What do customers complain about?
-Good      1  thimble rows "tickets/*.jsonl" -n 25, to see how customers describe what went wrong
-          2  thimble label complaint --in "tickets/*.jsonl" --values broken,late,billing,other --limit 25
-               --prompt "The main thing the customer is unhappy about."
-          3  reads the 25, sees late deliveries with a wrong charge split between late and billing, and makes the
-             definition exact: "... late means the order came after the promised date or never came. billing means a
-             charge, a refund amount or an invoice is wrong. When both happened, choose billing."
-          4  the label again with the new definition and no --limit, then thimble label complaint --wait
-          5  Most complaints are about a broken product, [1,210](r4#complaint=broken@n) of the 4,120 tickets. I sorted
-             the tickets with a label, "complaint", in which a model reads each ticket and picks its main complaint.
-Bad       1  a query with cats = {"broken": "broke|defect", "late": "late|delay", "billing": "charge|refund|invoice"}
-          2  Most complaints are about billing, 1,871 of the 4,120 tickets.
+Analyst   How many tickets ask for money back?
+Good      1  thimble label refund --in "tickets/*.jsonl" --regex "refund|money back|chargeback|reimburse"
+          2  thimble rows "tickets/*.jsonl" --label refund=no --search "back|return" -n 10, to find requests the rule
+             missed
+          3  [612](r4#refund=yes@n) of the 4,120 tickets ask for money back. I found them with a label, "refund", a
+             rule that matches words such as "refund", "money back" and "chargeback".
+Bad       1  a query that counts the tickets whose text holds "refund"
+          2  540 of the 4,120 tickets ask for a refund.
 ```
 
-The bad answer counts a ticket under every category whose words it contains, and the analyst cannot see the rule that made the count.
+The bad answer misses the tickets that ask for money back without the word "refund", and the analyst cannot see the rule behind the count.
 
-## Example
+## The thimble command
+
+`thimble` alone lists its commands.
+
+- `thimble run "ABOUT"` runs the Python you give it on stdin over the files, as a query. It keeps the code, the files it read, its output and the records behind each line of its result, under an id such as r3. The query's output is the value of its last line, such as `tally(df, "day")`. You see what it prints, but a card cannot draw that. In a query, `load(file, fields=[...])` reads a file, `tally(df, by)` counts and keeps each group's records, `use("r3")` reads an earlier query's output so nothing is computed twice, and `use("NAME")` gives a label's value and `_ref` for each record.
+- `thimble rows` lists the files and the saved cards. With a file it shows rows, which `--where`, `--search`, `--label NAME=VALUE` and `-n` narrow. With a ref it shows that row, or a value's chain down to its records. Use it when you are not sure where a value came from.
+- `thimble save NAME --from FILE` saves a card. The card guide describes the file.
+- `thimble label NAME --in GLOB` defines a label and applies it, with one of `--regex RE`, `--code FILE` (a Python `label(unit)` that returns a value, or a value and a confidence) or `--prompt "DEFINITION"`. `--values` gives the values, the positive first. `--limit N` tries it on N records, and the same command without `--limit` labels the rest. A prompt label makes a model call for each 50 records, so try it with `--limit` first, and use `thimble label NAME --wait` to wait for its calls. When the analyst corrects a record, their value counts in place of the label's.
+- `thimble coverage` lists the files whose lines you saw and the files you only computed over, searched or never touched.
 
 ```bash
 thimble rows
@@ -97,7 +104,6 @@ tally(df, "day")
 PY
 thimble save saves-per-day --from card.json
 thimble rows "obj:saves-per-day#/days/19/n" -n 3
-thimble coverage
 ```
 
-`thimble rows` alone lists the files and the saved cards; with a file it shows rows, and with a ref it shows that row, or a value's chain down to its rows: the card, r1 with its code, the 6,543 records of revisions.jsonl, and the first of them. `tally(df, by)` counts and keeps each group's records. In a transcript each record is one line, and its blocks (its words, each tool call, each result) are `<file>#L<n>.b<k>`.
+The last command follows a value of the card down to its records: the card, r1 with its code, the 6,543 records of revisions.jsonl behind that day, and the first three of them.

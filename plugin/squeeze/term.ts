@@ -50,7 +50,7 @@ const remark = (rec: MsgRecord) => remarkAny(rec) as MsgRecord
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }
 const TICK = 50
-// the longest a step on Interpretation or Background waits for the observer's look to say where the original stands
+// the longest a step on Interpretation waits for the observer's look to say where the original stands
 const LEVELS_WAIT_MS = 30000
 const BLANK: SqzUi = { focus: 'length', running: null, error: null, tick: 0 }
 
@@ -254,8 +254,9 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     const back = keepCorrections(bare.text, keep, rec.text)
     const whole = dropOrphanHeads(back.text)
     whole.dropped.unshift(...bare.dropped)
-    // held to the whole answer it was shown: the message, and its cards' words and values when the request had them
-    const checked = checkRewrite(answerText(rec.text, answer?.cards ?? []), whole.text)
+    // held to the whole answer it was shown: the message, its cards' words and values, and the query outputs a longer
+    // version may add detail from, when the request had them
+    const checked = checkRewrite(answerText(rec.text, [...(answer?.cards ?? []), ...(answer?.outputs ?? []).map(o => ({ text: o.text }))]), whole.text)
     // the cards this version changes, saved as the person's; one that does not save or draw is left out, said why
     const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, setWords(probe) || 'as written') : null
     const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []

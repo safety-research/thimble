@@ -24,7 +24,7 @@ import { SCALE, atOf, chipsOf, glyph, isCatchUp, isOriginal, levelWords, ownWord
 
 const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 /** What [ and ] do to each chip, in its words: the way down, then the way up. */
-const WAYS = { length: 'shorter / longer', interpret: 'facts / meaning', familiarity: 'newer / more expert' }
+const WAYS = { length: 'shorter / longer', interpret: 'facts / interpretation' }
 
 export default {
   name: 'chips',
@@ -159,7 +159,7 @@ export function program(k, data) {
   row.forEach(c => {
     const picked = c.id === focus && typing == null
     const bg = picked ? 'warn-faint' : null
-    // at the level where the original stands a chip reads `as written`; Interpretation and Background say it only
+    // at the level where the original stands a chip reads `as written`; Interpretation says it only
     // while picked (`balanced, as written`), so the row keeps its width
     const word = c.kind === 'fixed' && c.id !== 'length' && !picked && c.level === c.level0 ? c.levels[c.level] : levelWords(c)
     // the chip's digit first, the key that picks it

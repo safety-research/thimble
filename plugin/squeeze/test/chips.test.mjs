@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { checkRewrite, readReply, revealCut } from '../chips.mjs'
+import { MEANS, checkRewrite, chipsOf, readReply, request, revealCut } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -74,3 +74,25 @@ test('a ref with brackets in a key value stays one link through the check, a new
   }
 })
 
+
+test('the request carries only the definition of each level picked, and Length always', () => {
+  const words = { words: 40, data: false, keep: 0 }
+  const rec = { text: TEXT, squeeze: { at: { length: 3, interpret: 0, 'x-boss': 3 }, own: [{ id: 'x-boss', words: 'for my boss' }], scale: 4 } }
+  const tail = request(rec, { system: 'S' }).prompt[1].text
+  assert.match(tail, /- Length: much longer\. About two and a half times the original/)
+  assert.match(tail, /- Interpretation: facts only\. State what was found/)
+  assert.match(tail, /"for my boss": fully\. Write the whole text as these words ask\./)
+  // no other level of any chip is defined, and the input (the original) stays in the cached head
+  for (const [chip, at] of [['length', 3], ['interpret', 0]]) {
+    MEANS[chip].forEach((m, i) => { if (i !== at) assert.ok(!tail.includes(m(words).split('.')[0]), `${chip} level ${i} is not in the request`) })
+  }
+  assert.ok(!tail.includes(MEANS.own[1]()) && !tail.includes(MEANS.own[2]()))
+  assert.ok(!tail.includes('<original>'))
+  // a chip left where the original is, other than Length, is not named
+  const one = request({ text: TEXT, squeeze: { at: { length: 0 }, scale: 4 } }, { system: 'S' }).prompt[1].text
+  assert.match(one, /- Length: short\./)
+  assert.ok(!one.includes('Interpretation'))
+  // a record of before (one line first, a Background chip) reads on the scales now
+  const old = chipsOf({ text: TEXT, squeeze: { at: { length: 4, familiarity: 0 }, scale: 3, versions: { 'length=4': 'x' } } })
+  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'interpret=some interpretation'])
+})

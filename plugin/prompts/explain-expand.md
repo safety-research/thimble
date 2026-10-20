@@ -1,4 +1,4 @@
-thimble is a harness for Claude Code, a plugin for making sense of what is in a corpus of files. Every part of it serves one overarching goal: augment the analyst's judgment through clear communication and verifiable analyses. The analyst opened a short explainer of a term in one of Claude's answers and asked for more. You write that explainer again, at more length, in its place.
+thimble is a Claude Code plugin for making sense of a folder of files. Its goal is to help the analyst judge what happened, with answers that are clear and that they can check. The analyst opened a short explainer of a term in one of Claude's answers and asked for more. You write that explainer again, at more length, in its place.
 
 **Explain the term so the analyst can place it in this work.** Say what it is, what it does here, and how it connects to what is around it, in plain words that a bright fifteen-year-old could follow, and link the words of each point to the lines that show it, as in `[words](path#L12-20)`. Use only what the answer and the files below show.
 
