@@ -34,7 +34,7 @@ import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink } from '.
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { lineOf, newRecord, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
-import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList } from './thread'
+import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList, threadOf } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteEdit, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
@@ -51,7 +51,7 @@ import { SCALE, cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, set
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
-import { frameOf as trayFrameOf } from '../panes/tray.js'
+import { frameOf as trayFrameOf, scopeOf as trayScopeOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
@@ -1570,6 +1570,20 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), ask, ...pages, '] next', '0 back'].join(' · ') }
 }
 
+/** A passage of a reply as a mark of it: its side thread is the passage's, as a citation's is the citation's. */
+function passageFrame(row: string, p: { text: string; label: string }): TrayFrame {
+  return { row, kind: 'passage', label: p.label, text: p.text.slice(0, 4000) }
+}
+
+/** What a reply's margin asks about (view.ts): its passages, each a side thread's subject, opened in the side panel with
+ *  its input bar holding the keys, as a ask does for a citation. */
+function passagesOf($: Engine, row: string): { has: (p: { text: string; label: string }) => boolean; ask: (p: { text: string; label: string }) => unknown } {
+  return {
+    has: p => !!threadOf(threadKeyOf(trayScopeOf(passageFrame(row, p)) || {})),
+    ask: p => { void openMarkSide($, passageFrame(row, p), { ask: true }).catch(() => undefined) },
+  }
+}
+
 /** The keys of what has focus now: the top of the focus stack that is still there; a surface whose state is set but
  *  that never pushed itself (a reload while it was open) comes after, in the shell's own order. Null at rest. */
 async function focusKeys($: Engine): Promise<FocusWords | null> {
@@ -2992,7 +3006,7 @@ export const registerShell: Register = (on, options) => {
       if (caught?.note) parts.push(caught.note)
       if (!hidden && !caught?.main) {
         parts.push(rec.marks.length || rec.shown != null || busy || n != null || picked || caught
-          ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy || !!caught, lead: busy ?? (picked ? '▸' : null), leadColor: busy ? null : FOCUS[theme] })
+          ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy || !!caught, lead: busy ?? (picked ? '▸' : null), leadColor: busy ? null : FOCUS[theme], passages: busy || caught ? null : passagesOf($, at) })
           : await next(e))
       }
       // the labels its citations rest on, beside it (labeluse.ts)

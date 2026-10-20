@@ -42,7 +42,7 @@ export default {
     const f = frameOf(args)
     if (!f) return 'Citation'
     const heads = f.kind === 'gloss' && f.gloss && f.gloss.kind === 'heads'
-    return `${heads ? 'Heads up' : f.kind === 'gloss' ? 'Explain' : 'Cite'} · ${String(f.label || f.ref || '')}`.slice(0, 60)
+    return `${heads ? 'Heads up' : f.kind === 'gloss' ? 'Explain' : f.kind === 'passage' ? 'Passage' : 'Cite'} · ${String(f.label || f.ref || '')}`.slice(0, 60)
   },
   /** What its side thread is about: the mark (one thread per mark, the tray's own), its ref, in words, and what an
    *  explainer or an important detail said, as the person reads it. */
@@ -50,7 +50,9 @@ export default {
     const f = frameOf(args)
     if (!f) return null
     const refs = f.ref ? [f.ref] : (f.gloss && Array.isArray(f.gloss.refs) ? f.gloss.refs.slice(0, 3) : [])
-    return { scope: scopeOf(f), label: String(f.label || f.ref || 'this mark'), refs, ...(f.kind === 'gloss' && f.gloss ? { about: saidOf(f.gloss) } : {}) }
+    // a passage of a reply: its words, for the thread's agent
+    const about = f.kind === 'gloss' && f.gloss ? saidOf(f.gloss) : f.kind === 'passage' ? String(f.text || '') : ''
+    return { scope: scopeOf(f), label: String(f.label || f.ref || 'this mark'), refs, ...(about ? { about } : {}) }
   },
   program,
 }
@@ -67,6 +69,8 @@ const ACTION = { rows: 'Rows', code: 'Code', raw: 'As in the file' }
 export function program(k, data) {
   const top = data.frame
   if (!top) return k.text('{dim:Nothing is open here.}')
+  // a passage of a reply (its margin's ?): its words, under its subject
+  if (top.kind === 'passage') return k.stack(subjectBlock(k, { title: k.escape(String(top.label || 'a passage')), line: 'passage of the reply' }), k.size(k.text(k.escape(String(top.text || ''))), { w: Math.max(20, k.w - 2) }))
   const st = k.state || {}
   const heads = top.kind === 'gloss' && top.gloss && top.gloss.kind === 'heads'
   const inner = Math.max(20, k.w - 2)

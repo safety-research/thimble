@@ -374,6 +374,38 @@ test('a second ↵ while the thread\'s agent starts sends nothing more: the ques
   expect(file.asks.map((a: Any) => a.text)).toEqual(['why so high?'])
 })
 
+test("a reply's margin: a ? over the ● (shown under the pointer) asks about the passage in a side thread, as a does; once asked, a ↳ in its place opens that thread", async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, clock)
+  const REPLY = { component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: MARKED, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(REPLY as Any) } as never)
+  const tree = await ui.drawn()
+  // the ?, in the ●'s own cell: drawn out of the flow, shown only while the pointer is over its row
+  const q = pressKeys(tree).find(k => k.endsWith('-ask'))!
+  expect(q).toBeDefined()
+  expect(JSON.stringify(tree)).toMatch(/"display":"none","position":"absolute","top":0,"left":0\},"hover":\{"display":"flex"\}/)
+  // (the ● stays drawn under it: the ? hides nothing while the pointer is elsewhere)
+  expect(textOf(tree)).toMatch(/^●\?Mostly 6,543 saves on June 18/)
+  await ui.press({ key: q })
+  await clock.advance(2000)
+  await pane($, clock)
+  // the passage in the side panel, its input bar holding the keys, as a ask does for a citation
+  expect(w.opened.some(x => String(x.title).startsWith('Passage · "Mostly 6,543 saves on June 18'))).toBe(true)
+  expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  await ask($, clock, 'why June 18?')
+  expect(w.spawns[0].prompt).toContain("About: this passage of Claude's message:\nMostly [6,543 saves](q1#day=2026-06-18@n) on June 18")
+  // once asked: a ↳ in the margin, which opens that thread again
+  await ui.redraw()
+  const asked = pressKeys(await ui.drawn()).find(k => k.endsWith('-asked'))!
+  expect(asked).toBeDefined()
+  expect(pressKeys(await ui.drawn()).some(k => k.endsWith('-ask'))).toBe(false)
+  const n = w.opened.length
+  await ui.press({ key: asked })
+  await clock.settle()
+  expect(w.opened.slice(n).some(x => String(x.title).startsWith('Passage · '))).toBe(true)
+})
+
 test('the thread list opens from the prompt, never from inside a thread: t in the panel is a letter of the question; the bar\'s threads opens the list, which has no input bar, and a press on a row opens that thread', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
