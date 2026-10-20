@@ -54,7 +54,27 @@ async def read_ref(t: Any, args: dict[str, Any]) -> Result:
         return Result(f"no such place: {ref} ({e})", True)
 
 
+def heal_text(ws: str, text: str) -> dict[str, Any]:
+    """The healing pass (cards/heal.py) over a text that cites cards: what it did to each citation, for the page."""
+    from ..cards import heal as H
+
+    def load(cid: str) -> dict | None:
+        try:
+            return canvas.find(ws, cid)[1]
+        except KeyError:
+            return None
+
+    return H.heal(text, load)
+
+
 def register(ctx: Any) -> None:
+    @ctx.app.post("/api/corpora/{c}/heal")
+    def heal_route(c: str, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return heal_text(c, str(body.get("text") or ""))
+        except Exception as e:  # noqa: BLE001
+            raise ctx.bad(e) from None
+
     @ctx.app.get("/api/corpora/{c}/ref")
     def resolve_ref(c: str, ref: str, value: str | None = None) -> dict[str, Any]:
         try:
