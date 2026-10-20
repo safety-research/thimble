@@ -650,6 +650,12 @@ export const api = {
   // ---- settings ----
   settings: (c: string) => j<Settings>(`${ws(c)}/settings`),
   putSettings: (c: string, patch: SettingsPatch) => j<Settings>(`${ws(c)}/settings`, { method: 'PUT', body: JSON.stringify(patch) }),
+  /** `PUT /settings/api-key`: keep the API key the analyst pasted; the answer says only that one is saved */
+  saveApiKey: (c: string, key: string) => j<Settings>(`${ws(c)}/settings/api-key`, { method: 'PUT', body: JSON.stringify({ key }) }),
+  /** `DELETE /settings/api-key`: remove the saved API key */
+  removeApiKey: (c: string) => j<Settings>(`${ws(c)}/settings/api-key`, { method: 'DELETE' }),
+  /** `POST /settings/check`: one Models API call with the saved sign-in: whether it works, in words */
+  checkSignIn: (c: string) => j<{ ok: boolean; message: string }>(`${ws(c)}/settings/check`, { method: 'POST' }),
   /** the extensions added, found again for this workspace (backend extensions.list_route) */
   extensions: (c: string) => j<Extensions>(`${ws(c)}/extensions`),
   /** this workspace's switch of one extension; the analyst's browser alone may turn it */

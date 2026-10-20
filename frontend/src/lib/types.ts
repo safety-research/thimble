@@ -1295,6 +1295,27 @@ export interface AgentRow {
 /** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
  * `permission_modes` merges per agent, null putting an agent back on the session's mode; `web` sets a subagent's web
  * off, or back on main's rule with null. */
+/** How thimble browser signs in to Claude (backend settings.py): Workload Identity Federation with an org, or an API key
+ * the analyst pasted; {} before either is chosen. */
+export interface Credentials {
+  source?: 'wif' | 'key'
+  org?: string
+}
+
+/** `GET /ws/{c}/settings` in thimble browser (backend settings_api.view): the sign-in, the one model and effort every
+ * agent runs on, explainers, and the choices the popover offers. The API key itself is never sent: `has_api_key` says
+ * whether one is saved. `models` holds the 0.8 page's role rows, each the one model and effort. */
+export interface BrowserSettings extends Settings {
+  credentials: Credentials
+  /** the sign-in in words, never an id or a key: "Workload Identity Federation (org-a)" */
+  signed_in: string
+  has_api_key: boolean
+  model: string
+  effort: string
+  explain: boolean
+  choices: { models: string[]; efforts: string[]; orgs: string[] }
+}
+
 export interface SettingsPatch {
   models?: Record<string, Partial<ModelConf>>
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
