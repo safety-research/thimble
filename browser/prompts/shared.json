@@ -57,8 +57,8 @@
           ""
         ],
         [
-          "; and an optional \"program\" on thimble's drawing toolkit.",
-          ". thimble browser draws no \"program\", so give none."
+          "Give a \"program\" on thimble's drawing toolkit only when a picture shows the term better than words.",
+          "thimble browser draws no \"program\", so give none."
         ],
         [
           ", \"program\": \"<optional>\"",
@@ -69,7 +69,7 @@
           "(app/session.ts#L40-L52)"
         ],
         [
-          ", \"program\": \"return k.beside(...[['server HTML', 'app/server.ts#L30-44'], ['hydrate()', 'app/main.ts#L18'], ['page responds', 'app/page.ts#L5-20']].map(([s, ref], i) => k.region('step-' + i, { label: s, ref }, k.frame(k.text(s), { tone: i === 1 ? 'explain' : 'dim' }))), { gap: 2 })\"",
+          ",\n             \"program\": \"return k.beside(...[['server HTML', 'app/server.ts#L30-44'],\n             ['hydrate()', 'app/main.ts#L18'], ['page responds', 'app/page.ts#L5-20']]\n             .map(([s, ref], i) => k.region('step-' + i, { label: s, ref },\n             k.frame(k.text(s), { tone: i === 1 ? 'explain' : 'dim' }))), { gap: 2 })\"",
           ""
         ],
         [
@@ -77,10 +77,7 @@
           ""
         ]
       ],
-      "until": "<!-- digest -->",
-      "drop": [
-        "**Explain for this analyst.** Use what the session shows about what they know and care about: the words they use, what they opened, and what they asked in side threads. Each turn shows more."
-      ]
+      "until": "<!-- digest -->"
     },
     "explain-digest": {
       "prompt": "lens-explain",
@@ -131,6 +128,9 @@
           "[12%](r4#month=03@per_day)",
           "[12%](card:<id>#month/03)"
         ]
+      ],
+      "drop": [
+        "Such details are often in the cards and in what the session read, at the end of this request. Look for a claim that says more than its records hold, a file the session never saw that could change the answer, a number whose records come from another period, group or scope than its words say, or a drawing that disagrees with the words.\n\n"
       ]
     },
     "heads-digest": {

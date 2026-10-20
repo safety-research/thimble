@@ -2,7 +2,7 @@
 
 {{MESSAGES}}
 
-The verbs in the analyst's row: {{ROW}}
+The keys above the analyst's prompt: {{ROW}}
 {{SHOWN}}
 ## Cards
 
@@ -18,5 +18,5 @@ The verbs in the analyst's row: {{ROW}}
 {{RULES}}
 ## Your reply
 
-Reply with JSON only, and leave out what you do not give:
+Reply with JSON only. Leave out a key when you give nothing for it:
 {{SKELETON}}
