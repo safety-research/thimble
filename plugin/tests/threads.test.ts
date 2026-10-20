@@ -50,9 +50,11 @@ function world(on: any, open: Any = { isPlaced: true }) {
   })
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: open } })
-  on('ui.focus', () => ({ value: {} }))
+  // whether the panel holds the keys (a test gives them to the prompt), and each element the ring was put on
+  const keys = { panel: true, rings: [] as string[] }
+  on('ui.focus', (_$: unknown, e: Any) => { keys.rings.push(String(e.element ?? e.key)); return { value: {} } })
   on('ui.close', () => ({ value: undefined }))
-  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] : [] }))
+  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: keys.panel, isPlaced: true, plugin: 'thimble' }] : [] }))
   const views: Any[] = []
   on('ui.view', (_$: unknown, e: Any) => { views.push(e); return { value: {} } })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
@@ -98,7 +100,7 @@ function world(on: any, open: Any = { isPlaced: true }) {
     await $.turn.complete({ turnId: `x-${Math.random()}`, agentId, answer: text, durationMs: 5, reason: 'answer', isAborted: false } as never)
     await clock.settle()
   }
-  return { files, opened, views, submitted, spawns, sent, toasts, answer }
+  return { files, opened, views, submitted, spawns, sent, toasts, answer, keys }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,6 +124,21 @@ const pane = async ($: any, clock: { settle: () => Promise<void> }) => { for (le
 const askKeyOf = async ($: any) => /"key":"(ask-\d+)"/.exec(JSON.stringify(await $.ui.render(PANE)))?.[1] ?? ''
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(BAND))
+/** The keys of the presses a drawing holds, in order. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pressKeys(n: any, out: string[] = []): string[] {
+  if (n == null || typeof n !== 'object') return out
+  if (Array.isArray(n)) { n.forEach(x => pressKeys(x, out)); return out }
+  if (n.type === 'Button' && n.props?.key) out.push(String(n.props.key))
+  pressKeys(n.props?.children ?? n.children, out)
+  return out
+}
+/** The input bar's field as the panel draws it now: its key and the text it holds. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const fieldOf = async ($: any, at: unknown = PANE) => {
+  const s = JSON.stringify(await $.ui.render(at))
+  return { key: /"key":"(ask-\d+)"/.exec(s)?.[1] ?? '', value: /"key":"ask-\d+"[^}]*?"value":"([^"]*)"/.exec(s)?.[1] ?? /"value":"([^"]*)"[^}]*?"key":"ask-\d+"/.exec(s)?.[1] ?? '' }
+}
 /** The panel, mounted once per test (the kit holds one mount of an instance). */
 const mounts = new WeakMap<object, Any>()
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -241,8 +258,8 @@ test("a citation's thread: a in the tray opens the citation in the side panel wi
   const clock = mock.clock(on)
   await markedTurn($, clock)
   await press($, clock, edit(']'))
-  // one way to open a citation in the side panel: a open (↵ does the same where Claude Code hands it on)
-  expect(await hintOf($)).toContain('a open')
+  // one way to ask about a citation in the side panel: a ask (↵ does the same where Claude Code hands it on)
+  expect(await hintOf($)).toContain('a ask')
   expect(await hintOf($)).not.toContain('expand')
   // a acts once a letter after it could no longer make it the start of a word
   expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
@@ -270,6 +287,73 @@ test("a citation's thread: a in the tray opens the citation in the side panel wi
   const file = JSON.parse(w.files[`${ROOT}/thimble/threads/${SESSION}/mark-aaaaaaaa-bbbb-cccc-dddd-q1-day-2026-06-18-n.json`]!)
   expect(file.anchor).toMatchObject({ kind: 'pane', pane: 'mark' })
   expect(w.submitted.length).toBe(0)
+})
+
+test('a question typed while the keys are back at the prompt (keys typed at once can take them there): the input bar asks for the keys again, and ↵ after a click on it sends the question once, as typed', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, clock)
+  await press($, clock, edit(']'))
+  await press($, clock, edit('a'))
+  // the panel is open, and the asks for the keys that follow the open are over; the ring lands on the input bar
+  await clock.advance(2000)
+  await pane($, clock)
+  await $.ui.focus({ requestId: 'object', element: (await fieldOf($)).key, origin: { kind: 'plugin', name: 'thimble' } } as never)
+  await clock.settle()
+  // the keys go back to the prompt: Claude Code draws the panel without them
+  w.keys.panel = false
+  const UNFOCUSED = { ...(PANE as Any), props: { ...(PANE as Any).props, isFocused: false } } as never
+  await $.ui.render(UNFOCUSED)
+  const opens = w.opened.length
+  // the question comes through the prompt as one edit, and joins the input bar
+  const burst = { origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'why so high?' } as never
+  expect(await press($, clock, burst)).toEqual({ text: '', cursor: 0 })
+  await $.ui.render(UNFOCUSED)
+  await clock.settle()
+  const field = await fieldOf($, UNFOCUSED)
+  expect(field.value).toBe('why so high?')
+  // the input bar asks for the keys again: Claude Code keeps a ↵ typed at an empty prompt, so it never reaches the panel
+  expect(w.opened.slice(opens).some(x => x.id === 'object' && x.focus)).toBe(true)
+  // a click on the input bar gives it the keys, and ↵ sends what it shows: the question, once
+  w.keys.panel = true
+  await $.ui.focus({ requestId: 'object', element: field.key, origin: { kind: 'person' } } as never)
+  await clock.settle()
+  const ui = await mounted($)
+  await ui.input({ key: field.key, text: field.value })
+  await clock.settle()
+  expect(w.spawns.length).toBe(1)
+  expect(w.spawns[0].prompt).toContain('why so high?\n\nAbout')
+  expect(w.spawns[0].prompt).not.toContain('why so high?why so high?')
+  expect(w.submitted.length).toBe(0)
+})
+
+test('a question begun gives the conversation more rows, and the citations they show stand above the input bar: the input bar asks for the ring again, so the ↵ that follows reaches it, not a citation', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, clock)
+  await press($, clock, edit(']'))
+  await press($, clock, edit('a'))
+  await clock.advance(2000)
+  await ask($, clock, 'why so high?')
+  // a long answer, its citation at its start: the conversation's window shows its end
+  const long = ['Most were [6,543 saves](q1#day=2026-06-18@n) of reverts.', ...Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of the answer.`)].join('\n\n')
+  await w.answer($, clock, 'agent-1', long)
+  await pane($, clock)
+  const cites = async () => pressKeys(await $.ui.render(PANE)).filter(k => k.startsWith('mk-conv'))
+  expect(await cites()).toEqual([])
+  // the ring lands on the input bar, and a letter is typed there
+  const field = (await fieldOf($)).key
+  await $.ui.focus({ requestId: 'object', element: field, origin: { kind: 'plugin', name: 'thimble' } } as never)
+  await clock.settle()
+  const opens = w.opened.length
+  const ui = await mounted($)
+  await ui.input({ key: field, text: 'a', kind: 'change' })
+  await pane($, clock)
+  // the conversation takes more rows while a question is typed: its citation is a press above the input bar now
+  expect(await cites()).toEqual(['mk-conv-a1-0'])
+  // Claude Code keeps the ring at its place in the order of the presses, which is the citation now: the input bar asks
+  // for the ring again
+  expect(w.opened.slice(opens).some(x => x.id === 'object' && x.focus)).toBe(true)
 })
 
 test('the thread list opens from the prompt, never from inside a thread: t in the panel is a letter of the question; the bar\'s threads opens the list, which has no input bar, and a press on a row opens that thread', async ($, on) => {
@@ -349,7 +433,7 @@ test('a terminal too narrow for the panel: 1 in the tray leaves the tray as it w
   await press($, clock, edit('1'))
   expect(w.toasts.at(-1)).toBe('The side panel needs 144 columns when a key opens it (120 now). Type /threads to open it here, or widen the terminal.')
   // the keys are the chat's again, and the tray still shows the citation
-  expect(await hintOf($)).toContain('a open')
+  expect(await hintOf($)).toContain('a ask')
   expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   const n = w.opened.length
   await $.command.run({ command: 'threads', args: '' } as never)

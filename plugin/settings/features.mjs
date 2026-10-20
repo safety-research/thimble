@@ -46,7 +46,7 @@ export const SWITCHES = [
   },
   {
     key: 'counts', title: 'Labels and coverage on the bar', default: true, lenses: [], bar: ['cov', 'labels'], surfaces: ['terminal'],
-    does: 'The bar shows how much of the data Claude read (r) and how many labels there are (l).',
+    does: 'The bar shows how much of the data Claude has seen (r coverage) and how many labels there are (l).',
     costs: 'No model call: thimble counts the files after each turn.',
   },
   {

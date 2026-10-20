@@ -301,7 +301,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   // the tray's keys are in the bar under it, not on its frame
   expect(card.split('╯')[0]).not.toContain('a ask')
   // with the keys of the card's sections: the rows behind the value, and its code
-  expect(await hintOf($)).toContain('thimble  a open · r rows · c code · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  a ask · r rows · c code · 0 close · ] next')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
 })
@@ -325,14 +325,14 @@ test('a quote opens its span under its file\'s place, never an address; c shows 
     expect(buttons(band).map(b => b.props.label)).toContain('open revisions.jsonl:28')
     expect(textOf(band)).toContain('revisions.jsonl:28')
     expect(JSON.stringify(band)).not.toContain('file://')
-    expect(await hintOf($)).toContain('thimble  a open · c raw · 0 close · ] next')
+    expect(await hintOf($)).toContain('thimble  a ask · c raw · 0 close · ] next')
     // c: the record as the file holds it, in place of the span, in the same panel
     expect(await press($, clock, edit('c'))).toEqual({ text: '', cursor: 0 })
     let now = textOf(await $.ui.render(BAND))
     expect(now).toContain('revisions.jsonl:28, as the file holds it')
     expect(now).not.toContain('27 an earlier save')
     expect(now).toContain('cite · revisions.jsonl · raw')
-    expect(await hintOf($)).toContain('thimble  a open · c raw · 0 back · ] next')
+    expect(await hintOf($)).toContain('thimble  a ask · c raw · 0 back · ] next')
     // 0 brings the span back; the tray stays open
     expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
     now = textOf(await $.ui.render(BAND))
@@ -510,12 +510,12 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · c claims')
   expect(await hintOf($)).not.toContain('cite & explain')
   // the bar above the prompt says how much of the data the session read
-  expect(textOf(await $.ui.render(BAND))).toContain('seen 17%')
+  expect(textOf(await $.ui.render(BAND))).toContain('coverage 17%')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  expect(await hintOf($)).toContain('thimble  a open · 0 close · ] next')
+  expect(await hintOf($)).toContain('thimble  a ask · 0 close · ] next')
   await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
   await press($, clock, edit('['))
@@ -717,13 +717,13 @@ test('the bar is one row above the prompt: the verbs in words at its left, a lit
   const bar = textOf(await $.ui.render(HINT))
   expect(bar).toContain('thimble  v visualize · s squeeze · c claims')
   // 102 of 600 rows read, as the kernel counts them (events.jsonl was only named): 17%; no zero count shows
-  expect(bar).toContain('seen 17%')
+  expect(bar).toContain('coverage 17%')
   expect(bar).not.toContain('cites')
   expect(bar).not.toContain('card')
   expect(bar).not.toContain('thread')
   expect(bar).not.toMatch(/\d claims?\b/)
   // the counts that just changed are bright, then dim
-  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x).trim() === 'seen 17%') on = true }); return on }
+  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x).trim() === 'coverage 17%') on = true }); return on }
   expect(lit(await $.ui.render(HINT))).toBe(true)
   for (let i = 0; i < 40; i++) await clock.advance(50)
   expect(lit(await $.ui.render(HINT))).toBe(false)

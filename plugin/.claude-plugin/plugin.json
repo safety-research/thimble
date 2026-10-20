@@ -46,7 +46,7 @@
     "counts": {
       "type": "boolean",
       "title": "Labels and coverage on the bar",
-      "description": "The bar shows how much of the data Claude read (r) and how many labels there are (l). No model call: thimble counts the files after each turn.",
+      "description": "The bar shows how much of the data Claude has seen (r coverage) and how many labels there are (l). No model call: thimble counts the files after each turn.",
       "default": true
     },
     "squeezeCards": {

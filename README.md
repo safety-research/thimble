@@ -65,16 +65,21 @@ that work at that moment, so you do not need to learn them first.
 | `]` `[` | Step through the citations and explained terms in the reply, then its cards. |
 | `o` | Opens the card you stepped to. |
 | `{` `}` | Pick an earlier or a later reply. |
+| `t` | Lists the side threads of the session in the side panel, each with its last question, and whether it is answering. |
 | `esc` or `0` | Close. Claude Code keeps `esc` at the prompt, so it closes the side panel and what opens over it; `0` closes the rest. |
 
-A citation opens in a tray above the prompt: `r` shows its rows, `c` the code behind it, and `a` opens it in the
-side panel, its whole source with a side thread that the main conversation does not see.
+A citation or an explained term opens in a tray above the prompt: `r` shows the rows behind it, `c` the code, and
+`a` asks about it. `a` opens it in the side panel, its whole source with a side thread that the main conversation
+does not see, and what you type next is your question there.
 
 A card opens in a side panel beside the chat, and so do a label, Coverage and the thread list. The panel works with
 clicks alone, and with the keys you would expect: what you type there is a question for its side thread, `↑` `↓` move
 through its parts, `↵` opens one, and `esc` goes back. What a thing there offers (a card's Rows and Code, a label's
-Definition) is a row of words above the panel's input bar, and what one opens shows right above it. `t` at the prompt
-lists the side threads.
+Definition) is a row of words above the panel's input bar, and what one opens shows right above it.
+
+The right end of the line above the prompt counts what the session has: `t 2 threads` (a thread is listed as soon as
+you ask it), `r coverage 12%` (how much of the folder's rows Claude has seen; it opens Coverage, file by file) and
+`l 2 labels`. A click on a count does what its key does.
 
 A card or an answer that counts by a label shows the label under it, its values in their colors; a click opens the
 label: its values over its records, the records themselves, and how it was made.

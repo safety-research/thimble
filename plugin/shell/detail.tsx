@@ -116,6 +116,8 @@ let ringY = -1
 let draft = ''
 let refocus = false
 let drawnSig = ''
+// the presses drawn before the input bar's field, in order, as the last drawing had them (pressesBefore)
+let drawnAbove = ''
 let paneFocused = false
 // the page's window when the page is taller than the pane: what it follows (the selected part, or the bar under the
 // card once the person opened it), the bar and part it last saw, and the rows the wheel moved it by since
@@ -159,11 +161,16 @@ const isAsk = (k: string | null) => !!k && k.startsWith('ask-')
 // started by a letter, never cancelled by the next: a terminal busy drawing may hand the ring to a field it drew a
 // moment before, which the ring is sent on from to the field drawn last; a move that did not land (the prompt still
 // showed letters, so the pane could not take the keys) is started again by the next letter. A field with the ring is
-// never drawn afresh, since the letters typed into it meanwhile would be lost with it
+// never drawn afresh, since the letters typed into it meanwhile would be lost with it. The ring can leave the field
+// again without a move of ours (keys typed at once go to the prompt, and take the keys there): `landed` is only what
+// the last move said, so a letter that comes through the prompt asks the panel whether it still holds the keys
 let moveGen = 0
 let moving = false
 let landed: string | null = null
+// what each field showed when it was last drawn without the ring: what it reports counts from that
 const fields = new Map<string, { seen: string }>()
+// the latest request for the keys (focusEntry): only its later checks run
+let keysAsked = 0
 let askDrawn = 0
 function askRedraw($: Engine): void {
   void $.state.set(ASKLINE, ++askDrawn).catch(() => undefined)
@@ -227,22 +234,40 @@ async function takeKeys($: Engine): Promise<void> {
   else focusEntry($)
 }
 
-/** The input bar takes the keys now, holding what is typed in it so far (a thread opened to be asked). */
+/** The input bar takes the keys now, holding what is typed in it so far (a thread opened to be asked, a question typed
+ *  through the prompt). */
 export function focusEntry($: Engine): void {
   toAsk($, draft)
   // a click that opened the panel (on the bar, on a card in a reply) holds the keys a moment longer than the open, and
-  // can take them back after they landed: the keys are asked for again a little later, while the panel does not have
-  // them
+  // can take them back after they landed; a prompt that still shows letters cannot give them: the keys are asked for
+  // again a little later, while the panel does not have them
   const gen = moveGen
+  const mine = ++keysAsked
   const retry = () => { void (async () => {
-    if (!isOpen || !isAsk(ringAt) || gen !== moveGen) return
-    const here = (await $.ui.panes().catch(() => [] as Any[])).find((x: Any) => x.id === PANE)
-    if (here && here.isFocused === false) landed = null
+    if (!isOpen || !isAsk(ringAt) || gen !== moveGen || mine !== keysAsked) return
+    if (!(await panelHasKeys($))) landed = null
     if (landed !== askKey()) moveSoon($)
   })() }
   $.clock.after(250, retry)
   $.clock.after(900, retry)
   $.clock.after(1600, retry)
+}
+
+/** Whether the panel holds the keys, as Claude Code says now (when it cannot say, as the module last knew). */
+async function panelHasKeys($: Engine): Promise<boolean> {
+  const here = (await $.ui.panes().catch(() => [] as Any[])).find((x: Any) => x.id === PANE)
+  return !(here && here.isFocused === false)
+}
+
+/** Letters of the question that came through the prompt: the input bar did not have the keys when they were typed. Keys
+ *  typed at once go to the prompt even after the ring landed on the input bar, and the keys stay there. Unless the
+ *  panel holds them again, the field has lost the ring: one drawn afresh holds the whole question, and the input bar
+ *  asks for the keys, now and a little later, so the ↵ that follows reaches it (Claude Code keeps ↵ at an empty
+ *  prompt, so a ↵ typed there is lost). */
+async function typedInPrompt($: Engine, text: string): Promise<void> {
+  if (landed && !(await panelHasKeys($))) landed = null
+  draft = text
+  focusEntry($)
 }
 
 async function closed($: Engine, keep = false): Promise<void> {
@@ -257,6 +282,7 @@ async function closed($: Engine, keep = false): Promise<void> {
   draft = ''
   landed = null
   convBy = 0
+  drawnAbove = ''
   moveGen++
   await popFocus($, 'detail')
   // what the panel showed, and the way back through it, end with it (kept when it could not be placed: /threads opens it)
@@ -669,7 +695,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : 'this card'
   // what it offers above the input bar: the detail's actions, then the card's own keys with their words, each a press
   const own = ownActions(card?.drawing)
-  kids.push(...entryEls($, els, about, C, [...actionsOf(d), ...own], ev => {
+  kids.push(...entryEls($, els, about, C, !!e.props.isFocused, [...actionsOf(d), ...own], ev => {
     const k = /^key:(.+)$/.exec(ev)
     void (k ? cardAct($, { type: 'key', key: k[1], ...(sel.region ? { region: sel.region } : {}) }) : detailFire($, { type: ev })).then(() => focusEntry($))
   }))
@@ -683,6 +709,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   // press drawn above it hands it to another element): the input bar asks for it again, and a part's ring goes back
   // on the selected part
   if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
+  ringAbove($, kids)
   // the pane taking the keyboard back puts the ring where the person last moved it, as the engine kept it, which is
   // another part once the page scrolled: it goes back on the selected part
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
@@ -742,13 +769,16 @@ async function convOf($: Engine, els: Any, thread: Any | null, name: string, w: 
 }
 
 /** The input bar: what is typed in it so far, and ↵ asks the thread of what the panel shows about `about`. What the
- *  thread offers (`acts`: a card's rows, its code) stands right above it, a row of presses. */
-function entryEls($: Engine, els: Any, about: string, C: number, acts: { event: string; words: string; on?: boolean }[] = [], fire: (event: string) => unknown = () => undefined): Any[] {
+ *  thread offers (`acts`: a card's rows, its code) stands right above it, a row of presses. `keys`: whether the panel
+ *  is drawn holding the keys. */
+function entryEls($: Engine, els: Any, about: string, C: number, keys: boolean, acts: { event: string; words: string; on?: boolean }[] = [], fire: (event: string) => unknown = () => undefined): Any[] {
   const key = askKey()
-  // what the field holds, as it was first drawn and then reported: a field with the ring keeps its own text when drawn
-  // again, so a letter the question took through the prompt meanwhile is not in it
+  // what the field holds, as it was drawn and then reported: a field with the ring keeps its own text when drawn
+  // again, so a letter the question took through the prompt meanwhile is not in it; a field without the ring shows the
+  // question it is drawn with, and what it reports later counts from that
   let base = fields.get(key)
   if (!base) { base = { seen: draft }; fields.set(key, base); if (fields.size > 8) fields.delete(fields.keys().next().value!) }
+  else if (!(keys && landed === key)) base.seen = draft
   const what = cut(about, 40)
   const b = base
   const bar = entry(els, {
@@ -871,7 +901,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   // what an action opened, right above the actions and the input bar
   if (belowRows) kids.push(Text({ key: 'below-gap', children: ' ' }), Box({ key: 'below', marginLeft: 1, children: [paintRegions(openedOnly(grid), els, { theme, selected: region, key: 'side', from: split, rows: belowRows, onPress, painted: true })] }))
   const fireAct = (ev: string) => { void paneFire($, view.pane, view.args, { type: ev }).then(() => takeKeys($)) }
-  if (subject) kids.push(...entryEls($, els, subject.label, C, acts, fireAct))
+  if (subject) kids.push(...entryEls($, els, subject.label, C, !!e.props.isFocused, acts, fireAct))
   else if (acts.length) kids.push(...actionEls(els, acts, fireAct))
   // the ring follows the selection, as on a card
   const want = selectedGutter()
@@ -880,6 +910,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   // press drawn above it hands it to another element): the input bar asks for it again, and a part's ring goes back
   // on the selected part
   if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
+  ringAbove($, kids)
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
   paneFocused = !!e.props.isFocused
   if (want && e.props.isFocused && !isAsk(ringAt) && ringAt !== want && !refocus) {
@@ -887,6 +918,34 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
     $.clock.after(0, () => { void focusPart($).finally(() => { refocus = false }) })
   }
   return Box({ flexDirection: 'column', width: C, children: kids })
+}
+
+/** The keys of the presses (and fields) a drawing holds before the element keyed `field`, in order. */
+function pressesBefore(tree: Any, field: string): string {
+  const out: string[] = []
+  let done = false
+  const walk = (n: Any): void => {
+    if (done || n == null || typeof n !== 'object') return
+    if (Array.isArray(n)) { for (const x of n) walk(x); return }
+    if (n.props?.key === field) { done = true; return }
+    if (n.type === 'Button' || n.type === 'Input' || n.type === 'Select') out.push(String(n.props?.key ?? ''))
+    walk(n.children)
+    walk(n.props?.children)
+  }
+  walk(tree)
+  return out.join(',')
+}
+
+/** Claude Code keeps the ring at its place in the order of the presses: a press added or gone before the input bar's
+ *  field hands the ring on the field to another element, where ↵ would press it. That happens while a question is
+ *  typed (the conversation takes more rows then, and shows more of its citations) and when an answer brings its
+ *  citations. So when the presses before the field change while it has the ring, the input bar asks for the ring
+ *  again. */
+function ringAbove($: Engine, kids: Any[]): void {
+  const above = pressesBefore(kids, askKey())
+  if (above === drawnAbove) return
+  drawnAbove = above
+  if (isAsk(ringAt) && landed) { landed = null; moveSoon($) }
 }
 
 /** The rows the bar's preview takes over a pane (shell.tsx barPreviewEl): its title, its frame, and a blank row. */
@@ -998,7 +1057,7 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn | null> 
   if ((!e.key && !paste) || e.key?.ctrl || e.key?.meta || (e.text !== '' && !leftover)) return { box: null }
   const none = { text: '', cursor: 0 }
   // (the question as it stands when the key's work runs: the work of the keys before it has run by then)
-  if (paste) { const more = String(e.inputText); return { box: none, work: () => toAsk($, draft + more) } }
+  if (paste) { const more = String(e.inputText); return { box: none, work: () => typedInPrompt($, draft + more) } }
   const k = e.key!.key
   // the session clock (a test moves it), so a key and the letter after it are timed alike everywhere
   const now = Number(await $.clock.now())
@@ -1009,10 +1068,10 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn | null> 
   if (!pane && (!sel || sel.cite || sel.cites)) return { box: null }
   // a question already begun: the letter joins it (⌫ takes its last letter back, while the input bar has no keys)
   if (isAsk(ringAt) || (draft && typed) || leftover) {
-    if (k === 'backspace' && !typed) return { box: none, work: () => toAsk($, draft.slice(0, -1)) }
+    if (k === 'backspace' && !typed) return { box: none, work: () => typedInPrompt($, draft.slice(0, -1)) }
     // ↵ before the ring reached the field (the letters came through the prompt): the question is asked as it stands
     if ((k === 'return' || k === 'enter') && !typed) return { box: none, work: () => { moveGen++; void askHere($, draft) } }
-    return { box: none, work: () => toAsk($, draft + typed) }
+    return { box: none, work: () => typedInPrompt($, draft + typed) }
   }
   // a letter typed straight after a key that acted: that key began a word, and what it changed goes back
   const back = lastKey
@@ -1021,7 +1080,7 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn | null> 
       lastKey = null
       // the question at once, so the letters after it join it; what the key changed goes back after, outside the key's
       // own work (the next key waits for that work)
-      toAsk($, `${back.key}${typed}`)
+      await typedInPrompt($, `${back.key}${typed}`)
       $.clock.after(0, () => { void (async () => {
         if (back.pane) { if (back.undo) await setPaneState($, back.pane.pane, back.pane.args, back.undo, 'terminal'); return }
         if (!sel) return
@@ -1074,7 +1133,7 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn | null> 
     } }
   }
   // a letter (or a paste) that is no key begins a question in the input bar
-  if (typed.trim()) return { box: none, work: () => { lastKey = null; toAsk($, typed) } }
+  if (typed.trim()) return { box: none, work: () => { lastKey = null; return typedInPrompt($, typed) } }
   return { box: null, work: () => { lastKey = null } }
 }
 
@@ -1404,6 +1463,7 @@ export function resetDetail(): void {
   refocus = false
   paneFocused = false
   drawnSig = ''
+  drawnAbove = ''
   win.follow = 'part'; win.bar = ''; win.region = null; win.by = 0
   viewCols = 0
   latestSeen.clear()
