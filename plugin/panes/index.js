@@ -5,8 +5,10 @@
 // A pane module: {name, title, reads(args) -> store names, stateKey(args) -> where its state is kept, data(stores, args,
 // size) -> the program's data, program(k, data) -> node}. A new pane is a new file here and a line below.
 import chips from './chips.js'
+import coverage from './coverage.js'
 import detail from './detail.js'
+import labels from './labels.js'
 import proposals from './proposals.js'
 import tray from './tray.js'
 
-export default { chips, detail, proposals, tray }
+export default { chips, coverage, detail, labels, proposals, tray }

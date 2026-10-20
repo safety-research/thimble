@@ -49,6 +49,7 @@ import { mix } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
+import { countLabels, DOCK_KEY, dockAction, dockAnyOpen, dockCountEl, dockCounts, dockKey, dockOpen, dockStore, dockWant, noteCoverage, registerDock, resetDock, restKey, syncDock } from './dock'
 import { viewRequest } from './visualize.js'
 
 type Engine = EngineInterface
@@ -1219,6 +1220,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     const now = await $.clock.now()
     const root = await rootHere($)
     let cov = old?.cov ?? 0
+    let mix = old?.mix ?? []
     if (o.coverage && root && person === 'now') {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
@@ -1229,13 +1231,15 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         // the kernel's own share, by the rule its text says (a search, a listing or a count is not a read)
         if (typeof got.total?.read_share === 'number') cov = got.total.read_share
         else if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
+        // the Coverage pane shows it, and the bar's small type bar is made from it (dock.ts)
+        mix = noteCoverage(got)
       } catch {
         // the line keeps the last share it had
       }
     }
-    const next: LineCounts = { threads: threadCount(), cov, at: now, changed: { ...(old?.changed || {}) } }
-    const keys = ['threads', 'cov'] as const
-    for (const k of keys) if (old ? next[k] !== old[k] : next[k] > 0) next.changed[k] = now
+    const next: LineCounts = { threads: threadCount(), cov, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
+    const keys = ['threads', 'cov', 'labels'] as const
+    for (const k of keys) if (old ? next[k] !== old[k] : (next[k] ?? 0) > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
     await $.state.set(COUNTS, next)
     // the brightened counts dim again
@@ -1264,9 +1268,9 @@ async function threadInFront($: Engine): Promise<string | null> {
 /** What takes the keys, newest last: each surface pushes itself as it opens and leaves as it closes (the detail, the
  *  squeeze chips, v's proposals, the tray, a card under a reply). The bar says the keys of
  *  the top one alone, read from this one state, so it redraws whenever the stack changes. */
-type FocusKind = 'detail' | 'chips' | 'proposals' | 'tray' | 'card'
+type FocusKind = 'detail' | 'chips' | 'proposals' | 'tray' | 'card' | 'coverage' | 'labels'
 const FSTACK = { plugin: 'thimble', key: 'focus' } as const
-const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'detail']
+const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'detail', 'coverage', 'labels']
 
 export async function pushFocus($: Engine, kind: FocusKind): Promise<void> {
   const now = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
@@ -1303,6 +1307,12 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   if (kind === 'detail') {
     const d = await detailKeys($)
     return d ? { keys: d } : undefined
+  }
+  // Coverage and the label viewer (dock.ts): their programs' keys
+  if (kind === 'coverage' || kind === 'labels') {
+    if (!dockOpen(kind)) return undefined
+    const d = await paneNow($, kind)
+    return { status: status(d), keys: barText([d]) || 'esc close' }
   }
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (kind === 'chips') {
@@ -1420,6 +1430,7 @@ function barNamed(k: string, now: number, since: number): boolean {
 async function barEl($: Engine, els: Any, w: number, working = false): Promise<Any | null> {
   const { Box, Button, Text } = els
   const left: BarSeg[] = []
+  await syncDock($)
   const focus = await focusKeys($)
   if (focus) {
     // what the focused surface says now, cut at its end when the line is short (never to its first word), then its keys
@@ -1477,7 +1488,8 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   noteBar(now, left)
   const items: [string, number, string][] = c ? [
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
-    ['cov', c.cov, `coverage ${percent(c.cov)}`],
+    // coverage and the labels open their panes (dock.ts): `r coverage 34% ▆▆▆▆`, `l 2 labels`
+    ...dockCounts(c, percent),
   ] : []
   const counts = items.filter(([, n]) => n > 0).map(([id, , text]) => ({ id, text, bright: now - (c!.changed[id] ?? 0) < BRIGHT_MS }))
   const where = await threadInFront($)
@@ -1493,7 +1505,8 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), ...(g.bold ? { bold: true } : {}), children: `${g.key ? ' ' : ''}${g.words}` })] : []),
     ]),
   ]
-  const countEls = fit.counts.flatMap((x, i) => [...(i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []), Text({ key: `count-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.text })])
+  const countEl = (x: { id: string; text: string; bright: boolean }, press: boolean) => (x.id === 'cov' || x.id === 'labels' ? dockCountEl($, els, x, c!, press) : Text({ key: `count-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.text }))
+  const countEls = fit.counts.flatMap((x, i) => [...(i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []), countEl(x, !fit.cut)])
   if (fit.cut) {
     // narrower than the shortest form: one line, cut at its end (no presses: the keys still work)
     return Box({ width: w, children: [Text({ key: 'bar-cut', wrap: 'truncate-end', children: [...label, ...fit.left.flatMap(segText), ...(countEls.length ? [Text({ children: '   ' }), ...countEls] : [])] })] })
@@ -1504,7 +1517,8 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
     : segText(g, i))
   return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [...label, ...leftEls] }),
-    ...(countEls.length ? [Box({ key: 'bar-counts', flexShrink: 0, children: [Text({ key: 'bar-right', wrap: 'truncate-end', children: countEls })] })] : []),
+    // the counts in a row of their own: coverage and the labels are presses (dock.ts), which no Text may hold
+    ...(countEls.length ? [Box({ key: 'bar-counts', flexShrink: 0, flexDirection: 'row', children: countEls })] : []),
   ] })
 }
 
@@ -1546,6 +1560,9 @@ async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<
  *  when the key came. */
 async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
   const key = e.key
+  // Coverage or the label viewer on top of the focus stack: its program's keys (dock.ts)
+  const docked = dockAnyOpen() ? await dockKey($, (((await $.state.get(FSTACK)).value ?? []) as FocusKind[]).at(-1), e, at) : null
+  if (docked) return docked
   // the open detail takes its own keys first (detail.tsx), and a letter there begins the question for the card's thread
   const d = detailIsOpen() ? await detailKey($, e) : null
   if (d?.box) return d
@@ -1661,6 +1678,12 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     let made: string | null = null
     const undo = async () => { keyOpened = null; if (made) await dismissNow($, made, true) }
     return { box: consume, work: async () => { made = await catchUpNow($); keyOpened = { key: k, at: now, undo } }, word: undo }
+  }
+  // r and l: Coverage and the labels, as the bar's counts name them (dock.ts); a letter at once after them is a word
+  if (!pick && (k === DOCK_KEY.coverage || k === DOCK_KEY.labels)) {
+    const counts = (await $.state.get(COUNTS)).value as LineCounts | null
+    const t = restKey($, k, e, now, { cov: (counts?.cov ?? 0) > 0, labels: (counts?.labels ?? 0) > 0 })
+    if (t) return t
   }
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
   if (k.length === 1 && ROW_KEYS.some(v => v.key === k)) {
@@ -1922,12 +1945,17 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
 }
 
 /** Stores the squeeze chips and the card detail read (their modules add to this). */
-async function paneStoreMore(_$: Engine, _kind: string, _arg: string): Promise<unknown> {
+async function paneStoreMore($: Engine, kind: string, _arg: string): Promise<unknown> {
+  // Coverage and the labels (dock.ts)
+  const docked = await dockStore($, kind)
+  if (docked !== undefined) return docked
   return null
 }
 
 /** What a program wants that its data does not hold (k.want): {rows: [refs]} read through the kernel. */
 export async function paneWant($: Engine, _name: string, _args: Record<string, unknown>, request: Any): Promise<unknown> {
+  // a file's lines, a page of a label's records (dock.ts)
+  if (_name === 'coverage' || _name === 'labels') return (await dockWant($, request)) ?? { error: 'the terminal cannot read that' }
   // a card a program shows inside itself (the tray's): its parts drawn in the sandbox at the room it gives
   if (request?.card && typeof request.card === 'object') return trayCard($, request.card, Math.max(20, Number(request.w) || 80), Math.max(3, Number(request.h) || 9))
   const root = await rootHere($)
@@ -1999,6 +2027,7 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   }
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
   if (pane === 'detail') return detailAction($, a)
+  if (pane === 'coverage' || pane === 'labels') return dockAction($, pane, a)
   if (name === 'open') {
     // a place a program opens: a card (its detail), a message (the keys act on it now)
     if (typeof a.object === 'string' && ID.test(a.object)) {
@@ -2022,6 +2051,8 @@ export const registerShell: Register = (on, options) => {
   // thread's report never reach the shell's prompt hooks (or main)
   registerThreads(on, options)
   registerDetail(on)
+  // Coverage and the label viewer, docked where the detail docks (dock.ts)
+  registerDock(on, options)
 
   // (a matcher, as the kernel's module hooks session.start without one and the engine takes one bare hook per event)
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
@@ -2441,6 +2472,7 @@ export function resetShell(): void {
   placeNext = null
   keyDecided = 0
   barSeen.length = 0
+  resetDock()
   resetKeys(shellKey)
   graphLayout = null
 }

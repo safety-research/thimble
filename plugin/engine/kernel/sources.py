@@ -23,7 +23,7 @@ import os
 import re
 import sqlite3
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -430,6 +430,51 @@ def group_of(files: list[str]) -> dict[str, str]:
         ext = Path(f).suffix
         pat.append(f"*{ext}" if files_in[("/".join(parts[:-1]), ext)] >= 6 else parts[-1])
         out[f] = "/".join(pat)
+    return out
+
+
+def _shape(name: str) -> str:
+    """A folder's name with its numbers and ids read as `#`: run-003 and run-017 have one shape."""
+    return re.sub(r"[0-9a-f]{6,}|\d+", "#", name.lower())
+
+
+def pattern_of(files: list[str], alike: float = 0.6, many: int = 4) -> dict[str, str]:
+    """A wildcard pattern per file, for the coverage pane: a folder level reads `*` where it has `many` or more sibling
+    folders and most of them look alike (`alike` of them share a name shape, run-001 and run-002, or hold the same
+    names and file types), so runs/r1/agents/a.jsonl reads runs/*/agents/*.jsonl while backend/ and frontend/ keep
+    their names; three or more files of one type in one (pattern) folder read `*.ext`."""
+    kids: dict[str, set[str]] = defaultdict(set)
+    sig: dict[str, set[str]] = defaultdict(set)
+    for f in files:
+        parts = f.split("/")
+        for i in range(len(parts) - 1):
+            parent = "/".join(parts[:i])
+            kids[parent].add(parts[i])
+            if i:
+                sig["/".join(parts[:i])].add(parts[i] + "/")
+        sig["/".join(parts[:-1])].add(Path(f).suffix or parts[-1])
+    star: dict[str, bool] = {}
+    for parent, names in kids.items():
+        if len(names) < many:
+            star[parent] = False
+            continue
+        join = (lambda n: f"{parent}/{n}" if parent else n)
+        shapes = Counter(_shape(n) for n in names)
+        sigs = Counter(frozenset(sig[join(n)]) for n in names)
+        star[parent] = max(shapes.values()) >= alike * len(names) or max(sigs.values()) >= alike * len(names)
+    folder: dict[str, str] = {}
+    for f in files:
+        parts = f.split("/")
+        pat = [("*" if star.get("/".join(parts[:i])) else parts[i]) for i in range(len(parts) - 1)]
+        folder[f] = "/".join(pat)
+    names_in: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for f in files:
+        names_in[(folder[f], Path(f).suffix)].add(f.split("/")[-1])
+    out = {}
+    for f in files:
+        ext, name = Path(f).suffix, f.split("/")[-1]
+        leaf = f"*{ext}" if ext and len(names_in[(folder[f], ext)]) >= 3 else name
+        out[f] = f"{folder[f]}/{leaf}" if folder[f] else leaf
     return out
 
 

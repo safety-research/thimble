@@ -226,3 +226,25 @@ def test_wait_waits_once_the_calls_are_picked_up(root: Path):
         LB.write(st, lab, change=False)
     r = run(root, "label", "apology", "--wait", "2")
     assert r.returncode == 0 and "still 6 records waiting after 2s" in r.stdout
+
+
+def test_the_label_viewer_reads_a_page_of_records_with_their_values_and_the_labels_with_their_definitions(root: Path):
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    run(root, "label", "sorry", "--check", "chat/room.jsonl#L2", "yes")
+    # the labels list: each with its definition, kind, scope and counts
+    labs = json.loads(run(root, "label", "--json").stdout)
+    assert labs[0]["name"] == "sorry" and labs[0]["kind"] == "regex" and labs[0]["rule"] == "(?i)sorry|apolog"
+    assert labs[0]["in"] == "chat/*.jsonl" and labs[0]["values"] == ["yes", "no"] and labs[0]["counts"] == {"yes": 3, "no": 3}
+    # a page of one value's records, in order, each with its value, its source and its words
+    got = json.loads(run(root, "label", "sorry", "--records", "yes", "--json").stdout)
+    assert got["total"] == 3 and got["label"]["checked"] == 1
+    recs = got["records"]
+    assert [x["ref"] for x in recs] == ["chat/room.jsonl#L1", "chat/room.jsonl#L2", "chat/room.jsonl#L3"]
+    assert [x["by"] for x in recs] == ["regex", "analyst", "regex"]
+    assert recs[1]["checked"] and recs[1]["was"] == "no"
+    assert "broke the build" in recs[0]["words"]
+    # every record, a page at a time
+    page = json.loads(run(root, "label", "sorry", "--records", "--at", "4", "--count", "5", "--json").stdout)
+    assert page["total"] == 6 and [x["i"] for x in page["records"]] == [4, 5]
+    # the viewer's reads are not in --help, which Claude reads
+    assert "--records" not in run(root, "label", "--help").stdout

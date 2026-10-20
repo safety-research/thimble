@@ -9,7 +9,9 @@
 //   painted: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
 //   color; in the transcript it is the terminal's own. The selected region's text reads in the theme's text color.
 //   frame: a color for the card's own frame (its outer ╭─╮ │ ╰─╯ cells), as the card the keys act on is drawn
-//   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
+//   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back); with `stable`, a region's
+//   first Button is `r|<key>|~|<region id>`, the same wherever the window puts its row, so the ring stays on it while a
+//   list scrolls; `focus` names the region whose first Button takes the ring when the pane takes the keys (autoFocus)
 //   a knob's dial (`label ◂ value ▸`, k.dial) is two Buttons, its halves: a click on the left half calls onPress(id, -1),
 //   on the right half onPress(id, 1), so a click anywhere on the dial turns it
 import { paintGrid } from '../draw/paint.js'
@@ -45,7 +47,7 @@ export function selectable(grid: Grid): Region[] {
   return grid.regions.filter(r => r.rects.length && !r.link).slice().sort((a, b) => (a.rects[0]!.y - b.rects[0]!.y) || (a.rects[0]!.x - b.rects[0]!.x))
 }
 
-export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string, turn?: number) => unknown; frame?: string | null; painted?: boolean }): Any {
+export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string, turn?: number) => unknown; frame?: string | null; painted?: boolean; stable?: boolean; focus?: string | null }): Any {
   const { Box, Text, Button } = els
   const theme = opts.theme || 'dark'
   const key = opts.key || 'cells'
@@ -53,6 +55,8 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
   const to = Math.min(grid.h, from + (opts.rows ?? grid.h))
   const owner = regionMap(grid)
   const sel = opts.selected || ''
+  // the regions whose first Button is drawn already (stable keys)
+  const first = new Set<string>()
   const pixelRow = (y: number) => grid.rows[y]!.some(c => c.px) && !grid.rows[y]!.some(c => c.b || c.ref || c.w2)
   const out: Any[] = []
   let y = from
@@ -108,7 +112,9 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       const region = grid.regions.find(r => r.id === id)
       const label = String(region?.meta?.label || id)
       if (region?.meta?.knob) { kids.push(...dial(run, id, label)); continue }
-      kids.push(Button({ key: `r|${key}|${y}|${id}`, plain: true, label, children: run.map(text), onPress: () => opts.onPress!(id) }))
+      const lead = !!opts.stable && !first.has(id)
+      if (lead) first.add(id)
+      kids.push(Button({ key: `r|${key}|${lead ? '~' : y}|${id}`, plain: true, label, children: run.map(text), onPress: () => opts.onPress!(id), ...(lead && opts.focus === id ? { autoFocus: true } : {}) }))
     }
     return Box({ flexDirection: 'row', children: kids })
 

@@ -129,3 +129,48 @@ def test_what_one_command_shows(code: Path, cmd: str, want: list) -> None:
     lines = {"runs.csv": 4, **{f"src/{c}.py": 30 for c in NAMES}}
     got = [(f, how, span) for f, how, span, _ in SH.shows(cmd, files, str(code), str(code), lambda f: lines[f])]
     assert got == want
+
+
+def test_each_file_says_its_type_pattern_read_lines_and_search_hits(code: Path, tmp_path: Path) -> None:
+    # the coverage pane groups files by wildcard pattern and by type, and opens a file on the lines that were read
+    saw(tmp_path, code, [
+        {"tool": "Read", "file": str(code / "src" / "a.py"), "from": 1, "to": 10},
+        {"tool": "Read", "file": str(code / "src" / "a.py"), "from": 8, "to": 12},
+        bash("sed -n '20,22p' src/a.py", 3),
+        {"tool": "Grep", "path": str(code / "src"), "glob": "b.py", "mode": "content",
+         "files": [str(code / "src" / "b.py")], "lines": {str(code / "src" / "b.py"): [4, 9, 4]}},
+    ])
+    cov = LIN.coverage(Store(code))
+    by = {o["path"]: o for o in cov["files"]}
+    assert by["src/a.py"]["ranges"] == [[1, 12], [20, 22]] and by["src/a.py"]["read_lines"] == 15
+    assert by["src/b.py"]["status"] == "searched" and by["src/b.py"]["hit_lines"] == [4, 9]
+    assert by["src/c.py"]["ranges"] == [] and by["src/c.py"]["hit_lines"] == []
+    # twelve .py files in one folder read as one pattern; the table stands alone
+    assert {o["pattern"] for o in cov["files"]} == {"src/*.py", "runs.csv"}
+    assert {p["pattern"]: p["files"] for p in cov["patterns"]} == {"src/*.py": 12, "runs.csv": 1}
+    assert (by["src/a.py"]["type"], by["runs.csv"]["type"]) == ("py", "csv")
+    types = {t["type"]: t for t in cov["types"]}
+    assert types["py"]["files"] == 12 and types["py"]["rows"] == 360 and types["py"]["read_rows"] == 15
+    assert types["py"]["by_status"] == {"read": 1, "searched": 1, "not read": 10}
+    assert [t["type"] for t in cov["types"]] == ["py", "csv"]
+    g = next(x for x in cov["groups"] if x["group"] == "src/*.py")
+    assert g["read_rows"] == 15 and g["files"] == 12
+
+
+def test_a_pattern_stars_only_folders_that_look_alike() -> None:
+    from kernel import sources as S
+    files = [f"runs/run-00{i}/agents/{a}.jsonl" for i in range(1, 6) for a in ("wren", "moss", "fern")]
+    files += [f"runs/run-00{i}/config.json" for i in range(1, 6)]
+    files += ["backend/app/a.py", "backend/app/b.py", "backend/app/c.py", "backend/main.py", "frontend/src/x.tsx",
+              "docs/guide.md", "scripts/check.sh", "README.md"]
+    pat = S.pattern_of(files)
+    # run folders alike in name: one star; three agents' files of one type: *.jsonl
+    assert pat["runs/run-003/agents/moss.jsonl"] == "runs/*/agents/*.jsonl"
+    assert pat["runs/run-002/config.json"] == "runs/*/config.json"
+    # top folders of a project differ in name and contents: they keep their names
+    assert pat["backend/app/b.py"] == "backend/app/*.py"
+    assert pat["backend/main.py"] == "backend/main.py"
+    assert pat["frontend/src/x.tsx"] == "frontend/src/x.tsx" and pat["README.md"] == "README.md"
+    # folders alike in what they hold, though named apart (one per agent), read as one star too
+    agents = [f"agents/{a}/{f}" for a in ("wren", "moss", "fern", "sage") for f in ("log.jsonl", "notes.md")]
+    assert S.pattern_of(agents)["agents/moss/log.jsonl"] == "agents/*/log.jsonl"

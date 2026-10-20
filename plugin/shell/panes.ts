@@ -294,13 +294,15 @@ export function takeAsk(name: string, args: Record<string, unknown> = {}): Any |
 }
 
 /** The drawing as Claude Code elements: each part a press (a click), and the ring's place a focus event. */
-export async function paneEl($: Engine, e: Any, name: string, args: Record<string, unknown>, size: Size, o: { frame?: string | null; painted?: boolean } = {}): Promise<Any> {
+export async function paneEl($: Engine, e: Any, name: string, args: Record<string, unknown>, size: Size, o: { frame?: string | null; painted?: boolean; stable?: boolean; focus?: boolean } = {}): Promise<Any> {
   const els = $.ui.resolve(e) as Any
   const d = await paneRun($, name, args, size)
   const grid = renderTerm(d, { w: size.w })
   // the part the program selected (k.select) is marked as a card's selected part is
   return paintRegions(grid, els, {
     theme: theme(), key: `p-${name}`, frame: o.frame ?? null, painted: !!o.painted, selected: typeof d?.selected === 'string' ? d.selected : null,
+    // a list's rows keep their keys as it scrolls, and the selected one takes the ring (shell/dock.ts)
+    stable: !!o.stable, focus: o.focus && typeof d?.selected === 'string' ? d.selected : null,
     onPress: (id: string, dir?: number) => { void paneFire($, name, args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) },
   })
 }

@@ -685,10 +685,14 @@ def _label(st: Store, a: argparse.Namespace) -> int:
     if a.of:
         out_json(LB.of_refs(st, a.of))
         return 0
+    if a.records is not None and a.name:
+        # the label viewer's page of records (shell/side.ts): the person's read
+        out_json(LB.page(st, a.name, None if a.records == "*" else a.records, a.at or 0, a.count or LB.PAGE))
+        return 0
     if not a.name:
         labs = [LB.load(st, n) for n in LB.names(st)]
         if a.json:
-            out_json([{"name": x["name"], **LB.status(x), "query": x.get("query"), "card": x.get("card")} for x in labs if x])
+            out_json([{**LB.head(x), "query": x.get("query")} for x in labs if x])
             return 0
         if not labs:
             print("no labels yet: thimble label NAME --in GLOB --regex RE | --code FILE | --prompt \"DEFINITION\" makes one")
@@ -937,6 +941,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--of", nargs="+", metavar="REF", help="the labels of these records, as JSON")
     p.add_argument("--delete", action="store_true")
     p.add_argument("--json", action="store_true")
+    # the label viewer's reads (the person's, in the terminal): a page of records, all (*), of one value, or with none (-)
+    p.add_argument("--records", nargs="?", const="*", help=argparse.SUPPRESS)
+    p.add_argument("--at", type=int, help=argparse.SUPPRESS)
+    p.add_argument("--count", type=int, help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_label)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("q", "query"):

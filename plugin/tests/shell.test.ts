@@ -666,7 +666,7 @@ test('the bar is one row above the prompt: the verbs in words at its left, a lit
   expect(bar).not.toContain('thread')
   expect(bar).not.toContain('claims')
   // the counts that just changed are bright, then dim
-  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x) === 'coverage 17%') on = true }); return on }
+  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x).trim() === 'coverage 17%') on = true }); return on }
   expect(lit(await $.ui.render(HINT))).toBe(true)
   for (let i = 0; i < 40; i++) await clock.advance(50)
   expect(lit(await $.ui.render(HINT))).toBe(false)
