@@ -1,14 +1,13 @@
-// The squeeze chips' pure parts (verbs/squeeze/chips.mjs): chip state with its levels, every chip in one request, the
+// The squeeze chips' pure parts (squeeze/chips.mjs): chip state with its levels, every chip in one request, the
 // reply read and held to the original, the marks placed again after a
-// rewrite, the text cut as it writes itself in, and the original restored. node --test lean/verbs/squeeze/test
-import '../../../test-home.mjs'
+// rewrite, the text cut as it writes itself in, and the original restored. node --test squeeze/test
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
+import { newRecord, remark, verbsOf, withObserver } from '../../shell/message.js'
 import { ARRIVE, CATCHUP_HEAD, CHIPS, applyRewrite, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, termsOf, unplacedMoves } from '../chips.mjs'
-import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -19,7 +18,7 @@ const TEXT = [
   '- The fix is one line.',
   '- The test then [passed 200 times in a row](q3#test=checkout@passes).',
 ].join('\n')
-const PROMPT = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v6.md', import.meta.url)), 'utf8')
+const PROMPT = readFileSync(fileURLToPath(new URL('../../prompts/squeeze/v6.md', import.meta.url)), 'utf8')
 
 function record() {
   const rec = newRecord({ row: 'r1', session: 's1', text: TEXT })
@@ -184,22 +183,10 @@ test('the new text writes itself in from the top: each cut ends a word and never
   assert.equal(revealStep(5000, 50), 100)
 })
 
-test('run.mjs: the same rewrite from words, through ctx.model, for /verb and tools that hold a record', async () => {
+test('the rewrite names the terms of the message\'s explain marks, to keep in their words', () => {
   const rec = record()
-  assert.deepEqual(parseWords(rec, 'length=short familiarity=new to the field').at, { length: 1, familiarity: 0 })
-  assert.deepEqual(parseWords(rec, '').at, { length: ARRIVE })
-  assert.throws(() => parseWords(rec, 'story=full'), /no chip "story"/)
-  const asked = []
-  const model = { complete: async req => { asked.push(req); return { isAnswered: true, text: '<text>Fixed: [1 run in 9](q2#test=checkout@fail_rate).</text>', usage: { input_tokens: 10, output_tokens: 5 } } } }
-  const r = await run({ message: rec, args: 'length=one line', model, verb: { model: 'sonnet' } })
-  assert.equal(asked.length, 1)
-  // the terms of its explain marks are named, to keep in their words
-  assert.match(asked[0].prompt[1].text, /Terms the analyst can open an explainer of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test/)
-  assert.equal(r.message.shown, 'Fixed: [1 run in 9](q2#test=checkout@fail_rate).')
-  assert.equal(r.message.marks[0].ref, 'q2#test=checkout@fail_rate')
-  const back = await run({ message: r.message, args: 'original', model })
-  assert.equal(back.message.shown, null)
-  assert.equal(asked.length, 1)
+  const req = request({ ...rec, squeeze: { at: { length: 0 } } }, { system: PROMPT, question: '', terms: termsOf(rec), model: 'sonnet', effort: 'low', maxTokens: 4000 })
+  assert.match(req.prompt[1].text, /Terms the analyst can open an explainer of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test/)
 })
 
 test('the corrections of its own earlier answer are found in the original: a list under a lead, a paragraph, a sentence; an offer is not one', () => {

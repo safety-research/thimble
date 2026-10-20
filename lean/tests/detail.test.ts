@@ -53,7 +53,7 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING, open: Any = {
     if (e.argv.some(a => a.endsWith('prep.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       preps.push(input)
-      out = { drawing: prep(input), verbs: [], problems: [] }
+      out = { drawing: prep(input) }
     }
     else if (e.argv.includes('coverage')) out = COVERAGE
     else if (e.argv.includes('resolve')) out = { ref: e.argv[2], chain: [], rows: [], count: 0, records: [], notes: [] }

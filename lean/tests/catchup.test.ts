@@ -1,4 +1,4 @@
-// Catch-up (shell/shell.tsx, verbs/squeeze/term.ts): a message arrives as Claude wrote it, and the bar at rest reads
+// Catch-up (shell/shell.tsx, squeeze/term.ts): a message arrives as Claude wrote it, and the bar at rest reads
 // `s squeeze`. When two or more of Claude's replies came since the person's last prompt (the answer to it, and each
 // answer to a hand-back or a notification), s is lit in squeeze's amber, bold, as `s catch up on N replies`; s then
 // writes one catch-up of every message since that prompt, drawn under the newest reply beside a rule, while the
@@ -33,7 +33,7 @@ const OBJECT = { id: '01-saves', version: 1, title: 'Edits per day', program: 'r
 const DRAWING = { kit: 1, w: 40, h: 24, mode: 'inline', root: { t: 'stack', kids: [{ t: 'region', id: 'day-1', meta: { ref: 'q4#day=1@n', label: 'Day 1 20' }, kid: { t: 'beside', kids: [{ t: 'text', runs: [{ s: 'Day 1', tone: 'ink' }], wrap: false, w: 5 }, { t: 'bar', tone: 'accent', value: 20, max: 49 }, { t: 'text', runs: [{ s: '20', tone: 'ink' }], align: 'right', w: 3 }], gap: 1 } }] }, cites: {}, examples: {}, regions: [{ id: 'day-1', meta: { ref: 'q4#day=1@n', label: 'Day 1 20' } }], warnings: [], ms: 2 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, replies: string[] = [], verb: (input: Any) => unknown = () => ({})) {
+function world(on: any, replies: string[] = []) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -43,19 +43,16 @@ function world(on: any, replies: string[] = [], verb: (input: Any) => unknown = 
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/queries` }))
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
-    if (e.path.endsWith('/verbs/squeeze/verb.json')) return { value: '{"model": "sonnet", "effort": "low", "settleMs": 300}' }
+    if (e.path.endsWith('/squeeze/settings.json')) return { value: '{"model": "sonnet", "effort": "low", "settleMs": 300}' }
     return { value: files[e.path] ?? promptStub(e.path) ?? '' }
   })
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
     files[e.path] = String(e.content ?? e.text ?? e.data ?? '')
     return { value: undefined }
   })
-  const inputs: Any[] = []
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     let out: unknown = {}
-    if (e.argv.some(a => a.endsWith('verb.mjs')) && e.argv.includes('list')) out = { verbs: [{ key: 'v', name: 'visualize', row: true, order: 0 }, { key: 's', name: 'squeeze', row: true, order: 1 }, { key: 'c', name: 'claims', row: true, order: 2 }] }
-    else if (e.argv.some(a => a.endsWith('verb.mjs'))) { const input = JSON.parse(String(e.init?.stdin || '{}')); inputs.push(input); out = verb(input) }
-    else if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing: DRAWING, verbs: [], problems: [] }
+    if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing: DRAWING }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const submitted: { text: string; context: readonly string[] }[] = []
@@ -73,7 +70,7 @@ function world(on: any, replies: string[] = [], verb: (input: Any) => unknown = 
     calls.push(e)
     return { value: { isAnswered: true, text: replies[calls.length - 1] ?? '<text>(no reply left)</text>', usage: { input_tokens: 2000, output_tokens: 120, cache_creation_input_tokens: 0, cache_read_input_tokens: 1500 } } }
   })
-  return { files, calls, submitted, inputs }
+  return { files, calls, submitted }
 }
 
 // every string a drawn tree holds, in order
@@ -104,7 +101,7 @@ const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: {
 const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const hintOf = async ($: Any) => textOf(await $.ui.render(HINT))
 const recordOf = (w: { files: Record<string, string> }, r: string) => JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${r}.json`]!)
-// the call waits verb.json's settleMs, then the new text writes itself in
+// the call waits settings.json's settleMs, then the new text writes itself in
 const written = async (clock: Any) => { await clock.advance(400); await clock.settle(); for (let i = 0; i < 120; i++) await clock.advance(50) }
 
 /** One turn of main's: its prompt (the person's, or a hand-back or a notification by its origin), Claude's messages
@@ -273,8 +270,8 @@ test('the chips work on a catch-up: ] makes it longer with one call, no step lan
 })
 
 test('v on a catch-up: it asks for a card of it, Claude reads the catch-up with the request, and the card it makes is drawn under the catch-up', async ($, on) => {
-  const ask = 'The person pressed v (visualize) on the catch-up of your 2 replies since their last prompt. Make a card of it.'
-  const w = world(on, [`<text>${DIGEST}</text>`], () => ({ verb: 'visualize', text: 'Claude is making another view of this answer.', ask }))
+  const ask = 'The analyst pressed v (visualize) on the catch-up of your 2 replies since their last prompt that the squeeze chips wrote'
+  const w = world(on, [`<text>${DIGEST}</text>`])
   const session = mock.session(on)
   const clock = mock.clock(on)
   on('tool.call', () => {
@@ -291,9 +288,7 @@ test('v on a catch-up: it asks for a card of it, Claude reads the catch-up with 
   expect(textOf(await $.ui.render(view(A2, FOLLOW)))).not.toContain('another view of this answer')
   await clock.advance(700)
   await clock.settle()
-  // the verb ran on the catch-up's record; the row reads as the press, and the request goes before it for Claude
-  expect(w.inputs[0].message.row).toBe(cuRow)
-  expect(w.inputs[0].message.catchup.replies).toBe(2)
+  // v asked about the catch-up; the row reads as the press, and the request goes before it for Claude
   expect(w.submitted.map(x => x.text)).toEqual(['visualize another view of this answer'])
   const notes = (session.appended() as unknown as { door: string; message: { content: { text?: string }[] } }[]).filter(r => r.door === 'note' && r.message.content.some(b => String(b.text).includes(ask)))
   expect(notes.length).toBe(1)

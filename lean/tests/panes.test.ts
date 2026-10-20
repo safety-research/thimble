@@ -62,9 +62,8 @@ function world(on: Any, serverLines: unknown[] = [], draw: (input: Any) => unkno
     if (e.argv.some(a => a.endsWith('prep.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       preps.push(input)
-      out = { drawing: draw(input), verbs: [], problems: [] }
-    } else if (e.argv.some(a => a.endsWith('verb.mjs')) && e.argv.includes('list')) out = { verbs: [{ key: 'v', name: 'visualize', row: true, order: 0 }, { key: 's', name: 'squeeze', row: true, order: 1 }] }
-    else if (e.argv.includes('coverage')) out = { feeding: [{ path: 'revisions.jsonl' }], not_feeding: [] }
+      out = { drawing: draw(input) }
+    } else if (e.argv.includes('coverage')) out = { feeding: [{ path: 'revisions.jsonl' }], not_feeding: [] }
     else if (e.argv.includes('resolve')) out = { ref: e.argv[2], chain: [], rows: [], count: 3, records: [{ text: 'Hello agents' }], notes: [] }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })

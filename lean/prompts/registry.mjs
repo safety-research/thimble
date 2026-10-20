@@ -41,7 +41,7 @@ export const FEATURES = {
     versions: { v3: { about: "written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" } },
   },
   squeeze: {
-    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v6',
+    about: "squeeze's rewrite along its chips", reads: 'squeeze/term.ts', default: 'v6',
     versions: { v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
   },
   forms: {
@@ -54,7 +54,7 @@ export const FEATURES = {
     versions: { v2: { about: "v1 with thimble's purpose and the 0.9 words on answering and citing" } },
   },
   labels: {
-    about: "the classifier a --prompt label's records are read with: one call per batch of up to 50 records", reads: 'verbs/label/run.mjs, for each call of a --prompt label', default: 'v2',
+    about: "the classifier a --prompt label's records are read with: one call per batch of up to 50 records", reads: 'shell/labels.ts, for each call of a --prompt label', default: 'v2',
     versions: { v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
   },
 }

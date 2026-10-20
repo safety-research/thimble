@@ -10,6 +10,7 @@ const STUBS: Record<string, string> = {
   'lens-explain/v3': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
   'squeeze/v6': 'THE PROMPT',
   'thread/v2': 'THE THREAD PROMPT',
+  'labels/v2': 'LABEL {{NAME}} | {{VALUES}}\n{{RECORDS}}',
 }
 
 /** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */

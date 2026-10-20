@@ -21,11 +21,6 @@ const OBJECT = {
   },
 }
 const DRAWING = { kit: 1, w: 40, h: 24, mode: 'inline', root: { t: 'stack', kids: [{ t: 'text', runs: [{ s: 'Jun 18 6,543', tone: 'ink' }], wrap: false, w: 12 }] }, cites: {}, examples: {}, regions: [], warnings: [], ms: 2 }
-const VERBS = [
-  { key: 's', name: 'squeeze', line: 'shorter', phrase: null, picked: false },
-  { key: 'x', name: 'explore', line: 'a view to explore', phrase: 'explore 1 day', picked: true },
-  { key: 't', name: 'trace', line: 'where it came from', phrase: 'where these numbers come from', picked: true },
-]
 const USAGE = { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 100 }
 const NOW = Date.parse('2026-10-18T09:00:00Z')
 const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -37,7 +32,7 @@ type Any = any
 
 /** The session around the observer: one object on disk, the Node children, the model's two calls (answered by
  *  `question` and `fork`), the prompt and the band. */
-function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string>; verb?: () => Json; squeeze?: string; holdSqueeze?: Promise<void>; holdPass?: Promise<void> } = {}) {
+function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string>; squeeze?: string; holdSqueeze?: Promise<void>; holdPass?: Promise<void> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...(o.env ?? {}) })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
@@ -61,9 +56,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     let out = '{}'
-    if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: DRAWING, verbs: VERBS, problems: [] })
-    // a verb of the message row, run when the person picks it (verb.mjs run), and the row's verbs (verb.mjs list)
-    else if (o.verb && e.argv.some(a => a.endsWith('verb.mjs'))) out = JSON.stringify(e.argv.includes('list') ? { verbs: [{ key: 'v', name: 'visualize', row: true, order: 0 }, { key: 's', name: 'squeeze', row: true, order: 1 }] } : o.verb())
+    if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: DRAWING })
     else if (e.argv.includes('coverage')) out = 'Coverage of this session · 4 source files\nNot read: 1 file (9 rows): events.jsonl'
     else if (e.argv.some(a => a.endsWith('objects.mjs'))) out = JSON.stringify(Object.entries(files).filter(([k]) => k.startsWith(DIR + '/')).map(([, v]) => slim(JSON.parse(v))).filter(o => o && o.session === e.argv.at(-1)))
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -243,18 +236,17 @@ test('a reload mid-session keeps the notes not yet delivered: they reach Claude 
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('412')
 })
 
-test("a turn a verb's ask started: the notes ride on its prompt, once; the pass reads the verb's prompt", async ($, on) => {
+test("a turn v's ask started: the notes ride on its prompt, once; the pass reads v's prompt", async ($, on) => {
   let n = 0
   const w = world(on, {
     fork: () => (++n === 1 ? { notes: [{ note: 'The agents add up to 194, not 196: fix the title of 01-saves.' }], line: null, settled: false, hints: {} } : { notes: [], line: null, settled: false, hints: {} }),
-    verb: () => ({ verb: 'visualize', text: 'Claude is making another view of this answer.', ask: 'The person pressed v (visualize) on your answer. Make a card of it.' }),
   })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const session = mock.session(on)
   const clock = w.clock
   await turn($, w, clock, { id: 't1', prompt: 'I will tell my team the cap cut them off. Anything to fix first?', answer: 'Fix two things.', tools: 1, save: true })
   expect(w.questions.length).toBe(0)
-  // v pressed (nothing proposed, so it asks at once): the verb's ask is the next prompt of main, and the note rides with it, in the
+  // v pressed (nothing proposed, so it asks at once): its ask is the next prompt of main, and the note rides with it, in the
   // row for Claude alone before the prompt
   const ui = await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'Fix two things.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
   await clock.settle()
@@ -264,7 +256,7 @@ test("a turn a verb's ask started: the notes ride on its prompt, once; the pass 
   await ui.unmount()
   expect(w.submitted.at(-1)!.text).toBe('visualize another view of this answer')
   const hidden = (session.appended() as Any[]).filter(r => r.message?.type === 'user').map(r => String(r.message.content?.[0]?.text ?? '')).at(-1)!
-  expect(hidden).toContain('The person pressed v (visualize) on your answer. Make a card of it.')
+  expect(hidden).toContain('The analyst pressed v (visualize) on your answer that begins "Fix two things."')
   expect(hidden).toContain('Notes from a side agent that read your last answer')
   expect(hidden).toContain('- The agents add up to 194, not 196: fix the title of 01-saves.')
   await $.turn.start({ turnId: 't2', text: 'visualize another view of this answer' } as never)

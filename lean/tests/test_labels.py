@@ -1,5 +1,5 @@
 """Labels (engine/kernel/labels.py, `thimble label`): a category given to every record of a scope by a regex, code, the
-model (records that wait for the label verb) or Claude's own values; counts that are a query, so each is a citation;
+model (records that wait for its reads) or Claude's own values; counts that are a query, so each is a citation;
 use(name) and `thimble rows --label` in later work; the person's checks; and the label's card. Run with any Python that
 has pandas: python -m pytest lean/tests/test_labels.py"""
 from __future__ import annotations
@@ -114,9 +114,9 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "6 records wait for the model" in r.stdout and "1 call of up to 50 records" in r.stdout
     st = Store(root)
-    # the label verb is asked for in the change feed, on the label's card
+    # the reads are asked for in the change feed, on the label's card
     ev = feed(root)[-1]
-    assert ev["kind"] == "verb" and ev["verb"] == "label" and ev["args"] == "apology" and ev["object"] == LB.load(st, "apology")["card"]
+    assert ev["kind"] == "label" and ev["name"] == "apology" and ev["object"] == LB.load(st, "apology")["card"]
     w = json.loads(run(root, "label", "apology", "--waiting").stdout)
     assert w["definition"] == "The message apologizes." and w["reason"] is True and len(w["units"]) == 6
     assert w["batches"] == [[u["ref"] for u in w["units"]]]
@@ -135,10 +135,10 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert lab["units"][refs[0]]["why"] == "says sorry"
     out = run(root, "label", "apology").stdout
     assert "2 records have no value" in out and "--again" in out
-    # again: the two without a value wait again, and the verb is asked for again
+    # again: the two without a value wait again, and the reads are asked for again
     out = run(root, "label", "apology", "--again").stdout
     assert "2 records wait for the model (1 call)" in out
-    assert feed(root)[-1]["kind"] == "verb"
+    assert feed(root)[-1]["kind"] == "label"
     assert LB.status(LB.load(st, "apology"))["waiting"] == 2
 
 

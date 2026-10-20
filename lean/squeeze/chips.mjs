@@ -1,5 +1,5 @@
-// chips.mjs: Squeeze as chips under a message. No `$`, no Node, no DOM: the hooks module (term.ts), the verb's run.mjs
-// and the tests import it.
+// chips.mjs: Squeeze as chips under a message. No `$`, no Node, no DOM: the hooks module (term.ts), the chips pane
+// (panes/chips.js) and the tests import it.
 //
 // The chips are the same for every message; only where the original stands on each differs:
 //   Length              one line · short · medium · full. The original is always at full.
@@ -37,7 +37,7 @@ export const CHIPS = Object.freeze([
   Object.freeze({ id: 'familiarity', name: 'Familiarity', levels: Object.freeze(['new to the field', 'beginner', 'working', 'fluent', 'expert']), level0: 2, kind: 'fixed' }),
 ])
 export const LENGTH = CHIPS[0]
-/** The level of Length a catch-up arrives at, and the one `/verb squeeze` with no words sets: short. */
+/** The level of Length a catch-up arrives at: short. */
 export const ARRIVE = 1
 // the names an observer or an older record may give a level, as the levels are named now
 const ALIAS = { interpret: { both: 1, story: 2, facts: 0 }, familiarity: { new: 0, newcomer: 0, novice: 0, familiar: 2, intermediate: 2, 'new to testing': 0 } }
@@ -495,7 +495,7 @@ export function restore(rec, remark) {
   return remark({ ...rec, shown: null, squeeze: { ...s, at: {}, problems: [] }, marks: prev })
 }
 
-/** What the verb row says of the message: `6 of 33 lines` while it is squeezed, `33 lines` for a long original. */
+/** What the bar says of the message: `6 of 33 lines` while it is squeezed, `33 lines` for a long original. */
 export function noteOf(rec, cols = 100) {
   const full = rowsOf(rec?.text, cols)
   if (rec && typeof rec.shown === 'string') return `${rowsOf(rec.shown, cols)} of ${full} lines`

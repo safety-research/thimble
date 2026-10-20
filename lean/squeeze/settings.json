@@ -1,0 +1,7 @@
+{
+  "model": "sonnet",
+  "effort": "low",
+  "maxTokens": 4000,
+  "timeoutMs": 90000,
+  "settleMs": 300
+}

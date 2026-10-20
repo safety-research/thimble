@@ -63,7 +63,7 @@ export function ownState(state: Record<string, unknown> | null | undefined): Rec
 export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<string, unknown>, size: { w: number; h: number }, mode = 'detail'): Promise<{ drawing: Any; state: Record<string, unknown>; ask: CardAsk | null } | null> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], {
-    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}) }, mode, event, noVerbs: true }),
+    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}) }, mode, event }),
     timeoutMs: 30000,
   })
   if (r.exitCode !== 0) return null

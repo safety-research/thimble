@@ -1,4 +1,4 @@
-// Squeeze in the terminal (verbs/squeeze/term.ts through shell/shell.tsx): s opens the chips under the answer, each
+// Squeeze in the terminal (squeeze/term.ts through shell/shell.tsx): s opens the chips under the answer, each
 // as its label, its dots and its level, with their keys in the hint line under the prompt; a chip's change rewrites
 // the message in place with one model call, its marks placed again, and the new text writes itself in from the top;
 // 0 restores the original; a state seen before
@@ -27,7 +27,7 @@ function world(on: any, replies: (string | Record<string, unknown>)[] = [], hold
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
     if (/\/prompts\/squeeze\/v\d+\.md$/.test(e.path)) return { value: 'THE PROMPT' }
-    if (e.path.endsWith('/verbs/squeeze/verb.json')) return { value: '{"model": "sonnet", "effort": "low"}' }
+    if (e.path.endsWith('/squeeze/settings.json')) return { value: '{"model": "sonnet", "effort": "low"}' }
     return { value: files[e.path] ?? '' }
   })
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
@@ -35,8 +35,7 @@ function world(on: any, replies: (string | Record<string, unknown>)[] = [], hold
     return { value: undefined }
   })
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
-    const out = e.argv.some(a => a.endsWith('verb.mjs')) ? { verbs: [{ key: 'v', name: 'visualize', row: true, order: 0 }, { key: 's', name: 'squeeze', row: true, order: 1 }] } : {}
-    return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode: 0, stdout: '{}', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const submitted: { text: string; context: readonly string[] }[] = []
   on('prompt.submit', (_$: unknown, e: { text: string; context?: readonly string[] }) => {

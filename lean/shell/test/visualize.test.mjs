@@ -1,27 +1,27 @@
 // Visualize (v): the request it sends Claude (another view, the proposals, the card guide read only now), and the card
 // guide's worked programs (skills/thimble/forms), which must draw as the guide shows them, under a reply and in the
 // detail.
-//   node --test lean/verbs/visualize/test/visualize.test.mjs
-import '../../../test-home.mjs'
+//   node --test shell/test/visualize.test.mjs
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { runProgram } from '../../../draw/sandbox-node.mjs'
-import { gridText, renderTerm } from '../../../draw/term.js'
-import { request, run } from '../run.mjs'
+import { runProgram } from '../../draw/sandbox-node.mjs'
+import { gridText, renderTerm } from '../../draw/term.js'
+import { viewRequest } from '../visualize.js'
 
-const FORMS_DIR = fileURLToPath(new URL('../../../skills/thimble/forms/', import.meta.url))
-const GUIDE = fileURLToPath(new URL('../../../skills/thimble/cards.md', import.meta.url))
+const FORMS_DIR = fileURLToPath(new URL('../../skills/thimble/forms/', import.meta.url))
+const GUIDE = fileURLToPath(new URL('../../skills/thimble/cards.md', import.meta.url))
 const FORMS = ['bars', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
 const V3 = ['bars', 'unfold', 'strips']
 
-test('v asks Claude for another view of the answer, with the proposal the person picked first and the card forms to read', async () => {
+test('v asks Claude for another view of the answer, with the proposal the person picked first and the card guide to read', () => {
   const message = { text: '[840](q3#n) of the 2,143 steps were **reruns**; the cause was a shared fixture.', objects: ['r17-trail@1'],
     verbs: { v: { lit: true, note: '2 views ready', proposals: ['trail of the run', 'failures by test order'] } } }
-  const ask = request({ message, args: 'failures by test order', verb: { dir: '/plugin/verbs/visualize' } })
+  const ask = viewRequest({ message, choice: 'failures by test order', guide: '/plugin/skills/thimble/cards.md' })
   assert.match(ask, /^The analyst pressed v \(visualize\) on your answer that begins "840 of the 2,143 steps were reruns; the cause was a shared fixture\."/)
   assert.match(ask, /another view of it: a card in the form that shows what it says, as "failures by test order"/)
   assert.match(ask, /It has the card r17-trail already: make a different view, not a copy\./)
@@ -29,16 +29,14 @@ test('v asks Claude for another view of the answer, with the proposal the person
   assert.match(ask, /Read the card guide first, unless you have it from earlier in this session: \/plugin\/skills\/thimble\/cards\.md\./)
   assert.match(ask, /thimble save <name> --from FILE/)
   // no proposals and no card: the plain request
-  const plain = request({ message: { text: 'Done.' }, verb: { dir: '/v' } })
+  const plain = viewRequest({ message: { text: 'Done.' }, guide: 'g' })
   assert.doesNotMatch(plain, /Proposed|already/)
-  const r = await run({ message, verb: { dir: '/v' } })
-  assert.equal(r.text, 'Claude is making another view of this answer.')
-  assert.match(r.ask, /Proposed for it: trail of the run; failures by test order\./)
+  assert.match(viewRequest({ message, guide: 'g' }), /Proposed for it: trail of the run; failures by test order\./)
 })
 
 test('v on a catch-up names it as the catch-up the squeeze chips wrote of its replies, not as an answer of Claude\'s', () => {
   const message = { text: 'one\n\n---\n\ntwo', shown: 'The empty label has [741 IPs](q4#label=@ips).', objects: [], verbs: {}, catchup: { host: 'r2', rows: ['r1', 'r2'], replies: 2, question: 'q', prompt: 'p1' } }
-  const ask = request({ message, args: '', verb: { dir: '/v' } })
+  const ask = viewRequest({ message, guide: 'g' })
   assert.match(ask, /^The analyst pressed v \(visualize\) on the catch-up of your 2 replies since their last prompt that the squeeze chips wrote, which begins "The empty label has 741 IPs\."\. They want another view of it/)
 })
 

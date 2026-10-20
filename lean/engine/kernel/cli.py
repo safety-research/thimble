@@ -748,7 +748,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         lab, _, obj = _recount(st, name)
         card = obj or ({"id": lab["card"], "version": None} if lab.get("card") else None)
         if card:
-            st.emit({"kind": "verb", "verb": "label", "object": card["id"], "version": card["version"], "args": name})
+            st.emit({"kind": "label", "name": name, "object": card["id"], "version": card["version"]})
         calls = len(LB.batches(LB.waiting(st, name)["units"]))
         print(f"{name}: {r['waiting']:,} records wait for the model ({calls} call{'s' if calls != 1 else ''}), which run "
               f"beside the session. `thimble label {name} --wait` waits for them.")
@@ -803,7 +803,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         lab, q, obj = _recount(st, name)
         s = LB.status(lab)
         if kind == "prompt" and s["waiting"] and obj:
-            st.emit({"kind": "verb", "verb": "label", "object": obj["id"], "version": obj["version"], "args": name})
+            st.emit({"kind": "label", "name": name, "object": obj["id"], "version": obj["version"]})
         if a.json:
             out_json({"name": name, **s, "query": lab.get("query"), "card": lab.get("card"), "added": r["added"], "errors": r["errors"]})
             return 0
@@ -932,7 +932,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--wait", nargs="?", type=float, const=600.0, metavar="SECONDS")
     p.add_argument("--again", action="store_true")
     p.add_argument("--check", nargs=2, metavar=("REF", "VALUE"), help="the analyst's check of one record (- takes it back)")
-    p.add_argument("--answers", metavar="FILE", help="the model's answers for waiting records (the label verb writes them)")
+    p.add_argument("--answers", metavar="FILE", help="the model's answers for waiting records (the shell writes them)")
     p.add_argument("--waiting", action="store_true", help="the records that wait for the model, with their text, as JSON")
     p.add_argument("--of", nargs="+", metavar="REF", help="the labels of these records, as JSON")
     p.add_argument("--delete", action="store_true")

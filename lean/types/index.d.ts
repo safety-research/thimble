@@ -9,10 +9,8 @@ export type ObjRef = { id: string; v: number | null; root: string }
  *  cites, each a press from its rows. */
 export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null; prog?: boolean }
 
-/** A verb's run, as the /verb command's row draws it. */
-export type Ran = { verb: string; text?: string; note?: string; ask?: string; error?: string; saved?: ObjRef | null; on?: string; failed?: boolean }
-
-/** A verb running on an object (the row under it says `<verb>… <text>`, its progress), or what it said last. */
+/** Work running on a card (the row under it says `<verb>… <text>`, its progress: the model's reads of a label), or
+ *  what it said last. */
 export type Said = { verb: string; text?: string; error?: string; running?: boolean }
 
 
@@ -38,7 +36,7 @@ export type MsgRecord = {
   objects: string[]
   /** the turn's answer: the row its verb row is drawn under */
   final?: boolean
-  /** the squeeze chips' state (verbs/squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
+  /** the squeeze chips' state (squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
   squeeze?: Squeeze
   /** a catch-up's own record (it is no row of the transcript): what it covers, drawn under `host` */
   catchup?: CatchUp
@@ -89,11 +87,11 @@ declare module 'claude-code' {
       last: ObjRef | null
       /** the object and region a prompt was asked about, by the prompt row's id */
       asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string }>
-      /** a verb running on an object, or what it said last, by the object's id */
+      /** work running on a card (a label's reads), or what it said last, by the card's id */
       said: StateFamily<Said | null>
       /** words for Claude alone, given with the next prompt */
       notes: string[]
-      /** the row an object is drawn under, by the object's id: a verb's object is drawn under the same row */
+      /** the row an object is drawn under, by the object's id */
       where: StateFamily<string>
       /** `thimble resolve --json` of a ref, by root and ref */
       rows: StateFamily<unknown>
@@ -106,8 +104,7 @@ declare module 'claude-code' {
       msgrows: string[]
       /** the tray above the prompt, or none */
       tray: Tray | null
-      /** the line a verb opened under a message's verb row, or none */
-      /** the line a verb opened under a message's verb row, or none */
+      /** the line a key of the row opened under a message (v's proposals, s's chips), or none */
       pick: { row: string; verb: string; open?: string | null } | null
       /** the message the keys act on, when the person picked one other than the latest */
       selrow: string | null
@@ -117,10 +114,6 @@ declare module 'claude-code' {
       answers: string[]
       /** the card under a reply that has the keys (] reached it): its own keys win over the verbs until 0 */
       cardfocus: (ObjRef & { row: string }) | null
-      /** a verb of the row running on a message, by its row */
-      running: StateFamily<string | null>
-      /** the verbs of the row, as the registry lists them */
-      rowverbs: { key: string; name: string; color?: unknown }[] | null
       /** the squeeze chips' line of a message, by its row */
       sqz: StateFamily<SqzUi | null>
       /** what Claude reads with the next prompt of the version the person reads now, by row */

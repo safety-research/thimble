@@ -1,8 +1,8 @@
-// Labels in the terminal (shell/labels.ts, panes/detail.js, the label verb, and the fan-out of a verb's model calls in
-// shell/shell.tsx): calls a verb starts together are made side by side; a --prompt label asks for the label verb in the
-// change feed, which the shell runs beside the session with its progress under the card and the new card in the old
-// one's place; the detail shows each example's labels, the number keys check the record shown, and Claude hears of the
-// checks when the detail closes (or at its next prompt). `claude plugin test lean`. The Node children and `thimble` are answered at process.run.
+// Labels in the terminal (shell/labels.ts, shell/labelreads.mjs, panes/detail.js): a --prompt label writes a `label`
+// line in the change feed, and the shell has the model read its records beside the session, a wave of calls side by
+// side, with the progress under the card and the new card in the old one's place; the detail shows each example's
+// labels, the number keys check the record shown, and Claude hears of the checks when the detail closes (or at its next
+// prompt). `claude plugin test`. The Node children and `thimble` are answered at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 import { press, promptStub } from './stubs'
 
@@ -37,11 +37,14 @@ const ok = (stdout: unknown) => ({ value: { exitCode: 0, stdout: typeof stdout =
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Verb = (input: Any) => Any
 // the test runner's timer: a real wait lets the work the hooks left running go on
 declare const setTimeout: (fn: (value?: unknown) => void, ms: number) => unknown
 
-function world(on: Any, verb: Verb = () => ({ verb: 'label', text: 'ok' })) {
+/** The label the kernel holds in these tests: its records, which wait for the model until answers come for them. */
+type Kept = { waiting: { ref: string; text: string }[]; batch: number; values: Record<string, string>; failed: Record<string, string>; answers: number }
+const RECORDS = (n: number) => Array.from({ length: n }, (_, i) => ({ ref: `chat/room.jsonl#L${i + 1}`, text: `message ${i + 1}` }))
+
+function world(on: Any, kept: Kept = { waiting: [], batch: 50, values: {}, failed: {}, answers: 0 }) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('session.cwd', () => ({ value: ROOT }))
   on('session.id', () => ({ value: SESSION }))
@@ -49,27 +52,37 @@ function world(on: Any, verb: Verb = () => ({ verb: 'label', text: 'ok' })) {
     [CARD]: JSON.stringify(OBJECT(1)), [`${ROOT}/thimble/objects/.versions/02-label-apology/v1.json`]: JSON.stringify(OBJECT(1)),
     [`${ROOT}/thimble/objects/03-per-agent.json`]: JSON.stringify({ id: '03-per-agent', version: 1, title: 'Messages per agent', program: 'return k.text("card")', data: {}, lineage: { cites: [] } }),
   }
-  on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` || e.path.endsWith('/verbs/label/verb.json') }))
+  on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => {
-    if (e.path.endsWith('/verbs/label/verb.json')) return { value: JSON.stringify({ name: 'label', feed: true, parallel: 2, rounds: 10 }) }
-    return { value: files[e.path] ?? promptStub(e.path) ?? '' }
-  })
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => { files[e.path] = String(e.content ?? e.text ?? e.data ?? ''); return { value: undefined } })
   on('fs.stat', (_$: unknown, e: { path: string }) => (e.path in files ? { value: { kind: 'file', size: files[e.path]!.length, mtimeMs: 0 } } : { value: { kind: 'missing', size: 0, mtimeMs: 0 } }))
   const runs: string[][] = []
-  const inputs: Any[] = []
   const labelOf: Record<string, Any> = { 'chat/room.jsonl#L1': { apology: { value: 'yes', values: ['yes', 'no'], by: 'model', confidence: 0.9, reason: 'says sorry' } }, 'chat/room.jsonl#L3': { apology: { value: 'yes', values: ['yes', 'no'], by: 'model', confidence: 0.8 } }, 'chat/room.jsonl#L5': { apology: { value: 'yes', values: ['yes', 'no'], by: 'model', confidence: 0.6 } } }
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     runs.push([...e.argv])
     if (e.argv[0] === 'tail') return ok((files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1))
-    if (e.argv.some(a => a.endsWith('prep.mjs'))) return ok({ drawing: JSON.parse(String(e.init?.stdin || '{}')).object?.id === '03-per-agent' ? PER_AGENT : DRAWING, verbs: [], problems: [] })
-    if (e.argv.some(a => a.endsWith('verb.mjs'))) {
-      const input = JSON.parse(String(e.init?.stdin || '{}'))
-      inputs.push(input)
-      return ok(verb(input))
-    }
+    if (e.argv.some(a => a.endsWith('prep.mjs'))) return ok({ drawing: JSON.parse(String(e.init?.stdin || '{}')).object?.id === '03-per-agent' ? PER_AGENT : DRAWING })
     const at = e.argv.indexOf('label')
+    // the model's reads: the records that wait, and the answers written back (the card saved again when none wait)
+    if (at >= 0 && e.argv.includes('--waiting')) {
+      const refs = kept.waiting.map(u => u.ref)
+      const batches = Array.from({ length: Math.ceil(refs.length / kept.batch) }, (_, i) => refs.slice(i * kept.batch, (i + 1) * kept.batch))
+      return ok({ name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: false, units: kept.waiting, batches })
+    }
+    if (at >= 0 && e.argv.includes('--answers')) {
+      const got = JSON.parse(String(e.init?.stdin || '{}'))
+      if (!e.argv.includes('--json')) return ok('')
+      kept.answers++
+      Object.assign(kept.values, Object.fromEntries(Object.entries(got.values || {}).map(([r, v]) => [r, (v as Any).value])))
+      Object.assign(kept.failed, got.failed || {})
+      kept.waiting = kept.waiting.filter(u => !(u.ref in (got.values || {})) && !(u.ref in (got.failed || {})))
+      const done = !kept.waiting.length
+      if (done) files[CARD] = JSON.stringify(OBJECT(2))
+      const yes = Object.values(kept.values).filter(v => v === 'yes').length
+      const valued = Object.keys(kept.values).length
+      return ok({ took: Object.keys(got.values || {}).length, records: valued + Object.keys(kept.failed).length + kept.waiting.length, valued, waiting: kept.waiting.length, failed: Object.keys(kept.failed).length, counts: { ...(yes ? { yes } : {}), ...(valued - yes ? { no: valued - yes } : {}) }, query: done ? 'q9' : null, card: done ? { id: '02-label-apology', version: 2 } : null })
+    }
     if (at >= 0 && e.argv[at + 1] === '--of') return ok(Object.fromEntries(e.argv.slice(at + 2).filter(r => labelOf[r]).map(r => [r, labelOf[r]])))
     if (at >= 0 && e.argv.includes('--check')) {
       const i = e.argv.indexOf('--check')
@@ -105,7 +118,7 @@ function world(on: Any, verb: Verb = () => ({ verb: 'label', text: 'ok' })) {
   on('command.register', (_$: unknown, e: { name: string }) => ({ value: { command: e.name } }))
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
-  return { files, runs, inputs, submitted, toasts, opened, labelOf }
+  return { files, runs, submitted, toasts, opened, labelOf, kept }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,52 +134,50 @@ async function pane($: Any, clock: { settle: () => Promise<void> }): Promise<str
   return textOf(await $.ui.render(PANE))
 }
 
-const need = (key: string, units = 50) => ({ kind: 'complete', key, request: { model: 'sonnet', prompt: `batch ${key}`, units, telemetry: { feature: 'labels' } } })
-const answered: Any = { isAnswered: true, text: '[]', usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }
+const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+/** The model's answer to one batch: yes for each record its prompt holds. */
+const yes = (e: Any) => ({ isAnswered: true, text: JSON.stringify(String(e.prompt).split('### record ').slice(1).map((_, i) => ({ i: i + 1, value: 'yes', confidence: 0.9 }))), usage: USAGE })
+/** The feed lines of `thimble label apology --prompt …`: its card saved, and the label for the model to read. */
+const asked = (t: number, save = true) => (save ? JSON.stringify({ t, kind: 'save', session: SESSION, root: ROOT, object: '02-label-apology', version: 1 }) + '\n' : '')
+  + JSON.stringify({ t, kind: 'label', name: 'apology', session: SESSION, root: ROOT, object: '02-label-apology', version: 1 }) + '\n'
 
-test('calls a verb starts together are made side by side, at most `parallel` at once; a busy one is tried again; the verb runs once more with every answer', async ($, on) => {
-  const w = world(on, (input: Any) => (input.answers?.k1 && input.answers?.k2 && input.answers?.k3
-    ? { verb: 'label', text: `read ${Object.keys(input.answers).length} batches` }
-    : { verb: 'label', need: need('k1'), needs: [need('k1'), need('k2'), need('k3', 20)], limits: { parallel: 2, rounds: 10 } }))
+test('the calls of a wave are made side by side, at most eight at once; a busy one is tried again; the answers go back to the label once the wave is in', async ($, on) => {
+  const w = world(on, { waiting: RECORDS(10), batch: 1, values: {}, failed: {}, answers: 0 })
   const clock = mock.clock(on)
   let running = 0
   let most = 0
-  const asked: Any[] = []
+  const calls: Any[] = []
   let busy = 1
   on('model.complete', async (_$: unknown, e: Any) => {
-    asked.push(e)
+    calls.push(e)
     running++
     most = Math.max(most, running)
     await new Promise(r => setTimeout(r, 5))
     running--
-    if (e.prompt === 'batch k2' && busy-- > 0) return { value: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error' } } as never
-    return { value: answered } as never
+    if (String(e.prompt).includes('message 2\n') || String(e.prompt).endsWith('message 2')) { if (busy-- > 0) return { value: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error' } } as never }
+    return { value: yes(e) } as never
   })
-  const r = $.command.run({ command: 'verb', args: 'label 02-label-apology apology' } as never)
-  for (let i = 0; i < 20; i++) { await clock.advance(1000); await new Promise(res => setTimeout(res, 10)) }
-  const out = await r
-  // three calls and one try again; never more than two at once; the units the verb noted for its progress never sent
-  expect(asked.map(x => x.prompt).sort()).toEqual(['batch k1', 'batch k2', 'batch k2', 'batch k3'])
-  expect(most).toBe(2)
-  expect(asked.every(x => x.units === undefined && x.telemetry === undefined)).toBe(true)
-  expect(w.inputs.length).toBe(2)
-  expect(w.inputs[1].round).toBe(1)
-  expect(String(out.text)).toContain('read 3 batches')
+  w.files[EVENTS] = asked(Date.now() / 1000 + 5, false)
+  on('tool.call', () => ({ result: '' }))
+  await $.tool.call({ tool: 'Bash', command: 'thimble label apology --again' } as never)
+  for (let i = 0; i < 20 && w.kept.answers < 1; i++) { await clock.advance(1000); await new Promise(res => setTimeout(res, 10)) }
+  // ten calls and one try again; never more than eight at once; the notes for the shell never sent
+  expect(calls.length).toBe(11)
+  expect(most).toBe(8)
+  expect(calls.every(x => x.units === undefined && x.telemetry === undefined)).toBe(true)
+  expect(w.kept.answers).toBe(1)
+  expect(Object.keys(w.kept.values).length).toBe(10)
 })
 
-test("a --prompt label asks for the label verb in the change feed: it runs beside the session on the label's card, its progress under the card, then the new card in the old one's place; Claude hears what it did with the next prompt", async ($, on) => {
+test("a --prompt label: the model reads its records beside the session, its progress under the card, then the new card in the old one's place; Claude hears what the reads gave with the next prompt", async ($, on) => {
   let release: () => void = () => undefined
   const gate = new Promise<void>(r => { release = r })
-  const w = world(on, (input: Any) => (input.answers?.k1
-    ? (w.files[CARD] = JSON.stringify(OBJECT(2)), { verb: 'label', saved: { id: '02-label-apology', v: 2 }, text: 'apology: 3 of 6 records have a value (3 yes).', note: 'The model finished reading the records of the label apology.' })
-    : { verb: 'label', need: need('k1', 6), limits: { parallel: 4, rounds: 60 } }))
+  const w = world(on, { waiting: RECORDS(6), batch: 50, values: {}, failed: {}, answers: 0 })
   const clock = mock.clock(on)
-  on('model.complete', async () => { await gate; return { value: answered } as never })
-  // Claude's `thimble label apology --prompt …`: the kernel saved the card and asked for the verb
+  on('model.complete', async (_$: unknown, e: Any) => { await gate; return { value: yes(e) } as never })
+  // Claude's `thimble label apology --prompt …`: the kernel saved the card and wrote the label in the feed
   on('tool.call', () => {
-    const t = Date.now() / 1000
-    w.files[EVENTS] = (w.files[EVENTS] || '') + JSON.stringify({ t, kind: 'save', session: SESSION, root: ROOT, object: '02-label-apology', version: 1 }) + '\n'
-      + JSON.stringify({ t, kind: 'verb', verb: 'label', session: SESSION, root: ROOT, object: '02-label-apology', version: 1, args: 'apology' }) + '\n'
+    w.files[EVENTS] = (w.files[EVENTS] || '') + asked(Date.now() / 1000)
     return { result: 'label apology v1 · prompt\n' }
   })
   await $.turn.start({ turnId: 't1', text: 'which are apologies?' } as never)
@@ -174,36 +185,30 @@ test("a --prompt label asks for the label verb in the change feed: it runs besid
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'I labeled the messages.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'I labeled the messages.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
-  // the verb ran on the card with the label's name, and waits on its call: the row under the card says how far it is
-  expect(w.inputs[0].object.id).toBe('02-label-apology')
-  expect(w.inputs[0].args).toBe('apology')
+  // the reads wait on their call: the row under the card says how far they are
   await reply($)
   await clock.settle()
   expect(textOf(await reply($))).toContain('label… 0 of 6 records')
   release()
   for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 5)); await clock.settle() }
-  // done: the new version is drawn in the old one's place, and Claude reads what the verb said with the next prompt
+  // done: the new version is drawn in the old one's place, and Claude reads what the reads gave with the next prompt
   const shown = JSON.parse(w.files['/home/t/.thimble/lean/shown/s-1.json']!).under[ROW.slice(0, 24)]
   expect(shown.map((x: Any) => `${x.id}@${x.v}`)).toEqual(['02-label-apology@2'])
   expect(textOf(await reply($))).not.toContain('label…')
   await $.prompt.submit({ text: 'and?' } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).toContain('The label verb ran on 02-label-apology, as `thimble label` asked. The model finished reading the records of the label apology.')
+  expect(w.submitted.at(-1)!.context.join('\n')).toContain('The model finished reading the records of the label apology (1 call). apology: 6 of 6 records have a value (6 yes).')
   expect(w.toasts).toEqual([])
 })
 
-test('a verb asked for while the command still runs starts then: a chained `--wait` waits on calls already being made, and the card is drawn at the version the verb saved', async ($, on) => {
-  const w = world(on, (input: Any) => (input.answers?.k1
-    ? (w.files[CARD] = JSON.stringify(OBJECT(2)), { verb: 'label', saved: { id: '02-label-apology', v: 2 }, text: 'apology: 6 of 6 records have a value.' })
-    : { verb: 'label', need: need('k1', 6) }))
+test('a label written while the command still runs is read then: a chained `--wait` waits on calls already being made, and the card is drawn at the version the reads saved', async ($, on) => {
+  const w = world(on, { waiting: RECORDS(6), batch: 50, values: {}, failed: {}, answers: 0 })
   const clock = mock.clock(on)
-  on('model.complete', () => ({ value: answered }) as never)
+  on('model.complete', (_$: unknown, e: Any) => ({ value: yes(e) }) as never)
   let during = false
   on('tool.call', async () => {
-    const t = Date.now() / 1000 + 5
-    w.files[EVENTS] = JSON.stringify({ t, kind: 'save', session: SESSION, root: ROOT, object: '02-label-apology', version: 1 }) + '\n'
-      + JSON.stringify({ t, kind: 'verb', verb: 'label', session: SESSION, root: ROOT, object: '02-label-apology', version: 1, args: 'apology' }) + '\n'
-    for (let i = 0; i < 100 && w.inputs.length < 2; i++) await new Promise(r => setTimeout(r, 10))
-    during = w.inputs.length === 2
+    w.files[EVENTS] = asked(Date.now() / 1000 + 5)
+    for (let i = 0; i < 100 && w.kept.answers < 1; i++) await new Promise(r => setTimeout(r, 10))
+    during = w.kept.answers === 1
     return { result: 'apology: 6 of 6 records have a value' }
   })
   await $.turn.start({ turnId: 't1', text: 'which are apologies?' } as never)
@@ -211,29 +216,27 @@ test('a verb asked for while the command still runs starts then: a chained `--wa
   for (let i = 0; i < 20 && !during; i++) { await clock.advance(1000); await new Promise(r => setTimeout(r, 20)) }
   await call
   await clock.settle()
-  // the verb ran, and its calls were made, before the command ended; reading the feed after it starts it no second time
+  // the reads ran, and wrote their answers, before the command ended; reading the feed after it starts them no second time
   expect(during).toBe(true)
-  expect(w.inputs.length).toBe(2)
-  // the save the command made (v1) is read after it; the card is drawn at v2, which the verb saved meanwhile
+  expect(w.kept.answers).toBe(1)
+  // the save the command made (v1) is read after it; the card is drawn at v2, which the reads saved meanwhile
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'I labeled the messages.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'I labeled the messages.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
   expect(JSON.parse(w.files['/home/t/.thimble/lean/shown/s-1.json']!).under[ROW.slice(0, 24)].map((x: Any) => `${x.id}@${x.v}`)).toEqual(['02-label-apology@2'])
 })
 
-test('a call that fails says so plainly: a toast with what failed, and the verb keeps what the other calls gave', async ($, on) => {
-  const w = world(on, (input: Any) => (input.answers?.k1
-    ? { verb: 'label', saved: { id: '02-label-apology', v: 2 }, failed: true, text: 'apology: 3 of 6 records have a value (3 yes). 3 have no value (1 call failed: api-error 400): `thimble label apology --again` asks the model again.' }
-    : { verb: 'label', need: need('k1', 3), needs: [need('k1', 3), need('k2', 3)] }))
+test('a call that fails says so plainly: a toast with what failed, and the label keeps what the other calls gave', async ($, on) => {
+  const w = world(on, { waiting: RECORDS(6), batch: 3, values: {}, failed: {}, answers: 0 })
   const clock = mock.clock(on)
-  on('model.complete', (_$: unknown, e: Any) => ({ value: e.prompt === 'batch k2' ? { isAnswered: false, reason: 'api-error', status: 400, error: 'invalid_request_error' } : answered }) as never)
-  w.files[EVENTS] = JSON.stringify({ t: Date.now() / 1000 + 5, kind: 'verb', verb: 'label', session: SESSION, root: ROOT, object: '02-label-apology', version: 1, args: 'apology' }) + '\n'
+  on('model.complete', (_$: unknown, e: Any) => ({ value: String(e.prompt).includes('message 4') ? { isAnswered: false, reason: 'api-error', status: 400, error: 'invalid_request_error' } : yes(e) }) as never)
+  w.files[EVENTS] = asked(Date.now() / 1000 + 5, false)
   on('tool.call', () => ({ result: '' }))
   await $.tool.call({ tool: 'Bash', command: 'thimble label apology --again' } as never)
   for (let i = 0; i < 5; i++) { await new Promise(r => setTimeout(r, 5)); await clock.settle() }
-  expect(w.inputs.length).toBe(2)
-  // the failed call is an answer like any other, for the verb to say what it means
-  expect(w.inputs[1].answers.k2).toMatchObject({ isAnswered: false, status: 400 })
+  // the failed call's records have no value and say why; the other call's records have theirs
+  expect(Object.keys(w.kept.values).length).toBe(3)
+  expect(w.kept.failed['chat/room.jsonl#L4']).toBe('the call failed: api-error 400 (invalid_request_error)')
   expect(w.toasts.join('\n')).toContain('1 call failed: api-error 400')
   expect(w.toasts.join('\n')).toContain('--again')
 })

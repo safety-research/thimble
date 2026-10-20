@@ -73,7 +73,6 @@ const K = {
 const GLOSSED_KEEP = 100
 const GLOSS_FREE = 2 // looks whose glosses nobody opened before glosses back off
 export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2 ** (n - GLOSS_FREE - 1)))
-const ROWVERBS = { plugin: 'thimble', key: 'rowverbs' } as const
 
 const S = {
   session: '',
@@ -98,7 +97,7 @@ const S = {
 }
 
 // the looks to come and the one running: a promise that settles when the last of them has ended, so a squeeze step
-// that needs the levels a look gives can wait for them (verbs/squeeze/term.ts)
+// that needs the levels a look gives can wait for them (squeeze/term.ts)
 let pendingLook: { promise: Promise<void>; settle: () => void } | null = null
 function lookAhead(): void {
   if (pendingLook) return
@@ -269,7 +268,6 @@ async function look($: Engine, t: Look): Promise<void> {
     // 2. the pass: the state each lens needs, the lenses enabled, one call
     const glossed = strs(await $.store.get(K.glossed))
     const glossSkip = Math.min(8, num(await $.store.get(K.glossSkip)))
-    const inRow = ((await $.state.get(ROWVERBS)).value ?? []) as { key: string; name: string }[]
     const msgs = (await $.session.messages().catch(() => [])) as Any[]
     const st = { notesGiven: S.notesGiven, glossed, glossSkip }
     const frame = await promptText($, 'observer')
@@ -292,7 +290,7 @@ async function look($: Engine, t: Look): Promise<void> {
     const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
     const vals: Record<string, unknown> = {
       QUESTION: cut(t.question, 4000) || '(none)',
-      ROW: inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze',
+      ROW: 'v visualize, s squeeze',
       STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
       LINES: String(answer.split('\n').length),
       ANSWER: cut(answer, 16000),

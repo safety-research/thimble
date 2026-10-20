@@ -120,9 +120,9 @@ test('handlers a program declares only in the detail are tried there too; a slow
 
 test('prep.mjs checks only when asked (a save), in the same run; cli.mjs --check prints the same line', async () => {
   const o = card(ZOOM, { phases: PHASES, steps: 'a25_steps' })
-  const plain = await prep({ object: o, w: 80, noVerbs: true })
+  const plain = await prep({ object: o, w: 80 })
   assert.equal(plain.check, undefined)
-  const saved = await prep({ object: o, w: 80, noVerbs: true, check: true })
+  const saved = await prep({ object: o, w: 80, check: true })
   assert.equal(saved.check.failed, 3)
   assert.match(saved.check.line, /turning zoom to orient fails/)
   assert.ok(saved.check.ms >= 0)

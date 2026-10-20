@@ -14,15 +14,15 @@
 // it writes itself in from the top at a model's pace, and nothing else is drawn for it.
 import type { EngineInterface } from 'claude-code'
 
-import type { MsgRecord, SqzUi, Tray } from '../../types'
-import { promptText as registryText } from '../../prompts/prompts'
-import { newRecord, remark as remarkAny } from '../../shell/message.js'
-import { modelWhy } from '../../shell/why.js'
-import { tracked } from '../../telemetry/telemetry'
-import { FEATURES } from '../../prompts/registry.mjs'
-import { lookPending } from '../../observer/observer'
-import { answerRow, closeTray, questionBefore, recordNow, saveRecord } from '../../shell/shell'
-import { sessionKey } from '../../hooks/conversation'
+import type { MsgRecord, SqzUi, Tray } from '../types'
+import { promptText as registryText } from '../prompts/prompts'
+import { newRecord, remark as remarkAny } from '../shell/message.js'
+import { modelWhy } from '../shell/why.js'
+import { tracked } from '../telemetry/telemetry'
+import { FEATURES } from '../prompts/registry.mjs'
+import { lookPending } from '../observer/observer'
+import { answerRow, closeTray, questionBefore, recordNow, saveRecord } from '../shell/shell'
+import { sessionKey } from '../hooks/conversation'
 import { ARRIVE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, termsOf, unplacedMoves } from './chips.mjs'
 
 type Engine = EngineInterface
@@ -71,13 +71,13 @@ async function setUi($: Engine, row: string, change: Partial<SqzUi>): Promise<Sq
 async function ensure($: Engine): Promise<void> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   if (!Object.keys(cfg).length) {
-    try { cfg = JSON.parse(String(await $.fs.read(`${dir}/verbs/squeeze/verb.json`))) } catch { cfg = {} }
+    try { cfg = JSON.parse(String(await $.fs.read(`${dir}/squeeze/settings.json`))) } catch { cfg = {} }
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the verb row
+// ------------------------------------------------------------------------------------------------ the bar
 
-/** What the verb row shows for s: lit with `6 of 33 lines` while the person has the message squeezed; else what the
+/** What the bar shows for s: lit with `6 of 33 lines` while the person has the message squeezed; else what the
  *  observer gave (dim when nothing), so a message as Claude wrote it reads `s squeeze`, however long. A catch-up is
  *  squeezed by what it is, and says no line counts. */
 export function sLit(rec: MsgRecord, _ui: SqzUi | null): { lit: boolean; note: string } | null {
@@ -184,7 +184,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   const hit = isOriginal(chips) ? restore(probe, remark) : fromVersions(rec, want.at, remark)
   if (hit) { await settled($, row, hit as MsgRecord); return }
   await ensure($)
-  // a short wait before a call, so keys pressed in a row are written once, at the last level (verb.json settleMs)
+  // a short wait before a call, so keys pressed in a row are written once, at the last level (settings.json settleMs)
   const wait = Number(cfg.settleMs || 0)
   if (wait > 0) {
     await new Promise<void>(done => { $.clock.after(wait, () => done()) })

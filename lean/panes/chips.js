@@ -13,7 +13,7 @@
 //         < >: next to Claude Code's `← for agents` it reads as the arrow keys, and ← in an empty prompt leaves the
 //         conversation for the agents view. < > and , . still change, unnamed.
 //   presses: a chip picks it (the picked one steps up); a dot sets that level
-import { chipsOf, glyph, isCatchUp, isOriginal, noteOf, stepAt } from '../verbs/squeeze/chips.mjs'
+import { chipsOf, glyph, isCatchUp, isOriginal, noteOf, stepAt } from '../squeeze/chips.mjs'
 
 const same = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 
