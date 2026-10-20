@@ -34,25 +34,37 @@ export const FEATURES = {
       'v3-low': { about: 'v3 at low effort, as v2-low is v2', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low' },
     },
   },
-  'observer-turn': { about: "the pass's message: the new turn, its objects and the digest of the state", reads: 'observer/observer.ts', default: 'v1' },
+  'observer-turn': {
+    about: "the pass's message: the new turn, its cards and the digest of the state", reads: 'observer/observer.ts', default: 'v2',
+    versions: { v1: { about: 'as before' }, v2: { about: 'v1 with the analyst for the person' } },
+  },
   question: {
     about: "the question step: the answer against the person's literal question, and a stated decision", reads: 'observer/observer.ts', default: 'v2',
     versions: { v1: { about: 'as before' }, v2: { about: "v1 with thimble's purpose in the 0.9 preamble's words, and cards for objects" } },
   },
-  'lens-notes': { about: 'lens: notes to Claude', reads: 'the pass', default: 'v1', optional: true },
-  'lens-line': { about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v1', optional: true },
-  'lens-actions': {
-    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v3', optional: true,
-    versions: { v1: { about: "observer:v1's words on lit verbs" }, v2: { about: 'v lit with a named card when a claim would be clearer seen than read' }, v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" } },
+  'lens-notes': {
+    about: 'lens: notes to Claude', reads: 'the pass', default: 'v2', optional: true,
+    versions: { v1: { about: 'as before' }, v2: { about: 'v1 written clean in the 0.9 style: two principles and one example, good and bad' } },
   },
-  'lens-squeeze': { about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v1', optional: true },
+  'lens-line': {
+    about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v2', optional: true,
+    versions: { v1: { about: 'as before' }, v2: { about: 'v1 written clean in the 0.9 style: three principles and one example, good and bad' } },
+  },
+  'lens-actions': {
+    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v4', optional: true,
+    versions: { v1: { about: "observer:v1's words on lit verbs" }, v2: { about: 'v lit with a named card when a claim would be clearer seen than read' }, v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" }, v4: { about: 'v3 written clean in the 0.9 style: two principles and one example, good and bad' } },
+  },
+  'lens-squeeze': {
+    about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v2', optional: true,
+    versions: { v1: { about: 'as before' }, v2: { about: 'v1 written clean in the 0.9 style' } },
+  },
   'lens-explain': {
     about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v3', optional: true,
-    versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' }, v3: { about: "v2, opened with the 0.9 rule for terms (explain a term the person has not used the first time) as its reason" } },
+    versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' }, v3: { about: "v2 written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" } },
   },
   'lens-claims': {
-    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v2', optional: true,
-    versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" } },
+    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v3', optional: true,
+    versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" }, v3: { about: 'v2 written clean in the 0.9 style, at half the length' } },
   },
   squeeze: {
     about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v6',

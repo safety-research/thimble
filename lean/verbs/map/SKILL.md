@@ -1,15 +1,15 @@
 ---
 name: map
-description: Use when the person asks to map, lay out or see the shape of some work - one long agent run, many runs of a task, a sweep or a swarm, a dataset, a report or a code change - or presses m. You find the threads, stations and links in the rows, count them with `thimble run`, and save the map with `thimble save`; `k.map` draws it, and every station keeps its rows.
+description: Use when the analyst asks to map, lay out or see the shape of some work - one long agent run, many runs of a task, a sweep or a swarm, a dataset, a report or a code change - or presses m. You find the threads, stations and links in the rows, count them with `thimble run`, and save the map with `thimble save`; `k.map` draws it, and every station keeps its rows.
 ---
 
 # Map: lay the work out by its own structure
 
-The person wants to see the shape of the work: the order of moves in a long run, where many runs split and how they
+The analyst wants to see the shape of the work: the order of moves in a long run, where many runs split and how they
 ended, what a dataset holds. You find that structure in the rows, count it in code, and save it as a card. The
 drawing is `k.map` (see `../../draw/TOOLKIT.md`), so you write the map, not its cells.
 
-Under your reply the person sees the short form: one row for one run, the main split and the endings for many runs, one
+Under your reply the analyst sees the short form: one row for one run, the main split and the endings for many runs, one
 strip for a dataset. `m`, or opening the card, shows the full map. There each station, lane and group can be
 selected, and it shows its rows and the threads that pass it. `m` on a selected station or lane maps those threads on
 their own.
@@ -31,7 +31,7 @@ row has a thread, a station, `start` and `end`, and keeps its source rows.
 ## Principles
 
 **Find the structure the work already has.** Read before you choose stations. A long run has phases. Many runs share
-moves and split at a few of them. A dataset falls into kinds. Name stations by what happened, in the person's words,
+moves and split at a few of them. A dataset falls into kinds. Name stations by what happened, in the analyst's words,
 not by tool names.
 
 **Few stations, each one you can check.** Five to twelve stations read well. Write each as a rule in code ("runs pytest
@@ -40,14 +40,14 @@ rare moves into a neighbor. Mark the stations that tell the story `"key": true`:
 endings.
 
 **Every station names its rows.** A move's rows come with it when your query keeps `_refs` per row. A station can name
-a query value, `"ref": "r3#kind=probe"`. When the person selects a station, they see its rows and step through the
+a query value, `"ref": "r3#kind=probe"`. When the analyst selects a station, they see its rows and step through the
 threads that pass it. A station with no rows is a claim nobody can open.
 
 **Count all of them.** A map of 40 runs says something about all 40. Compute stations over every thread in code. If
 you mapped a sample, say so in the title.
 
 **End where the threads end, and color by the question.** Give each run its ending (merged, closed, timed out) as its
-last station, marked `"end": true`. Set `"lens"` to the thread field the person asked about; lanes split and color by
+last station, marked `"end": true`. Set `"lens"` to the thread field the analyst asked about; lanes split and color by
 it. When they ask a new question of the map ("which runs masked the flake?"), compute that field in a query and save
 a new version with it as the lens.
 
@@ -59,7 +59,7 @@ of the stations.
 
 ```bash
 thimble save NAME <<'JSON'
-{"title": "...", "question": "the person's question",
+{"title": "...", "question": "the analyst's question",
  "program": "return k.frame(k.map(data), { title: data.title })",
  "data": {"title": "...", "unit": "runs", "threads": "r4", "moves": "r5", "stations": [...], "lens": "outcome"}}
 JSON
@@ -69,7 +69,7 @@ The program is one line. Write your own around `k.map(data, o)` when the map nee
 
 ## Example: one long run (an agent's transcript)
 
-The person asks: "What did agent-05 do, start to finish?" You read the run with `thimble rows`, then give its tool calls
+The analyst asks: "What did agent-05 do, start to finish?" You read the run with `thimble rows`, then give its tool calls
 phases as step ranges you chose after reading:
 
 ```bash
@@ -99,7 +99,7 @@ each stop as wide as its share of the calls.
 
 ## Example: many runs (a sweep, or a swarm)
 
-The person asks: "How did the 40 runs of this task go?" One query gives each run its moves by rules in code, over all
+The analyst asks: "How did the 40 runs of this task go?" One query gives each run its moves by rules in code, over all
 40 transcripts; another gives each run its outcome:
 
 ```bash

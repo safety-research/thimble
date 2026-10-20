@@ -134,7 +134,7 @@ test('a version made of parts reads each section where it stands, and can leave 
   const t = textOf('cards', ROOT, {})
   assert.equal(t.id, 'forms:v3')
   assert.match(t.text, /^## Cards\n/)
-  assert.match(t.text, /\n## Making a card\n[\s\S]*\n### Worked examples\n/)
+  assert.match(t.text, /\n## Making a card\n[\s\S]*\n### Examples\n/)
   assert.doesNotMatch(t.text, /## Example\n/)
   const loaded = textOf('cards', ROOT, { THIMBLE_SKILL_LOADED: '1' })
   assert.match(loaded.text, /^## Making a card\n/)

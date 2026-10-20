@@ -1,14 +1,14 @@
 ---
 name: claims
-description: Use when the person asks for the corpus orientation (/verb claims orient) or for an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `thimble verb claims save` adds to the session's claims.
+description: Use when the analyst asks for the corpus orientation (/verb claims orient) or for an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `thimble verb claims save` adds to the session's claims.
 ---
 
 # The corpus orientation: what the work holds, claim by claim
 
-The orientation helps a person find their way in work they did not do: many agent runs, one long run, a wiki, a set
+The orientation helps an analyst find their way in work they did not do: many agent runs, one long run, a wiki, a set
 of records. It lists what the work holds as short claims. Each claim has a kind, the rows that show it, and its
 relations to other claims. Clusters group the claims by what happened. The claims join the session's own claims (the
-ones Claude and the person made in the conversation), marked as the orientation's: the person opens them with c, as a
+ones Claude and the analyst made in the conversation), marked as the orientation's: the analyst opens them with c, as a
 graph of clusters in the terminal and in the browser, and a claim shows its evidence.
 
 ## Who does the work
@@ -25,7 +25,7 @@ The subagent does the work below. Its last message is the last line of the check
 one ended, the main moves, the events. Then read a few runs or records closely with `thimble rows`, one for each kind of
 outcome. Name a claim only after you have seen the rows that show it.
 
-**A claim is one statement that a person can check.** Write it as a short sentence in plain words, under 80
+**A claim is one statement that an analyst can check.** Write it as a short sentence in plain words, under 80
 characters: "It fails 1 in 9 with no code change", not "flakiness analysis". Give it one of five kinds:
 - **fact**: true of the setup, and nobody disputes it ("test_checkout_total expects 10.80");
 - **finding**: what the rows show, often a count ("15 of 40 runs fixed it");
@@ -42,10 +42,10 @@ The check reads every ref and looks for every quote in its row.
 
 **Relations show how claims bear on each other.** "contradicts" joins two claims that cannot both be true. "supports"
 goes from a claim that shows something to the claim that it shows. "same topic" joins two claims about one thing when
-neither proves the other. Add the relations that a person would want to follow, not every pair: most claims have one
+neither proves the other. Add the relations that an analyst would want to follow, not every pair: most claims have one
 to four.
 
-**Clusters are what happened, in the person's words.** Use four to eight clusters, each with a name of two to four
+**Clusters are what happened, in the analyst's words.** Use four to eight clusters, each with a name of two to four
 words ("timezone detour", "masking", "stopping short"). Give each cluster a `lead`, the claim that best says what the
 cluster is about. A claim that fits no cluster has no `cluster`.
 
@@ -53,8 +53,8 @@ cluster is about. A claim that fits no cluster has no `cluster`.
 `of` ("in 14 of 40 runs") from a query, not from a guess. In a large folder, read a sample and count the rest in code.
 `scope.what` says what you counted and what you read.
 
-**Stop at a good first map.** The brief says about how long the person expects to wait, so plan for that time. Put
-your effort into the claims that explain the outcome, the disagreements and the surprises. The person can ask for more.
+**Stop at a good first map.** The brief says about how long the analyst expects to wait, so plan for that time. Put
+your effort into the claims that explain the outcome, the disagreements and the surprises. The analyst can ask for more.
 
 ## The file
 

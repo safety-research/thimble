@@ -22,7 +22,7 @@ test('v asks Claude for another view of the answer, with the proposal the person
   const message = { text: '[840](q3#n) of the 2,143 steps were **reruns**; the cause was a shared fixture.', objects: ['r17-trail@1'],
     verbs: { v: { lit: true, note: '2 views ready', proposals: ['trail of the run', 'failures by test order'] } } }
   const ask = request({ message, args: 'failures by test order', verb: { dir: '/plugin/verbs/visualize' } })
-  assert.match(ask, /^The person pressed v \(visualize\) on your answer that begins "840 of the 2,143 steps were reruns; the cause was a shared fixture\."/)
+  assert.match(ask, /^The analyst pressed v \(visualize\) on your answer that begins "840 of the 2,143 steps were reruns; the cause was a shared fixture\."/)
   assert.match(ask, /another view of it: a card in the form that shows what it says, as "failures by test order"/)
   assert.match(ask, /It has the card r17-trail already: make a different view, not a copy\./)
   assert.match(ask, /Also proposed for it: trail of the run\./)

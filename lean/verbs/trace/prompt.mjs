@@ -4,7 +4,7 @@
 // reads both files and passes their text (opts.skill, opts.toolkit), so there is one copy of each. Without them a
 // short fallback keeps the request whole.
 
-const FALLBACK_SKILL = `Draw the trace for this case. Answer the question the person has; decide how deep to go. Draw the
+const FALLBACK_SKILL = `Draw the trace for this case. Answer the question the analyst has; decide how deep to go. Draw the
 shape of this case (a chain, a fan-in of rows into a value, a tree of who read and who copied, a timeline), composed
 from the toolkit; there is no trace type. Counts come from data.facts; your judgments (groups of variants, short names)
 go in your json block. Show what is not behind it as k.unseen. Make every step a region whose meta has its ref.`
@@ -43,7 +43,7 @@ export function composePrompt(f, t, opts = {}) {
   const facts = JSON.stringify(slimFacts(f), null, 1)
   const what = t.ref ? `${t.ref}${t.text ? ` (the words "${t.text}")` : ''}` : `the words "${t.text}"`
   return [
-    `The person pressed t again on a trace: draw the full trace of ${what}, where it came from and where it went.`,
+    `The analyst pressed t again on a trace: draw the full trace of ${what}, where it came from and where it went.`,
     opts.ask ? `They asked: "${opts.ask}"` : '',
     'Write it as a program against the drawing toolkit. It will be drawn in the terminal at ' +
       `${opts.w || 100} columns, and the same program draws in the browser. Keep it under about 24 rows.`,

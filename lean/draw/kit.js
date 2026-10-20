@@ -222,7 +222,7 @@
         const n = String(name == null ? '' : name).trim()
         if (!n || typeof fn !== 'function') { warn(ctx, 'k.on needs (name, fn): a key, "press", "brush" or "press:<id>", and a function'); return k }
         const why = keys.why(n)
-        if (why) warn(ctx, `the key "${n}" does not reach this card where it is drawn now (${why}); the person cannot use it here. k.keys.free(key) says which keys do`)
+        if (why) warn(ctx, `the key "${n}" does not reach this card where it is drawn now (${why}); the analyst cannot use it here. k.keys.free(key) says which keys do`)
         if (!ctx.handlers.some(h => h.name === n)) ctx.handlers.push({ name: n, fn: fn, label: label != null ? clean(String(label)).slice(0, 40) : '' })
         return k
       },
@@ -236,7 +236,7 @@
       // k.ask(selection): open a side thread scoped to what is selected. selection: {label, region, rows, refs, text}:
       // rows are rows of the card's data (each knows its source rows); text, when given, is asked at once
       ask(sel) {
-        if (ctx.phase !== 'handle') { warn(ctx, 'k.ask opens a thread only inside a k.on handler, when the person acts'); return k }
+        if (ctx.phase !== 'handle') { warn(ctx, 'k.ask opens a thread only inside a k.on handler, when the analyst acts'); return k }
         ctx.ask = askOf(ctx, sel)
         return k
       },

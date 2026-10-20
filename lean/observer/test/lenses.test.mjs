@@ -50,13 +50,13 @@ test('the real fragments compose: every lens of the registry has instructions, a
   const frame = textOf('observer', ROOT, {}).text
   const parts = LENSES.map(lens => ({ lens, text: textOf(lens.feature, ROOT, {}).text }))
   const sys = composeSystem(frame, parts)
-  for (const h of ['## Notes to Claude', '## One line to the person', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explain marks', '## The claims of this turn']) assert.ok(sys.text.includes(h), h)
+  for (const h of ['## Notes to Claude', '## One line to the analyst', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explain marks', '## The claims of this turn']) assert.ok(sys.text.includes(h), h)
   assert.doesNotMatch(sys.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(sys.text, /<!--/)
   const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { QUESTION: 'q', QUESTION_STEP: 's', DECISION: 'none stated', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, { ...ST, open: { line: 'an open line', prompts: 1 } })
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
   assert.match(turn.text, /Notes Claude already has:\n- a note given/)
-  assert.match(turn.text, /Terms the person already saw explained:\n- p95/)
+  assert.match(turn.text, /Terms the analyst already saw explained:\n- p95/)
   assert.match(turn.text, /"an open line" \(shown 1 prompt ago\)/)
   assert.match(turn.text, /A line is open above the prompt now\. Give no new line this time/)
   // the attention version of the frame holds the draft principles in place of the default-none paragraph

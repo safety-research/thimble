@@ -26,12 +26,12 @@ export function request(ctx) {
     ? `your answer that begins "${firstWords(msg.shown ?? msg.text)}"`
     : obj ? `the card ${obj.id}${obj.title ? ` ("${obj.title}")` : ''}` : 'your last answer'
   const has = [...new Set([...(msg?.objects || []).map(x => String(x).split('@')[0]), ...(obj ? [obj.id] : [])])].filter(Boolean)
-  const lines = [`The person pressed v (visualize) on ${what}. They want another view of it: a card in the form that shows what it says${choice ? `, as "${choice}"` : ''}.`]
+  const lines = [`The analyst pressed v (visualize) on ${what}. They want another view of it: a card in the form that shows what it says${choice ? `, as "${choice}"` : ''}.`]
   if (has.length) lines.push(`It has the card${has.length > 1 ? 's' : ''} ${has.join(', ')} already: make a different view, not a copy.`)
   const others = proposals.filter(p => p !== choice)
   if (others.length) lines.push(`${choice ? 'Also proposed' : 'Proposed'} for it: ${others.join('; ')}.`)
-  lines.push('Run `thimble guide cards` first, unless you read the card guidance earlier in this session. Reuse the runs you made, and use `thimble run` again only for values you have not kept, so each part keeps its ref.')
-  lines.push('Save it with `thimble save <name> --from FILE`. Then say in one line what it shows; the person has read the answer, so do not repeat it.')
+  lines.push('Run `thimble guide cards` first, unless you read the card guidance earlier in this session. Reuse the queries you ran, and use `thimble run` again only for values you have not kept, so each part keeps its ref.')
+  lines.push('Save it with `thimble save <name> --from FILE`. Then say in one line what it shows; the analyst has read the answer, so do not repeat it.')
   return lines.join(' ')
 }
 

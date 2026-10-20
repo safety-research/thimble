@@ -79,7 +79,7 @@ async function fullMap(ctx, o) {
   const name = `${slugOf(o.id)}-full`
   const have = ctx.kernel.list(name)
   if (have && !have.error && have.lineage?.declared?.from === ref(o)) {
-    return { object: { id: have.id, version: have.version }, text: `The full map of ${o.title || o.id} is open in the detail view.`, note: `The person opened the full map of ${ref(o)}: ${have.id}@${have.version}.` }
+    return { object: { id: have.id, version: have.version }, text: `The full map of ${o.title || o.id} is open in the detail view.`, note: `The analyst opened the full map of ${ref(o)}: ${have.id}@${have.version}.` }
   }
   // the spec as Claude gave it (query refs unbound), so the kernel binds the same queries and keeps their lineage
   const src = o.source && o.source.data !== undefined ? o.source.data : o.data
@@ -99,7 +99,7 @@ async function fullMap(ctx, o) {
     text: threadCount(o.data) > 1
       ? `The full map of ${o.title || o.id}: every station, its lanes split by the lens. Tab selects a station or a lane; its rows show below the map.`
       : `The full map of ${o.title || o.id}: a station a row, with its first step, its note and its share. Tab selects one; its rows show below the map.`,
-    note: `The person opened the full map of ${ref(o)}. It is the same spec with full: true.`,
+    note: `The analyst opened the full map of ${ref(o)}. It is the same spec with full: true.`,
   }
 }
 
@@ -130,7 +130,7 @@ function zoom(ctx, o) {
       declared: { made_by: 'the map verb', from: ref(o), region: ctx.region, threads: keep.slice(0, 400), why: one ? `the line of ${keep[0]}` : `the ${keep.length} threads through ${label}` },
     },
     text: one ? `${keep[0]} on its own: its stations in order, each with its rows.` : `The ${keep.length} threads through ${label}, on a map of their own.`,
-    note: `The person zoomed ${ref(o)} into ${ctx.region} (${label}): ${keep.length} thread${one ? '' : 's'}${keep.length <= 12 ? ': ' + keep.join(', ') : ''}.`,
+    note: `The analyst zoomed ${ref(o)} into ${ctx.region} (${label}): ${keep.length} thread${one ? '' : 's'}${keep.length <= 12 ? ': ' + keep.join(', ') : ''}.`,
   }
 }
 
@@ -154,6 +154,6 @@ export async function run(ctx) {
   return {
     ask: askFor(o, ctx.region),
     text: `Asked Claude to map ${o.title || o.id}.`,
-    note: `The person pressed m on ${ref(o)}${ctx.region ? ' ▸ ' + ctx.region : ''}.`,
+    note: `The analyst pressed m on ${ref(o)}${ctx.region ? ' ▸ ' + ctx.region : ''}.`,
   }
 }

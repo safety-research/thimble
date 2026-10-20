@@ -154,7 +154,7 @@ def frame(st: Store, name: str):
         c = checks.get(ref)
         rows.append({"_ref": ref, "_file": ref.split("#")[0], lab["name"]: v,
                      "confidence": 1.0 if c else u.get("c"), "reason": u.get("why"),
-                     "by": "person" if c else u.get("by"), "checked": bool(c)})
+                     "by": "analyst" if c else u.get("by"), "checked": bool(c)})
     cols = ["_ref", "_file", lab["name"], "confidence", "reason", "by", "checked"]
     return pd.DataFrame(rows, columns=cols)
 
@@ -519,7 +519,7 @@ def of_refs(st: Store, refs: list[str]) -> dict[str, dict[str, Any]]:
                 continue
             c = (lab.get("checks") or {}).get(r)
             v = value_of(lab, r)
-            e: dict[str, Any] = {"value": v, "by": "person" if c else u.get("by"), "values": lab["values"]}
+            e: dict[str, Any] = {"value": v, "by": "analyst" if c else u.get("by"), "values": lab["values"]}
             if u.get("c") is not None and not c:
                 e["confidence"] = u["c"]
             if u.get("why"):

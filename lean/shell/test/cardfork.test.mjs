@@ -57,13 +57,13 @@ test('a query name becomes the id thimble ran it under, in data, text and cites,
 
 test('what asks for a fix: problem lines, citations that do not hold, a program that failed, an interaction that failed; never warnings', () => {
   const save = 'saved 03-x v1: thimble/objects/03-x.json\n  /days ← q12 (exact)\n  3 of 4 citations hold\n  problem: /total names q9, which has no column total'
-  const drawn = '03-x@1 is drawn for the person under your reply: 12 rows by 96 columns, 4 parts they can select.\nTried as the person would, the key f fails: TypeError: x is undefined (line 3). Fix the program.\nWarning: region id "a b" uses characters ids cannot hold; it is "a-b"'
+  const drawn = '03-x@1 is drawn for the analyst under your reply: 12 rows by 96 columns, 4 parts they can select.\nTried as the analyst would, the key f fails: TypeError: x is undefined (line 3). Fix the program.\nWarning: region id "a b" uses characters ids cannot hold; it is "a-b"'
   const p = problemsOf(save, drawn)
   assert.equal(p.length, 3)
   assert.ok(p[0].startsWith('3 of 4 citations hold'))
   assert.ok(p[1].startsWith('problem:'))
-  assert.ok(p[2].startsWith('Tried as the person would'))
-  assert.deepEqual(problemsOf('saved 03-x v1\n  4 of 4 citations hold', '03-x@1 is drawn for the person under your reply\nWarning: something'), [])
+  assert.ok(p[2].startsWith('Tried as the analyst would'))
+  assert.deepEqual(problemsOf('saved 03-x v1\n  4 of 4 citations hold', '03-x@1 is drawn for the analyst under your reply\nWarning: something'), [])
   assert.equal(problemsOf('', 'Its program failed: ReferenceError: y (line 2).').length, 1)
 })
 

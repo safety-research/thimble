@@ -32,7 +32,7 @@ test('a knob whose other values fail is caught at the save: one line, the first 
   assert.equal(r.tried, 3)
   assert.equal(r.failed.length, 3)
   const line = exerciseLine(r)
-  assert.match(line, /^Tried as the person would, turning zoom to orient fails: TypeError: data\.steps\.filter is not a function/)
+  assert.match(line, /^Tried as the analyst would, turning zoom to orient fails: TypeError: data\.steps\.filter is not a function/)
   assert.match(line, /\(state \{"zoom":"orient"\}\)/)
   assert.match(line, /2 more fail the same way/)
   assert.match(line, /save it again under the same name now/)

@@ -250,7 +250,7 @@ export function noteFor(f, t, d) {
   const steps = [d.head?.text, ...d.back.map(s => s.text)].filter(Boolean).join(' ← ')
   const fw = d.forward.map(s => s.text).join('; ')
   const sp = d.spread ? ` "${cut(d.spread.text, 40)}": ${d.spread.copied} wrote it after reading it, ${d.spread.held} read it and held out.` : ''
-  return `The person traced ${t.ref || JSON.stringify(t.text)} (t). It showed: ${cut(steps, 400)}.${sp}${fw ? ' Used by: ' + cut(fw, 200) + '.' : ''}` +
+  return `The analyst traced ${t.ref || JSON.stringify(t.text)} (t). It showed: ${cut(steps, 400)}.${sp}${fw ? ' Used by: ' + cut(fw, 200) + '.' : ''}` +
     ` \`thimble trace ${t.ref || ''}${t.text ? ` --text ${JSON.stringify(t.text)}` : ''} --json\` has the facts; the trace skill says how to draw a fuller one.`
 }
 
@@ -309,7 +309,7 @@ export async function run(ctx) {
     const words = ctx.ask || ctx.args
     return {
       text: 'Asked Claude for the full trace.',
-      ask: `The person asked for the full trace of ${t.ref || JSON.stringify(t.text)}${words ? `: "${words}"` : ''}. ` +
+      ask: `The analyst asked for the full trace of ${t.ref || JSON.stringify(t.text)}${words ? `: "${words}"` : ''}. ` +
         `Run \`thimble trace ${t.ref || ''}${t.text ? ` --text ${JSON.stringify(t.text)}` : ''} --json\`, decide how deep to go for what they asked, ` +
         'and draw it as an object (the trace skill has the principles and examples).',
     }

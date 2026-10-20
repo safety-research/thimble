@@ -1,10 +1,9 @@
 # Drawing a card
 
-A card's program is the body of a function `(k, data) => node`. `data` is the card's data, with run outputs bound in
-it. `k` is the toolkit. Return what to draw. The same program draws in the terminal, in cells, and in the browser,
+A card's program is the body of a function `(k, data) => node`. `data` is the card's data, with query outputs bound
+in it. `k` is the toolkit. Return what to draw. The same program draws in the terminal, in cells, and in the browser,
 with type and lines. It runs in a sandbox: it sees `k` and `data` and nothing else (no files, no network, no clock),
-and it runs start to end, with no `await`. The thimble skill's "What the person sees" says what makes a good card.
-This page lists the parts.
+and it runs start to end, with no `await`. The card guidance says what makes a good card; this page lists the parts.
 
 ```js
 const total = data.days.reduce((s, d) => s + d.messages, 0)
@@ -42,30 +41,30 @@ A value given as a number stays a number: the browser draws it exactly, and the 
   `cite` and `examples` are functions of a row, and make each row a part.
 - `k.unseen({ label, w, h })`: what you did not read or could not get, hatched. `k.legend(items)`, `k.dots(n, total)`.
 
-## Parts the person can select
+## Parts the analyst can select
 
 - `k.region(id, meta, part)` makes a part. The id names what the part is (`day-06-18`, `run-sgd-b32`), not where it
   sits. A selection, a link and a question about the part all carry the id, so keep ids when you change the program.
   `meta` is a label, or `{ label, ref, cite, examples, note, row, ... }`; any other field is kept.
-- A bar item, a stacked part, a table row, or a region's meta made from a row of a bound run output (the row,
-  `{ ...row }`, or `{ row: d }`) opens that row's source rows, with real examples spread across them.
+- A bar item, a stacked part, a table row, or a region's meta made from a row of a bound query output (the row,
+  `{ ...row }`, or `{ row: d }`) opens the records behind that row, with real examples spread across them.
 - `k.cite(id, { text, source, query, rows, more, note })` and `k.examples(id, { label, records, total, fmt })` register
   a citation or a set of real records and return the id. A region points at them with `{ cite, examples }`. `k.rows(x)`
   gives the refs of rows of the data.
 
 ## Knobs and interaction
 
-- `k.knob(id, { values, at, label, fmt })` returns the value the person set, else `at`. `values` is a list (up to
-  2,000) or `{ min, max, step }`; `fmt(value)` is how the person reads a value. `k.dial(id, { label, w })` draws it as
+- `k.knob(id, { values, at, label, fmt })` returns the value the analyst set, else `at`. `values` is a list (up to
+  2,000) or `{ min, max, step }`; `fmt(value)` is how the analyst reads a value. `k.dial(id, { label, w })` draws it as
   `label ◂ value ▸`, and a link `[words](#id)` in a text is the knob too. The program runs again with the new value.
 - `k.on(name, fn, label)` answers a key (`'j'`, `'space'`), a press on a part (`'press:<id>'`, or `onPress` in a
   region's meta) or a drag in the browser (`'brush'`, from `k.plot(..., { brush: 'id' })` or `c.brush`). `fn(event)`
   returns the new state, and the program runs again and reads it in `k.state`, the same in both surfaces. `k.event` is
   the event this run answers. In a handler: `k.set(key, value)`; `k.ask({ label, rows, region, text })` sends the
-  person's next question (or `text`, at once) to the card's thread; `k.after(ms, name, payload)` sends a later event,
+  analyst's next question (or `text`, at once) to the card's thread; `k.after(ms, name, payload)` sends a later event,
   such as the next frame of a replay; `k.do(action, args)` asks the host for an action, such as `'open'`;
   `k.select(id)` marks a part as selected; `k.status(text)` is one short line in the bar.
-- A card gets its keys while it has the focus: when the person steps onto it with `]` under a reply, or opens its
+- A card gets its keys while it has the focus: when the analyst steps onto it with `]` under a reply, or opens its
   detail. The bar then shows each key with the label you gave it, such as `c flip · , . year`, so a hint drawn inside
   the card adds nothing, and it stays there where the key does not work. A few keys stay with the host wherever the
   card is drawn, to move between things and to go back (`0` goes back). Claude Code keeps ← and → in the terminal, so
@@ -109,6 +108,6 @@ meanings: `ink`, `dim`, `accent`, `good`, `bad`, `warn`, `unseen`, and `c1` to `
 
 A program that throws, runs too long or draws too much shows one line under the card's title: the error, its line,
 and what to fix. Warnings, such as a region with no id or a link to an id nothing defines, come back with the drawing.
-To check an interaction before the person tries it, run the saved card with an event: `node cli.mjs
+To check an interaction before the analyst tries it, run the saved card with an event: `node cli.mjs
 thimble/objects/<id>.json --text --event '{"type":"key","key":"f"}'` (`cli.mjs` is beside this file). It prints the
 cells the card then draws and the state its handler set.

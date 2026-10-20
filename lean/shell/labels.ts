@@ -80,8 +80,8 @@ export async function checksDone($: Engine): Promise<void> {
     if (s?.card && s.card_version) await showVersion($, { id: String(s.card), v: Number(s.card_version), root: m.root })
     const agree = m.checks.filter(c => c.was != null && c.was === c.now)
     const changed = m.checks.filter(c => c.was !== c.now)
-    const shown = changed.slice(0, 6).map(c => `${c.ref} (the label said ${c.was ?? 'nothing'}, the person says ${c.now})`)
-    await noteForClaude($, `The person checked ${m.checks.length} record${m.checks.length === 1 ? '' : 's'} of the label ${m.label}: they agree with ${agree.length}` +
+    const shown = changed.slice(0, 6).map(c => `${c.ref} (the label said ${c.was ?? 'nothing'}, the analyst says ${c.now})`)
+    await noteForClaude($, `The analyst checked ${m.checks.length} record${m.checks.length === 1 ? '' : 's'} of the label ${m.label}: they agree with ${agree.length}` +
       (changed.length ? ` and changed ${changed.length}: ${shown.join('; ')}${changed.length > 6 ? '; …' : ''}` : '') +
       `. Their checks count in place of the label's values${s?.query ? `; its counts are now query ${s.query}` : ''}.`)
   }

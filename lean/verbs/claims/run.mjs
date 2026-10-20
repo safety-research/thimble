@@ -52,11 +52,11 @@ export function askFor({ root, dir = HERE, est, skill = null }) {
   return [
     `Orient on this folder's corpus: ${est.what}${under} (${est.detail}). It takes a subagent about ${est.minutes} minutes.`,
     '',
-    'Hand the reading to one subagent with the Agent tool, so the rows it reads stay out of this conversation. Give it this prompt, and add one sentence on what the person is looking into if you know:',
+    'Hand the reading to one subagent with the Agent tool, so the rows it reads stay out of this conversation. Give it this prompt, and add one sentence on what the analyst is looking into if you know:',
     '',
     `"Orient on the folder ${root}: ${est.what}${under}. First read ${file} and follow it. Write the claims as JSON to ${out}, then run \`thimble verb claims check ${out}\` and fix what it lists. Your last message is the check's last line."`,
     '',
-    `When the subagent is done, run \`thimble verb claims save ${out}\`. Its claims join this session's claims, which the person opens with c, so reply in one or two sentences: what the corpus holds, and the one thing in it that surprised you most.`,
+    `When the subagent is done, run \`thimble verb claims save ${out}\`. Its claims join this session's claims, which the analyst opens with c, so reply in one or two sentences: what the corpus holds, and the one thing in it that surprised you most.`,
   ].join('\n')
 }
 
@@ -68,12 +68,12 @@ export async function run(ctx) {
     return {
       ask: askFor({ root, dir: ctx.verb?.dir || HERE, est }),
       text: `Asked Claude to orient on the corpus: ${est.what} (about ${est.minutes} min). A subagent reads the rows, so this conversation stays short.`,
-      note: `The person asked for the corpus orientation: ${est.what} (${est.detail}).`,
+      note: `The analyst asked for the corpus orientation: ${est.what} (${est.detail}).`,
     }
   }
   const store = loadStore(root, ctx.session)
   return {
     text: store.claims.length ? `This session's claims: ${summary(store)}. Press c under a message to see them.` : 'No claims yet: they are read after each turn of work.',
-    note: `The person looked at this session's claims (${summary(store)}).`,
+    note: `The analyst looked at this session's claims (${summary(store)}).`,
   }
 }
