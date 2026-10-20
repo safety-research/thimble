@@ -47,3 +47,21 @@ test('a click on a part opens the first record it stands for', async () => {
   expect(partRef({ ref: 'a.jsonl#L2' })).toBe('a.jsonl#L2')
   expect(partRef({ label: 'x' })).toBeNull()
 })
+
+test('a card drawn again in a narrow place cuts its labels, never its numbers', async () => {
+  const { renderSvg } = await import('../../src/kit/svg.js')
+  const data = { rows: [['a-rather-long-name-of-a-run', 317], ['short', 187], ['other', 11956]] }
+  // k.bars with the label width a wide card asked for, and the same row built by hand
+  const programs = [
+    "return k.frame(k.bars(data.rows.map(([l, v]) => ({ label: l, value: v })), { labelW: 22 }))",
+    "return k.frame(k.stack(...data.rows.map(([l, v]) => k.beside(k.text(l, { w: 22, wrap: false }), k.bar(v, { max: 11956 }), k.text(k.fmt(v), { w: 6, align: 'right' }), { gap: 1 }))))",
+  ]
+  for (const program of programs) {
+    const drawing = DrawKit.run(program, data, { w: 35, h: 30, surface: 'browser', id: 'c2' }) as { w: number }
+    const out = renderSvg(drawing, { cw: 7.8 })
+    const values = [...out.svg.matchAll(/<text x="([\d.]+)"[^>]*text-anchor="end"[^>]*>(.*?)<\/text>/g)].map((m) => ({ x: +m[1], s: m[2].replace(/<[^>]+>/g, '') }))
+    expect(values.map((v) => v.s)).toEqual(['317', '187', '11,956'])
+    for (const v of values) expect(v.x).toBeLessThanOrEqual(drawing.w * 7.8)
+    expect(out.cut.map((c: { s: string }) => c.s)).toContain('a-rather-long-name-of-a-run')
+  }
+})
