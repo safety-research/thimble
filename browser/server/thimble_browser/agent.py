@@ -147,14 +147,17 @@ class Usage:
     cache_read_input_tokens: int = 0
     cache_creation_input_tokens: int = 0
     requests: int = 0
+    fast_requests: int = 0  # the requests that ran in fast mode, as the API reports (usage.speed)
 
     def add(self, u: Any) -> None:
         self.requests += 1
         for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
             setattr(self, k, getattr(self, k) + int(getattr(u, k, 0) or 0))
+        if getattr(u, "speed", None) == "fast":
+            self.fast_requests += 1
 
     def record(self) -> dict[str, int]:
-        return dict(self.__dict__)
+        return {k: v for k, v in self.__dict__.items() if v or k != "fast_requests"}
 
 
 class Session:
@@ -186,13 +189,19 @@ class Session:
         e = (home.read_json(home.workspace_dir(self.ws) / "session.json", {}) or {}).get("effort")
         return {"ultracode": "xhigh"}.get(e, e) if e in settings.EFFORTS + ("ultracode",) else settings.read()["effort"]
 
+    def fast(self) -> bool:
+        """Fast mode for the chat agent, in main and its threads: the composer's bolt for this workspace, off unless the
+        analyst turned it on. A view's builder runs at standard speed."""
+        return self.role == "main" and (home.read_json(home.workspace_dir(self.ws) / "session.json", {}) or {}).get(
+            "fast") is True
+
     def request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         tools = definitions(self.defn.tool_names())
         tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
         return {"max_tokens": MAX_TOKENS, "thinking": {"type": "adaptive"},
                 "system": [{"type": "text", "text": self.defn.prompt(self.folder), "cache_control": {"type": "ephemeral"}}],
                 "tools": tools, "messages": messages, "cache_control": {"type": "ephemeral"},
-                **llm.request_args(effort=self.effort())}
+                **llm.request_args(effort=self.effort(), fast=self.fast())}
 
     # ---- the log
 
@@ -333,7 +342,7 @@ class Session:
         except Exception as e:  # noqa: BLE001 — every failure is a row the analyst sees
             log.warning("turn failed: %s", type(e).__name__)
             self._close_open_calls(messages)
-            self._append({"type": "error", "kind": "api", "message": llm.failure(e)})
+            self._append({"type": "error", "kind": "api", "message": llm.failure(e, fast=self.fast())})
             result = "failed"
         self._append({"type": "done", "result": result, "cells": list(dict.fromkeys(self.cards)),
                       "usage": usage.record(), "model": self._model()})

@@ -40,7 +40,7 @@ export function modelChoices(settings: Settings | null | undefined, current?: st
   return out
 }
 
-/** Whether a model has fast mode, as Claude Code and the backend tell (config.has_fast_mode): an Opus 5 or Opus 4.8 id,
+/** Whether a model has fast mode, as the server tells (llm.has_fast_mode): an Opus 5, Opus 5.5 or Opus 4.8 id,
  * or `opus`, the alias for the current Opus. Pure. */
 export function hasFastMode(model: string | null | undefined): boolean {
   const m = (model ?? '').toLowerCase()

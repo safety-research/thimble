@@ -4,6 +4,7 @@
 // of its own, has none.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { Composer } from '../../src/chat/Composer.tsx'
 import { FastBolt, ModelLine, fastTip, noFastTip } from '../../src/chat/ModelLine.tsx'
 import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
@@ -59,6 +60,17 @@ describe("fast mode's bolt", () => {
     bolt.matches = ((sel: string) => sel === ':focus-visible' || Element.prototype.matches.call(bolt, sel)) as typeof bolt.matches
     await act(async () => bolt.focus())
     expect(tip()).toBe('Fast mode: Haiku 4.5 has no fast mode')
+  })
+
+  test("switches main's fast mode from the composer, and a view's build thread (fast null) has no bolt", async () => {
+    const onFast = vi.fn()
+    const el = await mount(<Composer model="claude-opus-5-5" effort="high" onEffort={() => {}} fast onFast={onFast} onSend={() => {}} sending={false} />)
+    const bolt = el.querySelector<HTMLButtonElement>('.fast-bolt')!
+    expect(bolt.getAttribute('aria-disabled')).toBeNull()
+    await click(bolt)
+    expect(onFast).toHaveBeenCalledWith(false)
+    const build = await mount(<Composer model="claude-opus-5-5" effort="high" onEffort={() => {}} fast={null} onFast={onFast} onSend={() => {}} sending={false} />)
+    expect(build.querySelector('.fast-bolt')).toBeNull()
   })
 
   test('its tip always opens with "Fast mode"', () => {

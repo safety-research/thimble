@@ -45,6 +45,18 @@ def test_saving_the_effort_gives_the_workspace_choice_way(folder):
     assert "effort" not in (home.read_json(home.workspace_dir(api.ws) / "session.json", {}) or {})
 
 
+def test_the_composers_bolt_keeps_fast_mode_for_the_workspace(folder):
+    api = Signed(folder)
+    main = lambda: next(m for m in api("GET", "/ws/{ws}/chats").json() if m["kind"] == "main")  # noqa: E731
+    assert main()["attached"]["fast_choice"] is False
+    r = api("PUT", "/ws/{ws}/session/fast", json={"fast": True})
+    assert r.status_code == 200 and r.json() == {"fast": True, "choice": True}
+    assert main()["attached"]["fast_choice"] is True
+    assert api("PUT", "/ws/{ws}/session/fast", json={"fast": "yes"}).status_code == 400
+    api("PUT", "/ws/{ws}/session/fast", json={"fast": False})
+    assert main()["attached"]["fast_choice"] is False
+
+
 def test_the_api_key_is_kept_private_and_never_sent_back(folder):
     api = Signed(folder)
     r = api("PUT", "/ws/{ws}/settings/api-key", json={"key": MADE_UP_KEY})

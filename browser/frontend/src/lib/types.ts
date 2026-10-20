@@ -73,6 +73,8 @@ export interface TurnUsage {
   cache_read_input_tokens: number
   cache_creation_input_tokens: number
   requests: number
+  /** the requests that ran in fast mode (absent when none did) */
+  fast_requests?: number
 }
 
 /** What a notice's button does: open Settings (`settings`), build the failed view `slug` again (`view-retry`), or sign

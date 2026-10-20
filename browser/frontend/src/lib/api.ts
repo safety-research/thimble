@@ -409,6 +409,8 @@ export const api = {
     j<EventPosted>(`${ws(c)}/events`, { method: 'POST', body: JSON.stringify({ kind, payload }) }),
   /** The composer's effort chip: main's effort (and its threads') from its next request (events.effort_route). */
   setEffort: (c: string, effort: MainEffort) => j<{ effort: string; choice: MainEffort }>(`${ws(c)}/session/effort`, { method: 'PUT', body: JSON.stringify({ effort }) }),
+  /** The composer's bolt: fast mode for main and its threads, from their next request, on a model that has it. */
+  setFast: (c: string, fast: boolean) => j<{ fast: boolean; choice: boolean }>(`${ws(c)}/session/fast`, { method: 'PUT', body: JSON.stringify({ fast }) }),
   /** Start it on a refused typed start (`POST /ws/{c}/subagents/start-it`): the same request, with the same values,
      * started through thimble's plugin as a click. */
   startIt: (c: string, request: string) => j<StartAnswer>(`${ws(c)}/subagents/start-it`, { method: 'POST', body: JSON.stringify({ request }) }).then(startAnswer),

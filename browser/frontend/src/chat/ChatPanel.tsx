@@ -19,7 +19,7 @@ import { hhmm } from '../lib/time'
 import type { ChatMeta, ChatRecord, MainEffort } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
-import { mainEffort, NEXT_LAUNCH } from './ModelLine'
+import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, foldRecords, withApiErrors, withBranches, type Row } from './model'
 import { Divider, Note, ThreadsContext } from './Notes'
 import { NoticeStrip } from './Notice'
@@ -309,6 +309,19 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     },
     [ws, main.reload],
   )
+  const pickFast = useCallback(
+    (on: boolean) => {
+      track('chat-settings', { target: 'chat:main', detail: { fast: on } })
+      api
+        .setFast(ws, on)
+        .then(() => {
+          main.reload()
+          bus.emit('toast', { text: `Fast mode ${on ? 'on' : 'off'}: ${NEXT_LAUNCH}.`, kind: 'info' })
+        })
+        .catch((err: Error) => bus.emit('toast', { text: `Could not switch fast mode: ${err.message}`, kind: 'error' }))
+    },
+    [ws, main.reload],
+  )
   const curPath = labels.get(current) ?? current
 
   const mainRows = useMemo(() => withApiErrors(foldRecords(main.records)), [main.records])
@@ -408,6 +421,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             model={mainModel}
             effort={attached ? mainEffort(attached) : null}
             onEffort={attached ? pickEffort : undefined}
+            fast={attached && kind !== 'dev' ? mainFast(attached) : null}
+            onFast={pickFast}
             onSend={send}
             sending={kind === 'dev' ? sendingView : chat.streaming}
             placeholder={kind === 'dev' ? `Ask for a change to ${build?.name ?? 'the view'}…` : `Reply in ${curPath}…`}

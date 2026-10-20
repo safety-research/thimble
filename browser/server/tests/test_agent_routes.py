@@ -59,8 +59,8 @@ def test_a_lens_scope_is_set_through_one_route_and_its_marks_follow(api, monkeyp
     reply = {"glosses": [{"where": "answer", "term": "merge queue", "body": "Where changes wait to merge.", "here": ""}]}
     monkeypatch.setattr(llm, "client", lambda: ScriptedClient(answer=lambda s, u: json.dumps(reply)))
     lenses = {x["id"]: x for x in api("GET", "/lenses").json()}
-    assert lenses["explain"]["scope"] == {"chat": True, "cards": False, "report": False}
-    assert lenses["details"]["scope"] == {"chat": False, "cards": False, "report": True}
+    assert lenses["explain"]["scope"] == {"chat": True, "cards": False, "report": True}
+    assert lenses["details"]["scope"] == {"chat": True, "cards": False, "report": True}
     import asyncio
     from thimble_browser.features import lenses as lens_mod
     n = asyncio.run(lens_mod.read(api.ws, chat="main", answer="It sat in the merge queue for a day."))
@@ -70,6 +70,10 @@ def test_a_lens_scope_is_set_through_one_route_and_its_marks_follow(api, monkeyp
     assert r.status_code == 200 and r.json()["scope"]["chat"] is False
     assert [m["shown"] for m in api("GET", "/marks?surface=chat").json()["marks"]] == [False]
     assert api("PUT", "/lenses/explain", json={"scope": {"elsewhere": True}}).status_code == 400
+    # the analyst's choice is kept for the surfaces they set; the others follow the default
+    assert lens_mod._conf(api.ws)["builtin"]["explain"]["scope"] == {"chat": False}
+    assert api("PUT", "/lenses/details", json={"surfaces": ["cards"]}).json()["scope"] == \
+        {"chat": False, "cards": True, "report": False}
     api("PUT", "/lenses/explain", json={"scope": {"chat": True}})
     mid = api("GET", "/marks").json()["marks"][0]["id"]
     assert api("POST", f"/marks/{mid}/dismiss").status_code == 200

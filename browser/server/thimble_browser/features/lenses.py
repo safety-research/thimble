@@ -59,17 +59,17 @@ from . import Feature, is_on
 log = logging.getLogger("thimble_browser.lenses")
 
 SURFACES = ("chat", "cards", "report")
-# the built-in lenses: their names, colors and today's default scope
+# the built-in lenses: their names, colors and default scope; a surface the analyst set (set_lens) keeps their choice
 BUILTIN: dict[str, dict[str, Any]] = {
     "explain": {"name": "Explainers", "color": "teal", "key": "glosses", "lens": "explain", "prompt": "lens-explain.md",
                 "on": True,
                 "question": "Which terms might the reader not know?",
                 "leaves": "the term highlighted; a click explains it",
-                "scope": {"chat": True, "cards": False, "report": False}},
+                "scope": {"chat": True, "cards": False, "report": True}},
     "details": {"name": "Important details", "color": "orange", "key": "heads", "lens": "heads",
                 "prompt": "lens-details.md", "on": True, "question": "Which details are easy to miss and matter before relying on this?",
                 "leaves": "the detail highlighted, and what to do about it beside it",
-                "scope": {"chat": False, "cards": False, "report": True}},
+                "scope": {"chat": True, "cards": False, "report": True}},
     "unverifiable": {"name": "Unverifiable", "color": "gold", "key": "unverifiable", "prompt": "lens-check.md",
                      "on": False, "question": "Which claims can't be checked against the files?",
                      "instructions": "Mark a claim only when nothing in the files can support it, and the claim matters "
@@ -150,7 +150,6 @@ def set_lens(ws: str, lid: str, *, on: bool | None = None, scope: dict[str, Any]
     with _lock:
         x = lens(ws, lid)
         conf = _conf(ws)
-        new_scope = _scope({**x["scope"], **(scope or {})}, x["scope"]) if scope is not None else x["scope"]
         if x["builtin"]:
             row = conf.setdefault("builtin", {}).setdefault(lid, {})
         else:
@@ -158,7 +157,8 @@ def set_lens(ws: str, lid: str, *, on: bool | None = None, scope: dict[str, Any]
         if on is not None:
             row["on"] = bool(on)
         if scope is not None:
-            row["scope"] = new_scope
+            # only the surfaces the analyst set are kept: one they never set follows the lens's default
+            row["scope"] = {**(row.get("scope") or {}), **{k: bool(v) for k, v in scope.items() if k in SURFACES}}
         if instructions is not None:
             if x["builtin"]:
                 raise ValueError("a built-in check keeps its own question")
