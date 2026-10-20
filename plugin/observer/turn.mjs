@@ -1,7 +1,7 @@
-// turn.mjs: the new turn as the post-turn pass reads it. Pure. From the session's messages ($.session.messages()), the
-// person's last prompt and everything after it: Claude's words between its tool calls, and each tool it ran with what
-// came back, each result cut to fit a budget, the latest calls kept longest. The pass reads this and a digest of the
-// state, never the session before the turn.
+// turn.mjs: the new turn as the earlier pass (observer `lenses` mode) reads it, and the turn's words the claims lens
+// reads. Pure. From the session's messages ($.session.messages()), the person's last prompt and everything after it:
+// Claude's words between its tool calls, and each tool it ran with what came back, each result cut to fit a budget,
+// the latest calls kept longest. (The fork reads the session itself.)
 
 const cut = (s, n) => {
   const t = String(s ?? '')

@@ -39,9 +39,10 @@ You ask Claude questions as usual. thimble adds three things:
   You can open a card to see each of its parts, the rows behind each part, and the code that made it.
 - **Citations.** Numbers in Claude's replies link to the rows they were counted from. You can open each one and read
   those rows.
-- **A second reader.** After each reply, a side agent reads the reply and the work behind it. It leaves notes for
-  Claude about anything that needs a fix, suggests another view when one would help, and explains terms you may not
-  know.
+- **A second reader.** After each of Claude's replies, a side agent reads it with the whole session and the work
+  behind it. It leaves notes for Claude about anything that needs a fix, suggests another view when one would help,
+  and explains terms you may not know. A click on `thimble` at the bar's left (or `/thimble-settings`) turns each of
+  its parts on or off.
 
 ### Use
 
@@ -81,10 +82,12 @@ If you type a word that starts with one of these letters, thimble gives the lett
 
 ### What it costs
 
-The side agent makes one model call after each of Claude's replies, with your session's model. A `--prompt` label
-makes one call per 50 records. A rewrite with `s` makes one call. All calls go through your Claude Code login and
-show in your usage like any other. To turn the side agent off, run `/plugin configure thimble@thimble` in Claude Code
-and set Observer to off.
+The side agent makes one model call after each of Claude's replies, with your session's model. It is a fork of the
+session, so the prompt cache serves the conversation it reads; replies that come while it reads wait and are read
+together in one call. A `--prompt` label makes one call per 50 records. A rewrite with `s` makes one call. All calls
+go through your Claude Code login and show in your usage like any other. To turn the side agent or one of its parts
+off, click `thimble` at the left of the bar (or run `/thimble-settings`); the same switches are in `/config` and in
+`/plugin configure thimble@thimble`.
 
 ### What it stores
 

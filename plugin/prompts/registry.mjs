@@ -7,24 +7,28 @@
 // Pure: no file system. The hooks module reads the files with $.fs (prompts.ts), Node with node:fs (node.mjs).
 
 /** @typedef {{about: string, default: string, reads: string, skill?: string, optional?: boolean, base?: string,
- *    versions?: Record<string, {about?: string, file?: string, mode?: string, base?: string}>}} Feature */
+ *    versions?: Record<string, {about?: string, file?: string, mode?: string, turn?: string, effort?: string, base?: string}>}} Feature */
 
 /** @type {Record<string, Feature>} */
 export const FEATURES = {
   observer: {
-    about: "the post-turn pass: its frame, which holds the shared principles and composes the enabled lenses",
-    reads: 'observer/observer.ts, after each turn of work',
-    default: 'v4-low',
+    about: "the observer's frame, which holds the shared principles and composes the enabled lenses",
+    reads: "observer/observer.ts, after each of Claude's messages",
+    default: 'v5',
     versions: {
-      v3: { about: "the frame for the lenses (one call over the new turn and a digest of the state), with thimble's purpose in the 0.9 preamble's words, and cards for objects", mode: 'lenses' },
-      'v3-low': { about: 'v3 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low' },
-      v4: { about: "v3 in coverage's words: a file is seen when some of its lines entered Claude's context; one only computed over, counted, listed or searched is not; and v3's word on explainers (they wait until opened, so give one for a term the analyst has not used)", mode: 'lenses' },
-      'v4-low': { about: 'v4 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v4.md', mode: 'lenses', effort: 'low' },
+      v3: { about: "the frame for the lenses (one call over the new turn and a digest of the state), with thimble's purpose in the 0.9 preamble's words, and cards for objects", mode: 'lenses', turn: 'v2' },
+      'v3-low': { about: 'v3 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low', turn: 'v2' },
+      v4: { about: "v3 in coverage's words: a file is seen when some of its lines entered Claude's context; one only computed over, counted, listed or searched is not; and v3's word on explainers (they wait until opened, so give one for a term the analyst has not used)", mode: 'lenses', turn: 'v2' },
+      'v4-low': { about: 'v4 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v4.md', mode: 'lenses', effort: 'low', turn: 'v2' },
+      v5: { about: "v4 as the prompt of a fork that shares the session: it reads each of Claude's messages with the whole session, the messages to read named at the end; when to give each part is left to the lenses", mode: 'fork', turn: 'v3' },
     },
   },
   'observer-turn': {
-    about: "the pass's message: the new turn, its cards and the digest of the state", reads: 'observer/observer.ts', default: 'v2',
-    versions: { v2: { about: 'the new turn with the analyst for the person' } },
+    about: "what follows the frame: the messages to read, the cards and what the session read, and the state the transcript lacks", reads: 'observer/observer.ts', default: 'v3',
+    versions: {
+      v2: { about: 'the new turn with the analyst for the person (the earlier pass, which reads no session)' },
+      v3: { about: "for the fork: the messages to read named by their first words, the cards' lineage, coverage, each lens's digest and rules, and the reply's skeleton" },
+    },
   },
   'lens-notes': {
     about: 'lens: notes to Claude', reads: 'the pass', default: 'v2', optional: true,
