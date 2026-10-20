@@ -39,7 +39,7 @@ test('v asks Claude for another view of the answer, with the proposal the person
 test('v on a catch-up names it as the catch-up the squeeze chips wrote of its replies, not as an answer of Claude\'s', () => {
   const message = { text: 'one\n\n---\n\ntwo', shown: 'The empty label has [741 IPs](q4#label=@ips).', objects: [], verbs: {}, catchup: { host: 'r2', rows: ['r1', 'r2'], replies: 2, question: 'q', prompt: 'p1' } }
   const ask = request({ message, args: '', verb: { dir: '/v' } })
-  assert.match(ask, /^The person pressed v \(visualize\) on the catch-up of your 2 replies since their last prompt that the squeeze chips wrote, which begins "The empty label has 741 IPs\."\. They want another view of it/)
+  assert.match(ask, /^The analyst pressed v \(visualize\) on the catch-up of your 2 replies since their last prompt that the squeeze chips wrote, which begins "The empty label has 741 IPs\."\. They want another view of it/)
 })
 
 test('the card guidance is not a skill at rest: no SKILL.md lists it; `thimble guide cards` reads it when a card is drawn', () => {
