@@ -39,8 +39,8 @@ export const FEATURES = {
     },
   },
   'lens-squeeze': {
-    about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v3', optional: true,
-    versions: { v2: { about: 'written clean in the 0.9 style' }, v3: { about: 'the chips as squeeze v7 names them: Interpretation (facts only · some meaning · full meaning) and Background (new · learning · working · expert), each in one sentence' } },
+    about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v4', optional: true,
+    versions: { v2: { about: 'written clean in the 0.9 style' }, v3: { about: 'the chips as squeeze v7 names them: Interpretation (facts only · some meaning · full meaning) and Background (new · learning · working · expert), each in one sentence' }, v4: { about: "v3 with why the starting dot matters, and Interpretation by where meaning begins (why, what follows, what to do; a sum or a ranking is still a fact), with a count table and a recommendation as its examples" } },
   },
   'lens-heads': {
     about: 'lens: an important detail of the answer, an orange mark that opens a heads-up card', reads: 'the pass', default: 'v2', optional: true,
