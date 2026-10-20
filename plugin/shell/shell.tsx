@@ -194,9 +194,14 @@ export async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Rec
   const hit = preps.get(key)
   if (hit) return hit
   await $.state.get({ ...READY, id: key })
-  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode, h, false, all).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
+  // a drawing Claude Code cut short (its call aborted with the drawing that asked for it, as the drawings around it
+  // changed) is asked again at the next drawing, a few times, so the card never stays on `drawing…`
+  const again = () => { const n = (lostPreps.get(key) ?? 0) + 1; lostPreps.set(key, n); if (n <= 5) void $.state.set({ ...READY, id: key }, Date.now()) }
+  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode, h, false, all).then(() => $.state.set({ ...READY, id: key }, Date.now()), again) })
   return null
 }
+/** How many times a drawing was cut short, by its key (preparedNow asks again up to five times). */
+const lostPreps = new Map<string, number>()
 
 /** The ref with its version: the latest when none is named. */
 async function withVersion($: Engine, ref: ObjRef): Promise<ObjRef> {
@@ -2547,6 +2552,7 @@ export const registerShell: Register = (on, options) => {
 /** For tests: the module's memory, cleared. */
 export function resetShell(): void {
   newestVersion.clear()
+  lostPreps.clear()
   objects.clear()
   preps.clear()
   pending.clear()

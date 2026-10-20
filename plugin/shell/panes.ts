@@ -162,6 +162,10 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
       void (async () => {
         let v: unknown
         try { v = await paneWant($, inst.name, inst.args, w.request) } catch (err) { v = { error: String((err as Error)?.message || err).slice(0, 200) } }
+        // a read Claude Code cut short (its call aborted with the drawing that asked for it) is no answer: asked again at
+        // the next drawing, up to the three asks, so a card opened by a click never stays on that failure
+        const why = String((v as { error?: unknown; problem?: unknown } | undefined)?.error ?? (v as { problem?: unknown } | undefined)?.problem ?? '')
+        if (/\baborted\b/.test(why) && (inst.tries.get(w.key) ?? 0) < 3) { inst.asked.delete(w.key); await redraw($, inst); return }
         inst.got = { ...inst.got, [w.key]: v === undefined ? { error: 'the host gave no answer' } : v }
         await redraw($, inst)
       })()

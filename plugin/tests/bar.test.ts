@@ -42,7 +42,8 @@ function feedSave(files: Record<string, string>, id: string, v = 1): void {
   files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: id, version: v }) + '\n'
 }
 
-function world(on: Any, o: { read?: number } = {}) {
+function world(on: Any, o: { read?: number; abortPreps?: number } = {}) {
+  let aborts = o.abortPreps ?? 0
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -59,6 +60,8 @@ function world(on: Any, o: { read?: number } = {}) {
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     if (e.argv[0] === 'tail') return { value: { exitCode: 0, stdout: (files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const prep = e.argv.some(a => a.endsWith('prep.mjs')) ? JSON.parse(String(e.init?.stdin || '{}')) : null
+    // Claude Code cuts a call short when the drawing that asked for it is abandoned
+    if (prep && !prep.check && aborts > 0) { aborts--; throw new Error('thimble: $.process.run(node) aborted') }
     const read = o.read ?? 0
     const out = prep ? { drawing: DRAWING, ...(prep.check ? { check: { line: null, tried: 0, total: 0, failed: 0, cut: 0, ms: 1 } } : {}) } : e.argv.includes('coverage') ? { files: [{ path: 'a.csv', rows: 4, lines: 4, status: 'computed', computed: read * 4 }], total: { files: 1, rows: 4, read_share: read } } : {}
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -214,4 +217,20 @@ test('where no fork can start, v asks main as before: a turn whose row reads as 
   await clock.settle()
   expect(w.submitted).toEqual(['visualize another view of this answer'])
   expect(AT.length).toBe(24)
+})
+
+test('a card drawing Claude Code cut short is asked again: the card is drawn, never left at drawing…', async ($, on) => {
+  const w = world(on, { abortPreps: 1 })
+  const clock = mock.clock(on)
+  on('agent.spawn', () => ({ deny: 'no forks in this test' }) as never)
+  on('tool.call', () => { feedSave(w.files, '02-view'); return { result: 'saved 02-view v1' } })
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'thimble save 02-view --from /tmp/v.json' } as never)
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: ANSWER }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  const ui = await $.ui.mount(REPLY)
+  for (let i = 0; i < 4; i++) { await clock.advance(10); await clock.settle() }
+  expect(textOf(await ui.drawn())).toContain('Jun 18 6,543')
+  await ui.unmount()
 })
