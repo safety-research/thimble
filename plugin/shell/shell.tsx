@@ -52,7 +52,7 @@ import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 
 import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
-import { countLabels, DOCK_KEY, dockAction, dockAnyOpen, dockCountEl, dockCounts, dockKey, dockOpen, dockStore, dockWant, noteCoverage, registerDock, resetDock, restKey, syncDock } from './dock'
+import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
 import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
@@ -1308,9 +1308,9 @@ async function threadInFront($: Engine): Promise<string | null> {
 /** What takes the keys, newest last: each surface pushes itself as it opens and leaves as it closes (the detail, the
  *  squeeze chips, v's proposals, the tray, a card under a reply). The bar says the keys of
  *  the top one alone, read from this one state, so it redraws whenever the stack changes. */
-type FocusKind = 'detail' | 'chips' | 'proposals' | 'tray' | 'card' | 'coverage' | 'labels'
+type FocusKind = 'detail' | 'chips' | 'proposals' | 'tray' | 'card'
 const FSTACK = { plugin: 'thimble', key: 'focus' } as const
-const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'detail', 'coverage', 'labels']
+const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'detail']
 
 export async function pushFocus($: Engine, kind: FocusKind): Promise<void> {
   const now = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
@@ -1349,12 +1349,6 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   if (kind === 'detail') {
     const d = await detailKeys($)
     return d ? { keys: d } : undefined
-  }
-  // Coverage and the label viewer (dock.ts): their programs' keys
-  if (kind === 'coverage' || kind === 'labels') {
-    if (!dockOpen(kind)) return undefined
-    const d = await paneNow($, kind)
-    return { status: status(d), keys: barText([d]) || 'esc close' }
   }
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (kind === 'chips') {
@@ -1474,7 +1468,6 @@ function barNamed(k: string, now: number, since: number): boolean {
 async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   const { Box, Button, Text } = els
   const left: BarSeg[] = []
-  await syncDock($)
   const focus = await focusKeys($)
   if (focus) {
     // what the focused surface says now, cut at its end when the line is short (never to its first word), then its keys
@@ -1549,7 +1542,8 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   const items: [string, number, string, string?][] = c ? [
     // t: the list of them in the side panel
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`, 't'],
-    // coverage and the labels open their panes (dock.ts): `r coverage 34% ▆▆▆▆`, `l 2 labels` (their key in their words)
+    // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 34% ▆▆▆▆`, `l 2 labels` (their
+    // key in their words)
     ...dockCounts(c, percent),
   ] : []
   const counts = items.filter(([, n]) => n > 0).map(([id, , words, key]) => ({ id, text: key ? `${key} ${words}` : words, ...(key ? { key } : {}), bright: now - (c!.changed[id] ?? 0) < BRIGHT_MS }))
@@ -1670,9 +1664,6 @@ async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<
  *  when the key came. */
 async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
   const key = e.key
-  // Coverage or the label viewer on top of the focus stack: its program's keys (dock.ts)
-  const docked = dockAnyOpen() ? await dockKey($, (((await $.state.get(FSTACK)).value ?? []) as FocusKind[]).at(-1), e, at) : null
-  if (docked) return docked
   // the open detail takes its own keys first (detail.tsx), and a letter there begins the question for the card's thread
   const d = detailIsOpen() ? await detailKey($, e) : null
   if (d?.box) return d
@@ -1722,8 +1713,9 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     return { box: { text: `v${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingV) { pendingV.cancelled = true; pendingV = null } } }
   }
   // and straight after t, while t waits to list the threads
-  if (pendingT && opened && opened.key === 't' && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
-    return { box: { text: `t${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingT) { pendingT.cancelled = true; pendingT = null } } }
+  if (pendingT && opened && ['t', DOCK_KEY.coverage, DOCK_KEY.labels].includes(opened.key) && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
+    const was = opened.key
+    return { box: { text: `${was}${e.inputText}`, cursor: was.length + e.inputText.length }, work: () => { if (pendingT) { pendingT.cancelled = true; pendingT = null } } }
   }
   // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] move the picked chip, 1-3 pick a chip,
   // 0 original, s done)
@@ -1793,6 +1785,21 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     const undo = async () => { keyOpened = null; if (made) await dismissNow($, made, true) }
     return { box: consume, work: async () => { made = await catchUpNow($); keyOpened = { key: k, at: now, undo } }, word: undo }
   }
+  // r and l: Coverage and the labels in the side panel, as the bar's counts name them (dock.ts), once WORD_MS has passed
+  // with no letter after them (a letter makes them the start of a word, as after t)
+  if (!pick && (k === DOCK_KEY.coverage || k === DOCK_KEY.labels)) {
+    const counts = (await $.state.get(COUNTS)).value as LineCounts | null
+    const pane = restPane(k, { cov: (counts?.cov ?? 0) > 0, labels: (counts?.labels ?? 0) > 0 })
+    if (pane) {
+      const wait = { cancelled: false }
+      const undo = () => { wait.cancelled = true; if (pendingT === wait) pendingT = null; keyOpened = null }
+      return { box: consume, work: () => {
+        pendingT = wait
+        keyOpened = { key: k, at: now }
+        $.clock.after(WORD_MS, () => { if (wait.cancelled || pendingT !== wait) return; pendingT = null; void toggleDock($, pane) })
+      }, word: undo }
+    }
+  }
   // t with threads: the list of them in the side panel (the bar's `t N threads`), once WORD_MS has passed with no
   // letter after it (a letter makes t the start of a word, as after v)
   if (k === 't' && !pick && threadCount() > 0) {
@@ -1803,12 +1810,6 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
       keyOpened = { key: 't', at: now }
       $.clock.after(WORD_MS, () => { if (wait.cancelled || pendingT !== wait) return; pendingT = null; void listThreads($) })
     }, word: undo }
-  }
-  // r and l: Coverage and the labels, as the bar's counts name them (dock.ts); a letter at once after them is a word
-  if (!pick && (k === DOCK_KEY.coverage || k === DOCK_KEY.labels)) {
-    const counts = (await $.state.get(COUNTS)).value as LineCounts | null
-    const t = restKey($, k, e, now, { cov: (counts?.cov ?? 0) > 0, labels: (counts?.labels ?? 0) > 0 })
-    if (t) return t
   }
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
   if (k.length === 1 && ROW_KEYS.some(v => v.key === k)) {
@@ -2272,7 +2273,8 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   if (pane === 'mark' && name === 'step') { await stepSide($, (_args.frame ?? null) as TrayFrame | null, Number(a.dir) < 0 ? -1 : 1); return }
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
   if (pane === 'detail') return detailAction($, a)
-  if (pane === 'coverage' || pane === 'labels') return dockAction($, pane, a)
+  // a label value checked in the label viewer (dock.ts); what a pane opens is the panel's, below
+  if ((pane === 'coverage' || pane === 'labels') && name === 'check') return dockAction($, pane, a)
   if (name === 'open') {
     // what a pane in the side panel opens goes over it there (esc comes back to it)
     const v = detailIsOpen() ? await sideNow($) : null
@@ -2307,8 +2309,6 @@ export const registerShell: Register = (on, options) => {
   // main; main reads one row naming the cards it made
   registerAside(on, options)
   onAsideMade('visualize', a => viewMade({ about: a.about, cards: a.saves }))
-  // Coverage and the label viewer, docked where the detail docks (dock.ts)
-  registerDock(on, options)
 
   // (a matcher, as the kernel's module hooks session.start without one and the engine takes one bare hook per event)
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
