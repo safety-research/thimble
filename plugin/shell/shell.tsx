@@ -1313,7 +1313,12 @@ async function trayFileLink($: Engine, e: Any, top: TrayFrame | null): Promise<A
   const link = fileLink(top.ref, (await rootHere($)) || String(await $.session.cwd()).replace(/\/+$/, ''))
   if (!link || !(await $.fs.exists(link.path).catch(() => false))) return null
   const { Markdown, Button, Text } = $.ui.resolve(e) as Any
-  const open = () => { void expandFrame($, top, true).then(why => { if (typeof why === 'string' && why) $.ui.toast(why) }).catch(() => undefined) }
+  const open = () => {
+    void expandFrame($, top, true).then(why => { if (typeof why === 'string' && why) $.ui.toast(why) }, err => {
+      const why = plainWhy(err)
+      if (why) $.ui.toast(`The cited lines did not open in the side panel: ${why}. ↵ in the tray opens them too.`)
+    })
+  }
   if (Markdown && (await hyperlinksHere($))) {
     const words = link.label.replace(/[[\]\\]/g, c => '\\' + c)
     return Markdown({ key: 'tray-file', text: `[${words}](${link.href})`, onLinkPress: open, pressableLinks: [link.href] })
