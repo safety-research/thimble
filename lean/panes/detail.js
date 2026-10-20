@@ -10,8 +10,15 @@
 //   keys: ↑↓ part · ↵ details · e examples · [ ] flip · + − zoom · f filter · , . turn · p program · h versions ·
 //         t thread · m send to main · o browser · 0 clear · esc back
 //   events: focus (the ring on a part), press (a part; the selected one opens its details; a version; a knob's ◂ ▸)
-//   asks of the host: card {state} (a knob of the card turned), version {v}, thread, main, browser, close
-//   wants: {rows: refs} (the rows behind the selected part), {facts: id} (where the card's values come from)
+//   asks of the host: card {state} (a knob of the card turned), version {v}, thread, main, browser, close,
+//         check {label, ref, value} (the person's check of a record's label value)
+//   wants: {rows: refs} (the rows behind the selected part), {facts: id} (where the card's values come from),
+//          {labels: refs, gen} (the labels of the examples shown, read again after each check)
+//
+// Labels: each example shows the values labels gave it (`thimble label`), and the details say how the part's rows
+// split by each label. On a record a label holds, the number keys check it: 1 for the label's first value, 2 for its
+// second, and so on (the label of a label's card, else the record's first). The check is the person's: it is recorded
+// beside the value the label gave, counts in its place, and the examples step on to the next record.
 //
 // The card's own keys and presses (its program's k.on) come before these: the host routes them to the card first.
 import { barAfter, cycleKnob, examplesView, exampleSet, fromLine, linkRuns, namedKnob, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
@@ -52,6 +59,8 @@ export default {
       versions: card.versions || [], v: card.v ?? o.version ?? null, drawing: inner, parts, refs,
       cites: d.cites || {}, examples: d.examples || {}, controls: d.controls || [], cardState: card.state || {},
       thread: !!card.thread, browser: !!card.browser, w: size.w, h: size.h,
+      // a label's card names its label; the host counts the checks made since it opened, so their labels are read again
+      label: typeof o.label === 'string' ? o.label : null, labelGen: card.labelGen || 0,
     }
   },
   program,
@@ -104,6 +113,14 @@ export function program(k, data) {
     k.on('[', () => ({ ex: ex - 1 }), 'flip')
     k.on(']', () => ({ ex: ex + 1 }), 'flip')
     k.on('e', () => ({ bar: barAfter(bar, 'examples') }), 'hide examples')
+    // the record shown, checked by its label value's number
+    const shown = shownExample(k, data, part, ex)
+    const lab = shown && checkable(data, shown.labels)
+    if (lab) {
+      lab.values.forEach((v, i) => {
+        if (i < 9) k.on(String(i + 1), () => { k.do('check', { label: lab.name, ref: shown.ref, value: v }); return { ex: ex + 1 } }, v)
+      })
+    }
   } else {
     // ↵ the details, e the examples; ] [ open the examples on their first
     k.on('return', () => ({ bar: barAfter(bar, 'details') }), bar ? undefined : 'details')
@@ -178,6 +195,66 @@ export function program(k, data) {
   return k.stack(head, takeaway, k.text(' '), k.embed(data.drawing), barView(k, data, part, bar, ex, W))
 }
 
+/** The records the examples bar shows for a part: those the program attached, else the rows behind the part. */
+function exampleRecords(k, data, part) {
+  const set = exampleSet({ examples: data.examples }, { examples: part.examples })
+  if (set) return { set, records: set.records, resolved: null }
+  const refs = data.refs[part.id] || []
+  const resolved = refs.length ? k.want({ rows: refs, n: 8 }) : null
+  const chain = resolved ? chainWords(resolved) : null
+  return { set: null, records: chain && !chain.error ? chain.records : [], resolved, chain }
+}
+
+/** The labels of records, as the host read them: {ref: {label: {value, by, confidence, reason, checked, was}}}. */
+function labelsOf(k, data, records) {
+  const refs = (records || []).map(r => r && typeof r === 'object' ? r.ref : null).filter(r => typeof r === 'string')
+  if (!refs.length) return {}
+  const got = k.want({ labels: refs.slice(0, 200), gen: data.labelGen || 0 })
+  return got && !got.error ? got : {}
+}
+
+/** The example the bar shows now, with its labels, or null. */
+function shownExample(k, data, part, ex) {
+  if (!part) return null
+  const { records } = exampleRecords(k, data, part)
+  if (!records.length) return null
+  const at = ((ex % records.length) + records.length) % records.length
+  const rec = records[at]
+  const ref = rec && typeof rec === 'object' && typeof rec.ref === 'string' ? rec.ref : null
+  if (!ref) return null
+  return { ref, labels: labelsOf(k, data, records)[ref] || {} }
+}
+
+/** The label a record is checked against: the card's own label when the record holds it, else its first. */
+function checkable(data, labels) {
+  const names = Object.keys(labels || {})
+  const name = data.label && labels[data.label] ? data.label : names[0]
+  if (!name) return null
+  const e = labels[name]
+  const values = Array.isArray(e.values) && e.values.length ? e.values : null
+  return values ? { name, values, e } : null
+}
+
+/** A record's labels in a few words: `apology yes · model 0.92`, `apology no → you: yes`, `apology yes ✓ you`. */
+export function labelWords(labels) {
+  return Object.entries(labels || {}).map(([name, e]) => {
+    if (e.waiting) return `${name}: waiting for the model`
+    if (e.value == null) return `${name}: no value${e.error ? ` (${e.error})` : ''}`
+    if (e.checked) return e.was != null && e.was !== e.value ? `${name}: ${e.was} → you: ${e.value}` : `${name}: ${e.value} ✓ you`
+    const how = e.by === 'model' && typeof e.confidence === 'number' ? `model ${e.confidence.toFixed(2)}` : e.by || ''
+    return `${name}: ${e.value}${how ? ` · ${how}` : ''}${e.reason ? `: ${e.reason}` : ''}`
+  }).join('  ·  ')
+}
+
+/** How a part's rows split by each label that holds some of them: `apology: 12 yes · 30 no`. */
+export function splitWords(labels) {
+  return Object.entries(labels || {}).map(([name, b]) => {
+    const parts = Object.entries(b.values || {}).map(([v, c]) => `${n(c)} ${v}`)
+    if (b.none) parts.push(`${n(b.none)} no value`)
+    return `${name}: ${parts.join(' · ')}${b.rows > b.of ? ` (${n(b.of)} of ${n(b.rows)} rows labeled)` : ''}`
+  })
+}
+
 /** The bar under the card: empty until asked, then the part's details, then its examples. Its rows stay the same while
  *  it is open, so the card above it never moves. */
 function barView(k, data, part, bar, ex, W) {
@@ -200,6 +277,9 @@ function barView(k, data, part, bar, ex, W) {
   out.push(k.text(`**${k.escape(cut(claim, W))}**`, { wrap: false }))
   const tone = t => (t === 'warn' ? 'warn' : t === 'unseen' ? 'unseen' : 'dim')
   out.push(k.text(segs.map(x => (x.bold ? `**${k.escape(x.t)}**` : `{${tone(x.tone)}:${k.escape(x.t)}}`)).join('') + (filter && filter.i > 0 ? `{dim: · }{accent:filter on: ${k.escape(String(filter.shown[filter.i]))}}` : ''), { wrap: false }))
+  // the labels that hold the part's rows, and how the rows split by each
+  const split = resolved && !resolved.error ? splitWords(resolved.labels) : []
+  if (split.length && bar !== 'examples') out.push(k.text(`{accent:label} ${split.map(x => k.escape(cut(x, W - 8))).join('{dim:  ·  }')}`, { wrap: false }))
   if (bar !== 'examples') return k.stack(out)
   // what the examples are examples of: the examples' own label, else the part's claim
   const of = String(set?.label || claim)
@@ -208,6 +288,7 @@ function barView(k, data, part, bar, ex, W) {
   const pos = nrec ? `${at + 1} of ${n(total)}` : ''
   out.push(k.text(' '))
   out.push(k.text(`{accent:examples of ${k.escape(cut(of, W - pos.length - 16))}}${pos ? `{dim: · ${pos}}` : ''}`, { wrap: false }))
+  const labels = labelsOf(k, data, records)
   const body = []
   if (!nrec) {
     if (refs.length && !resolved) body.push(k.text('{dim:   reading the rows behind it…}'))
@@ -228,7 +309,11 @@ function barView(k, data, part, bar, ex, W) {
     } else {
       for (const r of view.rows) {
         body.push(k.text(r.on ? `{accent:**  ▸ **}**${k.escape(cut(r.words || '', W - 6))}**` : `    {dim:${k.escape(cut(r.words || '', W - 6))}}`, { wrap: false }))
-        body.push(k.text(`{dim:      ${k.escape(cut(r.meta || '', W - 8))}}`, { wrap: false }))
+        const ref = records[r.i] && typeof records[r.i] === 'object' ? records[r.i].ref : null
+        const tags = ref ? labelWords(labels[ref]) : ''
+        body.push(tags
+          ? k.text(`      {accent:${k.escape(cut(tags, W - 8))}}${r.meta ? `{dim:  ·  ${k.escape(cut(r.meta, Math.max(0, W - 12 - tags.length)))}}` : ''}`, { wrap: false })
+          : k.text(`{dim:      ${k.escape(cut(r.meta || '', W - 8))}}`, { wrap: false }))
       }
     }
   }

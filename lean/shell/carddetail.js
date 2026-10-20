@@ -229,6 +229,8 @@ export function recordWords(rec, o = {}) {
 export function asTable(records) {
   const rs = (records || []).filter(r => r && typeof r === 'object' && !Array.isArray(r))
   if (!rs.length || rs.length !== records.length) return false
+  // rows the kernel read back ({ref, words, meta}, a label's examples) read as their words, however short
+  if (rs.every(r => typeof r.ref === 'string' && (r.words != null || r.text != null) && r.value === undefined)) return false
   const keys = [...new Set(rs.flatMap(r => Object.keys(r)))].filter(k => k !== '_rows' && k !== 'ref')
   if (!keys.length || keys.length > 6 || keys.some(k => /(^|_)(id|uuid|hash|key)$/i.test(k))) return false
   return rs.every(r => keys.every(k => r[k] == null || (typeof r[k] !== 'object' && String(r[k]).length <= 120)))

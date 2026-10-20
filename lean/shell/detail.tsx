@@ -39,6 +39,7 @@ import { type KeyEdit, type KeyTurn } from './keys'
 import { paneFire, paneNow, paneRun, paneState, paneTakes, patchPaneState, setPaneState } from './panes'
 import type { Scope } from './thread'
 import { aboutOf } from './threads.js'
+import { check as checkLabel, checksDone, labelGen } from './labels'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,6 +140,8 @@ async function closed($: Engine): Promise<void> {
   draft = ''
   await popFocus($, 'detail')
   if (viewing) { viewing = null; await $.ui.view({}).catch(() => undefined) }
+  // the labels the person checked are counted again, their cards drawn again, and Claude hears of the checks
+  $.clock.after(0, () => { void checksDone($).catch(() => undefined) })
 }
 
 /** The keys back to the card: the pane takes the keyboard (granted only over an empty composer), the ring on the part.
@@ -229,7 +232,7 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
   return {
     object, drawing: p ? (p.error ? { error: { name: 'Error', message: p.error } } : p.drawing) : null,
     versions: versionsOf(latest), v: sel.v ?? latest?.version ?? null, state: ownState(sel.state),
-    thread: !!threadFor({ object: sel.id }), browser: browserOn(),
+    thread: !!threadFor({ object: sel.id }), browser: browserOn(), labelGen: await labelGen($),
   }
 }
 
@@ -304,6 +307,9 @@ export async function detailAction($: Engine, a: Record<string, unknown>): Promi
     case 'close':
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return
+    // the person's check of a record's label value (shell/labels.ts)
+    case 'check':
+      return await checkLabel($, sel.root, a)
     default:
       return false
   }

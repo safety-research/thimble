@@ -60,10 +60,11 @@ test('the hint row picks the verbs the object names, then those whose hint.mjs h
   assert.deepEqual(none.verbs.filter(v => v.picked), [])
 })
 
-test('the plugin\'s verbs are map, visualize, squeeze, claims, explore and trace, on m, v, s, c, x and t, in that order; v, s and c are the message row\'s', async () => {
+test('the plugin\'s verbs are map, visualize, squeeze, claims, explore and trace, on m, v, s, c, x and t, in that order, then label, which has no key (the kernel asks for it); v, s and c are the message row\'s', async () => {
   const { verbs, problems } = listVerbs()
   assert.deepEqual(problems, [])
-  assert.deepEqual(verbs.map(v => [v.key, v.name]), [['m', 'map'], ['v', 'visualize'], ['s', 'squeeze'], ['c', 'claims'], ['x', 'explore'], ['t', 'trace']])
+  assert.deepEqual(verbs.map(v => [v.key ?? null, v.name]), [['m', 'map'], ['v', 'visualize'], ['s', 'squeeze'], ['c', 'claims'], ['x', 'explore'], ['t', 'trace'], [null, 'label']])
+  assert.deepEqual(verbs.filter(v => v.feed === true).map(v => v.name), ['label'])
   assert.deepEqual(verbs.filter(v => v.row === true).map(v => v.key), ['v', 's', 'c'])
   // a chart of numbers whose rows keep their source rows: explore and trace say what they would do for it
   const object = { id: '01-x', title: 'Saves', data: { days: [{ day: '2026-06-18', n: 3, _rows: ['r.jsonl#L1-3'] }] }, lineage: { bindings: [{ at: '/days', ref: 'q1' }] } }

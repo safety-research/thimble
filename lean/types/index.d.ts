@@ -10,9 +10,9 @@ export type ObjRef = { id: string; v: number | null; root: string }
 export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null; prog?: boolean }
 
 /** A verb's run, as the /verb command's row draws it. */
-export type Ran = { verb: string; text?: string; note?: string; ask?: string; error?: string; saved?: ObjRef | null; on?: string }
+export type Ran = { verb: string; text?: string; note?: string; ask?: string; error?: string; saved?: ObjRef | null; on?: string; failed?: boolean }
 
-/** A verb running on an object (the hint row says so), or what it said last (the detail view shows it). */
+/** A verb running on an object (the row under it says `<verb>… <text>`, its progress), or what it said last. */
 export type Said = { verb: string; text?: string; error?: string; running?: boolean }
 
 /** The hint row of one object version as the observer ranked it: its 2-3 verbs, each with a few words for this object. */
@@ -162,6 +162,10 @@ declare module 'claude-code' {
       cardver: StateFamily<number>
       /** how many times a pane was asked to draw again, by the pane's instance: its drawings read it */
       panever: StateFamily<number>
+      /** how many checks of label values the person has made (shell/labels.ts): the examples read their labels again */
+      labelgen: number
+      /** the labels of a set of records, by folder, generation and refs (`thimble label --of`) */
+      labelsof: StateFamily<unknown>
     }
   }
 }

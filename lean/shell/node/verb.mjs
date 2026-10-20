@@ -20,7 +20,9 @@
 //                  save(name, spec) saves an object and returns {id, v, out}
 //   ctx.draw       {runProgram, renderTerm, renderSvg, gridText}: the drawing contract, to draw or check an object
 //   ctx.model      {complete(request), fork(request)}: one quiet call to the session's own model, as $.model.complete
-//                  (no history) and $.model.fork (over the conversation) answer it: {isAnswered, text, usage, reason}
+//                  (no history) and $.model.fork (over the conversation) answer it: {isAnswered, text, usage, reason};
+//                  calls started together are made together (below)
+//   ctx.round      which run of this press it is (0 first), as the shell counts the runs its calls asked for
 //   ctx.w          the columns the person's terminal has for it
 //   ctx.message    for a verb of the message row (v, s, a): the message's record (CONTRACT 1: its text, marks, glosses
 //                  and the verbs the observer lit); ctx.object is then the message as an object ({id, text, row}).
@@ -39,6 +41,10 @@
 // no answer yet stops the run: the runner hands back {need: {kind, request, key}}, the module makes the call and runs
 // the verb again with every answer so far in `answers`, and the same call then resolves at once. A verb needs nothing
 // for this but to call ctx.model again the same way, which a run of the same input does.
+// Many calls at once: every call a run makes before it stops is in `needs` (`need` is the first of them), so a verb
+// that starts them together (Promise.all over ctx.model.complete) gets them made side by side, then runs once more
+// with all their answers. A verb with more calls than one round should hold can ask for some of them, write what the
+// answers gave, and ask for the next ones in its next run (ctx.round counts the runs).
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
@@ -84,16 +90,28 @@ export function kernelFor(root, lean = LEAN) {
 
 const keyOf = (kind, request) => createHash('sha256').update(kind + '\n' + JSON.stringify(request)).digest('hex').slice(0, 24)
 
-/** ctx.model for one run: answers from `answers`, else the first call without one is said in `need` and stops it. */
+/** ctx.model for one run: answers from `answers`, else each call without one is said in `need.calls` (the first
+ *  also in `need.call`) and stops the run. Calls started together are all said, so they are made together. */
 function modelFor(answers, need) {
   const call = kind => async request => {
     const key = keyOf(kind, request)
     if (answers && answers[key]) return answers[key]
-    if (!need.call) need.call = { kind, request, key }
+    const c = { kind, request, key }
+    if (!need.call) need.call = c
+    need.calls = need.calls || []
+    if (!need.calls.some(x => x.key === key)) need.calls.push(c)
     throw Object.assign(new Error('the model call is being made; this run waits for it'), { needsModel: true })
   }
   return { complete: call('complete'), fork: call('fork') }
 }
+
+/** What the runner hands back for a run stopped by its calls: the first, and all of them. */
+const needOf = (need, verb) => ({
+  need: need.call,
+  ...(need.calls && need.calls.length > 1 ? { needs: need.calls } : {}),
+  // how many calls the shell makes at once, and how many runs it allows, as the verb's verb.json says
+  limits: { ...(verb.parallel != null ? { parallel: Number(verb.parallel) } : {}), ...(verb.rounds != null ? { rounds: Number(verb.rounds) } : {}) },
+})
 
 /** The spec a verb's object becomes for `thimble save`: the kernel keeps its own lineage, so a verb's rides along as
  *  declared, and the kernel's own fields (id, version) are left to it. */
@@ -127,6 +145,7 @@ export async function runVerb(word, input, { dir, lean } = {}) {
     kernel,
     draw: { runProgram, renderTerm, renderSvg, gridText },
     model: modelFor(input.answers, need),
+    round: Number(input.round) || 0,
     w: Number(input.w) || 96,
     // a verb of the message row: the message's record (CONTRACT 1), its row key and the session
     message: input.message || null,
@@ -139,11 +158,11 @@ export async function runVerb(word, input, { dir, lean } = {}) {
     if (typeof mod.run !== 'function') return { verb: verb.name, error: `${verb.folder}/run.mjs exports no run(ctx)` }
     out = (await mod.run(ctx)) || {}
   } catch (e) {
-    if (need.call) return { verb: verb.name, need: need.call }
+    if (need.call) return { verb: verb.name, ...needOf(need, verb) }
     return { verb: verb.name, error: `${verb.name} failed: ${String(e && e.message || e).slice(0, 600)}` }
   }
-  // a verb that caught the stop itself still waits for its call
-  if (need.call) return { verb: verb.name, need: need.call }
+  // a verb that caught the stop itself still waits for its calls
+  if (need.call) return { verb: verb.name, ...needOf(need, verb) }
   const res = { ...out, verb: verb.name }
   const o = out.object
   if (o && typeof o === 'object') {
