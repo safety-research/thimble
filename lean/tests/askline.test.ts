@@ -72,7 +72,7 @@ function world(on: any) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function open($: any, clock: { settle: () => Promise<void> }): Promise<void> {
-  await $.command.run({ command: 'obj', args: '01-orchard row-2' } as never)
+  await $.command.run({ command: 'card', args: '01-orchard row-2' } as never)
   for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await clock.settle() }
 }
 // the ask line's key and what it holds, as the pane draws it now
