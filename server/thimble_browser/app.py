@@ -496,6 +496,10 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
                          "settings": {"models": {}}}.items():
         app.add_api_route(f"/api/ws/{{c}}/{route}", (lambda v: (lambda c: v))(value), methods=["GET"])
 
+    @app.put("/api/ws/{c}/canvas/active-group")
+    def active_group(c: str) -> Response:
+        return Response(status_code=204)
+
     @app.post("/api/ws/{c}/telemetry")
     def telemetry(c: str) -> Response:
         return Response(status_code=204)
