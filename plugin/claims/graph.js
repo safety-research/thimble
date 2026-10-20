@@ -302,6 +302,19 @@ export function program(k, data) {
     return k.stack(head)
   }
 
+  // ---- how much the claim under the graph shows: all of it where the graph keeps ten rows or more, else less (a
+  // conversation under the pane takes about two fifths of the rows, the input bar four)
+  const all = k.h || 40
+  const H = Math.max(12, all - 4 - (data.talk ? Math.floor(all * 0.4) : 0))
+  const edges = data.edges || []
+  const rowsFor = (x, lim) => (lim.gap ? 2 : 1) + Math.min(lim.text, wrap(x.text, W - 2).length) +
+    ((x.said || []).some(p => p.sentence || p.quote) || (x.folder && (x.sources || []).length) ? 1 : 0) + (x.revised_by || x.revises ? 1 : 0) +
+    Math.min(lim.links, linksOf(x, edges, byId).length) + Math.min(lim.ev, (x.sources || []).length)
+  const tallestOf = lim => Math.max(...claims.map(x => rowsFor(x, lim)))
+  const ROOMY = { text: 3, links: MAX_LINKS, ev: MAX_EVIDENCE, gap: true }
+  const TIGHT = { text: 2, links: 2, ev: 2, gap: false }
+  const lim = H - head.length - tallestOf(ROOMY) - 3 >= 10 ? ROOMY : TIGHT
+
   // ---- what is selected: the claim the state names, else the newest (of the last turn, the last said)
   const num = c => Number(/\d+$/.exec(String(c.id))?.[0] || 0)
   const newest = claims.reduce((b, c) => ((c.turn ?? -1) > (b.turn ?? -1) || ((c.turn ?? -1) === (b.turn ?? -1) && num(c) > num(b)) ? c : b))
@@ -310,10 +323,10 @@ export function program(k, data) {
   const fixes = claims.filter(c => c.revises && c.turn != null && c.turn === newest.turn)
   const fresh = st.at != null && data.last != null && st.at < data.last
   const claim = (!fresh && byId.get(st.claim)) || (fixes.length ? fixes.reduce((b, c) => (num(c) > num(b) ? c : b)) : newest)
-  const evidence = (claim.sources || []).slice(0, MAX_EVIDENCE)
+  const evidence = (claim.sources || []).slice(0, lim.ev)
   const other = claim.revised_by ? byId.get(claim.revised_by) : claim.revises ? byId.get(claim.revises) : null
   // the claims it is linked to, either way: what it supports or contradicts, what supports or contradicts it
-  const links = linksOf(claim, data.edges || [], byId)
+  const links = linksOf(claim, edges, byId).slice(0, lim.links)
   const rowsHere = new Set(['said', ...evidence.map((_, i) => `ev-${i + 1}`), ...(other ? [`fix-${other.id}`] : []), ...links.map(l => `rel-${l.id}`)])
   const at = data.last ?? null
   const pick = id => (byId.has(id) ? { claim: id, part: nodeRegion(id), at } : null)
@@ -362,8 +375,8 @@ export function program(k, data) {
   // ---- the claim selected, under the graph
   const panel = []
   const add = (markup, region, meta) => panel.push(region ? k.region(region, meta, k.text(markup, { wrap: false })) : k.text(markup, { wrap: false }))
-  panel.push(k.text(' '))
-  wrap(claim.text, W - 2).slice(0, 3).forEach((l, i) => add(`${i ? '  ' : `{${tone(claim)}:${dotOf(claim)}} `}**${k.escape(l)}**`))
+  if (lim.gap) panel.push(k.text(' '))
+  wrap(claim.text, W - 2).slice(0, lim.text).forEach((l, i) => add(`${i ? '  ' : `{${tone(claim)}:${dotOf(claim)}} `}**${k.escape(l)}**`))
   const g = groups.find(x => String(x.id) === String(claim.cluster))
   const meta = [g ? g.name : '', whenOf(claim), (claim.n || 1) >= 2 ? `said ${claim.n} times` : ''].filter(Boolean)
   add(`  {dim:${k.escape(meta.join(' · '))}}`)
@@ -388,12 +401,9 @@ export function program(k, data) {
     add(`  {accent:${i + 1}} {cite:${k.escape(cut(s.label, lw))}}${' '.repeat(Math.max(1, lw - Array.from(cut(s.label, lw)).length + 1))}{dim:${k.escape(cut(gist, W - lw - 7))}}`, `ev-${i + 1}`, { label: `evidence: ${s.label}`, ref: s.ref })
   })
 
-  // ---- the graph, in the rows left: the side panel's input bar takes its rows under the pane, and a conversation
-  // about two fifths of the rest
-  const all = k.h || 40
-  const H = Math.max(12, all - 4 - (data.talk ? Math.floor(all * 0.4) : 0))
+  // ---- the graph, in the rows left
   // the key names only what the graph shows
-  const has = (kind, how) => (data.edges || []).some(e => e.kind === kind && (!how || (how === 'contradicts') === (e.how === 'contradicts')))
+  const has = (kind, how) => edges.some(e => e.kind === kind && (!how || (how === 'contradicts') === (e.how === 'contradicts')))
   const keyParts = [
     claims.some(x => x.revised_by) ? '{dim:○ corrected}' : '', claims.some(x => (x.n || 1) >= 2) ? '{dim:◉ said again}' : '',
     has('corrects') ? '{warn:╌} {dim:correction}' : '', has('relates', 'other') ? '{accent:─} {dim:related}' : '', has('relates', 'contradicts') ? '{bad:─} {dim:contradicts}' : '',
@@ -404,13 +414,8 @@ export function program(k, data) {
   const need = 4 + Math.ceil(claims.length * 0.8) + 2 * groups.length
   // the rows under the graph are those of the tallest claim's, so the graph keeps its size and its dots their places
   // while the ring walks them
-  const tallest = Math.max(...claims.map(x => {
-    const other2 = x.revised_by || x.revises ? 1 : 0
-    const from = (x.said || []).some(p => p.sentence || p.quote) || (x.folder && (x.sources || []).length) ? 1 : 0
-    return 2 + Math.min(3, wrap(x.text, W - 2).length) + from + other2 + linksOf(x, data.edges || [], byId).length + Math.min(MAX_EVIDENCE, (x.sources || []).length)
-  }))
-  const gh = Math.max(6, Math.min(need, H - head.length - Math.max(tallest, panel.length) - 3))
-  const edges = data.edges || []
+  const tallest = tallestOf(lim)
+  const gh = Math.max(6, Math.min(need, H - head.length - Math.max(tallest, panel.length) - (lim.gap ? 3 : 2)))
   const named = groups.map(g => ({ id: g.id, name: g.folder ? `${g.name} (folder)` : g.name }))
   const order = claims.slice().sort((p, q) => num(p) - num(q))
   const lay = trim(layout(order.map(c => ({ id: c.id, cluster: c.cluster })), named, edges, { w: W, h: gh }))
@@ -426,15 +431,23 @@ export function program(k, data) {
     c.dot(p.x, p.y, tone(x), { glyph: dotOf(x), bold: x.id === claim.id, part: nodeRegion(x.id), meta: { label: `claim: ${x.text}`, ref: (x.sources || []).map(s => s.ref).slice(0, 6) } })
   }
   // the edges on the cells left blank: the selected claim's first and bright, then the other corrections and links,
-  // faint. Two claims that cite the same rows are joined only while one is selected, which keeps the graph readable
+  // faint, each only where its line passes no other dot (a line through a dot reads as two links). Two claims that
+  // cite the same rows are joined only while one is selected, which keeps the graph readable
   const mine = e => e.a === claim.id || e.b === claim.id
-  for (const e of [...edges.filter(mine), ...edges.filter(e => !mine(e) && e.kind !== 'rows')]) {
+  const dots = new Set([...lay.pos.values()].map(p => `${p.x},${p.y}`))
+  const clear = e => {
+    const a = lay.pos.get(e.a), b = lay.pos.get(e.b)
+    const n = a && b ? Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) : 0
+    for (let i = 1; i < n; i++) if (dots.has(`${Math.round(a.x + ((b.x - a.x) * i) / n)},${Math.round(a.y + ((b.y - a.y) * i) / n)}`)) return false
+    return true
+  }
+  for (const e of [...edges.filter(mine), ...edges.filter(e => !mine(e) && e.kind !== 'rows' && clear(e))]) {
     const a = lay.pos.get(e.a), b = lay.pos.get(e.b)
     if (!a || !b) continue
     const t = edgeTone(e, mine(e))
     c.link(a.x, a.y, b.x, b.y, mine(e) ? t : `${t}-faint`, { dash: e.kind === 'corrects' })
   }
-  return k.stack(...head, k.text(' '), c, legend, ...panel)
+  return k.stack(...head, ...(lim.gap ? [k.text(' ')] : []), c, legend, ...panel)
 }
 
 /** The layout with the rows it leaves blank taken out: none above its first row used (a dot or a name), at most one
