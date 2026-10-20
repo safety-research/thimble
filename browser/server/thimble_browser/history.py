@@ -39,10 +39,10 @@ from .hub import hub
 log = logging.getLogger("thimble_browser.history")
 
 MAX_STEPS = 100
-CONTENT = ("title", "kind", "code", "payload", "takeaway", "text")  # what a version holds of a card
+CONTENT = ("title", "kind", "code", "program", "payload", "takeaway", "text")  # what a version holds of a card
 RUN = ("outputs", "status")  # what a run changes, kept with the edit of the code it ran
 # the fields a card's step restores, by what the step is
-EDIT_FIELDS = ("title", "slug", "kind", "code", "payload", "text", "takeaway", "takeaway_author")
+EDIT_FIELDS = ("title", "slug", "kind", "code", "program", "payload", "text", "takeaway", "takeaway_author")
 TOGGLE_FIELDS = ("starred",)
 PLACE_FIELDS = ("pos", "width", "height")
 ANALYST = "analyst"
@@ -87,7 +87,7 @@ def _keep_version(ws: str, before: dict[str, Any], after: dict[str, Any]) -> Non
         return  # this change added no entry: a move, a star, a lock
     rec: dict[str, Any] = {"id": e["id"], "ts": e.get("ts"), "by": e.get("by"), "fields": e.get("fields") or [],
                            "was": {k: copy.deepcopy(before.get(k)) for k in CONTENT if k in before}}
-    if "code" in rec["fields"] or "kind" in rec["fields"]:
+    if {"code", "program", "kind"} & set(rec["fields"]):
         rec["shown"] = {k: copy.deepcopy(before.get(k)) for k in RUN}
     with _lock, open(_history_path(ws, str(after["id"])), "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -130,6 +130,8 @@ def restore(ws: str, cid: str, entry: str) -> dict[str, Any]:
     args: dict[str, Any] = {"question": v.get("title") or cell["title"], "takeaway": v.get("takeaway") or ""}
     if cell["kind"] in canvas.CODE_KINDS:
         args["code"] = v.get("code") or ""
+        if v.get("program") is not None:
+            args["program"] = v["program"]
         if v.get("kind") in canvas.CODE_KINDS:
             args["kind"] = v["kind"]
     elif cell["kind"] == "note":
@@ -138,7 +140,8 @@ def restore(ws: str, cid: str, entry: str) -> dict[str, Any]:
         args["refs"] = (v.get("payload") or {}).get("refs") or []
     elif cell["kind"] == "custom":
         args["html"] = (v.get("payload") or {}).get("html") or ""
-    code_changed = cell["kind"] in canvas.CODE_KINDS and (v.get("code") or "") != (cell.get("code") or "")
+    code_changed = cell["kind"] in canvas.CODE_KINDS and ((v.get("code") or "") != (cell.get("code") or "")
+                                                          or (v.get("program") or "") != (cell.get("program") or ""))
     cell = canvas.update_card(ws, cid, args, by=ANALYST)
     if code_changed and isinstance(v.get("outputs"), list):
         cell = canvas.set_run(ws, cid, outputs=v["outputs"], status=v.get("status") or "idle")
@@ -222,7 +225,7 @@ def _edited(ws: str, before: dict[str, Any], after: dict[str, Any], by: str) -> 
     fields = {k for k in keys if before.get(k) != after.get(k)}
     if not fields:
         return
-    if "code" in fields:
+    if {"code", "program"} & fields:
         fields |= set(RUN)
     undo, redo = _load(ws)
     cid = after["id"]
@@ -247,7 +250,7 @@ def _ran(ws: str, cell: dict[str, Any]) -> None:
     if step.get("op") == "created" and (step.get("after") or {}).get("code") == cell.get("code"):
         step["after"] = copy.deepcopy(cell)
     elif step.get("op") == "edited" and (step.get("after") or {}).get("code") == cell.get("code") \
-            and "code" in (step.get("after") or {}):
+            and ("code" in (step.get("after") or {}) or "program" in (step.get("after") or {})):
         step["after"].update({k: copy.deepcopy(cell.get(k)) for k in RUN})
     else:
         return

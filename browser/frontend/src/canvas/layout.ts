@@ -837,7 +837,7 @@ export function cellThread(createdBy: string | null | undefined, chats: Readonly
 export { hhmm } from '../lib/time'
 
 export const kindOf = (c: Cell): string => (c.kind === 'md' ? 'note' : c.kind || 'code')
-export const RUNNABLE = new Set(['plot', 'table', 'code', 'timeline', 'diagram'])
+export const RUNNABLE = new Set(['plot', 'table', 'code', 'timeline', 'diagram', 'program'])
 /** A card the kernel runs: a runnable kind with code, or without a dataset payload. */
 export const isRunnable = (c: Cell): boolean => {
   const k = kindOf(c)

@@ -75,7 +75,9 @@ async def edit_card(t: Any, args: dict[str, Any]) -> Result:
         return Result(f"no card {args.get('card')}: list_cards names them", True)
     except ValueError as e:
         return Result(str(e), True)
-    if cell["kind"] in canvas.CODE_KINDS and args.get("code") is not None and args["code"] != before.get("code"):
+    changed = (args.get("code") is not None and args["code"] != before.get("code")) or \
+        (args.get("program") is not None and args["program"] != before.get("program"))
+    if cell["kind"] in canvas.CODE_KINDS and changed:
         return await _run_and_describe(t, cell)
     t.on_card(cell["id"])
     return Result(describe(cell), cell_id=cell["id"])

@@ -234,6 +234,8 @@ export interface Cell {
   regenerating_for?: string[] | null
   verification?: unknown
   code?: string
+  /** a program card's program, on the terminal plugin's toolkit (kit/KitBody) */
+  program?: string
   outputs?: MimeBundle[]
   status?: CellStatus
   exec_count?: number | null

@@ -1,9 +1,11 @@
 """Runs one card's code and prints its outputs as JSON. The server starts this file in a sandbox (sandbox.py), one
 process per run, so no state lasts between runs and a card's code is all it needs.
 
-Input, one JSON object on stdin: {"code", "corpus", "timeout"}, and "workspace", by default the run's own folder
-($TMPDIR).
-Output, one JSON object on stdout: {"status": "ok" | "error", "outputs": [bundle, ...], "frame": {...} | null}.
+Input, one JSON object on stdin: {"code", "corpus", "timeout"}, "workspace", by default the run's own folder
+($TMPDIR), and "data": true for a card drawn by a program, whose code ends in the value the program draws.
+Output, one JSON object on stdout: {"status": "ok" | "error", "outputs": [bundle, ...], "frame": {...} | null}, and
+with "data" asked, "data": that value as JSON (a DataFrame as a list of rows), or an error when it is none or too
+large.
 
 A bundle is a dict of mime type to data, as a Jupyter kernel sends it, which the canvas draws unchanged:
 - a table's last DataFrame as frames.FRAME_MIME (with its text for the model);
@@ -29,6 +31,7 @@ import frames  # noqa: E402
 
 ERROR_MIME = "application/vnd.thimble.error+json"
 PANDAS_COLWIDTH = 200
+DATA_MAX = 2_000_000  # bytes of JSON a program card's data may take
 
 
 def error_bundle(ename: str, evalue: str, tb: list[str] | None = None) -> dict:
@@ -152,6 +155,39 @@ def last_frame(shell: Any) -> dict | None:
     return frames.normalize(thimble._frame_json(value))
 
 
+def last_data(shell: Any) -> Any:
+    """The value the code ends in, as JSON: a DataFrame or a Series as a list of rows (a Series' index a column), any
+    other value as it is, with what JSON has no form for as text. Raises ValueError when there is none or it is too
+    large."""
+    value = getattr(getattr(shell, "last_execution_result", None), "result", None)
+    if value is None:
+        raise ValueError("the code ends in no value: end it in the data the program draws, such as a dict of rows")
+    try:
+        import pandas as pd
+    except ImportError:
+        pd = None
+    if pd is not None and isinstance(value, pd.Series):
+        value = value.reset_index()
+    if pd is not None and isinstance(value, pd.DataFrame):
+        text = value.to_json(orient="records", date_format="iso", default_handler=str)
+    else:
+        def plain(v: Any) -> Any:
+            if pd is not None and isinstance(v, pd.DataFrame):
+                return json.loads(v.to_json(orient="records", date_format="iso", default_handler=str))
+            if pd is not None and isinstance(v, pd.Series):
+                return json.loads(v.reset_index().to_json(orient="records", date_format="iso", default_handler=str))
+            if hasattr(v, "item") and not isinstance(v, (list, dict, str)):
+                try:
+                    return v.item()
+                except (TypeError, ValueError):
+                    return str(v)
+            return str(v)
+        text = json.dumps(value, default=plain)
+    if len(text) > DATA_MAX:
+        raise ValueError(f"the data is {len(text):,} bytes of JSON, past {DATA_MAX:,}: give the program fewer rows")
+    return json.loads(text)
+
+
 def main() -> int:
     req = json.loads(sys.stdin.read() or "{}")
     code = str(req.get("code") or "")
@@ -186,6 +222,13 @@ def main() -> int:
         run.outputs.append(error_bundle("TimeoutError", f"the code ran past {timeout:g} s and was stopped"))
         ok = False
     frame = None
+    data: Any = None
+    if ok and req.get("data"):
+        try:
+            data = last_data(shell)
+        except Exception as e:  # noqa: BLE001 — what the program would draw is missing: the card says why
+            run.outputs.append(error_bundle("DataError", str(e)))
+            ok = False
     if ok:
         try:
             frame = last_frame(shell)
@@ -193,8 +236,10 @@ def main() -> int:
             run.outputs.append({"text/plain": f"(the table could not be read: {type(e).__name__}: {e})", "_stream": "stderr"})
         if frame is not None and run.result_index is not None:
             run.outputs[run.result_index] = frames.bundle(frame)
-    real_out.write(json.dumps({"status": "ok" if ok else "error", "outputs": run.outputs, "frame": frame},
-                              default=str))
+    out = {"status": "ok" if ok else "error", "outputs": run.outputs, "frame": frame}
+    if req.get("data"):
+        out["data"] = data
+    real_out.write(json.dumps(out, default=str))
     real_out.flush()
     return 0
 

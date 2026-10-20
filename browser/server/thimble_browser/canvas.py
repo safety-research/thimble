@@ -1,8 +1,13 @@
 """The canvas: groups of cards, each group one file `notebooks/<id>.json` in the workspace.
 
 A card has a question (its `title`), content and a takeaway. Its content is either code (kinds plot, table, code,
-diagram, timeline), which runs in the sandbox (cards/sandbox.py) and keeps the outputs the canvas draws, or data
-(kinds note, example, custom). The card shapes are those of thimble 0.8, so the 0.8 canvas draws them unchanged.
+diagram, timeline, program), which runs in the sandbox (cards/sandbox.py) and keeps the outputs the canvas draws, or
+data (kinds note, example, custom). The card shapes are those of thimble 0.8, so the 0.8 canvas draws them unchanged.
+
+A `program` card is drawn as the terminal plugin draws its cards: its code ends in the card's data, and its `program`,
+written against the plugin's toolkit (plugin/draw/kit.js), draws that data. The server runs the program in the sandbox
+(sandbox.run_program) and keeps the drawing with the data as the run's last output (KIT_MIME), which the page draws
+and runs again when the analyst turns a knob or presses a part. A part's id cites it: `card:<id>#<part id>`.
 
 Citations. Claude writes a citation as a Markdown link, `[31](card:<id>#outcome/merged)` or `[↗](runs/x.jsonl#L4)`,
 in the chat and in a takeaway alike, as the terminal plugin does. A takeaway is stored in the canvas's own form,
@@ -23,13 +28,17 @@ from .cards import cite, frames
 from .hub import hub
 
 MAIN = "main"
-CODE_KINDS = ("plot", "table", "code", "diagram", "timeline")
+CODE_KINDS = ("plot", "table", "code", "diagram", "timeline", "program")
 DATA_KINDS = ("note", "example", "custom")
 KINDS = CODE_KINDS + DATA_KINDS
 _lock = threading.RLock()
 log = logging.getLogger("thimble_browser.canvas")
 # the fields an edit that the card's history keeps changes (the `fields` of its `edited` entry)
-VERSION_FIELDS = ("title", "kind", "code", "payload", "takeaway")
+VERSION_FIELDS = ("title", "kind", "code", "program", "payload", "takeaway")
+# the output of a program card's run: {drawing, data, w}, the toolkit's drawing of the data at w columns
+KIT_MIME = "application/vnd.thimble.kit+json"
+# the columns a program draws in on the server: a card at the canvas's width (frontend canvas/layout CARD_W)
+DRAW_W = 88
 
 # Feature modules hear each change to a card (on_change): fn(ws, op, before, after, by=..., prior=...), `op` created,
 # edited, ran or deleted, `before`/`after` copies of the card (None for none), `prior` the id of the card before it in
@@ -174,7 +183,7 @@ def emit(ws: str, cell: dict[str, Any], kind: str = "ran") -> None:
 
 
 def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | None = None) -> dict[str, Any]:
-    kind = str(args.get("kind") or "code")
+    kind = str(args.get("kind") or ("program" if args.get("program") else "code"))
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}, not {kind!r}")
     question = str(args.get("question") or "").strip()
@@ -191,7 +200,11 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
     if kind in CODE_KINDS:
         if not str(args.get("code") or "").strip() and by != "user":  # the analyst's new card starts empty
             raise ValueError(f"a {kind} card needs `code`: Python that ends in what the card shows")
-        cell.update(code=str(args["code"]), exec_count=None, status="idle", outputs=[])
+        cell.update(code=str(args.get("code") or ""), exec_count=None, status="idle", outputs=[])
+        if kind == "program":
+            if not str(args.get("program") or "").strip():
+                raise ValueError("a program card needs `program`: the body of (k, data) => node that draws its data")
+            cell["program"] = str(args["program"])
     elif kind == "note":
         text = to_canvas_links(str(args.get("text") or ""))
         cell.update(payload={"text": text}, text=text)
@@ -231,9 +244,14 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
         if "code" in args and args["code"] is not None and cell["kind"] in CODE_KINDS:
             cell["code"] = str(args["code"])
             cell["status"] = "idle"
+        if args.get("program") is not None and (cell["kind"] == "program" or args.get("kind") == "program"):
+            cell["program"] = str(args["program"])
+            cell["status"] = "idle"
         if args.get("kind") in KINDS and args["kind"] != cell["kind"]:
             if (args["kind"] in CODE_KINDS) != (cell["kind"] in CODE_KINDS):
                 raise ValueError("a card with code cannot become a card with data, or the other way: add a new card")
+            if args["kind"] == "program" and not str(cell.get("program") or "").strip():
+                raise ValueError("a program card needs `program`: the body of (k, data) => node that draws its data")
             cell["kind"] = args["kind"]
         if "text" in args and cell["kind"] == "note":
             text = to_canvas_links(str(args["text"] or ""))
@@ -296,15 +314,17 @@ def kernel_workspace(ws: str) -> Path:
     return home.workspace_dir(ws) / "labels"
 
 
-async def run_code(ws: str, code: str, corpus: Path, *, timeout: float = 60.0, unsandboxed: bool = False) -> dict:
+async def run_code(ws: str, code: str, corpus: Path, *, timeout: float = 60.0, unsandboxed: bool = False,
+                   data: bool = False) -> dict:
     """Run code in the sandbox as a card's code runs: it reads the folder, and thimble.labels() reads the workspace's
-    labels."""
+    labels. With `data`, the answer also holds the value the code ends in (a program card's data)."""
     from .cards import sandbox
 
     wsdir = kernel_workspace(ws)
+    req: dict[str, Any] = {"code": code, "corpus": str(corpus.resolve()), "timeout": timeout, "data": data}
     if not wsdir.is_dir():
-        return await sandbox.run_code(code, corpus, timeout=timeout, unsandboxed=unsandboxed)
-    req = {"code": code, "corpus": str(corpus.resolve()), "workspace": str(wsdir), "timeout": timeout}
+        return await sandbox.run_script(sandbox.RUNNER, req, corpus, timeout=timeout, unsandboxed=unsandboxed)
+    req["workspace"] = str(wsdir)
     return await sandbox.run_script(sandbox.RUNNER, req, corpus, extra_ro=[wsdir], timeout=timeout,
                                     unsandboxed=unsandboxed)
 
@@ -318,12 +338,59 @@ async def run_card(ws: str, cid: str, corpus: Path, *, unsandboxed: bool = False
     import time
 
     t0 = time.monotonic()
-    res = await run_code(ws, cell["code"], corpus, timeout=timeout, unsandboxed=unsandboxed)
-    outputs = [{**o, "_out": i} for i, o in enumerate(res.get("outputs") or [])]
+    program = cell["kind"] == "program"
+    res = await run_code(ws, cell["code"], corpus, timeout=timeout, unsandboxed=unsandboxed, data=program)
+    outs = list(res.get("outputs") or [])
     status = "ok" if res.get("status") == "ok" else "error"
+    if program and status == "ok":
+        from .cards import sandbox
+
+        drawing = await sandbox.run_program(str(cell.get("program") or ""), res.get("data"), w=DRAW_W,
+                                            title=cell["title"], card_id=cell["id"], unsandboxed=unsandboxed)
+        outs.append({KIT_MIME: {"drawing": drawing, "data": res.get("data"), "w": DRAW_W},
+                     "text/plain": drawing_text(drawing)})
+        if drawing.get("error"):
+            status = "error"
+    outputs = [{**o, "_out": i} for i, o in enumerate(outs)]
     _, cell = find(ws, cid)
     return set_run(ws, cid, status=status, outputs=outputs, exec_count=(cell.get("exec_count") or 0) + 1,
                    duration_s=round(time.monotonic() - t0, 2))
+
+
+def drawing_text(drawing: dict[str, Any]) -> str:
+    """What Claude reads of a program's drawing, as the terminal's save reports it: the parts it can cite, each with its
+    label and the record it opens, then the warnings and the error with what to fix."""
+    lines = []
+    err = drawing.get("error")
+    if err:
+        where = f" (line {err['line']})" if err.get("line") else ""
+        lines.append(f"the program did not draw: {err.get('name')}: {err.get('message')}{where}. Fix: {err.get('fix')}")
+    regions = [r for r in drawing.get("regions") or [] if isinstance(r, dict) and r.get("id")]
+    if regions:
+        lines.append(f"{len(regions)} parts (cite one as card:<id>#<part id>):")
+        for r in regions[:60]:
+            meta = r.get("meta") if isinstance(r.get("meta"), dict) else {}
+            label = meta.get("label") or ""
+            ref = meta.get("ref") or ""
+            lines.append(f"  {r['id']}" + (f"  {label}" if label else "") + (f"  → {ref}" if ref else ""))
+        if len(regions) > 60:
+            lines.append(f"  … {len(regions) - 60} more")
+    elif not err:
+        lines.append("no parts: nothing on the card can be selected or cited")
+    for w in (drawing.get("warnings") or [])[:10]:
+        lines.append(f"warning: {w}")
+    return "\n".join(lines)
+
+
+def region_in(outputs: Any, rid: str) -> dict[str, Any] | None:
+    """The part `rid` of a program card's drawing in `outputs`, {id, meta}, or None."""
+    for o in outputs or []:
+        kit = o.get(KIT_MIME) if isinstance(o, dict) else None
+        if isinstance(kit, dict):
+            for r in (kit.get("drawing") or {}).get("regions") or []:
+                if isinstance(r, dict) and r.get("id") == rid:
+                    return r
+    return None
 
 
 def outputs_text(cell: dict[str, Any], limit: int = 6000) -> str:
@@ -336,6 +403,8 @@ def outputs_text(cell: dict[str, Any], limit: int = 6000) -> str:
             parts.append(f"[out{i}] error {e.get('ename')}: {e.get('evalue')}\n{tb}".strip())
         elif frames.FRAME_MIME in o:
             parts.append(f"[out{i}] table (cite a value as card:{cell['id']}#<column>/<row>):\n{o.get('text/plain', '')}")
+        elif KIT_MIME in o:
+            parts.append(f"[out{i}] drawing\n{o.get('text/plain', '')}")
         elif cite.chart_spec(o) is not None:
             rows = cite.chart_text(o, cell["id"])
             own = str(o.get("text/plain") or "")
@@ -359,6 +428,8 @@ def resolve_card_ref(ws: str, ref: str, value: str | None = None) -> dict[str, A
     _, _, loc = ref.partition("#")
     out: dict[str, Any] = {"ref": ref, "kind": "cell", "excerpt": f"{cell['title']}\n{cell.get('takeaway') or ''}",
                            "meta": {"card": cell["id"], "notebook": nb["id"], "kind": cell["kind"]}}
+    if loc and "/" not in loc and cell["kind"] == "program":
+        return _region_ref(ws, cell, loc, out)
     if not loc or "/" not in loc:
         return out
     col, row = loc.split("/", 1)
@@ -383,6 +454,34 @@ def resolve_card_ref(ws: str, ref: str, value: str | None = None) -> dict[str, A
     shown, html = got
     out.update(kind="value", excerpt=f"{col} for {row}: {shown}")
     out["meta"].update(value=shown, table_html=html, span={"col": col, "row": row})
+    if entry is not None:
+        out["meta"]["version"] = {"entry": entry.get("id"), "ts": entry.get("ts"), "by": entry.get("by")}
+    return out
+
+
+def _region_ref(ws: str, cell: dict[str, Any], rid: str, out: dict[str, Any]) -> dict[str, Any]:
+    """A part of a program card (`card:<id>#<part id>`): its label and the record it opens, from the card as it stands,
+    else from the newest earlier version that drew it, so a citation keeps pointing at what it cited."""
+    got, entry = region_in(cell.get("outputs"), rid), None
+    if got is None:
+        for fn in EARLIER:
+            try:
+                earlier = fn(ws, cell)
+            except Exception:  # noqa: BLE001 — a version that cannot be read leaves the card as it stands
+                log.exception("reading a card's earlier outputs failed")
+                continue
+            for e, outs in earlier:
+                if (got := region_in(outs, rid)) is not None:
+                    entry = e
+                    break
+            if got is not None:
+                break
+    if got is None:
+        return out
+    meta = got.get("meta") if isinstance(got.get("meta"), dict) else {}
+    label = str(meta.get("label") or rid)
+    out.update(kind="value", excerpt=f"{label}" + (f" (opens {meta['ref']})" if meta.get("ref") else ""))
+    out["meta"].update(value=label, region=rid, part=meta, span={"region": rid})
     if entry is not None:
         out["meta"]["version"] = {"entry": entry.get("id"), "ts": entry.get("ts"), "by": entry.get("by")}
     return out

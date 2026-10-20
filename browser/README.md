@@ -54,7 +54,9 @@ environment. There are two kinds:
 
 Code that Claude writes, a card's code and a view's reader, runs only in a sandbox: a new process for each run that
 sees the folder (read-only), the Python libraries and an empty folder of its own. It does not see your home folder,
-`~/.thimble-browser`, the server's environment or the network, and it is stopped when its time is up. The sandbox is
+`~/.thimble-browser`, the server's environment or the network, and it is stopped when its time is up. A card's program,
+which draws the card on the terminal plugin's toolkit, runs in Node in the same sandbox, seeing only the toolkit, and
+again in the page in a sandboxed frame with no network when you turn a knob or press a part. The sandbox is
 Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime), pinned in `server/sandbox/package.json`,
 on Seatbelt (macOS) or bubblewrap (Linux). If no sandbox works, code does not run, and the card and the server's first
 lines say why. `thimble-browser --check-sandbox` tests it, one line per check.

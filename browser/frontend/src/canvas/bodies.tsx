@@ -32,6 +32,7 @@ import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { TypeCard } from './TypeCard'
 import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
+import { KitBody, kitRunOf } from '../kit/KitBody'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -65,6 +66,9 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     }
     case 'plan':
       return <PlanBody cell={cell} />
+    case 'program':
+      // a card drawn by a program on the terminal's toolkit; before its first run, the running line says the state
+      return kitRunOf(cell) ? <KitBody cell={cell} width={width} /> : null
     default: {
       if ((kind === 'timeline' || kind === 'diagram') && !cell.code && payload.dataset != null) return <DatasetView kind={kind} dataset={payload.dataset} fitWidth={width} />
       const art = primaryArtifact(cell.outputs)
