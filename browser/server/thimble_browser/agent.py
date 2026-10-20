@@ -223,6 +223,7 @@ class Session:
         self.running = False
         self.started_at: str | None = None  # when the turn running now, or the last one, started
         self.cards: list[str] = []
+        self.opened: str | None = None  # the card this turn opened the Canvas tab on (features/cards.py)
         self._last_notify = 0.0
         self._pending_notify: asyncio.TimerHandle | None = None
         self._following: set[str] = set()  # the ON_INPUT tools that heard input in this request
@@ -326,6 +327,7 @@ class Session:
         usage = Usage()
         reply: list[str] = []
         self.cards.clear()
+        self.opened = None
         result: str | None = None
         messages = load_messages(self.ws, self.chat)
         try:

@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { foldRecords } from '../../src/chat/model.ts'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { Rows } from '../../src/chat/Rows.tsx'
+import { bus } from '../../src/lib/bus.ts'
+import { dispatch } from '../../src/lib/events.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 import SMOKE from './smoke.json'
@@ -76,5 +78,22 @@ describe('chat rows', () => {
     expect(el.querySelector(`.chat-text .refchip[data-ref="card:${card}"]`)).not.toBeNull()
     expect(el.querySelector(`.chat-tool.toolcard[data-tool="add_card"] .refchip[data-ref="card:${card}"]`)).not.toBeNull()
     expect(errors).toEqual([])
+  })
+
+  test("a turn's cards and its token use are not drawn under the reply; the page opens the canvas on the card", async () => {
+    const el = await rows(SMOKE as unknown as ChatRecord[])
+    const card = (SMOKE.find((r) => r.type === 'tool_result') as { cell_id: string }).cell_id
+    // the card is one chip on its tool call, and no drawing; the done record's usage leaves no line
+    expect(el.querySelectorAll(`[data-ref="card:${card}"], [data-anchor="card:${card}"]`).length).toBeGreaterThan(0)
+    expect(el.querySelector('figure, .chat-cards, .chat-card')).toBeNull()
+    expect(el.textContent).not.toMatch(/\bcached\b|\d out\b|Opus/)
+    const tabs: string[] = []
+    const refs: string[] = []
+    const offs = [bus.on('showTab', (e) => void tabs.push(e.tab)), bus.on('openRef', (e) => void refs.push(e.ref))]
+    dispatch({ type: 'open-card', card } as never, true) // the history the stream replays opens nothing
+    dispatch({ type: 'open-card', card } as never)
+    offs.forEach((off) => off())
+    expect(tabs).toEqual(['canvas'])
+    expect(refs).toEqual([`card:${card}`])
   })
 })
