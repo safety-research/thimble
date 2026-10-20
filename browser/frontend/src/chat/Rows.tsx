@@ -24,13 +24,11 @@ import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, ty
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
 import { API_ERROR_KIND, callPieces, callToolName, capacityNote, corpusRelative, groupState, groupTools, isRawCall, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ThreadChip } from './Notes'
-import { AnswerCards } from './AnswerCards'
 import { ApiErrorCard } from './ApiError'
 import { NoticeRow } from './Notice'
 import { LabelRunRow } from './LabelRun'
 import { DocChip, GroupChip, LabelChip, openLabel } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
-import { UsageLine } from './usage'
 
 const QUIET_S = 8 // after this long with no new step, the working mark says how long Claude has been thinking
 
@@ -146,8 +144,6 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
                   <ChatMarkdown text={r.text} streaming={r === lastText} marks={shownMarks(r.marks, lenses, 'chat')} lenses={lenses} />
                 </div>
-                {r.cards && <AnswerCards ws={ws} ids={r.cards} />}
-                {r.usage && <UsageLine usage={r.usage} />}
               </div>
             )
           case 'tools':

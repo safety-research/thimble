@@ -3,7 +3,7 @@
 // surfaces it names, and the place that draws a surface asks `useFeature(name)` first, so a feature turned off in
 // Settings takes its surfaces with it and leaves the others as they are:
 //
-//   cards      the Canvas tab, and the cards a turn made, under its answer (chat/Rows.tsx)
+//   cards      the Canvas tab, which opens on the first card a turn makes (lib/events.ts)
 //   citations  links from Claude's words to their records (chat/markdown.tsx): off, a link's words are plain text
 //   lenses     the marks of the explainers, important details and checks (components/LensMark.tsx)
 //   labels     the Labels pane of the Files tab and the colors it gives records (files/FilesTab.tsx)

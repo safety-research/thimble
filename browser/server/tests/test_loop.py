@@ -127,6 +127,38 @@ async def test_a_refusal_is_a_row_not_a_crash(ws, monkeypatch):
     assert errs and "declined" in errs[0]["message"]
 
 
+async def test_the_page_opens_the_canvas_on_the_first_card_of_each_turn(ws, monkeypatch):
+    from thimble_browser import tools
+    from thimble_browser.features import cards
+    from thimble_browser.hub import hub
+    for name in ("add_card", "edit_card"):
+        monkeypatch.setitem(tools.EXTRA, name, getattr(cards, name))
+    opened = []
+    monkeypatch.setattr(hub, "publish", lambda w, rec: rec.get("type") == "open-card" and opened.append(rec["card"]))
+
+    def note(q):
+        return {"kind": "note", "question": q, "text": "One line."}
+    client = FakeClient([
+        NS(content=[call("t1", "add_card", note("How many runs?")), call("t2", "add_card", note("Which merged?"))],
+           stop_reason="tool_use", usage=usage(), stop_details=None),
+        NS(content=[text("Two cards.")], stop_reason="end_turn", usage=usage(), stop_details=None),
+    ])
+    s = await run_turn(ws, client, monkeypatch)
+    await s.task
+    first, second = [r["cell_id"] for r in chats.records(ws, "main") if r["type"] == "tool_result"]
+    assert opened == [first]  # once a turn, on its first card
+    client.replies += [
+        NS(content=[call("t3", "edit_card", {"card": second, "takeaway": "One merged."}),
+                    call("t4", "add_card", note("Which failed?"))], stop_reason="tool_use", usage=usage(),
+           stop_details=None),
+        NS(content=[text("One more.")], stop_reason="end_turn", usage=usage(), stop_details=None),
+    ]
+    await s.send("And the failed one?")
+    await s.task
+    third = [r["cell_id"] for r in chats.records(ws, "main") if r["type"] == "tool_result"][-1]
+    assert opened == [first, third]  # an edit opens nothing; the next turn's first new card does
+
+
 async def test_a_report_write_shows_in_the_report_as_it_streams_in(ws, monkeypatch):
     import json
 

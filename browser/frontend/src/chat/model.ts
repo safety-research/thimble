@@ -2,7 +2,7 @@
 import type { Mark } from '../lib/marks'
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
-import type { ChatRecord, LabelRunState, TurnUsage } from '../lib/types'
+import type { ChatRecord, LabelRunState } from '../lib/types'
 
 export interface UserRow {
   kind: 'user'
@@ -30,10 +30,6 @@ export interface TextRow {
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
-  /** the model and token use of the turn this row ends (its `done` record), on the turn's last text row */
-  usage?: { model?: string } & TurnUsage
-  /** the cards the turn made or changed (its `done` record's `cells`), drawn under its last text row */
-  cards?: string[]
 }
 export interface ToolResult {
   summary: string
@@ -237,19 +233,10 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
       case 'error':
         rows.push({ kind: 'error', index, message: e.message, errorKind: e.kind, detail: e.detail })
         return
-      case 'done': {
-        // the turn's model and token use go under its last text row, the reply's end
-        if (!e.usage || parent) return
-        for (let k = rows.length - 1; k >= 0 && rows[k].kind !== 'user'; k--) {
-          const r = rows[k]
-          if (r.kind === 'text' && !r.apiError) {
-            r.usage = { ...e.usage, ...(e.model ? { model: e.model } : {}) }
-            if (e.cells?.length) r.cards = [...e.cells]
-            return
-          }
-        }
+      case 'done':
+        // the turn's end draws nothing: its cards are on the canvas, which the page opened on the first (lib/events.ts),
+        // and the composer's model line shows the model
         return
-      }
       case 'marks':
       case 'glosses': {
         // a lens's marks after an answer (`glosses`: an explainers' record of an earlier version): each goes to the

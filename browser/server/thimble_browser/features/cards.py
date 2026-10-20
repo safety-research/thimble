@@ -1,10 +1,10 @@
 """Cards: what Claude draws to show the evidence of an answer, a table, a chart, a diagram, a timeline, records or a
-note, each with its question and its takeaway. The chat shows the cards of a turn under its answer, and the Canvas tab
-lays them all out in groups.
+note, each with its question and its takeaway. The Canvas tab lays them out in groups, and the page opens it on the
+first card a turn makes (the stream's `open-card` record). The chat links to a card and draws none.
 
 It owns the canvas's routes (canvas.py keeps the cards, canvas_layout.py their groups and places, history.py their
 versions and Undo), the card tools, the `Cards` part of the chat agent's prompt (prompts/cards.md) and, on the page,
-the Canvas tab and the cards under an answer.
+the Canvas tab.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from fastapi import Body, HTTPException
 from fastapi.responses import Response
 
 from .. import canvas, canvas_layout, history
+from ..hub import hub
 from ..tools import Result
 from . import Feature
 
@@ -59,11 +60,23 @@ async def list_cards(t: Any, args: dict[str, Any]) -> Result:
     return Result("\n".join(lines) or "no cards yet")
 
 
+def _open_canvas(t: Any, cell: dict[str, Any]) -> None:
+    """Tell the page to open the Canvas tab on `cell`, selected, when it is the first card the turn made; the turn's
+    later cards are placed on the canvas without moving it (agent.Session.opened)."""
+    s = t.session
+    if s is not None:
+        if s.opened:
+            return
+        s.opened = cell["id"]
+    hub.publish(t.ws, {"type": "open-card", "card": cell["id"], "chat": t.chat})
+
+
 async def add_card(t: Any, args: dict[str, Any]) -> Result:
     try:
         cell = canvas.new_card(t.ws, args, by=t.maker(), chat=t.chat)
     except ValueError as e:
         return Result(str(e), True)
+    _open_canvas(t, cell)
     return await _run_and_describe(t, cell)
 
 
@@ -158,11 +171,11 @@ def register(ctx: Any) -> None:
 FEATURE = Feature(
     name="cards",
     title="Cards",
-    does="Claude draws a card under its answer when a picture shows the evidence better than words. The Canvas tab "
-         "holds them all.",
+    does="Claude draws a card on the Canvas tab when a picture shows the evidence better than words, and the page "
+         "opens the canvas on it.",
     register=register,
     tools={"list_cards": list_cards, "add_card": add_card, "edit_card": edit_card, "delete_card": delete_card},
     main_tools=("list_cards", "add_card", "edit_card", "delete_card"),
     prompt="cards.md",
-    page=("canvas", "answer-cards"),
+    page=("canvas",),
 )
