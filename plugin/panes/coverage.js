@@ -261,10 +261,7 @@ export function program(k, data) {
     return k.stack(...head, k.text(' '), toggles(k, by), listOf(k, items, idx, rows, (it, on) => groupRow(k, it.g, by, W, sw, on, it.id), header(k, by === 'type' ? 'type' : 'pattern', W, sw)))
   }
   if (level === 'group') {
-    const title = subjectBlock(k, {
-      title: by === 'type' ? `${k.escape(group.key)} files` : String(group.key).split('*').map(x => k.escape(x)).join('{accent:\\*}'),
-      line: k.escape(groupLine(group)),
-    })
+    const title = wrappedSubject(k, by === 'type' ? `${k.escape(group.key)} files` : String(group.key).split('*').map(x => k.escape(x)).join('{accent:\\*}'), groupLine(group))
     const rows = Math.max(3, k.h - 4 - chromeOf(k, data.chat))
     const pw = pathW(items.map(x => x.f), group, by, W)
     return k.stack(title, k.text(' '), listOf(k, items, idx, rows, (it, on) => fileRow(k, it.f, group, by, W, pw, on, it.id), fileHeader(k, pw)))
@@ -339,10 +336,27 @@ function legend(k) {
   return k.text(KEY.map(([, tone, words]) => `{${tone}:■} {dim:${words}}`).join('   '), { wrap: false })
 }
 
+/** Plain words in rows of at most `w` characters, broken at spaces. */
+export function wrapWords(s, w) {
+  const out = ['']
+  for (const word of String(s).split(' ')) {
+    const last = out[out.length - 1]
+    if (last && Array.from(last).length + 1 + Array.from(word).length > w) out.push(word)
+    else out[out.length - 1] = last ? `${last} ${word}` : word
+  }
+  return out
+}
+
+/** A subject block whose dim line wraps to the panel's width (a sentence of several units is long). */
+function wrappedSubject(k, title, words, tail = '') {
+  const [first, ...rest] = wrapWords(words, Math.max(20, k.w - 3))
+  const rows = rest.map((t, i) => k.text(`{dim:${k.escape(t)}}${i === rest.length - 1 ? tail : ''}`, { wrap: false }))
+  return subjectBlock(k, { title, line: `{dim:${k.escape(first)}}${rest.length ? '' : tail}`, rows })
+}
+
 /** The overview: the sentence, then the legend. */
 function overview(k, data) {
-  const top = subjectBlock(k, { title: 'Coverage', line: `${k.escape(sentence(data.total, data.session))}${data.refreshing ? '{dim: ◌}' : ''}` })
-  return [top, legend(k)]
+  return [wrappedSubject(k, 'Coverage', sentence(data.total, data.session), data.refreshing ? '{dim: ◌}' : ''), legend(k)]
 }
 
 function toggles(k, by) {
@@ -377,7 +391,7 @@ function groupRow(k, g, by, W, sw, on, id) {
   const bar = k.bar([{ value: g.seen, tone: 'accent' }, { value: counted, tone: 'dim' }, { value: g.untouched, tone: 'dim-faint' }], { max: Math.max(1, g.rows), w: BAR })
   const row = k.beside(k.text(left, { wrap: false }), bar, k.text(` ${pad(pct(share), 5, true)}`, { wrap: false }))
   // a pattern's group carries its pattern, which `thimble rows` reads, so a question about it names its files
-  return k.region(id, { label: `${g.key}: ${n(g.files)} files, ${sizeText(g)}; Claude read ${pct(share)} of them`, ...(by === 'pattern' ? { ref: g.key } : {}) }, row)
+  return k.region(id, { label: `${g.key}: ${n(g.files)} file${g.files === 1 ? '' : 's'}, ${sizeText(g)}; Claude read ${pct(share)} of them`, ...(by === 'pattern' ? { ref: g.key } : {}) }, row)
 }
 
 /** A file as its group's list names it: by its name alone when the group's pattern names its folder (the header says
