@@ -15,13 +15,15 @@ browser workbench alone). It needs Node 22.12 or later, [uv](https://docs.astral
 the sandbox. Then:
 
 ```
-thimble-browser path/to/folder
+cd path/to/folder
+thimble-browser
 thimble-browser path/to/folder --wif path/to/wif.toml
 ```
 
-The server prints a sign-in link and opens it. A link works once, for 15 minutes; press Enter in the server's window
+`thimble-browser` opens the folder you are in, or the folder you name. The server listens on 127.0.0.1, port 8000 or the
+next free one (`--port N` tries another first). It prints a sign-in link and opens it when this machine has a browser. A link works once, for 15 minutes; press Enter in the server's window
 for a new one. To try it on a made-up folder of agent runs: `thimble-browser browser/samples/agent-runs`. From another
-machine, reach it through an SSH tunnel (`ssh -L 8420:127.0.0.1:8420 <host>`). The workspace (chats, cards, report) is
+machine, reach it through an SSH tunnel (`ssh -L 8000:127.0.0.1:8000 <host>`). The workspace (chats, cards, report) is
 kept in `~/.thimble-browser`, or in `THIMBLE_BROWSER_HOME`.
 
 ## Credentials

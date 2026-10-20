@@ -192,6 +192,10 @@ if [ ${#notes[@]} -gt 0 ]; then
 fi
 if [ "$web" = 1 ]; then
   say ""
-  say "To start the browser workbench on a folder of files: thimble-browser FOLDER. It needs credentials for the Claude"
-  say "API, an API key or Workload Identity Federation; browser/README.md says how."
+  say "To start the browser workbench, run this in a folder of files:"
+  say ""
+  say "  thimble-browser"
+  say ""
+  say "It opens the folder you are in (or: thimble-browser FOLDER) at http://127.0.0.1:8000. It needs credentials for the"
+  say "Claude API, an API key or Workload Identity Federation; browser/README.md says how."
 fi

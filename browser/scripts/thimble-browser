@@ -3,7 +3,7 @@
 # of the repository, installs what it needs and puts a launcher for it on PATH. Here it builds the page again when its
 # sources are newer than the build, and installs the sandbox runtime again when its lock file changed (after a pull).
 #
-#   thimble-browser [FOLDER] [--port N] [--no-open] [--wif FILE]
+#   thimble-browser [FOLDER] [--port N] [--no-open] [--wif FILE]   FOLDER: the folder you are in when not given
 #   thimble-browser --check-sandbox     tests the sandbox card code runs in (no sign-in needed), and exits
 #
 # Needs uv, Node 22.12 or later, and credentials for the Claude API (browser/README.md). The sandbox also needs

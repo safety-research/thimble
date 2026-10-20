@@ -103,7 +103,8 @@ The terminal plugin:
 The browser workbench:
 
 1. Run `thimble-browser --check-sandbox`. It prints one line per check of the sandbox, each `pass`.
-2. Run `thimble-browser browser/samples/agent-runs` in the checkout. The server prints a sign-in link and opens it.
+2. Run `thimble-browser` in a folder of files, or `thimble-browser browser/samples/agent-runs` in the checkout. The
+   server prints a sign-in link and opens it, on 127.0.0.1 port 8000 or the next free one.
 3. In Settings, give your credentials. Ask in the chat: "How many runs failed, and why?" Claude answers with a card,
    and the numbers in its answer are links.
 
