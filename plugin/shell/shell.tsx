@@ -61,7 +61,7 @@ import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
 import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
-import { tellOpened } from './engaged'
+import { flushEngaged, resetEngaged, tellOpened } from './engaged'
 import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
@@ -609,8 +609,10 @@ export async function noteForClaude($: Engine, text: string): Promise<void> {
  *  observer has for Claude) go just before it as a row the person does not see, for Claude alone; the prompt is `t.text`, as the person
  *  would type it. Claude Code labels its row as the plugin's. */
 async function startTurn($: Engine, rows: string[], t: { text: string; typed: boolean; verb: string }): Promise<void> {
-  // what the person reads now (a squeeze's version, a catch-up) reached Claude as rows of their own
+  // what the person reads now (a squeeze's version, a catch-up), and what they opened and asked, reach Claude as rows
+  // of their own
   await tellSettled($).catch(() => undefined)
+  await flushEngaged($).catch(() => undefined)
   const notes = [...(((await $.state.get(NOTES)).value ?? []) as string[])]
   await $.state.set(NOTES, [])
   // the observer hears of the turn (its own prompt.submit hook may never see this plugin's prompt): its notes come back
@@ -3112,6 +3114,8 @@ export const registerShell: Register = (on, options) => {
     try {
       // the version of a message the person settled on reaches Claude first, as a row of its own
       await tellSettled($).catch(() => undefined)
+      // what the analyst opened and asked since Claude's last reply, with their own next prompt (engaged.ts)
+      if (!e.isMeta && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) await flushEngaged($).catch(() => undefined)
       // checks of label values the person made in a detail whose close was never heard: Claude hears of them now
       if (checksPending()) await checksDone($)
       const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
@@ -3232,6 +3236,7 @@ export function resetShell(): void {
   resetDock()
   resetKeys(shellKey)
   resetAside()
+  resetEngaged()
   held.clear()
   heldFaults.clear()
   heldId = null

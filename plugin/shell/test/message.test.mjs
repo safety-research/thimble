@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
-import { askedRow, openedRow } from '../engaged.js'
+import { askedRow, engagedText, openedRow } from '../engaged.js'
 import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, inline, lineOf, linkMarks, marksIn, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
 import { citeRef } from '../object.js'
@@ -443,20 +443,26 @@ test('a link is drawn as a hyperlink only where Claude Code surely draws one, so
   assert.equal(drawsHyperlinks({ VTE_VERSION: '0.50.0' }), false)
 })
 
-test('what the person engaged with, in a short row for Claude: an explainer, an important detail, a citation, a question to a side thread', () => {
+test('what the person engaged with, in one short row for Claude that says what it is for: an explainer, an important detail, a citation, a question to a side thread', () => {
   const message = 'The page stays blank until `hydrate()` runs, as [app/main.ts](app/main.ts#L18) shows.'
   const g = openedRow({ row: 'r1', i: 1, kind: 'gloss', label: 'hydrate()', gloss: { term: 'hydrate()' } }, message)
-  assert.equal(g.text, 'The analyst opened the explainer of "hydrate()" in your message that begins "The page stays blank until hydrate() runs, as app/main.ts…".')
+  assert.equal(g.text, 'opened the explainer of "hydrate()" in your message that begins "The page stays blank until hydrate() runs, as app/main.ts…"')
   const h = openedRow({ row: 'r1', i: 2, kind: 'gloss', label: 'blank', gloss: { kind: 'heads', term: 'stays blank', title: 'Only on a cold load' } }, message)
-  assert.match(h.text, /^The analyst opened the important detail "Only on a cold load" on "stays blank" in your message/)
+  assert.match(h.text, /^opened the important detail "Only on a cold load" on "stays blank" in your message/)
   const c = openedRow({ row: 'r1', i: 0, kind: 'cite', ref: 'app/main.ts#L18', label: 'app/main.ts' }, message)
-  assert.match(c.text, /^The analyst opened the citation "app\/main.ts" \(app\/main.ts#L18\) in your message/)
+  assert.match(c.text, /^opened the citation "app\/main.ts" \(app\/main.ts#L18\) in your message/)
   // a citation inside a card names no message
-  assert.equal(openedRow({ kind: 'cite', ref: 'q2#n', label: '2,994' }).text, 'The analyst opened the citation "2,994" (q2#n).')
+  assert.equal(openedRow({ kind: 'cite', ref: 'q2#n', label: '2,994' }).text, 'opened the citation "2,994" (q2#n)')
   // the same open twice is one key
   assert.equal(openedRow({ row: 'r1', i: 1, kind: 'gloss', label: 'hydrate()', gloss: { term: 'hydrate()' } }, 'other words').key, g.key)
   const a = askedRow({ text: 'why does it wait on the session?', scope: { row: 'r1', mark: { kind: 'gloss', term: 'hydrate()' } } })
-  assert.equal(a.text, 'The analyst asked a side thread about "hydrate()", which a side agent answers there: "why does it wait on the session?"')
+  assert.equal(a.text, 'asked a side thread about "hydrate()", which a side agent answers there: "why does it wait on the session?"')
+  // the row: what it is for, then each thing, so Claude reads it as context with the analyst's prompt
+  assert.equal(engagedText([g.text, a.text]), [
+    'What the analyst did on screen since your last reply. It shows what they know and what they care about; none of it asks anything of you.',
+    '- They opened the explainer of "hydrate()" in your message that begins "The page stays blank until hydrate() runs, as app/main.ts…".',
+    '- They asked a side thread about "hydrate()", which a side agent answers there: "why does it wait on the session?".',
+  ].join('\n'))
   assert.match(askedRow({ text: 'which week?', scope: { object: 'saves', region: 'bar-3', label: 'week 3' }, card: { id: 'saves', title: 'Saves per week' } }).text, /about the card "Saves per week" \(week 3\)/)
   assert.equal(openedRow(null), null)
   assert.equal(askedRow({ text: '  ' }), null)

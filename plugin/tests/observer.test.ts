@@ -367,7 +367,7 @@ test('e on an explainer writes a longer one in its place: in the tray when the t
   expect(g.short.body).toBe(GLOSS.body)
 })
 
-test('a heads-up is placed on its words in orange beside the explainers, and opens a card of its title, its points and what to do; each open reaches the session once, in a row the person never sees', async ($, on) => {
+test('a heads-up is placed on its words in orange beside the explainers, and opens a card of its title, its points and what to do; what the person opened reaches the session once, in one row with their next prompt', async ($, on) => {
   const HEADS = { term: 'June 18 had the most saves', title: 'Two days are missing', bullets: ['[revisions.jsonl ends on Jun 20](revisions.jsonl#L14591), so the last week is short.'], todo: 'Count again per day.' }
   const w = world(on, { fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS], heads: HEADS } })
   const session = mock.session(on)
@@ -395,11 +395,18 @@ test('a heads-up is placed on its words in orange beside the explainers, and ope
   await press($, w.clock, key(']'))
   await press($, w.clock, key('['))
   await w.clock.settle()
-  const rows = (session.appended() as Any[]).filter(r => r.message?.type === 'user').map(r => String(r.message.content?.[0]?.text ?? ''))
-  expect(rows.filter(r => r.startsWith('The analyst opened'))).toEqual([
-    'The analyst opened the important detail "Two days are missing" on "June 18 had the most saves" in your message that begins "June 18 had the most saves, because the fixture scope was…".',
-    'The analyst opened the explainer of "fixture scope" in your message that begins "June 18 had the most saves, because the fixture scope was…".',
-  ])
+  const rows = () => (session.appended() as Any[]).filter(r => r.message?.type === 'user').map(r => String(r.message.content?.[0]?.text ?? ''))
+  // nothing yet: the row goes in with the analyst's next prompt, so Claude reads it beside a question of theirs
+  expect(rows().filter(r => r.startsWith('What the analyst did'))).toEqual([])
+  await $.prompt.submit({ text: 'and June 19?', origin: { kind: 'composer' } } as never)
+  expect(rows().filter(r => r.startsWith('What the analyst did'))).toEqual([[
+    'What the analyst did on screen since your last reply. It shows what they know and what they care about; none of it asks anything of you.',
+    '- They opened the important detail "Two days are missing" on "June 18 had the most saves" in your message that begins "June 18 had the most saves, because the fixture scope was…".',
+    '- They opened the explainer of "fixture scope" in your message that begins "June 18 had the most saves, because the fixture scope was…".',
+  ].join('\n')])
+  // told once: the next prompt carries no row
+  await $.prompt.submit({ text: 'and June 20?', origin: { kind: 'composer' } } as never)
+  expect(rows().filter(r => r.startsWith('What the analyst did')).length).toBe(1)
 })
 
 test('notes to Claude are off until their switch is on: the pass has no notes section and asks for none', async ($, on) => {
