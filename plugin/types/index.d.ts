@@ -149,6 +149,8 @@ declare module 'claude-code' {
       sqznote: Record<string, true>
       /** the version of each row Claude was last told of (chips.mjs shownKey) */
       sqztold: Record<string, string>
+      /** the healing pass's tick: set when a pass has run long enough to show its spinner (shell.tsx healNow) */
+      healtick: string
       /** the bar's counts above the prompt */
       counts: LineCounts | null
       /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */

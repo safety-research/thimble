@@ -16,7 +16,7 @@ import { paintRegions } from './cells'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; within?: number }
+type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; within?: number; tag?: string }
 export type Theme = 'dark' | 'light'
 
 /** The marks' colors, per theme: a citation's purple, a mid tone that reads on a dark and a light background; an explained term as a highlighter pen marks it, dark text on a
@@ -83,7 +83,14 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const on = o.focus === r.mark || (inCite && o.focus === r.within)
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
-  if (m.kind === 'cite') {
+  if (r.tag) {
+    // the healing pass's glyph after a citation's words: a small spinner while it checks, a red × when contradicted
+    if (r.tag === 'bad') p.color = 'error'
+    else p.dimColor = true
+  } else if (m.kind === 'cite' && m.heal === 'quiet') {
+    // a value the pass unwrapped: plain grey words (a press still says why)
+    if (on) { p.backgroundColor = 'selectionBg'; p.color = 'text' } else p.color = 'inactive'
+  } else if (m.kind === 'cite') {
     if (on) { p.backgroundColor = c.cite; p.color = c.paper } else { p.color = c.cite; p.underline = true }
   } else if (m.kind === 'gloss') {
     const heads = o.rec.glosses?.[m.gloss as string]?.kind === 'heads'

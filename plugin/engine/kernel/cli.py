@@ -549,6 +549,26 @@ def _label_rows_of(st: Store, r: dict[str, Any]) -> None:
         pass
 
 
+def cmd_heal(a: argparse.Namespace) -> int:
+    """The shell's healing pass over texts it draws (heal.py), as JSON: stdin is one text, or {"texts": [...]}."""
+    from . import heal as H
+
+    st = Store()
+    raw = Path(a.text_file).read_text() if a.text_file else stdin_text()
+    batch = None
+    if raw.lstrip().startswith("{"):
+        try:
+            got = json.loads(raw)
+            batch = got.get("texts") if isinstance(got, dict) else None
+        except ValueError:
+            batch = None
+    if isinstance(batch, list):
+        out_json(H.heal_all(st, [str(t or "") for t in batch], analyst=a.analyst, since=a.since or []))
+    else:
+        out_json(H.heal_all(st, [raw], analyst=a.analyst, since=a.since or [])[0])
+    return 0
+
+
 def cmd_coverage(a: argparse.Namespace) -> int:
     st = Store()
     if a.name:
@@ -932,6 +952,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
+    # the shell's healing pass over a text it draws (heal.py): neither help nor usage lists it
+    p = sub.add_parser("heal")
+    p.add_argument("--from", dest="text_file", metavar="FILE")
+    p.add_argument("--analyst", action="store_true")
+    p.add_argument("--since", action="append", metavar="VERSION")
+    p.set_defaults(fn=cmd_heal)
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")

@@ -402,8 +402,8 @@ export const marksIn = (marks, from, to) => (marks || []).map((m, i) => ({ ...m,
 // ------------------------------------------------------------------------------------------------ inline runs
 
 /**
- * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, mark?, within?}` where `mark` is the mark's
- * index in the record's marks. Bold, italic and inline code as Claude Code draws them; a link that is no mark reads as
+ * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, mark?, within?, tag?}` where `mark` is the mark's
+ * index in the record's marks, and `tag` the healing pass's glyph after a citation's words (HEAL_TAG). Bold, italic and inline code as Claude Code draws them; a link that is no mark reads as
  * its words then its target, as Claude Code draws one. An explain on words inside a link's words is a run of its own
  * between the link's runs, `within` the link's mark (or `link`, for a link that is no mark). (A paragraph's lines are
  * blocks of their own, so a line break stays one.)
@@ -439,13 +439,14 @@ export function inline(text, from, to, marks = []) {
     const mk = mine.find(m => m.start === i)
     if (mk && mk.kind === 'cite' && s[mk.start] === '[') {
       const close = s.indexOf('](', mk.start)
-      if (close > mk.start && close < mk.end && linkWords(mk.start + 1, close, { mark: mk.i }, { within: mk.i })) { i = mk.end; continue }
+      if (close > mk.start && close < mk.end && linkWords(mk.start + 1, close, { mark: mk.i }, { within: mk.i })) { if (HEAL_TAG[mk.heal]) push(HEAL_TAG[mk.heal], { mark: mk.i, tag: mk.heal }); i = mk.end; continue }
     }
     if (mk) {
       const raw = s.slice(mk.start, mk.end)
       const asCode = mk.kind === 'gloss' && /^`[^`]*`$/.test(raw)
       const words = mk.kind === 'gloss' ? raw.replace(/`+/g, '').replace(/\s+/g, ' ') : mk.kind === 'spark' ? sparkChars(mk.values || []) : mk.label
       push(words, { mark: mk.i, ...(asCode ? { code: true } : {}) })
+      if (mk.kind === 'cite' && HEAL_TAG[mk.heal]) push(HEAL_TAG[mk.heal], { mark: mk.i, tag: mk.heal })
       i = mk.end
       continue
     }
@@ -541,7 +542,7 @@ function merge(runs) {
     const { sp, ...x } = r
     const last = out[out.length - 1]
     if (last && last.mark === undefined && x.mark === undefined && !!last.b === !!x.b && !!last.it === !!x.it && !!last.code === !!x.code && !!last.link === !!x.link && !!last.dim === !!x.dim) last.s += x.s
-    else if (last && last.mark !== undefined && x.mark === last.mark) last.s += x.s
+    else if (last && last.mark !== undefined && x.mark === last.mark && last.tag === x.tag) last.s += x.s
     else out.push({ ...x })
   }
   return out
@@ -689,3 +690,68 @@ export function headsOf(item, text) {
 export function withObserver(rec, { verbs, glosses } = {}) {
   return remark({ ...rec, verbs: verbs || {}, glosses: glosses || {} })
 }
+
+// ------------------------------------------------------------------------------------------------ healing
+
+/** A text's key for the healing pass: FNV-1a over its UTF-16 units, as hex, the same in Node and the browser. */
+export function textKey(text) {
+  const s = String(text ?? '')
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+  return h.toString(16).padStart(8, '0')
+}
+
+const citesOf = rec => (Array.isArray(rec?.marks) ? rec.marks : []).filter(m => m && m.kind === 'cite' && !m.code)
+
+/** Whether a record's shown text has citations the healing pass reads, and no pass has healed this text yet. */
+export function needsHeal(rec) {
+  return citesOf(rec).length > 0 && !(rec.heal && rec.heal.key === textKey(shownOf(rec)))
+}
+
+/** The text the healing pass reads (the kernel's `thimble heal`): the shown text with each citation's target written
+ *  as the ref its mark reads (`auth.py:88` as `auth.py#L88`), so the kernel and the drawing read the same place. */
+export function healInput(rec) {
+  const s = shownOf(rec)
+  let out = ''
+  let at = 0
+  for (const m of citesOf(rec)) {
+    const close = s.indexOf('](', m.start)
+    if (s[m.start] !== '[' || close < 0 || close > m.end) continue
+    out += s.slice(at, m.start) + s.slice(m.start, close + 2) + m.ref + ')'
+    at = m.end
+  }
+  return out + s.slice(at)
+}
+
+/**
+ * The record as its healing pass left it, for a drawing (no write): each citation the pass re-pointed opens its new
+ * place (`ref`, with `wrote` the ref as written), one it unwrapped is quiet (`heal: 'quiet'`, drawn grey, `why`), one
+ * the cited place contradicts is `heal: 'bad'` with `why`; while a pass runs (`checking`) every citation is
+ * `heal: 'checking'`. The changes match the marks in order, by their link as written or their ref.
+ */
+export function healedRecord(rec, { checking = false } = {}) {
+  if (!citesOf(rec).length) return rec
+  const text = shownOf(rec)
+  const h = rec.heal
+  if (h && h.key === textKey(text) && Array.isArray(h.changes)) {
+    const used = new Set()
+    const marks = rec.marks.map(m => {
+      if (!m || m.kind !== 'cite' || m.code) return m
+      const raw = text.slice(m.start, m.end)
+      const j = h.changes.findIndex((c, k) => !used.has(k) && c && (`[${c.label}](${c.ref})` === raw || c.ref === m.ref))
+      if (j < 0) return m
+      used.add(j)
+      const c = h.changes[j]
+      if (c.state === 'contradicted') return { ...m, heal: 'bad', why: String(c.why || '') }
+      if (c.state === 'quiet') return { ...m, heal: 'quiet', why: String(c.why || '') }
+      if (c.to && c.to !== c.ref) return { ...m, ref: c.to, wrote: m.ref, heal: 'moved' }
+      return m
+    })
+    return { ...rec, marks }
+  }
+  if (!checking) return rec
+  return { ...rec, marks: rec.marks.map(m => (m && m.kind === 'cite' && !m.code ? { ...m, heal: 'checking' } : m)) }
+}
+
+/** The glyph after a citation's words: a small spinner while it is checked, a red × when the cited place contradicts it. */
+export const HEAL_TAG = { checking: ' ◌', bad: ' ×' }
