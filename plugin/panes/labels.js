@@ -239,7 +239,8 @@ function labelView(k, data, st, lab, W) {
   })
   k.on('press', e => {
     const r = String(e.region || '')
-    if (r === 'filter-all') return { filter: null, rec: 0, at: 'filter-all' }
+    // (show all goes once pressed: the first record takes the selection, so a question is never about the press)
+    if (r === 'filter-all') return { filter: null, rec: 0, at: null }
     if (r === 'filter-none') return setFilter(NO_VALUE)
     const v = /^val-(\d+)$/.exec(r)
     if (v) return setFilter(values[Number(v[1])])

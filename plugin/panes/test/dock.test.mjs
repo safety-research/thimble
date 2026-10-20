@@ -208,6 +208,7 @@ test('labels: one label opens on its values over its records and the records, sa
   assert.equal(t.after.wants[0].request.value, 'yes')
   assert.match(turn(PANES.labels, labData(), state, null, page(t.after)).text, /records · yes 2 · show all/)
   assert.equal(turn(PANES.labels, labData(), state, { type: 'press', region: 'filter-all' }).state.filter, null)
+  assert.equal(turn(PANES.labels, labData(), state, { type: 'press', region: 'filter-all' }).state.at, null)
   assert.equal(turn(PANES.labels, labData(), state, { type: 'press', region: 'val-0' }).state.filter, null)
   assert.equal(turn(PANES.labels, labData(), state, { type: 'press', region: 'filter-none' }).state.filter, '-')
   // Definition opens how it was made, in the `side:opened` region the panel draws above the actions; esc closes it
