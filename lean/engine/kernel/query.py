@@ -16,7 +16,9 @@ from thimble-lite's query kernel and extended):
     keep(name, obj) / use(name) pass a result to a later query, which records the name and the query that kept it.
                                 A label is this: a query that gives rows a value (by a rule in code, or values Claude
                                 wrote after reading the rows) and keeps it; each keep is a new version, and every value
-                                built on it names the version it used
+                                built on it names the version it used. use(name) of a label made with `thimble label`
+                                gives each record's `_ref` and value (a column named as the label), with
+                                `confidence`, `reason`, `by` and `checked`: merge it on `_ref`, then tally by it
     use("r3")                   an earlier query's output, as the table it showed, with `_refs` (each row's source
                                 rows) when it kept them: build on it without running it again
     pd, np, re, json, Counter, ROOT
@@ -329,12 +331,39 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
             pass
         return obj
 
+    def label_rows(name: str) -> "pd.DataFrame":
+        """The records a label (thimble label) gave a value, one row each: `_ref`, `_file`, the value (a column named as
+        the label), `confidence`, `reason`, `by` and `checked`. The label read every record it holds: those count as
+        rows this query read."""
+        from . import labels as LB
+
+        lab = LB.load(st, name)
+        if lab is None:
+            raise KeyError(f"no label {name!r}; labels: {', '.join(LB.names(st)) or 'none'}")
+        df = LB.frame(st, name)
+        for f, n in LB.files_of(lab).items():
+            info["loads"].append({"path": f, "rows": n, "table": None, "via": "label"})
+        info["frames"].append(df)
+        return df
+
     def use(name: str) -> Any:
         reg = st.read_json(kept_f) or {}
         if name not in reg and re.fullmatch(R.QUERY_ID, name):
             return used_output(name)
         if name not in reg:
-            raise KeyError(f"nothing kept as {name!r}; kept: {', '.join(reg) or 'nothing'}")
+            from . import labels as LB
+
+            lab = LB.load(st, name)
+            if lab is not None:
+                # a label (thimble label): its values as they are now, a check the person made since included
+                df = LB.frame(st, name)
+                if lab.get("query"):
+                    info["uses"].append({"name": name, "query": lab["query"], "label": lab["name"], "rev": lab.get("rev")})
+                info["frames"].append(df)
+                return df
+            labels = LB.names(st)
+            raise KeyError(f"nothing kept as {name!r}; kept: {', '.join(reg) or 'nothing'}"
+                           + (f"; labels: {', '.join(labels)}" if labels else ""))
         info["uses"].append({"name": name, "query": reg[name]})
         f = pickle_path(st.dir / "kept", slug(name))
         if f is None:
@@ -389,7 +418,8 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
     loop = _Records(info, st)
     return {"pd": pd, "np": np, "json": json, "re": re, "Counter": Counter, "defaultdict": defaultdict,
             "ROOT": st.root, "load": load, "rows": rows, "tally": tally,
-            "sample": sample, "keep": keep, "use": use, APPEND: loop.append, "__name__": "__lean_query__"}
+            "sample": sample, "keep": keep, "use": use, "label_rows": label_rows, APPEND: loop.append,
+            "__name__": "__lean_query__"}
 
 
 # ------------------------------------------------------------------ records built in a loop

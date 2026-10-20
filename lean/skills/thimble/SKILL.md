@@ -71,8 +71,6 @@ The person never sees your shell output, so put the work your answer rests on wh
   one record the other way makes the answer false and makes the person doubt the rest. `thimble coverage` shows what
   this session computed over, read, searched and did not touch. When a file you did not read could change the answer,
   say so.
-- A label is a run that gives rows a value, by a rule or by values you wrote after reading them, and keeps it with
-  `keep("name", values)`. A later run reads it with `use("name")`, and its lineage names the run that made that version.
 
 ## Cards
 
@@ -89,6 +87,56 @@ the card's data (`"data": {"days": "r1"}`), not copied numbers, so each part dra
 When you read or judged rows in a way no tool saw, say so under `declared`, in your own words. A long card is easier
 to write as a file: `thimble save NAME --from FILE`. Put the work in the card, which thimble shows under your reply, and do not repeat it in your reply. thimble adds its
 card guidance, with worked examples, beside your first data command.
+
+## Labels
+
+A label is a semantic category derived from the records by a classifier, such as "asks for a refund". `thimble label
+NAME --in GLOB` defines it and applies it to every record of that scope (`--where` and `--within` narrow it). Its
+predicate decides each record in one of three ways: `--regex` matches the text, `--code` is a Python function that
+returns a value and a confidence, and `--prompt` has a model judge each record against your definition. The result is a
+count per value and a label card under your reply, where the person reads the definition, opens the records of each
+value and checks a sample; what they say a record is counts in place of the label's value.
+
+Whenever you sort records into categories, use `thimble label`, not a regex or a model call of your own inside a run.
+It runs the model's calls in parallel beside the session, so the answer reaches the person quickly. It applies the
+category to exactly the scope you give it, and the person can inspect the definition and its records, while a category
+made inside your own code reads to them as a fact they cannot check. Values you decide yourself after reading records
+are a label too: `thimble label NAME --set REF=VALUE ...`.
+
+Use a regex or code when a pattern or a field settles the value: it is exact and makes no model calls. Use a prompt for
+labels that require interpretation or judgment, with a definition of one or two sentences that two careful readers
+would apply the same way. Give values the person would recognize, with the positive one first (`--values`). Try a new
+label on a sample with `--limit`, read records of each value with `thimble rows GLOB --label NAME=VALUE`, and make sure
+it also catches other ways of saying or doing the same thing, before you run it on everything. A takeaway that counts
+by a label names it, says whether a rule or a model made it, and says how many records the person has checked. In a
+run, `use("NAME")` gives each record's `_ref` and value: merge it on `_ref`, then tally by it.
+
+A label that sorts outcomes, such as which attempts worked, decides each one by what the person asked about, such as
+whether the agent got past its sandbox. A command that exits with 0 has only run. Once a card or a label defines an
+outcome, use that definition wherever the same outcome comes up again, since two definitions give the person two
+answers to one question and leave them unsure of both.
+
+```
+Person    What do customers complain about?
+Good      1  thimble rows "tickets/*.jsonl" -n 25, to see how customers describe what went wrong
+          2  thimble label complaint --in "tickets/*.jsonl" --values broken,late,billing,other --limit 25 \
+               --prompt "The main thing the customer is unhappy about."
+          3  reads the 25 with thimble rows "tickets/*.jsonl" --label complaint=late, sees late deliveries with a wrong
+             charge split between late and billing, and writes the definition again: "The main thing the customer is
+             unhappy about. late means the order came after the promised date or never came. billing means a charge, a
+             refund amount or an invoice is wrong. When both happened, choose billing."
+          4  the same label with the new definition and no --limit, over all 4,120 tickets; then thimble label complaint --wait
+          5  reply  Most complaints are about a broken product, [1,210](r4#complaint=broken@n) of the 4,120 tickets. I
+                    sorted the tickets with a label, "complaint", in which a model reads each ticket and picks its main
+                    complaint.
+Bad       1  thimble rows "tickets/*.jsonl" -n 25
+          2  a run with the code
+               cats = {"broken": "broke|defect", "late": "late|delay|never arrived", "billing": "charge|refund|invoice"}
+               counts = {c: sum(bool(re.search(p, t, re.I)) for t in texts) for c, p in cats.items()}
+          3  it prints broken 1,530, late 1,102 and billing 1,871, counting a ticket under every category whose words
+             it contains
+          4  reply  Most complaints are about billing, 1,871 of the 4,120 tickets.
+```
 
 ## Example
 

@@ -96,6 +96,10 @@ export const FEATURES = {
     about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v2',
     versions: { v1: { about: 'as before' }, v2: { about: "v1 with thimble's purpose and the 0.9 words on answering and citing" } },
   },
+  labels: {
+    about: "the classifier a --prompt label's records are read with: one call per batch of up to 50 records", reads: 'verbs/label/run.mjs, for each call of a --prompt label', default: 'v2',
+    versions: { v1: { about: 'as coh-labels wrote it, from the 0.9 classifier' }, v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
+  },
   thimble: { about: 'the thimble skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'thimble', versions: { skill: { file: 'skills/thimble/SKILL.md', about: 'as SKILL.md says now' } } },
   claims: { about: 'the corpus orientation (a subagent reads it)', reads: 'verbs/claims/run.mjs, /verb claims orient', default: 'skill', skill: 'claims', versions: { skill: { file: 'verbs/claims/SKILL.md' } } },
   map: { about: 'the map skill', reads: 'the skill', default: 'skill', skill: 'map', versions: { skill: { file: 'verbs/map/SKILL.md' } } },

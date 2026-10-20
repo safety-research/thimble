@@ -62,6 +62,7 @@ import { mix } from '../draw/palette.js'
 import { emptyStore, readStore } from '../verbs/claims/claims.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 import { modelWhy } from './why.js'
+import { checksDone, checksPending, labelsOf } from './labels'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -298,6 +299,10 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
   $.clock.after(0, () => { void recount($) })
 }
 
+/** The newest version a verb saved of each object (by folder and id): a save of an older one, read from the feed
+ *  later, is drawn at this one. */
+const newestVersion = new Map<string, number>()
+
 /** The saves the kernel wrote to this session's change feed since the feed was last read: one JSON line per save in
  *  $THIMBLE_HOME/lean/events/<session>.jsonl, each naming its object, version and folder. Read from the feed, a save
  *  is seen however the command was written (`thimble save … | tail -3`, a script that saves, a `cd` first). */
@@ -336,6 +341,8 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
   for (const line of lines) {
     try {
       const ev = JSON.parse(line)
+      // a verb the kernel asked for (a --prompt label asks for the label verb): run beside the session
+      if (ev?.kind === 'verb' && typeof ev.object === 'string' && ID.test(ev.object) && typeof ev.root === 'string' && Number(ev.t) >= since) { runFromFeed($, ev); continue }
       if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
       const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
       // a save the card after the answer made: it placed that card itself
@@ -345,8 +352,37 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
       // a line that does not parse is skipped; the feed's later lines still count
     }
   }
-  // an object saved twice in one call is drawn once, at its latest version
+  // an object saved twice in one call is drawn once, at its latest version; one a verb has saved again meanwhile (the
+  // label verb, while the command still ran) is drawn at the verb's version
   return out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root))
+    .map(x => { const v = newestVersion.get(`${x.root}|${x.id}`); return v != null && x.v != null && v > x.v ? { ...x, v } : x })
+}
+
+
+/** How far the look for verbs in the feed has read it, while a command runs (newSaves reads it after). */
+let verbScan: { file: string; bytes: number } | null = null
+
+/** The verbs the kernel asked for in the feed since it was last read, started now (each runs once: runFromFeed). The
+ *  saves are left for newSaves, which places them after the command. */
+async function verbsInFeed($: Engine): Promise<void> {
+  const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+  const file = `${home.replace(/\/+$/, '')}/lean/events/${safe(await sessionKey($))}.jsonl`
+  const size = await $.fs.stat(file).then(x => (x.kind === 'file' ? x.size : -1), () => -1)
+  if (size < 0) return
+  const read = (await $.state.get(EVENTS)).value as { file: string; bytes?: number } | undefined
+  const from = Math.max(verbScan?.file === file ? verbScan.bytes : 0, read?.file === file ? read.bytes ?? 0 : 0)
+  if (size <= from) return
+  const text = await feedTail($, file, from)
+  const whole = text.slice(0, text.lastIndexOf('\n') + 1)
+  verbScan = { file, bytes: from + utf8Bytes(whole) }
+  for (const line of whole.split('\n').filter(Boolean)) {
+    try {
+      const ev = JSON.parse(line)
+      if (ev?.kind === 'verb' && typeof ev.object === 'string' && ID.test(ev.object) && typeof ev.root === 'string' && Number(ev.t) >= LOADED - 2) runFromFeed($, ev)
+    } catch {
+      // a line that does not parse is skipped
+    }
+  }
 }
 
 /** UTF-8 bytes of a text (the feed's offsets are bytes). */
@@ -476,9 +512,10 @@ async function rootHere($: Engine): Promise<string | null> {
 }
 
 /** One call a verb made to the model, made here: the verb's Node child has no $. It is a line in the session's events,
- *  under the feature and prompt version the verb named (`request.telemetry`), else under the verb. */
+ *  under the feature and prompt version the verb named (`request.telemetry`), else under the verb. `units` (how many
+ *  things the call covers, for the progress line) is the verb's note to the shell, never sent. */
 async function modelCall($: Engine, need: { kind: string; request: Any }, word = 'verb'): Promise<unknown> {
-  const { telemetry: tag, ...req } = (need.request && typeof need.request === 'object' ? need.request : {}) as Any
+  const { telemetry: tag, units: _units, ...req } = (need.request && typeof need.request === 'object' ? need.request : {}) as Any
   try {
     const r = await tracked($, { feature: String(tag?.feature || word), prompt: tag?.prompt ?? null, model: need.kind === 'fork' ? 'fork' : String(req.model ?? '') }, () =>
       need.kind === 'fork' ? $.model.fork({ prompt: String(req.prompt ?? '') }) : $.model.complete(req))
@@ -488,9 +525,49 @@ async function modelCall($: Engine, need: { kind: string; request: Any }, word =
   }
 }
 
-/** Run a verb on an object (and region): its run.mjs in a Node child (shell/node/verb.mjs), again after each call to
- *  the model it needs, with the answers so far. What it made is saved by the kernel. */
-async function execVerb($: Engine, word: string, ref: ObjRef, region: string | null, cols: number, o: { state?: Record<string, unknown> | null; args?: string; extra?: Record<string, unknown> } = {}): Promise<Ran> {
+/** Whether a call came back without text because the API was busy (a rate limit, an overload, a server error): such a
+ *  call is tried again after a pause. */
+const busyReply = (r: Any) => !!r && r.isAnswered === false && r.reason === 'api-error' && [429, 500, 502, 503, 529].includes(Number(r.status))
+
+/** How far a verb's calls are: of this run's calls (`calls`, `done`, `failed`), and, when the calls cover units (records
+ *  a label reads), of those (`units`, `of`). */
+export type CallProgress = { calls: number; done: number; failed: number; units?: number; of?: number; round: number }
+
+/** The calls one run of a verb asked for, made side by side, at most `parallel` at once (verb.json, default 4). A call
+ *  the API turned away while busy is tried again after 2, 4 and 8 seconds. Each answer goes under its call's key. */
+async function modelCalls($: Engine, needs: { kind: string; request: Any; key: string }[], word: string, parallel: number, progress?: (p: Omit<CallProgress, 'round'>) => unknown): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {}
+  let next = 0
+  let done = 0
+  let lost = 0
+  let units = 0
+  const of = needs.reduce((n, x) => n + (Number(x.request?.units) || 0), 0)
+  const pause = (ms: number) => new Promise<void>(resolve => { $.clock.after(ms, () => resolve()) })
+  const worker = async () => {
+    while (next < needs.length) {
+      const need = needs[next++]!
+      let r = (await modelCall($, need, word)) as Any
+      for (let t = 0; t < 3 && busyReply(r); t++) {
+        await pause(2000 * 2 ** t)
+        r = (await modelCall($, need, word)) as Any
+      }
+      out[need.key] = r
+      done++
+      units += Number(need.request?.units) || 0
+      if (!r?.isAnswered) lost++
+      try { await progress?.({ calls: needs.length, done, failed: lost, ...(of ? { units, of } : {}) }) } catch { /* the calls go on */ }
+    }
+  }
+  try { await progress?.({ calls: needs.length, done: 0, failed: 0, ...(of ? { units: 0, of } : {}) }) } catch { /* the calls go on */ }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, needs.length)) }, worker))
+  return out
+}
+
+/** Run a verb on an object (and region): its run.mjs in a Node child (shell/node/verb.mjs), again after the calls to
+ *  the model it needs, with the answers so far. Calls a run starts together are made side by side (modelCalls), and
+ *  `progress` hears how far they are. A verb runs at most `rounds` times (verb.json, default 8), and a run that asks
+ *  again for calls it has the answers to stops it. What it made is saved by the kernel. */
+async function execVerb($: Engine, word: string, ref: ObjRef, region: string | null, cols: number, o: { state?: Record<string, unknown> | null; args?: string; extra?: Record<string, unknown>; progress?: (p: CallProgress) => unknown } = {}): Promise<Ran> {
   const p = await prepared($, ref, 96, o.state)
   const on = `${refText(ref)}${region ? ' ▸ ' + region : ''}`
   if (!p.object) return { verb: word, on, error: `no object ${refText(ref)}: ${p.error}` }
@@ -502,16 +579,82 @@ async function execVerb($: Engine, word: string, ref: ObjRef, region: string | n
   }
   const answers: Record<string, unknown> = {}
   let out: Any = null
-  for (let round = 0; round < 8; round++) {
-    const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', word], { stdin: JSON.stringify({ ...input, answers }), cwd: ref.root, env: await leanEnv($, ref.root), timeoutMs: 600000 })
+  let rounds = 8
+  for (let round = 0; round < rounds; round++) {
+    const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', word], { stdin: JSON.stringify({ ...input, answers, round }), cwd: ref.root, env: await leanEnv($, ref.root), timeoutMs: 600000 })
     try { out = JSON.parse(r.stdout) } catch { out = { verb: word, error: (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400) || `exit ${r.exitCode}` } }
     if (!out.need) break
-    answers[String(out.need.key)] = await modelCall($, out.need, word)
+    rounds = Math.max(1, Math.min(200, Number(out.limits?.rounds) || 8))
+    const needs = (Array.isArray(out.needs) && out.needs.length ? out.needs : [out.need]) as { kind: string; request: Any; key: string }[]
+    const fresh = needs.filter(x => !(String(x.key) in answers))
+    if (!fresh.length) { out = { verb: out.verb || word, error: 'it asked again for calls it already has the answers to' }; break }
+    const parallel = Math.max(1, Math.min(16, Number(out.limits?.parallel) || 4))
+    Object.assign(answers, await modelCalls($, fresh, word, parallel, o.progress ? p => o.progress!({ ...p, round }) : undefined))
   }
-  if (out?.need) out = { verb: out.verb || word, error: 'it asked the model more than eight times' }
-  const ran: Ran = { verb: String(out.verb || word), text: out.text, note: out.note, ask: out.ask, error: out.error, on, saved: out.saved ? { id: out.saved.id, v: out.saved.v ?? null, root: ref.root } : null }
+  if (out?.need) out = { verb: out.verb || word, error: `it asked the model for more than ${rounds} rounds of calls` }
+  const ran: Ran = { verb: String(out.verb || word), text: out.text, note: out.note, ask: out.ask, error: out.error, on, saved: out.saved ? { id: out.saved.id, v: out.saved.v ?? null, root: ref.root } : null, ...(out.failed ? { failed: true } : {}) }
   if (ran.saved) await $.state.set(LAST, ran.saved)
   return ran
+}
+
+// ------------------------------------------------------------------------------------------------ verbs the kernel asks for
+
+/** The verbs the change feed asked for that have started, so each runs once. */
+const fromFeed = new Set<string>()
+
+/** A verb the kernel asked for in the change feed (`thimble label NAME --prompt …` asks for the label verb), run once,
+ *  in the background, on the object the event names. Only a verb whose verb.json says `"feed": true` runs so. */
+function runFromFeed($: Engine, ev: Any): void {
+  const key = `${ev.root}|${ev.object}|${ev.verb}|${ev.t}`
+  if (fromFeed.has(key)) return
+  fromFeed.add(key)
+  $.clock.after(0, () => { void feedVerb($, ev).catch(err => failed($, `The ${String(ev.verb)} verb`, err, `run it again with /verb ${String(ev.verb)} ${String(ev.object)}`)) })
+}
+
+/** How far a verb's calls are, in a few words: `120 of 412 records`, or `3 of 9 calls`, and how many failed. */
+export function progressText(p: CallProgress, base = { units: 0, calls: 0 }): string {
+  const main = p.of ? `${fmtN(base.units + (p.units ?? 0))} of ${fmtN(base.units + p.of)} records` : `${fmtN(base.calls + p.done)} of ${fmtN(base.calls + p.calls)} calls`
+  return p.failed ? `${main} · ${fmtN(p.failed)} call${p.failed === 1 ? '' : 's'} failed` : main
+}
+
+/** The feed's verb at work: `<verb>… <progress>` under its object while its calls run; then its new object in the old
+ *  one's place, its words for Claude with the next prompt, and a toast that says plainly what failed. */
+async function feedVerb($: Engine, ev: Any): Promise<void> {
+  const word = String(ev.verb || '')
+  if (!/^[a-z][a-z0-9_-]{0,40}$/.test(word)) return
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  let spec: Any = null
+  try { spec = JSON.parse(String(await $.fs.read(`${dir}/verbs/${word}/verb.json`))) } catch { spec = null }
+  if (!spec || spec.feed !== true) return
+  const ref: ObjRef = { id: String(ev.object), v: null, root: String(ev.root).replace(/\/+$/, '') }
+  const at = { ...SAID, id: ref.id }
+  await $.state.set(at, { verb: word, running: true, text: 'starting' })
+  // the calls of each round add to those of the rounds before
+  const base = { units: 0, calls: 0, round: 0 }
+  let last: CallProgress | null = null
+  const ran = await execVerb($, word, ref, null, 96, {
+    args: String(ev.args || ''),
+    progress: async p => {
+      if (last && p.round !== last.round) { base.units += last.of ?? 0; base.calls += last.calls }
+      last = p
+      await $.state.set(at, { verb: word, running: true, text: progressText(p, base) })
+    },
+  })
+  await $.state.set(at, ran.error ? { verb: word, error: ran.error } : { verb: word, text: ran.text })
+  if (ran.saved) await showVersion($, ran.saved)
+  const said = ran.error ? `It failed: ${ran.error}` : ran.note || ran.text || ''
+  await noteForClaude($, `The ${word} verb ran on ${ref.id}, as \`thimble ${word}\` asked. ${said}`.trim())
+  if (ran.error) $.ui.toast(`× ${word} ${String(ev.args || ref.id)}: ${cut(ran.error, 200)}`)
+  else if (ran.failed) $.ui.toast(`! ${cut(ran.text || `${word} ran, and some of its calls failed`, 240)}`)
+}
+
+/** A new version of an object: drawn where the object is drawn now, in its place; one the turn has not placed yet is
+ *  placed at the new version. */
+export async function showVersion($: Engine, ref: ObjRef): Promise<void> {
+  if (ref.v != null) newestVersion.set(`${ref.root}|${ref.id}`, Math.max(ref.v, newestVersion.get(`${ref.root}|${ref.id}`) ?? 0))
+  const where = (await $.state.get({ ...WHERE, id: ref.id })).value as string | undefined
+  if (where) { await place($, where, ref); return }
+  if (turn) turn.unplaced = turn.unplaced.map(x => (x.id === ref.id && x.root === ref.root ? { ...x, v: ref.v } : x))
 }
 
 /** What Claude reads of a verb the person ran, with their next prompt. */
@@ -521,7 +664,7 @@ function ranNote(r: Ran): string {
 }
 
 /** Words for Claude alone, given with the next prompt (prompt.submit's context): no row of the transcript. */
-async function noteForClaude($: Engine, text: string): Promise<void> {
+export async function noteForClaude($: Engine, text: string): Promise<void> {
   const cur = ((await $.state.get(NOTES)).value ?? []) as string[]
   await $.state.set(NOTES, [...cur, text].slice(-12))
 }
@@ -2269,7 +2412,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
 /** The one quiet row under an object while a verb runs on it (`map…`); nothing at rest. Its keys (`1 open detail`)
  *  are in the hint line under the prompt, and the card the keys act on shows it by its frame. */
 function runningRow(els: Any, said: Said | null) {
-  return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…` }) : null
+  return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
 }
 
 /** One object inline: its cells, or one red line saying why it cannot be drawn. The card the keys act on (`1` opens
@@ -2468,6 +2611,8 @@ export async function paneWant($: Engine, _name: string, _args: Record<string, u
     await resolveRefs($, root, refs)
     return (await $.state.get({ ...ROWS, id: `${root}|${refsKey(refs.length > 1 ? refs.slice(0, 500) : refs)}` })).value ?? null
   }
+  // the labels of the records a part shows (shell/labels.ts), read again after each check
+  if (Array.isArray(request?.labels) && root) return labelsOf($, root, request.labels as string[], Number(request.gen) || 0)
   // where a card's values come from: its sources, rows, labels and the files read (the from line)
   if (typeof request?.facts === 'string' && ID.test(request.facts) && root) {
     const dir = $.plugin.root.replace(/\/+$/, '')
@@ -2636,7 +2781,12 @@ export const registerShell: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const r = await next(e)
+    // a verb the kernel asks for while the command still runs (`thimble label … --prompt … && thimble label … --wait`
+    // waits on it): the feed is looked at each second until the command ends
+    let watch: { cancel?: () => void } | null = null
+    try { watch = $.clock.every(1000, () => { void verbsInFeed($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { watch = null }
+    let r: Awaited<ReturnType<typeof next>>
+    try { r = await next(e) } finally { watch?.cancel?.() }
     let notes: string[] = []
     try {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
@@ -2956,6 +3106,8 @@ export const registerShell: Register = (on, options) => {
     const context: string[] = []
     try {
       context.push(...(await sqNotes($)))
+      // checks of label values the person made in a detail whose close was never heard: Claude hears of them now
+      if (checksPending()) await checksDone($)
       const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
       if (notes.length) {
         context.push(notes.join('\n'))
@@ -3114,6 +3266,7 @@ export const registerShell: Register = (on, options) => {
 
 /** For tests: the module's memory, cleared. */
 export function resetShell(): void {
+  newestVersion.clear()
   objects.clear()
   preps.clear()
   pending.clear()
