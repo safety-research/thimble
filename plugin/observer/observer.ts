@@ -31,9 +31,9 @@
 //    Order with squeeze: a step the person makes on Interpretation or Background before the pass has said where the
 //    answer stands waits for the look (lookPending) and counts from the level it gives.
 //
-// Switches (settings/features.mjs): the observer and each lens can be turned off in /thimble-settings or /config. A
-// lens turned off (there, or with THIMBLE_PROMPTS=lens-explain:off) has no section in the prompt, no key in the reply,
-// and no merge. THIMBLE_OBSERVER_SHADOW=<version> (such as v4-low) runs that frame version too on each look, measured
+// Features (settings/features.mjs): each lens belongs to a feature the person turns on or off in /thimble-settings,
+// and the observer runs only while one of those features is on. A lens turned off (there, or with
+// THIMBLE_PROMPTS=lens-explain:off) has no section in the prompt, no key in the reply, and no merge. THIMBLE_OBSERVER_SHADOW=<version> (such as v4-low) runs that frame version too on each look, measured
 // in the session's events and the observer's file and never merged, so two versions compare on the same session.
 //
 // Where its output goes:
@@ -278,8 +278,8 @@ export function messagesText(msgs: Msg[]): string {
   return [`Read these ${msgs.length} messages of Claude's, above in the session, in order. They came while you read the one before them:`, ...msgs.map((m, i) => `${i + 1}. ${one(m)}`)].join('\n')
 }
 
-/** The keys in the analyst's row, as the switches leave them. */
-const rowKeys = () => ['v visualize', 's squeeze', ...(featureOn('claims') ? ['c claims'] : [])].join(', ')
+/** The keys in the analyst's row, as the features leave them (each key only while its feature is on). */
+const rowKeys = () => [['cards', 'v visualize'], ['squeeze', 's squeeze'], ['claims', 'c claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
 
 // ------------------------------------------------------------------------------------------------ the queue
 

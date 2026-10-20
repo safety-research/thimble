@@ -1,7 +1,7 @@
 {
   "name": "thimble",
   "version": "0.10.0",
-  "description": "thimble for Claude Code: the `thimble` command reads and queries any files and keeps the code, inputs and source rows behind every value. Each card Claude saves is drawn under its reply and opens in a detail view that keeps the chat going; each citation opens the rows it cites. After each of Claude's messages an observer reads it with the whole session: it leaves notes for Claude, lights v when another view would help, and marks the terms the person may not know. Each part can be turned off in /thimble-settings or /config.",
+  "description": "thimble for Claude Code: the `thimble` command reads and queries any files and keeps the code, inputs and source rows behind every value. Each card Claude saves is drawn under its reply and opens in a detail view that keeps the chat going; each citation opens the rows it cites. After each of Claude's messages an observer reads it with the whole session: it lights v when another view would help, marks the terms the person may not know, and keeps the session's claims. A click on `thimble` in the bar, or /thimble-settings, turns each feature on or off.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -13,65 +13,47 @@
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "observer": {
+    "cards": {
       "type": "boolean",
-      "title": "Observer",
-      "description": "After each of Claude's messages, a side agent reads it with the whole session and gives the parts that are on. One call per message, over the session Claude already has cached.",
-      "default": true
-    },
-    "notes": {
-      "type": "boolean",
-      "title": "Observer: notes to Claude",
-      "description": "Up to two notes Claude reads with your next prompt, such as a number that counts the wrong months. You do not see them. A small part of each look.",
-      "default": true
-    },
-    "visualize": {
-      "type": "boolean",
-      "title": "Observer: v proposals",
-      "description": "Lights v with a named view when a view would show what the answer only tells. A small part of each look.",
-      "default": true
-    },
-    "explain": {
-      "type": "boolean",
-      "title": "Observer: explainers",
-      "description": "Marks the terms of an answer you may not know; ] opens what each one means here. A small part of each look.",
-      "default": true
-    },
-    "details": {
-      "type": "boolean",
-      "title": "Observer: important details",
-      "description": "Marks the details of an answer that are easy to miss and change what it means. A small part of each look.",
+      "title": "Cards",
+      "description": "v makes a chart or a table of an answer, and lights up when one would show more. A small part of the call after each reply; then one card each time you ask.",
       "default": true
     },
     "squeeze": {
       "type": "boolean",
-      "title": "Observer: squeeze levels",
-      "description": "Says where each answer stands on squeeze's chips, so your first change with s starts from the right level. A few words of each look.",
+      "title": "Squeeze and catch-up",
+      "description": "s makes an answer shorter or longer, and catches you up on replies you missed. A few words of the call after each reply; then one rewrite each time you ask.",
+      "default": true
+    },
+    "explain": {
+      "type": "boolean",
+      "title": "Explainers",
+      "description": "Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.",
+      "default": true
+    },
+    "details": {
+      "type": "boolean",
+      "title": "Important details",
+      "description": "Marks the details of an answer that are easy to miss and change what it means. A small part of the call after each reply.",
       "default": true
     },
     "claims": {
       "type": "boolean",
-      "title": "Observer: claims",
-      "description": "Keeps the session's claims in the Claims pane, with c and the claims count on the bar. The largest part of each look.",
+      "title": "Claims",
+      "description": "c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.",
       "default": true
     },
-    "catchup": {
+    "counts": {
       "type": "boolean",
-      "title": "Catch-up",
-      "description": "When two or more replies came since your last prompt, s offers to catch up on all of them in one. Nothing until you press s: then one rewrite of the replies.",
+      "title": "Labels and coverage on the bar",
+      "description": "The bar shows how much of the data Claude read (r) and how many labels there are (l). No model call: thimble counts the files after each turn.",
       "default": true
     },
-    "coverage": {
+    "notes": {
       "type": "boolean",
-      "title": "Coverage count on the bar",
-      "description": "Shows on the bar how much of the data Claude read (seen 12%); r opens Coverage. No model call: thimble counts the files after each turn.",
-      "default": true
-    },
-    "labels": {
-      "type": "boolean",
-      "title": "Labels count on the bar",
-      "description": "Shows on the bar how many labels the folder has; l opens them. No model call.",
-      "default": true
+      "title": "Notes to Claude (experimental)",
+      "description": "Claude gets up to two notes on its last answer with your next prompt. You do not see them. A small part of the call after each reply.",
+      "default": false
     }
   }
 }

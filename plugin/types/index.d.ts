@@ -137,6 +137,8 @@ declare module 'claude-code' {
       sqz: StateFamily<SqzUi | null>
       /** the pane drawn as a Client that holds the keyboard (a click on it gave it), by its id (shell.tsx heldEl), or none */
       held: string | null
+      /** the feature the settings panel changed last: it stays selected while the plugin loads again (settings/term.ts) */
+      setlast: string | null
       /** the chips the person typed after + this session, newest last */
       owndims: string[]
       /** v's card landed under a message off screen: the bar says so for a few seconds (shell.tsx cardLanded) */

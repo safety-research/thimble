@@ -1,6 +1,7 @@
 // The observer's hooks (observer/observer.ts): one look after a turn of work; its notes reach Claude beside the next
 // prompt and never the person; it lights the verbs of the answer's row and places its glosses, a gloss never twice and
-// fewer when nobody opens them.
+// fewer when nobody opens them. Notes to Claude is an experimental feature, off by default: the tests of notes turn it
+// on (settings/features.mjs).
 // `claude plugin test plugin`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -161,7 +162,7 @@ async function turn($: Any, w: { at: { tools: number } }, clock: Any, o: { id: s
 const reply = ($: Any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18.', isFirstOfReply: true }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never)
 const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 
-test('after a turn that saved an object: one look reads its lineage; its note reaches Claude with the next prompt, and it lights the verbs of the answer', async ($, on) => {
+test('after a turn that saved an object: one look reads its lineage; its note reaches Claude with the next prompt, and it lights the verbs of the answer', { options: { notes: true } }, async ($, on) => {
   const w = world(on, { fork: {
     notes: [{ note: 'The 6,543 counts every save of Jun 18, reverts too; say so.', rests_on: 'tally(df, "day")' }],
     line: null, settled: false,
@@ -211,7 +212,7 @@ test('a short answer of a turn with no tool is read too: one look, as every answ
   expect(w.forks.length).toBe(1)
 })
 
-test('a look that ends while a new turn runs: its note waits for Claude\'s next prompt, and its verbs light the answer it looked at', async ($, on) => {
+test('a look that ends while a new turn runs: its note waits for Claude\'s next prompt, and its verbs light the answer it looked at', { options: { notes: true } }, async ($, on) => {
   const w = world(on, { fork: { notes: [{ note: 'Before you share it: the 6,543 counts reverts.' }], verbs: { v: { note: 'saves by day', proposals: ['saves by day'] } } } })
   const clock = w.clock
   // the turn ends; before its look runs, the person starts another turn
@@ -248,7 +249,7 @@ test('a reload mid-session keeps the notes not yet delivered: they reach Claude 
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('412')
 })
 
-test("a turn v's ask started: the notes ride on its prompt, once; the pass reads v's prompt", async ($, on) => {
+test("a turn v's ask started: the notes ride on its prompt, once; the pass reads v's prompt", { options: { notes: true } }, async ($, on) => {
   let n = 0
   const w = world(on, {
     fork: () => (++n === 1 ? { notes: [{ note: 'The agents add up to 194, not 196: fix the title of 01-saves.' }], line: null, settled: false, hints: {} } : { notes: [], line: null, settled: false, hints: {} }),
@@ -287,7 +288,7 @@ test("a turn v's ask started: the notes ride on its prompt, once; the pass reads
   expect(JSON.parse(w.files[OBS]!).log.filter((r: Json) => r.kind === 'notes_delivered').map((r: Json) => r.with)).toEqual(['verb visualize'])
 })
 
-test('a prompt a hook drops gives its notes back: they ride on the next prompt that enters', async ($, on) => {
+test('a prompt a hook drops gives its notes back: they ride on the next prompt that enters', { options: { notes: true } }, async ($, on) => {
   // beneath the plugin, a notification that never enters (Claude Code drops it)
   on('prompt.submit', { origin: { kind: 'task-notification' } }, () => ({ drop: 'the thread answered' }))
   const w = world(on, { fork: { notes: [{ note: 'The 412 counts all months.' }], line: null, settled: false, hints: {} } })
@@ -407,7 +408,7 @@ test('a term the person saw explained is never glossed again; glosses nobody ope
 
 // ------------------------------------------------------------------------------------------------ lenses, versions, telemetry
 
-test('the pass is a fork of the session: its prompt is the frame, the lenses, the message to read and the evidence; each call and the turn are lines in the session events, with each lens\'s share', async ($, on) => {
+test('the pass is a fork of the session: its prompt is the frame, the lenses, the message to read and the evidence; each call and the turn are lines in the session events, with each lens\'s share', { options: { notes: true } }, async ($, on) => {
   const w = world(on, { fork: { notes: [{ note: 'Say the 6,543 counts reverts.' }], line: null, settled: false, verbs: { v: { note: '1 view ready', proposals: ['saves per day, June 18 marked'] } }, glosses: [], claims: [] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
   await w.clock.settle()
@@ -454,7 +455,7 @@ test('the pass is a fork of the session: its prompt is the frame, the lenses, th
   expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves per day, June 18 marked'])
 })
 
-test('a lens turned off is neither asked nor merged; another frame version is read in its place', async ($, on) => {
+test('a lens turned off is neither asked nor merged; another frame version is read in its place', { options: { notes: true } }, async ($, on) => {
   const w = world(on, { env: { THIMBLE_PROMPTS: 'lens-explain:off,observer:v3' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
   await w.clock.settle()
@@ -648,7 +649,7 @@ test('words Claude writes to the person before it goes on working are a message 
   expect(w.forks[1]).toContain('Claude\'s answer at the end of turn 1, which begins "Agent 30 edited most."')
 })
 
-test('a pass that fails is tried once more; a second failure is said plainly, with its fix', async ($, on) => {
+test('a pass that fails is tried once more; a second failure is said plainly, with its fix', { options: { notes: true } }, async ($, on) => {
   let n = 0
   const FAIL = { fails: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: USAGE } }
   const w = world(on, { fork: () => (++n <= 1 ? FAIL : { notes: [{ note: 'The 6,543 counts reverts too.' }], verbs: {}, glosses: [] }) })
@@ -671,7 +672,7 @@ test('a pass that fails is tried once more; a second failure is said plainly, wi
   expect(w.toasts).toEqual(["thimble's observer could not read Claude's last message: the API is overloaded."])
 })
 
-test('THIMBLE_OBSERVER_SHADOW runs another frame version on the same look, measured and never merged', async ($, on) => {
+test('THIMBLE_OBSERVER_SHADOW runs another frame version on the same look, measured and never merged', { options: { notes: true } }, async ($, on) => {
   const w = world(on, { env: { THIMBLE_OBSERVER_SHADOW: 'v4-low' }, fork: { notes: [{ note: 'A note from the look.' }], verbs: {}, glosses: [] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
   await w.clock.settle()
@@ -688,7 +689,7 @@ test('THIMBLE_OBSERVER_SHADOW runs another frame version on the same look, measu
   expect(w.submitted.at(-1)!.context.join('\n').match(/A note from the look\./g)?.length).toBe(1)
 })
 
-test('a note whose look ends after the person asked again reaches Claude in that turn, with the next result of a tool, once', async ($, on) => {
+test('a note whose look ends after the person asked again reaches Claude in that turn, with the next result of a tool, once', { options: { notes: true } }, async ($, on) => {
   let release = () => {}
   const held = new Promise<void>(r => { release = r })
   const w = world(on, { holdPass: held, fork: { notes: [{ note: 'The 6,543 counts reverts too.' }], verbs: {}, glosses: [] } })

@@ -42,8 +42,8 @@ import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop 
 import { catchUpEl, keyColor, messageEl } from './view'
 import { markNextTurn, record as recordEvent } from '../telemetry/telemetry'
 import { ownTurn } from '../observer/observer'
-import { featureOn } from '../settings/features.mjs'
-import { openSettings, settingsAction, settingsStore } from '../settings/term'
+import { featureOn, switchesFrom } from '../settings/features.mjs'
+import { heldValues, openSettings, settingsAction, settingsStore } from '../settings/term'
 
 
 import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, markChanged as sqChanged, setLevels as sqSetLevels, sLit, tellSettled, wantLevels as sqWant } from '../squeeze/term'
@@ -794,8 +794,11 @@ async function drawnRecord($: Engine, at: string, text: string): Promise<MsgReco
 
 /** The keys of the row: v and s, and c, which opens the Claims pane in the side panel. */
 const ROW_KEYS = [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }, { key: 'c', name: 'claims' }]
-/** The keys of the row as the switches leave them: c only while Claims is on (settings/features.mjs). */
-const rowKeysOn = () => ROW_KEYS.filter(v => v.key !== 'c' || featureOn('claims'))
+/** The feature each key of the row belongs to (settings/features.mjs): v to Cards, s to Squeeze, c to Claims. */
+const ROW_FEATURE: Record<string, string> = { v: 'cards', s: 'squeeze', c: 'claims' }
+/** The keys of the row as the features leave them: a key only while its feature is on (`on`: featureOn, or the
+ *  values the settings panel's preview shows). */
+const rowKeysOn = (on: (key: string) => boolean = featureOn) => ROW_KEYS.filter(v => on(ROW_FEATURE[v.key] ?? v.key))
 
 /** Whether a person is at this session: `now` (an interactive session), `later` (one Claude Code's background service
  *  runs, a pre-warmed spare or a background job, until the person's first prompt), `never` (a `-p` run, the SDK). */
@@ -857,8 +860,8 @@ async function sinceLastPrompt($: Engine): Promise<{ prompt: { row: string; text
  * and since the newest catch-up of them the person read. Then s offers to catch up on all the replies since that
  * prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
  */
-async function pileUp($: Engine): Promise<{ n: number; prompt: { row: string; text: string } | null; rows: string[]; replies: string[] } | null> {
-  if (!featureOn('catchup')) return null
+async function pileUp($: Engine, on: (key: string) => boolean = featureOn): Promise<{ n: number; prompt: { row: string; text: string } | null; rows: string[]; replies: string[] } | null> {
+  if (!on('squeeze')) return null
   const since = await sinceLastPrompt($)
   let from = 0
   for (let i = since.replies.length - 1; i >= 0; i--) {
@@ -1382,7 +1385,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     const root = await rootHere($)
     let cov = old?.cov ?? 0
     let mix = old?.mix ?? []
-    if (o.coverage && root && person === 'now' && featureOn('coverage')) {
+    if (o.coverage && root && person === 'now' && featureOn('counts')) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
         const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
@@ -1605,11 +1608,17 @@ function barNamed(k: string, now: number, since: number): boolean {
 /** The bar: its label, what the keys do now at its left, the counts at its right. Always there while thimble is on.
  *  It is always one line: with less room it drops the counts (coverage last), then says each key's words by their
  *  first word, then drops its label, then cuts its end (panes/host.js fitBar). Beside a docked pane Claude Code gives
- *  the band only the transcript's column, so there it is the narrow form. */
-async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
+ *  the band only the transcript's column, so there it is the narrow form.
+ *
+ *  `preview`: the bar as it is at rest, with the features as `on` says (the settings panel's preview, barPreviewEl):
+ *  no surface's keys, no thread's name, and nothing in it is a press. */
+async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) => boolean; preview?: boolean } = {}): Promise<Any | null> {
+  const on = o.on ?? featureOn
+  // a preview's presses are words: what each would press shows, and nothing acts
+  const els = o.preview ? { ...elsIn, Button: (p: Any) => elsIn.Text({ key: p.key, children: p.children }) } : elsIn
   const { Box, Button, Text } = els
   const left: BarSeg[] = []
-  const focus = await focusKeys($)
+  const focus = o.preview ? null : await focusKeys($)
   if (focus) {
     // what the focused surface says now, cut at its end when the line is short (never to its first word), then its keys
     if (focus.status) left.push({ key: '', words: focus.status.text, tone: focus.status.tone, status: true })
@@ -1638,18 +1647,18 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     const nameOf = (v: { key: string; name: string }) => (v.key === 'c' ? claimWords : v.name)
     const claimsBright = !!lc && (await $.clock.now()) - (lc.changed.claims ?? 0) < BRIGHT_MS
     if (!row || !rec) {
-      for (const v of rowKeysOn()) left.push({ key: v.key, words: nameOf(v), dim: true })
+      for (const v of rowKeysOn(on)) left.push({ key: v.key, words: nameOf(v), dim: true })
     } else {
-      const verbs = rowKeysOn()
+      const verbs = rowKeysOn(on)
       const sqUi = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
       const lit: Record<string, { lit?: boolean; note?: string }> = { ...(rec.verbs || {}) }
-      // v lit by the observer, while its v proposals are on
-      if (!featureOn('visualize')) delete lit.v
+      // v lit by the observer, while Cards is on
+      if (!on('cards')) delete lit.v
       const sv = sLit(rec, sqUi)
       if (sv) lit.s = sv
       else delete lit.s
       // replies piled up since the person's last prompt, and the keys on the newest: s catches up on them, lit and bold
-      const pile = !(await $.state.get(SELROW)).value ? await pileUp($) : null
+      const pile = !(await $.state.get(SELROW)).value ? await pileUp($, on) : null
       for (const v of verbs) {
         const color = keyColor(v.key, theme)
         const on = lit[v.key]
@@ -1676,7 +1685,7 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   }
   const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
   const now = await $.clock.now()
-  noteBar(now, left)
+  if (!o.preview) noteBar(now, left)
   // each count: its id, its number, its words, and the key that acts on it (drawn before its words; a click on the
   // count does what the key does)
   // (the claims are counted by c at the left, never here)
@@ -1692,8 +1701,8 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   // so the bar never names one key twice. Unnamed, a click on the count still opens it.
   const named = namedKeys(left)
   const keyed = (k: string | null | undefined) => !!k && !focus && !named.has(k)
-  // a count whose switch is off is not shown: coverage and the labels with their own
-  const shown = (id: string) => (id === 'cov' ? featureOn('coverage') : id === 'labels' ? featureOn('labels') : true)
+  // a count whose feature is off is not shown: coverage and the labels with theirs
+  const shown = (id: string) => (id === 'cov' || id === 'labels' ? on('counts') : true)
   const counts = items.filter(([id, n]) => n > 0 && shown(id)).map(([id, , words, key]) => {
     const bright = now - (c!.changed[id] ?? 0) < BRIGHT_MS
     // (coverage's and the labels' words begin with their key: dock.ts)
@@ -1701,7 +1710,7 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
     if (dk) return keyed(dk) ? { id, text: words, bright } : { id, text: words.slice(dk.length + 1), bare: true, bright }
     return keyed(key) ? { id, text: `${key} ${words}`, key, bright } : { id, text: words, bright }
   })
-  const where = await threadInFront($)
+  const where = o.preview ? null : await threadInFront($)
   if (!left.length && !counts.length && !where) return null
   const fit = fitBar({ label: where ?? 'thimble', left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bare?: boolean; bright: boolean }[]; cut: boolean }
   // the label names whose keys these are; it is no link and no press, so it is drawn plain (an underline is a
@@ -1751,6 +1760,20 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
   return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [...label, ...leftEls] }),
     ...(right ? [right] : []),
+  ] })
+}
+
+/** The bar as the features Claude Code holds now leave it, at rest: the settings panel's preview, which detail.tsx
+ *  draws above the list. It is the bar's own drawing (barEl) for this session, in a frame, with nothing in it a press;
+ *  a feature turned off a moment ago is already gone from it, while the plugin loads again with the new value. */
+export async function barPreviewEl($: Engine, els: Any, w: number): Promise<Any> {
+  const { Box, Text } = els
+  const on = switchesFrom(await heldValues($))
+  const inner = Math.max(20, w - 4)
+  const line = (await barEl($, els, inner, { on, preview: true })) ?? Text({ key: 'bar-label', color: FOCUS[theme], bold: true, children: 'thimble' })
+  return Box({ key: 'bar-preview', flexDirection: 'column', width: w, children: [
+    Text({ key: 'bar-preview-title', dimColor: true, children: 'The bar, with these features' }),
+    Box({ key: 'bar-preview-frame', borderStyle: 'round', borderDimColor: true, paddingX: 1, width: w, children: [line] }),
   ] })
 }
 
@@ -1968,7 +1991,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // with no letter after them (a letter makes them the start of a word, as after t)
   if (!pick && (k === DOCK_KEY.coverage || k === DOCK_KEY.labels)) {
     const counts = (await $.state.get(COUNTS)).value as LineCounts | null
-    const pane = restPane(k, { cov: featureOn('coverage') && (counts?.cov ?? 0) > 0, labels: featureOn('labels') && (counts?.labels ?? 0) > 0 })
+    const pane = restPane(k, { cov: featureOn('counts') && (counts?.cov ?? 0) > 0, labels: featureOn('counts') && (counts?.labels ?? 0) > 0 })
     if (pane) {
       const wait = { cancelled: false }
       const undo = () => { wait.cancelled = true; if (pendingT === wait) pendingT = null; keyOpened = null }
@@ -3100,6 +3123,7 @@ export const registerShell: Register = (on, options) => {
   // /squeeze [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
   // on), picked; with no words, the chips open
   on('command.run', { command: 'squeeze' }, async ($, e) => {
+    if (!featureOn('squeeze')) return { text: 'Squeeze is off. Turn on "Squeeze and catch-up" in /thimble-settings to use it.' }
     const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
     const row = pick?.verb === 's' ? pick.row : await actingRow($)
     if (!row || !(await recordNow($, row))) return { text: 'No message to squeeze yet: ask Claude something first.' }
