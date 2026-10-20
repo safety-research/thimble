@@ -23,8 +23,9 @@
 //
 //   state: {by: 'pattern' | 'type', group: the group open, file: the file open, at: the part selected, range: the range}
 //   presses: a group opens its files, a file its lines, a range its lines as a citation; `by pattern` and `by type`
-//            group the files. keys: none of its own: the side panel's ring walks the parts (↑ ↓, tab), ↵ presses the one
-//            it is on, esc goes back a level (at the top, esc is the panel's: back, or close)
+//            group the files. keys: none of its own: the side panel's ring walks the parts (↑ ↓, tab), starting on the
+//            part selected, ↵ presses the one it is on, esc goes back a level (at the top, esc is the panel's: back, or
+//            close)
 //   wants: {lines: path, from, to} (the file's lines around a range, read by the host)
 //   asks of the host: open {mark: {kind: 'cite', ref, label}} (a seen range, as a citation)
 
@@ -151,6 +152,8 @@ function patternText(k, p, bold = false) {
 export default {
   name: 'coverage',
   title: 'Coverage',
+  // the ring starts on the selected group, so ↵ opens it at once, as a click does; a letter still starts a question
+  ringStart: 'part',
   local: ['at'],
   reads: () => ['coverage'],
   stateKey: () => 'coverage',
