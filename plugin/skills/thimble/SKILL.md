@@ -40,7 +40,7 @@ The first bad reply uses words the analyst never used and gives six numbers wher
 
 The analyst never sees your shell output, so cite what your answer rests on. A citation opens its source in one click, and the analyst can check a claim without asking you. Put the link on the words of the claim itself.
 
-- A number links to the query row it comes from, as in `[352](r3#outcome=approved@n) of the 410`. Compute every number you cite with `thimble run` over every record, so that its citation opens the records behind it.
+- A number links to its value in a query's result, as in `[352](r3#outcome=approved@n) of the 410`, which points at column n of the line where outcome is approved in the result of query r3. Compute every number you cite with `thimble run` over every record, so that its citation opens the records behind it.
 - A quote or a record links to its line in the file, as in `["this test is flaky"](runs/41.jsonl#L88)`. In a transcript, one block of a line (its words, a tool call or a result) is `#L88.b2`.
 - Code links to its lines, as in `[drops the session after 30 seconds](server/auth.py#L88-94)`.
 - A shape links to a column of a query, as in `[~](r3@n)`, which draws that column in place. Use it when the sentence claims a trend, a burst or a spread that the numbers alone hide, and at most once in a message.
@@ -89,7 +89,7 @@ The bad answer misses the tickets that ask for money back without the word "refu
 
 `thimble` alone lists its commands.
 
-- `thimble run "ABOUT"` runs the Python you give it on stdin over the files, as a query. It keeps the code, the files it read, its output and the records behind each output row, under an id such as r3. In a query, `load(file, fields=[...])` reads a file, `tally(df, by)` counts and keeps each group's records, `use("r3")` reads an earlier query's output so nothing is computed twice, and `use("NAME")` gives a label's value and `_ref` for each record.
+- `thimble run "ABOUT"` runs the Python you give it on stdin over the files, as a query. It keeps the code, the files it read, its output and the records behind each line of its result, under an id such as r3. In a query, `load(file, fields=[...])` reads a file, `tally(df, by)` counts and keeps each group's records, `use("r3")` reads an earlier query's output so nothing is computed twice, and `use("NAME")` gives a label's value and `_ref` for each record.
 - `thimble rows` lists the files and the saved cards. With a file it shows rows, which `--where`, `--search`, `--label NAME=VALUE` and `-n` narrow. With a ref it shows that row, or a value's chain down to its records. Use it when you are not sure where a value came from.
 - `thimble save NAME --from FILE` saves a card. The card guide describes the file.
 - `thimble label NAME --in GLOB` defines a label and applies it, with one of `--regex RE`, `--code FILE` (a Python `label(unit)` that returns a value, or a value and a confidence) or `--prompt "DEFINITION"`. `--values` gives the values, the positive first. `--limit N` tries it on N records, and the same command without `--limit` labels the rest. A prompt label makes a model call for each 50 records, so try it with `--limit` first, and use `thimble label NAME --wait` to wait for its calls. When the analyst corrects a record, their value counts in place of the label's.
@@ -106,4 +106,4 @@ thimble save saves-per-day --from card.json
 thimble rows "obj:saves-per-day#/days/19/n" -n 3
 ```
 
-The last command follows a value of the card down to its rows: the card, r1 with its code, the 6,543 records of revisions.jsonl behind that day, and the first three of them.
+The last command follows a value of the card down to its records: the card, r1 with its code, the 6,543 records of revisions.jsonl behind that day, and the first three of them.

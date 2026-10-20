@@ -28,7 +28,8 @@
       "tail": true,
       "drop": [
         " Compute every number you cite with `thimble run` over every record, so that its citation opens the records behind it.",
-        " In a transcript, one block of a line (its words, a tool call or a result) is `#L88.b2`."
+        " In a transcript, one block of a line (its words, a tool call or a result) is `#L88.b2`.",
+        ", which points at column n of the line where outcome is approved in the result of query r3"
       ],
       "replace": [
         [
@@ -36,7 +37,7 @@
           "never sees your tools' output"
         ],
         [
-          "A number links to the query row it comes from",
+          "A number links to its value in a query's result",
           "A number links to its value in a card"
         ],
         [

@@ -1,6 +1,6 @@
 ## Claims
 
-The claims graph beside the chat shows each statement of the work that could be true or false, grouped by the question it is about, so the analyst can check one claim at a time with the rows it cites. Give the claims of the answer and of the analyst's message it answers, and none for a plan, a step or a question.
+The claims graph beside the chat shows each statement of the work that could be true or false, grouped by the question it is about, so the analyst can check one claim at a time with the records it cites. Give the claims of the answer and of the analyst's message it answers, and none for a plan, a step or a question.
 
 Write each claim as a full sentence that reads alone, in the message's own words, with its numbers and qualifiers. A claim said again, in any words, is the same claim, and one that says an earlier claim is wrong revises it. Link a claim to one it supports or that is about the same thing, and name each cluster by the one question it looks into.
 
