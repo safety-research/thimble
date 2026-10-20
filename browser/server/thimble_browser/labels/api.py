@@ -420,8 +420,11 @@ DRAFT_SCHEMA = {
 
 async def draft(ws: str, folder: Any, text: str, paths: list[str]) -> dict[str, Any]:
     """The label the labels model defines from the analyst's description, reading the first records of the files it
-    would apply to; nothing is stored."""
-    found = units_mod.match_paths(folder, store.globs(paths)) if paths else []
+    would apply to (every file when none is chosen); nothing is stored."""
+    # with no files chosen (the Labels sidebar's New label), the label reads every file of the folder, which the analyst
+    # can narrow in its card
+    paths = paths or ["*"]
+    found = units_mod.match_paths(folder, store.globs(paths))
     if found:
         first = found[0]
         lines = []

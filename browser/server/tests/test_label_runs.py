@@ -180,3 +180,20 @@ def test_the_label_editors_run_asks_first_with_the_same_ask(big, folder, monkeyp
         assert run.record(big, cid)["total"] == asks.SAMPLE and run.record(big, cid)["status"] == "done"
         assert c.get(f"{base}/concepts/{cid}").json()["ask"] is None
     assert label_runs(big) == [] and agent.take_notes(big, "main") == []
+
+
+async def test_a_label_described_with_no_files_reads_every_file(big, folder, monkeypatch):
+    """The Labels sidebar's New label chooses no files: the drafted label applies to every file, so its Run reaches
+    the ask instead of failing with "applies to no files"."""
+    from thimble_browser.labels import api
+
+    seen = {}
+
+    async def complete(system, user, **kw):
+        seen["prompt"] = system
+        return json.dumps({"scope": "files", "kind": "prompt", "name": "asks", "text": "Asks a question.",
+                           "values": ["yes", "no"], "marks": "span"})
+
+    monkeypatch.setattr(llm, "complete", complete)
+    got = await api.draft(big, folder, "edits that ask a question", [])
+    assert got["glob"] == "*" and "edits.jsonl" in seen["prompt"]
