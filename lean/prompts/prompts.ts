@@ -15,9 +15,7 @@
 // the time).
 //
 // Skills: Claude Code finds a skill's SKILL.md where it is, and that text is the version `skill`. When another version
-// of a skill's feature is active, the skill.prompt hook serves it in place of the file's text. The same hook makes sure
-// a verb's skill never replaces the thimble skill: when Claude loads one of thimble's other skills (map, explore, trace,
-// claims) before the thimble skill in a session, the thimble skill's text comes first in what it reads.
+// of a skill's feature is active, the skill.prompt hook serves it in place of the file's text. thimble has one skill.
 //
 import type { EngineInterface } from 'claude-code'
 
@@ -199,20 +197,11 @@ export function registerPrompts(on: Any, _options?: Any): void {
         // another version than the file's own: its text in place of the body
         if (a.file !== idx[feature].versions.skill?.file) text = withBody(text, (await promptText($, feature)).text)
       }
-      let leanFirst = false
       if (name === 'thimble') {
         R.leanLoaded = true
         await markSkill($, true)
-      } else if (!R.leanLoaded) {
-        // a verb's skill loaded before the thimble skill: the thimble skill's text first, so citing and saving still hold
-        const lean = await promptText($, 'thimble')
-        const leanText = lean.text
-        text = `${leanText.trim()}\n\n(The thimble skill's base folder: ${rootOf($)}/skills/thimble.)\n\n---\n\nThe ${name} skill, which builds on the thimble skill above:\n\n${text}`
-        R.leanLoaded = true
-        await markSkill($, true)
-        leanFirst = true
       }
-      await record($, { kind: 'prompt', feature: feature ?? name, prompt: id, via: `skill ${name}`, ...(leanFirst ? { with_lean: true } : {}) })
+      await record($, { kind: 'prompt', feature: feature ?? name, prompt: id, via: `skill ${name}` })
       return { text }
     } catch {
       return r

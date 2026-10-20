@@ -33,27 +33,10 @@ function world(on: Any, env: Record<string, string> = {}) {
 const load = ($: Any, skill: string, body: string, plugin = 'thimble') =>
   $.skill.prompt({ skill: `${plugin}:${skill}`, text: `Base directory for this skill: /p/${skill}\n\n${body}`, pluginName: plugin, source: 'plugin' })
 
-test("a verb's skill loaded before the thimble skill brings the thimble skill's text first, once", async ($, on) => {
-  const w = world(on)
-  const map = String((await load($, 'map', '# Map: lay the work out')).text)
-  expect(map.startsWith('LEAN BODY: cite what you show.')).toBe(true)
-  expect(map).toContain('The map skill, which builds on the thimble skill above:')
-  expect(map).toContain('Base directory for this skill: /p/map\n\n# Map: lay the work out')
-  // the thimble skill is in the conversation now: the next verb skill comes alone
-  const trace = String((await load($, 'trace', '# Trace')).text)
-  expect(trace).toBe('Base directory for this skill: /p/trace\n\n# Trace')
-  await w.clock.advance(100)
-  const lines = w.events.filter(e => e.kind === 'prompt')
-  expect(lines.map(e => e.via)).toEqual(['skill map', 'skill trace'])
-  expect(lines[0]!.with_lean).toBe(true)
-  expect(lines[0]!.prompt).toBe('map:skill')
-})
-
-test('the thimble skill loaded first: a verb skill after it comes alone; a skill of another plugin is left as it is', async ($, on) => {
+test('the thimble skill comes as its file says; a skill of another plugin is left as it is', async ($, on) => {
   world(on)
   const lean = String((await load($, 'thimble', 'LEAN BODY as the file says')).text)
   expect(lean).toBe('Base directory for this skill: /p/thimble\n\nLEAN BODY as the file says')
-  expect(String((await load($, 'explore', '# Explore')).text)).toBe('Base directory for this skill: /p/explore\n\n# Explore')
   expect(String((await load($, 'commit', '# Commit', 'other')).text)).toBe('Base directory for this skill: /p/commit\n\n# Commit')
 })
 

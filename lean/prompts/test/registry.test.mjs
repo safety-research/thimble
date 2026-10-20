@@ -74,7 +74,7 @@ test('the spec of the versions in use names only those that are not the defaults
 
 test('skills, bodies and placeholders', () => {
   assert.equal(featureOfSkill('thimble:thimble'), 'thimble')
-  assert.equal(featureOfSkill('map'), 'map')
+  assert.equal(featureOfSkill('map'), null)
   assert.equal(featureOfSkill('commit'), null)
   assert.equal(bodyOf('---\nname: x\ndescription: y\n---\n\n# Body\n'), '\n# Body\n')
   assert.equal(bodyOf('# no frontmatter'), '# no frontmatter')

@@ -89,9 +89,6 @@ export const FEATURES = {
     versions: { v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
   },
   thimble: { about: 'the thimble skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'thimble', versions: { skill: { file: 'skills/thimble/SKILL.md', about: 'as SKILL.md says now' } } },
-  map: { about: 'the map skill', reads: 'the skill', default: 'skill', skill: 'map', versions: { skill: { file: 'verbs/map/SKILL.md' } } },
-  explore: { about: 'the explore skill', reads: 'the skill', default: 'skill', skill: 'explore', versions: { skill: { file: 'verbs/explore/SKILL.md' } } },
-  trace: { about: 'the trace skill', reads: 'the skill, and the trace verb', default: 'skill', skill: 'trace', versions: { skill: { file: 'verbs/trace/SKILL.md' } } },
 }
 
 /** Other names a person or Claude may use for a feature. */

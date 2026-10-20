@@ -13,10 +13,6 @@ session's permission mode and sandbox like any other command.
     thimble resolve REF [-n 5] [--label WORDS] where a value came from, down to its source rows (a few of them, spread
                                                across the rows)
     thimble coverage [NAME] [--all]            what was read and what was not (of this session, or of a card)
-    thimble trace [REF] [--text PASSAGE] [--in GLOB]
-                                               where it came from and where it went: the path back to its rows, what
-                                               uses it (queries, cards, answers), and in transcripts who read a
-                                               passage and who wrote it after reading it
     thimble label [NAME]                       the labels, or one label's counts per value (each a citation)
     thimble label NAME --in GLOB (--regex RE | --code [FILE] | --prompt "DEFINITION") [--values yes,no]
                   [--where EXPR] [--within LABEL=VALUE] [--limit N] [--reason]
@@ -30,7 +26,7 @@ group's rows; use("r3") is an earlier query's output; keep(name, x) and use(name
 (use of a `thimble label` gives each record's `_ref` and value); rows(glob), sample(df, n), pd, np, re, json. The
 last expression is the output. `thimble run --help` says more.
 
-Add --json to sources, run, list, resolve, coverage or trace for the whole record.
+Add --json to sources, run, list, resolve or coverage for the whole record.
 """
 from __future__ import annotations
 
@@ -565,25 +561,6 @@ def cmd_coverage(a: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_trace(a: argparse.Namespace) -> int:
-    from . import trace as T
-
-    st = Store()
-    if not a.ref and not a.text:
-        print("thimble trace needs a ref (a value, a row, a transcript block) or --text with the words to follow")
-        return 2
-    try:
-        r = T.trace(st, a.ref, a.text, a.within, answers=not a.no_answers, n=a.n)
-    except (R.RefError, ValueError) as e:
-        print(f"{a.ref or a.text}: {e}")
-        return 1
-    if a.json:
-        out_json(r)
-        return 0
-    print(T.text_of(r))
-    return 0
-
-
 # ------------------------------------------------------------------ labels
 
 LABEL_HELP = """A label gives every record of a scope one of a few values, and keeps each record's ref.
@@ -919,14 +896,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
-    p = sub.add_parser("trace", help="where it came from and where it went")
-    p.add_argument("ref", nargs="?")
-    p.add_argument("--text", help="the words to follow through transcripts: who read them, who wrote them")
-    p.add_argument("--in", dest="within", metavar="GLOB", help="the transcripts to look in (default: the ref's own folder)")
-    p.add_argument("-n", type=int, default=3, help="source rows read back")
-    p.add_argument("--no-answers", action="store_true", help="skip the session transcripts (Claude's cited answers)")
-    p.add_argument("--json", action="store_true")
-    p.set_defaults(fn=cmd_trace)
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
