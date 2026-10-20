@@ -72,7 +72,8 @@ async def chromium(monkeypatch):
                 pytest.skip(f"no Chromium here: {str(e).splitlines()[0]}")
 
             async def launch(pw, tmp):
-                return await pw.chromium.launch(headless=True, chromium_sandbox=False, env={"HOME": tmp})
+                return await pw.chromium.launch(headless=True, chromium_sandbox=False, env={"HOME": tmp},
+                                                args=page_check.ARGS)
 
             monkeypatch.setattr(page_check, "_launch", launch)
 

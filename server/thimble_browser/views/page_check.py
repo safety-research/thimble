@@ -10,7 +10,8 @@ of the page (`check.png` in the view's folder), which the builder's view_check g
 
 Safety. Chromium runs as a child of the server with its own sandbox on (chromium_sandbox=True), never inside
 bubblewrap. Every request the page makes is answered by this module, never by the network: the host page and the
-view's media files from the folder (each with the media route's checks), every other request aborted. The browser has
+view's media files from the folder (each with the media route's checks), every other request aborted, and no host
+name resolves, so not even a DNS lookup leaves. The browser has
 no user profile (a fresh context in a temporary folder that is removed after), no downloads, and the whole check stops
 after LIMIT_S. Where Chromium cannot start, or cannot start its sandbox, the check is skipped with a line that says why.
 """
@@ -37,6 +38,10 @@ MEDIA_MAX = 32 * 1024 * 1024  # bytes of one media file the check serves
 ERRORS_MAX = 12
 TOKENS = Path(__file__).resolve().parents[3] / "frontend" / "src" / "styles" / "tokens.css"
 SHOT = "check.png"
+ARGS = ["--disable-background-networking", "--disable-sync", "--no-first-run", "--disable-extensions",
+        "--disable-component-update",
+        # no host name resolves, so not even a DNS lookup (a prefetch hint) leaves
+        "--host-resolver-rules=MAP * ~NOTFOUND", "--dns-prefetch-disable"]
 NO_RTC = ("<script>for(const k of ['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel'])try{"
           "Object.defineProperty(window,k,{value:undefined})}catch{}</script>")
 
@@ -109,8 +114,7 @@ async def _launch(pw: Any, tmp: str) -> Any:
     return await pw.chromium.launch(headless=True, chromium_sandbox=True, downloads_path=tmp,
                                     env={"HOME": tmp, "TMPDIR": tmp, "XDG_CONFIG_HOME": tmp, "XDG_CACHE_HOME": tmp,
                                          "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
-                                    args=["--disable-background-networking", "--disable-sync", "--no-first-run",
-                                          "--disable-extensions", "--disable-component-update"])
+                                    args=ARGS)
 
 
 def _media_answer(folder: Path, claims: list[str], url: str) -> tuple[int, bytes, str]:
