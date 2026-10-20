@@ -15,12 +15,11 @@ const TEXT = [
   '- The test then [passed 200 times in a row](q3#test=checkout@passes).',
 ].join('\n')
 
-test('a rewrite is held to the original: a ref it never cited loses its link, and a number it never states is named', () => {
+test('a rewrite is held to the original: a ref it never cited is kept for the healing pass, and a number it never states is named', () => {
   const out = checkRewrite(TEXT, 'Fixed in [2 tries](q9#x@n); it failed [1 run in 9](q2#test=checkout@fail_rate), 12% of runs.')
-  assert.equal(out.text, 'Fixed in 2 tries; it failed [1 run in 9](q2#test=checkout@fail_rate), 12% of runs.')
-  assert.equal(out.problems.length, 2)
-  assert.match(out.problems[0], /q9#x@n is not in the original/)
-  assert.match(out.problems[1], /"12" is not in the original/)
+  assert.equal(out.text, 'Fixed in [2 tries](q9#x@n); it failed [1 run in 9](q2#test=checkout@fail_rate), 12% of runs.')
+  assert.equal(out.problems.length, 1)
+  assert.match(out.problems[0], /"12" is not in the original/)
   assert.deepEqual(checkRewrite(TEXT, 'It failed about [1 in 9](q2#test=checkout@fail_rate); now it [passed 200 times](q3#test=checkout@passes).').problems, [])
   // a kept ref whose words state another number of the text: the words stay, the link goes
   const moved = checkRewrite(TEXT, 'The fix held [200 times](tests/conftest.py#L14); it [passed 200 times](q3#test=checkout@passes).')
@@ -61,8 +60,8 @@ test('readReply takes the text from its tags, or the whole reply when it gave no
   assert.equal(readReply('Plain.\n<card drop="02-old"/>').text, 'Plain.')
 })
 
-test('a ref with brackets in a key value stays one link through the check, and nothing of it is left as words', () => {
-  const orig = 'Of the boys, [21](r4#age=child%20(0-12)&group=a@kept) of 37 stayed; of the girls, [19](r4#age=child%20(0-12)&group=b@kept) of 32.'
+test('a ref with brackets in a key value stays one link through the check, a new one too, and nothing of it is left as words', () => {
+  const orig = 'Of the boys, [21](r4#age=child%20(0-12)&group=a@kept) of 37 stayed; of the girls, 19 of 32.'
   const text = 'Boys: [21](r4#age=child%20(0-12)&group=a@kept) of 37. Girls: [19](r4#age=child%20(0-12)&group=b@kept) of 32.'
   const out = checkRewrite(orig, text)
   assert.equal(out.text, text)

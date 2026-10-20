@@ -690,8 +690,10 @@ function roundings(n) {
 }
 
 /**
- * A rewrite held to the original: a link to a ref the original never cited loses its link (its words stay), and a
- * number the original never states is named as a problem. Returns the text to show and the problems.
+ * A rewrite held to the original: a link to a ref the original cites states the number it cites there, else it loses
+ * its link (its words stay), and a number the original never states is named as a problem. A link to a place the
+ * original never cited is kept: the healing pass checks it against its place, as it checks every citation of a shown
+ * text (shell.tsx runHeal). Returns the text to show and the problems.
  */
 export function checkRewrite(original, text) {
   // each ref the original cites, with the numbers its words state there
@@ -708,10 +710,7 @@ export function checkRewrite(original, text) {
   const out = mapLinks(text, (whole, words, ref) => {
     const r = ref.trim()
     if (/^(https?|mailto):/i.test(r)) return whole
-    if (!cited.has(r)) {
-      problems.push(`a citation to ${r.slice(0, 60)} is not in the original, so it shows as plain words`)
-      return words
-    }
+    if (!cited.has(r)) return whole
     // a kept citation states the number the original cites there (it may add a date or a total beside it), never
     // only another number of the text
     const said = numbersIn(words)
