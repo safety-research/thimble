@@ -37,6 +37,17 @@
   // the refs one part of a map carries (the rows of every thread through it), as many as a selection resolves
   const MAX_PART_REFS = 500
   const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
+  // Pages. A knob whose values are the pages of one piece (the chapters of a guide, the slides of a talk) is a page
+  // knob: `k.knob(id, {pages: true})`, or a knob named page, chapter, section, slide or lesson, or one whose values read
+  // as "3 of 9". A host can draw every page of it at once, one after another (run's opts.all), each under its own
+  // heading. A program says `pages: false` to keep a knob from being one.
+  const MAX_PAGES = 40
+  const PAGE_WORDS = /^(page|chapter|section|slide|lesson)s?$/i
+  const PAGE_OF = /^\s*\d+\s*(of|\/)\s*\d+\s*$/
+  // the ids of one page of a card drawn all at once: `pg3~~day-18`, its heading `pg3~~` (a program's id has no ~~)
+  const PAGE_SEP = '~~'
+  // drawing every page at once may take this many times a single run's time limit
+  const ALL_TIME = 4
 
   // ---------------------------------------------------------------- small utilities
   const isObj = v => v != null && typeof v === 'object' && !Array.isArray(v)
@@ -95,6 +106,17 @@
     return /^[a-z0-9]/.test(t) ? t : ''
   }
   function escapeMarkup(s) { return String(s == null ? '' : s).replace(/([\\*{}[\]])/g, '\\$1') }
+  // whether a knob is a page knob (see PAGE_WORDS): said so, or named so, or its values read as "3 of 9"
+  function pageLike(id, label, shown, said) {
+    if (said === false || shown.length < 2 || shown.length > MAX_PAGES) return false
+    return said === true || PAGE_WORDS.test(String(id)) || PAGE_WORDS.test(String(label).trim()) || shown.every(s => PAGE_OF.test(s))
+  }
+  function pageIdOf(n, id) { return 'pg' + n + PAGE_SEP + (id == null ? '' : id) }
+  // a page's id read back: {page, id} (id '' for the page's heading), or null for any other id
+  function pageOfId(s) {
+    const m = /^pg(\d+)~~(.*)$/.exec(String(s == null ? '' : s))
+    return m ? { page: +m[1], id: m[2] } : null
+  }
   function plain(runs) { return (runs || []).map(r => r.br ? '\n' : r.s).join('') }
 
   // ---------------------------------------------------------------- tones
@@ -228,7 +250,7 @@
       },
       // k.set(key, value) or k.set({...}): the state a handler leaves for the next run
       set(key, value) {
-        if (ctx.phase !== 'handle') { warn(ctx, 'k.set changes the state only inside a k.on handler; read k.state to draw'); return k }
+        if (ctx.phase !== 'handle' && ctx.phase !== 'probe') { warn(ctx, 'k.set changes the state only inside a k.on handler; read k.state to draw'); return k }
         if (isObj(key)) Object.keys(key).forEach(x => { ctx.patch[x] = clone(key[x]) })
         else if (key != null) ctx.patch[String(key)] = clone(value)
         return k
@@ -598,15 +620,19 @@
           return typeof v === 'number' ? fmt(v) : clean(typeof v === 'object' && v ? JSON.stringify(v) : String(v))
         })
         tick(values.length / 8)
-        ctx.controls[kid] = { id: kid, label: o.label != null ? clean(o.label) : kid, values: values, shown: shown, i: i, start: start }
+        const c = { id: kid, label: o.label != null ? clean(o.label) : kid, values: values, shown: shown, i: i, start: start }
+        if (pageLike(kid, c.label, shown, o.pages)) c.pages = true
+        ctx.controls[kid] = c
         return clone(values[i])
       },
-      // the knob drawn where the program puts it: `label ◂ value ▸`, a link to the knob, so a person can select and turn it
+      // the knob drawn where the program puts it: `label ◂ value ▸`, a link to the knob, so a person can select and turn it.
+      // With every page drawn at once, a page's own dial only says which page it is: the host's heading turns them
       dial(id, o) {
         o = o || {}
         const c = ctx.controls[String(id)]
         if (!c) { warn(ctx, `k.dial("${id}") comes before k.knob("${id}"), or there is no such knob`); return k.text(String(id), { tone: 'dim' }) }
         const label = o.label === false ? '' : (o.label != null ? String(o.label) : c.label)
+        if (ctx.unroll === c.id) return k.text(`{dim:${label ? escapeMarkup(label) + ' ' : ''}${escapeMarkup(c.shown[c.i])}}`, { wrap: false, w: o.w })
         return k.text(`${label ? '{dim:' + escapeMarkup(label) + '} ' : ''}[◂ ${escapeMarkup(c.shown[c.i])} ▸](#${c.id})`, { wrap: false, w: o.w, bold: o.bold })
       },
 
@@ -2243,12 +2269,28 @@
     const limit = Math.max(50, num(opts.limit) || 2000)
     const maxBytes = Math.max(10000, num(opts.maxBytes) || 2000000)
     let state = isObj(opts.state) ? (clone(opts.state) || {}) : {}
-    const event = isObj(opts.event) ? clone(opts.event) : null
+    let event = isObj(opts.event) ? clone(opts.event) : null
+    // every page at once: opts.all names the knob (true: the card's first page knob)
+    const all = opts.all === true ? true : typeof opts.all === 'string' && opts.all ? opts.all : null
     let ctx = newCtx(state, event, limit, opts.got)
-    let rootNode = null, error = null, asked = null, handled = null, effects = [], after = []
+    let rootNode = null, error = null, asked = null, handled = null, effects = [], after = [], pages = null
     const t0 = ctx.t0
     try {
+      // with every page drawn at once, a press on a part of page 3 (`pg3~~day-18`) is a press on `day-18` with the
+      // knob at page 3, as the program drew it there; a press on a page's heading turns the knob to that page
+      const at = all && event ? pageOfId(event.region != null ? event.region : event.id) : null
+      if (at) {
+        const look = newCtx(clone(state), null, limit, opts.got)
+        runOnce(program, data, opts, look, W, H)
+        const c = unrolled(look, all)
+        if (c && at.page >= 1 && at.page <= c.values.length) state = Object.assign({}, state, { [c.id]: clone(c.values[at.page - 1]) })
+        if (!at.id) event = null
+        else { event = Object.assign({}, event); if (event.region != null) event.region = at.id; else event.id = at.id }
+        ctx = newCtx(clone(state), event, limit, opts.got)
+        ctx.t0 = t0
+      }
       const first = runOnce(program, data, opts, ctx, W, H)
+      let kk = first.k
       rootNode = first.root
       if (event) {
         const hs = handlersFor(ctx, event)
@@ -2269,10 +2311,15 @@
             again.ops = ctx.ops
             again.nextCheck = ctx.ops + 2000
             ctx = again
-            rootNode = runOnce(program, data, opts, ctx, W, H).root
+            const r = runOnce(program, data, opts, ctx, W, H)
+            rootNode = r.root
+            kk = r.k
           }
         }
       }
+      // which knob each key turns, and which way, so a host can name it: `n next chapter · p previous chapter`
+      probeTurns(ctx, kk)
+      if (all) pages = unrollPages(program, data, opts, ctx, state, all, W, H, limit, t0)
     } catch (e) {
       error = errorInfo(e, typeof program === 'string' ? program : '')
     }
@@ -2289,15 +2336,21 @@
         if (r.meta.cite && !ctx.cites[r.meta.cite]) warn(ctx, `region "${r.id}" cites "${r.meta.cite}", which no k.cite defines`)
         if (r.meta.examples && !ctx.examples[r.meta.examples]) warn(ctx, `region "${r.id}" points at examples "${r.meta.examples}", which no k.examples defines`)
       })
+      // every page at once: the pages, each under its heading, in place of the one page
+      if (pages) { rootNode = pages.root; regions = collectRegions(rootNode) }
     }
     const ms = Math.round((nowMs() - t0) * 10) / 10
     const finish = () => {
-      const out = { kit: KIT, w: W, h: H, mode: opts.mode || 'inline', title: title, root: rootNode, cites: error ? {} : ctx.cites, examples: error ? {} : ctx.examples, regions: error ? [] : regions, warnings: ctx.warnings, ms: ms }
-      const controls = Object.keys(ctx.controls).map(id => ctx.controls[id])
+      const cites = error ? {} : pages ? pages.cites : ctx.cites
+      const examples = error ? {} : pages ? pages.examples : ctx.examples
+      const out = { kit: KIT, w: W, h: H, mode: opts.mode || 'inline', title: title, root: rootNode, cites: cites, examples: examples, regions: error ? [] : regions, warnings: ctx.warnings, ms: ms }
+      const controls = Object.keys(ctx.controls).map(id => pages && id === pages.knob ? Object.assign({}, ctx.controls[id], { all: true }) : ctx.controls[id])
+        .concat(pages ? Object.keys(pages.controls).map(id => pages.controls[id]) : [])
       if (controls.length && !error) out.controls = controls
       if (!error && (controls.length || Object.keys(state).length)) out.state = state
-      // what reaches the program: the keys and events its handlers take, which a host shows and routes to it
-      if (!error && ctx.handlers.length) out.on = ctx.handlers.map(h => ({ name: h.name, label: h.label }))
+      // what reaches the program: the keys and events its handlers take, which a host shows and routes to it; a key that
+      // turns a knob says which, and which way (turn: {knob, dir})
+      if (!error && ctx.handlers.length) out.on = ctx.handlers.map(h => h.turn ? { name: h.name, label: h.label, turn: h.turn } : { name: h.name, label: h.label })
       if (handled) out.handled = handled
       if (asked && !error) out.ask = asked
       // what the handler asked of the host: actions (k.do), events later (k.after); and what the program wants shown
@@ -2306,9 +2359,11 @@
       if (after.length && !error) out.after = after
       if (ctx.status && !error) out.status = ctx.status
       if (ctx.wants.length && !error) out.wants = ctx.wants
-      if (ctx.selected && !error) out.selected = ctx.selected
+      if (ctx.selected && !error) out.selected = pages ? pageIdOf(pages.at, ctx.selected) : ctx.selected
       // the state keys each surface keeps for itself (k.local)
       if (ctx.local.length && !error) out.local = ctx.local.slice()
+      // every page at once: which knob, how many pages, and the page the knob is at
+      if (pages && !error) out.pages = { knob: pages.knob, n: pages.n, at: pages.at }
       if (error) out.error = error
       return out
     }
@@ -2323,6 +2378,114 @@
     }
     return JSON.parse(text)
   }
+
+  // the knob drawn all at once: the one opts.all names, else the first page knob; null when it has fewer than two
+  // values or more than MAX_PAGES
+  function unrolled(ctx, all) {
+    const cs = Object.keys(ctx.controls).map(id => ctx.controls[id])
+    const c = all === true ? cs.find(x => x.pages) : ctx.controls[all]
+    return c && c.values.length >= 2 && c.values.length <= MAX_PAGES ? c : null
+  }
+
+  // Each page of the knob, drawn as the program draws it at that value, one after another, each under its own heading
+  // (the knob's label and the value as the person reads it: `chapter 3 of 9`). A page's parts, cites and examples get the
+  // page's ids (pageIdOf), so a part is one part even when every page has one by its name. A page past the time the
+  // pages may take is a line that says so. Null when there is no such knob.
+  function unrollPages(program, data, opts, ctx, state, all, W, H, limit, t0) {
+    const c = unrolled(ctx, all)
+    if (!c) return null
+    const kk = makeKit(newCtx({}, null, Infinity), W, H, opts)
+    const cites = {}, examples = {}, controls = {}
+    const blocks = []
+    c.values.forEach((v, i) => {
+      const n = i + 1
+      const label = pageLabel(c, i)
+      const rule = Math.max(2, W - Array.from(label).length - 4)
+      const head = { t: 'region', id: pageIdOf(n, ''), meta: { label: label, page: n }, kid: kk.text(`{dim:──} **${escapeMarkup(label)}** {dim:${'─'.repeat(rule)}}`, { wrap: false }) }
+      let body
+      if (nowMs() - t0 > limit * ALL_TIME) body = kk.text('{unseen:░} {dim:not drawn: drawing every page at once took too long. Show the pages one at a time to read this one.}')
+      else {
+        const pctx = newCtx(Object.assign({}, state, { [c.id]: clone(v) }), null, limit, opts.got)
+        pctx.unroll = c.id
+        body = runOnce(program, data, opts, pctx, W, H).root
+        try { matchRegions(pctx, collectRegions(body), body) } catch (e) { /* matching is a help, never a failure */ }
+        pagePrefix(body, pctx, n, c.id)
+        Object.keys(pctx.cites).forEach(id => { cites[pageIdOf(n, id)] = Object.assign({}, pctx.cites[id], { id: pageIdOf(n, id) }) })
+        Object.keys(pctx.examples).forEach(id => { examples[pageIdOf(n, id)] = Object.assign({}, pctx.examples[id], { id: pageIdOf(n, id) }) })
+        // a knob only some pages have (a step of the diagram on page 2) is still a knob of the card, so its dial turns
+        Object.keys(pctx.controls).forEach(id => { if (!ctx.controls[id] && !controls[id]) controls[id] = pctx.controls[id] })
+        pctx.warnings.forEach(w => warn(ctx, w))
+      }
+      blocks.push({ t: 'stack', kids: [head, body], gap: 1 })
+    })
+    return { root: { t: 'stack', kids: blocks, gap: 2 }, cites: cites, examples: examples, controls: controls, knob: c.id, n: c.values.length, at: c.i + 1 }
+  }
+
+  // a page's heading: its value as the person reads it, after the knob's label when the value is a number or "3 of 9"
+  // (`chapter 3 of 9`), alone when it is words already (`contents`, `chapter 2 of 7`)
+  function pageLabel(c, i) {
+    const shown = String(c.shown[i])
+    return /^\s*[\p{L}]/u.test(shown) ? shown : `${c.label} ${shown}`
+  }
+
+  // One page's ids made its own, in place: its regions, the parts of its bars, tables, plots and canvases, its brushes,
+  // the links in its words and the cites and examples its parts name. A link to the knob drawn all at once is words only
+  // (the headings turn it); a link to another knob stays that knob's.
+  function pagePrefix(root, pctx, n, knob) {
+    const pre = pageIdOf(n, '')
+    const P = id => (String(id).indexOf(pre) === 0 ? String(id) : pre + id)
+    const runs = rs => { if (Array.isArray(rs)) rs.forEach(r => { if (r && r.ref) { if (r.ref === knob) delete r.ref; else if (!pctx.controls[r.ref]) r.ref = P(r.ref) } }) }
+    const meta = m => { if (isObj(m)) { if (typeof m.cite === 'string') m.cite = P(m.cite); if (typeof m.examples === 'string') m.examples = P(m.examples) } }
+    const walk = x => {
+      if (!x || typeof x !== 'object') return
+      if (x.t === 'region') { x.id = P(x.id); meta(x.meta) }
+      if (x.t === 'text') runs(x.runs)
+      if (x.t === 'frame') { runs(x.title); runs(x.right); runs(x.bottom) }
+      if (x.t === 'table') x.rows.forEach(r => { if (r.region) r.region = P(r.region); meta(r.meta); (r.cells || []).forEach(runs) })
+      if (x.t === 'plot') { x.series.forEach(s => { if (s.region) s.region = P(s.region); meta(s.meta) }); if (x.brush) x.brush.id = P(x.brush.id) }
+      if (x.t === 'bar' && x.parts) x.parts.forEach(p => { if (p.region) p.region = P(p.region); meta(p.meta) })
+      if (x.t === 'canvas') x.ops.forEach(op => {
+        if (op[0] === 'text') runs(op[3])
+        else if (op[0] === 'box') runs(op[6])
+        else if (op[0] === 'region') { op[1] = P(op[1]); meta(op[6]) }
+        else if (op[0] === 'dot' && op[4] && op[4].region) { op[4].region = P(op[4].region); meta(op[4].meta) }
+        else if (op[0] === 'brush') op[1] = P(op[1])
+      })
+      ;(x.kids || []).forEach(walk)
+      if (x.kid) walk(x.kid)
+    }
+    walk(root)
+  }
+
+  // Which knob each of the program's keys turns, and which way: each key's handler is called as a key would call it,
+  // with nothing it asks for kept, and the patch it answers with is read. A key at its knob's end turns nowhere now;
+  // a key that shares its words with one that turns the same knob turns it the other way.
+  const PROBE_SKIP = /^(press|brush|hover|focus|key|tick|input)(:|$)/
+  function probeTurns(ctx, kk) {
+    const cs = Object.keys(ctx.controls).map(id => ctx.controls[id])
+    const hs = ctx.handlers.filter(h => !PROBE_SKIP.test(h.name))
+    if (!cs.length || !hs.length) return
+    const keep = { phase: ctx.phase, patch: ctx.patch, ask: ctx.ask, effects: ctx.effects, after: ctx.after, status: ctx.status, selected: ctx.selected, warnings: ctx.warnings.slice(), local: ctx.local.slice() }
+    for (const h of hs) {
+      ctx.phase = 'probe'; ctx.patch = {}; ctx.ask = null; ctx.effects = []; ctx.after = []
+      let ret = null
+      try { ret = h.fn({ type: 'key', key: h.name }) } catch (e) { ret = null; ctx.patch = {} }
+      const patch = Object.assign({}, ctx.patch, isObj(ret) && ret !== kk ? ret : {})
+      for (const c of cs) {
+        if (!Object.prototype.hasOwnProperty.call(patch, c.id)) continue
+        const j = c.values.findIndex(x => JSON.stringify(x) === JSON.stringify(patch[c.id]))
+        if (j >= 0) { h.turn = { knob: c.id, dir: Math.sign(j - c.i) }; break }
+      }
+    }
+    Object.assign(ctx, keep)
+    hs.forEach(h => {
+      if (!h.turn || h.turn.dir) return
+      const o = hs.find(x => x !== h && x.turn && x.turn.dir && x.turn.knob === h.turn.knob && x.label === h.label)
+      if (o) h.turn.dir = -o.turn.dir
+      else delete h.turn
+    })
+  }
+
   // the readable fallback: one line under the title that says what failed and what to fix
   function fallback(error, title, limit, W, H, opts) {
     error.fix = fixFor(error, limit)
@@ -2334,5 +2497,5 @@
     return kk.text(`{bad:×} ${title ? `**${escapeMarkup(title)}** ` : ''}{dim:could not draw:} ${escapeMarkup(error.name)}${escapeMarkup(what)}${where} {dim:· fix:} ${escapeMarkup(error.fix)}`)
   }
 
-  root.DrawKit = { KIT: KIT, TONES: TONES, CATS: CATS, run: run, wantKey: wantKey, fmt: fmt, inline: (s, o) => inline(s, o, { warnings: [], links: [] }), wide: wide, plain: plain }
+  root.DrawKit = { KIT: KIT, TONES: TONES, CATS: CATS, run: run, pageOfId: pageOfId, pageIdOf: pageIdOf, ALL_TIME: ALL_TIME, wantKey: wantKey, fmt: fmt, inline: (s, o) => inline(s, o, { warnings: [], links: [] }), wide: wide, plain: plain }
 })(typeof globalThis !== 'undefined' ? globalThis : this)

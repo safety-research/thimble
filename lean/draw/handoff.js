@@ -83,3 +83,47 @@ export function turn(drawing, state, id, step) {
   const i = Math.max(0, Math.min(c.values.length - 1, c.i + Math.round(step || 0)))
   return Object.assign({}, state || {}, { [c.id]: c.values[i] })
 }
+
+// ---------------------------------------------------------------- pages (kit.js: a page knob, every page at once)
+// A card drawn with every page of its page knob at once (run's opts.all) gives each page's parts the page's ids:
+// `pg3~~day-18` is the part `day-18` as page 3 draws it, `pg3~~` page 3's heading. Outside that drawing a selection is
+// the card's own: the part's own id, with the knob at that page.
+
+/** The id of part `id` of page `n` (1-based) in a drawing of every page at once; `id` '' is the page's heading. */
+export function pageId(n, id = '') {
+  return `pg${n}~~${id ?? ''}`
+}
+
+/** A page's id read back: {page, id} (id '' for the heading), or null for any other id. */
+export function pageOf(id) {
+  const m = /^pg(\d+)~~(.*)$/.exec(String(id ?? ''))
+  return m ? { page: Number(m[1]), id: m[2] } : null
+}
+
+/** The drawing's page knob (k.knob with pages, or named or formatted as pages), or null. */
+export function pageKnob(drawing) {
+  return ((drawing && drawing.controls) || []).find(c => c.pages) || null
+}
+
+/** The knob a drawing shows all at once (it carries `all`), or null. */
+export function allKnob(drawing) {
+  return ((drawing && drawing.controls) || []).find(c => c.all) || null
+}
+
+/**
+ * A part of a drawing of every page at once, as the card's own selection: {region, state} where region is the part's
+ * own id (null for a page's heading) and state holds the knob at that page. A part of no page: as it is, no state.
+ */
+export function ownPart(drawing, id) {
+  const p = pageOf(id)
+  const c = p ? allKnob(drawing) || pageKnob(drawing) : null
+  if (!p || !c || p.page < 1 || p.page > c.values.length) return { region: p ? p.id || null : id ?? null, state: null }
+  return { region: p.id || null, state: { [c.id]: c.values[p.page - 1] } }
+}
+
+/** The page (1-based) a knob's value is, or 0. */
+export function pageAt(control, value) {
+  if (!control) return 0
+  const i = control.values.findIndex(x => JSON.stringify(x) === JSON.stringify(value))
+  return i < 0 ? control.i + 1 : i + 1
+}

@@ -8,7 +8,10 @@
 //
 //   partsOf(grid)                 the parts a person selects, in reading order: [{id, label, rects, knob?}]
 //   stepPart(parts, at, dir)      the part after `at` (dir 1) or before it (dir -1), wrapping
-//   versionsOf(object)            [{v, at, change}] from the latest object's history
+//   versionsOf(object, seen)      [{v, at, change, seen?, drafts?}] from the latest object's history, with which ones the
+//                                 person saw (runtime.ts readSeen)
+//   shownVersions(versions, v)    the versions the header lists: those seen, and the one shown
+//   PAGES_DEFAULT                 how a card with pages opens: 'all' (every page, one after another) or 'one'
 //   stepVersion(versions, v)      the version `h` goes to: the one before, and from v1 the latest
 //   keyOf(key, ctx)               what a key does in the detail, or null; keys act only while the composer is empty
 //   exampleSet(drawing, meta)     the examples the program attached to a part, or null
@@ -19,6 +22,12 @@
 //   linkRuns(text)                Claude's words with their citations: [{s, link?}]
 
 const n = x => (typeof x === 'number' && isFinite(x) ? x.toLocaleString('en-US') : String(x ?? ''))
+
+// ---------------------------------------------------------------------------------------------- pages
+
+/** How a card with pages (a page knob, kit.js) opens in the detail: 'all', every page one after another under its own
+ *  heading, to scroll through; or 'one', a page at a time. `a` switches between them; `1` and "read all" open so. */
+export const PAGES_DEFAULT = 'all'
 
 // ---------------------------------------------------------------------------------------------- parts
 
@@ -51,11 +60,29 @@ export function stepPart(parts, at, dir = 1) {
 
 // ---------------------------------------------------------------------------------------------- versions
 
-export function versionsOf(object) {
+/** Every version, oldest first. With `seen` (the versions the person could see; null when no record was kept), each
+ *  says whether it was seen, and a seen one how many unseen drafts came just before it. The latest always counts. */
+export function versionsOf(object, seen = null) {
   const h = Array.isArray(object?.history) ? object.history : []
   const out = h.filter(x => x && x.v != null).map(x => ({ v: Number(x.v), at: x.at || null, change: x.change || null }))
   if (!out.length && object?.version != null) out.push({ v: Number(object.version), at: object.updated || null, change: null })
-  return out.sort((a, b) => a.v - b.v)
+  out.sort((a, b) => a.v - b.v)
+  if (Array.isArray(seen)) {
+    const was = new Set(seen.map(Number))
+    const last = out.length ? out[out.length - 1].v : null
+    let drafts = 0
+    for (const x of out) {
+      x.seen = was.has(x.v) || x.v === last
+      if (!x.seen) drafts++
+      else { if (drafts) x.drafts = drafts; drafts = 0 }
+    }
+  }
+  return out
+}
+
+/** The versions the header lists: those the person saw (all, when no record says), and the one shown now. */
+export function shownVersions(versions, v) {
+  return (versions || []).filter(x => x.seen !== false || x.v === v)
 }
 
 /** `h` steps back one version; from the first it goes to the latest again (B4: v2 → v1 → v2). */

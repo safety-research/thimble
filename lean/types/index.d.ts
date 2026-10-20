@@ -7,7 +7,7 @@ export type ObjRef = { id: string; v: number | null; root: string }
  *  the knobs' values the person set (`state`) and the knob turned last; `prog` while the program is laid over the card
  *  (`p`); or, with `cite`, one citation of Claude's words and the rows behind it; or, with `cites`, the values a reply
  *  cites, each a press from its rows. */
-export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null; prog?: boolean }
+export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null; prog?: boolean; pages?: 'all' | 'one' }
 
 /** A verb's run, as the /verb command's row draws it. */
 export type Ran = { verb: string; text?: string; note?: string; ask?: string; error?: string; saved?: ObjRef | null; on?: string; failed?: boolean }
