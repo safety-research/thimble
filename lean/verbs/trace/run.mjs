@@ -29,6 +29,7 @@
 // module and the CLI (cli.mjs) can run it in Node.
 import { SHORT_PATH } from './programs.mjs'
 import { composePrompt, parseReply, slimFacts } from './prompt.mjs'
+import { modelWhy } from '../../shell/why.js'
 
 const REF = /^(q\d+(#.*)?|obj:[A-Za-z0-9_.-]+(#\/.*)?|[^\s#][^#\n]*#[^\s].*|[^\s#]+\.(jsonl|ndjson|csv|tsv|json|db|sqlite|md|txt|log|diff|patch))$/
 
@@ -259,7 +260,7 @@ async function ask(model, prompt) {
   if (typeof model === 'function') return String(await model(prompt))
   const r = model.fork ? await model.fork({ prompt }) : await model.complete({ model: model.name || 'opus', prompt, maxTokens: 12000 })
   if (r && typeof r === 'object') {
-    if (r.isAnswered === false) throw new Error(`no reply (${r.reason || 'unknown'})`)
+    if (r.isAnswered === false) throw new Error(`no reply: ${modelWhy(r)}`)
     return String(r.text ?? '')
   }
   return String(r ?? '')

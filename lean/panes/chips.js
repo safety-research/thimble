@@ -51,9 +51,10 @@ export function program(k, data) {
   const pending = !!rec.squeeze.want && !same(rec.squeeze.want, rec.squeeze.at)
 
   // ---- what the person does
+  // a step names the key it came from (, and . are < and >), so a rewrite that fails says which key tries again
   const step = (id, dir) => {
     const to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, id, dir)
-    if (to) k.do('squeeze', { row: data.row, at: to })
+    if (to) k.do('squeeze', { row: data.row, at: to, key: dir < 0 ? '<' : '>' })
     return { focus: id, adding: false }
   }
   chips.slice(0, 9).forEach((c, i) => k.on(String(i + 1), () => ({ focus: c.id, adding: false })))

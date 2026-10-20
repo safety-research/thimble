@@ -44,7 +44,8 @@
 //   look is done; a ranking that comes while a turn runs waits for that turn's end.
 // - claims: into the session's Claims (thimble/claims/<session>.json, CONTRACT 7) by verbs/claims/claims.js: placed
 //   by their words in the turn's messages, with the citations near them; c lights under the answer with how many are
-//   new. A look that fails is noted there, so the list says which turn was not read.
+//   new. A look that fails is noted there, so the list says which turn was not read, and kept, so it runs again when
+//   the Claims pane opens (readAgain).
 // Memory and backoff, as YSK's: the last 50 lines shown and every known line are kept in the plugin's store and go
 // to the fork; code drops a repeat. After more than two lines typed past in a row, the next 2^(n-3) looks (at most
 // 16) give notes but no line.
@@ -55,7 +56,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { ObjRef, ObserverLine, Ranking } from '../types'
 import { answerRow, applyObserver, cardSettled, claimsStore, drawnTextOf, leanEnv, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
 import { glossesOf } from '../shell/message.js'
-import { applyTurn, basedOnFrom, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
+import { applyTurn, basedOnFrom, clearGap, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
 import { promptText, promptTextAt, shadowVersions } from '../prompts/prompts'
 import { FEATURES, fillBlocks } from '../prompts/registry.mjs'
 import { record, tracked } from '../telemetry/telemetry'
@@ -63,6 +64,8 @@ import { composeSystem, composeTurn, sharesOf } from './compose.mjs'
 import { digest, isRepeat, jsonIn, parseAnswer } from './evidence.js'
 import { LENSES } from './lenses/index.mjs'
 import { stepsOf, turnWords } from './turn.mjs'
+import { sessionKey } from '../hooks/conversation'
+import { modelWhy } from '../shell/why.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,6 +85,11 @@ type Answer = {
 // sent it); earlier: the person's questions before it
 type Look = { turnId: string; turnNo: number; steps: number; tools: number; answer: string; question: string; typed: boolean; verb: string; earlier: string[]; since: number }
 type TurnPrompt = { text: string; typed: boolean; verb: string }
+// where a turn's claims were said (the shell's turnPlaces), and its answer's row
+type Places = Awaited<ReturnType<typeof turnPlaces>>
+type Again = { row: string | null; tp: Places | null }
+// a look whose call failed, kept so it can run again: its turn, the look, and where its turn's words are
+type Failed = { turn: number; look: Look; again: Again; why: string }
 
 const LINE = { plugin: 'thimble', key: 'line' } as const
 const RANKED = { plugin: 'thimble', key: 'ranked' } as const
@@ -106,6 +114,8 @@ const GLOSSED_KEEP = 100
 const GLOSS_FREE = 2 // looks whose glosses nobody opened before glosses back off
 export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2 ** (n - GLOSS_FREE - 1)))
 const ROWVERBS = { plugin: 'thimble', key: 'rowverbs' } as const
+const REREAD = { plugin: 'thimble', key: 'reread' } as const
+const KEEP_FAILED = 5 // failed looks kept to read again
 
 const S = {
   session: '',
@@ -129,6 +139,7 @@ const S = {
   deferred: [] as { id: string; ranking: Ranking }[],
   hints: {} as Record<string, Ranking>,
   log: [] as Record<string, unknown>[],
+  failed: [] as Failed[],
 }
 
 // the looks to come and the one running: a promise that settles when the last of them has ended, so a squeeze step
@@ -159,7 +170,7 @@ const cut = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n - 1) + '
 /** The session and its file, read again after a reload (which keeps the session, not this memory). The prompts come
  *  from the registry (prompts/prompts.ts), at each look. */
 async function ensure($: Engine): Promise<void> {
-  const id = String(await $.session.id())
+  const id = await sessionKey($)
   if (id !== S.session) {
     S.session = id
     const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
@@ -170,6 +181,8 @@ async function ensure($: Engine): Promise<void> {
         S.hints = kept.hints && typeof kept.hints === 'object' ? kept.hints : {}
         S.log = Array.isArray(kept.log) ? kept.log : []
         S.notesGiven = strs(kept.notesGiven)
+        // the looks whose call failed, which the Claims pane reads again
+        S.failed = Array.isArray(kept.failed) ? kept.failed.filter((f: Any) => f && typeof f.turn === 'number' && f.look && typeof f.look.turnId === 'string') : []
         // a reload mid-session: the notes not yet delivered wait again, and the person's questions come back
         const delivered = new Set(S.log.filter(r => r.kind === 'notes_delivered').flatMap(r => strs(r.notes)))
         const added = S.log.filter(r => r.kind === 'look').flatMap(r => (Array.isArray(r.notes_added) ? (r.notes_added as Note[]) : []))
@@ -190,7 +203,7 @@ async function ensure($: Engine): Promise<void> {
 async function save($: Engine): Promise<void> {
   if (!S.file) return
   try {
-    await $.fs.write(S.file, JSON.stringify({ hints: S.hints, notesGiven: S.notesGiven.slice(-200), log: S.log.slice(-400) }, null, 1))
+    await $.fs.write(S.file, JSON.stringify({ hints: S.hints, notesGiven: S.notesGiven.slice(-200), log: S.log.slice(-400), failed: S.failed.slice(-KEEP_FAILED) }, null, 1))
   } catch {
     // the file is memory for a resume and a record for measuring; the observer works without it
   }
@@ -348,13 +361,27 @@ async function flushDeferred($: Engine): Promise<void> {
   if (list.length) await save($)
 }
 
-async function look($: Engine, t: Look): Promise<void> {
+/** The session's messages up to a turn's answer: what a look read when it ran, for a look that runs again later. */
+function upTo(msgs: Any[], answer: string): Any[] {
+  const a = answer.trim()
+  if (!a) return msgs
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m?.role === 'assistant' && String(m.text || '').trim() && (String(m.text).trim() === a || a.endsWith(String(m.text).trim()))) return msgs.slice(0, i + 1)
+  }
+  return msgs
+}
+
+/** One look at a turn. `again`: a look that failed, run again (by readAgain) after later turns: it reads that turn's
+ *  messages and places its claims and verbs where that turn's answer is. */
+async function look($: Engine, t: Look, again: Again | null = null): Promise<void> {
   if (S.looking) {
-    S.again = t // looks never overlap; the latest turn waits for the one running
+    // looks never overlap: the latest turn waits for the one running (a look run again stays kept for the next time)
+    if (!again) S.again = t
     return
   }
   S.looking = true
-  const row: Record<string, unknown> = { kind: 'look', turn: t.turnNo, steps: t.steps, tools: t.tools }
+  const row: Record<string, unknown> = { kind: 'look', turn: t.turnNo, steps: t.steps, tools: t.tools, ...(again ? { again: true } : {}) }
   try {
     await ensure($)
     const answer = await answerOf($, t.answer)
@@ -372,7 +399,7 @@ async function look($: Engine, t: Look): Promise<void> {
     const qo = (q.out ?? null) as Any
     const drift = qo && typeof qo.drift === 'string' && qo.drift.trim() ? qo.drift.trim() : ''
     const stated = qo && typeof qo.decision === 'string' && qo.decision.trim() ? qo.decision.trim() : ''
-    if (t.typed) S.decision = stated
+    if (t.typed && !again) S.decision = stated
     const decision = t.typed ? stated : S.decision
 
     // 2. the objects and their lineage (a card drawn after the answer, by a fork, is one of them once it is done)
@@ -406,7 +433,8 @@ async function look($: Engine, t: Look): Promise<void> {
     // the session's claims so far, which the claims lens adds this turn's to (CONTRACT 7)
     const store = await claimsStore($)
     const grown = grownClusters(store)
-    const msgs = (await $.session.messages().catch(() => [])) as Any[]
+    const all = (await $.session.messages().catch(() => [])) as Any[]
+    const msgs = again ? upTo(all, answer) : all
     // the turn's words (the person's message and Claude's words, no tool output): what the claims lens's digest and its
     // quiet rule read
     const turnText = turnWords(msgs, t.question)
@@ -475,7 +503,7 @@ async function look($: Engine, t: Look): Promise<void> {
       const tmpl = await promptText($, 'observer-turn')
       // a long answer arrives squeezed: the person reads the squeezed text, which the pass reads beside the original
       // when that rewrite (which starts as the turn ends, beside this look) is back by now
-      const atRow = await answerRow($)
+      const atRow = again ? again.row : await answerRow($)
       const before = atRow ? await messageRecord($, atRow) : null
       const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
       passVals = {
@@ -510,13 +538,18 @@ async function look($: Engine, t: Look): Promise<void> {
     }
     const moved = S.running || S.turnId !== t.turnId // the person started another turn while it looked
 
-    // a look that gave nothing readable: noted in Claims, so the list says which turn was not read
+    // a look that gave nothing readable: noted in Claims, so the list says which turn was not read, and kept, so the
+    // Claims pane can run it again
     if (!out) {
       try {
         if (parts.some(x => x.lens.name === 'claims')) {
-          const tp = await turnPlaces($, t.turnId)
-          noteGap(store, tp.turn ?? t.turnNo, f.isAnswered ? 'the look gave no answer it could read' : `the look failed (${f.reason})`)
+          const tp = again?.tp ?? (await turnPlaces($, t.turnId))
+          const turnNo = tp.turn ?? t.turnNo
+          const why = f.isAnswered ? 'the observer gave no answer it could read' : `the observer's call failed: ${modelWhy(f)}`
+          noteGap(store, turnNo, why, true)
           await saveClaims($, store)
+          const kept: Failed = { turn: turnNo, look: { ...t, answer: cut(answer, 40000) }, again: again ?? { row: tp.rows.at(-1) ?? (await answerRow($)), tp }, why }
+          S.failed = [...S.failed.filter(x => x.turn !== turnNo), kept].slice(-KEEP_FAILED)
         }
       } catch (err) {
         row.claims_error = cut(String((err as Error)?.message || err), 300)
@@ -550,11 +583,14 @@ async function look($: Engine, t: Look): Promise<void> {
       // the turn's claims into the session's Claims: placed by their words, said again, revised, clustered
       claims: async (value: { claims: unknown[]; clusters: unknown[] }) => {
         try {
-          const tp = await turnPlaces($, t.turnId)
-          const here = await answerRow($)
+          const tp = again?.tp ?? (await turnPlaces($, t.turnId))
+          const here = again ? again.row : await answerRow($)
           const places = tp.places.length ? tp.places : here ? [{ row: here, by: 'claude' as const, turn: null, text: answer }] : []
           const when = new Date(await $.clock.now()).toISOString()
           const res = applyTurn(store, { places, out: value, turn: tp.turn ?? t.turnNo, at: when, grown })
+          // a turn read after a failed look: it is no longer a gap, and its look is not kept to run again
+          clearGap(store, tp.turn ?? t.turnNo)
+          S.failed = S.failed.filter(x => x.turn !== (tp.turn ?? t.turnNo))
           // a claim whose sentence cites a value and that the pass gave no "based on": the rows behind the citation say it
           if (root) row.based_on_filled = await fillBasedOn($, root, store, res.added)
           await saveClaims($, store)
@@ -587,7 +623,7 @@ async function look($: Engine, t: Look): Promise<void> {
 
     // the message row of the turn's answer: the verbs the lenses lit and the explain marks, in the answer's record
     const lit = claimsLit as { row: string; note: string; claims: string[] } | null
-    const at = await answerRow($)
+    const at = again ? again.row : await answerRow($)
     if (at) {
       const kept = await messageRecord($, at)
       const shown = kept ? String(kept.shown ?? kept.text) : answer
@@ -621,16 +657,46 @@ async function look($: Engine, t: Look): Promise<void> {
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
-    // the objects saved up to the turn it looked at are looked at; a turn that began since keeps its own start
-    S.since = S.turnId !== t.turnId ? S.turnStart : 0
+    // the objects saved up to the turn it looked at are looked at; a turn that began since keeps its own start (a look
+    // run again changes nothing of it)
+    if (!again) S.since = S.turnId !== t.turnId ? S.turnStart : 0
     S.looking = false
     await logRow($, row)
     // one line per look in the session's events: what it lit, so `thimble stats` counts how often v lights
-    await record($, { kind: 'look', turn: t.turnNo, ...(row.skip ? { skip: row.skip } : {}), lit: Array.isArray(row.verbs_lit) ? row.verbs_lit : [], v: row.v_lit ?? null, observer: (row.fork as Any)?.prompt ?? null, prompts: (row.fork as Any)?.lenses ?? null })
+    await record($, { kind: 'look', turn: t.turnNo, ...(again ? { again: true } : {}), ...(row.skip ? { skip: row.skip } : {}), lit: Array.isArray(row.verbs_lit) ? row.verbs_lit : [], v: row.v_lit ?? null, observer: (row.fork as Any)?.prompt ?? null, prompts: (row.fork as Any)?.lenses ?? null })
     const next = S.again
     S.again = null
     if (next) $.clock.after(50, () => { void look($, next) })
     else lookEnded()
+  }
+}
+
+let rereading = false
+
+/**
+ * The turns whose look failed (the observer's call found no sign-in, the API was down), read again now: one look each,
+ * oldest first, after any look that runs. The Claims pane starts it when it opens (c), and shows the turns it reads
+ * meanwhile (REREAD). A look that fails again stays kept, and the pane says so.
+ */
+export async function readAgain($: Engine): Promise<void> {
+  if (rereading) return
+  rereading = true
+  try {
+    await ensure($)
+    if (!S.failed.length || !(await isOn($))) return
+    const todo = [...S.failed].sort((a, b) => a.turn - b.turn)
+    await $.state.set(REREAD, todo.map(f => f.turn))
+    for (const f of todo) {
+      while (S.looking) await (lookPending() ?? new Promise<void>(done => { $.clock.after(200, () => done()) }))
+      lookAhead()
+      await look($, f.look, f.again)
+      await $.state.set(REREAD, todo.filter(x => x.turn > f.turn).map(x => x.turn))
+    }
+  } catch {
+    // the turns stay kept, and the pane says they were not read
+  } finally {
+    rereading = false
+    await $.state.set(REREAD, []).catch(() => undefined)
   }
 }
 
@@ -970,8 +1036,9 @@ export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', enabled: true, model: '', turnId: '', turnNo: 0, steps: 0, tools: 0,
     turnStart: 0, running: false, since: 0, prompt: { text: '', typed: true, verb: '' }, questions: [], decision: '', notesGiven: [], pending: [], looking: false, again: null,
-    deferred: [], hints: {}, log: [],
+    deferred: [], hints: {}, log: [], failed: [],
   })
+  rereading = false
   sending = false
   carrying = []
   lookEnded()

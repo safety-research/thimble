@@ -127,6 +127,8 @@ declare module 'claude-code' {
       selrow: string | null
       /** the row of the latest turn's answer */
       answer: string | null
+      /** the rows of the session's answers (each turn's last words, a turn that ended in an error left out), oldest first */
+      answers: string[]
       /** the card under a reply that has the keys (] reached it): its own keys win over the verbs until 0 */
       cardfocus: (ObjRef & { row: string }) | null
       /** a verb of the row running on a message, by its row */
@@ -143,6 +145,8 @@ declare module 'claude-code' {
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
+      /** the turns whose failed look the observer runs again now (observer.ts readAgain): the Claims pane says so */
+      reread: number[]
       /** this session's claims (CONTRACT 7), as held for the drawing; thimble/claims/<session>.json on disk */
       claims: Record<string, unknown> | null
       /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */

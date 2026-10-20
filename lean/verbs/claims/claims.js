@@ -496,10 +496,17 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
   return res
 }
 
-/** A turn the observer could not read (its fork failed): said in the store, so the list says it. */
-export function noteGap(store, turn, why) {
+/** A turn the observer could not read (its call failed): said in the store, so the list says it. `again`: the
+ *  observer kept what it needs to read the turn again. */
+export function noteGap(store, turn, why, again = false) {
   if (turn == null) return store
-  store.gaps = [...(store.gaps || []).filter(g => g.turn !== turn), { turn, why: str(why, 160) }].slice(-20)
+  store.gaps = [...(store.gaps || []).filter(g => g.turn !== turn), { turn, why: str(why, 160), ...(again ? { again: true } : {}) }].slice(-20)
+  return store
+}
+
+/** A turn that was read after all: its gap goes. */
+export function clearGap(store, turn) {
+  if (turn != null && Array.isArray(store.gaps)) store.gaps = store.gaps.filter(g => g.turn !== turn)
   return store
 }
 

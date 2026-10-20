@@ -50,6 +50,8 @@ export type MessageOpts = {
   /** a rewrite of it is running (squeeze): the words dim, and `lead` takes the place of its first ● */
   dim?: boolean
   lead?: string | null
+  /** the color of `lead` (squeeze's amber when none) */
+  leadColor?: string | null
 }
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
@@ -96,8 +98,8 @@ function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] 
 }
 
 /** The 2 columns left of a reply: Claude Code's ● on the reply's first row, else blank. */
-function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'dark') {
-  if (lead) return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: verbColor('s', theme), children: lead })] })
+function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'dark', leadColor?: string | null) {
+  if (lead) return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: leadColor || verbColor('s', theme), children: lead })] })
   return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ children: dot ? '●' : ' ' })] })
 }
 
@@ -164,7 +166,7 @@ export function messageEl(els: Any, given: MessageOpts): Any {
   let dot = o.first
   let k = 0
   const push = (content: Any[], gap: boolean) => {
-    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot, rows.length === 0 ? o.lead : null, o.theme), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot, rows.length === 0 ? o.lead : null, o.theme, o.leadColor), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
   let i = 0

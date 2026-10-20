@@ -16,7 +16,7 @@ const LONG = Array.from({ length: 44 }, (_, i) => `Run ${i + 1} landed [${i + 3}
 type Any = any
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, replies: string[] = [], hold: Promise<void> | null = null) {
+function world(on: any, replies: (string | Record<string, unknown>)[] = [], hold: Promise<void> | null = null) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -56,6 +56,8 @@ function world(on: any, replies: string[] = [], hold: Promise<void> | null = nul
     // a reply on its way until the test lets it come
     if (hold) await hold
     const text = replies[calls.length - 1] ?? '<text>(no reply left)</text>'
+    // a reply given as a result is the call's result as it came (a failure)
+    if (typeof text === 'object') return { value: text }
     return { value: { isAnswered: true, text, usage: { input_tokens: 2000, output_tokens: 120, cache_creation_input_tokens: 0, cache_read_input_tokens: 1500 } } }
   })
   return { files, submitted, calls, fills }
@@ -421,4 +423,19 @@ test('an explain mark stays on a squeezed text: the request names its term, a te
   const band = await hintOf($)
   expect(band).toContain('─ fixture scope ─')
   expect(band).toContain('─ explain ─')
+})
+
+test('a rewrite that fails says what failed in plain words and which key tries again', async ($, on) => {
+  // the call finds no sign-in: Claude Code says no HTTP status and an error of no named kind
+  const w = world(on, [{ isAnswered: false, reason: 'api-error', status: null, error: 'unknown', usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } }])
+  const clock = mock.clock(on)
+  await answered($, on, clock)
+  await press($, clock, edit('s'))
+  await press($, clock, edit('<'))
+  await clock.settle()
+  const bar = await hintOf($)
+  expect(bar).toContain('The rewrite failed: no reply came from the API (the connection or the sign-in failed). Press < to try again')
+  expect(bar).not.toContain('unknown')
+  // the browser's chips read the same words from the record
+  expect(record(w).squeeze.error).toContain('Press < to try again')
 })

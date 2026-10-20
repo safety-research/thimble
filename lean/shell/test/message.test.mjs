@@ -222,3 +222,15 @@ test('an explain whose term a rewrite left out stays as a loose mark after the t
   const back = remark({ ...n2, shown: null })
   assert.equal(orig.slice(back.marks[0].start, back.marks[0].end), 'Emergent vs managed')
 })
+
+test('a model call that gave no answer is said as what happened, never as its code alone', async () => {
+  const { modelWhy } = await import('../why.js')
+  assert.equal(modelWhy({ isAnswered: true, text: 'x' }), '')
+  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: null, error: 'unknown' }), 'no reply came from the API (the connection or the sign-in failed)')
+  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed' }), 'the sign-in failed or expired')
+  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded' }), 'the API is overloaded')
+  assert.equal(modelWhy({ isAnswered: false, reason: 'api-error', status: 418, error: 'unknown' }), 'the API answered with an error (HTTP 418)')
+  assert.equal(modelWhy({ isAnswered: false, reason: 'empty-reply' }), 'the model answered with no text')
+  assert.match(modelWhy({ isAnswered: false, reason: 'aborted' }), /stopped before an answer came/)
+  assert.equal(modelWhy(null), 'no answer came back')
+})

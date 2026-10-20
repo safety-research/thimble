@@ -75,7 +75,10 @@ function world(on: Any, forks: Record<string, unknown>[]) {
   // the question step has no system prompt; the pass has the frame and its lenses as one (observer:v2)
   const pass = (prompt: string) => {
     prompts.push(prompt)
-    return { value: { isAnswered: true, text: JSON.stringify(forks[prompts.length - 1] ?? forks.at(-1)), usage: USAGE } }
+    const fork = (forks[prompts.length - 1] ?? forks.at(-1)) as Any
+    // a fork given as {failed: result} is a call that failed with that result
+    if (fork?.failed) return { value: fork.failed }
+    return { value: { isAnswered: true, text: JSON.stringify(fork), usage: USAGE } }
   }
   on('model.complete', (_$: unknown, e: { prompt: string; system?: string }) => (e.system ? pass(`${e.system}\n${e.prompt}`) : { value: { isAnswered: true, text: JSON.stringify({ parts: [], drift: null, decision: null }), usage: USAGE } }))
   on('model.fork', (_$: unknown, e: { prompt: string }) => pass(String(e.prompt)))
@@ -326,4 +329,26 @@ test('a graph with no layout (a drawing older than its module, after a reload) s
   const d = DK.run(claimsPane.program, { total: 1, clusters: 1, claims: [{ id: 'c1', cluster: 'k1', text: 'June 18 was the busiest day', n: 1, said: [], sources: [] }], groups: [{ id: 'k1', name: 'the June 18 burst', i: 0 }], order: ['c1'], w: 80, h: 20 }, { w: 80, h: 22 })
   expect(d.error).toBeUndefined()
   expect(JSON.stringify(d.root)).toContain('The graph could not be laid out. Press esc, then c to open it again.')
+})
+
+test("a turn whose look failed is said in Claims with why, and is read again when c opens the pane", async ($, on) => {
+  // the first pass finds no sign-in; the one after it answers
+  const NO_SIGN_IN = { failed: { isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed', usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }
+  const w = world(on, [NO_SIGN_IN, FORK1])
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  let store = JSON.parse(w.files[STORE]!)
+  expect(store.claims).toEqual([])
+  expect(store.gaps).toEqual([{ turn: 1, why: "the observer's call failed: the sign-in failed or expired", again: true }])
+  // the look is kept to run again, in the observer's file (a resumed session reads it back)
+  expect(JSON.parse(w.files['/home/t/.thimble/lean/observer/s-1.json']!).failed.map((f: Any) => f.turn)).toEqual([1])
+  // c opens the pane, which says the turn was not read, and reads it again
+  await press($, w.clock, key('c'))
+  await w.clock.advance(100)
+  await w.clock.settle()
+  store = JSON.parse(w.files[STORE]!)
+  expect(store.claims.map((c: Any) => c.id)).toEqual(['c1', 'c2', 'c3'])
+  expect(store.gaps).toEqual([])
+  expect(store.claims[1].said[0].row).toBe(R1.slice(0, 24))
+  expect(JSON.parse(w.files['/home/t/.thimble/lean/observer/s-1.json']!).failed).toEqual([])
+  expect(textOf(await $.ui.render(PANE))).toContain('Claims   3')
 })

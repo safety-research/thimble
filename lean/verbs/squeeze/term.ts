@@ -17,6 +17,7 @@ import type { EngineInterface } from 'claude-code'
 import type { MsgRecord, SqzUi, Tray } from '../../types'
 import { promptText as registryText } from '../../prompts/prompts'
 import { remark as remarkAny } from '../../shell/message.js'
+import { modelWhy } from '../../shell/why.js'
 import { tracked } from '../../telemetry/telemetry'
 import { FEATURES } from '../../prompts/registry.mjs'
 import { lookPending } from '../../observer/observer'
@@ -46,7 +47,9 @@ const BLANK: SqzUi = { focus: 'length', adding: false, running: null, error: nul
 // prompt's text; the last screen size
 const inflight = new Map<string, { want: Want | null }>()
 const revealing = new Map<string, number>()
-type Want = { at: At }
+// `key`: the key the person pressed for it (< or >), which presses it again after a failure; none for a press of the
+// pointer or a message that arrived squeezed
+type Want = { at: At; key?: string | null }
 let cfg: Record<string, unknown> = {}
 let view = { cols: 100, rows: 48 }
 
@@ -147,22 +150,27 @@ export async function addStretch($: Engine, row: string, text: string): Promise<
 
 // ------------------------------------------------------------------------------------------------ the rewrite
 
+/** What a failed rewrite says: what failed and why, then the key that tries again. */
+export function failedWords(why: string, key?: string | null): string {
+  return `The rewrite failed: ${why}. ${key ? `Press ${key} to try again` : 'Pick the level again to try again'}`
+}
+
 /** Set the chips of a row to `at` and show that version: from the record when it was written before, else one call.
- *  Changes made while a call runs wait, and only the latest of them runs next. */
-export async function setLevels($: Engine, row: string, at: At): Promise<void> {
+ *  Changes made while a call runs wait, and only the latest of them runs next. `key`: the key that asked for it. */
+export async function setLevels($: Engine, row: string, at: At, key: string | null = null): Promise<void> {
   // the chips show where they go at once (here, and in the browser from the record); the text follows
   await setUi($, row, { want: at, error: null })
   await markRecord($, row, { want: at, error: null })
   const job = inflight.get(row)
   if (job) {
-    job.want = { at }
+    job.want = { at, key }
     return
   }
   inflight.set(row, { want: null })
   try {
-    let next: Want | null = { at }
+    let next: Want | null = { at, key }
     while (next) {
-      next = { at: await fromObserved($, row, next.at) }
+      next = { at: await fromObserved($, row, next.at), key: next.key }
       await once($, row, next)
       const j = inflight.get(row)!
       next = j.want
@@ -254,14 +262,14 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     const r = await tracked($, { feature: 'squeeze', prompt: sp.id, model: req.model, extra: { row, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(',') } }, () => $.model.complete(req as Any))
     const ms = (await $.clock.now()) - t0
     if (!r.isAnswered) {
-      const why = r.reason === 'api-error' ? `the API answered ${(r as Any).status ?? ''} ${(r as Any).error ?? ''}`.trim() : r.reason
-      await setUi($, row, { error: `the rewrite did not come back (${why}) · press the key again to retry · 0 original` })
-      await log($, { row, ok: false, why, ms })
+      const why = modelWhy(r)
+      await setUi($, row, { error: failedWords(why, want.key) })
+      await log($, { row, ok: false, why, reason: r.reason, ...(r.reason === 'api-error' ? { status: (r as Any).status ?? null, error: (r as Any).error ?? null } : {}), ms })
       return
     }
     const reply = readReply(r.text)
     if (!reply.text.trim()) {
-      await setUi($, row, { error: 'the rewrite came back empty · press the key again to retry · 0 original' })
+      await setUi($, row, { error: failedWords('the model wrote no text', want.key) })
       return
     }
     // a heading the rewrite ends on, with nothing under it, promises what the text does not give: dropped before a
