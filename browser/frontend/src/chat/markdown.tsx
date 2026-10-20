@@ -134,7 +134,14 @@ export function rehypeRefChips() {
 }
 
 /** The marks a text shows, with the lenses that made them (lib/marks.ts). */
-const MarkContext = createContext<{ marks: readonly Mark[]; lenses: readonly Lens[] }>({ marks: [], lenses: [] })
+const NO_MARKS: { marks: readonly Mark[]; lenses: readonly Lens[] } = { marks: [], lenses: [] }
+const MarkContext = createContext(NO_MARKS)
+
+/** Markdown inside it shows no marks. A mark's own card (components/LensMark) stands inside the reply it marks, and
+ * would otherwise mark its own text with the reply's marks, such as an explainer's term in an important detail. */
+export function NoMarks({ children }: { children: ReactNode }) {
+  return <MarkContext.Provider value={NO_MARKS}>{children}</MarkContext.Provider>
+}
 
 /** rehype plugin: the first place each term of `terms` stands in the text (outside code and chips) becomes a
  * `<span data-mark-at=i>` that renders as its lens's mark. */
