@@ -116,9 +116,10 @@ test('the handoff carries the object and its selection both ways', () => {
   for (const r of t.regions) assert.ok(b.regions.some(x => x.id === r.id && x.rects.length), `the browser lost ${r.id}`)
 })
 
-test('the toolkit doc\'s programs run', () => {
-  const md = readFileSync(DRAW + 'TOOLKIT.md', 'utf8')
-  const blocks = [...md.matchAll(/```js\n([\s\S]*?)```/g)].map(m => m[1])
+test('the card guide\'s opening program runs', () => {
+  // the card guide's opening program (its other programs are the visualize forms, which their tests draw)
+  const md = readFileSync(DRAW + '../skills/thimble/cards.md', 'utf8')
+  const blocks = [...md.matchAll(/```js\n([\s\S]*?)```/g)].map(m => m[1]).slice(0, 1)
   const rows = [{ day: '06-16', messages: 3 }]
   // the toolkit doc keeps one program, its opening example; the worked programs are in the card guidance
   // (prompts/forms/), whose forms the visualize tests draw

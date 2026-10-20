@@ -47,8 +47,7 @@ export const FEATURES = {
     versions: { v1: { about: 'as before' }, v2: { about: 'v1 written clean in the 0.9 style: two principles and one example, good and bad' } },
   },
   'lens-line': {
-    about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v2', optional: true,
-    versions: { v1: { about: 'as before' }, v2: { about: 'v1 written clean in the 0.9 style: three principles and one example, good and bad' } },
+    about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v1', optional: true,
   },
   'lens-actions': {
     about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v4', optional: true,
@@ -63,8 +62,8 @@ export const FEATURES = {
     versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' }, v3: { about: "v2 written clean in the 0.9 style, opened with the 0.9 rule for terms (explain a term the analyst has not used the first time)" } },
   },
   'lens-claims': {
-    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v3', optional: true,
-    versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" }, v3: { about: 'v2 written clean in the 0.9 style, at half the length' } },
+    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v2', optional: true,
+    versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" } },
   },
   squeeze: {
     about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v6',
@@ -77,8 +76,8 @@ export const FEATURES = {
         parts: [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
       },
       v3: {
-        about: "the 0.9 card guidance adapted to cards that are programs (question, content and takeaway; the four takeaway failures; several cards), with its worked takeaways and three worked programs: the thimble skill's card section (read where it stands) and forms/v3.md's 'Making a card'",
-        parts: [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/v3.md', section: 'Making a card' }],
+        about: "the card guide (skills/thimble/cards.md): what makes a good card, in the 0.9 words, the toolkit's parts, and worked examples",
+        parts: [{ file: 'skills/thimble/cards.md' }],
       },
       v1: { about: 'FORMS.md as v read it: the card forms, for another view' },
       v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },

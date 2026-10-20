@@ -835,7 +835,7 @@ let carrying: Note[] = []
 function notesText(pending: Note[]): string | null {
   if (!pending.length) return null
   return [
-    'Notes from a side agent that read your last answer, the objects you saved and their lineage. The analyst does not see these notes.',
+    'Notes from a side agent that read your last answer, the cards you saved and their lineage. The analyst does not see these notes.',
     'Act on them in this reply: if a note shows an error in what you told the analyst, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
     ...pending.map(n => `- ${n.note}${n.rests_on ? ` (It rests on: "${cut(n.rests_on, 300)}")` : ''}`),
   ].join('\n')

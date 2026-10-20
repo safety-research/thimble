@@ -1946,7 +1946,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
     const g = rec.glosses?.[m.gloss!] ?? { term: '' }
     return {
       label: g.term, scope: { row: rec.row, mark: { kind: 'gloss', term: g.term } }, refs: (g.refs || []).slice(0, 3),
-      context: `The analyst asked this with a gloss of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The gloss said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`,
+      context: `The analyst asked this with an explainer of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The explainer said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`,
     }
   }
   const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)

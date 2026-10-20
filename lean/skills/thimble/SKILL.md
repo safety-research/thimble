@@ -59,14 +59,14 @@ The analyst never sees your shell output, so the work your answer rests on has t
   Markdown link whose words are the number or the quoted words, as in `[352](r3#outcome=approved@n) of the 410` or
   `["this test is flaky"](runs/41.jsonl#L88)`, and `[↗](<ref>)` when there are no words to link. Ids appear only
   inside refs: in prose, name a card by its question and a record by what it shows. When you are not sure where a
-  value came from, run `thimble resolve` on it before you use it.
+  value came from, run `thimble rows` on its ref before you use it.
 - **Draw a shape in a sentence only when the sentence claims one.** `[~](r3@n)` draws column `n` of r3's output in
   place. It shows a trend, a burst or a spread that the numbers alone hide. Next to a single count it takes the
   analyst's attention and shows nothing, so one in a message is the most that helps.
 - **Say what you did not read.** Words such as "only", "all", "stopped", "from then on" and "then" are claims about
   every record or about order, and one record the other way makes the answer false and makes the analyst doubt the
-  rest. `thimble coverage` lists what this session computed over, read, searched and never opened. When a file you did
-  not read could change the answer, say so.
+  rest. `thimble coverage` lists the files this session read or computed over, and those it only searched, only named
+  or counted, or never touched: none of these were read. When a file you did not read could change the answer, say so.
 
 ```
 Analyst   How many refund requests were approved?
@@ -85,17 +85,15 @@ takeaway. The question says what the card is for, the content shows the evidence
 representative example), and the takeaway answers the question in a sentence or two. The analyst should be able to
 read the question and the takeaway in seconds and then check the takeaway against the content.
 
-**Your cards are where your work goes, and the chat is where you talk with the analyst.** Save a card when the work is
-more than a number or two, such as a chart, a table or a map, and answer a quick question that needs no computation in
-the chat, without a card. thimble draws the card under your reply, so do not repeat its content in the reply.
+**Your cards are where your work goes, and the chat is where you talk with the analyst.** Put the analysis your answer
+rests on in a card, since the analyst never sees your shell output, and a card lets them see the pattern at a glance
+and open the records behind each part. Answer a quick question that a number or two settles in the chat, without a
+card. thimble draws the card under your reply, so do not repeat its content there.
 
-**A card is a short program.** Save it with `thimble save NAME --from FILE`, a JSON file with the question as `title`,
-the takeaway as `text` (its numbers cited), the content as `program`, and the query outputs it draws as `data`, as in
-`"data": {"days": "r1"}`. A part drawn from a row of that data opens the records behind it when the analyst selects
-it. The parts are in `../../draw/TOOLKIT.md` from this skill's folder: read it before your first card. thimble adds
-its card guidance beside your first data command. `thimble save` checks each citation and binding and lists each
-problem: fix it and save again under the same name. When you read or judged records in a way no tool saw, say so under
-`declared`.
+**A card is a short program.** Save it with `thimble save NAME --from FILE`: the question as `title`, the takeaway as
+`text` with its numbers cited, the content as `program`, and the query outputs it draws as `data`, such as
+`"data": {"days": "r1"}`. When you read or judged records by hand, say so under `declared`. The card guide, which
+thimble gives you beside your first data command, says what makes a good card and lists the toolkit.
 
 ## Labels
 
@@ -142,17 +140,18 @@ made the count.
 ## Example
 
 ```bash
-thimble sources
+thimble rows
 thimble run "saves per day" <<'PY'
 df = load("revisions.jsonl", fields=["time", "label"])
 df["day"] = df.time.str[:10]
 tally(df, "day")
 PY
 thimble save saves-per-day --from card.json
-thimble resolve "obj:saves-per-day#/days/19/n" -n 3
+thimble rows "obj:saves-per-day#/days/19/n" -n 3
 thimble coverage
 ```
 
-`tally(df, by)` counts and keeps each group's records. `thimble resolve` shows a value's chain: the card, r1 with its
-code, the 6,543 records of revisions.jsonl, and the first of them. In a transcript each record is one line, and its
-blocks (its words, each tool call, each result) are `<file>#L<n>.b<k>`.
+`thimble rows` alone lists the files and the saved cards; with a file it shows rows, and with a ref it shows that row,
+or a value's chain down to its rows: the card, r1 with its code, the 6,543 records of revisions.jsonl, and the first of
+them. `tally(df, by)` counts and keeps each group's records. In a transcript each record is one line, and its blocks
+(its words, each tool call, each result) are `<file>#L<n>.b<k>`.

@@ -26,7 +26,7 @@ test('v asks Claude for another view of the answer, with the proposal the person
   assert.match(ask, /another view of it: a card in the form that shows what it says, as "failures by test order"/)
   assert.match(ask, /It has the card r17-trail already: make a different view, not a copy\./)
   assert.match(ask, /Also proposed for it: trail of the run\./)
-  assert.match(ask, /Run `thimble guide cards` first, unless you read the card guidance earlier in this session\./)
+  assert.match(ask, /Read the card guide first, unless you have it from earlier in this session: \/plugin\/skills\/thimble\/cards\.md\./)
   assert.match(ask, /thimble save <name> --from FILE/)
   // no proposals and no card: the plain request
   const plain = request({ message: { text: 'Done.' }, verb: { dir: '/v' } })
@@ -55,7 +55,7 @@ for (const name of FORMS) {
     const program = readFileSync(join(DIR, 'forms', `${name}.program.js`), 'utf8').trimEnd()
     for (const v of ['v1.md', 'v2.md']) assert.ok(readFileSync(join(GUIDANCE, v), 'utf8').includes(program), `forms:${v} holds ${name}.program.js as it is`)
     // forms:v3 shows three of the forms, without their opening comment lines
-    if (V3.includes(name)) assert.ok(readFileSync(join(GUIDANCE, 'v3.md'), 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `forms:v3.md holds ${name}.program.js`)
+    if (V3.includes(name)) assert.ok(readFileSync(join(DIR, '..', '..', 'skills', 'thimble', 'cards.md'), 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `the card guide holds ${name}.program.js`)
     const data = JSON.parse(readFileSync(join(DIR, 'forms', `${name}.data.json`), 'utf8'))
     for (const [w, mode] of [[96, 'inline'], [98, 'detail'], [60, 'inline']]) {
       const d = runProgram({ id: name, v: 1, program, data }, { w, h: mode === 'detail' ? 30 : 24, mode })
