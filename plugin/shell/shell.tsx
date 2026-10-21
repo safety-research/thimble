@@ -57,7 +57,7 @@ import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
-import { answerAsk, askFromFeed, checksDone, checksPending, labelAskNow, labelFromFeed, labelsOf } from './labels'
+import { answerAsk, askFromFeed, checksDone, checksPending, labelAskNow, labelFromFeed, labelsOf, setLabelAsk } from './labels'
 import type { LabelAsk } from './labels'
 import { cardLegend, cardsLabels, labelsRow } from './labeluse'
 import { howMade } from '../panes/labels.js'
@@ -138,7 +138,9 @@ let trayWait: { key: string; at: number; cancelled: boolean } | null = null
 const TRAY_WAIT = new Set(['a', 'o', 'h'])
 // a big label's ask (labels.ts): its keys, and the one pressed last, waiting a moment for a letter after it
 const ASK_KEYS: Record<string, 'all' | 'sample' | 'cancel'> = { '1': 'all', '2': 'sample', '0': 'cancel' }
-let askWait: { key: string; cancelled: boolean } | null = null
+let askWait: { key: string; cancelled: boolean; ask: LabelAsk } | null = null
+// the key that last answered an ask, for the key's line in the session's events
+let askKeyTaken: string | null = null
 // the row the next turn's cards are drawn under, when v asked about a catch-up: under the catch-up,
 // not under the turn's own last words
 let placeNext: string | null = null
@@ -2071,7 +2073,9 @@ async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<
   // a key thimble took is a line in the session's events, with what had the keys: what people use, for measuring
   if (t.box && inTime && e.key?.key && !e.key.ctrl && !e.key.meta) {
     const key = String(e.key.key)
-    $.clock.after(0, () => { void (async () => { const stack = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]; await recordEvent($, { kind: 'key', key, on: detailIsOpen() ? 'detail' : stack.at(-1) ?? 'rest' }) })().catch(() => undefined) })
+    const asked = askKeyTaken === key
+    askKeyTaken = null
+    $.clock.after(0, () => { void (async () => { const stack = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]; await recordEvent($, { kind: 'key', key, on: asked ? 'label ask' : detailIsOpen() ? 'detail' : stack.at(-1) ?? 'rest' }) })().catch(() => undefined) })
   }
   if (t.box || !inTime) return t.box ?? { text: e.text, cursor: e.cursor }
   return keyTyped($, e, next)
@@ -2141,7 +2145,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // and straight after an ask's key (1 2 0), while it waits to run: the key began a word, and nothing runs
   if (askWait && opened && opened.key === askWait.key && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
     const w = askWait
-    return { box: { text: `${w.key}${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { w.cancelled = true; if (askWait === w) askWait = null } }
+    return { box: { text: `${w.key}${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { w.cancelled = true; if (askWait === w) askWait = null; void setLabelAsk($, w.ask).catch(() => undefined) } }
   }
   // and straight after t, while t waits to list the threads
   if (pendingT && opened && ['t', DOCK_KEY.coverage, DOCK_KEY.labels].includes(opened.key) && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
@@ -2192,12 +2196,15 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // a big label's ask waits (labels.ts): 1 runs all, 2 a sample, 0 cancels, once WORD_MS has passed with no letter after
   // the key (a letter makes it the start of a word, and nothing runs)
   const la = !pick && !tray ? await labelAskNow($) : null
-  if (la && ASK_KEYS[k] && !(k === '2' && la.units <= la.sample)) {
-    const wait = { key: k, cancelled: false }
+  if (la && ASK_KEYS[k] && !(k === '2' && !sampleOffered(la))) {
+    const wait = { key: k, cancelled: false, ask: la }
+    askKeyTaken = k
     return { box: consume, work: () => {
       askWait = wait
       keyOpened = { key: k, at: now }
-      $.clock.after(WORD_MS, () => { if (wait.cancelled || askWait !== wait) return; askWait = null; void answerAsk($, ASK_KEYS[k]!).catch(err => $.ui.toast(`× The label ${la.name} did not start: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
+      // the choices leave the bar and the card at once, whichever key; a letter after the key shows them again
+      void setLabelAsk($, null).catch(() => undefined)
+      $.clock.after(WORD_MS, () => { if (wait.cancelled || askWait !== wait) return; askWait = null; void answerAsk($, ASK_KEYS[k]!, la).catch(err => $.ui.toast(`× The label ${la.name} did not start: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
     } }
   }
   // a card with the focus: its own keys win over the verbs (the bar names them); a (or 1, or o) asks about it in its
@@ -2293,9 +2300,14 @@ function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
 }
 
+/** Whether an ask offers a sample: not after the person chose one (an ask for the rest), nor when all fit in one. */
+const sampleOffered = (a: LabelAsk) => !a.rest && a.sample > 0 && a.units > a.sample
+/** An ask's first choice in words: "run all", or "run the rest" after a sample. */
+const allWords = (a: LabelAsk) => (a.rest ? 'run the rest' : 'run all')
+
 /** An ask's keys, as the bar and its row say them. */
 function askKeys(a: LabelAsk): string {
-  return [`1 run all`, ...(a.units > a.sample ? [`2 run on a sample of ${a.sample.toLocaleString('en-US')}`] : []), '0 cancel'].join(' · ')
+  return [`1 ${allWords(a)}`, ...(sampleOffered(a) ? [`2 run on a sample of ${a.sample.toLocaleString('en-US')}`] : []), '0 cancel'].join(' · ')
 }
 
 /** A big label's ask under its card: what the run reads (certain), the three choices, each a press, and under them the
@@ -2307,7 +2319,7 @@ function askRows(els: Any, $: Engine, a: LabelAsk): Any {
     Box({ key: `ask-${c}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: words, onPress: () => { void answerAsk($, c) }, children: [Text({ key: 'k', color, bold: true, children: key }), Text({ key: 'w', children: ` ${words}` })] })] })
   return Box({ key: 'label-ask', flexDirection: 'column', marginTop: 1, children: [
     Text({ key: 'ask-text', children: `${a.text}?` }),
-    Box({ key: 'ask-keys', flexDirection: 'row', children: [choice('1', 'run all', 'all'), ...(a.units > a.sample ? [choice('2', `run on a sample of ${a.sample.toLocaleString('en-US')}`, 'sample')] : []), choice('0', 'cancel', 'cancel')] }),
+    Box({ key: 'ask-keys', flexDirection: 'row', children: [choice('1', allWords(a), 'all'), ...(sampleOffered(a) ? [choice('2', `run on a sample of ${a.sample.toLocaleString('en-US')}`, 'sample')] : []), choice('0', 'cancel', 'cancel')] }),
     ...(a.meta ? [Text({ key: 'ask-meta', dimColor: true, children: a.meta })] : []),
   ] })
 }

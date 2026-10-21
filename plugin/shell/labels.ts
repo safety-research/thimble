@@ -128,18 +128,30 @@ async function readHere($: Engine, ev: Any): Promise<void> {
 /** The ask that waits for the person's choice: a big label's run, with the sentence that says what it reads, the line
  *  under its choices (its model calls) and the card it is drawn under. One at a time: a newer ask takes its place. */
 const LABELASK = { plugin: 'thimble', key: 'labelask' } as const
-export type LabelAsk = { root: string; name: string; ask: string; card: string | null; text: string; meta: string; units: number; sample: number }
+export type LabelAsk = { root: string; name: string; ask: string; card: string | null; text: string; meta: string; units: number; sample: number; rest?: boolean }
+/** The asks already shown, by id: the feed's line is read by labelsInFeed while Claude's command runs and again by
+ *  newSaves after it, and an ask the person answered never comes back. */
+const asksSeen = new Set<string>()
 
-/** A `label_ask` line of the change feed: the ask waits for the person (the bar and the card's row show it). */
+/** A `label_ask` line of the change feed: the ask waits for the person (the bar and the card's row show it), once. */
 export async function askFromFeed($: Engine, ev: Any): Promise<void> {
   if (typeof ev?.name !== 'string' || !ID.test(ev.name) || typeof ev.root !== 'string' || typeof ev.ask !== 'string') return
+  if (asksSeen.has(ev.ask)) return
+  asksSeen.add(ev.ask)
   const a: LabelAsk = {
     root: String(ev.root).replace(/\/+$/, ''), name: ev.name, ask: ev.ask,
     card: typeof ev.object === 'string' && ID.test(ev.object) ? ev.object : null,
     text: String(ev.text || `Read ${Number(ev.units) || 0} records with Claude`), meta: String(ev.meta || ''),
-    units: Number(ev.units) || 0, sample: Number(ev.sample) || 0,
+    units: Number(ev.units) || 0, sample: Number(ev.sample) || 0, rest: ev.rest === true,
   }
   await $.state.set(LABELASK, a)
+}
+
+/** Show an ask again, or (null) take it off the bar and the card at once, before its answer runs: a key that answers
+ *  it leaves no stale choices on screen while the kernel and Claude's turn go on. */
+export async function setLabelAsk($: Engine, a: LabelAsk | null): Promise<void> {
+  await $.state.set(LABELASK, a)
+  $.ui.invalidate('ui.render')
 }
 
 /** The ask that waits, if any. */
@@ -149,10 +161,10 @@ export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
 
 /** The person's choice for the ask: run all, run on a sample, or cancel, as their own command. The reads start here,
  *  beside the session, and Claude hears the choice with the next prompt. */
-export async function answerAsk($: Engine, choice: 'all' | 'sample' | 'cancel'): Promise<void> {
-  const a = await labelAskNow($)
+export async function answerAsk($: Engine, choice: 'all' | 'sample' | 'cancel', given?: LabelAsk): Promise<void> {
+  const a = given ?? (await labelAskNow($))
   if (!a) return
-  await $.state.set(LABELASK, null)
+  await setLabelAsk($, null)
   const r = await kernel($, a.root, ['label', a.name, '--answer', choice, '--ask', a.ask])
   let got: Any = null
   try { got = JSON.parse(r.out) } catch { got = null }
@@ -164,8 +176,15 @@ export async function answerAsk($: Engine, choice: 'all' | 'sample' | 'cancel'):
     await noteForClaude($, `The analyst chose not to run the label ${a.name}: the model reads none of its ${a.units.toLocaleString('en-US')} records.`)
     return
   }
-  const what = choice === 'all' ? `all ${a.units.toLocaleString('en-US')} records` : `a random sample of ${Number(got.reads || a.sample).toLocaleString('en-US')} records`
-  await noteForClaude($, `The analyst chose to run the label ${a.name} on ${what}. The model reads them beside the session; \`thimble label ${a.name}\` shows the counts.`)
+  const n = (x: number) => x.toLocaleString('en-US')
+  if (choice === 'all') {
+    await noteForClaude($, `The analyst chose to run the label ${a.name} on ${a.rest ? 'the other' : 'all'} ${n(a.units)} records. The model reads them beside the session; \`thimble label ${a.name}\` shows the counts.`)
+  } else {
+    // a sample: the ask has left the screen, so Claude must not point at a key; the rest needs a new ask
+    const reads = Number(got.reads || a.sample)
+    const other = Math.max(0, (Number(got.of) || a.units) - reads)
+    await noteForClaude($, `The analyst chose a random sample of ${n(reads)} of the label ${a.name}'s ${n(a.units)} records, not all of them. The model reads the sample beside the session; \`thimble label ${a.name}\` shows the counts. The choices have left the screen, and the other ${n(other)} records stay without a value. To label them, run the same \`thimble label\` command again without --limit: the terminal then asks the analyst again, to run them or cancel.`)
+  }
   const card = got.card && typeof got.card.id === 'string' ? got.card.id : a.card
   labelFromFeed($, { name: a.name, root: a.root, object: card, t: `${a.ask}-${choice}` })
 }

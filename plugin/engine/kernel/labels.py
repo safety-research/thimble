@@ -5,7 +5,9 @@
 A label is defined once and applied to every record of the files a glob names (or a sample of them, a trial), after
 `--where` and `--within` narrow them. Each record gets one of its values (positive first) by its predicate:
 
-    regex    the record's text as the file holds it matches: the first value, else the last
+    regex    the record's text matches: the first value, else the last. A JSON or JSONL record's text is its values,
+             decoded, one per line (a newline in a value is a real newline), the text a person reads; any other
+             record's text is as the file holds it (regex_text)
     code     `label(unit)` in Python returns the value, (value, confidence) or None; a unit is the record as a dict
              (a line of text is {"text": ...}), with `_ref` and `_text` (the line as the file holds it)
     prompt   a model reads each record against the definition: the records wait in the label (`waiting`) until the
@@ -215,6 +217,26 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
     return kept, matched, files
 
 
+JSON_KINDS = ("jsonl", "transcript", "json")  # files whose records a regex reads decoded
+
+
+def regex_text(row: S.Row, kind: str | None) -> str:
+    """The text a regex label matches. A JSON or JSONL record's values, decoded and one per line, the text a person
+    reads: the file holds a newline in a value as the two characters \\ and n, so `\\bhttps?://` would miss a link
+    right after one. Any other record (a line of text, a CSV row, a table's row) as the file holds it."""
+    if kind in JSON_KINDS and not isinstance(row.value, str):
+        return S._flat_text(row.value)
+    return row.raw
+
+
+def _kind_of_ref(kinds: dict[str, str | None], ref: str) -> str | None:
+    """The kind of the file a row's ref is in, from {file: kind}."""
+    k = kinds.get(ref.rsplit("#", 1)[0], "?")
+    if k != "?":
+        return k
+    return next((v for f, v in kinds.items() if ref.startswith(f + "#")), None)
+
+
 def unit_text(row: S.Row, cut: int = UNIT_CHARS) -> str:
     """A record as the model reads it: a transcript record's blocks (its words, tool calls, results), a record's JSON,
     or a line of text; cut at `cut` characters."""
@@ -310,6 +332,7 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
         lab["matched"] = matched
         lab["files"] = files
         units = lab["units"]
+        kinds = {f: S.kind_of_file(st.root, f) for f in files} if kind == "regex" else {}
         added, errors = 0, []
         for row in rows:
             if row.ref in units and not units[row.ref].get("wait") and units[row.ref].get("v") is not None:
@@ -318,7 +341,7 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
                 continue
             added += 1
             if kind == "regex":
-                hit = re.search(rule, row.raw) is not None
+                hit = re.search(rule, regex_text(row, _kind_of_ref(kinds, row.ref))) is not None
                 units[row.ref] = {"v": values[0] if hit else values[-1], "c": 1.0, "by": "regex"}
             elif kind == "code":
                 try:
@@ -524,7 +547,10 @@ def hold_for_ask(st: Store, name: str, calls: int) -> dict[str, Any]:
         if lab is None:
             raise LabelError(f"no label {name!r}")
         n = sum(1 for u in (lab.get("units") or {}).values() if u.get("wait"))
-        ask = {"id": "a" + secrets.token_hex(6), "units": n, "calls": calls, "scope": scope_key(lab), "at": time.time()}
+        # after the person chose a sample of this label and scope, the ask is for the rest: run them, or cancel
+        rest = lab.get("sampled") == scope_key(lab)
+        ask = {"id": "a" + secrets.token_hex(6), "units": n, "calls": calls, "scope": scope_key(lab), "at": time.time(),
+               "rest": rest}
         lab["run"] = {"state": "ask", "ask": ask, "waiting": n}
         write(st, lab, change=False)
     return ask
@@ -537,8 +563,8 @@ def approved(lab: dict[str, Any]) -> bool:
 
 def answer_ask(st: Store, name: str, ask_id: str, choice: str, sample: int, seed: int = 0) -> dict[str, Any]:
     """The person's choice for the ask `ask_id`: all (the model reads every waiting record, and this label and scope need
-    not ask again), sample (`sample` of them at random; the others leave the label, which is then a trial), or cancel
-    (none; the waiting records leave the label). LabelError for an ask that is not the one waiting."""
+    not ask again), sample (`sample` of them at random; the others leave the label, which is then a trial, and its next
+    ask is for the rest), or cancel (none; the waiting records leave the label). LabelError for an ask that is not the one waiting."""
     if choice not in ("all", "sample", "cancel"):
         raise LabelError("the choice is all, sample or cancel")
     with locked(st, name):
@@ -560,11 +586,14 @@ def answer_ask(st: Store, name: str, ask_id: str, choice: str, sample: int, seed
         elif choice == "sample":
             keep = set(random.Random(seed).sample(wait, min(sample, len(wait))))
             lab["trial"] = True
+            lab["sampled"] = scope_key(lab)
         else:
             keep = set()
         for r in wait:
             if r not in keep:
                 del units[r]
+        if choice == "cancel" and units:  # the records that have values are a sample of the scope
+            lab["trial"] = True
         now = time.time()
         lab["run"] = {"state": "asked", "asked": now, "waiting": len(keep), "chose": choice} if keep else \
             {"state": "cancelled", "at": now, "chose": choice, "units": len(wait)}
@@ -856,6 +885,16 @@ if (L.waiting) parts.push(k.beside(k.text('{dim:waiting}', { w: 10 }), k.unseen(
 if (L.failed) parts.push(k.text(`{warn:${k.fmt(L.failed)} records have no value}{dim: · ${k.escape(L.failed_why || 'thimble label ' + col + ' --again asks again')}}`))
 const how = L.kind === 'prompt' ? 'the model read each record' : L.kind === 'regex' ? 'a regex' : L.kind === 'code' ? 'code' : 'Claude, after reading'
 const checked = L.checked ? ` · checked ${k.fmt(L.checked)}: ${k.fmt(L.agree)} agree, ${k.fmt(L.disagree)} disagree` : ' · none checked yet'
+// the definition in one line, cut with … where it does not fit: panes/labels.js defLine, which the row beside a card
+// uses (this program runs in the drawing sandbox, which imports nothing, so it keeps the same steps here)
+const lead = { prompt: 'question', regex: 'pattern', code: 'code' }[L.kind]
+const def = String(L.definition || '').trim()
+const one = L.kind === 'code'
+  ? def.split('\n').map(x => x.trim()).filter(x => x && !/^def\s+label\s*\(/.test(x)).reduce((s, x) => (!s ? x : s.endsWith(':') ? `${s} ${x}` : `${s}; ${x}`), '')
+  : def.replace(/\s+/g, ' ')
+const room = Math.max(8, k.w - 4 - Array.from(lead || '').length - 2)
+const cut = Array.from(one).length <= room ? one : Array.from(one).slice(0, room - 1).join('') + '…'
+if (lead && one) parts.push(k.text(`{dim:${lead}} ${k.escape(cut)}`))
 parts.push(k.text(`{dim:${k.escape(how)} · ${k.fmt(total)} records${L.trial ? ' (a trial sample)' : ''}${checked}}`))
 return k.frame(k.stack(...parts), { title: k.title })
 """
