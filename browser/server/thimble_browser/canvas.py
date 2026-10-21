@@ -180,7 +180,9 @@ def _slug(title: str, taken: set[str]) -> str:
 
 
 def emit(ws: str, cell: dict[str, Any], kind: str = "ran") -> None:
-    hub.publish(ws, {"type": "cell", "notebook": cell.get("notebook", ""), "cell": cell["id"], "kind": kind})
+    """Tell the page a card changed. The slug goes with the id because a citation may name the card by either."""
+    hub.publish(ws, {"type": "cell", "notebook": cell.get("notebook", ""), "cell": cell["id"], "kind": kind,
+                     "slug": cell.get("slug") or ""})
 
 
 def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | None = None) -> dict[str, Any]:

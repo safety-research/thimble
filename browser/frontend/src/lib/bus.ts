@@ -13,7 +13,8 @@ export type Events = {
   /** every record of the workspace stream */
   wsEvent: WsEvent
   chat: { chat: string; deleted?: boolean }
-  cell: { notebook: string; cell: string; kind: string }
+  /** a card ran, changed, was added, deleted or moved; `slug` is the name a citation may give it in place of its id */
+  cell: { notebook: string; cell: string; kind: string; slug?: string }
   report: { slug: string; status: string; span?: string }
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
   /** `held`: the proposal of an orientation from before 0.8.0 before its view first passes, which only its chip follows */
