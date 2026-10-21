@@ -1,12 +1,12 @@
 // aside.ts: work a key asks of Claude, done beside the conversation. v asks for another view of an answer; the card
-// is drawn under that answer, and the chat shows no prompt and no reply of Claude's, only one short line under the
-// answer while the work runs (`visualize… another view of this answer · 3 steps · 24s`).
+// is drawn under that answer, and the chat shows no prompt and no reply of Claude's. While the work runs, the bar says
+// so with thimble's other work (busy.ts: `⠋ visualizing 24s`); only a failure leaves a line under the answer.
 //
 // The mechanism: a fork of main ($.agent.spawn with subagentType 'fork'), started in the background. A fork has the
 // conversation as its context (the answer, the queries behind it, the thimble guidance), its model and its tools, so
 // it makes the card as main would, with the `thimble` command, and its Bash calls go through the same permission checks
 // as main's. Its messages stay out of main's conversation:
-//   - its steps are read from its transcript each second ($.session.messages), for the line and for its commands;
+//   - its steps are read from its transcript each second ($.session.messages), for its commands;
 //   - the cards it saves are placed under the message the key was pressed on (shell.tsx places what asideFor names):
 //     read after its own calls where its tool.call reaches this plugin, else at its end, and a save another call read
 //     first from the change feed goes under the message when the agent's commands name the card;
@@ -24,6 +24,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Aside, ObjRef } from '../types'
 import { claimAgent } from '../telemetry/telemetry'
+import { busyWhile } from './busy'
 import { ownReport } from './threads.js'
 import { cardForClaude, tellMain } from './shell'
 
@@ -50,8 +51,10 @@ export function onAsideMade(verb: string, made: (a: Aside) => string): void {
 export type AsideAsk = {
   /** the message the key was pressed on: the cards are drawn under it, and the progress line too */
   row: string
-  /** the key's verb, which the line names (`visualize`) and the session's events file the agent's turns under */
+  /** the key's verb, which a failure line names (`visualize`) and the session's events file the agent's turns under */
   verb: string
+  /** what the bar says while the work runs (`visualizing`) */
+  doing?: string
   /** what is being made, in a few words (`another view of this answer`) */
   what: string
   /** the message's first words, for the row main reads after */
@@ -101,7 +104,9 @@ export async function askAside($: Engine, o: AsideAsk): Promise<boolean> {
   await $.state.set({ ...ASIDE, id: o.row }, { row: o.row, verb: o.verb, what: o.what, about: o.about, agentId, status: 'running', at: now, secs: 0, steps: 0, cmds: [], saves: [] })
   await $.state.set(ASIDEOF, { ...of, [agentId]: o.row })
   claimAgent(agentId, o.verb, null)
-  // the line counts the seconds and the steps while the agent works
+  // the bar shows the work until the agent's turn ends (turn.complete below)
+  void busyWhile($, o.doing ?? o.verb, async () => { const a = await asideOn($, o.row); return a?.agentId === agentId && a.status === 'running' })
+  // the seconds, the steps and the commands, kept while the agent works
   const tick = $.clock.every(1000, () => { void follow($, agentId, o.row).catch(() => undefined) }) as unknown as { cancel?: () => void }
   live.set(agentId, tick)
   return true
@@ -174,15 +179,10 @@ export async function clearAside($: Engine, row: string, gone = false): Promise<
   if (a && (a.status !== 'running' || gone)) await $.state.set({ ...ASIDE, id: row }, null)
 }
 
-/** The progress line under the message, as words and a tone, or null with nothing to say. */
+/** The line under the message when the work made no card, as words and a tone, or null with nothing to say. While the
+ *  work runs the bar says so (busy.ts), not the message. */
 export function asideLine(a: Aside | null): { text: string; error: boolean } | null {
   if (!a) return null
-  if (a.status === 'running') {
-    const parts = [`${a.verb}… ${a.what}`]
-    if (a.steps) parts.push(`${a.steps} step${a.steps === 1 ? '' : 's'}`)
-    if (a.secs) parts.push(`${a.secs}s`)
-    return { text: parts.join(' · '), error: false }
-  }
   if (a.status === 'failed') return { text: `× ${a.verb} made no card${a.error ? `: ${a.error}` : ''} · press ${a.verb[0]} to try again`, error: true }
   return null
 }

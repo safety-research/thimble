@@ -24,7 +24,7 @@
 // object's program runs only in the drawing contract's sandbox.
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { LineCounts, MsgRecord, ObjRef, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
+import type { Aside, LineCounts, MsgRecord, ObjRef, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
 import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
 import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, regionAt, renderTerm } from '../draw/term.js'
@@ -52,7 +52,7 @@ import { barText, fitBar, hostKeys, keyEvent, keysOf, previewBarWidth } from '..
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTitle, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf, scopeOf as trayScopeOf } from '../panes/tray.js'
-import { ANOTHER_VIEW } from '../panes/proposals.js'
+import { ANOTHER_VIEW, nextView } from '../panes/proposals.js'
 import { hex as toneHex, mix, setAutoTheme, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
@@ -1544,8 +1544,9 @@ export function panelClosed(): void {
   endWait(false)
 }
 
-/** A key of the row under a message, v or s: its line opens (a press on the open one closes it). v with no view
- *  proposed asks Claude for another view at once, once the moment in which it could begin a word has passed. */
+/** A key of the row under a message, v or s: s opens its chips (a press on the open ones closes them). v asks Claude
+ *  for a view at once, once the moment in which it could begin a word has passed: the first view the observer proposed,
+ *  else another view of the answer. It never asks the person to pick; the next proposal is offered under the card. */
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
   if (cur && cur.row === row && cur.verb === key) { await setPick($, null); return }
@@ -1562,10 +1563,10 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
     // (one whose agent is gone, ended unheard, no longer holds the message)
     const was = await asideOn($, row)
     const alive = was?.status === 'running' && ((await $.agent.list().catch(() => [])) as Any[]).some(x => x?.id === was.agentId && !/^(completed|failed|killed|stopped)$/.test(String(x?.status || '')))
-    if (alive) { $.ui.toast('v is still making a view of this answer: its line under the answer says how far it is.'); return }
+    if (alive) { $.ui.toast('v is still making a view of this answer: the bar says how far it is.'); return }
     await clearAside($, row, true)
   }
-  if (key === 'v' && rec && !(v?.lit && Array.isArray(v.proposals) && v.proposals.length)) {
+  if (key === 'v' && rec) {
     await setPick($, null)
     const wait = { row, cancelled: false }
     pendingV = wait
@@ -1573,7 +1574,8 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
       if (wait.cancelled || pendingV !== wait) return
       pendingV = null
       const now = (await recordNow($, row)) ?? rec
-      await askForView($, now, ANOTHER_VIEW)
+      const choice = nextView(now) ?? ANOTHER_VIEW
+      await askForView($, choice === ANOTHER_VIEW ? now : await takeProposal($, now, choice), choice)
     }
     // the wait runs on from the key's own work, not from a timer: an agent v starts there is one whose calls this
     // plugin's hooks still hear (a timer's would not), so its card is drawn as it saves it
@@ -1592,20 +1594,25 @@ async function pickOption($: Engine, row: string, key: string, choice: string): 
   const rec = await recordNow($, row)
   if (!rec || key !== 'v') return false
   await setPick($, null)
-  // the view picked is no longer proposed: v stays lit only for the views still to make, so it is not lit beside the
-  // card it drew (v with none left asks for another view at once)
-  const v = (rec.verbs ?? {}).v
-  if (v && Array.isArray(v.proposals) && v.proposals.includes(choice)) {
-    const verbs = { ...rec.verbs }
-    const left = v.proposals.filter(p => p !== choice)
-    // what is ready is the views not drawn yet, not the card just asked for: `1 more view`
-    if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} more view${left.length === 1 ? '' : 's'}` }
-    else delete verbs.v
-    await saveRecord($, { ...rec, verbs })
-  }
+  const left = await takeProposal($, rec, choice)
   // outside the press, but from its own work (not a timer), so this plugin's hooks hear the calls of the agent it starts
-  void askForView($, rec, choice).catch(() => undefined)
+  void askForView($, left, choice).catch(() => undefined)
   return true
+}
+
+/** The view asked for is no longer proposed: v stays lit only for the views still to make, so it is not lit beside the
+ *  card it drew (v with none left asks for another view at once). The record as saved. */
+async function takeProposal($: Engine, rec: MsgRecord, choice: string): Promise<MsgRecord> {
+  const v = (rec.verbs ?? {}).v
+  if (!(v && Array.isArray(v.proposals) && v.proposals.includes(choice))) return rec
+  const verbs = { ...rec.verbs }
+  const left = v.proposals.filter(p => p !== choice)
+  // what is ready is the views not drawn yet, not the card just asked for: `1 more view`
+  if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} more view${left.length === 1 ? '' : 's'}` }
+  else delete verbs.v
+  const next = { ...rec, verbs }
+  await saveRecord($, next)
+  return next
 }
 
 /** v on a message: Claude is asked for another view of it (visualize.js), as a turn whose row reads as the press. What
@@ -1617,7 +1624,7 @@ async function askForView($: Engine, rec: MsgRecord, choice: string): Promise<vo
     // a fork of the conversation makes the card in the background, drawn under the message (aside.ts); only where no
     // fork can start does v ask main, as a turn of its own
     const what = picked || 'another view of this answer'
-    if (await askAside($, { row: rec.row, verb: 'visualize', what, about: shownOf(rec), request: viewRequest({ message: rec, choice: picked, guide, aside: true }) })) return
+    if (await askAside($, { row: rec.row, verb: 'visualize', doing: 'visualizing', what, about: shownOf(rec), request: viewRequest({ message: rec, choice: picked, guide, aside: true }) })) return
     const request = viewRequest({ message: rec, choice: picked, guide })
     placeNext = isCatchUp(rec) ? rec.row : null
     await ask($, request, 'visualize', choice || 'another view of this answer')
@@ -2686,10 +2693,23 @@ async function heldPosted($: Engine, id: string, data: Any): Promise<void> {
   }
 }
 
-/** The line under a message while a key's work runs beside the conversation (`visualize… another view of this answer ·
- *  3 steps · 24s`), or why it made nothing. */
+/** The line under a message when a key's work beside the conversation made nothing, and why (while it runs, the bar
+ *  says so). */
 function asideRowEl(els: Any, line: { text: string; error: boolean }, key: string): Any {
   return els.Box({ key, marginTop: 1, marginLeft: 2, children: [els.Text({ wrap: 'truncate-end', ...(line.error ? { color: 'error' } : { dimColor: true }), children: line.text })] })
+}
+
+/** The view v draws next, offered in one line under the card v drew for the message (`v another view: saves by wiki`):
+ *  only once v drew here, while the observer's proposals are not all drawn, and while v acts on this message. */
+async function nextViewOffer($: Engine, rec: MsgRecord, made: Aside | null, row: string): Promise<string | null> {
+  if (made?.status !== 'done' || !featureOn('cards')) return null
+  const view = nextView(rec)
+  return view && (await actingRow($)) === row ? view : null
+}
+
+function nextViewEl($: Engine, els: Any, row: string, next: string): Any {
+  const { Box, Button, Text } = els
+  return Box({ key: `nv-${row}`, marginTop: 1, marginLeft: 2, children: [Button({ key: `nv-${row}-press`, plain: true, label: `another view: ${next}`, onPress: () => pressRowVerb($, row, 'v'), children: [Text({ key: 'k', color: keyColor('v', theme), children: 'v' }), Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: ` another view: ${next}` })] })] })
 }
 
 /** One object inline: a card in its frame (its question in bold, a blank row, the drawing, its takeaway when it has
@@ -2839,6 +2859,8 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
     const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
     const rest = !tray && !pick && !cf && (await actingRow($)) === row
     tail.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${row}-${i}`, row, cf && cf.row === row && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null, sqNotes.marks[ref.id] ?? null)))))
+    const offer = await nextViewOffer($, cu, await asideOn($, row), row)
+    if (offer) tail.push(nextViewEl($, els, row, offer))
   }
   if (sqNotes.left.length) tail.push(leftOutEl(els, sqNotes.left, `lo-${row}`))
   // the chips last, under the whole catch-up and its cards
@@ -3559,6 +3581,8 @@ export const registerShell: Register = (on, options) => {
         const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
         const rest = !tray && !pick && !cf && (await actingRow($)) === at
         parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, cf && cf.row === at && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null, sqNotes.marks[ref.id] ?? null)))))
+        const offer = await nextViewOffer($, rec, made, at)
+        if (offer) parts.push(nextViewEl($, els, at, offer))
       }
       if (sqNotes.left.length) parts.push(leftOutEl(els, sqNotes.left, `lo-${at}`))
       if (open === 's') {

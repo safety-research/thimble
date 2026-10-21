@@ -171,28 +171,55 @@ test('after a turn that saved an object: one look reads its lineage, lights the 
   expect(JSON.parse(w.files[OBS]!).log.find((r: { kind: string }) => r.kind === 'look').verbs_lit).toEqual(['v'])
 })
 
-test('v after a pick names the views still to make: its note says one more, and its line\'s keys name the one option left', async ($, on) => {
+test('v draws the first proposed view at once: the bar says it works, nothing asks to pick, and the next view is offered under the card', async ($, on) => {
   const w = world(on, { fork: { line: null, settled: false, verbs: { v: { note: '2 views ready', proposals: ['saves by day', 'saves by wiki'] } }, glosses: [] } })
   const clock = w.clock
+  // v's card is made by a fork of the conversation in the background (aside.ts)
+  const spawns: string[] = []
+  const ended = new Set<string>()
+  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(String(e.prompt)); return { model: 'claude-test', agentId: `agent-${spawns.length}` } as never })
+  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, description: 'thimble · visualize', status: ended.has(`agent-${i + 1}`) ? 'completed' : 'running' })) }))
   await turn($, w, clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
   await clock.settle()
   await reply($)
   await clock.settle()
   const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
-  // v opens the line of two views, drawn under the reply; 1 picks the first
+  const bar = async () => textOf(await $.ui.render(BAND))
+  // v: no line of options and no keys to pick; once the moment to type a word has passed, the first view is asked for
   await press($, clock, key('v'))
+  expect(await bar()).not.toContain('pick')
+  await clock.advance(800)
+  await clock.settle()
+  expect(spawns.length).toBe(1)
+  expect(spawns[0]).toContain('as "saves by day"')
+  // while the fork works: the bar says so with its seconds, and the transcript has no progress line of its own
+  await clock.advance(3500)
+  await clock.settle()
+  expect(await bar()).toMatch(/visualizing \d+s/)
+  expect(await bar()).not.toContain('pick')
+  const working = textOf(await reply($))
+  expect(working).not.toContain('visualize…')
+  expect(working).not.toContain('another view:')
+  // the fork saves its card and ends: the bar is quiet again, and one line under the card offers the next view
+  await $.tool.call({ tool: 'Bash', command: 'thimble save saves-by-day --from card.json', agentId: 'agent-1' } as never)
+  ended.add('agent-1')
+  await $.turn.complete({ turnId: 'f1', agentId: 'agent-1', answer: 'Saves per day.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.advance(300)
+  await clock.settle()
+  expect(await bar()).not.toContain('visualizing')
+  expect(await bar()).toContain('1 more view')
   await reply($)
   await clock.settle()
-  expect(textOf(await $.ui.render(BAND))).toContain('1 2 pick')
-  await press($, clock, key('1'))
-  const bar = textOf(await $.ui.render(BAND))
-  expect(bar).toContain('1 more view')
-  expect(bar).not.toContain('view ready')
-  // v again, before the line is drawn under the reply: the bar names the one option left
+  const done = textOf(await reply($))
+  expect(done).toContain('v another view: saves by wiki')
+  expect(done.indexOf('another view:')).toBeGreaterThan(done.indexOf('Jun 18'))
+  // v again draws that one, with no pick either; with none left, no line offers more
   await press($, clock, key('v'))
-  const again = textOf(await $.ui.render(BAND))
-  expect(again).toContain('1 pick')
-  expect(again).not.toContain('2 pick')
+  await clock.advance(800)
+  await clock.settle()
+  expect(spawns.length).toBe(2)
+  expect(spawns[1]).toContain('as "saves by wiki"')
+  expect(await bar()).not.toContain('pick')
 })
 
 test('the pass is a fork of the session: its prompt is the frame, the lenses, the message to read and the evidence; each call and the turn are lines in the session events, with each lens\'s share', async ($, on) => {
