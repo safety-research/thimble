@@ -38,7 +38,7 @@ import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCoun
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteEdit, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
-import { base as trayBase, open as trayOpen, order as markOrder, stepFrom, top as trayTop } from './tray.js'
+import { base as trayBase, markNow, open as trayOpen, order as markOrder, stepFrom, top as trayTop } from './tray.js'
 import { catchUpEl, keyColor, markColors, messageEl } from './view'
 import { markNextTurn, record as recordEvent } from '../telemetry/telemetry'
 import { ownTurn } from '../observer/observer'
@@ -1368,7 +1368,9 @@ async function stepPlace($: Engine): Promise<{ list: { row: string; i?: number; 
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const base = trayBase(tray) as TrayFrame | null
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
-  const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === base.i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
+  // the tray's mark where its message holds it now (an explainer saved before it since it opened moves it on)
+  const i = base && base.row != null ? markNow(await recordNow($, base.row), base) : -1
+  const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
   return { list, at }
 }
 
