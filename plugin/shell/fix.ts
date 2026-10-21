@@ -229,7 +229,7 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
 
 // ------------------------------------------------------------------------------------------------ fixes that work
 
-/** Each fix as last seen: its status, the time of its last use (each \`thimble fix use\` is a round of the fix) and its
+/** Each fix as last seen: its status, the time of its last use (each `thimble fix use` is a round of the fix) and its
  *  title, so each round that came into use is said once. Empty until the first look. */
 const seen = new Map<string, { status: string; used: number; title: string }>()
 /** The fixes whose draft the person asked for (p) and whose preview has not opened yet. */
@@ -276,7 +276,7 @@ export async function refreshFixes($: Engine): Promise<void> {
       // the plugins load again once the session is idle, so they try it at once
       if (!(await ownFix($))) await reloadFor($, '/reload-plugins')
     } else if (was.title !== f.title) {
-      // a round changed what the fix does, and its title says so now (\`thimble fix title\`)
+      // a round changed what the fix does, and its title says so now (`thimble fix title`)
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
       const l = await fixLineNow($)
       if (l?.kind === 'applied' && l.slug === f.slug) await $.state.set(LINE, { ...l, title: f.title })
