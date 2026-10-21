@@ -13,7 +13,7 @@ import { back, base, open, order, push, step, stepFrom, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../draw/term.js'
-import { cardBody, frameOf, placeWords } from '../../panes/tray.js'
+import { cardBody, cutTitle, frameOf, placeWords } from '../../panes/tray.js'
 
 const TEXT = 'Mostly notes. Of 9,120 saves, [2,310 notes](q2#label=note@n) [~](q3@n) went to other bots, from [880 senders](q4#row=1@n). I read only **1 of 3 files**, so the `fixture scope` and `rebase loop` are guesses.'
 const at = (text, m) => text.slice(m.start, m.end)
@@ -328,6 +328,20 @@ test('] stops at the newest reply\'s last stop and [ at the oldest reply\'s firs
   assert.equal(stepFrom(list, 3, 1), null)
   assert.equal(stepFrom(list, 0, -1), null)
   assert.equal(step(order([{ row: 'r1', marks: [{}] }, { row: 'r2', marks: [{}, {}] }]), { row: 'r2', i: 1 }, 1), null)
+})
+
+test('a tray title and a record\'s place keep their line number whole and lose the start of the path first', () => {
+  assert.equal(cutTitle('engine/kernel/lineage.py:463', 20), '…rnel/lineage.py:463')
+  assert.ok(cutTitle('engine/kernel/lineage.py:463', 20).endsWith('lineage.py:463'))
+  assert.equal(cutTitle('runs/abcdef0123456789.jsonl#L20288', 18), '…6789.jsonl#L20288')
+  assert.equal(cutTitle('the swarm stalled on day two', 12), 'the swarm s…')
+  // a record whose place is long, beside long words: the place stays whole, never "lineage.py#L…"
+  const recs = { count: 1, records: [{ ref: 'engine/kernel/lineage.py#L463', text: 'def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | None = None) -> dict[str, Any]:' }], chain: [] }
+  const card = sourceCard({ ref: 'engine/kernel/lineage.py:463', label: 'engine/kernel/lineage.py:463', resolved: recs })
+  const out = gridText(draw(card.parts[0], 70))
+  assert.ok(out.includes('lineage.py#L463'), out)
+  const long = { count: 1, records: [{ ref: 'agents/agent-05/session-abcdef0123456789abcdef.jsonl#L20288', text: 'pushed the branch again after the reviewer asked for a smaller change set and more tests' }], chain: [] }
+  assert.ok(gridText(draw(sourceCard({ ref: "x", label: "x", resolved: long }).parts[0], 70)).includes("#L20288"))
 })
 
 test('a code path written from the folder Claude ran cd into opens its place with no moved note', () => {
