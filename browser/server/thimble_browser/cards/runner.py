@@ -126,7 +126,8 @@ def shell_for(run: Run, workspace: str) -> Any:
         "del _pt",
         "import sys, types\nm = types.ModuleType('thimble')\nm.__file__, m.WS = PATH, WS\n"
         "with open(PATH, encoding='utf-8') as f:\n    exec(compile(f.read(), PATH, 'exec'), m.__dict__)\n"
-        "sys.modules['thimble'] = m\ndel m, f, types",
+        # `thimble` is in the namespace too, as the prompts say: thimble.labels(...) needs no import
+        "sys.modules['thimble'] = m\nthimble = m\ndel m, f, types",
     ]
     shell.user_ns["PATH"] = str(HERE / "kernel_thimble.py")
     shell.user_ns["WS"] = workspace

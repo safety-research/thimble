@@ -71,6 +71,13 @@ def test_the_kernel_reads_the_store_as_written(runs):
                                                                   ("runs/r1.jsonl#L2", "tests", 2)]
 
 
+async def test_code_finds_thimble_with_no_import(runs):
+    """The prompts say thimble.labels(...) is there in run_python and a card's code, so it needs no import."""
+    r = await sandbox.run_code("thimble.labels", runs, timeout=60, unsandboxed=True)
+    assert r["status"] == "ok", r["outputs"]
+    assert "NameError" not in str(r["outputs"])
+
+
 # ---- a prompt run: batches, calls at once, one system prompt
 
 # ---- the classifier prompt is the terminal's
