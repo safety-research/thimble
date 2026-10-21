@@ -24,6 +24,7 @@ import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, ty
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
 import { API_ERROR_KIND, callPieces, callToolName, capacityNote, corpusRelative, groupState, groupTools, isRawCall, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ThreadChip } from './Notes'
+import { midTurnTexts } from './tidy'
 import { ApiErrorCard } from './ApiError'
 import { NoticeRow } from './Notice'
 import { LabelRunRow } from './LabelRun'
@@ -117,12 +118,16 @@ export function shownRows(rows: readonly (Row | BranchRow)[], each = false): Sho
  * message body carries `data-anchor="chat:<id>#<index>"`, so a ⌘-click starts a thread there. `live` marks the calls of
  * a run still going. `retry` names the error row whose Retry sends the analyst's message again, and `note` its line.
  */
+const EMPTY_SET: ReadonlySet<number> = new Set()
+
 export function Rows({ rows, ws, chat, streaming = false, nested = false, live = false, retry }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; nested?: boolean; live?: boolean; retry?: ErrorRetry }) {
   const lastText = streaming ? [...rows].reverse().find((r): r is Extract<Row, { kind: 'text' }> => r.kind === 'text') : undefined
   const lastRow = rows[rows.length - 1]
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows)
+  // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them
+  const notes = nested ? EMPTY_SET : midTurnTexts(shown)
   // the lenses whose marks show in the chat (lib/marks.ts): a lens turned off for the chat hides its marks at once
   const lenses = useLenses(ws)
   return (
@@ -140,7 +145,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
             )
           case 'text':
             return (
-              <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
+              <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}${notes.has(r.index) ? ' chat-step-note' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
                   <ChatMarkdown text={r.text} streaming={r === lastText} marks={shownMarks(r.marks, lenses, 'chat')} lenses={lenses} />
                 </div>

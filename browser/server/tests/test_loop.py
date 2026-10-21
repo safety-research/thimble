@@ -230,3 +230,18 @@ async def test_a_report_write_shows_in_the_report_as_it_streams_in(ws, monkeypat
     assert drafts[-1].startswith("Two runs merged. One failed")
     final = report.writeup(ws)
     assert not final.get("drafting") and "flaky test" in report.markdown(ws)
+
+
+async def test_the_reply_after_a_turn_is_the_text_after_its_last_call(ws, monkeypatch):
+    heard = []
+    monkeypatch.setattr(agent, "AFTER_TURN", [lambda s, answer, result: heard.append(answer)])
+    client = FakeClient([
+        NS(content=[text("Let me count the runs first."), call("t1", "Read", {"file_path": "results.csv"})],
+           stop_reason="tool_use", usage=usage(), stop_details=None),
+        NS(content=[text("2 runs [2](results.csv#row=1).")], stop_reason="end_turn", usage=usage(), stop_details=None),
+    ])
+    s = await run_turn(ws, client, monkeypatch)
+    await s.task
+    assert heard == ["2 runs [2](results.csv#row=1)."]
+    # the note stays in the log, where the steps show it
+    assert any(r.get("delta") == "Let me count the runs first." for r in chats.records(ws, "main"))

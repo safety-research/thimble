@@ -55,3 +55,19 @@ export function tidyRows(rows: readonly Row[]): Row[] {
   }
   return out
 }
+
+/** The indexes of the text rows written in the middle of a turn: a text row that a call of the same turn follows.
+ * Claude's reply is the text after the turn's last call; words written before a call are a note on the way there
+ * ("Let me count the runs first."), which reads as one of the turn's steps, not as the reply. Pure. */
+export function midTurnTexts(rows: readonly { kind: string; index: number }[]): Set<number> {
+  const out = new Set<number>()
+  let before: number[] = []
+  for (const r of rows) {
+    if (r.kind === 'text') before.push(r.index)
+    else if (r.kind === 'tool' || r.kind === 'tools' || r.kind === 'calls') {
+      for (const i of before) out.add(i)
+      before = []
+    } else if (r.kind === 'user') before = []
+  }
+  return out
+}
