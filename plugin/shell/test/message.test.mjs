@@ -213,18 +213,20 @@ test("a code citation's preview keeps every line's indent: the cited lines and t
   }
 })
 
-test("a citation's rows section names the cited files' own entries: records, rows or lines, and none for a whole file", () => {
+test("a citation's rows section, when asked for, names the cited files' own entries: records, rows or lines, and none for a whole file", () => {
   const query = { id: 'q4', about: 'survivors by class and sex', keys: ['class', 'sex'], table: [{ class: 3, sex: 'male', n: 347 }, { class: 1, sex: 'female', n: 94 }] }
   const ofRecords = { count: 347, rows: ['revisions.jsonl#L1-347'], records: [], chain: [], unit: 'records', unit_one: 'record' }
-  const card = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: ofRecords, query })
+  // by default the card has the code section alone
+  assert.deepEqual(sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: ofRecords, query }).sections.map(x => x.id), ['code'])
+  const card = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: ofRecords, query, rows: true })
   const rows = card.sections.find(x => x.id === 'rows')
   assert.equal(rows.key, 'r')
   assert.equal(rows.words, 'records')
   assert.match(rows.parts[0].data.head, /^\*\*347\*\* records of revisions\.jsonl behind /)
-  const csv = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: { ...ofRecords, rows: ['titanic.csv#L2-348'], unit: 'rows', unit_one: 'row' }, query })
+  const csv = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: { ...ofRecords, rows: ['titanic.csv#L2-348'], unit: 'rows', unit_one: 'row' }, query, rows: true })
   assert.equal(csv.sections.find(x => x.id === 'rows').words, 'rows')
   // whole files with no entries (an image, a PDF): no rows section, the code section still there
-  const img = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: { ...ofRecords, rows: ['chart.png'], unit: null, unit_one: null }, query })
+  const img = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: { ...ofRecords, rows: ['chart.png'], unit: null, unit_one: null }, query, rows: true })
   assert.deepEqual(img.sections.map(x => x.id), ['code'])
 })
 

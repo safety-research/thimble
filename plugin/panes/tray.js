@@ -5,31 +5,30 @@
 // It shows one card at a time, the top of a stack: a citation's source card or an explain card (what a term is, a
 // small drawing, where it mattered here). A citation's card opens on the most readable form of what it points to (the
 // cited span of a file, the query's output as a table with the cited cell marked, a series, the card with its part
-// marked: shell/cards.js); what reads less easily is one key away in the same panel, a section the card names (r the
-// rows behind the value, c its code, or a record as the file holds it), shown in place of the card until the same key
-// or 0 closes it. A citation inside a card opens over it; back returns to the card under it, and back from the first
+// marked: shell/cards.js); what reads less easily is one key away in the same panel, a section the card names (c its
+// code, or a record as the file holds it), shown in place of the card until the same key or 0 closes it. A citation inside a card opens over it; back returns to the card under it, and back from the first
 // card closes the tray. a asks about it: the card opens in the side panel as the mark's side thread (side.ts), the card
 // at its top, the thread's conversation under it, its input bar at the bottom holding the keys. Main does not see the
 // thread.
 //
-//   state: {stack: [frame, ...]}
-//   frame: {row, i, kind, ref, label, gloss, open, heal?, why?, wrote?} for a mark of a message (frameOf; heal: what the
-//          check found, kept, moved, bad, quiet or gone), {kind: 'cite', ref, label, open}
-//          for a citation inside a card; `open` is the section shown. A frame carries what it shows, so a surface draws
-//          it without the message's record.
+//   state: {stack: [frame, ...], noted?}: noted once a section's note (cards.js: what load and tally do) was shown,
+//          so the session's trays show it the first time only
+//   frame: {row, i, kind, ref, label, gloss, open, note?, heal?, why?, wrote?} for a mark of a message (frameOf; heal:
+//          what the check found, kept, moved, bad, quiet or gone), {kind: 'cite', ref, label, open}
+//          for a citation inside a card; `open` is the section shown, `note` whether it shows the section's note. A
+//          frame carries what it shows, so a surface draws it without the message's record.
 //   reads: the session's side threads (whether the mark has one); busy, the glyph that turns while thimble works
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
 //          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
 //          label}], problem} (cards.js drawnCard)
 //   keys: a ask (the side panel on the mark, its whole source and its thread, the input bar holding the keys; a
 //         citation's ↵ and 1 too, unnamed) · h the heads up (or explainer) on a citation's words, over it (a click on
-//         its line too) · ↵ or e expand an explainer (a longer one in its place) · the sections' keys (r records, rows or lines, in
-//         the cited files' own word, when entries stand behind it; c code)
-//         · o open the first citation inside the card (the rest by a click; 2–9 still open them, unnamed) · 0 back (or
-//         close; esc too): esc at the prompt never reaches a plugin, so 0 stays named · ] [ the next and the one before
-//         (the host's order of marks and cards: k.do('step')), ] named while there is a next (the `steps` read), else [
-//         where there is one before. Letters for what the person does, so the line reads as
-//         words (`a ask · o open … · 0 close`), never as a number
+//         its line too) · ↵ or e expand an explainer (a longer one in its place) · the sections' keys (c code)
+//         · a citation inside the card opens by a click (2–9 too, unnamed) · 0 back (or close; esc too): esc at the
+//         prompt never reaches a plugin, so 0 stays named · ] [ the next and the one before (the host's order of marks
+//         and cards: k.do('step')), ] named while there is a next (the `steps` read), with what it goes to (`] next
+//         citation`), else [ where there is one before. Letters for what the person does, so the line reads as words
+//         (`a ask · c code · 0 close`), never as a number
 //   asks of the host: thread {frame} (the side panel on this card, its input bar holding the keys), expand {frame},
 //         step, close
 import { threadKey } from '../shell/threads.js'
@@ -120,8 +119,9 @@ export default {
       // the turning glyph while thimble works (the terminal's shell/busy.ts), so a line that says the work never looks frozen
       busy: typeof stores.busy === 'string' ? stores.busy : null,
       threads: list.map(t => ({ key: t.key || (t.scope ? threadKey(t.scope) : ''), status: t.status || '', error: t.error || '', turns: (t.turns || []).map(x => ({ role: x.role === 'user' ? 'person' : x.role, text: String(x.text || '') })) })),
-      // whether ] and [ go anywhere from this mark ({next, prev}; null where the host does not say), and where its
-      // reply is when that is an earlier one ({reply: 'reply 1 of 3, above'})
+      // whether ] and [ go anywhere from this mark ({next, prev}; null where the host does not say), what each goes to
+      // ({nextWhat: 'citation', prevWhat: 'explainer'}), and where its reply is when that is an earlier one ({reply:
+      // 'reply 1 of 3, above'})
       steps: stores.steps && typeof stores.steps === 'object' ? stores.steps : null,
     }
   },
@@ -169,20 +169,26 @@ export function program(k, data) {
     k.on('return', longer, 'expand')
     k.on('e', longer, 'expand')
   }
-  // a section's key opens it in place of the card, and closes it again
-  sections.forEach(s => k.on(s.key, () => withTop({ open: open && open.id === s.id ? null : s.id }), s.words))
+  // a section's key opens it in place of the card, and closes it again; a section with a note (what load and tally do)
+  // shows it the first time the session's trays open one, on that card only
+  sections.forEach(s => k.on(s.key, () => {
+    if (open && open.id === s.id) return withTop({ open: null })
+    if (s.note && !st.noted) return { ...withTop({ open: s.id, note: true }), noted: true }
+    return withTop({ open: s.id })
+  }, s.words))
   if (top.kind === 'gloss') k.on('a', toThread, 'ask')
   k.on('1', toThread)
-  // o: the first citation inside the card, over it; the others by a click, or 2–9, unnamed
-  if (links.length) k.on('o', () => openLink(links[0]), `open ${short(links[0].label || links[0].ref || '', 28)}`)
+  // a citation inside the card opens over it by a click on it, or 2–9, unnamed: the bar names no key for it, since its
+  // words are already underlined in the card
   links.forEach((l, j) => k.on(String(j + 2), () => openLink(l)))
   k.on('0', back, open || stack.length > 1 ? 'back' : 'close')
   k.on('esc', back)
   // ] is named while there is a next mark or card; at the newest reply's last stop, [ is named instead, where there
   // is one before (both still work unnamed)
   const steps = data.steps || { next: true, prev: true }
-  k.on(']', () => { k.do('step', { dir: 1 }) }, steps.next !== false ? 'next' : undefined)
-  k.on('[', () => { k.do('step', { dir: -1 }) }, steps.next === false && steps.prev !== false ? 'previous' : undefined)
+  const what = w => (typeof w === 'string' && w ? ` ${w}` : '')
+  k.on(']', () => { k.do('step', { dir: 1 }) }, steps.next !== false ? `next${what(steps.nextWhat)}` : undefined)
+  k.on('[', () => { k.do('step', { dir: -1 }) }, steps.next === false && steps.prev !== false ? `previous${what(steps.prevWhat)}` : undefined)
   // the gloss on the citation's words (frameOf `inner`): over the citation, as a citation inside a card opens
   const onWords = !open && Array.isArray(top.inner) ? top.inner.find(f => f && f.kind === 'gloss') : null
   const wordsHeads = !!(onWords && onWords.gloss && onWords.gloss.kind === 'heads')
@@ -273,6 +279,8 @@ export function cardBody(k, card, top, open) {
     ;(open.drawings || []).forEach((d, j) => {
       if (j) parts.push(k.space(1, 1))
       parts.push(k.embed(d))
+      // the section's note under its first part (the code), on the card that showed it first
+      if (!j && open.note && top && top.note) parts.push(k.text(`{dim:${k.escape(String(open.note))}}`, { max: 2 }))
     })
   } else {
     (card.drawings || []).forEach((d, j) => {
