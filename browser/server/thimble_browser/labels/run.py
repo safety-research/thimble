@@ -167,7 +167,7 @@ def _note(rec: dict[str, Any], why: str) -> None:
 
 
 async def _shown(ws: str, run: Any) -> None:
-    """The run, shown in the top bar while it goes (busy.py)."""
+    """The run, shown above the chat's input box while it goes (busy.py)."""
     async with working(ws, "labeling"):
         await run
 

@@ -1,6 +1,6 @@
 // thimble's own work while it runs (backend busy.py): the stream's `busy` records, each a job's start or end with a
-// word or two ("marking", "labeling"), and a document Claude writes (the `report` records, "writing"). The top bar shows the newest job that has run 300 ms or more, with its seconds
-// from 3 s on (shell/TopBar.tsx BusyMark). A dropped stream clears them: a page that reconnects hears the next ones.
+// word or two ("marking", "labeling"), and a document Claude writes (the `report` records, "writing"). The line above the chat's input box shows the newest job that has run 300 ms or more, with
+// its seconds from 3 s on (chat/ChatBusy.tsx). A dropped stream clears them: a page that reconnects hears the next ones.
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { bus } from './bus'
 
@@ -47,7 +47,7 @@ export function busyNow(now = Date.now()): { word: string; secs: number | null }
   return { word: best.word, secs: ms >= SECS_MS ? Math.floor(ms / 1000) : null }
 }
 
-/** The job the top bar shows now, drawn again each 250 ms while any job runs. */
+/** The job the busy line shows now, drawn again each 250 ms while any job runs. */
 export function useBusy(): { word: string; secs: number | null } | null {
   useSyncExternalStore(
     (fn) => {

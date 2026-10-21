@@ -84,20 +84,6 @@
 .shell-spacer {
   flex: 1;
 }
-/* main's turn and thimble's own work while they run (TopBar MainWork, BusyMark): a spinner and a word, quiet */
-.shell-main-work,
-.shell-busy {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 12px;
-  font-size: var(--text-xs, 12px);
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-.shell-busy-secs {
-  font-variant-numeric: tabular-nums;
-}
 .shell-tools {
   display: inline-flex;
   align-items: center;

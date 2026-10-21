@@ -18,6 +18,7 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { ChatMeta, ChatRecord, MainEffort } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
+import { ChatBusy } from './ChatBusy'
 import { Composer } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, foldRecords, withApiErrors, withBranches, type Row } from './model'
@@ -428,6 +429,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         <div ref={footRef} className="chat-foot">
           <ProposalCard ws={ws} />
           <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          <ChatBusy ws={ws} />
           <Composer
             model={mainModel}
             effort={attached ? mainEffort(attached) : null}

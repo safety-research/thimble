@@ -1,4 +1,4 @@
-// The top bar's indicator of thimble's own work (lib/busy.ts): the stream's `busy` records start and end jobs; a job
+// The busy line's record of thimble's own work (lib/busy.ts): the stream's `busy` records start and end jobs; a job
 // shows after 300 ms, the newest first, with its seconds from 3 s on, and a dropped stream clears them.
 import { describe, expect, it } from 'vitest'
 import { bus } from '../../src/lib/bus'
