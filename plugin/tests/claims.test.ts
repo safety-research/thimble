@@ -438,6 +438,53 @@ test('Coverage closed while its read still runs: the bar says r again, and a lat
   expect(line).toContain('r coverage')
 })
 
+// Claude Code hands esc at an idle, empty prompt only to an open pane. So r shows Coverage early in its wait, without
+// the keys: esc then closes it and nothing opens after; a letter typed at a usual pace makes r a word and opens nothing;
+// with no letter the pane takes the keys once the wait has passed
+test('esc in r\'s wait closes Coverage for good; a word opens nothing; else the pane takes the keys', async ($, on) => {
+  const w = world(on, [FORK1], { cov: COV })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  const opens = () => w.opened.filter((o: Any) => o.id === 'object')
+
+  // a word: r, then u 150 ms later
+  await press($, w.clock, key('r'))
+  await w.clock.advance(150)
+  const word = await press($, w.clock, key('u'))
+  expect(word.text).toBe('ru')
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  expect(opens()).toHaveLength(0)
+  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'backspace' }, text: '', cursor: 0, start: 0, end: 0, inputText: '' } as never)
+
+  // esc 500 ms after r: the pane shown early, without the keys, closes, and nothing opens after
+  await press($, w.clock, key('r'))
+  await w.clock.advance(400)
+  await w.clock.settle()
+  expect(opens()).toHaveLength(1)
+  expect(opens()[0].focus).toBeUndefined()
+  expect(opens()[0].closeOnEscape).toBe(true)
+  expect(w.keys.panel).toBe(false)
+  await w.clock.advance(100)
+  // esc at the idle, empty prompt: Claude Code closes the pane (closeOnEscape), and the panel's close runs closed().
+  // The kit raises no close of the person's, so the module hears of it here from a prompt that finds the pane gone
+  w.keys.open = false
+  await $.prompt.submit({ text: 'and the other folder?', origin: { kind: 'composer' } } as never)
+  await w.clock.settle()
+  await w.clock.advance(3000)
+  await w.clock.settle()
+  expect(opens()).toHaveLength(1)
+  expect(w.keys.panel).toBe(false)
+
+  // no letter and no esc: the pane takes the keys once the wait has passed
+  await press($, w.clock, key('r'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  const later = opens().slice(1)
+  expect(later[0].focus).toBeUndefined()
+  expect(later.slice(1).some((o: Any) => o.focus === true)).toBe(true)
+  expect(w.keys.panel).toBe(true)
+})
+
 // Claude Code gives ← and → to the prompt even while a pane holds the keys (its panes bind ↑ ↓ tab ↵ esc, never ← →),
 // and ↑ reaches the prompt in the moment before the panel holds them. A suggestion → takes, or a history entry ↑
 // recalls, fills the prompt, and Claude Code then refuses the panel the keys: esc, ↑ and the letters all went to the

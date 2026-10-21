@@ -212,14 +212,14 @@ export async function dockAction($: Engine, pane: Dock, a: Record<string, unknow
 // ------------------------------------------------------------------------------------------------ open and close
 
 /** The pane in the side panel, over what the panel shows (esc goes back to it), its data read again. */
-export async function openDock($: Engine, pane: Dock): Promise<boolean> {
+export async function openDock($: Engine, pane: Dock, o: { keys?: boolean } = {}): Promise<boolean> {
   if (pane === 'coverage') $.clock.after(0, () => { void readCoverage($) })
   else {
     $.clock.after(0, () => { void readLabels($) })
     // the bar's count opens the folder's labels (one label alone opens on itself)
     await patchPaneState($, 'labels', {}, { open: null, filter: null, rec: 0, at: null, from: null, def: false })
   }
-  return openSide($, { pane, args: {} }, { push: detailIsOpen() })
+  return openSide($, { pane, args: {} }, { push: detailIsOpen(), keys: o.keys })
 }
 
 /** One label in the side panel, its records filtered to `value` when one is given: from the row beside a card or an

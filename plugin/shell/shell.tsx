@@ -31,7 +31,7 @@ import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { bodyRows, cardFrame, cardLine, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
-import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, noteViewport, noticeOpen, openDetailPane, registerDetail } from './detail'
+import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, giveKeys, noteViewport, noticeOpen, openDetailPane, registerDetail } from './detail'
 import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withGone, withHeal, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, partLines, recordRefs, refsKey, regionMeta, regionRefs, splitsNote } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList, threadOf } from './thread'
@@ -62,7 +62,7 @@ import { answerAsk, askFromFeed, checksDone, checksPending, labelAskNow, labelFr
 import type { LabelAsk } from './labels'
 import { cardLegend, cardsLabels, labelsRow } from './labeluse'
 import { howMade } from '../panes/labels.js'
-import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, openLabel, registerDock, resetDock, restPane, toggleDock } from './dock'
+import { closeDock, countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockShown, dockStore, dockWant, noteCoverage, openDock, openLabel, registerDock, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
 import { flushEngaged, resetEngaged, tellOpened } from './engaged'
@@ -1481,8 +1481,30 @@ async function sourceSpec($: Engine, ref: string, label: string, room: number): 
 const WORD_MS = 700
 /** v pressed with nothing proposed, waiting out WORD_MS before it asks Claude (a letter typed meanwhile cancels it). */
 let pendingV: { row: string; cancelled: boolean } | null = null
-/** t pressed at rest, waiting out WORD_MS before it lists the threads (a letter typed meanwhile makes it a word). */
-let pendingT: { cancelled: boolean } | null = null
+/** t pressed at rest, waiting out WORD_MS before it lists the threads (a letter typed meanwhile makes it a word); r and
+ *  l too, before their pane takes the keys. `key`: the key pressed; `undo`: what takes back what the wait showed so far
+ *  (r's pane, shown early). */
+let pendingT: { cancelled: boolean; key?: string; undo?: () => void } | null = null
+/** When r or l shows its pane while it waits out WORD_MS, without the keys: Claude Code hands esc at an idle, empty
+ *  prompt only to an open pane, so a pane open by then is what hears an esc pressed in the wait (and closes, and the
+ *  wait ends). Not at once, so a word typed at a usual pace (`run…`, `look…`) never opens it. */
+const EARLY_MS = 300
+
+/** The wait of t, r or l ends with nothing done: a letter made the key the start of a word (what the wait showed is
+ *  taken back), or esc closed a pane (`undo` false: the person's close takes it away). */
+function endWait(undo = true): void {
+  const w = pendingT
+  if (!w) return
+  w.cancelled = true
+  pendingT = null
+  if (undo) w.undo?.()
+}
+
+/** The side panel closed (detail.tsx): a key's wait ends with it, so what the key would open does not open after
+ *  (esc closed r's pane, shown early). */
+export function panelClosed(): void {
+  endWait(false)
+}
 
 /** A key of the row under a message, v or s: its line opens (a press on the open one closes it). v with no view
  *  proposed asks Claude for another view at once, once the moment in which it could begin a word has passed. */
@@ -2222,6 +2244,14 @@ async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
     const ev = { type: 'key', key: tail[1] === 'C' ? ']' : '[' }
     return { box: { text: '', cursor: 0 }, work: () => paneFire($, 'chips', { row: pickNow.row }, ev).then(() => undefined) }
   }
+  // a letter straight after r or l, while their pane shows early without the keys: the key began a word, as at an empty
+  // prompt (emptyPromptKey), and the letter never starts a question in the pane
+  const w = pendingT
+  const op = keyOpened
+  if (w?.key && op && op.key === w.key && key && !key.ctrl && !key.meta && at - op.at < WORD_MS && /^\p{L}$/u.test(key.key) && e.text === '') {
+    const typed = String(e.inputText || '')
+    return { box: { text: `${op.key}${typed}`, cursor: op.key.length + typed.length }, work: () => { endWait(); keyOpened = null } }
+  }
   // the open detail takes its own keys first (detail.tsx), and a letter there begins the question for the card's thread
   const d = detailIsOpen() ? await detailKey($, e) : null
   if (d?.box) return d
@@ -2251,6 +2281,8 @@ let keyDecided = 0
 export function keysMoved(at: number): void {
   keyDecided = Math.max(keyDecided, at)
   barSeen.length = 0
+  // esc (or a click) in r's, l's or t's wait: what the key would open does not open after it
+  endWait(false)
 }
 
 /** A key pressed while the prompt is empty: the box as it should stand when the shell takes the key (null: it types),
@@ -2283,7 +2315,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // and straight after t, while t waits to list the threads
   if (pendingT && opened && ['t', DOCK_KEY.coverage, DOCK_KEY.labels].includes(opened.key) && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
     const was = opened.key
-    return { box: { text: `${was}${e.inputText}`, cursor: was.length + e.inputText.length }, work: () => { if (pendingT) { pendingT.cancelled = true; pendingT = null } } }
+    return { box: { text: `${was}${e.inputText}`, cursor: was.length + e.inputText.length }, work: () => endWait() }
   }
   // the squeeze chips open under a message: their program's keys first (panes/chips.js: [ ] move the picked chip, 1-3 pick a chip,
   // 0 original, s done)
@@ -2399,12 +2431,28 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     const counts = (await $.state.get(COUNTS)).value as LineCounts | null
     const pane = restPane(k, { cov: featureOn('counts') && ((counts?.cov ?? 0) > 0 || (counts?.covFiles ?? 0) > 0), labels: featureOn('counts') && (counts?.labels ?? 0) > 0 })
     if (pane) {
-      const wait = { cancelled: false }
-      const undo = () => { wait.cancelled = true; if (pendingT === wait) pendingT = null; keyOpened = null }
+      // the pane shown already: the key closes it once the wait has passed. Else it shows early, without the keys, and
+      // takes them once the wait has passed; a letter in the wait closes it again, and esc closes it (EARLY_MS)
+      const shownNow = await dockShown($, pane)
+      let early = false
+      const wait: NonNullable<typeof pendingT> = { cancelled: false, key: k, undo: () => { if (early) { early = false; void closeDock($, pane).catch(() => undefined) } } }
+      const undo = () => { if (pendingT === wait) endWait(); else wait.cancelled = true; keyOpened = null }
       return { box: consume, work: () => {
         pendingT = wait
         keyOpened = { key: k, at: now }
-        $.clock.after(WORD_MS, () => { if (wait.cancelled || pendingT !== wait) return; pendingT = null; void toggleDock($, pane) })
+        if (!shownNow) {
+          $.clock.after(EARLY_MS, () => {
+            if (wait.cancelled || pendingT !== wait) return
+            early = true
+            void openDock($, pane, { keys: false }).then(ok => { if (!ok) early = false }, () => { early = false })
+          })
+        }
+        $.clock.after(WORD_MS, () => {
+          if (wait.cancelled || pendingT !== wait) return
+          pendingT = null
+          if (shownNow) void toggleDock($, pane)
+          else if (early) void (async () => { if (await dockShown($, pane)) await giveKeys($) })().catch(() => undefined)
+        })
       }, word: undo }
     }
   }
