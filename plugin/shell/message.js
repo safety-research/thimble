@@ -914,7 +914,8 @@ export function healedRecord(rec, { checking = false } = {}) {
       if (c.state === 'quiet') return { ...m, heal: c.how === 'gone' ? 'gone' : 'quiet', why: String(c.why || '') }
       // a path written from the folder Claude ran `cd` into names the same place: it opens there, with no moved note
       if (c.how === 'folder' && c.to) return { ...m, ref: c.to, heal: 'kept' }
-      if (c.to && c.to !== c.ref) return { ...m, ref: c.to, wrote: m.ref, heal: 'moved' }
+      // `shows`: what the place as written shows; `quote`: the words it quotes were not there
+      if (c.to && c.to !== c.ref) return { ...m, ref: c.to, wrote: m.ref, heal: 'moved', ...(c.source != null ? { shows: String(c.source) } : {}), ...(c.how === 'quote' ? { quote: true } : {}) }
       return c.state === 'linked' ? { ...m, heal: 'kept' } : m
     })
     return { ...rec, marks }
