@@ -75,7 +75,8 @@ Draft a report of a problem with thimble itself, for the analyst to review. thim
   "type": "object",
   "properties": {
     "title": {"type": "string", "description": "One line that names the problem in thimble's own terms, such as \"Rows fails on a CSV file that uses ; between fields\"."},
-    "body": {"type": "string", "description": "Markdown with the sections ## What happened, ## Expected and ## Reproduction (made-up data)."}
+    "body": {"type": "string", "description": "Markdown with the sections ## What happened, ## Expected and ## Reproduction (made-up data)."},
+    "slug": {"type": "string", "description": "The fix's slug, when you changed thimble with the fix tools: the draft then carries the change, and its body ends with a ## Change section that says what the change does and how it was tested."}
   },
   "required": ["title", "body"]
 }

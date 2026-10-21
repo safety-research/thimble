@@ -18,7 +18,7 @@ from typing import Any, Callable
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import chats, corpus, features, files, home, issues, settings, settings_api
+from . import chats, corpus, features, files, fixcopy, home, issues, settings, settings_api
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -338,7 +338,9 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
         meta = chats.meta(c, chat)
         first = chat != "main" and not any(r.get("type") == "user" for r in chats.records(c, chat))
         try:
-            await sessions.get(c, chat).send(thread_opening(meta, text) if first else text, shown=text)
+            # `/fix …` (typed, or the top bar's Fix…): the chat shows what was typed, Claude reads the request
+            said = fixcopy.expand(text) or text
+            await sessions.get(c, chat).send(thread_opening(meta, said) if first else said, shown=text)
         except RuntimeError as e:
             raise HTTPException(409, str(e)) from None
         return {"id": secrets.token_hex(4), "kind": kind, "delivered": 1, "thread": chat}

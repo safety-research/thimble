@@ -2,6 +2,7 @@
 // workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
 // the surfaces' tabs over the main area (a click shows the surface, a drag takes it to a pane); at the right Undo and
 // Redo (shell/undo.ts), the links toggle, the theme popover and the settings gear (Report a problem… is in its menu).
+// Before them, Fix… and the line of the fix Claude made (shell/FixEntry).
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -13,6 +14,7 @@ import { toggleLinks, useLinksVisible } from '../lib/links'
 import type { WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { DemoTag } from './DemoTag'
+import { FixButton, FixState } from './FixEntry'
 import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
@@ -114,6 +116,8 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
         ))}
       </nav>
       <span className="shell-spacer" />
+      <FixState ws={ws} />
+      <FixButton />
       {onSide && <SideButtons ws={ws} side={side} onSide={onSide} />}
       <span ref={setTools} className="shell-tools">
         <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />

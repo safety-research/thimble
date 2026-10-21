@@ -43,15 +43,15 @@ const cut = (s, n) => (Array.from(String(s)).length <= n ? String(s) : Array.fro
 export const keepList = scan => (Array.isArray(scan) ? scan : []).filter(h => keepable(h) && !h.kept).slice(0, 9)
 
 /** The keys the preview says in its last line, as words. */
-export function keyLine(kind) {
-  return kind === 'report'
+export function keyLine(kind, diff = 'x') {
+  return kind === 'report' || !diff
     ? 'y send · w save as a file · e edit · esc not now'
     : 'y send (the pull request as a draft) · w save as a file · e edit · esc not now'
 }
 
 export default {
   name: 'fix',
-  title: 'Share the fix',
+  title: 'Submit your fix',
   reads: args => [`fix:${String(args.slug || '')}`],
   stateKey: args => `fix-${String(args.slug || '').replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 64)}`,
   data(stores, args) {
@@ -61,7 +61,7 @@ export default {
       scan: Array.isArray(s.scan) ? s.scan : [], issue: String(s.issue || ''), diff: String(s.diff || ''), waiting: !!s.waiting, problem: s.problem ? String(s.problem) : '',
     }
   },
-  titleOf: () => 'Share the fix',
+  titleOf: () => 'Submit your fix',
   // no side thread: what to change goes to main, in the prompt (e says so)
   thread: () => null,
   program,
@@ -72,7 +72,8 @@ export function program(k, data) {
   const W = Math.max(30, k.w)
   if (data.problem) return k.text(`{bad:×} ${k.escape(data.problem)}`)
   if (!data.issue) return k.text('{dim:There is no draft to show yet. Claude writes it with `thimble fix draft`, and it opens here.}')
-  const report = data.kind === 'report'
+  // a copy with no change goes out as an issue alone: a request
+  const report = data.kind === 'report' || !data.diff
   const send = answer => () => { k.do('send', { slug: data.slug, answer }); return null }
   const toKeep = keepList(data.scan)
   if (st.keeping) {
@@ -90,13 +91,13 @@ export function program(k, data) {
   }
 
   const out = []
-  out.push(k.text(`**${report ? 'Report the problem' : 'Share the fix'}**`, { wrap: false }))
+  out.push(k.text(`**${report ? 'Submit your request' : 'Submit your fix'}**`, { wrap: false }))
   out.push(k.text(data.waiting ? '{dim:Nothing has been sent. This is the exact text.}' : '{dim:This text was sent or saved as a file.}'))
 
   // the privacy scan: each hit, already removed, with what took its place
   const hits = data.scan
   const kept = hits.filter(h => h.kept).length
-  out.push(k.space(1, 1), k.text(`**Privacy scan** {dim:· ${hits.length} found · ${kept ? `${kept} kept, the rest removed` : 'all removed'}}`, { wrap: false }))
+  out.push(k.space(1, 1), k.text(`**Privacy scan** {dim:· ${hits.length ? `${hits.length} found · ${kept ? `${kept} kept, the rest removed` : 'all removed'}` : 'nothing found'}}`, { wrap: false }))
   const fw = Math.max(4, Math.min(32, Math.floor((W - 20) / 2), Math.max(0, ...hits.map(h => Array.from(String(h.found)).length))))
   hits.forEach(h => {
     const n = st.keeping ? toKeep.indexOf(h) : -1

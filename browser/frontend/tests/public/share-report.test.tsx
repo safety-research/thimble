@@ -4,7 +4,8 @@
 // report leaves. Fix this and Report this ask main to draft the report. All names and data here are made up.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { markPieces, reportMessage, ReportThis, ShareReportDialog, type IssueDraft } from '../../src/shell/ShareReport.tsx'
+import { diffLines, markPieces, reportMessage, ReportThis, ShareReportDialog, type IssueDraft } from '../../src/shell/ShareReport.tsx'
+import { fixLine, fixMessage } from '../../src/shell/FixEntry.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -43,11 +44,11 @@ test('the preview marks each placeholder, offers Keep but for a token, and only 
   const toasts: string[] = []
   const off = bus.on('toast', (t) => toasts.push(t.text))
   let closed = 0
-  const el = await mount(<ShareReportDialog ws="w" draft={DRAFT} fix onClose={() => closed++} />)
+  const el = await mount(<ShareReportDialog ws="w" draft={DRAFT} onClose={() => closed++} />)
 
   expect(el.querySelector('h2')?.textContent).toBe('Share this report')
   expect(el.textContent).toContain('from your login @made-up-tester')
-  expect(el.textContent).toContain('fixes are made from the terminal plugin for now')
+  expect(el.querySelector('[data-testid="share-change-tab"]')).toBeNull()
   const marks = [...el.querySelectorAll('.share-ph')].map((m) => m.textContent)
   expect(marks).toEqual(['‹data file›', '‹data file›', '‹field›', '‹email›'])
   expect(el.querySelector('[data-testid="share-text"]')?.textContent).toBe(DRAFT.text)
@@ -80,8 +81,44 @@ test('Fix this and Report this ask main to draft a report of the failure', async
   await act(async () => fix.click())
   await act(async () => report.click())
   expect(got).toEqual([{ mode: 'fix', text: 'Rows could not open the file' }, { mode: 'report', text: 'Rows could not open the file' }])
-  expect(reportMessage('fix', 'x')).toBe('Fix this problem in thimble: x')
+  expect(reportMessage('fix', 'x')).toBe('/fix x')
   expect(reportMessage('report', '')).toMatch(/^I want to report a problem with thimble/)
   expect(markPieces('a ‹path› b', ['‹path›'])).toEqual([{ text: 'a ', mark: false }, { text: '‹path›', mark: true }, { text: ' b', mark: false }])
   off()
+})
+
+test('a fix with a change shows its pull request: the files it changes and the diff, and Send says drafts', async () => {
+  const diff = 'diff --git a/plugin/claims/order.py b/plugin/claims/order.py\n--- a/plugin/claims/order.py\n+++ b/plugin/claims/order.py\n@@ -1 +1 @@\n-ORDER = 1\n+ORDER = 2\n'
+  const draft: IssueDraft = { ...DRAFT, kind: 'change', pr: '## Change\nNewest first.\n', diff, files: [{ path: 'plugin/claims/order.py', added: 1, removed: 1 }] }
+  const sent: string[] = []
+  vi.stubGlobal('fetch', async (url: string) => {
+    sent.push(String(url))
+    return json({ status: 'sent', url: 'https://github.com/example/thimble/issues/3', pr_url: 'https://github.com/example/thimble/pull/4' })
+  })
+  const toasts: string[] = []
+  const off = bus.on('toast', (t) => toasts.push(t.text))
+  const el = await mount(<ShareReportDialog ws="w" draft={draft} onClose={() => undefined} />)
+  expect(el.querySelector('h2')?.textContent).toBe('Share this fix')
+  expect(el.textContent).toContain('a draft pull request with the change below and an issue that links it')
+  const tab = el.querySelector('[data-testid="share-change-tab"]') as HTMLButtonElement
+  expect(tab.textContent).toBe('Pull request · 1 file')
+  await act(async () => tab.click())
+  expect(el.querySelector('[data-testid="share-change"]')?.textContent).toContain('plugin/claims/order.py +1 −1')
+  expect([...el.querySelectorAll('.share-dl-add')].map((l) => l.textContent)).toEqual(['+ORDER = 2\n'])
+  const send = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Send') as HTMLButtonElement
+  await act(async () => send.click())
+  await settle()
+  expect(toasts[0]).toBe('Sent as drafts: pull request https://github.com/example/thimble/pull/4 · issue https://github.com/example/thimble/issues/3')
+  expect(diffLines('+a\n-b\n c').map((l) => l.kind)).toEqual(['add', 'del', 'ctx'])
+  off()
+})
+
+test("the top bar's Fix… sends /fix, and the fix line offers what the fix's state allows", () => {
+  expect(fixMessage('  sort claims\n newest first ')).toBe('/fix sort claims newest first')
+  const f = { slug: 'sort-claims', title: 'Sort claims newest first', status: 'working' }
+  expect(fixLine(f, null)).toEqual({ words: 'fixing: Sort claims newest first', actions: [] })
+  expect(fixLine({ ...f, status: 'applied' }, 'sort-claims')).toEqual({ words: '✓ fixed: Sort claims newest first', good: true, actions: ['submit', 'undo'] })
+  expect(fixLine({ ...f, status: 'ready' }, null)?.actions).toEqual(['try', 'submit'])
+  expect(fixLine({ ...f, status: 'sent' }, null)).toBeNull()
+  expect(fixLine({ ...f, status: 'sent' }, 'sort-claims')).toEqual({ words: '✓ fixed: Sort claims newest first · sent', good: true, actions: ['undo'] })
 })

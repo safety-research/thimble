@@ -219,13 +219,45 @@ def footer(removed: int) -> str:
             f"detail{'' if removed == 1 else 's'} before the tester's review.")
 
 
+def kernel_fixes() -> Path:
+    """Where the kernel keeps the fixes that change thimble's code (fixcopy.py), as the terminal's `thimble fix`."""
+    from .kernel_fix import fix  # noqa: PLC0415
+
+    return fix.fixes_home()
+
+
+def _is_kernel(d: Path) -> bool:
+    return d.parent == kernel_fixes()
+
+
 def _dir(slug: str) -> Path:
-    if not re.fullmatch(r"[a-z0-9-]{1,60}", slug):
+    if not re.fullmatch(r"[a-z0-9-]{1,80}", slug):
         raise HTTPException(404, f"no report {slug!r}")
-    d = fixes_dir() / slug
-    if not (d / "fix.json").is_file():
-        raise HTTPException(404, f"no report {slug!r}")
-    return d
+    for d in (kernel_fixes() / slug, fixes_dir() / slug):
+        if (d / "fix.json").is_file():
+            return d
+    raise HTTPException(404, f"no report {slug!r}")
+
+
+class _NoFeed:
+    """The kernel's change feed, which the browser does not read: its page hears of a draft on the hub instead."""
+
+    def emit(self, ev: dict[str, Any]) -> None:
+        pass
+
+
+def draft_fix(ws: str, slug: str, title: str, body: str) -> tuple[str, int]:
+    """The draft of a fix the agent made in a copy (fixcopy.py), built by the kernel: the issue, and when the copy has
+    a change, the pull request's text and its diff, all scanned with this session's terms. (slug, details removed)."""
+    from .kernel_fix import fix  # noqa: PLC0415
+
+    fx = fix.load(slug)
+    fx["workspace"] = ws
+    fix.save(fx)
+    title = " ".join(title.split()) or fx["title"]
+    r = fix.draft(slug, None, None, text=f"# {title}\n\n{body.strip()}\n", terms=_terms(ws))
+    hub.publish(ws, {"type": "issue", "slug": slug})
+    return slug, r["removed"]
 
 
 def _render(d: Path) -> str:
@@ -265,23 +297,57 @@ def make_draft(ws: str, title: str, body: str) -> tuple[str, int]:
 
 def current(ws: str) -> dict[str, Any] | None:
     """The newest report of this workspace that waits for the person, as the preview reads it."""
-    best: tuple[str, Path] | None = None
-    for d in fixes_dir().iterdir():
+    best: tuple[float, Path] | None = None
+    kd = kernel_fixes()
+    for d in [*fixes_dir().iterdir(), *(kd.iterdir() if kd.is_dir() else [])]:
         meta = home.read_json(d / "fix.json", {}) or {}
         if meta.get("workspace") == ws and meta.get("status") == "drafted" and (d / "share" / "ask.json").is_file():
-            if best is None or meta.get("created", "") > best[0]:
-                best = (meta.get("created", ""), d)
+            when = _when(meta.get("created"))
+            if best is None or when > best[0]:
+                best = (when, d)
     return view(best[1]) if best else None
+
+
+def _when(v: Any) -> float:
+    """A fix's `created`: the kernel's is seconds, the browser's own an ISO time."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        from datetime import datetime  # noqa: PLC0415
+
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def diff_files(diff: str) -> list[dict[str, Any]]:
+    """The files a unified diff changes, each with its lines added and removed. Pure."""
+    out: list[dict[str, Any]] = []
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            m = re.match(r"diff --git a/(.*) b/(.*)$", line)
+            out.append({"path": m.group(2) if m else line[11:], "added": 0, "removed": 0})
+        elif out and line.startswith("+") and not line.startswith("+++"):
+            out[-1]["added"] += 1
+        elif out and line.startswith("-") and not line.startswith("---"):
+            out[-1]["removed"] += 1
+    return out
 
 
 def view(d: Path) -> dict[str, Any]:
     meta = home.read_json(d / "fix.json", {}) or {}
     ask = home.read_json(d / "share" / "ask.json", {}) or {}
     hits = home.read_json(d / "share" / "scan.json", []) or []
-    return {"slug": meta.get("slug"), "title": meta.get("title"), "status": meta.get("status"),
-            "text": (d / "share" / "issue.md").read_text(), "draft": (d / "draft.md").read_text(),
-            "hits": [{**h, "keepable": privacy.keepable(h)} for h in hits], "ask": ask.get("id"), "repo": REPO,
-            "url": meta.get("url")}
+    out = {"slug": meta.get("slug"), "title": meta.get("title"), "status": meta.get("status"),
+           "text": (d / "share" / "issue.md").read_text(),
+           "draft": (d / "draft.md").read_text() if (d / "draft.md").is_file() else "",
+           "hits": [{**h, "keepable": privacy.keepable(h) and (not _is_kernel(d) or not h.get("kept"))} for h in hits],
+           "ask": ask.get("id"), "repo": meta.get("repo") or REPO, "url": meta.get("url") or meta.get("issue_url"),
+           "kind": "change" if (d / "share" / "pr.md").is_file() else "request"}
+    if (d / "share" / "pr.md").is_file():
+        diff = (d / "share" / "diff.patch").read_text() if (d / "share" / "diff.patch").is_file() else ""
+        out.update(pr=(d / "share" / "pr.md").read_text(), diff=diff, files=diff_files(diff))
+    return out
 
 
 def _check_ask(d: Path, ask: Any) -> None:
@@ -327,17 +393,86 @@ def send_issue(d: Path) -> str:
 # ---- the agent's tool
 
 async def draft_report(t: Any, args: dict[str, Any]) -> Result:
-    slug, n = make_draft(t.ws, str(args.get("title") or ""), str(args.get("body") or ""))
+    if args.get("slug"):
+        slug, n = draft_fix(t.ws, str(args["slug"]), str(args.get("title") or ""), str(args.get("body") or ""))
+    else:
+        slug, n = make_draft(t.ws, str(args.get("title") or ""), str(args.get("body") or ""))
     removed = "1 detail was removed" if n == 1 else f"{n} details were removed"
     return Result(f"The person is reviewing the draft in a preview; {removed} by the privacy scan. "
                   "Nothing is sent until they choose to send it.")
 
 
 
+def _send_fix(d: Path, slug: str, answer: Any, ask: Any) -> dict[str, Any]:
+    """The person's answer to a fix's preview, through the kernel: send (a draft pull request and an issue, or an
+    issue alone for a request), file (one Markdown file, nothing sent) or cancel."""
+    from .kernel_fix import fix  # noqa: PLC0415
+
+    if answer not in ("send", "file", "cancel"):
+        raise HTTPException(400, "answer is send, file or cancel")
+    try:
+        fix.send(slug, answer, ask)
+    except fix.FixError as e:
+        raise HTTPException(409, f"{e}. Try again, or Save as file") from None
+    meta = fix.load(slug)
+    if meta.get("workspace"):
+        hub.publish(meta["workspace"], {"type": "fix", "slug": slug, "status": meta.get("status")})
+    if answer == "file":
+        p = Path(meta.get("file") or "")
+        return {"status": "saved", "markdown": p.read_text() if p.is_file() else "", "filename": p.name or f"thimble-{slug}.md",
+                "path": str(p)}
+    return {"status": meta.get("status"), "url": meta.get("issue_url"), "pr_url": meta.get("pr_url")}
+
+
+def fixes_of(ws: str) -> dict[str, Any]:
+    """This workspace's fixes of thimble's code as the page's fix line reads them, and the one turned on."""
+    from .kernel_fix import fix  # noqa: PLC0415
+
+    out = []
+    for slug in fix.all_slugs():
+        try:
+            fx = fix.load(slug)
+        except fix.FixError:
+            continue
+        if fx.get("workspace") == ws:
+            out.append({k: fx.get(k) for k in ("slug", "title", "status", "created", "pr_url", "issue_url")})
+    out.sort(key=lambda f: _when(f.get("created")))
+    return {"fixes": out, "active": fix.active_slug()}
+
+
 # ---- the routes
 
 def register(ctx: Any) -> None:
     app = ctx.app
+
+    @app.get("/api/ws/{c}/fixes")
+    def fixes_list(c: str) -> Any:
+        ctx.ws_of(c)
+        return fixes_of(c)
+
+    @app.post("/api/ws/{c}/fixes/{slug}/use")
+    def fixes_use(c: str, slug: str) -> Any:
+        from .kernel_fix import fix  # noqa: PLC0415
+
+        ctx.ws_of(c)
+        try:
+            said = fix.use(slug, plugin_dir=False)
+        except fix.FixError as e:
+            raise HTTPException(409, str(e)) from None
+        hub.publish(c, {"type": "fix", "slug": slug, "status": fix.load(slug).get("status")})
+        return {**fixes_of(c), "said": said}
+
+    @app.post("/api/ws/{c}/fixes/undo")
+    def fixes_undo(c: str) -> Any:
+        from .kernel_fix import fix  # noqa: PLC0415
+
+        ctx.ws_of(c)
+        try:
+            said = fix.undo(plugin_dir=False)
+        except fix.FixError as e:
+            raise HTTPException(409, str(e)) from None
+        hub.publish(c, {"type": "fix", "slug": "", "status": "undone"})
+        return {**fixes_of(c), "said": said}
 
     @app.get("/api/ws/{c}/issues/current")
     def issue_current(c: str) -> Any:
@@ -356,6 +491,17 @@ def register(ctx: Any) -> None:
         first = text.lstrip().splitlines()[0] if text.strip() else ""
         if not first.startswith("# "):
             raise HTTPException(400, 'the text starts with its title as "# ..."')
+        if _is_kernel(d):
+            from .kernel_fix import fix  # noqa: PLC0415
+
+            # the kernel's footer goes, and the pull request's text comes back as the draft's "## Change"
+            issue = re.split(r"\n---\nthimble ", text, maxsplit=1)[0].rstrip()
+            pr = (d / "share" / "pr.md").read_text() if (d / "share" / "pr.md").is_file() else ""
+            try:
+                fix.draft(slug, None, None, text=f"{issue}\n\n{pr}", terms=_terms(c))
+            except fix.FixError as e:
+                raise HTTPException(400, str(e)) from None
+            return {**view(d), "login": None}
         foot = re.compile(r"\n*Written with Claude in thimble; a privacy scan removed \d+ details? before the tester's review\.\s*$")
         (d / "draft.md").write_text(foot.sub("\n", text).rstrip() + "\n")
         meta = home.read_json(d / "fix.json", {})
@@ -374,6 +520,16 @@ def register(ctx: Any) -> None:
             raise HTTPException(404, f"no scan hit {body.get('hit')!r}")
         if not privacy.keepable(hit):
             raise HTTPException(400, "a key or a token is never sent: edit the text instead")
+        if _is_kernel(d):
+            from .kernel_fix import fix  # noqa: PLC0415
+
+            if not body.get("keep", True):
+                raise HTTPException(400, "a kept detail of a fix stays kept: edit the text to take it out")
+            try:
+                fix.keep(slug, str(hit["id"]), body.get("ask"), _NoFeed())
+            except fix.FixError as e:
+                raise HTTPException(400, str(e)) from None
+            return view(d)
         hit["kept"] = bool(body.get("keep", True))
         home.write_json(d / "share" / "scan.json", hits)
         _render(d)
@@ -386,6 +542,8 @@ def register(ctx: Any) -> None:
         _check_ask(d, body.get("ask"))
         answer = body.get("answer")
         meta = home.read_json(d / "fix.json", {}) or {}
+        if _is_kernel(d):
+            return _send_fix(d, slug, answer, body.get("ask"))
         if answer == "send":
             url = send_issue(d)
             meta.update(status="sent", url=url)

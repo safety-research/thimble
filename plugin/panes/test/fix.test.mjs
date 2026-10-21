@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { gridText, renderTerm } from '../../draw/term.js'
 import pane, { diffFiles } from '../fix.js'
-import { FAIL_KEYS, fixRequest, lineKey } from '../../shell/fixask.js'
+import { FAIL_KEYS, fixRequest, fixVerb, lineKey, USE_KEYS } from '../../shell/fixask.js'
 
 const DK = globalThis.DrawKit
 
@@ -71,4 +71,25 @@ test("a failure line's keys: f fixes, F reports, p and u act on a fix in use, an
   assert.match(r, /pressed f \(fix this\) on a thimble failure: "Rows could not open the file"/)
   assert.match(r, /`thimble fix new/)
   assert.match(fixRequest({ failure: 'x', kind: 'report' }), /--kind report/)
+})
+
+test('/thimble:fix: no words lists the fixes, submit undo and try act on a fix, and any other words are a change', () => {
+  assert.deepEqual(fixVerb(''), { verb: 'status' })
+  assert.deepEqual(fixVerb('  submit '), { verb: 'submit', slug: '' })
+  assert.deepEqual(fixVerb('share claims-newest'), { verb: 'submit', slug: 'claims-newest' })
+  assert.deepEqual(fixVerb('undo'), { verb: 'undo', slug: '' })
+  assert.deepEqual(fixVerb('try claims-newest'), { verb: 'try', slug: 'claims-newest' })
+  assert.deepEqual(fixVerb('sort the claims newest first'), { verb: 'change', text: 'sort the claims newest first' })
+  assert.deepEqual(fixVerb('undo the bold in the bar'), { verb: 'change', text: 'undo the bold in the bar' })
+  assert.equal(USE_KEYS, 'p submit · u undo')
+})
+
+test('a fix whose copy has no change is submitted as a request: an issue alone, with no pull request', () => {
+  const { d, text } = run({ ...STORE, diff: '' })
+  assert.match(text, /Submit your request/)
+  assert.match(run({ ...STORE, scan: [] }).text, /Privacy scan · nothing found/)
+  assert.doesNotMatch(text, /Draft pull request/)
+  assert.match(text, /y send · w save as a file · e edit · esc not now/)
+  assert.deepEqual(keys(d).sort(), ['e', 'k', 'w', 'y'])
+  assert.match(run(STORE).text, /Submit your fix/)
 })

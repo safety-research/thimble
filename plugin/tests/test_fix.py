@@ -54,6 +54,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                  ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "release")):
         sh("git", *args, cwd=src)
     monkeypatch.setattr(FX, "find_source", lambda: (src, sh("git", "rev-parse", "HEAD", cwd=src), False))
+    # the tests run in no Claude Code session of their own: which kind of session it is comes from the paths
+    monkeypatch.setattr(FX, "_session_plugin_dir", lambda: None)
     data = tmp_path / "support"
     data.mkdir()
     (data / "tickets.csv").write_text("id,queue_owner,state\nT-1,wren.example@example.org,open\nT-2,moss.example@example.org,closed\n")
@@ -168,11 +170,185 @@ def test_file_mode_writes_one_markdown_file(env: Path):
     assert FX.load(fx["slug"])["status"] == "saved"
 
 
-def test_use_from_a_plugin_dir_session_says_how_and_installs_nothing(env: Path, tmp_path: Path, monkeypatch):
+def test_use_from_a_plugin_dir_session_says_the_one_command_and_installs_nothing(env: Path, tmp_path: Path, monkeypatch):
     # this checkout's plugin is not in Claude Code's plugins folder: the session was started with --plugin-dir
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     assert FX.from_plugin_dir()
     fx = FX.new("Coverage opens a group")
-    with pytest.raises(FX.FixError, match=r"--plugin-dir .*/worktree/plugin"):
-        FX.use(fx["slug"])
-    assert FX.active_slug() is None and FX.load(fx["slug"])["status"] == "working"
+    said = FX.use(fx["slug"])
+    assert f"claude --continue --plugin-dir {fx['worktree']}/plugin" in said
+    assert FX.active_slug() is None and FX.load(fx["slug"])["status"] == "ready"
+    # a session started again with the copy's folder runs the fix; undo says the command back to the clone
+    monkeypatch.setattr(FX, "PLUGIN", Path(fx["worktree"]) / "plugin")
+    assert FX.fix_of_plugin() == fx["slug"] and FX.latest() == fx["slug"]
+    assert "already runs" in FX.use(fx["slug"]) and FX.load(fx["slug"])["status"] == "applied"
+    back = FX.undo()
+    assert f"--plugin-dir {fx['source']}/plugin" in back and FX.load(fx["slug"])["status"] == "ready"
+
+
+CLAUDE_STUB = """#!/bin/sh
+echo "$*" >> "{log}"
+"""
+
+
+def test_a_folder_marketplace_install_turns_the_copy_on_and_off_like_a_github_one(env: Path, tmp_path: Path, monkeypatch):
+    # scripts/install.sh --local: the marketplace is the clone itself, and Claude Code reads its plugin/ in place
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    clone = tmp_path / "src"
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"source": {"source": "directory", "path": str(clone)}}}))
+    (cc / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {"thimble@thimble": [{"installPath": str(cc / "x")}]}}))
+    # Claude Code keeps the marketplace's source in the user settings too, and refuses another source until it changes
+    settings = {"theme": "dark", "extraKnownMarketplaces": {"thimble": {"source": {"source": "directory", "path": str(clone)}}}}
+    (cc / "settings.json").write_text(json.dumps(settings))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
+    stub = tmp_path / "claude-stub"
+    stub.write_text(CLAUDE_STUB.format(log=tmp_path / "claude.log"))
+    stub.chmod(0o755)
+    monkeypatch.setenv("THIMBLE_CLAUDE", str(stub))
+    monkeypatch.setattr(FX, "PLUGIN", clone / "plugin")
+    assert not FX.from_plugin_dir()
+    fx = FX.new("Claims newest first", "feature")
+    assert "/reload-plugins" in FX.use(fx["slug"]) and FX.active_slug() == fx["slug"] and FX.latest() == fx["slug"]
+    now = json.loads((cc / "settings.json").read_text())
+    assert now["theme"] == "dark" and now["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(Path(fx["worktree"]).resolve())}
+    # the session reloaded on the copy, then undid it: it still runs the copy until it reloads, and try turns it on again
+    monkeypatch.setattr(FX, "PLUGIN", Path(fx["worktree"]) / "plugin")
+    assert not FX.from_plugin_dir()
+    assert FX.undo().startswith(f"thimble is back to the release from {clone}")
+    assert not FX.from_plugin_dir() and "/reload-plugins" in FX.use(fx["slug"])
+    assert FX.undo().startswith(f"thimble is back to the release from {clone}")
+    assert json.loads((cc / "settings.json").read_text())["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
+    back = [f"plugin marketplace add {clone}", "plugin marketplace update thimble", "plugin update thimble@thimble"]
+    assert log(env, "claude") == [f"plugin marketplace add {fx['worktree']}", *back, f"plugin marketplace add {fx['worktree']}", *back]
+    assert FX.active_slug() is None
+
+
+def test_a_copy_with_no_change_is_shared_as_a_request_alone(env: Path):
+    fx = FX.new("Show the label count per file", "feature")
+    draft = env / "d.md"
+    draft.write_text("# Show the label count per file\n\nThe person wants each file's label count in Files.\n")
+    r = FX.draft(fx["slug"], str(draft), None, terms={})
+    share = FX.fix_dir(fx["slug"]) / "share"
+    assert not r["change"] and (share / "issue.md").exists() and not (share / "pr.md").exists()
+    assert "a request from a tester" in (share / "issue.md").read_text()
+    ask = json.loads((share / "ask.json").read_text())["id"]
+    assert FX.send(fx["slug"], "send", ask) == ["The person sent the report under their GitHub login: issue https://example.invalid/test-user/issues/2."]
+    assert not any(l.startswith(("repo fork", "pr create")) for l in log(env, "gh")) and log(env, "git") == []
+
+
+# ---- a fix follows releases: a made-up release history in the source checkout
+
+def release(src: Path, version: str, files: dict[str, str]) -> str:
+    """A new release of the made-up thimble: its files and its version, committed in the source checkout."""
+    for rel, text in {**files, "plugin/.claude-plugin/plugin.json": json.dumps({"name": "thimble", "version": version})}.items():
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text(text)
+    sh("git", "add", "-A", cwd=src)
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", f"release {version}", cwd=src)
+    return sh("git", "rev-parse", "HEAD", cwd=src)
+
+
+@pytest.fixture()
+def on(env: Path, monkeypatch: pytest.MonkeyPatch):
+    """A fix that is on (the marketplace points at its copy), whose change is one line of rows.py, left uncommitted."""
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    undone: list[str] = []
+    monkeypatch.setattr(FX, "undo", lambda plugin_dir=None: undone.append("undo") or "back")
+    fx = FX.new("Rows reads a semicolon")
+    rows = Path(fx["worktree"]) / "plugin" / "rows.py"
+    rows.write_text(rows.read_text().replace("split(',')", "split(';')"))
+    (FX.fixes_home() / "active").write_text(fx["slug"] + "\n")
+    return fx, env / "src", undone
+
+
+def test_follow_replays_the_fix_on_a_newer_release(on):
+    fx, src, undone = on
+    new = release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
+    assert FX.follow() == "thimble 0.11.0 + your fix 'Rows reads a semicolon' · u undo"
+    wt = Path(fx["worktree"])
+    after = FX.load(fx["slug"])
+    assert after["base"] == new and after["version"] == "0.11.0" and not undone
+    assert (wt / "plugin" / "claims.py").exists() and "split(';')" in (wt / "plugin" / "rows.py").read_text()
+    # at most once a day the next session start fetches again, and at once when a newer release is known (here the
+    # dev install's clone moved on)
+    import time
+    stamps = json.loads((FX.fixes_home() / "follow.json").read_text())
+    assert FX.follow() == "thimble 0.11.0 + your fix 'Rows reads a semicolon' · u undo" and json.loads((FX.fixes_home() / "follow.json").read_text()) == stamps
+    release(src, "0.11.1", {"plugin/more.py": "x = 1\n"})
+    assert FX.follow() == "thimble 0.11.1 + your fix 'Rows reads a semicolon' · u undo" and time.time() - json.loads((FX.fixes_home() / "follow.json").read_text())[fx["slug"]] < 60
+
+
+def test_follow_goes_back_to_the_release_when_the_fix_is_in_it(on):
+    fx, src, undone = on
+    release(src, "0.11.0", {"plugin/rows.py": (src / "plugin" / "rows.py").read_text().replace("split(',')", "split(';')")})
+    assert FX.follow() == "Your fix 'Rows reads a semicolon' is in thimble 0.11.0; you are on the release again."
+    assert undone == ["undo"] and FX.load(fx["slug"])["status"] == "merged"
+
+
+def test_follow_goes_back_to_the_release_when_the_fix_no_longer_fits_and_keeps_the_copy(on, monkeypatch):
+    fx, src, undone = on
+    release(src, "0.11.0", {"plugin/rows.py": "def rows(path):\n    return open(path).read().split('|')\n"})
+    assert FX.follow(force=True) == "Your fix 'Rows reads a semicolon' no longer fits thimble 0.11.0; you are on the release · /thimble:fix to redo it"
+    assert undone == ["undo"] and FX.load(fx["slug"])["status"] == "stale" and FX.load(fx["slug"])["base"] == fx["base"]
+    assert "split(';')" in (Path(fx["worktree"]) / "plugin" / "rows.py").read_text()
+
+
+def test_follow_goes_back_when_the_quick_tests_fail_after_the_replay(on, monkeypatch):
+    fx, src, undone = on
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
+    assert "no longer fits thimble 0.11.0" in FX.follow()
+    assert undone == ["undo"] and FX.load(fx["slug"])["base"] == fx["base"]
+    assert not (Path(fx["worktree"]) / "plugin" / "claims.py").exists()
+
+
+def test_a_caller_that_is_no_session_says_so_and_uses_the_marketplace(env: Path, tmp_path: Path, monkeypatch):
+    # the browser's server runs from a checkout, which looks like --plugin-dir; it passes plugin_dir=False
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    stub = tmp_path / "claude-stub"
+    stub.write_text(CLAUDE_STUB.format(log=tmp_path / "claude.log"))
+    stub.chmod(0o755)
+    monkeypatch.setenv("THIMBLE_CLAUDE", str(stub))
+    assert FX.from_plugin_dir()
+    fx = FX.new("Coverage opens a group")
+    assert "/reload-plugins" in FX.use(fx["slug"], plugin_dir=False) and FX.active_slug() == fx["slug"]
+    assert "back to the release" in FX.undo(plugin_dir=False) and FX.active_slug() is None
+
+
+def test_a_session_started_with_plugin_dir_on_thimble_is_told_apart_from_a_folder_marketplace_on_the_same_clone(tmp_path: Path):
+    clone = tmp_path / "clone"
+    (clone / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (clone / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble"}))
+    other = tmp_path / "other"
+    (other / ".claude-plugin").mkdir(parents=True)
+    (other / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "notes"}))
+    assert FX.plugin_dir_in(["claude", "--plugin-dir", str(clone / "plugin"), "--permission-mode", "auto"]) is True
+    assert FX.plugin_dir_in(["claude", f"--plugin-dir={clone / 'plugin'}"]) is True
+    assert FX.plugin_dir_in(["claude", "--plugin-dir", str(other)]) is False
+    assert FX.plugin_dir_in(["claude", "--continue"]) is False
+    assert FX.plugin_dir_in(None) is None
+    assert FX.plugin_dir_in(None, str(clone / "plugin")) is True
+
+
+def test_a_second_follow_while_one_runs_changes_nothing(on):
+    import fcntl
+    fx, src, undone = on
+    release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
+    with open(FX.fixes_home() / "follow.lock", "w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert FX.follow(force=True) == f"thimble {fx['version']} + your fix 'Rows reads a semicolon' · u undo"
+    assert FX.load(fx["slug"])["base"] == fx["base"] and not undone
+    assert FX.follow(force=True) == "thimble 0.11.0 + your fix 'Rows reads a semicolon' · u undo"
+
+
+def test_a_replay_stopped_part_way_replays_only_the_fix(on):
+    fx, src, undone = on
+    first = release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
+    # the copy's branch was moved onto 0.11.0 but its base was never saved (a replay that was stopped)
+    wt = Path(fx["worktree"])
+    FX._commit_local(wt, fx["slug"])
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "rebase", "-q", "--onto", first, fx["base"], fx["branch"], cwd=wt)
+    release(src, "0.11.1", {"plugin/rows.py": (src / "plugin" / "rows.py").read_text() + "# a note\n", "plugin/more.py": "x = 1\n"})
+    assert FX.follow(force=True) == "thimble 0.11.1 + your fix 'Rows reads a semicolon' · u undo"
+    assert "split(';')" in (wt / "plugin" / "rows.py").read_text() and (wt / "plugin" / "more.py").exists() and not undone

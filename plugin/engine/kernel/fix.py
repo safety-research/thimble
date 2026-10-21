@@ -93,8 +93,12 @@ def upstream() -> str:
     return m.group(1) if m else "safety-research/thimble"
 
 
+def config_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
 def plugins_dir() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "plugins"
+    return config_dir() / "plugins"
 
 
 def read_json(p: Path) -> Any:
@@ -234,6 +238,43 @@ def active_slug() -> str | None:
         return None
 
 
+def _marketplace_entry() -> dict[str, Any] | None:
+    """The thimble marketplace's source as Claude Code records it ({source: github, repo} or {source: directory, path})."""
+    src = ((read_json(plugins_dir() / "known_marketplaces.json") or {}).get("thimble") or {}).get("source")
+    return src if isinstance(src, dict) else None
+
+
+def _entry_of(source: str) -> dict[str, Any]:
+    if re.match(r"^[\w.-]+/[\w.-]+$", source) and not Path(source).exists():
+        return {"source": "github", "repo": source}
+    if re.match(r"^[a-z]+://", source):
+        return {"source": "git" if source.endswith(".git") else "url", "url": source}
+    return {"source": "directory", "path": str(Path(source).expanduser().resolve())}
+
+
+def _repoint(source: str, entry: dict[str, Any] | None = None) -> None:
+    """Point the thimble marketplace at `source`. Claude Code also keeps the marketplace's source in its user settings
+    (extraKnownMarketplaces) and refuses to add it again from another source until that entry changes, as its own
+    message says. Removing the marketplace instead would uninstall thimble and delete its options. So the entry changes
+    first, and nothing else in the file; then Claude Code adds the marketplace from the new source."""
+    p = config_dir() / "settings.json"
+    try:
+        settings = json.loads(p.read_text())
+    except FileNotFoundError:
+        settings = None
+    except (OSError, ValueError):
+        raise FixError(f"thimble cannot read Claude Code's settings ({p}) to change where its marketplace reads from. "
+                       f"Run: claude plugin marketplace add {source}")
+    known = (settings or {}).get("extraKnownMarketplaces")
+    if isinstance(known, dict) and isinstance(known.get("thimble"), dict):
+        known["thimble"]["source"] = entry or _entry_of(source)
+        tmp = p.with_suffix(".json.thimble-tmp")
+        tmp.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+        os.chmod(tmp, p.stat().st_mode & 0o777)
+        tmp.replace(p)
+    run([claude(), "plugin", "marketplace", "add", source])
+
+
 def _marketplace_source() -> str | None:
     src = ((read_json(plugins_dir() / "known_marketplaces.json") or {}).get("thimble") or {}).get("source") or {}
     return src.get("repo") or src.get("url") or src.get("path")
@@ -246,45 +287,143 @@ def _installed() -> bool:
 RELOAD = "It takes effect after /reload-plugins in the running session, or in a new session."
 
 
+def _is_thimble(folder: str) -> bool:
+    return (read_json(Path(folder).expanduser() / ".claude-plugin" / "plugin.json") or {}).get("name") == "thimble"
+
+
+def _claude_argv() -> list[str] | None:
+    """The command line of the Claude Code session that runs this command: the nearest `claude` among this process's
+    parents (read with ps), or None when there is none (a test, the browser's server) or it cannot be read."""
+    pid = os.getppid()
+    for _ in range(12):
+        if pid <= 1:
+            return None
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=", "-o", "args=", "-p", str(pid)], capture_output=True, text=True,
+                                 timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        ppid, _, args = out.partition(" ")
+        argv = args.split()
+        if argv and Path(argv[0]).name == "claude" and argv[1:2] != ["plugin"]:
+            return argv
+        try:
+            pid = int(ppid)
+        except ValueError:
+            return None
+    return None
+
+
+def plugin_dir_in(argv: list[str] | None, env_dirs: str = "") -> bool | None:
+    """Whether a session with this command line (and CLAUDE_CODE_PLUGIN_DIRS) loads thimble from a folder; None when
+    there is no session to read."""
+    if any(_is_thimble(x) for x in env_dirs.split(os.pathsep) if x):
+        return True
+    if argv is None:
+        return None
+    dirs = [argv[i + 1] for i, x in enumerate(argv[:-1]) if x == "--plugin-dir"]
+    dirs += [x.split("=", 1)[1] for x in argv if x.startswith("--plugin-dir=")]
+    return any(_is_thimble(d) for d in dirs)
+
+
+def _session_plugin_dir() -> bool | None:
+    """Whether the Claude Code session that runs this command loads thimble with --plugin-dir: read from the
+    session's own command line, since a --plugin-dir folder and a folder marketplace can be the same clone."""
+    return plugin_dir_in(_claude_argv(), os.environ.get("CLAUDE_CODE_PLUGIN_DIRS") or "")
+
+
 def from_plugin_dir() -> bool:
-    """Whether this thimble runs from a folder given to Claude Code with --plugin-dir, not from an installed copy in
-    Claude Code's plugins folder. Claude Code loads such a folder before an installed plugin of the same name."""
+    """Whether this thimble runs from a folder given to Claude Code with --plugin-dir, not from an install. Claude Code
+    loads such a folder before an installed plugin of the same name, for the whole session. An install runs either
+    Claude Code's own copy in its plugins folder (a GitHub marketplace) or the plugin folder of a folder marketplace in
+    place (scripts/install.sh --local, or a fix's copy that `use` turned on)."""
+    seen = _session_plugin_dir()
+    if seen is not None:
+        return seen
+    here = PLUGIN.resolve()
     try:
-        PLUGIN.resolve().relative_to(plugins_dir().resolve())
+        here.relative_to(plugins_dir().resolve())
         return False
     except ValueError:
-        return True
+        pass
+    # a fix's copy that `use` turned on through the marketplace: the session still runs it after an undo, until it reloads
+    own = fix_of_plugin()
+    if own and (read_json(fix_dir(own) / "fix.json") or {}).get("via") == "marketplace":
+        return False
+    src = _marketplace_source()
+    if src and not re.match(r"^[a-z]+://|^[\w.-]+/[\w.-]+$", str(src)):
+        try:
+            if (Path(src).expanduser().resolve() / "plugin") == here and _installed():
+                return False
+        except OSError:
+            pass
+    return True
 
 
-def use(slug: str) -> str:
-    """Point Claude Code's thimble marketplace at the fix's copy, as scripts/install.sh --local does with a checkout.
-    Claude Code reads a plugin from a folder marketplace in place, so later edits in the copy load on the next
-    /reload-plugins too. A session that loads thimble with --plugin-dir keeps that folder whatever is installed, so then
-    nothing is installed and the person starts Claude Code with the copy's folder instead."""
+def fix_of_plugin() -> str | None:
+    """The fix whose copy this thimble runs from, or None when it runs the release."""
+    try:
+        rel = PLUGIN.resolve().relative_to(fixes_home().resolve())
+    except ValueError:
+        return None
+    parts = rel.parts
+    return parts[0] if len(parts) >= 3 and parts[1] == "worktree" else None
+
+
+def _restart(folder: str | Path) -> str:
+    return f"claude --continue --plugin-dir {folder}"
+
+
+def use(slug: str, plugin_dir: bool | None = None) -> str:
+    """Turn the fix's copy on. An install (from GitHub, or a folder marketplace such as scripts/install.sh --local):
+    point Claude Code's thimble marketplace at the copy, as install.sh --local does with a checkout. Claude Code reads a
+    plugin from a folder marketplace in place, so later edits in the copy load on the next /reload-plugins too.
+    A session started with --plugin-dir keeps that folder until it quits, whatever is installed: then nothing is
+    installed, and the one line says the command that starts the session again with the copy."""
     fx = load(slug)
     if not fx.get("worktree"):
-        raise FixError(f"{slug} is a report: it has no code to load")
-    if from_plugin_dir():
-        raise FixError(f"this session loads thimble with --plugin-dir {PLUGIN}, which Claude Code uses before any "
-                       f"installed thimble, so the fix cannot load here. Start Claude Code again with --plugin-dir "
-                       f"{fx['worktree']}/plugin to use it, and with --plugin-dir {PLUGIN} to go back")
+        raise FixError(f"{slug} is a request with no change: there is nothing to turn on")
+    # plugin_dir: whether the caller is a Claude Code session started with --plugin-dir; None asks this plugin's own
+    # place. A caller that is no Claude Code session (the browser's server, which runs from a checkout) passes False.
+    if from_plugin_dir() if plugin_dir is None else plugin_dir:
+        if fx["status"] in ("working", "ready", "applied"):
+            fx["status"] = "applied" if fix_of_plugin() == slug else "ready"
+        fx["via"] = "plugin-dir"
+        save(fx)
+        if fix_of_plugin() == slug:
+            return f"This session already runs the fix {slug}."
+        return (f"This session loads thimble with --plugin-dir, which Claude Code keeps until it quits. To try the fix, "
+                f"quit and run: {_restart(Path(fx['worktree']) / 'plugin')}")
     prev = _marketplace_source()
     rel = fixes_home() / "release.json"
     if prev and not str(prev).startswith(str(fixes_home())):
-        write_json(rel, {"source": prev})
-    run([claude(), "plugin", "marketplace", "add", fx["worktree"]])
+        write_json(rel, {"source": prev, "entry": _marketplace_entry()})
+    _repoint(fx["worktree"])
     if not _installed():
         run([claude(), "plugin", "install", "thimble@thimble"])
     (fixes_home() / "active").write_text(slug + "\n")
     fx["status"] = "applied" if fx["status"] in ("working", "ready", "applied") else fx["status"]
+    fx["via"] = "marketplace"
     save(fx)
     return f"thimble now runs the fix {slug} from {fx['worktree']}/plugin. {RELOAD} `thimble fix undo` goes back to the release."
 
 
-def undo() -> str:
+def undo(plugin_dir: bool | None = None) -> str:
+    if from_plugin_dir() if plugin_dir is None else plugin_dir:
+        slug = fix_of_plugin()
+        if not slug:
+            return "This session runs no fix: thimble is the one --plugin-dir names."
+        fx = load(slug)
+        if fx["status"] == "applied":
+            fx["status"] = "ready"
+            save(fx)
+        back = Path(fx.get("source") or "") / "plugin"
+        return (f"This session loads the fix with --plugin-dir, which Claude Code keeps until it quits. To go back to "
+                f"the release, quit and run: {_restart(back)}")
     slug = active_slug()
-    prev = (read_json(fixes_home() / "release.json") or {}).get("source") or upstream()
-    run([claude(), "plugin", "marketplace", "add", prev])
+    rel = read_json(fixes_home() / "release.json") or {}
+    prev = rel.get("source") or upstream()
+    _repoint(prev, rel.get("entry") if rel.get("source") else None)
     run([claude(), "plugin", "marketplace", "update", "thimble"], check=False)
     run([claude(), "plugin", "update", "thimble@thimble"], check=False)
     try:
@@ -297,6 +436,161 @@ def undo() -> str:
             fx["status"] = "ready"
             save(fx)
     return f"thimble is back to the release from {prev}. {RELOAD}"
+
+
+# ------------------------------------------------------------------ a fix follows releases
+
+FOLLOW_EVERY_S = 24 * 3600
+
+
+def on_slug() -> str | None:
+    """The fix that is on: the one the marketplace points at, or the one this session runs with --plugin-dir."""
+    s = active_slug() or fix_of_plugin()
+    return s if s and fix_dir(s).is_dir() else None
+
+
+def _release_url(fx: dict[str, Any]) -> str:
+    """Where the release comes from: the marketplace's source before the fix was turned on (GitHub, a URL, or a
+    folder: a dev install's clone), else the checkout the copy came from."""
+    src = (read_json(fixes_home() / "release.json") or {}).get("source") or fx.get("source") or upstream()
+    if re.match(r"^[\w.-]+/[\w.-]+$", src) and not Path(src).exists():
+        return f"https://github.com/{src}.git"
+    return src
+
+
+def _fetch_release(fx: dict[str, Any]) -> tuple[str, str]:
+    """(commit, version) of the newest release, fetched into the copy (a read, never a write elsewhere)."""
+    wt = fx["worktree"]
+    git("fetch", "-q", "--no-tags", _release_url(fx), "HEAD", cwd=wt)
+    commit = git("rev-parse", "FETCH_HEAD", cwd=wt)
+    try:
+        version = json.loads(git("show", f"{commit}:plugin/.claude-plugin/plugin.json", cwd=wt)).get("version") or "?"
+    except (FixError, ValueError):
+        version = "?"
+    return commit, version
+
+
+def _newer_known(fx: dict[str, Any]) -> bool:
+    """Whether a newer release is known without the network: a dev install's clone has moved past the fix's base."""
+    url = _release_url(fx)
+    if not Path(url).is_dir():
+        return False
+    head = git("rev-parse", "HEAD", cwd=url, check=False)
+    return bool(head) and head != fx["base"] and run(["git", "merge-base", "--is-ancestor", head, fx["base"]],
+                                                       cwd=fx["worktree"], check=False).returncode != 0
+
+
+def _quick_tests(wt: Path) -> bool:
+    """The plugin's quick tests in the copy: the kernel's tests where this Python has pytest, else the copy's `thimble`
+    command must start (THIMBLE_FIX_TESTS, a shell command, replaces them)."""
+    import importlib.util  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    cmd = os.environ.get("THIMBLE_FIX_TESTS")
+    py = sys.executable or "python3"
+    if cmd:
+        argv = ["sh", "-c", cmd]
+    elif importlib.util.find_spec("pytest"):
+        argv = [py, "-m", "pytest", "plugin/tests", "-q", "-x", "-p", "no:cacheprovider"]
+    else:
+        argv = [py, "plugin/engine/thimble.py", "--help"]
+    try:
+        return subprocess.run(argv, cwd=wt, capture_output=True, text=True, timeout=900).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _commit_local(wt: Path, slug: str) -> None:
+    """The copy's change, committed on its own branch so that it can be replayed (a local commit; a send makes its own)."""
+    git("add", "-A", cwd=wt)
+    if run(["git", "diff", "--cached", "--quiet"], cwd=wt, check=False).returncode != 0:
+        git("-c", "user.name=thimble", "-c", "user.email=thimble@localhost", "commit", "-q", "-m", f"thimble fix {slug}", cwd=wt)
+
+
+def _back_to_release(fx: dict[str, Any], plugin_dir: bool | None = None) -> str:
+    """Turn the fix off. An install goes back to the release at once; a --plugin-dir session needs the one command."""
+    if fix_of_plugin() == fx["slug"] and (from_plugin_dir() if plugin_dir is None else plugin_dir):
+        return f"; quit and run: {_restart(Path(fx.get('source') or '') / 'plugin')}"
+    undo(plugin_dir)
+    return ""
+
+
+def follow(force: bool = False, plugin_dir: bool | None = None) -> str | None:
+    """Keep the fix that is on with the newest release, in one line for the person, or None when no fix is on.
+
+    At most once a day (or at once with force), thimble fetches the newest release and replays the fix's change on it
+    in the copy. In the release already (the replay is empty): back to the plain release. Replays and the quick tests
+    pass: the newest release plus the fix. Does not replay, or the tests fail: back to the plain release, the copy kept
+    as it was for /thimble:fix to redo it."""
+    slug = active_slug() if plugin_dir is False else on_slug()
+    if not slug or not fix_dir(slug).is_dir():
+        return None
+    import fcntl  # noqa: PLC0415
+
+    # one follow at a time: a session that reloads while the copy changes under it starts another
+    with open(fixes_home() / "follow.lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fx = load(slug)
+            return f"thimble {fx.get('version') or '?'} + your fix '{fx['title']}' · u undo"
+        return _follow(slug, force, plugin_dir)
+
+
+def _follow(slug: str, force: bool, plugin_dir: bool | None) -> str | None:
+    fx = load(slug)
+    title, wt = fx["title"], Path(fx.get("worktree") or "")
+    on_line = lambda v: f"thimble {v} + your fix '{title}' · u undo"  # noqa: E731
+    if not fx.get("worktree"):
+        return None
+    stamps = read_json(fixes_home() / "follow.json") or {}
+    if not force and time.time() - float(stamps.get(slug) or 0) < FOLLOW_EVERY_S and not _newer_known(fx):
+        return on_line(fx.get("version") or "?")
+    stamps[slug] = time.time()
+    write_json(fixes_home() / "follow.json", stamps)
+    try:
+        commit, version = _fetch_release(fx)
+    except FixError as e:
+        return f"{on_line(fx.get('version') or '?')} (the newest release could not be fetched: {e})"
+    base = fx["base"]
+    if commit == base or run(["git", "merge-base", "--is-ancestor", commit, base], cwd=wt, check=False).returncode == 0:
+        return on_line(fx.get("version") or version)
+    _commit_local(wt, slug)
+    before = git("rev-parse", "HEAD", cwd=wt)
+    # only the fix's own commits replay: the copy's branch may already hold some of the release's (a replay that was
+    # stopped part way)
+    since = git("merge-base", "HEAD", commit, cwd=wt, check=False) or base
+    replayed = run(["git", "-c", "user.name=thimble", "-c", "user.email=thimble@localhost", "rebase", "-q", "--onto",
+                    commit, since, fx["branch"]], cwd=wt, check=False).returncode == 0
+    if not replayed:
+        run(["git", "rebase", "--abort"], cwd=wt, check=False)
+    elif run(["git", "diff", "--quiet", commit, "HEAD"], cwd=wt, check=False).returncode == 0:
+        git("reset", "-q", "--hard", before, cwd=wt)
+        how = _back_to_release(fx, plugin_dir)
+        fx = load(slug)
+        fx.update(status="merged", merged_in=version)
+        save(fx)
+        return f"Your fix '{title}' is in thimble {version}; you are on the release again{how}."
+    elif _quick_tests(wt):
+        fx.update(base=commit, version=version)
+        save(fx)
+        return on_line(version)
+    else:
+        git("reset", "-q", "--hard", before, cwd=wt)
+    how = _back_to_release(fx, plugin_dir)
+    fx = load(slug)
+    fx.update(status="stale", stale_on=version)
+    save(fx)
+    return f"Your fix '{title}' no longer fits thimble {version}; you are on the release{how} · /thimble:fix to redo it"
+
+
+def latest() -> str | None:
+    """The fix that `/thimble:fix submit` means: the one turned on, else the newest that was neither sent nor dropped."""
+    a = active_slug() or fix_of_plugin()
+    if a and fix_dir(a).is_dir():
+        return a
+    open_ = [(load(s).get("created") or 0, s) for s in all_slugs() if load(s).get("status") not in ("sent", "dropped", "merged")]
+    return max(open_)[1] if open_ else None
 
 
 # ------------------------------------------------------------------ the draft and its scan
@@ -444,44 +738,56 @@ def _write_share(fx: dict[str, Any], parts: dict[str, str], hits: list[dict]) ->
     out = P.apply(parts, hits)
     removed = sum(not h["kept"] for h in hits)
     foot = (f"\n\n---\nthimble {fx.get('version') or '?'} · {platform.system() or 'unknown OS'} · "
-            f"{'bug fix' if fx['kind'] == 'fix' else fx['kind']} from a tester\n"
+            f"{'a change' if 'pr' in out else 'a request'} from a tester\n"
             f"The privacy scan removed {removed} detail{'' if removed == 1 else 's'}, and the tester read this text "
             f"before it was sent.\n")
     (d / "issue.md").write_text(out["issue"].rstrip() + foot)
     if "pr" in out:
         (d / "pr.md").write_text(out["pr"].rstrip() + "\n")
         (d / "diff.patch").write_text(out.get("diff", ""))
+    else:
+        for name in ("pr.md", "diff.patch"):
+            (d / name).unlink(missing_ok=True)
     write_json(d / "scan.json", hits)
     fx["share_branch"] = "fix/" + _share_slug(out["issue"].splitlines()[0].lstrip("# "))
     return out
 
 
-def draft(slug: str, src: str, st: Store) -> dict[str, Any]:
+def draft(slug: str, src: str | None, st: Store | None, *, text: str | None = None,
+          terms: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    """Build the share from Claude's draft (the file `src`, or `text`): the issue, and when the copy has a change, the
+    pull request and its diff. A fix whose copy has no change goes out as an issue alone: a request. The scan's
+    session terms come from the kernel's records of the session (`st`), or from the caller (`terms`, the browser's)."""
     fx = load(slug)
-    try:
-        text = Path(src).read_text()
-    except OSError as e:
-        raise FixError(f"cannot read the draft {src}: {e.strerror}")
+    if text is None:
+        try:
+            text = Path(src or "").read_text()
+        except OSError as e:
+            raise FixError(f"cannot read the draft {src}: {e.strerror}")
     title, body, change = _split_draft(text, fx["title"])
     if not body:
         raise FixError("the draft has no issue text: write what happened, what was expected, and a reproduction on made-up data")
     parts = {"issue": f"# {title}\n\n{body}\n"}
-    if fx["kind"] != "report":
-        if not change:
-            raise FixError("the draft has no '## Change' section: add one that says what the change does and how it was tested")
+    diff = ""
+    if fx["kind"] != "report" and fx.get("worktree"):
         wt = Path(fx["worktree"])
         diff = _diff(wt, fx["base"])
-        if not diff.strip():
-            raise FixError(f"the copy has no change from the release yet ({wt})")
+    if diff.strip():
+        if not change:
+            raise FixError("the draft has no '## Change' section: add one that says what the change does and how it was tested")
         binary = re.findall(r"^Binary files (?:a/)?(\S+)", diff, re.M)
         if binary:
             raise FixError(f"the change has a binary file ({binary[0]}); a fix shares text changes only, so remove it or make it text")
         parts.update(pr=change + "\n", diff=diff, branch=fx["branch"],
                      commit=git("log", "--format=%B", f"{fx['base']}..HEAD", cwd=wt))
+    elif change:
+        # a request with no change: the "## Change" words, if any, belong to the issue
+        parts["issue"] = f"# {title}\n\n{body}\n\n{change}\n"
     repo_paths = [(str(PLUGIN) + os.sep, "plugin/")]
     if fx.get("worktree"):
         repo_paths.append((fx["worktree"] + os.sep, ""))
-    hits, notes = P.scan(parts, session_terms(st), _known(fx), repo_paths, allow=[fx.get("base") or ""])
+    hits, notes = P.scan(parts, terms if terms is not None else session_terms(st), _known(fx), repo_paths,
+                         allow=[fx.get("base") or ""])
     old = {(h["where"], h["found"]): h["kept"] for h in read_json(fix_dir(slug) / "share" / "scan.json") or []}
     for h in hits:
         h["kept"] = bool(old.get((h["where"], h["found"]))) and h["kind"] not in P.NEVER_KEPT
@@ -493,9 +799,10 @@ def draft(slug: str, src: str, st: Store) -> dict[str, Any]:
     fx.pop("error", None)
     save(fx)
     removed = sum(not h["kept"] for h in hits)
-    st.emit({"kind": "fix_ask", "slug": slug, "ask": ask["id"], "fix_kind": fx["kind"], "title": fx["title"],
-             "removed": removed, "share": str(fix_dir(slug) / "share")})
-    return {"removed": removed, "notes": notes, "hits": hits}
+    if st is not None:
+        st.emit({"kind": "fix_ask", "slug": slug, "ask": ask["id"], "fix_kind": fx["kind"], "title": fx["title"],
+                 "removed": removed, "share": str(fix_dir(slug) / "share")})
+    return {"removed": removed, "notes": notes, "hits": hits, "change": bool(diff.strip())}
 
 
 def _check_ask(slug: str, ask_id: str | None) -> dict[str, Any]:
@@ -561,7 +868,7 @@ def _send(fx: dict[str, Any]) -> list[str]:
     fx["login"] = login
     lines = []
     issue_body = (share / "issue.md").read_text().split("\n", 1)[1].lstrip("\n")
-    if fx["kind"] != "report":
+    if (share / "pr.md").exists():
         wt = Path(fx["worktree"])
         noreply = f"{uid}+{login}@users.noreply.github.com"
         run([gh(), "repo", "fork", repo, "--clone=false"])

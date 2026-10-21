@@ -973,6 +973,8 @@ FIX_HELP = """Change thimble itself, or report a problem with it, from the sessi
     thimble fix status [SLUG]      the fixes, or one fix
     thimble fix use SLUG           loads the copy's plugin into the person's thimble
     thimble fix undo               goes back to the release
+    thimble fix follow [now]       replays the fix that is on onto the newest release, at most once a day; in the
+                                   release already, or no longer fitting, it goes back to the release
     thimble fix draft SLUG --from FILE
         FILE is the issue in markdown ("# title" first), and for a fix or a feature a "## Change" section for the
         pull request. thimble scans every part (the text, the diff, the branch, the commit messages), removes the
@@ -1015,6 +1017,11 @@ def cmd_fix(a: argparse.Namespace) -> int:
             return 0
         if a.verb == "undo":
             print(FX.undo())
+            return 0
+        if a.verb == "follow":
+            line = FX.follow(force=bool(a.args and a.args[0] == "now"))
+            if line:
+                print(line)
             return 0
         if a.verb == "draft":
             if not a.args or not a.draft_file:

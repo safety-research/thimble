@@ -6,10 +6,11 @@
 //   fixRequest({failure, kind})   f (kind 'fix') or F (kind 'report') on a failure line
 //   shareRequest({slug, title})   p on a fix with no draft yet
 //   lineKey(line, k)              what a key does to the line the bar names: fix, report, share, undo, or null
+//   fixVerb(args)                 what /thimble:fix's words ask for: the fixes, submit, undo, try, or a change
 
 /** The keys a failure line carries, and the keys of a fix now in the person's thimble. */
 export const FAIL_KEYS = 'f fix this · F report only'
-export const USE_KEYS = 'p share it · u undo'
+export const USE_KEYS = 'p submit · u undo'
 
 /** What key `k` does to the line the bar names (a failure, or a fix in use), or null: it types. */
 export function lineKey(line, k) {
@@ -35,4 +36,16 @@ export function fixRequest({ failure = '', kind = 'fix' } = {}) {
 /** The request p sends when the fix has no draft yet: Claude writes it, and the preview opens on it. */
 export function shareRequest({ slug = '', title = '' } = {}) {
   return `The analyst pressed p (share it) on the fix ${slug}${title ? ` "${one(title)}"` : ''}. Write the draft and give it to \`thimble fix draft ${slug} --from FILE\`. The analyst reviews the exact text before anything is sent.`
+}
+
+/** What `/thimble:fix <words>` asks for: nothing (the fixes and what to do), `submit` (the review of the fix, as p),
+ *  `undo` (back to the release, as u), `try [fix]` (turn a fix on again), or any other words: the change the person
+ *  wants, which the command's own text asks Claude for (commands/fix.md). */
+export function fixVerb(args) {
+  const w = one(args)
+  const m = /^(status|submit|share|undo|try|use)(?:\s+([a-z0-9][a-z0-9-]{0,79}))?$/i.exec(w)
+  if (!w || /^status$/i.test(w)) return { verb: 'status' }
+  if (!m) return { verb: 'change', text: w }
+  const v = m[1].toLowerCase()
+  return { verb: v === 'share' ? 'submit' : v === 'use' ? 'try' : v, slug: m[2] ? m[2].toLowerCase() : '' }
 }

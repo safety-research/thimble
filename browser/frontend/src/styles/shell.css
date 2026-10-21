@@ -1415,3 +1415,117 @@ button.settings-ext-name:hover .settings-ext-caret {
     flex-wrap: wrap;
   }
 }
+
+/* -------- Fix thimble (shell/FixEntry): the top bar's Fix…, its sheet, and the line of the newest fix -------- */
+.shell-fix-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  cursor: pointer;
+}
+.shell-fix-btn:hover {
+  background: var(--surface-hover);
+}
+.shell-fix-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+.shell-fix-form label {
+  font: 600 var(--type-ui-sm);
+}
+.shell-fix-form textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-ui);
+  background: var(--paper-0);
+  color: var(--text-primary);
+  font: var(--type-body);
+  resize: vertical;
+}
+.shell-fix-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.shell-fix-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.shell-fix-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 420px;
+  margin-right: 8px;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.shell-fix-state.good .shell-fix-words {
+  color: var(--status-positive);
+}
+.shell-fix-words {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.shell-fix-act {
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  cursor: pointer;
+}
+.shell-fix-act:hover {
+  background: var(--surface-hover);
+}
+.share-tab {
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.share-change {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.share-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--type-ui-sm);
+}
+.share-files li {
+  padding: 2px 0;
+}
+.share-add {
+  color: var(--status-positive);
+}
+.share-del {
+  color: var(--status-negative);
+}
+.share-diff .share-dl {
+  display: block;
+  white-space: pre;
+}
+.share-dl-add {
+  background: color-mix(in srgb, var(--status-positive) 14%, transparent);
+}
+.share-dl-del {
+  background: var(--status-negative-soft);
+}
+.share-dl-file,
+.share-dl-hunk {
+  color: var(--text-secondary);
+}

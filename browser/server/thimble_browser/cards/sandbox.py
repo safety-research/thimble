@@ -340,6 +340,71 @@ async def run_script(script: Path, req: dict[str, Any], corpus: Path, *, extra_r
         shutil.rmtree(run_dir, ignore_errors=True)
 
 
+TEST_S = 300.0
+TEST_OUT = 12_000
+
+
+def test_python() -> str | None:
+    """The Python that runs a fix's tests: this server's own when it has pytest, else THIMBLE_PYTHON's (the terminal
+    plugin's) when that has it, else None."""
+    import importlib.util  # noqa: PLC0415
+
+    if importlib.util.find_spec("pytest") is not None:
+        return sys.executable
+    other = os.environ.get("THIMBLE_PYTHON")
+    if other and shutil.which(other):
+        try:
+            ok = subprocess.run([other, "-c", "import pytest"], capture_output=True, timeout=30).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+        if ok:
+            return shutil.which(other)
+    return None
+
+
+async def run_tests(copy: Path, args: Sequence[str], *, timeout: float = TEST_S, unsandboxed: bool = False) -> dict[str, Any]:
+    """{ok, text}: pytest over `args` (paths of the copy, and pytest's own -flags) in a fix's copy of thimble
+    (fixcopy.py), in the sandbox as a card's code runs: the copy is shown read-only and is the run's working folder,
+    the run writes only its own folder, and it has no network and none of the server's environment. Only this
+    server's Python runs, so the tests that need what it lacks (pytest, pandas) say so in their output."""
+    copy = copy.resolve()
+    st = status()
+    if not st.kind and not unsandboxed:
+        return {"ok": False, "text": f"The tests did not run: thimble browser runs code only in a sandbox, and found "
+                                     f"none: {st.why}. {st.fix}"}
+    py = test_python()
+    if not py:
+        return {"ok": False, "text": "The tests did not run: pytest is not installed for thimble browser's Python. "
+                                     "Install it with `uv sync --project browser/server --extra dev` in the thimble "
+                                     "checkout, or set THIMBLE_PYTHON to a Python that has pytest."}
+    run_dir = Path(tempfile.mkdtemp(prefix="thimble-test-")).resolve()
+    command = [py, "-I", "-m", "pytest", "-q", "-p", "no:cacheprovider", *args]
+    try:
+        env = child_env(run_dir)
+        # the sandbox hides the system's user list, and thimble's tests read a user name (the privacy scan's)
+        env.update(PYTHONDONTWRITEBYTECODE="1", USER="thimble-test", LOGNAME="thimble-test")
+        if st.kind:
+            more = [Path(d) for d in interpreter_dirs(py)] if py != sys.executable else []
+            argv = launcher_argv(st.node, rules_for(copy, run_dir, more), command, env)
+            env = launcher_env(run_dir)
+        else:
+            argv = command
+        proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.DEVNULL,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                                                    env=env, cwd=str(copy), start_new_session=True)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        except asyncio.TimeoutError:
+            await _stop(proc)
+            return {"ok": False, "text": f"The tests did not finish in {timeout:g} s and were stopped."}
+        text = out.decode(errors="replace")
+        if len(text) > TEST_OUT:
+            text = "[...]\n" + text[-TEST_OUT:]
+        return {"ok": proc.returncode == 0, "text": text.strip() or f"pytest exited with {proc.returncode}"}
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
 async def _stop(proc: asyncio.subprocess.Process) -> None:
     """Stop a run's process group: SIGTERM, which run.mjs passes on and cleans up after, then SIGKILL if it is still
     there after STOP_S."""

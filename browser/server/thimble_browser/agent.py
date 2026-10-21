@@ -35,7 +35,10 @@ from typing import Any, Callable
 import anthropic
 
 from . import chats, features, home, llm, prompts, settings
+from . import fixcopy
 from .tools import Tools, definitions
+
+fixcopy.register()
 
 log = logging.getLogger("thimble_browser.agent")
 
@@ -60,7 +63,7 @@ class AgentDef:
         return self.tools() if callable(self.tools) else self.tools
 
 
-CORE_TOOLS = READ + ("run_python", "draft_report")
+CORE_TOOLS = READ + ("run_python", "draft_report", *fixcopy.TOOLS)
 
 
 def _main_prompt(folder: Path) -> str:
