@@ -41,9 +41,12 @@ LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
 # how a citation ended: kept as written; re-pointed inside the cited query or card, at another one the text cites, or
 # at a query of the session; no place holds it; several places hold it
 KEPT, CELL, CITED, SESSION = "kept", "cell", "cited", "session"
-# a source path re-pointed at the file it means: written from a subfolder (the one file under the root whose path ends
-# with it), or mistyped (the one file beside it whose name starts the same way and holds the cited place)
+# a source path re-pointed at the file it means: mistyped (the one file beside it whose name starts the same way and
+# holds the cited place)
 PATH = "path"
+# a source path written from the subfolder a session ran `cd` into (the one file under the root whose path ends with
+# it): the same place, its ref written with the path under the root. It is not a repair
+FOLDER = "folder"
 NO_HOME, SEVERAL, GONE = "no_home", "several", "gone"
 
 WHY_CONTRADICTED = "the cited place shows {source}"
@@ -81,7 +84,7 @@ class Result:
     version: str = ""
 
     def record(self) -> dict[str, Any]:
-        return {"text": self.text, "changed": any(c.how != KEPT for c in self.changes), "of": self.of,
+        return {"text": self.text, "changed": any(c.how not in (KEPT, FOLDER) for c in self.changes), "of": self.of,
                 "version": self.version, "changes": [c.record() for c in self.changes]}
 
 
@@ -521,13 +524,13 @@ class _Pass:
             # a citation of a file's place is re-pointed only to a place in a file, never to a query or a card
             at = _at_source(self.st, p, ref)
             if at.exists:
-                return Change(label, ref, LINKED, PATH, to=at.moved) if at.moved else Change(label, ref, LINKED, KEPT, to=ref)
+                return Change(label, ref, LINKED, FOLDER, to=at.moved) if at.moved else Change(label, ref, LINKED, KEPT, to=ref)
             fixed = _sibling(self.st, p, words)
             if fixed:
                 return Change(label, ref, LINKED, PATH, to=fixed)
             return self._quiet(label, ref, GONE, WHY_GONE.format(problem=str(at.problem).replace(f" under {self.st.root}", "")))
         if at.exists and at.moved:
-            return Change(label, ref, LINKED, PATH, to=at.moved)
+            return Change(label, ref, LINKED, FOLDER, to=at.moved)
         if at.exists and (at.holds or not num):
             return Change(label, ref, LINKED, KEPT, to=ref)
         if not num:

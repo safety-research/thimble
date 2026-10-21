@@ -330,6 +330,24 @@ test('] stops at the newest reply\'s last stop and [ at the oldest reply\'s firs
   assert.equal(step(order([{ row: 'r1', marks: [{}] }, { row: 'r2', marks: [{}, {}] }]), { row: 'r2', i: 1 }, 1), null)
 })
 
+test('a code path written from the folder Claude ran cd into opens its place with no moved note', () => {
+  const text = 'The turn ends [here](util/clock.ts#L12).'
+  const rec = remark(newRecord({ row: 'x', session: 's', text }))
+  const checked = withHeal(rec, textKey(text), { changes: [{ label: 'here', ref: 'util/clock.ts#L12', state: 'linked', how: 'folder', to: 'app/util/clock.ts#L12' }] })
+  const top = frameOf(healedRecord(checked), 0)
+  assert.equal(top.ref, 'app/util/clock.ts#L12')
+  assert.equal(top.heal, 'kept')
+  assert.equal(top.wrote, undefined)
+  assert.deepEqual(cardBody({ text: s => s, escape: s => s }, { drawings: [] }, top, null), [])
+  // a mistyped path the pass re-pointed to its sibling still says where it pointed
+  const typo = withHeal(rec, textKey(text), { changes: [{ label: 'here', ref: 'util/clock.ts#L12', state: 'linked', how: 'path', to: 'util/clocks.ts#L12' }] })
+  assert.equal(frameOf(healedRecord(typo), 0).heal, 'moved')
+  // a card's words: the link opens the place, with no `wrote`
+  const links = linksIn('See [here](util/clock.ts#L12).', () => ({ label: 'here', ref: 'util/clock.ts#L12', state: 'linked', how: 'folder', to: 'app/util/clock.ts#L12' }))
+  assert.equal(links[0].ref, 'app/util/clock.ts#L12')
+  assert.equal(links[0].wrote, undefined)
+})
+
 test('a re-pointed citation\'s card says where it pointed in words, never in the ref\'s own syntax', () => {
   const text = 'Kestrel made [41](r2#user=Kestrel%20B@n) edits.'
   const rec = remark(newRecord({ row: 'x', session: 's', text }))

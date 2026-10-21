@@ -65,7 +65,7 @@ export function linksIn(md, look = null) {
     if (c && c.state === 'quiet') continue
     const ref = c && c.to && c.state === 'linked' ? c.to : citeRef(m[2])
     if (!ref || out.some(x => x.ref === ref)) continue
-    out.push({ id: `n${out.length + 1}`, ref, label: citeWords(m[1], ref), ...(c && c.to && c.to !== c.ref && c.state === 'linked' ? { wrote: c.ref } : {}) })
+    out.push({ id: `n${out.length + 1}`, ref, label: citeWords(m[1], ref), ...(c && c.to && c.to !== c.ref && c.state === 'linked' && c.how !== 'folder' ? { wrote: c.ref } : {}) })
   }
   return out.slice(0, MAX_LINKS)
 }
