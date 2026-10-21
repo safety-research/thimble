@@ -185,6 +185,22 @@ def count_calls(messages: list[dict[str, Any]]) -> int:
                if isinstance(b, dict) and b.get("type") == "tool_use")
 
 
+def reply_of(pieces: Any) -> str:
+    """A turn's reply, from its pieces in order, each `(is_call, text)`: the text after the turn's last call, or, when
+    Claude wrote nothing after that call (it answered and then made a card), the last text before it. Words written
+    before a later call are a note on the way there ("Let me count the runs first."), which the steps show. Pure."""
+    after: list[str] = []  # the words since the latest call
+    before: list[str] = []  # the last words a call followed
+    for is_call, text in pieces:
+        if not is_call:
+            after.append(text)
+        elif "".join(after).strip():
+            before, after = after, []
+        else:
+            after = []
+    return "".join(after if "".join(after).strip() else before).strip()
+
+
 def _block(b: Any) -> dict[str, Any]:
     """A content block of a reply as the next request sends it back: unchanged (thinking blocks keep their
     signatures)."""
@@ -329,7 +345,7 @@ class Session:
 
     async def _turn(self) -> None:
         usage = Usage()
-        reply: list[str] = []
+        pieces: list[tuple[bool, str]] = []  # the turn's texts and calls in order, from which reply_of reads its reply
         self.cards.clear()
         self.opened = None
         self.group = None
@@ -365,12 +381,8 @@ class Session:
                         continue
                     raise
                 retries = 0
-                # the reply is what Claude wrote for the analyst after its last call; words written before a call are a
-                # note on the way there, which the steps show
-                if any(b.type == "tool_use" for b in final.content):
-                    reply.clear()
-                else:
-                    reply.extend(b.text for b in final.content if b.type == "text")
+                pieces.extend((b.type == "tool_use", getattr(b, "text", "")) for b in final.content
+                              if b.type in ("text", "tool_use"))
                 messages.append({"role": "assistant", "content": [_block(b) for b in final.content]})
                 save_messages(self.ws, self.chat, messages)
                 if final.stop_reason == "refusal":
@@ -432,7 +444,7 @@ class Session:
         chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
         self.finished(result)
         if self.role == "main":
-            text_out = "".join(reply).strip()
+            text_out = reply_of(pieces)
             for fn in AFTER_TURN:
                 try:
                     fn(self, text_out, result)

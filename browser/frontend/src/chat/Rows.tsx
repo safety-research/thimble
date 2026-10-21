@@ -126,8 +126,9 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows)
-  // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them
-  const notes = nested ? EMPTY_SET : midTurnTexts(shown)
+  // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them,
+  // or the last text before the last call when nothing follows it
+  const notes = nested ? EMPTY_SET : midTurnTexts(shown, streaming || live)
   // the lenses whose marks show in the chat (lib/marks.ts): a lens turned off for the chat hides its marks at once
   const lenses = useLenses(ws)
   return (
