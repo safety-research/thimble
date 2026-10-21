@@ -213,6 +213,8 @@ export function cardBody(k, card, top, open) {
     parts.push(k.text(`{dim:${top.kind === 'gloss' ? 'drawing the explainer…' : 'reading it through the kernel…'}}`))
   } else if (card.problem || card.error) {
     parts.push(k.text(`{dim:${k.escape(String(card.problem || card.error))}}`))
+  } else if (card.unresolved && top && top.heal === 'gone' && top.why) {
+    // a citation whose place is gone: the line above already says what is missing
   } else if (open) {
     if (open.problem) parts.push(k.text(`{dim:${k.escape(String(open.problem))}}`))
     ;(open.drawings || []).forEach((d, j) => {

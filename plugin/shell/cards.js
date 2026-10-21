@@ -414,7 +414,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   const right = `cite · ${short(files || ref, 40)}`
   const deep = Math.max(room + 6, 14)
   if (r.error && kind !== 'code') {
-    return { title: label, right, parts: [{ program: RECORDS_PROGRAM, data: { head: '', recs: [], empty: `${ref} does not resolve: ${short(r.error, 200)}`, max: 1, more: '' } }], sections: [], links: [] }
+    return { title: label, right, parts: [{ program: RECORDS_PROGRAM, data: { head: '', recs: [], empty: `${ref} does not resolve: ${short(r.error, 200)}`, max: 1, more: '' } }], sections: [], links: [], unresolved: true }
   }
   const about = query?.about ? esc(short(query.about, 80)) : ''
   if (kind === 'query' || kind === 'series') {
