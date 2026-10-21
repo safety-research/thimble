@@ -4,11 +4,12 @@
 //
 // FixButton is the top bar's Fix…: a small sheet asks what thimble should do differently and sends `/fix <text>` to
 // main, as typing it in the chat does. FixState is the line beside it for this workspace's newest fix: `fixing` while
-// Claude works, then `✓ fixed` with Submit and Undo while the copy is on, or Try it and Submit while it is off.
+// Claude works, then Try it and Submit. Try it restarts thimble browser from the fix's copy and reloads the page; then
+// the line says `✓ fixed` with Submit and Undo, and Undo restarts it from the release (backend restart.py).
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Popover } from '../components/Menu'
-import { apiBase } from '../lib/browserKey'
+import { apiBase, apiUrl } from '../lib/browserKey'
 import { bus } from '../lib/bus'
 
 export interface FixRow {
@@ -45,8 +46,8 @@ export function fixLine(f: FixRow | null, active: string | null): { words: strin
   if (!f || ['dropped', 'merged'].includes(f.status)) return null
   const shared = f.status === 'sent' || f.status === 'saved'
   if (f.status === 'working') return { words: `fixing: ${f.title}`, actions: [] }
-  // a shared fix stays on until a release has it: only Undo is left
-  if (active === f.slug || f.status === 'applied') return { words: `✓ fixed: ${f.title}${shared ? ` · ${f.status}` : ''}`, good: true, actions: shared ? ['undo'] : ['submit', 'undo'] }
+  // `active` is the fix this browser runs (Try it restarts the server from its copy); a shared fix keeps only Undo
+  if (active === f.slug) return { words: `✓ fixed: ${f.title}${shared ? ` · ${f.status}` : ''}`, good: true, actions: shared ? ['undo'] : ['submit', 'undo'] }
   return shared ? null : { words: f.title, actions: ['try', 'submit'] }
 }
 
@@ -93,9 +94,31 @@ export function FixButton() {
   )
 }
 
+async function bootId(): Promise<string | null> {
+  try {
+    const res = await fetch(apiUrl('/api/health'), { cache: 'no-store' })
+    return res.ok ? (((await res.json()) as { boot?: string }).boot ?? null) : null
+  } catch {
+    return null
+  }
+}
+
+/** Waits until the server answers with a boot id other than `before` (a restart is done), for at most two minutes. */
+async function waitForRestart(before: string | null): Promise<void> {
+  for (let i = 0; i < 240; i++) {
+    await new Promise((r) => window.setTimeout(r, 500))
+    const now = await bootId()
+    if (now && now !== before) return
+  }
+}
+
 export function FixState({ ws }: { ws: string }) {
   const [state, setState] = useState<{ fixes: FixRow[]; active: string | null } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [boot, setBoot] = useState<string | null>(null)
+  useEffect(() => {
+    void bootId().then(setBoot)
+  }, [])
   const load = useCallback(() => {
     call<{ fixes: FixRow[]; active: string | null }>(ws, '/fixes')
       .then(setState)
@@ -120,9 +143,15 @@ export function FixState({ ws }: { ws: string }) {
     }
     setBusy(what)
     try {
-      const r = await call<{ fixes: FixRow[]; active: string | null; said: string }>(ws, what === 'try' ? `/fixes/${enc(f.slug)}/use` : '/fixes/undo', 'POST')
-      setState(r)
+      const r = await call<{ fixes: FixRow[]; active: string | null; said: string; restarting?: boolean }>(ws, what === 'try' ? `/fixes/${enc(f.slug)}/use` : '/fixes/undo', 'POST')
       bus.emit('toast', { text: r.said })
+      if (r.restarting) {
+        // the server restarts from the fix's copy (or the release): reload the page once the new one answers
+        await waitForRestart(boot)
+        window.location.reload()
+        return
+      }
+      setState(r)
     } catch (e) {
       bus.emit('toast', { text: `${what === 'try' ? 'The fix was not turned on' : 'The fix was not undone'}: ${(e as Error).message}`, kind: 'error' })
     } finally {
@@ -137,7 +166,7 @@ export function FixState({ ws }: { ws: string }) {
       </span>
       {line.actions.map((a) => (
         <button key={a} type="button" className="shell-fix-act" disabled={!!busy} onClick={() => void act(a)} data-fix-action={a}>
-          {label[a]}
+          {busy === a && a !== 'submit' ? 'Restarting…' : label[a]}
         </button>
       ))}
     </span>

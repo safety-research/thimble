@@ -28,7 +28,7 @@ import type { IconName } from './Icon'
 import { chartLabels, Output, isNumericCell, primaryArtifact } from './Outputs'
 import { useConcepts } from '../canvas/concepts'
 import { Spinner } from './Spinner'
-import { CHECKED_REF, HealContext, markRefFailed, refFailure, useRefFailure } from '../lib/heal'
+import { CHECKED_REF, HealContext, checkFileRef, markRefFailed, refFailure, useRefFailure } from '../lib/heal'
 import { QuoteBox, RecordFacts } from '../canvas/Quote'
 import { FACT_KINDS, markFacts, markValue, recordFacts, type RecordFact } from '../canvas/facts'
 import { quoteParts, type QuotePart } from '../canvas/quotes'
@@ -233,6 +233,8 @@ const pointing = (): boolean => document.body.hasAttribute('data-cmd')
 
 /** the ref kinds that are a record or part of one in a file, whose hover shows the record as it reads */
 const FILE_KINDS = new Set(['record', 'range', 'block', 'span', 'page', 'pointer'])
+/** the ref kinds that name a place in a file of the folder */
+const FILE_REFS = new Set(['record', 'range', 'block', 'span', 'page', 'pointer', 'csvrow', 'row', 'table', 'path'])
 
 /** the ref kinds with nothing to excerpt: the label names them and the click teleports */
 const NAME_ONLY = new Set(['group', 'report', 'view', 'ui', 'chat'])
@@ -323,18 +325,23 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
     return null
   }
 
+  // a citation of a file is checked once it shows (lib/heal checkFileRef): a place that is not there draws as failed
+  // in place before anyone hovers it
+  const fileRef = !!parsed && FILE_REFS.has(parsed.kind)
+  useEffect(() => {
+    if (cite && fileRef && ws) void checkFileRef(ws, ref)
+  }, [cite, fileRef, ws, ref])
   // the record behind an inline citation, kept from its hover, so a click can open it at the words the citation quotes
   const resolved = useRef<{ ref: string; r: ResolvedRef } | null>(null)
   /** Where a click opens: the span of the words in quotation marks in the citation's text (else of its whole text)
-   * inside the record it cites, when the record holds them; the ref itself otherwise. */
-  const clickTarget = async (): Promise<string> => {
-    if (!value || parsed?.kind !== 'record' || !ws) return ref
-    try {
-      if (resolved.current?.ref !== ref) resolved.current = { ref, r: await api.resolveRef(ws, ref) }
-      return quoteSpanRef(resolved.current.r, value) ?? ref
-    } catch {
-      return ref
-    }
+   * inside the record it cites, when the record holds them; else the place as the folder holds it (a path written
+   * from a subfolder names its file in full); the ref itself for a ref that is no file's. Null when the place does not
+   * open: the click then shows why in place. */
+  const clickTarget = async (): Promise<string | null> => {
+    if (!fileRef || !ws) return ref
+    const r = resolved.current?.ref === ref ? resolved.current.r : await checkFileRef(ws, ref)
+    if (!r) return null
+    return (value && r.kind === 'record' ? quoteSpanRef(r, value) : null) ?? r.ref ?? ref
   }
 
   const cancelHide = () => window.clearTimeout(hideTimer.current)
@@ -389,7 +396,7 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
         return setPop({ state: 'error', rect, message: 'This line is no longer in the card\'s output' })
       }
       const cell = wholeCell || drawnPart ? cellOf(r) : null
-      const where = [hiddenPath(ref), spanWhere(ref), whereOf(r)].filter(Boolean).join(' · ') || undefined
+      const where = [hiddenPath(r.ref || ref), spanWhere(ref), whereOf(r)].filter(Boolean).join(' · ') || undefined
       // a record of a file reads as the record (canvas/quotes), never its JSON or markdown source, with the cited words
       // marked and its facts over it (canvas/facts)
       const quoted = !cell && ((FILE_KINDS.has(r.kind) && (r.blocks?.length || r.view)) || r.kind === 'row' || r.kind === 'csvrow') ? quoteParts(r) : undefined
@@ -434,7 +441,7 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
     unmark()
     if (unresolved) return
     if (home && openCited(home, ref)) return
-    void clickTarget().then((to) => teleport(to))
+    void clickTarget().then((to) => (to ? teleport(to) : void open()))
   }
 
   const kind = asText ? undefined : parsed?.kind

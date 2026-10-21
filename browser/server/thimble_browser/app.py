@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 from pathlib import Path
 from dataclasses import dataclass
@@ -23,7 +24,10 @@ from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
 
-DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+# the built page; a server that runs from a fix's copy serves the one restart.py names
+DIST = Path(os.environ.get("THIMBLE_BROWSER_DIST") or Path(__file__).resolve().parents[2] / "frontend" / "dist")
+# a new one each start, so the page knows when a restart (restart.py) is done
+BOOT = secrets.token_hex(8)
 SECURITY_HEADERS = {"x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
                     "content-security-policy": "frame-ancestors 'self'"}
 
@@ -60,6 +64,9 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     def bad(e: Exception) -> HTTPException:
         if isinstance(e, corpus.OutsideFolder):
             return HTTPException(400, str(e))
+        if isinstance(e, FileNotFoundError) and e.filename:
+            # the system's error names the file by its path on this disk, which the page never shows
+            return HTTPException(404, f"no such file: {os.path.basename(str(e.filename))}")
         if isinstance(e, (FileNotFoundError, KeyError, IndexError)):
             return HTTPException(404, str(e))
         return HTTPException(400, str(e))
@@ -77,7 +84,7 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "product": "thimble-browser"}
+        return {"ok": True, "product": "thimble-browser", "boot": BOOT}
 
     @app.post("/api/ui/key")
     def ui_key(request: Request, body: dict = Body(...)) -> Response:

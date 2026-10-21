@@ -57,6 +57,23 @@ def test_a_dict_of_numbers_opens_rows_a_count_its_frames_and_a_share_all_rows_re
     assert r["why"] == f"{q['id']} computed this value over all 12 rows it read (edits.jsonl), and it does not keep which of them the value used"
 
 
+def test_a_count_of_a_filtered_frame_opens_the_filtered_rows(root: Path) -> None:
+    # made-up crew list: rows 2, 4 and 5 have no age
+    (root / "crew.csv").write_text("name,age,deck\nkai,31,A\nlou,,B\nmo,22,B\nned,,C\nola,,C\npia,47,A\n")
+    st = Store(root)
+    # a count of missing values, never named as a frame: its rows are the three with no age, not all six
+    q = Q.run(st, "no age", 'import pandas as pd\ndf = load("crew.csv")\na = pd.to_numeric(df.age, errors="coerce")\na.isna().sum()')
+    r = LIN.resolve(st, f"{q['id']}#row=1@value")
+    assert r["count"] == 3 and r["rows"] == ["crew.csv#row=2,4-5"] and "why" not in r
+    # a count of a condition's true values
+    q = Q.run(st, "deck c", 'df = load("crew.csv")\nc = df.deck == "C"\nc.sum()')
+    assert LIN.resolve(st, f"{q['id']}#row=1@value")["rows"] == ["crew.csv#row=4-5"]
+    # a count that two different row sets fit rests on every row read, as before
+    q = Q.run(st, "two", 'df = load("crew.csv")\na = df.deck == "A"\nb = df.deck == "B"\nb.sum()')
+    r = LIN.resolve(st, f"{q['id']}#row=1@value")
+    assert r["count"] == 6 and "why" in r
+
+
 def test_values_with_no_rows_say_why_in_one_line(root: Path) -> None:
     st = Store(root)
     # computed from no source rows
@@ -115,6 +132,36 @@ def test_a_quote_resolves_to_its_span_the_rows_around_it_and_the_quoted_words_in
     # an ellipsis splits a quote: from its first part to the end of its last
     hot = LIN.resolve(st, "say.jsonl#L7", label="“add SEC … map”")["span"]["rows"][2]
     assert hot["text"][hot["at"][0]:hot["at"][1]] == "add SEC county map"
+
+
+def test_a_cited_event_row_shows_the_time_hashes_and_flag_its_words_name(root: Path) -> None:
+    # made-up audit log: a push, then a forced branch move; an event row has no sentence, only an action and fields
+    rows = [{"id": 1, "ts": "2026-05-04T09:10:02.100+00:00", "agent": "otter-3", "action": "repo.push", "params": {"branch": "fix/9", "commits": 2}},
+            {"id": 2, "ts": "2026-05-04T09:21:47.800+00:00", "agent": "otter-3", "action": "repo.ref",
+             "params": {"ref": "refs/heads/fix/9", "old": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678", "new": "0f1e2d3c4b5a69788796a5b4c3d2e1f001234567", "forced": True, "created": False}},
+            {"id": 3, "ts": "2026-05-04T09:30:00.000+00:00", "agent": "heron-1", "action": "repo.push", "params": {"branch": "fix/9", "commits": 1}}]
+    with open(root / "audit.jsonl", "w") as f:
+        f.write("".join(json.dumps(r) + "\n" for r in rows))
+    st = Store(root)
+    hot = next(r for r in LIN.span(st, "audit.jsonl#L2", label="09:21")["rows"] if r["hot"])
+    assert hot["text"] == "repo.ref · agent otter-3"
+    assert hot["meta"].startswith("2026-05-04 09:21:47")
+    assert "old a1b2c3d" in hot["meta"] and "new 0f1e2d3" in hot["meta"] and "forced" in hot["meta"]
+    assert "created" not in hot["meta"] and "id 2" not in hot["meta"]
+    # words that write a hash longer than 7 characters name it, and it is shown as long as they write it
+    hot = next(r for r in LIN.span(st, "audit.jsonl#L2", label="from a1b2c3d4 to 0f1e2d3c")["rows"] if r["hot"])
+    assert hot["meta"].startswith("old a1b2c3d4 · new 0f1e2d3c")
+    # words that name the flag put it first
+    hot = next(r for r in LIN.span(st, "audit.jsonl#L2", label="the branch moved, marked forced")["rows"] if r["hot"])
+    assert hot["meta"].startswith("forced · 2026-05-04 09:21:47")
+    # the rows around it stay one line each
+    assert all("meta" not in r for r in LIN.span(st, "audit.jsonl#L2", label="09:21")["rows"] if not r["hot"])
+    # a row with a sentence keeps its words; only a field the citation names is added
+    with open(root / "say.jsonl", "w") as f:
+        f.write(json.dumps({"user": "ana", "text": "moved the map to the parks page", "bytes": 4120, "day": "2026-03-04"}) + "\n")
+    hot = LIN.span(st, "say.jsonl#L1", label="4120 bytes")["rows"][0]
+    assert hot["text"] == "moved the map to the parks page" and hot["meta"].startswith("bytes 4120")
+    assert "bytes" not in LIN.span(st, "say.jsonl#L1", label="moved the map")["rows"][0].get("meta", "")
 
 
 def test_rows_of_a_file_are_named_by_one_field_not_by_whichever_is_longest(root: Path) -> None:

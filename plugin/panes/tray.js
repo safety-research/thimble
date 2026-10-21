@@ -37,6 +37,15 @@ import { threadKey } from '../shell/threads.js'
 /** A label cut to `n` characters, with … where it was cut. */
 const short = (s, n) => (String(s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s))
 
+/** A title cut to `n` characters: a place (`engine/lineage.py:463`, `runs/a.jsonl#L12`) loses the start of its path
+ *  first, so its line or row stays whole; other words are cut at the end. */
+export function cutTitle(s, n) {
+  const t = String(s)
+  if (t.length <= n) return t
+  if (/^\S+(?::\d+(?:-\d+)?|#\S+)$/.test(t) && n > 4) return `…${t.slice(t.length - n + 1)}`
+  return `${t.slice(0, Math.max(1, n - 1))}…`
+}
+
 /** The rows a card may take in the tray: a citation's, and an explainer's, which may hold a picture beside its words. */
 export const BODY = 9
 export const BODY_EXPLAIN = 16
@@ -200,13 +209,18 @@ export function program(k, data) {
     const q = (thread.turns.find(t => t.role === 'person') || {}).text || ''
     parts.push(k.region('thread', { label: 'the thread about this mark' }, k.text(`{dim:↳ thread:} ${k.escape(q.length > 60 ? q.slice(0, 59) + '…' : q)} {dim:· a opens it}`, { wrap: false })))
   }
-  const title = top.label.length > inner - 12 ? top.label.slice(0, Math.max(8, inner - 13)) + '…' : top.label
   // the frame's right says what the card is from (the card's own words, `cite · revisions.jsonl`), the section open,
   // and how deep the stack is
   const from = card && !card.problem && !card.error && typeof card.right === 'string' && card.right ? card.right : kind
   // a mark of an earlier reply says where that reply is first, since the chat may show a later one
   const where = data.steps && typeof data.steps.reply === 'string' ? data.steps.reply : ''
   const right = [where, from, open ? open.words : '', stack.length > 1 ? String(stack.length) : ''].filter(Boolean).join(' · ')
+  // the title gets the room the frame leaves it beside the right (draw/term.js), cut here so a place keeps its line
+  const avail = k.w - 6
+  const rl = right.length
+  const room = top.label.length + (rl ? rl + 3 : 0) <= avail ? top.label.length
+    : avail - (rl ? Math.min(rl, Math.max(Math.floor(avail / 2) - 2, avail - top.label.length - 3)) + 3 : 0)
+  const title = cutTitle(top.label, Math.max(8, Math.min(room, inner - 12)))
   return k.frame(k.size(k.stack(parts), { w: inner }), { title: k.escape(title), right: k.escape(right), tone })
 }
 

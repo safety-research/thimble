@@ -25,6 +25,7 @@ The files, as the terminal's `thimble fix` keeps them (kind report), under the b
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import getpass
 import json
@@ -41,7 +42,7 @@ from typing import Any, Iterable
 
 from fastapi import Body, HTTPException
 
-from . import __version__, home, privacy, settings
+from . import __version__, home, privacy, restart, settings
 from .hub import hub
 from .tools import Result
 
@@ -437,7 +438,8 @@ def fixes_of(ws: str) -> dict[str, Any]:
         if fx.get("workspace") == ws:
             out.append({k: fx.get(k) for k in ("slug", "title", "status", "created", "pr_url", "issue_url")})
     out.sort(key=lambda f: _when(f.get("created")))
-    return {"fixes": out, "active": fix.active_slug()}
+    # the fix this browser runs (restart.py), not the one the terminal plugin's marketplace points at
+    return {"fixes": out, "active": restart.running_slug()}
 
 
 # ---- the routes
@@ -451,28 +453,30 @@ def register(ctx: Any) -> None:
         return fixes_of(c)
 
     @app.post("/api/ws/{c}/fixes/{slug}/use")
-    def fixes_use(c: str, slug: str) -> Any:
+    async def fixes_use(c: str, slug: str) -> Any:
+        """Try it: restart this server from the fix's copy (restart.py). The terminal plugin is left as it is."""
         from .kernel_fix import fix  # noqa: PLC0415
 
         ctx.ws_of(c)
         try:
-            said = fix.use(slug, plugin_dir=False)
-        except fix.FixError as e:
+            plan = await asyncio.to_thread(restart.try_fix, slug)
+            if plan["server"]:
+                restart.schedule(plan["server"], plan["changes"])
+        except (fix.FixError, restart.NotTried) as e:
             raise HTTPException(409, str(e)) from None
-        hub.publish(c, {"type": "fix", "slug": slug, "status": fix.load(slug).get("status")})
-        return {**fixes_of(c), "said": said}
+        return {**fixes_of(c), "said": plan["said"], "restarting": bool(plan["server"])}
 
     @app.post("/api/ws/{c}/fixes/undo")
-    def fixes_undo(c: str) -> Any:
-        from .kernel_fix import fix  # noqa: PLC0415
-
+    async def fixes_undo(c: str) -> Any:
+        """Undo: restart this server from the release (restart.py)."""
         ctx.ws_of(c)
+        plan = restart.undo_fix()
         try:
-            said = fix.undo(plugin_dir=False)
-        except fix.FixError as e:
+            if plan["server"]:
+                restart.schedule(plan["server"], plan["changes"])
+        except restart.NotTried as e:
             raise HTTPException(409, str(e)) from None
-        hub.publish(c, {"type": "fix", "slug": "", "status": "undone"})
-        return {**fixes_of(c), "said": said}
+        return {**fixes_of(c), "said": plan["said"], "restarting": bool(plan["server"])}
 
     @app.get("/api/ws/{c}/issues/current")
     def issue_current(c: str) -> Any:

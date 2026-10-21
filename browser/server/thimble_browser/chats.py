@@ -70,6 +70,25 @@ def records(ws: str, chat: str) -> list[dict[str, Any]]:
     return out
 
 
+def read_paths(ws: str, folder: Path) -> list[str]:
+    """The paths in `folder` of the files Claude read in the workspace's chats (its Read calls), so a citation of a
+    path that several files end with is read at the one Claude read (corpus.locate)."""
+    root = folder.resolve()
+    out: list[str] = []
+    for log in sorted(_dir(ws).glob("*.jsonl")):
+        for rec in records(ws, log.stem):
+            inp = rec.get("input") if rec.get("type") == "tool_use" and rec.get("name") == "Read" else None
+            p = inp.get("file_path") if isinstance(inp, dict) else None
+            if not isinstance(p, str) or not p:
+                continue
+            q = Path(p) if Path(p).is_absolute() else root / p
+            try:
+                out.append(str(q.resolve().relative_to(root)))
+            except (ValueError, OSError):
+                continue
+    return out
+
+
 def append(ws: str, chat: str, rec: dict[str, Any], *, notify: bool = True) -> None:
     rec = {**rec}
     rec.setdefault("ts", home.now())

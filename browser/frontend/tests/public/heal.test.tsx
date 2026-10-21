@@ -75,7 +75,7 @@ test('a citation whose place is gone turns gray in a reply once the check says s
   expect(el.querySelectorAll('.refchip-checking')).toHaveLength(0)
 })
 
-test('a citation whose place is gone when it is opened turns gray with its reason, and so does each chip of its ref', async () => {
+test('a citation of a file whose place is gone turns gray once it shows, with its reason on hover, and so does each chip of its ref', async () => {
   const reply = 'The run [started here](runs/r1.jsonl#L4) and [it started](runs/r1.jsonl#L4) once.'
   let status = 404
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
@@ -90,7 +90,8 @@ test('a citation whose place is gone when it is opened turns gray with its reaso
   await settle()
   const chips = () => [...el.querySelectorAll<HTMLElement>('.refchip-value')]
   expect(chips()).toHaveLength(2)
-  expect(chips().some((c) => c.classList.contains('refchip-quiet'))).toBe(false)
+  // the check that runs once the chips show finds the place gone, before anyone hovers them
+  expect(chips().every((c) => c.classList.contains('refchip-quiet'))).toBe(true)
   const hover = async () => {
     await act(async () => chips()[0].dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
     await act(async () => {

@@ -365,9 +365,12 @@ class Session:
                         continue
                     raise
                 retries = 0
-                for b in final.content:
-                    if b.type == "text":
-                        reply.append(b.text)
+                # the reply is what Claude wrote for the analyst after its last call; words written before a call are a
+                # note on the way there, which the steps show
+                if any(b.type == "tool_use" for b in final.content):
+                    reply.clear()
+                else:
+                    reply.extend(b.text for b in final.content if b.type == "text")
                 messages.append({"role": "assistant", "content": [_block(b) for b in final.content]})
                 save_messages(self.ws, self.chat, messages)
                 if final.stop_reason == "refusal":

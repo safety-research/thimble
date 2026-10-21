@@ -233,11 +233,28 @@ export async function revealCell(home: HTMLElement, col: string, row: string, se
 }
 
 /** Mark `el` cited for FLASH_MS, then let the mark fade (refchip.css), from the start when it was marked already. */
-function flashCited(el: HTMLElement): void {
+function flashCited(el: Element): void {
   el.classList.remove(CITED_FLASH)
-  void el.offsetWidth
+  void el.getBoundingClientRect()
   el.classList.add(CITED_FLASH)
   window.setTimeout(() => el.classList.remove(CITED_FLASH), FLASH_MS)
+}
+
+/**
+ * Flash the part `id` that a card's program draws under `home` (kit/svg.js: each part's hit boxes carry
+ * `data-region`), as a cited cell is flashed. Returns its first box, or null when the card draws no such part.
+ */
+export function revealPart(home: ParentNode, id: string): Element | null {
+  const boxes = Array.from(home.querySelectorAll('[data-region]')).filter((b) => b.getAttribute('data-region') === id)
+  for (const b of boxes) flashCited(b)
+  return boxes[0] ?? null
+}
+
+/** The part of a card a ref names after its `#` when the fragment is no table cell, output line or step the card
+ * holds (`card:<id>#merged`), else null. Pure. */
+export function partOf(ref: string): string | null {
+  const m = /^(?:card|cell):[A-Za-z0-9_-]+#(.+)$/.exec(ref.trim())
+  return m ? decodeURIComponent(m[1].replace(/%(?![0-9A-Fa-f]{2})/g, '%25')) : null
 }
 
 /**

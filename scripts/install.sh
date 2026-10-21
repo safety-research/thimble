@@ -11,9 +11,9 @@ Usage: scripts/install.sh [--no-browser] [--no-plugin] [--local] [--bin-dir DIR]
 Installs thimble's two products. It checks Node, Python and uv first, and says what is missing, one line each.
   The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble.
     Without the claude command, it prints the two commands to run.
-  The browser workbench, from this checkout: the server (uv sync), the page (npm ci, then a build), the sandbox
-    runtime (npm ci in browser/server/sandbox), and a thimble-browser launcher in ~/.local/bin. It says how much
-    disk space this takes, about 600 MB.
+  The browser workbench, from this checkout: the server (uv sync, with pytest for a fix's tests), the page (npm ci,
+    then a build), the sandbox runtime (npm ci in browser/server/sandbox), and a thimble-browser launcher in
+    ~/.local/bin. It says how much disk space this takes, about 600 MB.
 Running it again is safe, and updates both.
 
   --no-browser   install the terminal plugin only
@@ -164,7 +164,8 @@ if [ "$web" = 1 ]; then
   step "The browser workbench"
   say "The server's Python packages (uv sync)..."
   export NPM_CONFIG_UPDATE_NOTIFIER=false
-  quietly uv sync --project "$browser/server" --locked
+  # with pytest (the dev extra, about 3 MB), so that a fix made in the browser can run its tests (fixcopy.py, fix_test)
+  quietly uv sync --project "$browser/server" --locked --extra dev
   say "The page (npm ci, then a build)..."
   quietly npm --prefix "$browser/frontend" ci --no-audit --no-fund
   quietly npm --prefix "$browser/frontend" run build

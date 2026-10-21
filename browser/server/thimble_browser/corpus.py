@@ -8,8 +8,9 @@ it reads as a transcript, the key of its records' time, and each record's blocks
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 PAGE_MAX = 2000
 FIND_LINES_MAX = 2000
@@ -263,20 +264,58 @@ def split_ref(ref: str) -> tuple[str, str]:
     return path.replace("%20", " "), loc
 
 
-def resolve(corpus: Path, ref: str) -> dict[str, Any]:
+_LISTED: dict[str, tuple[float, list[str]]] = {}  # folder -> (when it was listed, its files), for a few seconds
+LISTED_S = 5.0
+
+
+def _files(corpus: Path) -> list[str]:
+    key = str(corpus.resolve())
+    when, files = _LISTED.get(key, (0.0, []))
+    if time.monotonic() - when > LISTED_S:
+        files = [f["path"] for f in walk(corpus)]
+        _LISTED[key] = (time.monotonic(), files)
+    return files
+
+
+def locate(corpus: Path, rel: str, read: Callable[[], Iterable[str]] | None = None) -> str:
+    """The path in the folder of the file a ref names. A path may be written from a subfolder: Claude read
+    toy/board.jsonl and cited board.jsonl. When the folder holds nothing at `rel`, the one file whose path ends with
+    /<rel> is meant; among several, the one the session read (`read` lists the paths it read). `rel` itself when no file
+    ends so, which then fails as a missing file. ValueError when several files end so and the reads do not choose."""
+    rel = rel.strip()
+    if not rel or inside(corpus, rel).exists():
+        return rel
+    tail = "/" + rel.removeprefix("./")
+    hits = [f for f in _files(corpus) if f.endswith(tail)]
+    if len(hits) > 1 and read is not None:
+        seen = {r.removeprefix("./") for r in read()}
+        hits = [h for h in hits if h in seen] or hits
+    if len(hits) > 1:
+        more = f", and {len(hits) - 3} more" if len(hits) > 3 else ""
+        raise ValueError(f"no file {rel} in the folder, and {len(hits)} files end with {tail}: "
+                         f"{', '.join(hits[:3])}{more}")
+    return hits[0] if hits else rel
+
+
+def resolve(corpus: Path, ref: str, read: Callable[[], Iterable[str]] | None = None) -> dict[str, Any]:
     """What a file ref points at, as GET /ref answers (readers/refs.py): {ref, kind, path, line, record, blocks,
-    excerpt, meta}. FileNotFoundError for a place that is not there, ValueError (OutsideFolder for a path that leaves the
-    folder) for a ref that is malformed."""
+    excerpt, meta}. A path written from a subfolder is read at the file it means (locate): then `ref` is the ref with
+    that path, and `moved_from` the ref as written. FileNotFoundError for a place that is not there, ValueError
+    (OutsideFolder for a path that leaves the folder) for a ref that is malformed."""
     from .readers import refs  # noqa: PLC0415
 
     path, loc = split_ref(ref.strip())
     inside(corpus, path)  # OutsideFolder before anything is read
+    where = locate(corpus, path, read)
     try:
-        return refs.resolve(corpus, f"{path}#{loc}" if loc else path)
+        got = refs.resolve(corpus, f"{where}#{loc}" if loc else where)
     except refs.RefError as e:
         if e.status == 404:
             raise FileNotFoundError(e.detail) from None
         raise ValueError(e.detail) from None
+    if where != path:
+        got["moved_from"] = ref.strip()
+    return got
 
 
 def csv_rows(corpus: Path, rel: str, a: int, b: int) -> list[list[int]]:
