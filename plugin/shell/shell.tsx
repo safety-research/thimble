@@ -2722,7 +2722,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const pages = pk ? pagesRow(els, pk, focus === 'focus', fullscreen ? () => openDetail($, ref, null, { pages: PAGES_DEFAULT }) : null) : null
   const o = p.object || {}
   const fw = frameWidth(outer, p.grid.w, o.title)
-  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: rows, more, onMore: openAll, color: ring })
+  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: rows, more, onMore: openAll, onOpen: openAll, color: ring })
   // the labels its data came through, beside it (labeluse.ts)
   const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id, width: framed ? Math.max(p.grid.w, 40) : fw })
   return Box({

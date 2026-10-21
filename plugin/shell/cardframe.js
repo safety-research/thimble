@@ -5,6 +5,7 @@
 //   w      the frame's outer width; the drawing inside has w - 4 columns (a border and a space on each side)
 //   body   the drawing's element (cells.ts paintRegions), bodyH rows tall
 //   more   the drawing's rows cut off below bodyH (bodyRows), said in one dim row under it; onMore opens them
+//   onOpen a press on the card's title opens the card (its detail), as the line under a cut drawing does
 //   color  the border's color: the keys' color on the card the keys act on, else none (the border is dim)
 //   text   the takeaway, as Claude saved it; its citations show as their words
 // frameLines() is the same frame's text rows, for a test or a plain-text surface.
@@ -87,7 +88,7 @@ export function cardFrame(els, o) {
   const side = (k, s) => Box({ key: `${o.key}-${k}`, flexDirection: 'column', width: 2, flexShrink: 0, children: Array.from({ length: innerH }, (_, i) => Text({ key: `${k}${i}`, ...line, children: s })) })
   const mid = []
   rows.forEach((r, i) => {
-    if (r.kind === 'title') mid.push(Text({ key: `t${i}`, bold: true, wrap: 'truncate-end', children: r.s }))
+    if (r.kind === 'title') mid.push(titleRow(els, `t${i}`, r.s, o.onOpen, o.title))
     else if (r.kind === 'blank') mid.push(Text({ key: `b${i}`, children: ' ' }))
     else if (r.kind === 'text') mid.push(Text({ key: `x${i}`, wrap: 'truncate-end', children: r.s }))
     else if (r.kind === 'more') mid.push(moreRow(els, r.s, o.onMore))
@@ -101,6 +102,12 @@ export function cardFrame(els, o) {
       Text({ key: 'bottom', ...line, children: rows[rows.length - 1].s }),
     ],
   })
+}
+
+/** A row of the card's title in bold, a press that opens the card when `open` is given. */
+export function titleRow(els, key, s, open, title) {
+  const t = els.Text({ key, bold: true, wrap: 'truncate-end', children: s })
+  return open ? els.Button({ key: `${key}-b`, plain: true, label: `open the card ${String(title || s).replace(/\s+/g, ' ').trim()}`, onPress: open, children: [t] }) : t
 }
 
 /** The dim line under a cut drawing, a press that opens the card when `open` is given. */

@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import { barParts, isRef, objectRefs, partLines, recordRefs, regionRefs, rowByName, splitsNote } from '../object.js'
 import { viewMade } from '../visualize.js'
 import { prep } from '../node/prep.mjs'
-import { bodyRows, frameLines } from '../cardframe.js'
+import { bodyRows, cardFrame, frameLines } from '../cardframe.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 
 const OBJ = {
@@ -83,6 +83,22 @@ test('a diagram under a reply is drawn whole when it fits on the screen; a talle
   assert.deepEqual(tall, { rows: 31, more: 49 })
   const cut = frameLines({ w: 60, title: 'A long list', text: '', more: tall.more }, Array.from({ length: tall.rows }, (_, i) => `row ${i}`))
   assert.match(cut.at(-2), /↓ 49 more rows · open the card to see all/)
+})
+
+test('a press on a framed card\'s title opens the card, as the line under a cut drawing does', () => {
+  const el = t => o => ({ t, ...o })
+  const els = { Box: el('Box'), Text: el('Text'), Button: el('Button') }
+  const all = n => [n, ...[n.children].flat().filter(c => c && typeof c === 'object').flatMap(all)]
+  let opened = 0
+  const frame = cardFrame(els, { key: 'c', w: 60, title: 'Open orders fell in the first two hours', text: '', body: els.Text({ children: 'x' }), bodyH: 30, more: 22, onMore: () => opened++, onOpen: () => opened++ })
+  const presses = all(frame).filter(n => n.t === 'Button')
+  assert.deepEqual(presses.map(b => b.label), ['open the card Open orders fell in the first two hours', 'open the card to see all its rows'])
+  presses[0].onPress()
+  assert.equal(opened, 1)
+  // with nothing to open (not fullscreen), the title is plain bold text
+  const still = cardFrame(els, { key: 'c', w: 60, title: 'Open orders', text: '', body: els.Text({ children: 'x' }), bodyH: 3, more: 0 })
+  assert.equal(all(still).filter(n => n.t === 'Button').length, 0)
+  assert.ok(all(still).some(n => n.t === 'Text' && n.bold && n.children === 'Open orders'))
 })
 
 test('the plain text of a stacked bar card names each part and its value, and v names the card by its title', async () => {
