@@ -60,7 +60,7 @@ class AgentDef:
         return self.tools() if callable(self.tools) else self.tools
 
 
-CORE_TOOLS = READ + ("run_python",)
+CORE_TOOLS = READ + ("run_python", "draft_report")
 
 
 def _main_prompt(folder: Path) -> str:

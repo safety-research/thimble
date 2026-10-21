@@ -29,6 +29,7 @@ import PANES from '../panes/index.js'
 import { joinShared, localKeys, nextState, same, shared, takes, wantsOpen } from '../panes/host.js'
 import { paintRegions, regionOfKey } from './cells'
 import { paneAction, paneStateChanged, paneStore, paneWant, paneWhere } from './shell'
+import { failNotice } from './fix'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -217,7 +218,7 @@ export async function paneFire($: Engine, name: string, args: Record<string, unk
   const known = inst.drawing ?? (await paneRun($, name, args, size))
   if (!takes(known, event)) return false
   const d = await paneRun($, name, args, size, event)
-  if (d?.error) { $.ui.toast(`× ${paneOf(name).title} could not answer: ${d.error.name} · fix: ${d.error.fix || 'its program'}`); return true }
+  if (d?.error) { failNotice($, `× ${paneOf(name).title} could not answer: ${d.error.name} · fix: ${d.error.fix || 'its program'}`); return true }
   await answered($, inst, d, by)
   return true
 }
@@ -257,10 +258,10 @@ export async function act($: Engine, inst: Inst, eff: Record<string, unknown>): 
   const name = String(eff.do || '')
   try {
     const said = await paneAction($, inst.name, inst.args, eff)
-    if (said === false) $.ui.toast(`× ${paneOf(inst.name).title}: the terminal has no action "${name}". Use the keys in the bar instead.`)
+    if (said === false) failNotice($, `× ${paneOf(inst.name).title}: the terminal has no action "${name}". Use the keys in the bar instead.`)
     else if (typeof said === 'string' && said) $.ui.toast(said)
   } catch (err) {
-    $.ui.toast(`× ${paneOf(inst.name).title}: ${name} failed (${String((err as Error)?.message || err).slice(0, 160)}). Try again, or press esc.`)
+    failNotice($, `× ${paneOf(inst.name).title}: ${name} failed (${String((err as Error)?.message || err).slice(0, 160)}). Try again, or press esc.`)
   }
 }
 

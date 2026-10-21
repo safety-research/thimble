@@ -17,6 +17,7 @@ import chips from './chips.js'
 import claims from '../claims/graph.js'
 import coverage from './coverage.js'
 import detail from './detail.js'
+import fix from './fix.js'
 import labels from './labels.js'
 import mark from './mark.js'
 import proposals from './proposals.js'
@@ -24,4 +25,4 @@ import settings from './settings.js'
 import threads from './threads.js'
 import tray from './tray.js'
 
-export default { chips, claims, coverage, detail, labels, mark, proposals, settings, threads, tray }
+export default { chips, claims, coverage, detail, fix, labels, mark, proposals, settings, threads, tray }

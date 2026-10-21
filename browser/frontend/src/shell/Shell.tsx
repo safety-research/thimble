@@ -63,6 +63,7 @@ import { ServerDown } from './ServerDown'
 import { Toasts } from './Toasts'
 import { TopBar } from './TopBar'
 import { TourHost } from './TourHost'
+import { ShareReportHost } from './ShareReport'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
 // the surfaces' tabs, each with the feature it belongs to (features.ts): a tab whose feature is off is not shown
@@ -386,6 +387,7 @@ export function Shell({ ws }: { ws: string }) {
       <CmdPointer ws={ws} />
       <LabelEditorHost ws={ws} />
       <Toasts />
+      <ShareReportHost ws={ws} />
       <TourHost />
       <ServerDown />
       <NewVersion />

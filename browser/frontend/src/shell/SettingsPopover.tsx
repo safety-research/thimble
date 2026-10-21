@@ -311,6 +311,12 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         )}
         {error && <div className="settings-error">{error}</div>}
         <div className="settings-foot">
+          <Button variant="ghost" className="settings-report" onClick={() => {
+              onClose()
+              bus.emit('reportThis', { mode: 'report', text: '' })
+            }}>
+            Report a problem…
+          </Button>
           <Button variant="ghost" className="settings-check" busy={check === 'busy'} disabled={!settings || dirty} title={dirty ? 'Save first: Check uses the saved sign-in' : 'Ask Claude’s API once with the saved sign-in'} onClick={() => void runCheck()}>
             Check sign-in
           </Button>

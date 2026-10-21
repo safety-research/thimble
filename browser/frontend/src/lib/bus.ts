@@ -72,6 +72,9 @@ export type Events = {
   toast: { text: string; kind?: 'info' | 'error'; ref?: string; thread?: { id: string; label: string }; action?: ToastAction }
   /** open Report a problem under the top bar's bug, with what failed written in and the chats it concerns */
   reportProblem: ProblemPrefill
+  /** Fix this or Report this on a failure (shell/ShareReport ReportThis), or Report a problem… in the settings menu
+   * with no text: main drafts a report of it */
+  reportThis: { mode: 'fix' | 'report'; text: string }
   /** a ⌘-click inside a view's frame (files/ViewerFrame): the pointer's box opens on that element, at `rect`; `view`
    * is the view's slug, which the thread names so its fork knows which view the element is in */
   pointAt: { anchor: string; text: string; element: string; rect: DOMRect; frame: HTMLIFrameElement; view?: string }

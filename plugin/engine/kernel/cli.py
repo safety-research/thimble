@@ -20,6 +20,9 @@ session's permission mode and sandbox like any other command.
                                                analyst as a card where they check records; a --prompt label's records
                                                wait for the model, which reads each one beside the session
                                                (--wait waits for it; thimble label --help says more)
+    thimble fix new "TITLE" [--kind fix|feature|report] | status | use SLUG | undo | draft SLUG --from FILE
+                                               change or report thimble itself, in a copy of its code, and share it
+                                               only after the person reads the exact text (thimble fix --help)
 
 In a query: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
 group's rows; use("r3") is an earlier query's output; keep(name, x) and use(name) pass a named result or a label on
@@ -40,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from . import estimate as EST
+from . import fix as FX
 from . import labels as LB
 from . import lineage as LIN
 from . import objects as O
@@ -956,11 +960,94 @@ def _label(st: Store, a: argparse.Namespace) -> int:
     return 0
 
 
+FIX_HELP = """Change thimble itself, or report a problem with it, from the session.
+
+    thimble fix new "TITLE" [--kind fix|feature|report]
+        makes a copy of the installed thimble's code (a git worktree on branch fix/<slug>, outside the data folder)
+        and prints where it is. A report has no copy.
+    thimble fix status [SLUG]      the fixes, or one fix
+    thimble fix use SLUG           loads the copy's plugin into the person's thimble
+    thimble fix undo               goes back to the release
+    thimble fix draft SLUG --from FILE
+        FILE is the issue in markdown ("# title" first), and for a fix or a feature a "## Change" section for the
+        pull request. thimble scans every part (the text, the diff, the branch, the commit messages), removes the
+        person's details, and shows the person the exact text. Only their choice sends it, or saves it as a file.
+
+Work in the copy, never in the data folder. Show the problem with a new test on made-up data with the same shape (for
+example 4 rows with ; between fields), never with the person's rows. Then make the change and run the plugin's tests
+in the copy.
+"""
+
+
+def cmd_fix(a: argparse.Namespace) -> int:
+    try:
+        if a.verb == "new":
+            if not a.args:
+                print('give a title: thimble fix new "Rows opens CSV files with ; between fields"')
+                return 2
+            fx = FX.new(" ".join(a.args), a.kind)
+            if fx["kind"] == "report":
+                print(f"Report {fx['slug']}: no copy of the code is needed. Write the issue in a markdown file (what "
+                      f"happened, what was expected, a reproduction on made-up data), then: "
+                      f"thimble fix draft {fx['slug']} --from FILE")
+            else:
+                print(f"Fix {fx['slug']}: a copy of thimble {fx.get('version') or ''} at {fx['base'][:9]}, on branch "
+                      f"{fx['branch']}:\n  {fx['worktree']}")
+                print("Work there, not in the data folder: add a test on made-up data that shows the problem, make the "
+                      "change, and run the plugin's tests in the copy (python3 -m pytest plugin -q, or the targeted "
+                      f"test). Then `thimble fix use {fx['slug']}` loads it into the person's thimble. Leave the change "
+                      "uncommitted: a share takes the copy's whole change, committed or not, and makes its own commit.")
+            return 0
+        if a.verb == "status":
+            for line in FX.status_lines(a.args[0] if a.args else None):
+                print(line)
+            return 0
+        if a.verb == "use":
+            if not a.args:
+                print("name the fix: thimble fix use SLUG (thimble fix status lists them)")
+                return 2
+            print(FX.use(a.args[0]))
+            return 0
+        if a.verb == "undo":
+            print(FX.undo())
+            return 0
+        if a.verb == "draft":
+            if not a.args or not a.draft_file:
+                print("thimble fix draft SLUG --from FILE: FILE holds the issue in markdown, and a '## Change' section for a fix")
+                return 2
+            r = FX.draft(a.args[0], a.draft_file, Store())
+            n = r["removed"]
+            print(f"The person is reviewing the draft; {n} detail{'' if n == 1 else 's'} {'was' if n == 1 else 'were'} "
+                  f"removed. Nothing is sent until they choose to send it or save it as a file. Their choice reaches "
+                  f"you with their next message; `thimble fix status {a.args[0]}` shows it.")
+            for note in r["notes"]:
+                print(f"  note: {note}")
+            return 0
+        if a.verb == "keep":
+            if len(a.args) < 2:
+                print("thimble fix keep SLUG HIT --ask ID")
+                return 2
+            print(FX.keep(a.args[0], a.args[1], a.ask, Store()))
+            return 0
+        if a.verb == "send":
+            if not a.args or not a.answer:
+                print("thimble fix send SLUG --answer send|file|cancel --ask ID")
+                return 2
+            for line in FX.send(a.args[0], a.answer, a.ask):
+                print(line)
+            return 0
+    except FX.FixError as e:
+        print(f"thimble fix {a.verb}: {e}")
+        return 1
+    print(f"no verb {a.verb!r}: thimble fix new, status, use, undo or draft")
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     # sources, list and resolve (or from) are what `rows` does, under the names they had before it: they still work,
     # and neither help nor usage lists them
-    sub = ap.add_subparsers(dest="cmd", metavar="{run,save,rows,coverage,label}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{run,save,rows,coverage,label,fix}")
     p = sub.add_parser("sources", help="the source files here")
     p.add_argument("glob", nargs="?")
     p.add_argument("--json", action="store_true")
@@ -1053,6 +1140,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--at", type=int, help=argparse.SUPPRESS)
     p.add_argument("--count", type=int, help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_label)
+    p = sub.add_parser("fix", help="change or report thimble itself", description=FIX_HELP,
+                       formatter_class=argparse.RawDescriptionHelpFormatter,
+                       usage="thimble fix {new,status,use,undo,draft} ...")
+    p.add_argument("verb", metavar="{new,status,use,undo,draft}")
+    p.add_argument("args", nargs="*", help=argparse.SUPPRESS)
+    p.add_argument("--kind", choices=FX.KINDS, default="fix", help="for new: fix (default), feature or report")
+    p.add_argument("--from", dest="draft_file", metavar="FILE", help="for draft: the draft in markdown")
+    # the person's choices in the preview, which their key or button runs (never Claude's to pass): keep SLUG HIT and
+    # send SLUG, each with the ask id that only the preview knows
+    p.add_argument("--answer", choices=("send", "file", "cancel"), help=argparse.SUPPRESS)
+    p.add_argument("--ask", help=argparse.SUPPRESS)
+    p.set_defaults(fn=cmd_fix)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("q", "query"):
         # the names `run` had before the rename: they still work, and neither help nor usage lists them
@@ -1062,7 +1161,7 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__.strip())
         return 0
     if not args[0].startswith("-") and args[0] not in sub.choices:
-        ap.error(f"no command {args[0]!r}: the commands are run, save, rows, coverage and label")
+        ap.error(f"no command {args[0]!r}: the commands are run, save, rows, coverage, label and fix")
     a = ap.parse_args(args)
     a.argv = args
     if not getattr(a, "fn", None):

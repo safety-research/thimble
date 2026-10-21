@@ -18,7 +18,7 @@ from typing import Any, Callable
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import chats, corpus, features, files, home, settings, settings_api
+from . import chats, corpus, features, files, home, issues, settings, settings_api
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -348,6 +348,7 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     ctx = Ctx(app=app, auth=auth, sessions=sessions, folder_of=folder_of, ws_of=ws_of, bad=bad)
     settings_api.register(ctx)
     files.register(ctx)
+    issues.register(ctx)
     features.register_all(ctx)
 
     @app.get("/api/ws/{c}/features")

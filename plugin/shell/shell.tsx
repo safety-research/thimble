@@ -57,6 +57,7 @@ import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
+import { failNotice, fixAction, fixAskFromFeed, fixBar, fixKeyOf, fixStore, pressFix, promptTyped, refreshFixes } from './fix'
 import { answerAsk, askFromFeed, checksDone, checksPending, labelAskNow, labelFromFeed, labelsOf, setLabelAsk } from './labels'
 import type { LabelAsk } from './labels'
 import { cardLegend, cardsLabels, labelsRow } from './labeluse'
@@ -141,6 +142,8 @@ const ASK_KEYS: Record<string, 'all' | 'sample' | 'cancel'> = { '1': 'all', '2':
 let askWait: { key: string; cancelled: boolean; ask: LabelAsk } | null = null
 // the key that last answered an ask, for the key's line in the session's events
 let askKeyTaken: string | null = null
+// a fix key (fix.ts: f F on a failure line, p u on a fix in use), waiting a moment for a letter after it
+let fixWait: { key: string; cancelled: boolean } | null = null
 // the row the next turn's cards are drawn under, when v asked about a catch-up: under the catch-up,
 // not under the turn's own last words
 let placeNext: string | null = null
@@ -378,6 +381,8 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
       if (ev?.kind === 'label' && Number(ev.t) >= since) { labelFromFeed($, ev); continue }
       // a big --prompt label's ask: the person's choice before the model reads its records
       if (ev?.kind === 'label_ask' && Number(ev.t) >= since) { await askFromFeed($, ev); continue }
+      // a fix's share waits for the person: its preview opens in the side panel (fix.ts)
+      if (ev?.kind === 'fix_ask' && Number(ev.t) >= since) { await fixAskFromFeed($, ev); continue }
       if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
       const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
       out.push(ref)
@@ -419,6 +424,7 @@ async function labelsInFeed($: Engine): Promise<void> {
       const ev = JSON.parse(line)
       if (ev?.kind === 'label' && Number(ev.t) >= LOADED - 2) labelFromFeed($, ev)
       if (ev?.kind === 'label_ask' && Number(ev.t) >= LOADED - 2) await askFromFeed($, ev)
+      if (ev?.kind === 'fix_ask' && Number(ev.t) >= LOADED - 2) await fixAskFromFeed($, ev)
     } catch {
       // a line that does not parse is skipped
     }
@@ -705,7 +711,9 @@ export function plainWhy(err: unknown): string | null {
   // a refusal or an error written as JSON inside the text reads as its words
   s = s.replace(/\{[^{}]*\}/g, j => { try { const v = JSON.parse(j); return String(v.deny ?? v.error ?? v.message ?? v.reason ?? '') } catch { return j } })
   // the host's prefix: `thimble: $.fs.read: …`, or `thimble: $.process.run(<program>) …`
-  s = s.replace(/^[\w.-]+: \$\.[\w.]+(?:: |\([^)]*\) )/, '').split('\n').map(l => l.trim()).find(Boolean) ?? ''
+  // a Python traceback says what went wrong on its last line, not its first
+  const lines = s.replace(/^[\w.-]+: \$\.[\w.]+(?:: |\([^)]*\) )/, '').split('\n').map(l => l.trim()).filter(Boolean)
+  s = (/^Traceback \(most recent call last\)/.test(lines[0] ?? '') ? lines[lines.length - 1] : lines[0]) ?? ''
   if (!s || QUIET.test(s)) return null
   return cut(s.replace(/\s+/g, ' ').replace(/[.\s]+$/, ''), 160)
 }
@@ -714,7 +722,7 @@ export function plainWhy(err: unknown): string | null {
  *  nothing from them shows nothing. */
 function failed($: Engine, what: string, err: unknown, fix: string): void {
   const why = plainWhy(err)
-  if (why != null) $.ui.toast(`${what}: ${why}. ${fix}`)
+  if (why != null) failNotice($, `${what}: ${why}. ${fix}`)
 }
 
 /** A pane that cannot draw: one plain line that says so and how to get it back, never the error itself. */
@@ -1885,6 +1893,11 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
       const words = `card ready under "${cut(lineOf(note.about), 30)}" · click to go there`
       left.push({ key: '', words, short: 'card ready', color: keyColor('v', theme), wordsColor: keyColor('v', theme), label: 'go to the card', onPress: () => goToCard($, note.row, note.id) })
     }
+    // a fix that works, and the keys of a failure line or of a fix now in use (fix.ts)
+    for (const g of await fixBar($)) {
+      const fk = g.key
+      left.push({ key: g.key, words: g.words, ...(g.status ? { status: true } : {}), ...(g.good ? { color: 'success', wordsColor: 'success' } : g.status ? { wordsColor: FOCUS[theme] } : {}), ...(fk ? { color: FOCUS[theme], onPress: async () => { const w = await fixKeyOf($, fk); if (w) await pressFix($, w) } } : {}) })
+    }
     // at rest the bar names the three verbs alone (v s c) and the counts: ] still steps through the marks and the cards,
     // { } through the replies, and 1 opens the card the keys are on, unnamed until one of them is in use. c says how many
     // claims the session holds (`c 11 claims`), so the claims are named once, never as a key and a count apart
@@ -2155,6 +2168,11 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     const w = askWait
     return { box: { text: `${w.key}${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { w.cancelled = true; if (askWait === w) askWait = null; void setLabelAsk($, w.ask).catch(() => undefined) } }
   }
+  // and straight after a fix key (f F p u), while it waits: the key began a word, and nothing runs
+  if (fixWait && opened && opened.key === fixWait.key && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
+    const w = fixWait
+    return { box: { text: `${w.key}${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { w.cancelled = true; if (fixWait === w) fixWait = null } }
+  }
   // and straight after t, while t waits to list the threads
   if (pendingT && opened && ['t', DOCK_KEY.coverage, DOCK_KEY.labels].includes(opened.key) && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
     const was = opened.key
@@ -2212,7 +2230,18 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
       keyOpened = { key: k, at: now }
       // the choices leave the bar and the card at once, whichever key; a letter after the key shows them again
       void setLabelAsk($, null).catch(() => undefined)
-      $.clock.after(WORD_MS, () => { if (wait.cancelled || askWait !== wait) return; askWait = null; void answerAsk($, ASK_KEYS[k]!, la).catch(err => $.ui.toast(`× The label ${la.name} did not start: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
+      $.clock.after(WORD_MS, () => { if (wait.cancelled || askWait !== wait) return; askWait = null; void answerAsk($, ASK_KEYS[k]!, la).catch(err => failNotice($, `× The label ${la.name} did not start: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
+    } }
+  }
+  // a failure line's keys (f fix this, F report only) and a fix's (p share it, u undo), once WORD_MS has passed with no
+  // letter after the key (a letter makes it the start of a word, such as "fix this" typed, and nothing runs)
+  const fk = !pick && !tray && k.length === 1 ? await fixKeyOf($, k) : null
+  if (fk) {
+    const wait = { key: k, cancelled: false }
+    return { box: consume, work: () => {
+      fixWait = wait
+      keyOpened = { key: k, at: now }
+      $.clock.after(WORD_MS, () => { if (wait.cancelled || fixWait !== wait) return; fixWait = null; void pressFix($, fk).catch(err => $.ui.toast(`× ${k} did not run: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
     } }
   }
   // a card with the focus: its own keys win over the verbs (the bar names them); a (or 1, or o) asks about it in its
@@ -2633,14 +2662,14 @@ async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unkno
   const region = typeof event.region === 'string' ? event.region : kept?.region ?? null
   const got = await cardEvent($, o, { ...ref, region, ex: 0, all: false, state: kept?.state || {} } as Sel, { ...event, ...(region && !event.region ? { region } : {}) }, { w: inlineCols, h: 24 }, 'inline')
   if (!got || got.drawing?.error) {
-    $.ui.toast(`× ${o.title || ref.id} could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
+    failNotice($, `× ${o.title || ref.id} could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return
   }
   await writeCardState($, ref.root, ref.id, { state: got.state, region }, 'terminal')
   if (got.ask?.text) {
     const refs = got.ask.refs?.length ? got.ask.refs : got.ask.region ? regionRefs(o, got.drawing, got.ask.region).refs : []
     const r = await askThread($, { text: got.ask.text, scope: { object: ref.id, v: o.version ?? ref.v, ...(got.ask.region ? { region: got.ask.region } : {}), label: got.ask.label }, refs, root: ref.root, card: { id: o.id, v: o.version, title: o.title, file: `${ref.root}/thimble/objects/${o.id}.json` }, anchor: { kind: 'card', id: ref.id, v: null, root: ref.root, region: got.ask.region ?? region } })
-    if (r.problem) $.ui.toast(`× ${r.problem}`)
+    if (r.problem) failNotice($, `× ${r.problem}`)
     // its answer shows in the card's panel, under the card
     else await openDetail($, { ...ref, v: o.version ?? ref.v }, got.ask.region ?? region)
   } else if (got.ask) {
@@ -2774,6 +2803,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
 /** Stores the squeeze chips and the card detail read (their modules add to this). */
 async function paneStoreMore($: Engine, kind: string, _arg: string): Promise<unknown> {
   // Coverage and the labels (dock.ts)
+  // a fix's share, for its preview (fix.ts)
+  if (kind === 'fix') return fixStore($, _arg)
   const docked = await dockStore($, kind)
   if (docked !== undefined) return docked
   return null
@@ -2922,6 +2953,8 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   if (pane === 'mark' && name === 'expand' && a.frame && typeof a.frame === 'object') return expandFrame($, a.frame as TrayFrame, false)
   // ] and [ on a mark in the side panel: the next mark or card in its place
   if (pane === 'mark' && name === 'step') { await stepSide($, (_args.frame ?? null) as TrayFrame | null, Number(a.dir) < 0 ? -1 : 1); return }
+  // the preview of a fix's share: send, save, keep a hit, edit (fix.ts)
+  if (pane === 'fix') return fixAction($, _args, a)
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
   // the Claims pane's own actions (claims/term.ts); its citations open as any pane's do (open, below)
   if (pane === 'claims') { const said = await claimsAction($, a); if (said !== false) return said }
@@ -2991,6 +3024,8 @@ export const registerShell: Register = (on, options) => {
       await restoreAnswers($)
       // its side threads, so the bar counts them and t lists them (a resumed conversation's are on disk)
       await restoreThreads($, (await rootHere($)) || undefined)
+      // the fixes as they stand: one still working shows in the bar, and its draft opens when it is written (fix.ts)
+      void refreshFixes($).catch(() => undefined)
     } catch {
       // a session that cannot read its placements draws its new objects only
     }
@@ -3008,6 +3043,8 @@ export const registerShell: Register = (on, options) => {
       // the analyst's turn: it began with the prompt they typed (a background job's report or a key's request did not)
       const typed = !!typedLast && !!String(e.text || '').trim() && String(e.text).trim() === typedLast.trim()
       typedLast = null
+      // the person's own prompt: a failure line's keys go
+      if (typed) await promptTyped($).catch(() => undefined)
       turn = { unplaced: [], lastRow: '', calls: [], placed: [], at: placeNext, saves: [], typed, began: Date.now() / 1000 }
       placeNext = null
       // a new turn: the keys act on its answer again, and a verb's open line closes
@@ -3031,6 +3068,8 @@ export const registerShell: Register = (on, options) => {
     try { watch = $.clock.every(1000, () => { void labelsInFeed($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { watch = null }
     let r: Awaited<ReturnType<typeof next>>
     try { r = await next(e) } finally { watch?.cancel?.() }
+    // a `thimble fix` call (main's or a subagent's): the bar's fix note and the line when a fix came into use (fix.ts)
+    if (/\bthimble\b[^\n|;&]*\bfix\b/.test(String((e as unknown as { command?: string }).command || ''))) void refreshFixes($).catch(() => undefined)
     let notes: string[] = []
     try {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
@@ -3141,6 +3180,8 @@ export const registerShell: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    // a fix a subagent worked on: its state, as the bar shows it (fix.ts)
+    void refreshFixes($).catch(() => undefined)
     try {
       // the end of a key's agent (v's card, aside.ts): the saves its calls left in the change feed go under the message
       // the key was pressed on (its calls may not reach this plugin's hooks); one main saved meanwhile stays main's

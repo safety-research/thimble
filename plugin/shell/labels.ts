@@ -20,6 +20,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { leanEnv, noteForClaude, showVersion, tellMain } from './shell'
+import { failNotice } from './fix'
 import { promptText } from '../prompts/prompts'
 import { tracked } from '../telemetry/telemetry'
 import { SETTINGS, progressText, readLabel } from './labelreads.mjs'
@@ -59,7 +60,7 @@ export function labelFromFeed($: Engine, ev: Any): void {
   if (started.has(key)) return
   started.add(key)
   $.clock.after(0, () => {
-    void readHere($, ev).catch(err => $.ui.toast(`× The model's reads of the label ${String(ev.name)} stopped: ${String((err as Error)?.message || err).slice(0, 200)}. \`thimble label ${String(ev.name)} --again\` starts them again.`))
+    void readHere($, ev).catch(err => failNotice($, `× The model's reads of the label ${String(ev.name)} stopped: ${String((err as Error)?.message || err).slice(0, 200)}. \`thimble label ${String(ev.name)} --again\` starts them again.`))
   })
 }
 
@@ -119,7 +120,7 @@ async function readHere($: Engine, ev: Any): Promise<void> {
   await say(out.error ? { verb: 'label', error: out.error } : { verb: 'label', text: out.text })
   if (out.card) await showVersion($, { id: out.card.id, v: out.card.v, root })
   await noteForClaude($, out.error ? `The model's reads of the label ${name} failed: ${out.error}` : out.note)
-  if (out.error) $.ui.toast(`× label ${name}: ${String(out.error).slice(0, 200)}`)
+  if (out.error) failNotice($, `× label ${name}: ${String(out.error).slice(0, 200)}`)
   else if (out.failed) $.ui.toast(`! ${String(out.text).slice(0, 240)}`)
 }
 
@@ -169,7 +170,7 @@ export async function answerAsk($: Engine, choice: 'all' | 'sample' | 'cancel', 
   let got: Any = null
   try { got = JSON.parse(r.out) } catch { got = null }
   if (!r.ok || !got) {
-    $.ui.toast(`× The label ${a.name} did not start: ${r.out.split('\n').slice(-1)[0]?.replace(/^thimble label: /, '').slice(0, 200) || 'thimble label gave nothing'}. Ask Claude to run it again.`)
+    failNotice($, `× The label ${a.name} did not start: ${r.out.split('\n').slice(-1)[0]?.replace(/^thimble label: /, '').slice(0, 200) || 'thimble label gave nothing'}. Ask Claude to run it again.`)
     return
   }
   if (choice === 'cancel') {

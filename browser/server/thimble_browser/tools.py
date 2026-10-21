@@ -8,6 +8,7 @@ What a tool can touch:
 - Read, Grep and Glob read files under the agent's read roots (the folder; for the view builder also the view kit's
   docs and the worked examples), each path resolved, symlinks included, and checked to be inside one of them.
 - run_python runs code in the sandbox (cards/sandbox.py), as a card's code does.
+- draft_report drafts a report of a problem with thimble for the person to preview (issues.py); it never sends.
 - A feature's tools change the workspace's own store (its cards, its report, a view's files), never the folder of
   files.
 """
@@ -212,6 +213,13 @@ class Tools:
         cell = {"id": "run", "outputs": [{**o, "_out": i} for i, o in enumerate(res.get("outputs") or [])]}
         text = canvas.outputs_text(cell, limit=RESULT_CHARS).replace("(cite a value as card:run#<column>/<row>)", "")
         return Result(text, res.get("status") != "ok")
+
+    # ---- reporting a problem with thimble (issues.py): a draft the person previews; no tool sends
+
+    async def t_draft_report(self, args: dict[str, Any]) -> Result:
+        from . import issues  # noqa: PLC0415 — issues.py imports this module
+
+        return await issues.draft_report(self, args)
 
     def maker(self) -> str:
         """Who a card or a save this agent makes is by, as the page reads it (frontend canvas/layout.cellThread): main,

@@ -65,3 +65,18 @@ Run Python over the folder's files to compute a value: a count, a total, a first
   "required": ["code"]
 }
 ```
+
+## draft_report
+
+Draft a report of a problem with thimble itself, for the analyst to review. thimble adds its version and settings, removes any detail that could name the analyst or their data, and shows the analyst a preview of the exact text. Nothing is sent: only the analyst can send the report or save it as a file, from the preview. The result says how many details the scan removed.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "title": {"type": "string", "description": "One line that names the problem in thimble's own terms, such as \"Rows fails on a CSV file that uses ; between fields\"."},
+    "body": {"type": "string", "description": "Markdown with the sections ## What happened, ## Expected and ## Reproduction (made-up data)."}
+  },
+  "required": ["title", "body"]
+}
+```

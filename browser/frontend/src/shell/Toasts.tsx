@@ -4,13 +4,15 @@
 // server down) shows once, next to what it concerns, and is never also a toast. An error has a negative edge and ✕;
 // news has the accent dot and a chip to where it landed, and news of a thread stays longer (its chip opens it). A span
 // in backticks (a command such as `thimble up`) is drawn as code, as a notice draws it. A toast may carry one button
-// (`action`), such as Reopen after the analyst resolved a comment; a click on it acts and closes the toast.
+// (`action`), such as Reopen after the analyst resolved a comment; a click on it acts and closes the toast. An error
+// also offers Fix this and Report this (shell/ShareReport), which ask main to draft a report of it.
 import { useEffect, useState } from 'react'
 import { Mark } from '../components/Marks'
 import { RefChip } from '../components/RefChip'
 import { bus, type ToastAction } from '../lib/bus'
 import { ThreadChip } from '../chat/Notes'
 import { noticeText } from '../chat/Notice'
+import { ReportThis } from './ShareReport'
 
 interface Toast {
   id: number
@@ -51,6 +53,7 @@ export function Toasts() {
           <span className="shell-toast-text">{noticeText(t.text)}</span>
           {t.ref && <RefChip ref={t.ref} compact />}
           {t.thread && <ThreadChip id={t.thread.id} label={t.thread.label} />}
+          {t.kind === 'error' && <ReportThis text={t.text} className="shell-toast-report" />}
           {t.action && (
             <button type="button" className="shell-toast-action" onClick={() => t.action!.run()}>
               {t.action.label}

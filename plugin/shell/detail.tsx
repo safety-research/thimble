@@ -60,6 +60,7 @@ import { check as checkLabel, checksDone, labelGen } from './labels'
 import { conversation, entry, ENTRY_ROWS, fitItems, type Item } from './conversation'
 import { openMark, paneSubject, sideBack, sideClosed, sideDepth, sideNow, sidePrev, sideTitle, type Subject } from './side'
 import { openLabel } from './dock'
+import { failNotice } from './fix'
 import { cardLabels } from './labeluse'
 import type { SideView } from '../types'
 
@@ -567,7 +568,7 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
   const at: Detail = mapped?.state ? { ...sel, state: { ...(sel.state || {}), ...mapped.state } } : sel
   const got = await cardEvent($, p.object, at, ev, { w: drawn.w, h: drawn.h })
   if (!got || got.drawing?.error) {
-    $.ui.toast(`× The card could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
+    failNotice($, `× The card could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
     return
   }
   const region = typeof ev.region === 'string' ? ev.region : sel.region
@@ -585,7 +586,7 @@ async function cardAct($: Engine, event: Record<string, unknown>): Promise<void>
     const o = p.object
     const refs = ask.refs?.length ? ask.refs : ask.region ? regionRefs(o, got.drawing, ask.region).refs : []
     const r = await askThread($, { text: ask.text, scope: { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label }, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` }, anchor: { kind: 'card', id: sel.id, v: null, root: sel.root, region: ask.region ?? null } })
-    if (r.problem) $.ui.toast(`× ${r.problem}`)
+    if (r.problem) failNotice($, `× ${r.problem}`)
   } else if (ask) next = { ...next, ask }
   await $.state.set(SEL, next)
   await writeCardState($, sel.root, sel.id, { state: next.state, region: next.region }, 'terminal')
@@ -1024,7 +1025,7 @@ async function askHere($: Engine, text: string): Promise<void> {
   sending = true
   let problem: string | null
   try { problem = await askSide($, text) } finally { sending = false }
-  if (problem) { $.ui.toast(`× ${problem}`); return }
+  if (problem) { failNotice($, `× ${problem}`); return }
   // the line empties: a field drawn afresh, so no word of the question stays in it
   draft = ''
   askGen++

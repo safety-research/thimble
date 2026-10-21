@@ -21,6 +21,7 @@ import { refreshProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import type { Notice, NoticeAction } from '../lib/types'
 import type { NoticeRow as NoticeRowT } from './model'
+import { ReportThis } from '../shell/ShareReport'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
 export const NOTICE_DOS: readonly string[] = ['settings', 'view-retry', 'sign-out']
@@ -109,6 +110,7 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
       <Icon name="warning" size={13} className="chat-notice-ico" />
       <div className="chat-notice-body">
         <NoticeWords agent={agent} text={notice.text} after={openLink} />
+        <ReportThis text={notice.text} className="chat-notice-report" />
         {actions.length > 0 && (
           <span className="chat-notice-acts">
             {actions.map((a) => (

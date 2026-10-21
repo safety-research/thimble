@@ -1,19 +1,18 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
 // workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
 // the surfaces' tabs over the main area (a click shows the surface, a drag takes it to a pane); at the right Undo and
-// Redo (shell/undo.ts), Report a problem, the links toggle, the theme popover and the settings gear.
+// Redo (shell/undo.ts), the links toggle, the theme popover and the settings gear (Report a problem… is in its menu).
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
-import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
+import { bus, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
 import type { WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { DemoTag } from './DemoTag'
-import { ProblemReportPopover } from './ProblemReport'
 import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
@@ -65,28 +64,16 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)
-  const [problemOpen, setProblemOpen] = useState(false)
-  const [prefill, setPrefill] = useState<ProblemPrefill | null>(null)
   const [tools, setTools] = useState<HTMLSpanElement | null>(null)
   const [path, setPath] = useState<string | null>(null)
   const links = useLinksVisible()
   const history = useUndo(ws)
-  useEffect(
-    () =>
-      bus.on('reportProblem', (p) => {
-        setThemeOpen(false)
-        setSettingsOpen(false)
-        setPrefill(p)
-        setProblemOpen(true)
-      }),
-    [],
-  )
+  // a failure's Report a problem drafts a report through main (shell/ShareReport), which listens for it itself
   // a notice's Open Settings (chat/Notice.tsx, the bus's `openSettings`) opens the settings under the gear
   useEffect(
     () =>
       bus.on('openSettings', () => {
         setThemeOpen(false)
-        setProblemOpen(false)
         setSettingsOpen(true)
       }),
     [],
@@ -129,29 +116,22 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
       <span className="shell-spacer" />
       {onSide && <SideButtons ws={ws} side={side} onSide={onSide} />}
       <span ref={setTools} className="shell-tools">
-        {/* thimble browser has no problem report yet: its button comes back with it */}
         <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />
         <Button variant="icon" icon="redo" title={history.labels.redo ? `Redo: ${history.labels.redo}` : 'Redo'} aria-label="Redo" disabled={!history.labels.redo} onClick={history.redo} data-tel="redo" />
         <Button variant="icon" icon={links ? 'link' : 'link-off'} title={links ? 'Hide links' : 'Show links'} aria-label={links ? 'Hide links' : 'Show links'} aria-pressed={links} className={`shell-links${links ? ' on' : ''}`} onClick={toggleLinks} data-tel="links" />
         <Button variant="icon" icon="palette" title="Theme" aria-label="Theme" aria-haspopup="dialog" aria-expanded={themeOpen} onClick={() => {
             setSettingsOpen(false)
-            setProblemOpen(false)
             setThemeOpen((o) => !o)
           }}
           data-tel="theme" />
         <Button ref={setGear} variant="icon" icon="gear" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => {
             setThemeOpen(false)
-            setProblemOpen(false)
             setSettingsOpen((o) => !o)
           }}
           data-tel="settings" />
       </span>
       {/* the popover hangs under the tools, flush with their right end */}
       <ThemePopover anchor={tools} open={themeOpen} onClose={() => setThemeOpen(false)} />
-      <ProblemReportPopover ws={ws} anchor={tools} open={problemOpen} prefill={prefill} onClose={() => {
-          setProblemOpen(false)
-          setPrefill(null)
-        }} />
       <SettingsPopover ws={ws} anchor={gear} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   )

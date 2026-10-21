@@ -174,6 +174,12 @@ declare module 'claude-code' {
       labelgen: number
       /** a big label's ask that waits for the person's choice (shell/labels.ts): the run's sentence, its model calls, its card */
       labelask: { root: string; name: string; ask: string; card: string | null; text: string; meta: string; units: number; sample: number } | null
+      /** the line whose fix keys the bar names (shell/fix.ts): a failure (f F) or a fix now in use (p u) */
+      fixline: { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string } | null
+      /** the fixes that work now (shell/fix.ts), for the bar's note */
+      fixes: { slug: string; title: string; kind: string }[]
+      /** a fix's share as its preview reads it, by slug (shell/fix.ts); never the ask's id */
+      fixshare: StateFamily<unknown>
       /** the labels of a set of records, by folder, generation and refs (`thimble label --of`) */
       labelsof: StateFamily<unknown>
       /** the labels a card or an answer rests on, by its key (shell/labeluse.ts) */
