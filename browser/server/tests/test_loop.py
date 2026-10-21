@@ -159,6 +159,36 @@ async def test_the_page_opens_the_canvas_on_the_first_card_of_each_turn(ws, monk
     assert opened == [first, third]  # an edit opens nothing; the next turn's first new card does
 
 
+async def test_a_card_that_names_no_group_goes_in_its_turns_group_named_after_its_question(ws, monkeypatch):
+    """A card added with no `group` went to a group titled Canvas. Now a turn's cards that name none share one group,
+    named after the first one's question, and the next turn's start another."""
+    from thimble_browser import canvas, tools
+    from thimble_browser.features import cards
+    monkeypatch.setitem(tools.EXTRA, "add_card", cards.add_card)
+
+    def note(q, **kw):
+        return {"kind": "note", "question": q, "text": "One line.", **kw}
+    client = FakeClient([
+        NS(content=[call("t1", "add_card", note("How many pages does each wiki have?")),
+                    call("t2", "add_card", note("Which wiki grew fastest?")),
+                    call("t3", "add_card", note("Who edits most?", group="Editors"))],
+           stop_reason="tool_use", usage=usage(), stop_details=None),
+        NS(content=[text("Three cards.")], stop_reason="end_turn", usage=usage(), stop_details=None),
+        NS(content=[call("t4", "add_card", note("When were the edits made?"))], stop_reason="tool_use", usage=usage(),
+           stop_details=None),
+        NS(content=[text("One more.")], stop_reason="end_turn", usage=usage(), stop_details=None),
+    ])
+    s = await run_turn(ws, client, monkeypatch, "How big is each wiki?")
+    await s.task
+    await s.send("And when?")
+    await s.task
+    groups = {nb["title"]: [c["title"] for c in nb["cells"]] for nb in canvas.notebooks(ws)}
+    assert groups == {"How many pages does each wiki have?": ["How many pages does each wiki have?",
+                                                              "Which wiki grew fastest?"],
+                      "Editors": ["Who edits most?"],
+                      "When were the edits made?": ["When were the edits made?"]}
+
+
 async def test_a_report_write_shows_in_the_report_as_it_streams_in(ws, monkeypatch):
     import json
 

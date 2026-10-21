@@ -6,6 +6,7 @@ import copy
 import json
 import re
 import time
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
@@ -114,6 +115,8 @@ async def test_a_big_model_label_asks_first_and_the_turn_goes_on(big, folder, mo
     assert re.fullmatch(r"[\d,]+ model calls", asked["meta"])
     result = client.requests[1]["messages"][-1]["content"][0]["content"]
     assert "It has not run." in result and "waits for their choice" in result
+    # it names the ask's buttons as the page writes them, so main's reply names what the analyst sees
+    assert all(f'"{b}"' in result for b in asks.choices()) and "every one" not in result
     assert chats.records(ws, "main")[-1]["type"] == "done"
 
     # the analyst picks a sample: the run reads that many, at random, and the row says how it ended
@@ -135,6 +138,15 @@ async def test_a_big_model_label_asks_first_and_the_turn_goes_on(big, folder, mo
     assert "chose to run the label edit purpose" in first[0]["text"] and f"yes [{asks.SAMPLE}](concept:{k['id']}/yes)" in first[0]["text"]
     assert first[1] == {"type": "text", "text": "And the label?"}
     assert agent.take_notes(ws, "main") == []
+
+
+def test_the_ask_names_the_buttons_the_page_draws():
+    """main told the analyst to choose "every one", a button the ask does not have: the words Claude reads are the
+    page's own button labels."""
+    page = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "chat" / "LabelRun.tsx").read_text()
+    run_all, sample, cancel = asks.choices()
+    assert f">\n        {run_all}\n" in page and f">\n        {cancel}\n" in page
+    assert sample == f"Run on a sample of {asks.SAMPLE:,}" and "`Run on a sample of ${" in page
 
 
 def test_the_estimate_counts_the_real_batches_and_prices_the_model(big, folder):

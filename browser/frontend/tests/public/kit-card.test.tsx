@@ -93,6 +93,22 @@ test('a plot draws [x, y] pairs in values, dots per series as its legend shows t
   expect(narrow.out.cut.filter((c) => c.k === 'axis').length).toBe(1)
 })
 
+test("a plot's x ticks can name dates: the browser draws each tick's own label, as the terminal does", async () => {
+  // @ts-expect-error -- the plugin's terminal renderer is plain JavaScript with no declarations
+  const { renderTerm, gridText } = await import('../../../../plugin/draw/term.js')
+  // made-up daily counts over 31 days, a tick each week labeled with its date
+  const days = ['Mar 3', 'Mar 10', 'Mar 17', 'Mar 24', 'Mar 31']
+  const program = `return k.plot([{ name: 'saves', values: ${JSON.stringify(Array.from({ length: 31 }, (_, i) => (i * 7) % 23))} }], { h: 8, x: { ticks: ${JSON.stringify(days.map((label, i) => ({ at: i * 7, label })))} } })`
+  const opts = { w: 80, h: 30, id: 'c4' }
+  const drawing = DrawKit.run(program, {}, { ...opts, surface: 'browser' }) as Drawing
+  expect(drawing.warnings).toEqual([])
+  const texts = [...renderSvg(drawing, { cw: 7.8 }).svg.matchAll(/<text [^>]*>(.*?)<\/text>/g)].map((m) => m[1].replace(/<[^>]+>/g, ''))
+  for (const d of days) expect(texts).toContain(d)
+  expect(texts).not.toContain('7')
+  const term = gridText(renderTerm(DrawKit.run(program, {}, { ...opts, surface: 'terminal' }), { w: 80 }))
+  for (const d of days) expect(term).toContain(d)
+})
+
 test("a code line's indent stays when its text wraps", () => {
   const drawing = DrawKit.run("return k.text('        if a:', { max: 2 })", {}, { w: 60, h: 10, surface: 'browser' }) as Drawing
   const texts = renderSvg(drawing, { w: 60 }).svg.match(/<text[^>]*>.*?<\/text>/g) || []
