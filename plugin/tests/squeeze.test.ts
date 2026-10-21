@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { promptStub } from './stubs'
 import { applyRewrite } from '../squeeze/chips.mjs'
-import { setLevels } from '../squeeze/term'
+import { latestAsShown, setLevels } from '../squeeze/term'
 import { newRecord, remark } from '../shell/message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,6 +60,25 @@ function squeezed(): Any {
   const cards = { rows: { [ROW]: [{ id: '02-fare', v: 2, root: ROOT }] }, did: [{ id: '02-fare', did: 'edited', title: 'Survival by fare', v: 2 }] }
   return applyRewrite(rec, { text: 'Most top-fare passengers survived: [72%](q1#band=top@share).', at: { length: 0 }, cards, origCards: orig }, remark)
 }
+
+test('0 makes the original\'s card the latest version again, so the store reads what the message shows', async () => {
+  const $ = engine()
+  const back = { ...squeezed(), shown: null, squeeze: { ...squeezed().squeeze, at: {} } }
+  expect(await latestAsShown($, back)).toEqual([])
+  expect($.saves.length).toBe(1)
+  expect($.saves[0]!.argv.slice(1)).toEqual(expect.arrayContaining(['save', '02-fare', '--change', 'squeeze: as written']))
+  expect($.saves[0]!.spec).toEqual(ORIG_SOURCE)
+  // the version the squeeze saved is shown: nothing to save
+  $.saves.length = 0
+  expect(await latestAsShown($, squeezed())).toEqual([])
+  expect($.saves.length).toBe(0)
+})
+
+test('a card saved since by someone else stays the latest when 0 brings the original back', async () => {
+  const $ = engine('changed')
+  await latestAsShown($, { ...squeezed(), shown: null, squeeze: { ...squeezed().squeeze, at: {} } })
+  expect($.saves.length).toBe(0)
+})
 
 test('0 shows the original whole at once: its text does not write itself in again, so its tail and marks never go', async () => {
   const $ = engine()
