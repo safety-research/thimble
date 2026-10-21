@@ -99,26 +99,25 @@ def test_reading_every_file_says_so_and_how_much(code: Path, tmp_path: Path) -> 
                                           "Claude's context.")
 
 
-def test_rows_a_query_or_a_script_printed_by_their_refs_are_seen(code: Path, tmp_path: Path) -> None:
-    # a query that printed two rows beside their refs, and a script whose output named a third and a csv row; refs cut
-    # short, of no source file, or of a whole range name no row that reached Claude
-    (code / "notes.jsonl").write_text("".join(json.dumps({"i": i, "text": f"note {i}"}) + "\n" for i in range(20)))
-    th = code / "thimble"
-    (th / "queries").mkdir(parents=True)
-    (th / "queries" / "r1.json").write_text(json.dumps({
-        "id": "r1", "about": "sample notes", "error": None, "rows": None,
-        "stdout": "notes.jsonl#L4 note 3 | first\nnotes.jsonl#L12, note 11\nnotes.jsonl#L1... cut\nother.jsonl#L2 x\n"}))
-    (th / "ledger.jsonl").write_text(json.dumps({"session": "s-cov", "kind": "query", "id": "r1",
-                                                "loaded": {"notes.jsonl": 20}}) + "\n")
-    saw(tmp_path, code, [{**bash("python3 sample.py", 3),
-                          "refs": ["notes.jsonl#L7", "runs.csv#row=2", "notes.jsonl#L1-20", "src/a.py#intro"]}])
-    cov = LIN.coverage(Store(code))
-    by = {o["path"]: o for o in cov["files"]}
-    assert by["notes.jsonl"]["status"] == "seen"
-    assert by["notes.jsonl"]["ranges"] == [[4, 4], [7, 7], [12, 12]]
-    assert by["runs.csv"]["status"] == "seen" and by["runs.csv"]["shown"] == 1
-    assert by["src/a.py"]["status"] == "not read"
-    assert LIN.printed_refs("a.jsonl#L3, b.csv#row=2. c.jsonl#L4… (d.jsonl#L5)") == ["a.jsonl#L3", "b.csv#row=2", "d.jsonl#L5"]
+def test_a_query_reads_the_rows_its_shown_table_holds_and_a_print_of_refs_reads_none(code: Path, tmp_path: Path) -> None:
+    # a print of `_refs`, a script whose output named refs, and a result of refs alone name rows without their content:
+    # the files are touched, none of their rows read. A result table of the rows' fields beside their refs shows its rows
+    from kernel import query as Q
+
+    (code / "people.csv").write_text("id,name,fare\n" + "".join(f"{i},Person{i} Example,{i}.25\n" for i in range(1, 101)))
+    saw(tmp_path, code, [{**bash("python3 ids.py", 1), "refs": ["runs.csv#row=2"]}])
+    st = Store(code)
+    Q.run(st, "refs", 'df = load("people.csv")\nprint(list(df._ref[:12]))\nNone')
+    Q.run(st, "refs alone", 'load("people.csv")._ref[:12]')
+    by = {o["path"]: o for o in LIN.coverage(Store(code))["files"]}
+    assert by["people.csv"]["status"] == "computed" and by["people.csv"]["seen_units"] == 0 and by["people.csv"]["touched"]
+    assert by["runs.csv"]["status"] == "named" and by["runs.csv"]["seen_units"] == 0
+    # 100 rows with their names: the result shows its first and last rows (query.display), and those are read
+    q = Q.run(st, "names", 'load("people.csv")[["_ref", "name"]]')
+    n = len(q["shown_rows"])
+    assert 10 <= n < 100 and q["shown_rows"][0] == 0 and q["shown_rows"][-1] == 99
+    by = {o["path"]: o for o in LIN.coverage(Store(code))["files"]}
+    assert by["people.csv"]["status"] == "seen" and by["people.csv"]["seen_units"] == n
 
 
 def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

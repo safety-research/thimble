@@ -938,6 +938,26 @@ def jsonable(v: Any) -> Any:
 def show(v: Any, qid: str | None = None) -> str:
     """The result as Claude reads it. A table of up to 60 rows shows whole when it fits in SHOW characters; a longer or
     wider one shows as many of its first and last rows as fit, and says how many it has (the query keeps them all)."""
+    return display(v, qid)[0]
+
+
+def shown_rows(v: Any, n: int | None) -> list[int]:
+    """The places of the result's rows that show() put in front of Claude (it showed at most `n`: the first and last
+    n // 2 of a longer table), when the table shows fields of its rows beside their refs. A table of refs alone (a
+    Series of `_ref`, a frame with only `_ref` or `_refs`) shows no row's content, so none of its rows is shown."""
+    if n is None:
+        return []
+    cols = list(getattr(v, "columns", None) if hasattr(v, "columns") else [getattr(v, "name", None)])
+    one, many = ref_columns(v) if hasattr(v, "columns") else ([], [])
+    named = [c for c in cols if c not in one and c not in many and not (isinstance(c, str) and c.startswith("_ref"))]
+    if not named:
+        return []
+    k = len(v)
+    return list(range(k)) if k <= n else [*range(n // 2), *range(k - n // 2, k)]
+
+
+def display(v: Any, qid: str | None = None) -> tuple[str, int | None]:
+    """show()'s text, and how many of a table's rows it shows at most (None for a value that is no table)."""
     try:
         import pandas as pd
         if isinstance(v, (pd.DataFrame, pd.Series)):
@@ -957,15 +977,15 @@ def show(v: Any, qid: str | None = None) -> str:
             if len(v) > n:
                 s += f"\n({len(v):,} rows, the first and last {n // 2} shown"
                 s += f"; use(\"{qid}\") reads them all in a later query)" if qid else ")"
-            return s
+            return s, n
     except ImportError:
         pass
     if isinstance(v, (dict, list)):
         try:
-            return json.dumps(v, indent=1, ensure_ascii=False, default=str)
+            return json.dumps(v, indent=1, ensure_ascii=False, default=str), None
         except (TypeError, ValueError):
             pass
-    return repr(v)
+    return repr(v), None
 
 
 def ref_columns(f: Any) -> tuple[list[str], list[str]]:
@@ -1678,6 +1698,7 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
     t0 = time.time()
     err = None
     last = None
+    shown: list[int] = []
     old = os.getcwd()
     os.chdir(st.root)
     try:
@@ -1695,7 +1716,12 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
                     last = ns["result"]
                 # a query that ends by keeping a result (keep("kind", values)) printed what it meant to show already
                 if last is not None and not kept_last:
-                    print(show(last, qid))
+                    at = len(buf.getvalue())
+                    text, n = display(last, qid)
+                    print(text)
+                    # the rows of the result Claude read: those it showed, when all of it is within what Claude reads
+                    if at + len(text) <= CUT:
+                        shown = shown_rows(last, n)
             except Exception as e:  # noqa: BLE001
                 err = f"{type(e).__name__}: {e}"
                 print(query_traceback(e, code))
@@ -1731,7 +1757,8 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
         inputs.append({"path": f, "rows_read": loaded.get(f, 0), "how": "load" if f in loaded else "opened", **fp})
     out = {"stdout": buf.getvalue(), "error": err, "seconds": round(time.time() - t0, 2), "inputs": inputs,
            "samples": info["samples"], "external": sorted(info["external"])[:20],
-           "kept": info["kept"], "uses": _dedupe(info["uses"]), "labels": sorted(set(info["labels"])), **lin}
+           "kept": info["kept"], "uses": _dedupe(info["uses"]), "labels": sorted(set(info["labels"])),
+           "shown_rows": shown if err is None else [], **lin}
     try:
         # the cache stays bounded: looked over after a query that added frames to it, else at most once a day
         prune_cache(force=bool(info.get("cached")))
@@ -1815,7 +1842,7 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
          "uses": r["uses"], "table": r["table"], "truncated": r.get("truncated", False), "rows": r["rows"],
          "keys": r["keys"], "lineage": r["mode"], "frame": r["frame"],
          "out_hash": hashlib.sha1(r["stdout"].encode()).hexdigest()[:16]}
-    for k in ("why_rows", "read", "via", "cells", "loop", "cells_by", "lineage_error", "labels"):
+    for k in ("why_rows", "read", "via", "cells", "loop", "cells_by", "lineage_error", "labels", "shown_rows"):
         if r.get(k):
             q[k] = r[k]
     # a long row lineage is written packed; the record in hand, which `thimble run --json` prints, stays whole
