@@ -137,3 +137,15 @@ def test_a_number_with_no_sign_states_the_size_and_a_signed_one_the_sign_too():
         assert one("[+14.2](card:gggggg#low) points")[1]["state"] == H.CONTRADICTED
     finally:
         del CARDS["ffffff"], CARDS["gggggg"]
+
+
+def test_a_number_followed_by_words_is_the_value():
+    """Any number in the words may be the value, as in the terminal: `31 merged` holds at a cell that shows 31."""
+    from thimble_browser.cards import cite
+    assert cite.same_value("24.2%", "24.2% survived") and cite.same_value("24.2%", "24.2 % survived")
+    assert cite.same_value("8,452", "8,452 of the 14,591 edits") and cite.same_value("14,591", "8,452 of the 14,591 edits")
+    assert not cite.same_value("31", "31,000 runs") and not cite.same_value("31", "131 merged")
+    merged = f"card:aaaaaa#n/{frames.row_labels(frames.frame_in(CARDS['aaaaaa']['outputs']))[0]}"
+    assert one(f"[31 merged]({merged}) so far")[1]["how"] == H.KEPT
+    _, c = one(f"[30 merged]({merged}) so far")
+    assert c["state"] == H.CONTRADICTED and c["why"] == "the cited place shows 31"

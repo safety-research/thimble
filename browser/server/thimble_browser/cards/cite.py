@@ -210,7 +210,15 @@ def map_links(text: str, fn) -> str:
     return "".join(out)
 
 
-_SPACE = re.compile(r"[\s,   ]")
+# a mark that only groups a number's digits (8,452, or 8 452 with a thin or no-break space), and a space before a
+# percent (24.2 %): the check drops both, as the terminal's kernel/objects.py reads a number
+_GROUP = re.compile("(?<=\\d)[,\u00a0\u2009\u202f](?=\\d)|(?<=\\d)\\s+(?=%)")
+
+
+def _words(s: str) -> str:
+    """Words, or a value as a card shows it, as the check compares them: digits ungrouped, the minus sign as "-", and
+    each run of spaces one space, so `31 merged` still holds 31 as a whole number."""
+    return " ".join(_GROUP.sub("", s.replace(frames.MINUS, "-")).split())
 
 
 def sign_at(text: str, at: int) -> str:
@@ -223,19 +231,18 @@ def sign_at(text: str, at: int) -> str:
 
 
 def same_value(shown: str, label: str) -> bool:
-    """Whether a citation's words (`label`) state the value the card shows: the value as a whole number or word in
-    them, commas and spaces aside. A number the words write with no sign of its own states the value's size, either
-    sign (`14.2 points below` states −14.2); one written with a sign (`-14.2`, `+14.2`) states the sign too."""
-    a = _SPACE.sub("", shown).replace(frames.MINUS, "-")
+    """Whether a citation's words (`label`) state the value the card shows: the value as a whole number or word
+    anywhere in them (`31 merged`, `8,452 of the 14,591 edits`), digit grouping aside. A number the words write with no
+    sign of its own states the value's size, either sign (`14.2 points below` states −14.2); one written with a sign
+    (`-14.2`, `+14.2`) states the sign too."""
+    a, b = _words(shown), _words(label)
     neg = a[:1] == "-" and a[1:2].isdigit()
     if a[:1] in ("-", "+") and a[1:2].isdigit():
         a = a[1:]
-    kept = [i for i, ch in enumerate(label) if not _SPACE.match(ch)]
-    b = "".join(label[i] for i in kept).replace(frames.MINUS, "-")
     if not a or not b:
         return False
     for m in re.finditer(rf"(?<![\w.]){re.escape(a)}(?![\w]|\.\d)", b):
-        sign = sign_at(label, kept[m.start()]) if a[0].isdigit() else ""
+        sign = sign_at(b, m.start()) if a[0].isdigit() else ""
         if not sign or (sign == "-") == neg:
             return True
     return False
