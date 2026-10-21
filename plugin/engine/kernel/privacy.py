@@ -13,9 +13,10 @@ messages):
   host name, git name and email, the data folder's path and the names of its files and folders, and the field names and
   string values the session read.
 
-A field name or a value that also appears in thimble's own source tree is not a hit (the caller's `known` answers that),
-so words such as "card", "rows" and "label" pass. The person's own names never pass that way: a data file or folder
-name, a path, their user, host or git name is a hit even when thimble's source holds the same word (board.jsonl). Each hit gets a placeholder by its kind, and a path inside thimble's own tree
+A field name, a value, or a file's or folder's bare name that also appears in thimble's own source tree is not a hit (the
+caller's `known` answers that), so words such as "card", "rows", "label" or "tests" pass, and a diff of thimble's code
+still applies after the scan. A whole file name (board.jsonl), a path, and the person's user, host or git name are hits
+even when thimble's source holds the same words. Each hit gets a placeholder by its kind, and a path inside thimble's own tree
 becomes its path in the repository.
 """
 from __future__ import annotations
@@ -67,7 +68,13 @@ ALLOW = re.compile(r"^/(?:home|Users)/(?:t|you|user|username|name|me)(?:/|$)|^(?
                    r"|@(?:[A-Za-z0-9-]+\.)*(?i:example\.(?:com|org|net)|example)$")
 _COMPILED = [(k, re.compile(rx, re.S), re.compile(b) if b else None) for k, rx, b in GENERIC]
 _WORDY = {"name", "host", "git", "folder", "file", "field", "value"}
-KNOWN_PASS = {"field", "value"}  # the only session kinds a word of thimble's own source lets pass
+KNOWN_PASS = {"field", "value"}  # the session kinds a word of thimble's own source lets pass, with bare names (_passes)
+
+
+def _passes(kind: str, s: str) -> bool:
+    """Whether a word of thimble's own source lets this term pass: a field or a value, or a file's or folder's bare
+    name with no extension (tests, prompt), which thimble's code is full of; never a whole file name or a person's."""
+    return kind in KNOWN_PASS or (kind in ("file", "folder") and "." not in s)
 
 
 def _finds(text: str, found: str, kind: str) -> Iterable[tuple[int, int]]:
@@ -159,7 +166,7 @@ def scan(parts: dict[str, str], session: dict[str, Iterable[str]] | None = None,
                 terms.append((kind, x))
     terms.sort(key=lambda kt: -len(kt[1]))
     present = {where: [(k, x) for k, x in terms if next(iter(_finds(text, x, k)), None)] for where, text in parts.items()}
-    generic_words = sorted({x for p in present.values() for k, x in p if k in KNOWN_PASS} - allowed)
+    generic_words = sorted({x for p in present.values() for k, x in p if _passes(k, x)} - allowed)
     public = known(generic_words) if (known and generic_words) else set()
     hits: list[dict] = []
     for where, text in parts.items():
@@ -169,7 +176,7 @@ def scan(parts: dict[str, str], session: dict[str, Iterable[str]] | None = None,
         taken = [False] * len(text)
         listed: set[str] = set()
         for kind, s in cand:
-            if s in allowed or s in listed or (kind in KNOWN_PASS and s in public):
+            if s in allowed or s in listed or (_passes(kind, s) and s in public):
                 continue
             spans = [(a, b) for a, b in _finds(text, s, kind) if not any(taken[a:b])]
             if not spans:

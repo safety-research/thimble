@@ -57,18 +57,18 @@ def test_session_terms_whole_words_and_placeholders():
     assert "‹folder›" not in out  # the folder's name went with its whole path
 
 
-def test_field_names_and_values_in_thimble_source_pass_but_the_persons_names_never_do():
-    # "label" is a field of the person's data and a word of thimble's source; board.jsonl is the person's data file and
-    # also a name in thimble's source (its samples): the field passes, the file is a hit wherever it stands
+def test_words_of_thimble_source_pass_but_whole_file_names_never_do():
+    # "label" is a field of the person's data and a word of thimble's source, and so is the folder name "support";
+    # board.jsonl is the person's data file and also a name in thimble's source (its samples): the field and the
+    # folder's bare name pass, the whole file name is a hit wherever it stands
     session = {"field": ["label", "queue_owner"], "value": ["open"], "file": ["board.jsonl"], "folder": ["support"]}
     known = lambda terms: {"label", "open", "board.jsonl", "support"} & set(terms)  # noqa: E731
     seen: list[list[str]] = []
     hits, _ = P.scan({"issue": "The label of board.jsonl in support is open; queue_owner.", "branch": "fix/board.jsonl",
                       "commit": "Read board.jsonl"}, session, lambda t: (seen.append(t), known(t))[1], use_gitleaks=False)
     assert sorted((h["where"], h["found"]) for h in hits) == [
-        ("branch", "board.jsonl"), ("commit", "board.jsonl"), ("issue", "board.jsonl"), ("issue", "queue_owner"),
-        ("issue", "support")]
-    assert all(set(t) <= {"label", "queue_owner", "open"} for t in seen)  # only field names and values are asked about
+        ("branch", "board.jsonl"), ("commit", "board.jsonl"), ("issue", "board.jsonl"), ("issue", "queue_owner")]
+    assert all(set(t) <= {"label", "queue_owner", "open", "support"} for t in seen)  # never the whole file name
     out = P.apply({"issue": "The label of board.jsonl is open."}, [h for h in hits if h["where"] == "issue"])["issue"]
     assert out == "The label of ‹data file› is open."
 

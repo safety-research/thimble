@@ -170,7 +170,10 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
   if (v.verb === 'try') {
     const r = await kernel($, ['use', f.slug])
     void refreshFixes($).catch(() => undefined)
-    if (r.ok) $.clock.after(0, () => { void reloadFor($, r.out) })
+    if (r.ok) {
+      await noteForClaude($, `The analyst turned the fix ${f.slug} on again. ${lastLine(r.out)}`)
+      $.clock.after(0, () => { void reloadFor($, r.out) })
+    }
     return { text: r.ok ? lastLine(r.out) : `× ${cut(lastLine(r.out) || 'thimble fix use gave nothing', 240)}` }
   }
   // submit, a moment after the command has answered: the review opens, or Claude writes the draft first
