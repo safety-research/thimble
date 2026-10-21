@@ -168,11 +168,57 @@ def test_file_mode_writes_one_markdown_file(env: Path):
     assert FX.load(fx["slug"])["status"] == "saved"
 
 
-def test_use_from_a_plugin_dir_session_says_how_and_installs_nothing(env: Path, tmp_path: Path, monkeypatch):
+def test_use_from_a_plugin_dir_session_says_the_one_command_and_installs_nothing(env: Path, tmp_path: Path, monkeypatch):
     # this checkout's plugin is not in Claude Code's plugins folder: the session was started with --plugin-dir
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     assert FX.from_plugin_dir()
     fx = FX.new("Coverage opens a group")
-    with pytest.raises(FX.FixError, match=r"--plugin-dir .*/worktree/plugin"):
-        FX.use(fx["slug"])
-    assert FX.active_slug() is None and FX.load(fx["slug"])["status"] == "working"
+    said = FX.use(fx["slug"])
+    assert f"claude --continue --plugin-dir {fx['worktree']}/plugin" in said
+    assert FX.active_slug() is None and FX.load(fx["slug"])["status"] == "ready"
+    # a session started again with the copy's folder runs the fix; undo says the command back to the clone
+    monkeypatch.setattr(FX, "PLUGIN", Path(fx["worktree"]) / "plugin")
+    assert FX.fix_of_plugin() == fx["slug"] and FX.latest() == fx["slug"]
+    assert "already runs" in FX.use(fx["slug"]) and FX.load(fx["slug"])["status"] == "applied"
+    back = FX.undo()
+    assert f"--plugin-dir {fx['source']}/plugin" in back and FX.load(fx["slug"])["status"] == "ready"
+
+
+CLAUDE_STUB = """#!/bin/sh
+echo "$*" >> "{log}"
+"""
+
+
+def test_a_folder_marketplace_install_turns_the_copy_on_and_off_like_a_github_one(env: Path, tmp_path: Path, monkeypatch):
+    # scripts/install.sh --local: the marketplace is the clone itself, and Claude Code reads its plugin/ in place
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    clone = tmp_path / "src"
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"source": {"source": "directory", "path": str(clone)}}}))
+    (cc / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {"thimble@thimble": [{"installPath": str(cc / "x")}]}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
+    stub = tmp_path / "claude-stub"
+    stub.write_text(CLAUDE_STUB.format(log=tmp_path / "claude.log"))
+    stub.chmod(0o755)
+    monkeypatch.setenv("THIMBLE_CLAUDE", str(stub))
+    monkeypatch.setattr(FX, "PLUGIN", clone / "plugin")
+    assert not FX.from_plugin_dir()
+    fx = FX.new("Claims newest first", "feature")
+    assert "/reload-plugins" in FX.use(fx["slug"]) and FX.active_slug() == fx["slug"] and FX.latest() == fx["slug"]
+    assert FX.undo().startswith(f"thimble is back to the release from {clone}")
+    assert log(env, "claude") == [f"plugin marketplace add {fx['worktree']}", f"plugin marketplace add {clone}",
+                                  "plugin marketplace update thimble", "plugin update thimble@thimble"]
+    assert FX.active_slug() is None
+
+
+def test_a_copy_with_no_change_is_shared_as_a_request_alone(env: Path):
+    fx = FX.new("Show the label count per file", "feature")
+    draft = env / "d.md"
+    draft.write_text("# Show the label count per file\n\nThe person wants each file's label count in Files.\n")
+    r = FX.draft(fx["slug"], str(draft), None, terms={})
+    share = FX.fix_dir(fx["slug"]) / "share"
+    assert not r["change"] and (share / "issue.md").exists() and not (share / "pr.md").exists()
+    assert "a request from a tester" in (share / "issue.md").read_text()
+    ask = json.loads((share / "ask.json").read_text())["id"]
+    assert FX.send(fx["slug"], "send", ask) == ["The person sent the report under their GitHub login: issue https://example.invalid/test-user/issues/2."]
+    assert not any(l.startswith(("repo fork", "pr create")) for l in log(env, "gh")) and log(env, "git") == []

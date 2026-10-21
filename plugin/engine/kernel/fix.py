@@ -247,27 +247,56 @@ RELOAD = "It takes effect after /reload-plugins in the running session, or in a 
 
 
 def from_plugin_dir() -> bool:
-    """Whether this thimble runs from a folder given to Claude Code with --plugin-dir, not from an installed copy in
-    Claude Code's plugins folder. Claude Code loads such a folder before an installed plugin of the same name."""
+    """Whether this thimble runs from a folder given to Claude Code with --plugin-dir, not from an install. Claude Code
+    loads such a folder before an installed plugin of the same name, for the whole session. An install runs either
+    Claude Code's own copy in its plugins folder (a GitHub marketplace) or the plugin folder of a folder marketplace in
+    place (scripts/install.sh --local, or a fix's copy that `use` turned on)."""
+    here = PLUGIN.resolve()
     try:
-        PLUGIN.resolve().relative_to(plugins_dir().resolve())
+        here.relative_to(plugins_dir().resolve())
         return False
     except ValueError:
-        return True
+        pass
+    src = _marketplace_source()
+    if src and not re.match(r"^[a-z]+://|^[\w.-]+/[\w.-]+$", str(src)):
+        try:
+            if (Path(src).expanduser().resolve() / "plugin") == here and _installed():
+                return False
+        except OSError:
+            pass
+    return True
+
+
+def fix_of_plugin() -> str | None:
+    """The fix whose copy this thimble runs from, or None when it runs the release."""
+    try:
+        rel = PLUGIN.resolve().relative_to(fixes_home().resolve())
+    except ValueError:
+        return None
+    parts = rel.parts
+    return parts[0] if len(parts) >= 3 and parts[1] == "worktree" else None
+
+
+def _restart(folder: str | Path) -> str:
+    return f"claude --continue --plugin-dir {folder}"
 
 
 def use(slug: str) -> str:
-    """Point Claude Code's thimble marketplace at the fix's copy, as scripts/install.sh --local does with a checkout.
-    Claude Code reads a plugin from a folder marketplace in place, so later edits in the copy load on the next
-    /reload-plugins too. A session that loads thimble with --plugin-dir keeps that folder whatever is installed, so then
-    nothing is installed and the person starts Claude Code with the copy's folder instead."""
+    """Turn the fix's copy on. An install (from GitHub, or a folder marketplace such as scripts/install.sh --local):
+    point Claude Code's thimble marketplace at the copy, as install.sh --local does with a checkout. Claude Code reads a
+    plugin from a folder marketplace in place, so later edits in the copy load on the next /reload-plugins too.
+    A session started with --plugin-dir keeps that folder until it quits, whatever is installed: then nothing is
+    installed, and the one line says the command that starts the session again with the copy."""
     fx = load(slug)
     if not fx.get("worktree"):
-        raise FixError(f"{slug} is a report: it has no code to load")
+        raise FixError(f"{slug} is a request with no change: there is nothing to turn on")
     if from_plugin_dir():
-        raise FixError(f"this session loads thimble with --plugin-dir {PLUGIN}, which Claude Code uses before any "
-                       f"installed thimble, so the fix cannot load here. Start Claude Code again with --plugin-dir "
-                       f"{fx['worktree']}/plugin to use it, and with --plugin-dir {PLUGIN} to go back")
+        fx["status"] = "applied" if fix_of_plugin() == slug else "ready"
+        save(fx)
+        if fix_of_plugin() == slug:
+            return f"This session already runs the fix {slug}."
+        return (f"This session loads thimble with --plugin-dir, which Claude Code keeps until it quits. To try the fix, "
+                f"quit and run: {_restart(Path(fx['worktree']) / 'plugin')}")
     prev = _marketplace_source()
     rel = fixes_home() / "release.json"
     if prev and not str(prev).startswith(str(fixes_home())):
@@ -282,6 +311,17 @@ def use(slug: str) -> str:
 
 
 def undo() -> str:
+    if from_plugin_dir():
+        slug = fix_of_plugin()
+        if not slug:
+            return "This session runs no fix: thimble is the one --plugin-dir names."
+        fx = load(slug)
+        if fx["status"] == "applied":
+            fx["status"] = "ready"
+            save(fx)
+        back = Path(fx.get("source") or "") / "plugin"
+        return (f"This session loads the fix with --plugin-dir, which Claude Code keeps until it quits. To go back to "
+                f"the release, quit and run: {_restart(back)}")
     slug = active_slug()
     prev = (read_json(fixes_home() / "release.json") or {}).get("source") or upstream()
     run([claude(), "plugin", "marketplace", "add", prev])
@@ -297,6 +337,15 @@ def undo() -> str:
             fx["status"] = "ready"
             save(fx)
     return f"thimble is back to the release from {prev}. {RELOAD}"
+
+
+def latest() -> str | None:
+    """The fix that `/thimble:fix submit` means: the one turned on, else the newest that was neither sent nor dropped."""
+    a = active_slug() or fix_of_plugin()
+    if a and fix_dir(a).is_dir():
+        return a
+    open_ = [(load(s).get("created") or 0, s) for s in all_slugs() if load(s).get("status") not in ("sent", "dropped", "merged")]
+    return max(open_)[1] if open_ else None
 
 
 # ------------------------------------------------------------------ the draft and its scan
@@ -444,44 +493,56 @@ def _write_share(fx: dict[str, Any], parts: dict[str, str], hits: list[dict]) ->
     out = P.apply(parts, hits)
     removed = sum(not h["kept"] for h in hits)
     foot = (f"\n\n---\nthimble {fx.get('version') or '?'} · {platform.system() or 'unknown OS'} · "
-            f"{'bug fix' if fx['kind'] == 'fix' else fx['kind']} from a tester\n"
+            f"{'a change' if 'pr' in out else 'a request'} from a tester\n"
             f"The privacy scan removed {removed} detail{'' if removed == 1 else 's'}, and the tester read this text "
             f"before it was sent.\n")
     (d / "issue.md").write_text(out["issue"].rstrip() + foot)
     if "pr" in out:
         (d / "pr.md").write_text(out["pr"].rstrip() + "\n")
         (d / "diff.patch").write_text(out.get("diff", ""))
+    else:
+        for name in ("pr.md", "diff.patch"):
+            (d / name).unlink(missing_ok=True)
     write_json(d / "scan.json", hits)
     fx["share_branch"] = "fix/" + _share_slug(out["issue"].splitlines()[0].lstrip("# "))
     return out
 
 
-def draft(slug: str, src: str, st: Store) -> dict[str, Any]:
+def draft(slug: str, src: str | None, st: Store | None, *, text: str | None = None,
+          terms: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    """Build the share from Claude's draft (the file `src`, or `text`): the issue, and when the copy has a change, the
+    pull request and its diff. A fix whose copy has no change goes out as an issue alone: a request. The scan's
+    session terms come from the kernel's records of the session (`st`), or from the caller (`terms`, the browser's)."""
     fx = load(slug)
-    try:
-        text = Path(src).read_text()
-    except OSError as e:
-        raise FixError(f"cannot read the draft {src}: {e.strerror}")
+    if text is None:
+        try:
+            text = Path(src or "").read_text()
+        except OSError as e:
+            raise FixError(f"cannot read the draft {src}: {e.strerror}")
     title, body, change = _split_draft(text, fx["title"])
     if not body:
         raise FixError("the draft has no issue text: write what happened, what was expected, and a reproduction on made-up data")
     parts = {"issue": f"# {title}\n\n{body}\n"}
-    if fx["kind"] != "report":
-        if not change:
-            raise FixError("the draft has no '## Change' section: add one that says what the change does and how it was tested")
+    diff = ""
+    if fx["kind"] != "report" and fx.get("worktree"):
         wt = Path(fx["worktree"])
         diff = _diff(wt, fx["base"])
-        if not diff.strip():
-            raise FixError(f"the copy has no change from the release yet ({wt})")
+    if diff.strip():
+        if not change:
+            raise FixError("the draft has no '## Change' section: add one that says what the change does and how it was tested")
         binary = re.findall(r"^Binary files (?:a/)?(\S+)", diff, re.M)
         if binary:
             raise FixError(f"the change has a binary file ({binary[0]}); a fix shares text changes only, so remove it or make it text")
         parts.update(pr=change + "\n", diff=diff, branch=fx["branch"],
                      commit=git("log", "--format=%B", f"{fx['base']}..HEAD", cwd=wt))
+    elif change:
+        # a request with no change: the "## Change" words, if any, belong to the issue
+        parts["issue"] = f"# {title}\n\n{body}\n\n{change}\n"
     repo_paths = [(str(PLUGIN) + os.sep, "plugin/")]
     if fx.get("worktree"):
         repo_paths.append((fx["worktree"] + os.sep, ""))
-    hits, notes = P.scan(parts, session_terms(st), _known(fx), repo_paths, allow=[fx.get("base") or ""])
+    hits, notes = P.scan(parts, terms if terms is not None else session_terms(st), _known(fx), repo_paths,
+                         allow=[fx.get("base") or ""])
     old = {(h["where"], h["found"]): h["kept"] for h in read_json(fix_dir(slug) / "share" / "scan.json") or []}
     for h in hits:
         h["kept"] = bool(old.get((h["where"], h["found"]))) and h["kind"] not in P.NEVER_KEPT
@@ -493,9 +554,10 @@ def draft(slug: str, src: str, st: Store) -> dict[str, Any]:
     fx.pop("error", None)
     save(fx)
     removed = sum(not h["kept"] for h in hits)
-    st.emit({"kind": "fix_ask", "slug": slug, "ask": ask["id"], "fix_kind": fx["kind"], "title": fx["title"],
-             "removed": removed, "share": str(fix_dir(slug) / "share")})
-    return {"removed": removed, "notes": notes, "hits": hits}
+    if st is not None:
+        st.emit({"kind": "fix_ask", "slug": slug, "ask": ask["id"], "fix_kind": fx["kind"], "title": fx["title"],
+                 "removed": removed, "share": str(fix_dir(slug) / "share")})
+    return {"removed": removed, "notes": notes, "hits": hits, "change": bool(diff.strip())}
 
 
 def _check_ask(slug: str, ask_id: str | None) -> dict[str, Any]:
@@ -561,7 +623,7 @@ def _send(fx: dict[str, Any]) -> list[str]:
     fx["login"] = login
     lines = []
     issue_body = (share / "issue.md").read_text().split("\n", 1)[1].lstrip("\n")
-    if fx["kind"] != "report":
+    if (share / "pr.md").exists():
         wt = Path(fx["worktree"])
         noreply = f"{uid}+{login}@users.noreply.github.com"
         run([gh(), "repo", "fork", repo, "--clone=false"])
