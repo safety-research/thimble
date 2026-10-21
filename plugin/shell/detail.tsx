@@ -407,9 +407,10 @@ async function closed($: Engine, keep = false): Promise<void> {
   convBy = 0
   drawnAbove = ''
   moveGen++
-  await popFocus($, 'detail')
-  // what the panel showed, and the way back through it, end with it (kept when it could not be placed: /threads opens it)
+  // what the panel showed, and the way back through it, end with it (kept when it could not be placed: /threads opens it).
+  // First, so a drawing of the panel while it closes finds it showing nothing (noticeOpen)
   if (!keep) await sideClosed($)
+  await popFocus($, 'detail')
   // the labels the person checked are counted again, their cards drawn again, and Claude hears of the checks
   $.clock.after(0, () => { void checksDone($).catch(() => undefined) })
 }
@@ -1664,6 +1665,14 @@ export function detailIsOpen(): boolean {
 export function markOpen(open: boolean): void {
   isOpen = open
   setThreadWindow(open)
+}
+
+/** A drawing of the panel: the panel is open again in this module's memory only while the side state holds what it
+ *  shows and Claude Code lists it as shown (a reload of the module while it stayed open). A drawing that comes after
+ *  the panel closed, such as a slow read's redraw, finds neither, so a closed panel never holds the keys or the bar. */
+export async function noticeOpen($: Engine): Promise<void> {
+  if (isOpen) return
+  if ((await sideNow($)) && (await paneShown($))) markOpen(true)
 }
 
 /** For tests: the module's memory, cleared. */

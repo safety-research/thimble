@@ -31,7 +31,7 @@ import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { bodyRows, cardFrame, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
-import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
+import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, noteViewport, noticeOpen, openDetailPane, registerDetail } from './detail'
 import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withGone, withHeal, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, partLines, recordRefs, refsKey, regionMeta, regionRefs, splitsNote } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList, threadOf } from './thread'
@@ -3638,7 +3638,7 @@ export const registerShell: Register = (on, options) => {
   // the side panel (detail.tsx)
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     try {
-      markOpen(true)
+      await noticeOpen($)
       return await detailPane($, e)
     } catch (err) {
       // a detail that cannot draw says so in one plain line

@@ -3,6 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { register } from 'node:module'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, linksIn, placeOf, sourceCard } from '../cards.js'
 import { linkRuns } from '../carddetail.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
@@ -35,6 +36,42 @@ test('links inside code, and links to the web, are not marks', () => {
   const marks = linkMarks(t)
   assert.equal(marks.length, 1)
   assert.equal(marks[0].label, 'c')
+})
+
+// the message's drawing (view.ts), loaded as TypeScript: its imports name modules without their extension, as the plugin's
+// bundler reads them, so a resolve hook adds `.ts`. Skipped on a Node that cannot run TypeScript
+register('data:text/javascript,' + encodeURIComponent('export async function resolve(s, c, next) { try { return await next(s, c) } catch (e) { if (/^\\.\\.?\\//.test(s) && !/\\.[cm]?[jt]sx?$/.test(s)) return next(s + ".ts", c); throw e } }'))
+const view = await import('../view.ts').catch(() => null)
+// Claude Code's elements as plain nodes: each a name and its props
+const els = new Proxy({}, { get: (_, type) => props => ({ type, props }) })
+const nodes = n => (n == null ? [] : Array.isArray(n) ? n.flatMap(nodes) : typeof n === 'object' ? [n, ...nodes(n.props?.children)] : [])
+
+test('a fenced block keeps its lines: a link in it is no mark, an explainer never lands in it, and the reply draws it as written', { skip: !view && 'this Node runs no TypeScript' }, () => {
+  const t = 'A citation is checked in three steps:\n\n```\n┌ claim ┐ ──▶ ┌ query ┐\n│ [352](r3#outcome=approved@n) row sets │\n└───────┘     └───────┘\n```\n\nThe [check](q1#row=1@n) then runs.'
+  // the fence holds all three lines: its link is no mark, and an explainer's term said only inside it has no place
+  assert.deepEqual(linkMarks(t).map(m => m.label), ['check'])
+  assert.equal(anchorTerm(t, 'row sets'), null)
+  const code = blocks(t).filter(b => b.type === 'code')
+  assert.equal(code.length, 1)
+  assert.deepEqual(t.slice(code[0].start, code[0].end).split('\n').slice(1, -1), ['┌ claim ┐ ──▶ ┌ query ┐', '│ [352](r3#outcome=approved@n) row sets │', '└───────┘     └───────┘'])
+  // a record whose marks still fall in the block (written before): the block is Claude Code's Markdown, its lines whole
+  const rec = newRecord({ row: 'r1', session: 's1', text: t })
+  const inBlock = t.indexOf('[352]')
+  rec.marks = [{ kind: 'cite', start: inBlock, end: t.indexOf(')', inBlock) + 1, ref: 'r3#outcome=approved@n', label: '352' }, ...rec.marks]
+  const drawn = nodes(view.messageEl(els, { rec, key: 'm', cols: 40, first: true, theme: 'dark', focus: null, onMark: () => {} }))
+  const md = drawn.filter(n => n.type === 'Markdown').map(n => n.props.text).join('\n')
+  assert.match(md, /```\n┌ claim ┐ ──▶ ┌ query ┐\n│ \[352\]\(r3#outcome=approved@n\) row sets │\n└───────┘     └───────┘\n```/)
+  assert.ok(!drawn.some(n => n.type === 'Button' && /352/.test(n.props.label)), 'no press on the link in the block')
+})
+
+test('a mark wider than the line breaks at its spaces, each piece still the mark; only a word wider than the line is cut', () => {
+  const heads = 'This affects every multi-line code block in a reply.'
+  const lines = wrapRuns([{ s: heads, mark: 0 }], 21)
+  assert.deepEqual(lines.map(l => runsText(l)), ['This affects every', 'multi-line code block', 'in a reply.'])
+  assert.ok(lines.every(l => l.length === 1 && l[0].mark === 0))
+  // a mark that fits stays whole on the next line; a single word wider than the line is cut by cells
+  assert.deepEqual(wrapRuns([{ s: 'Mostly from ' }, { s: 'the June 18 burst', mark: 1 }], 21).map(l => runsText(l)), ['Mostly from', 'the June 18 burst'])
+  assert.deepEqual(wrapRuns([{ s: 'abcdefghijklmnopqrstuvwxyz', mark: 2 }], 10).map(l => runsText(l)), ['abcdefghij', 'klmnopqrst', 'uvwxyz'])
 })
 
 const draw = (part, w = 90, h = 9) => { const d = runProgram(part, { w, h }); assert.equal(d.error, undefined, JSON.stringify(d.error)); return renderTerm(d, { w }) }

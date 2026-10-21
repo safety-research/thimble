@@ -230,10 +230,13 @@ export function messageEl(els: Any, given: MessageOpts): Any {
     rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot, rows.length === 0 ? o.lead : null, o.theme, o.leadColor, ask), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
+  // a block laid out here: one that holds marks. A code block never is: its lines stay as written, in Claude Code's
+  // Markdown, whatever lies in it
+  const laidOut = (b: Any) => b.type !== 'code' && marksIn(o.rec.marks, b.start, b.end).length > 0
   let i = 0
   while (i < bs.length) {
     const b = bs[i]
-    if (marksIn(o.rec.marks, b.start, b.end).length) {
+    if (laidOut(b)) {
       push(blockLines(els, o, text, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i))
       i++
       continue
@@ -242,7 +245,7 @@ export function messageEl(els: Any, given: MessageOpts): Any {
     // passage: it ends at a blank line (but a list's items stay together) and before a heading
     const joins = (a: Any, n: Any) => !o.passages || (n.type !== 'heading' && (!n.gap || (a.type === 'item' && n.type === 'item')))
     let j = i
-    while (j + 1 < bs.length && !marksIn(o.rec.marks, bs[j + 1].start, bs[j + 1].end).length && joins(bs[j], bs[j + 1])) j++
+    while (j + 1 < bs.length && !laidOut(bs[j + 1]) && joins(bs[j], bs[j + 1])) j++
     push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0, passageOf(i, j))
     i = j + 1
   }

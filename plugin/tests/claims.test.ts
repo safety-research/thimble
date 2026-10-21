@@ -32,7 +32,7 @@ const FORK2 = { notes: [], verbs: {}, glosses: [], claims: [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown; labels?: Any[] } = {}) {
+function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown; labels?: Any[]; slow?: { gate: Promise<void> | null } } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
@@ -55,8 +55,11 @@ function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown; la
     if (e.argv.some(a => a.endsWith('estimate.mjs'))) out = JSON.stringify({ kind: 'runs', offer: { what: '3 trials', minutes: 4, tokens: 310000, read: 'trials/', detail: '3 transcripts · 2 KB' } })
     else if (e.argv.some(a => a.endsWith('objects.mjs'))) out = '[]'
     else if (e.argv.includes('label')) out = JSON.stringify(e.argv.includes('--records') ? { records: [{ i: 0, ref: 'revisions.jsonl#L3', value: 'yes', words: 'Kestrel saved Lexicon', by: 'regex' }] } : o.labels ?? [])
-    else if (e.argv.includes('coverage')) out = e.argv.includes('--json') ? JSON.stringify(o.cov ?? {}) : 'Coverage of this session · 4 source files'
-    else if (e.argv.includes('resolve')) out = JSON.stringify({ ref: e.argv[e.argv.indexOf('resolve') + 1], chain: [{ step: 'query', id: 'q4', about: 'share by user', value: '41%' }], rows: ['revisions.jsonl#L28-31'], count: 4, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }], notes: [] })
+    else if (e.argv.includes('coverage')) {
+      out = e.argv.includes('--json') ? JSON.stringify(o.cov ?? {}) : 'Coverage of this session · 4 source files'
+      // a large folder: the read answers only when the test opens the gate
+      if (o.slow?.gate) return o.slow.gate.then(() => ({ value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+    } else if (e.argv.includes('resolve')) out = JSON.stringify({ ref: e.argv[e.argv.indexOf('resolve') + 1], chain: [{ step: 'query', id: 'q4', about: 'share by user', value: '41%' }], rows: ['revisions.jsonl#L28-31'], count: 4, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }], notes: [] })
     else if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: { kit: 1, w: 40, h: 1, root: { t: 'text', runs: [{ s: 'rows', tone: 'ink' }] }, cites: {}, examples: {}, regions: [], warnings: [] } })
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -398,6 +401,41 @@ test('Coverage: ↵ on an untouched file opens it on the file, and the bar says 
   expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
   expect(await bar()).toContain('esc back')
   expect(await bar()).not.toContain('esc close')
+})
+
+// On a large folder the coverage read takes seconds: the pane closes before it ends. The read's end, and a drawing of
+// the pane that comes after the close, leave the panel closed: the bar names r again, never `esc close`
+test('Coverage closed while its read still runs: the bar says r again, and a later drawing does not reopen it', async ($, on) => {
+  const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 14, bodyColumns: 160, scroll: { offset: 0, bodyRows: 14 }, view: {} }, viewport: { columns: 160, rows: 40, isFullscreen: true } } as never
+  const slow = { gate: null as Promise<void> | null }
+  const w = world(on, [FORK1], { cov: COV, slow })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  let done = () => {}
+  slow.gate = new Promise<void>(r => { done = r })
+  await press($, w.clock, key('r'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  const bar = async () => { await $.ui.render(BAND); await w.clock.settle(); return textOf(await $.ui.render(BAND)) }
+  expect(await bar()).toContain('esc close')
+  // the panel closes: Claude Code takes the pane away, and the module hears of it (here from the next prompt, which
+  // finds the pane gone; esc's close runs the same closed())
+  const band = await $.ui.mount(BAND)
+  await band.press({ key: 'count-cov' })
+  await w.clock.settle()
+  expect(w.closed).toContain('object')
+  await $.prompt.submit({ text: 'and the other folder?', origin: { kind: 'composer' } } as never)
+  await w.clock.settle()
+  expect(await bar()).not.toContain('esc close')
+  // the read ends after the close, and Claude Code draws the pane once more
+  done()
+  await w.clock.advance(100)
+  await w.clock.settle()
+  await $.ui.render(PANE)
+  await w.clock.settle()
+  const line = await bar()
+  expect(line).not.toContain('esc close')
+  expect(line).toContain('r coverage')
 })
 
 // Claude Code gives ← and → to the prompt even while a pane holds the keys (its panes bind ↑ ↓ tab ↵ esc, never ← →),

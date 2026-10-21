@@ -67,8 +67,10 @@ export async function dockShown($: Engine, pane: Dock): Promise<boolean> {
   return v?.kind === 'pane' && v.pane === pane
 }
 
-/** Draw the pane again (its program reads the stores anew). */
+/** Draw the pane again (its program reads the stores anew), while the side panel shows it: a read that ends after
+ *  the panel closed draws nothing (the pane reads the stores when it opens). */
 async function again($: Engine, pane: Dock): Promise<void> {
+  if (!(await dockShown($, pane))) return
   await redraw($, instance(pane, {}))
 }
 
