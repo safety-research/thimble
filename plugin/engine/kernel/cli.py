@@ -998,6 +998,7 @@ FIX_HELP = """Change thimble itself, or report a problem with it, from the sessi
         and prints where it is. A report has no copy.
     thimble fix status [SLUG]      the fixes, or one fix
     thimble fix use SLUG           loads the copy's plugin into the person's thimble
+    thimble fix title SLUG "TITLE" a new title, when a later round changed what the fix does
     thimble fix undo               goes back to the release
     thimble fix remove SLUG        turns the fix off when it is on, and deletes its copy and its record
     thimble fix follow [now]       replays the fix that is on onto the newest release, at most once a day; in the
@@ -1048,6 +1049,12 @@ def cmd_fix(a: argparse.Namespace) -> int:
                 return 2
             print(FX.use(a.args[0]))
             return 0
+        if a.verb == "title":
+            if len(a.args) < 2:
+                print('name the fix and its new title: thimble fix title SLUG "TITLE"')
+                return 2
+            print(FX.retitle(a.args[0], " ".join(a.args[1:])))
+            return 0
         if a.verb == "undo":
             print(FX.undo())
             return 0
@@ -1090,7 +1097,7 @@ def cmd_fix(a: argparse.Namespace) -> int:
     except FX.FixError as e:
         print(f"thimble fix {a.verb}: {e}")
         return 1
-    print(f"no verb {a.verb!r}: thimble fix new, status, use, undo, remove or draft")
+    print(f"no verb {a.verb!r}: thimble fix new, status, use, title, undo, remove or draft")
     return 2
 
 
@@ -1193,8 +1200,8 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_label)
     p = sub.add_parser("fix", help="change or report thimble itself", description=FIX_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter,
-                       usage="thimble fix {new,status,use,undo,remove,draft} ...")
-    p.add_argument("verb", metavar="{new,status,use,undo,remove,draft}")
+                       usage="thimble fix {new,status,use,title,undo,remove,draft} ...")
+    p.add_argument("verb", metavar="{new,status,use,title,undo,remove,draft}")
     p.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     p.add_argument("--kind", choices=FX.KINDS, default="fix", help="for new: fix (default), feature or report")
     p.add_argument("--from", dest="draft_file", metavar="FILE", help="for draft: the draft in markdown")
