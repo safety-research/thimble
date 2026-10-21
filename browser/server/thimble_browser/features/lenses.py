@@ -379,7 +379,7 @@ async def read(ws: str, *, chat: str | None = None, answer: str | None = None, c
         f"The texts to read:\n\n{places}\n\nWhich lens reads which text:\n{covers}"
     try:
         # the busy line above the chat's input box shows the reading while it runs (busy.py)
-        async with working(ws, "marking"):
+        async with working(ws, "adding explainers and details"):
             got = json.loads(await llm.complete(system, user, schema=_schema(active), effort="low") or "{}")
     except Exception as e:  # noqa: BLE001 — a failed reading leaves the texts as they are, and says so once
         log.warning("the lenses' reading failed: %s", llm.failure(e))

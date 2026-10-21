@@ -29,7 +29,7 @@ const TICK_MS = 120
 
 // what each model call is, as the bar says it, by its telemetry feature
 const WORDS: Record<string, string> = {
-  observer: 'reading the turn',
+  observer: 'adding explainers and details',
   'explain-expand': 'explaining',
   squeeze: 'rewriting',
   labels: 'labeling',
