@@ -108,3 +108,15 @@ test("a key that wraps keeps each mark on the line of its name", () => {
     for (const l of lines) expect(l).toMatch(/^■ [a-z]+( {3}■ [a-z]+)*$/)
   }
 })
+
+test('a plot key with more series than one line holds wraps onto more lines, so every series is named', () => {
+  const names = ['north depot', 'south depot', 'harbor', 'airport', 'rail yard', 'east market', 'old town']
+  const program = `return k.plot(${JSON.stringify(names)}.map((name, i) => ({ name, points: [1, 2, 3].map(x => [x, x * (i + 1)]) })), { h: 10 })`
+  const drawing = DrawKit.run(program, {}, { w: 50, h: 30, surface: 'browser', id: 'c4' }) as Drawing
+  const out = renderSvg(drawing, { cw: 7.8 })
+  const texts = [...out.svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)"[^>]*>(.*?)<\/text>/g)].map((m) => ({ y: +m[2], s: m[3].replace(/<[^>]+>/g, '') }))
+  const key = texts.filter((t) => names.includes(t.s))
+  expect(key.map((t) => t.s)).toEqual(names)
+  expect(new Set(key.map((t) => t.y)).size).toBeGreaterThan(1)
+  expect(out.svg.match(/<rect [^>]*width="12" height="3"/g)?.length).toBe(names.length)
+})

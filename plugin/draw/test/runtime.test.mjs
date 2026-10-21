@@ -168,3 +168,55 @@ test('k.want asks the host for data not in hand; the host runs the program again
   assert.equal(again.wants, undefined)
   assert.match(gridText(renderTerm(again, { w: 40 })), /6543 rows/)
 })
+
+test('k.fmt rounds halves up on the decimal digits a reply shows, not on the binary value', () => {
+  const f = globalThis.DrawKit.fmt
+  // 7.925 is 7.92499… in binary, so toFixed(2) reads 7.92 while a reply that cites it reads 7.93
+  assert.deepEqual([f(7.925, { dp: 2 }), f(-7.925, { dp: 2 }), f(1.005, { dp: 2 }), f(9.995, { dp: 2 })], ['7.93', '-7.93', '1.01', '10.00'])
+  assert.deepEqual([f(17.925), f(0.0012345), f(95.4321), f(1546)], ['17.93', '0.001235', '95.43', '1,546'])
+  assert.deepEqual([f(1150, { compact: true }), f(0.07925, { pct: true, dp: 2 })], ['1.2k', '7.93%'])
+})
+
+test('a share that is not zero never reads 0%', () => {
+  const f = globalThis.DrawKit.fmt
+  assert.deepEqual([f(7 / 8571, { pct: true, dp: 0 }), f(0.0004, { pct: true, dp: 1 }), f(0, { pct: true, dp: 0 }), f(0.006, { pct: true, dp: 0 })], ['<1%', '<0.1%', '0%', '1%'])
+  // the label card's note: 7 of 8,571 records
+  const d = runProgram({ id: 'share', program: "return k.bars([{ id: 'a', label: 'yes', value: 7, note: k.fmt(7 / 8571, { pct: true, dp: 0 }) }, { id: 'b', label: 'no', value: 8564, note: k.fmt(8564 / 8571, { pct: true, dp: 0 }) }])", data: {} }, { w: 60, h: 10 })
+  const t = gridText(renderTerm(d, { w: 60 }))
+  assert.match(t, /yes.*<1%/)
+  assert.doesNotMatch(t, / 0%/)
+})
+
+test('a flow\'s boxes widen to show their notes whole when the frame has room', () => {
+  const nodes = [
+    { id: 'a', label: 'write step', note: 'packs the order, checks the totals, writes the batch file' },
+    { id: 'b', label: 'pickup()', note: 'after each tick, reads new batches and sorts them' },
+  ]
+  const graph = o => `return k.graph({ nodes: ${JSON.stringify(nodes)}, edges: [{ from: 'a', to: 'b' }] }, ${JSON.stringify(o)})`
+  const draw = (o, w) => { const d = runProgram({ id: 'flow', program: graph(o), data: {} }, { w, h: 40 }); return { d, t: gridText(renderTerm(d, { w })) } }
+  const wide = draw({ dir: 'down' }, 100)
+  assert.equal(wide.d.error, undefined)
+  assert.doesNotMatch(wide.t, /…/)
+  assert.match(wide.t.replace(/[│\s]+/g, ' '), /writes the batch file/)
+  // a width the program set is kept, and a narrow frame still fits, its notes cut as before
+  assert.match(draw({ dir: 'down', nodeW: 18 }, 100).t, /…/)
+  const narrow = draw({ dir: 'down' }, 26)
+  assert.ok(narrow.t.split('\n').every(l => l.length <= 26) && !narrow.d.warnings.some(w => /cut at the right/.test(w)))
+})
+
+test('a plot key with more series than its row holds wraps onto more rows, so every series is named', () => {
+  const names = ['north depot', 'south depot', 'harbor', 'airport', 'rail yard', 'east market', 'old town']
+  const program = `return k.plot(data.names.map((name, i) => ({ name, points: [1, 2, 3].map(x => [x, x * (i + 1)]) })), { h: 10 })`
+  for (const w of [30, 60]) {
+    const d = runProgram({ id: 'key', program, data: { names } }, { w, h: 30 })
+    const g = renderTerm(d, { w })
+    const t = gridText(g)
+    for (const n of names) assert.match(t, new RegExp('━ ' + n), `${n} at ${w}`)
+    assert.ok(t.split('\n').every(l => l.trimEnd().length <= w))
+  }
+  // a name wider than the row is cut with …, and said in cut
+  const long = runProgram({ id: 'key', program, data: { names: ['a depot whose name runs past the row', 'b'] } }, { w: 24, h: 30 })
+  const g = renderTerm(long, { w: 24 })
+  assert.match(gridText(g), /━ a depot.*…/)
+  assert.deepEqual(g.cut.filter(c => c.k === 'key').map(c => c.s), ['a depot whose name runs past the row'])
+})

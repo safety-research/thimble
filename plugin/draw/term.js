@@ -9,8 +9,9 @@
 //   - a plot's lines are braille dots, two across and four down per cell, so a line stays thin; where two series
 //     share a cell it takes the color of the one listed first; a dot is four braille dots. The axis is ┤ └ ┴ with
 //     round values, a free row between two y labels, and a value on the same row as its label; a plot keeps at least
-//     five rows however short the program asked for. The y label and the legend share the top row, and the legend
-//     shows each series' mark as the plot draws it (━ for a line, ⠶ for dots). The x label follows the last tick's
+//     five rows however short the program asked for. The y label and the legend share the top row when the legend
+//     fits there, else the legend takes as many rows under the axis as its series need, and it shows each series'
+//     mark as the plot draws it (━ for a line, ⠶ for dots). The x label follows the last tick's
 //     value, or has a row of its own when it does not fit there, cut with … only when it is wider than the plot;
 //   - a table is padded columns, numbers right-aligned, the widest text column shrinking first;
 //   - unseen data is ▒ (a medium shade), never blank, so a gap reads as a gap;
@@ -562,14 +563,29 @@ function paintPlot(n, g, x, y, w, cx, mark) {
   let ymin = isFinite(ys.min) ? ys.min : yv.length ? Math.min(...yv) : 0
   let ymax = isFinite(ys.max) ? ys.max : yv.length ? Math.max(...yv) : 1
   if (ymax === ymin) ymax = ymin + 1
-  // the legend: one entry per named series, on the top row beside the y label when it fits there, else under the axis
+  // the legend: one entry per named series, on the top row beside the y label when it fits there, else under the axis,
+  // on as many rows as its entries take, so no series goes unnamed
   const legend = n.legend !== false && (S.length > 1 || S.some(s => s.name))
   const entries = legend ? S.map(s => ({ s, w: 2 + len(s.name || '') })) : []
   const legendW = entries.reduce((t, e) => t + e.w, 0) + Math.max(0, entries.length - 1) * 3
   const ylab = ys.label || ''
   const top = ylab || legend ? 1 : 0
   const legendTop = legend && (ylab ? len(ylab) + 3 : 0) + legendW <= w
-  const bottom = legend && !legendTop ? 1 : 0
+  let bottom = legend && !legendTop ? 1 : 0
+  // the legend under the axis in rows of `room` cells: each entry {s, name, at}, a name wider than a row cut with …
+  const keyRows = room => {
+    const rows = [[]]
+    let end = 0
+    entries.forEach(e => {
+      let name = e.s.name || ''
+      if (2 + len(name) > room) name = Array.from(name).slice(0, Math.max(0, room - 3)).join('') + '…'
+      const at = end ? end + 3 : 0
+      if (end && at + 2 + len(name) > room) { rows.push([{ s: e.s, name, at: 0 }]); end = 2 + len(name); return }
+      rows[rows.length - 1].push({ s: e.s, name, at })
+      end = at + 2 + len(name)
+    })
+    return rows
+  }
   // the rows of plot and the y axis's round values, for `xrow` rows given to the x label
   const ymin0 = ymin, ymax0 = ymax
   const layoutY = xrow => {
@@ -628,6 +644,8 @@ function paintPlot(n, g, x, y, w, cx, mark) {
   let L = layoutY(0)
   const xrow = xlab && w - len(xlab) <= placeX(L.yw + 1, L.pw).lastEnd + 2 ? 1 : 0
   if (xrow) L = layoutY(1)
+  let rows = bottom ? keyRows(w - L.yw - 1) : []
+  if (rows.length > 1) { bottom = rows.length; L = layoutY(xrow); rows = keyRows(w - L.yw - 1); bottom = rows.length }
   const { ph, yAt, ylabels, yw, pw } = L
   ymin = L.fitted.lo; ymax = L.fitted.hi
   const yticks = L.fitted.ts
@@ -683,18 +701,19 @@ function paintPlot(n, g, x, y, w, cx, mark) {
     g.markArea(x + ox, y + oy, pw, ph)
   }
   // legend, one entry per series; a series with an id is a region (its legend entry and the plot area)
-  const ly = legendTop ? y : y + h - 1
-  let lx = legendTop ? x + w - legendW : x + ox
+  const keyAt = new Map()
+  if (legendTop) { let lx = x + w - legendW; entries.forEach(e => { keyAt.set(e.s, { x: lx, y, name: e.s.name || '' }); lx += e.w + 3 }) }
+  else rows.forEach((row, r) => row.forEach(e => keyAt.set(e.s, { x: x + ox + e.at, y: y + h - bottom + r, name: e.name })))
   S.forEach(s => {
     if (s.region) mark({ k: 'region', id: s.region })
     mark({ k: 'series', name: s.name, n: s.pts.length })
-    const area = () => { if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: x + ox, y: y + oy, w: pw, h: ph }) }
-    if (!legend) { area(); return }
-    const name = s.name || ''
-    if (lx + 2 + len(name) > x + w) { area(); return }
-    if (!g.dry) { g.put(lx, ly, asDots(s) ? '⠶' : '━', s.tone); g.str(lx + 2, ly, name, s.tone) }
-    if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: lx, y: ly, w: 2 + len(name), h: 1 })
-    lx += 2 + len(name) + 3
+    const at = keyAt.get(s)
+    if (!at) { if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: x + ox, y: y + oy, w: pw, h: ph }); return }
+    if (!g.dry) {
+      g.put(at.x, at.y, asDots(s) ? '⠶' : '━', s.tone); g.str(at.x + 2, at.y, at.name, s.tone)
+      if (at.name !== (s.name || '')) cx.cut.push({ k: 'key', s: s.name })
+    }
+    if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: at.x, y: at.y, w: 2 + len(at.name), h: 1 })
   })
   return h
 }
