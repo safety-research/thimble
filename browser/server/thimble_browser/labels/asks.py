@@ -101,6 +101,12 @@ def calls_line(est: dict[str, Any]) -> str:
     return E.calls_line(est["calls"])
 
 
+def choices() -> tuple[str, str, str]:
+    """The ask's three buttons as the page writes them (frontend chat/LabelRun.tsx, AskChoices), so that what Claude
+    reads names what the analyst sees."""
+    return "Run all", f"Run on a sample of {SAMPLE:,}", "Cancel"
+
+
 # ---- the chat's records
 
 def _asks_dir(ws: str) -> Path:

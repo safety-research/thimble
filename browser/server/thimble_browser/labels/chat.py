@@ -133,11 +133,12 @@ async def apply_label(t: tools.Tools, args: dict[str, Any]) -> Result:
 def asked(concept: dict[str, Any], card: str, est: dict[str, Any], where: str) -> str:
     """apply_label's answer when the run waits for the analyst's go-ahead."""
     cid = concept["id"]
+    run_all, sample, cancel = asks.choices()
     return (f"Defined the label {concept['name']} [↗](concept:{cid}); its card is card:{card}. It has not run. "
             f"{asks.size_line(concept, est, where)}, in {asks.calls_line(est)}. That is "
-            f"the analyst's time and money, so the chat asks them to run it on every one, on a random sample of "
-            f"{asks.SAMPLE}, or not at all. Their choice, and the counts once a run ends, reach you with their next "
-            f"message. Answer now from what you have, such as a trial's records or what you computed, and say that "
+            f"the analyst's time and money, so the chat asks them first, with three buttons: \"{run_all}\", "
+            f"\"{sample}\" (chosen at random) and \"{cancel}\". Their choice, and the counts once a run ends, reach "
+            f"you with their next message. Answer now from what you have, such as a trial's records or what you computed, and say that "
             f"the label waits for their choice.")
 
 
