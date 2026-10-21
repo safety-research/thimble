@@ -62,8 +62,9 @@ export type MessageOpts = {
 export type Passage = { text: string; label: string }
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
-function runText(els: Any, r: Run, dim = false, ink: string | null = null) {
+function runText(els: Any, r: Run, dim = false, ink: string | null = null, wrap?: string) {
   const p: Any = { children: r.s }
+  if (wrap) p.wrap = wrap
   if (ink) p.color = ink
   if (dim) p.dimColor = true
   if (r.b) p.bold = true
@@ -118,10 +119,15 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
 
 /** One laid-out line: its runs, each mark a press. */
 function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] = []) {
+  const row = runs.some(r => r.mark !== undefined)
+  // a line with marks is a row of its words and presses, laid out here at the width this drawing had. When the column
+  // narrows (a side panel opens) Claude Code lays out this drawing in it until the next one arrives: each piece of
+  // words then cuts at its end rather than wrapping in its own narrow column, which broke the text into columns
+  const wrap = row ? 'truncate-end' : undefined
   const kids: Any[] = [...lead]
-  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, !!o.dim, o.ink ?? null)))
-  if (!runs.some(r => r.mark !== undefined)) return els.Text({ key, wrap: 'truncate-end', children: kids })
-  return els.Box({ key, flexDirection: 'row', children: kids.map(k => (typeof k === 'string' ? els.Text({ children: k }) : k)) })
+  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, !!o.dim, o.ink ?? null, wrap)))
+  if (!row) return els.Text({ key, wrap: 'truncate-end', children: kids })
+  return els.Box({ key, flexDirection: 'row', children: kids.map(k => (typeof k === 'string' ? els.Text({ wrap, children: k }) : k)) })
 }
 
 /** The 2 columns left of a reply: Claude Code's ● on the reply's first row, else blank. A passage's cell (`ask`): a

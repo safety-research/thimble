@@ -13,7 +13,7 @@ import { back, base, open, order, push, step, stepFrom, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../draw/term.js'
-import { cardBody, frameOf } from '../../panes/tray.js'
+import { cardBody, frameOf, placeWords } from '../../panes/tray.js'
 
 const TEXT = 'Mostly notes. Of 9,120 saves, [2,310 notes](q2#label=note@n) [~](q3@n) went to other bots, from [880 senders](q4#row=1@n). I read only **1 of 3 files**, so the `fixture scope` and `rebase loop` are guesses.'
 const at = (text, m) => text.slice(m.start, m.end)
@@ -68,6 +68,18 @@ test('a fenced block keeps its lines: a link in it is no mark, an explainer neve
   const md = drawn.filter(n => n.type === 'Markdown').map(n => n.props.text).join('\n')
   assert.match(md, /```\n┌ claim ┐ ──▶ ┌ query ┐\n│ \[352\]\(r3#outcome=approved@n\) row sets │\n└───────┘     └───────┘\n```/)
   assert.ok(!drawn.some(n => n.type === 'Button' && /352/.test(n.props.label)), 'no press on the link in the block')
+})
+
+test('a line with a citation cuts its words at the end when its column narrows, never wraps them in narrow columns', { skip: !view && 'this Node runs no TypeScript' }, () => {
+  const t = 'Most saves came from **Quill Bot**: [412](r2#editor=Quill Bot@n) of them, then Fern Helper with a few.'
+  const rec = newRecord({ row: 'r1', session: 's1', text: t })
+  const drawn = nodes(view.messageEl(els, { rec, key: 'm', cols: 60, first: true, theme: 'dark', focus: null, onMark: () => {} }))
+  const kids = n => [n.props.children].flat().filter(k => k && typeof k === 'object')
+  const rows = drawn.filter(n => n.type === 'Box' && n.props.flexDirection === 'row' && kids(n).some(k => k.type === 'Button' && /^mk-/.test(k.props.key)))
+  assert.ok(rows.length >= 1)
+  const words = rows.flatMap(r => kids(r).filter(k => k.type === 'Text'))
+  assert.ok(words.length >= 2)
+  for (const w of words) assert.equal(w.props.wrap, 'truncate-end')
 })
 
 test('a table too wide for its column is drawn as its rows, `header: cell`, each citation in it still a mark that ] stops on', { skip: !view && 'this Node runs no TypeScript' }, () => {
@@ -316,6 +328,24 @@ test('] stops at the newest reply\'s last stop and [ at the oldest reply\'s firs
   assert.equal(stepFrom(list, 3, 1), null)
   assert.equal(stepFrom(list, 0, -1), null)
   assert.equal(step(order([{ row: 'r1', marks: [{}] }, { row: 'r2', marks: [{}, {}] }]), { row: 'r2', i: 1 }, 1), null)
+})
+
+test('a re-pointed citation\'s card says where it pointed in words, never in the ref\'s own syntax', () => {
+  const text = 'Kestrel made [41](r2#user=Kestrel%20B@n) edits.'
+  const rec = remark(newRecord({ row: 'x', session: 's', text }))
+  const checked = withHeal(rec, textKey(text), { changes: [{ label: '41', ref: 'r2#user=Kestrel%20B@n', state: 'linked', how: 'cell', to: 'r2#user=Wren@n' }] })
+  const top = frameOf(healedRecord(checked), 0)
+  const k = { text: s => s, escape: s => s }
+  const body = cardBody(k, { drawings: [] }, top, null)
+  assert.deepEqual(body, ['{dim:moved here from the row with user Kestrel B (column n), which does not show this value}'])
+  assert.ok(!/r2|#|@/.test(body[0]))
+  assert.equal(placeWords('r5#team=north&day=mon@edits'), 'the row with team north and day mon (column edits)')
+  assert.equal(placeWords('r5#row=3@edits'), "row 3 of a query's result (column edits)")
+  assert.equal(placeWords('r5@edits'), "column edits of a query's result")
+  assert.equal(placeWords('q7'), "a query's whole result")
+  assert.equal(placeWords('card:ab12#/rows/0/n'), 'a value of another card')
+  assert.equal(placeWords('logs/edits.jsonl#L41'), 'logs/edits.jsonl:41')
+  assert.equal(placeWords('runs.csv#row=3'), 'runs.csv row 3')
 })
 
 test('a citation whose place goes away after its check: its card names the ref once and says what is missing, and its mark is drawn gone', () => {
