@@ -831,6 +831,21 @@ export function healOf(rec) {
   return rec && rec.heal && rec.heal.key === key ? rec.heal : null
 }
 
+/** The record as the check of version `check` reads it. Each pass's result says which version of the check made it
+ *  (`check`), and the record which one placed its marks (`marked`). A result another version made is dropped, so its
+ *  text is checked again (an update may fix what that version found); marks another version placed are placed again.
+ *  The same record when nothing changes, and when `check` is unknown. */
+export function withCheck(rec, check) {
+  if (!rec || typeof check !== 'string' || !check) return rec
+  const heals = rec.heals && typeof rec.heals === 'object' ? rec.heals : {}
+  const stale = Object.keys(heals).some(k => !heals[k] || heals[k].check !== check) || (rec.heal && rec.heal.check !== check)
+  if (!stale && rec.marked === check) return rec
+  const kept = Object.fromEntries(Object.entries(heals).filter(([, h]) => h && h.check === check))
+  const { heal: was, heals: _h, ...rest } = rec
+  const out = { ...rest, ...(Object.keys(kept).length ? { heals: kept } : {}), ...(was && was.check === check ? { heal: was } : {}) }
+  return rec.marked === check ? out : { ...remark(out), marked: check }
+}
+
 /** The record with a pass's result kept for the text it read (`key`), beside the passes of its other texts. */
 export function withHeal(rec, key, result) {
   const heals = { ...(rec.heals && typeof rec.heals === 'object' ? rec.heals : {}) }

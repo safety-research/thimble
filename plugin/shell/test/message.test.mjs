@@ -7,7 +7,7 @@ import { register } from 'node:module'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, linksIn, placeOf, sourceCard } from '../cards.js'
 import { linkRuns } from '../carddetail.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
-import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withGone, withHeal, withObserver, wrapRuns } from '../message.js'
+import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withCheck, withGone, withHeal, withObserver, wrapRuns } from '../message.js'
 import { applyRewrite, restore } from '../../squeeze/chips.mjs'
 import { back, base, open, order, push, step, stepFrom, top } from '../tray.js'
 import { citeRef } from '../object.js'
@@ -208,6 +208,28 @@ test('the healing pass in a drawing: a spinner while it runs, a re-pointed citat
   assert.deepEqual([f.heal, f.why], ['gone', 'the cited place is gone (no query r9)'])
   // a squeeze's new text is a new key: its own pass, the old result left alone
   assert.equal(needsHeal({ ...healed, shown: 'Busiest: [5](r1#day=a@n).' }), true)
+})
+
+test('a result an older version of the check kept is checked again, and the marks it placed are placed again', () => {
+  const text = 'Busiest: [5](r1#day=a@n). Many: [7](r1@n).'
+  const moved = { label: '5', ref: 'r1#day=a@n', state: 'linked', how: 'cell', to: 'r5#day=a@n' }
+  // kept by a version that wrote no `check`, its marks one short and placed by that version
+  const old = withHeal({ ...newRecord({ row: 'x', session: 's', text }), marks: newRecord({ row: 'x', session: 's', text }).marks.slice(0, 1) }, textKey(text), { changes: [moved] })
+  assert.equal(healedRecord(old).marks[0].heal, 'moved')
+  const now = withCheck(old, 'c2')
+  // the old result is gone, so the text is checked again and the old re-pointing is not drawn
+  assert.equal(needsHeal(now), true)
+  assert.equal(healedRecord(now).marks[0].heal, undefined)
+  assert.equal(healedRecord(now).marks[0].ref, 'r1#day=a@n')
+  assert.equal(now.marked, 'c2')
+  assert.equal(now.marks.filter(m => m.kind === 'cite').length, 2)
+  // the new pass's result names its version: it stands, and the record is the same one
+  const again = withHeal(now, textKey(text), { changes: [{ ...moved, to: 'r1#day=a@n', how: 'kept' }], check: 'c2' })
+  assert.equal(withCheck(again, 'c2'), again)
+  assert.equal(needsHeal(withCheck(again, 'c2')), false)
+  // a newer version checks it again; with no version known, the kept result stands
+  assert.equal(needsHeal(withCheck(again, 'c3')), true)
+  assert.equal(withCheck(old, null), old)
 })
 
 test('an opened citation reaches Claude as written, with what the check found there', () => {
