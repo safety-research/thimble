@@ -77,10 +77,20 @@ function sayLine($: Engine, said: string): void {
   } else $.ui.toast(said)
 }
 
+/** A load of the plugins asked for and not run yet. Claude Code refuses one asked from inside a tool call (it would
+ *  wait on the turn the call holds), so it stays due until the next look outside one: turn.complete looks again. */
+let reloadDue = false
+
 /** Load the plugins again once the session is idle, so the person sees the fix, or the release, without typing
  *  /reload-plugins. refreshFixes asks for it once per switch of thimble (a fix on, off, or a new round of it). */
 async function reloadPlugins($: Engine): Promise<void> {
-  await $.command.run({ command: 'reload-plugins' }).catch(() => undefined)
+  if (!reloadDue) return
+  reloadDue = false
+  try {
+    await $.command.run({ command: 'reload-plugins' })
+  } catch {
+    reloadDue = true
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ the failure line
@@ -265,6 +275,7 @@ export function forgetFixes(): void {
   known = false
   restoring = null
   poll = null
+  reloadDue = false
 }
 
 /** The fixes in $THIMBLE_HOME/fixes, and which is in use. */
@@ -324,7 +335,8 @@ export async function refreshFixes($: Engine): Promise<void> {
   known = true
   // kept before the reload, so the module the reload loads goes on from here
   await $.state.set(SEEN, { fixes: Object.fromEntries(seen), active }).catch(() => undefined)
-  if (reload) await reloadPlugins($)
+  if (reload) reloadDue = true
+  await reloadPlugins($)
   if ((working.length || shareWait.size) && !poll) {
     try { poll = $.clock.every(3000, () => { void refreshFixes($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { poll = null }
   } else if (!working.length && !shareWait.size && poll) {
@@ -360,6 +372,7 @@ async function followFix($: Engine, f: Fix): Promise<void> {
     // this load is the switch's one: refreshFixes does not load it again when it sees the fix off
     wasActive = ((await readText($, `${await home($)}/fixes/active`)) || '').trim() || null
     await $.state.set(SEEN, { fixes: Object.fromEntries(seen), active: wasActive }).catch(() => undefined)
+    reloadDue = true
     await reloadPlugins($)
   }
 }

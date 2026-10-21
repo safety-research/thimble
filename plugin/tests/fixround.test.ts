@@ -65,7 +65,7 @@ const ACTIVE = `${HOME}/fixes/active`
 
 /** An engine whose `thimble fix` changes the made-up fixes as the kernel does, in a session that runs the fix's copy
  *  through the marketplace (Claude Code reads a folder marketplace in place, so the plugin's root is the copy). */
-function sessionOnCopy(files: Map<string, string>, toasts: string[], commands: string[]): Any {
+function sessionOnCopy(files: Map<string, string>, toasts: string[], commands: string[], turn = { held: false }): Any {
   const $ = engine(files, toasts, commands)
   const fix = () => JSON.parse(files.get(TEAL) || 'null')
   const said: Record<string, string> = {
@@ -82,6 +82,8 @@ function sessionOnCopy(files: Map<string, string>, toasts: string[], commands: s
     // what runs a moment later (after 0) runs as the session would; the bar's busy ticks never do
     clock: { ...$.clock, now: async () => 0, after: (ms: number, fn: () => void) => { if (!ms) void Promise.resolve().then(fn); return { cancel() {} } } },
     ui: { ...$.ui, log: () => undefined },
+    // as Claude Code does: a reload asked from inside a tool call would wait on the turn the call holds
+    command: { run: async (c: Any) => { if (turn.held) throw new Error('command.run: called from a tool.call hook (host check)'); commands.push(c.command) } },
     process: {
       run: async (args: string[]) => {
         if (args[0] === 'ls') return { exitCode: 0, stdout: files.has(TEAL) ? 'teal-titles\nactive\n' : '', stderr: '' }
@@ -104,7 +106,8 @@ test('each switch loads the plugins once, also after a reload: round 2 in a sess
   files.set(TEAL, JSON.stringify({ slug: 'teal-titles', title: 'Titles in teal', kind: 'fix', status: 'working', created: 1, used: 0 }))
   const toasts: string[] = []
   const commands: string[] = []
-  const $ = sessionOnCopy(files, toasts, commands)
+  const turn = { held: false }
+  const $ = sessionOnCopy(files, toasts, commands, turn)
   // the session's first look: the fix works
   await refreshFixes($)
   expect(commands.length).toBe(0)
@@ -114,8 +117,15 @@ test('each switch loads the plugins once, also after a reload: round 2 in a sess
   await refreshFixes($)
   expect(commands).toEqual(['reload-plugins'])
   forgetFixes()
-  // round 2 in the session that now runs the copy: one load
+  // round 2 in the session that now runs the copy: seen in Claude's tool call, which cannot reload, then loaded once
+  // its turn ends
   await $.process.run(['thimble', 'fix', 'use', 'teal-titles'])
+  turn.held = true
+  await refreshFixes($)
+  expect(commands.length).toBe(1)
+  turn.held = false
+  await refreshFixes($)
+  expect(commands.length).toBe(2)
   await refreshFixes($)
   expect(commands.length).toBe(2)
   expect(toasts.filter(t => t.includes('Titles in teal')).length).toBe(2)
