@@ -24,7 +24,8 @@
 // What can be pressed looks like it can (a color, the ring), so the pane prints no captions, legends or turn numbers.
 // The side panel holds the keys: ↑↓ (and tab) walk the claims in the order they are listed, cluster by cluster (this
 // program's up and down: the host turns each move of Claude Code's ring from the selected dot into one of them, so the
-// walk never depends on where the dots stand), and the panel's input bar asks its thread about the claim. The other
+// walk never depends on where the dots stand), ← → go to the cluster before or after (its first claim), and the panel's
+// input bar asks its thread about the claim. The other
 // presses (the head's, the rows in the box) are a click away; ↵ on the dot opens where it was said.
 //
 //   state: {claim, part: the dot or row selected, at: the last turn when it was selected, open: 'ev' | 'hist' | null}
@@ -440,6 +441,15 @@ export function program(k, data) {
   }
   k.on('up', step(-1), 'move')
   k.on('down', step(1), 'move')
+  // ← → go to the cluster before or after, on its first claim
+  const hop = dir => () => {
+    const order = [...new Set(claims.map(c => String(c.cluster)))]
+    const to = order[(order.indexOf(String(claim.cluster)) + dir + order.length) % order.length]
+    const first = claims.find(c => String(c.cluster) === to)
+    return first ? pick(first.id) : null
+  }
+  k.on('left', hop(-1))
+  k.on('right', hop(1))
   // ↵ presses what the ring is on (Claude Code's own press); the bar says what that does there, in a word that reads
   // alone (a narrow bar keeps only the first)
   const enter = /^ev-/.test(part) || (claim.folder && !(claim.said || []).some(x => x.row)) ? 'rows' : /^was-/.test(part) ? 'version' : 'message'
