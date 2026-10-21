@@ -387,8 +387,14 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
   }
   // an object saved twice in one call is drawn once, at its latest version; one saved again meanwhile (a label's card,
   // as the model's reads of it ended while the command still ran) is drawn at that version
-  return out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root))
-    .map(x => { const v = newestVersion.get(`${x.root}|${x.id}`); return v != null && x.v != null && v > x.v ? { ...x, v } : x })
+  return atNewest(out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root)), newestVersion)
+}
+
+/** Saves at the newest version drawn of each object (`newest`: by `root|id`), never an older one: a label's reads save a
+ *  new version of its card while the command that saved the old one still runs, and that command's save line is read
+ *  after it ends, or the reads end after the line was read. */
+export function atNewest<T extends { id: string; root: string; v?: number | null }>(list: T[], newest: Map<string, number>): T[] {
+  return list.map(x => { const v = newest.get(`${x.root}|${x.id}`); return v != null && x.v != null && v > x.v ? { ...x, v } : x })
 }
 
 
@@ -456,7 +462,7 @@ async function place($: Engine, at: string, ref: Placed): Promise<void> {
  *  latest words, so a fix within a turn leaves no second copy above. */
 async function placeTurn($: Engine, at: string): Promise<void> {
   if (!turn) return
-  const moved = turn.unplaced
+  const moved = atNewest(turn.unplaced, newestVersion)
   for (const before of turn.placed) {
     if (before === at) continue
     const cur = ((await $.state.get({ ...UNDER, id: before })).value ?? []) as Placed[]
@@ -566,6 +572,8 @@ export async function showVersion($: Engine, ref: ObjRef): Promise<void> {
   if (ref.v != null) newestVersion.set(`${ref.root}|${ref.id}`, Math.max(ref.v, newestVersion.get(`${ref.root}|${ref.id}`) ?? 0))
   const where = (await $.state.get({ ...WHERE, id: ref.id })).value as string | undefined
   // (a version a label's reads or the analyst's checks saved is never a change the analyst asked for: noteEdits)
+  // a save the turn still has to place takes this version too, so it never moves an older one under the reply
+  if (turn) turn.unplaced = atNewest(turn.unplaced, newestVersion)
   if (where) { await place($, where, ref); return }
   if (turn) turn.unplaced = turn.unplaced.map(x => (x.id === ref.id && x.root === ref.root ? { ...x, v: ref.v } : x))
 }
@@ -2484,7 +2492,8 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const onPress = fullscreen ? (id: string, dir?: number) => (spotOf(id) ? openLabel($, spotOf(id)!.name, spotOf(id)!.value) : dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id, { bar: linkBar(id) })) : undefined
   const run = runningRow(els, said)
   const la = await labelAskNow($)
-  const askEl = la && la.card === ref.id && la.root === ref.root ? askRows(els, $, la) : null
+  // under the card's newest placement only (a card saved again in a later turn is drawn there too)
+  const askEl = la && la.card === ref.id && la.root === ref.root && (await $.state.get({ ...WHERE, id: ref.id })).value === at ? askRows(els, $, la) : null
   const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
   // the card the keys act on: its own frame in the keys' color, or, for a card with no frame, a bar down its left side
   const ring = focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null
