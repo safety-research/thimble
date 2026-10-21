@@ -347,7 +347,8 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
     if (pointing()) return
     const rect = chipEl.current?.getBoundingClientRect()
     if (!rect) return
-    if (broken) return setPop({ state: 'error', rect, message: 'Unable to verify', detail: brokenWhy || undefined })
+    // a contradicted citation was checked: its place shows another value, which the detail names
+    if (broken) return setPop({ state: 'error', rect, message: "Doesn't match", detail: brokenWhy || undefined })
     if (unwrapped) return setPop({ state: 'error', rect, message: `Not linked${quietWhy ? ` — ${quietWhy}` : ''}`, muted: true })
     if (unresolved || !parsed) return setPop({ state: 'error', rect, message: 'Unknown reference', muted: true })
     if (NAME_ONLY.has(parsed.kind) && !(parsed.kind === 'view' && parsed.key)) {
