@@ -8,12 +8,16 @@
 //                 person's thimble now uses shows one line, `✓ Your thimble now has the fix: <title>`, with
 //                 `p share it · u undo`. u runs `thimble fix undo` as the person
 //   fixCommand    /thimble:fix, the one way in: words are the change the person wants (the command's text asks Claude,
-//                 commands/fix.md); submit, undo and try do what p and u do, for the fix that is on or the newest
+//                 commands/fix.md); submit, undo and try do what p and u do, for the fix that is on or the newest;
+//                 remove turns a fix off and deletes its copy and its record
 //   fixAskFromFeed  a `fix_ask` line of the change feed (`thimble fix draft` built the share and waits for the person):
-//                 the preview opens in the side panel (panes/fix.js). y and w run `thimble fix send <slug> --answer …
-//                 --ask ID` as the person, with the id from share/ask.json, which never reaches Claude
+//                 the preview opens in the side panel (panes/fix.js). y, w and k run `thimble fix send|keep … --ask -`
+//                 as the person: each key press makes a new secret, held only here, writes its sha256 into
+//                 share/ask.json and gives the secret on stdin. No file, argument or feed line holds it, so Claude's
+//                 shell cannot send
 //
-//   state: fixline (the line whose keys the bar names), fixes (the fixes that work), fixshare (a fix's share, by slug)
+//   state: fixline (the line whose keys the bar names: a failure, a fix in use, or a notice that a fix went off),
+//   fixes (the fixes that work), fixshare (a fix's share, by slug)
 import type { EngineInterface } from 'claude-code'
 
 import { ask, leanEnv, noteForClaude, rootHere } from './shell'
@@ -30,7 +34,7 @@ const FIXES = { plugin: 'thimble', key: 'fixes' } as const
 const SHARE = { plugin: 'thimble', key: 'fixshare' } as const
 const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/
 
-export type FixLine = { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string }
+export type FixLine = { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string }
 type Fix = { slug: string; title: string; kind: string; status: string; created: number }
 
 const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
@@ -49,15 +53,17 @@ async function readJson($: Engine, path: string): Promise<Any> {
   try { return JSON.parse(t) } catch { return null }
 }
 
-/** `thimble fix …` as the person's own command: its exit code and its words. */
-async function kernel($: Engine, args: string[]): Promise<{ ok: boolean; out: string }> {
+/** `thimble fix …` as the person's own command: its exit code and its words. `stdin`: the secret of a key press. */
+async function kernel($: Engine, args: string[], stdin?: string): Promise<{ ok: boolean; out: string }> {
   const root = (await rootHere($)) || (await home($))
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const r = await $.process.run([`${dir}/bin/thimble`, 'fix', ...args], { cwd: root, env: await leanEnv($, root), timeoutMs: 300000 })
+  const r = await $.process.run([`${dir}/bin/thimble`, 'fix', ...args], { cwd: root, env: await leanEnv($, root), timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) })
   return { ok: (r.exitCode ?? 1) === 0, out: `${String(r.stdout || '')}${r.stderr ? `\n${String(r.stderr)}` : ''}`.trim() }
 }
 
 const lastLine = (s: string) => s.split('\n').map(l => l.trim()).filter(Boolean).slice(-1)[0] || ''
+/** The kernel's last line without its `thimble fix <verb>: ` prefix, and with its first letter a capital. */
+const said = (s: string) => { const l = lastLine(s).replace(/^thimble fix \w+: /, ''); return l.charAt(0).toUpperCase() + l.slice(1) }
 
 /** One line for the person: a toast, and when it holds a command to run (a --plugin-dir session's `quit and run: …`),
  *  also a row of the transcript, which keeps the whole command where the toast cuts it. */
@@ -90,10 +96,11 @@ export async function fixLineNow($: Engine): Promise<FixLine | null> {
   return ((await $.state.get(LINE)).value ?? null) as FixLine | null
 }
 
-/** The person typed their next prompt: a failure line's keys go (a fix's line stays until p or u). */
+/** The person typed their next prompt: a failure line's keys go, and a notice that a fix went off (they have seen it).
+ *  A fix's line stays until p or u. */
 export async function promptTyped($: Engine): Promise<void> {
   const l = await fixLineNow($)
-  if (l?.kind === 'failed') await $.state.set(LINE, null)
+  if (l?.kind === 'failed' || l?.kind === 'notice') await $.state.set(LINE, null)
 }
 
 /** What a key does to the fix line now, or null: f and F on a failure, p and u on a fix in use. */
@@ -130,6 +137,19 @@ async function undoFix($: Engine, slug: string): Promise<string> {
   await noteForClaude($, `The analyst undid the fix ${slug}. ${said}`)
   await reloadFor($, said)
   return said
+}
+
+/** Remove a fix (/thimble:fix remove): the kernel turns it off when it is on, then deletes its copy and its record. */
+async function removeFix($: Engine, slug: string): Promise<string> {
+  const r = await kernel($, ['remove', slug])
+  void refreshFixes($).catch(() => undefined)
+  if (!r.ok) return `× The fix was not removed: ${cut(said(r.out) || 'thimble fix remove gave nothing', 220)}`
+  const l = await fixLineNow($)
+  if (l?.kind === 'applied' && l.slug === slug) await $.state.set(LINE, null)
+  const line = lastLine(r.out)
+  await noteForClaude($, `The analyst removed the fix ${slug}. ${line}`)
+  $.clock.after(0, () => { void reloadFor($, line) })
+  return line
 }
 
 /** The review of a fix (p, /thimble:fix submit): it opens when a draft waits for the person, else Claude writes the
@@ -175,9 +195,13 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
     const r = await kernel($, ['status'])
     return { text: `${r.out}\n/thimble:fix submit shares the newest · /thimble:fix undo goes back to the release` }
   }
+  const on = active || (await ownFix($))
+  // removing deletes the copy: with no name, only the fix that is on
+  if (v.verb === 'remove' && !v.slug && !fixes.some(x => x.slug === on)) return { text: 'Name the fix to remove: /thimble:fix remove <name>. /thimble:fix lists them.' }
   const f = v.slug ? fixes.find(x => x.slug === v.slug) ?? null : await currentFix($, fixes, active, v.verb)
   if (!f) return { text: v.slug ? `There is no fix ${v.slug}. /thimble:fix lists them.` : 'No fix yet. Say what you want changed: /thimble:fix <what you want changed>' }
   if (v.verb === 'undo') return { text: await undoFix($, f.slug) }
+  if (v.verb === 'remove') return { text: await removeFix($, f.slug) }
   if (v.verb === 'try') {
     const r = await kernel($, ['use', f.slug])
     void refreshFixes($).catch(() => undefined)
@@ -185,7 +209,7 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
       await noteForClaude($, `The analyst turned the fix ${f.slug} on again. ${lastLine(r.out)}`)
       $.clock.after(0, () => { void reloadFor($, r.out) })
     }
-    return { text: r.ok ? lastLine(r.out) : `× ${cut(lastLine(r.out) || 'thimble fix use gave nothing', 240)}` }
+    return { text: r.ok ? lastLine(r.out) : `× ${cut(said(r.out) || 'thimble fix use gave nothing', 240)}` }
   }
   // submit, a moment after the command has answered: the review opens, or Claude writes the draft first
   $.clock.after(0, () => { void submitFix($, f.slug, f.title).catch(err => $.ui.toast(`× The review did not open: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
@@ -258,9 +282,16 @@ async function followFix($: Engine, f: Fix): Promise<void> {
   if (!line) return
   const off = /you are on the release/.test(line)
   const was = await fixLineNow($)
-  const said = was?.kind === 'applied' && was.slug === f.slug ? was.said : undefined
-  await $.state.set(LINE, off ? null : { kind: 'applied', slug: f.slug, title: f.title, said: line })
-  if (said !== line) sayLine($, r.ok ? line : `× ${cut(line, 200)}`)
+  const shown = was?.kind === 'applied' && was.slug === f.slug ? was.said : undefined
+  if (off) {
+    // the fix went off (no longer fits, or in the release now): the whole line, once, as a row of the transcript, and
+    // on the bar until the person's next prompt; never a toast, which cuts it and goes by itself
+    await $.state.set(LINE, { kind: 'notice', text: line })
+    $.ui.log(line)
+  } else {
+    await $.state.set(LINE, { kind: 'applied', slug: f.slug, title: f.title, said: line })
+    if (shown !== line) sayLine($, r.ok ? line : `× ${cut(line, 200)}`)
+  }
   const after = await readJson($, `${await home($)}/fixes/${f.slug}/fix.json`)
   const moved = off || (before?.base && after?.base && before.base !== after.base)
   if (moved) {
@@ -281,6 +312,7 @@ export async function fixBar($: Engine): Promise<{ key: string; words: string; t
   if (w.length) out.push({ key: '', words: w.length === 1 ? `◌ fixing: ${cut(w[0]!.title, 32)}` : `◌ fixing ${w.length}`, status: true })
   const l = await fixLineNow($)
   if (l?.kind === 'failed') out.push({ key: 'f', words: 'fix this' }, { key: 'F', words: 'report only' })
+  else if (l?.kind === 'notice') out.push({ key: '', words: l.text, status: true })
   else if (l?.kind === 'applied') out.push({ key: '', words: '✓ fixed', status: true, good: true }, { key: 'p', words: 'submit' }, { key: 'u', words: 'undo' })
   return out
 }
@@ -346,23 +378,38 @@ async function closeShare($: Engine, slug: string): Promise<void> {
   }
 }
 
+/** The person's key press in the preview: a new secret, held only in this function, whose sha256 goes into the draft's
+ *  share/ask.json for the kernel to check. The secret itself goes to the kernel on stdin, so no file, argument or line
+ *  of the change feed holds it; null when no draft waits. */
+async function keyPress($: Engine, slug: string): Promise<string | null> {
+  const path = `${await home($)}/fixes/${slug}/share/ask.json`
+  const a = await readJson($, path)
+  if (!a || typeof a !== 'object') return null
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  const secret = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
+  const sum = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))
+  await $.fs.write(path, `${JSON.stringify({ ...a, key: [...sum].map(b => b.toString(16).padStart(2, '0')).join('') })}\n`)
+  return secret
+}
+
 /** What the preview asks of the host (k.do): send or save (y, w), keep a hit (k), edit (e). Each runs as the person,
- *  with the ask's id from share/ask.json, which neither the program nor Claude sees. */
+ *  with the secret of this key press (keyPress), which neither the program nor Claude sees. */
 export async function fixAction($: Engine, args: Record<string, unknown>, a: Record<string, unknown>): Promise<string | void> {
   const slug = String(args.slug || a.slug || '')
   if (!SLUG.test(slug)) return '× That is not the name of a fix.'
   const name = String(a.do || '')
   if (name === 'edit') return 'Say in the chat what to change in the draft. Claude writes it again, and this preview opens with the new text.'
-  const id = String((await readJson($, `${await home($)}/fixes/${slug}/share/ask.json`))?.id || '')
-  if (!id) { await loadShare($, slug); return '× This draft no longer waits for you. Ask Claude for a new draft.' }
+  if (name !== 'keep' && name !== 'send') return
+  const key = await keyPress($, slug)
+  if (!key) { await loadShare($, slug); return '× This draft no longer waits for you. Ask Claude for a new draft.' }
   if (name === 'keep') {
-    const r = await kernel($, ['keep', slug, String(a.id || ''), '--ask', id])
+    const r = await kernel($, ['keep', slug, String(a.id || ''), '--ask', '-'], key)
     await loadShare($, slug)
     return r.ok ? undefined : `× That detail was not kept: ${cut(lastLine(r.out) || 'thimble fix keep gave nothing', 200)}.`
   }
   if (name === 'send') {
     const answer = a.answer === 'file' ? 'file' : 'send'
-    const r = await kernel($, ['send', slug, '--answer', answer, '--ask', id])
+    const r = await kernel($, ['send', slug, '--answer', answer, '--ask', '-'], key)
     await loadShare($, slug)
     if (!r.ok) return `× Nothing was ${answer === 'file' ? 'saved' : 'sent'}: ${cut(lastLine(r.out) || 'thimble fix send gave nothing', 200)}. Press ${answer === 'file' ? 'w' : 'y'} to try again, or w to save it as a file.`
     const said = lastLine(r.out)
