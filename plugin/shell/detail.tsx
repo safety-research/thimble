@@ -49,7 +49,7 @@ import { paintRegions, regionOfKey } from './cells'
 import { askMerge, beganWord, editsOf, examplesView, PAGES_DEFAULT, partsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { barPreviewEl, citeLabels, currentTheme, escTop, healOfText, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { barPreviewEl, citeLabels, currentTheme, escTop, healOfText, keysMoved, loadObject, openDetail, panelClosed, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, setThreadWindow, threadFor, threadOf } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, readEdits, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
@@ -235,8 +235,10 @@ function askRedraw($: Engine): void {
 // ------------------------------------------------------------------------------------------------ opening
 
 /** Open the side panel on what side.ts says it shows: the pane docked beside the transcript, leaving the chat its
- *  share, holding the keys while the input bar is empty. False when the terminal had no room for it. */
-export async function openDock($: Engine, title: string): Promise<boolean> {
+ *  share, holding the keys while the input bar is empty. False when the terminal had no room for it. `keys: false`
+ *  leaves the keys with the prompt until giveKeys (a key's pane shown while the key may still begin a word: esc at the
+ *  idle, empty prompt still closes it). */
+export async function openDock($: Engine, title: string, o: { keys?: boolean } = {}): Promise<boolean> {
   const was = isOpen
   isOpen = true
   setThreadWindow(true)
@@ -249,7 +251,7 @@ export async function openDock($: Engine, title: string): Promise<boolean> {
     if (!isAsk(ringAt)) ringAt = null
   }
   wideDock = wantsRoom(await sideNow($))
-  const r = await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: dockColumns() }).catch((err: unknown) => ({ isPlaced: false, reason: String((err as Error)?.message || err).slice(0, 160) }))
+  const r = await $.ui.open({ id: PANE, title, ...(o.keys === false ? {} : { focus: true as const }), closeOnEscape: true, columns: dockColumns() }).catch((err: unknown) => ({ isPlaced: false, reason: String((err as Error)?.message || err).slice(0, 160) }))
   // a terminal too narrow for a docked pane a key opened (one a command opens is placed at any width): Claude Code
   // would keep it waiting, undrawn, with the keys still the panel's. It is closed again, and the toast says what opens
   // it; what it would have shown stays, for that command
@@ -263,8 +265,13 @@ export async function openDock($: Engine, title: string): Promise<boolean> {
   // the input bar takes the keys: every character typed reaches it (a `?` too, which an empty prompt would take for
   // its shortcuts), ↑ goes up to the parts and esc goes back. Asked from a key, the open lands while the key is still
   // in the prompt: the keys are asked for again once it is gone
-  void takeKeys($)
+  if (o.keys !== false) void takeKeys($)
   return true
+}
+
+/** The panel opened with `keys: false` takes the keys now, as an open does. */
+export async function giveKeys($: Engine): Promise<void> {
+  if (isOpen) await takeKeys($)
 }
 
 /** The card's detail opens in the side panel (shell.tsx openDetail). */
@@ -395,6 +402,7 @@ async function typedInPrompt($: Engine, text: string): Promise<void> {
 
 async function closed($: Engine, keep = false): Promise<void> {
   isOpen = false
+  panelClosed()
   seeded.clear()
   askedRegion.clear()
   setThreadWindow(false)

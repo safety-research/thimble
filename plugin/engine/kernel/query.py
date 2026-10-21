@@ -116,6 +116,7 @@ def get(st: Store, qid: str) -> dict[str, Any] | None:
 CACHE_MIN = 200_000  # bytes: a source file bigger than this keeps its parsed frame in the cache
 PARALLEL_MIN = 64_000_000  # bytes of files not yet in the cache: a load over this parses them in worker processes
 PARALLEL_MAX = 8  # worker processes at most
+FRAME_V = 2  # 2: a CSV's numeric columns are numbers
 
 
 def _frame_cache(st: Store, rel: str):
@@ -123,7 +124,8 @@ def _frame_cache(st: Store, rel: str):
     with an index of where each starts, so a load that names its fields reads only those columns."""
     p = st.root / rel
     s = p.stat()
-    key = hashlib.sha1(f"{rel}:{s.st_size}:{s.st_mtime_ns}".encode()).hexdigest()[:16]
+    # FRAME_V names how a file is parsed: a frame parsed another way is parsed again
+    key = hashlib.sha1(f"{FRAME_V}:{rel}:{s.st_size}:{s.st_mtime_ns}".encode()).hexdigest()[:16]
     return st.cache / "frames2" / f"{key}.cols"
 
 
@@ -192,8 +194,48 @@ def _parse_frame(root: Path, rel: str, table: str | None):
         recs.append(v if isinstance(v, dict) else {"text": v})
         refs.append(row.ref)
     df = pd.DataFrame.from_records(recs) if recs else pd.DataFrame()
+    if recs and S.kind_of_file(root, rel) == "csv":
+        df = _csv_numbers(df)
     df.insert(0, "_ref", refs)
     df.insert(1, "_file", rel)
+    return df
+
+
+def _csv_numbers(df):
+    """A CSV's columns of numbers as numbers, as a reader of the table expects: a sum adds, a sort orders by size. A
+    column turns only when each of its filled cells is a number; an empty cell is then NaN. A column with a code that
+    starts with 0 (a zip code, "007") stays text, since a number would drop the 0."""
+    import numpy as np
+    import pandas as pd
+
+    code = re.compile(r"\s*[+-]?0\d")
+    for c in df.columns:
+        col = df[c]
+        if not (pd.api.types.is_object_dtype(col) or pd.api.types.is_string_dtype(col)):
+            continue
+        arr = col.to_numpy(dtype=object)
+        # (a row with more cells than the header holds a list under None: no number, so the column stays)
+        if not all(v is None or type(v) is str for v in arr):
+            continue
+        empty = np.fromiter((v is None or not v.strip() for v in arr), bool, len(arr))
+        filled = arr[~empty]
+        if not len(filled):
+            continue
+        try:
+            # the first cells first, so a column of words is passed over without reading all of it
+            if np.isnan(pd.to_numeric(filled[:50], errors="coerce").astype(float)).any():
+                continue
+            nums = pd.to_numeric(filled, errors="coerce")
+        except (TypeError, ValueError):
+            continue
+        if (nums.dtype == object or not np.isfinite(nums.astype(float)).all()
+                or any(v[:1] in "0+- \t" and code.match(v) for v in filled)):
+            continue
+        if empty.any():
+            out = np.full(len(arr), np.nan)
+            out[~empty] = nums
+            nums = out
+        df[c] = nums
     return df
 
 
@@ -1177,6 +1219,10 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
     if not keys:
         keys = [c for c in df.columns if not c.startswith("_") and c != "index"
                 and (not pd.api.types.is_numeric_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c]))]
+    if not keys and row_refs is not None and len(df) > 1:
+        # rows that keep their own source rows (a tally) with no word column: a number column of the frame they came
+        # from that tells them apart names them (`passed` of a CSV, a bin), so a value is cited by its group's value
+        keys = next(([c] for c in _number_keys(df, [], ns, frames) if _unique(df, [c])), [])
     out["keys"] = keys
     if row_refs is None and aligned is not None:
         row_refs, out["mode"], out["frame"] = aligned

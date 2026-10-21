@@ -62,11 +62,11 @@ export async function sideClosed($: Engine): Promise<void> {
 
 /** A pane of thimble's in the side panel, as a thread (the module's opening comment). False when the terminal had no
  *  room to dock it (a toast says what opens it). */
-export async function openSide($: Engine, view: { pane: string; args?: Record<string, unknown>; title?: string }, o: { push?: boolean; ask?: boolean; keep?: boolean } = {}): Promise<boolean> {
+export async function openSide($: Engine, view: { pane: string; args?: Record<string, unknown>; title?: string }, o: { push?: boolean; ask?: boolean; keep?: boolean; keys?: boolean } = {}): Promise<boolean> {
   paneOf(view.pane)
   const v: SideView = { kind: 'pane', pane: view.pane, args: view.args ?? {}, ...(view.title ? { title: view.title } : {}) }
   await setSide($, v, o.push ? 'push' : o.keep ? 'keep' : 'replace')
-  const placed = await openDock($, sideTitle(v))
+  const placed = await openDock($, sideTitle(v), { keys: o.keys })
   if (placed && o.ask) focusEntry($)
   return placed
 }
