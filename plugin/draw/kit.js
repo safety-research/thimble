@@ -505,11 +505,13 @@
         tick(vals.length / 8)
         return sizing(n, o)
       },
-      // lines (or dots) of series over x: [numbers], [[x, y]...], or [{name, values | points, tone, id, cite}]
+      // lines (or dots) of series over x: [numbers], [[x, y]...], or [{name, values | points, tone, dots, id, cite}]
       plot(series, o) {
         o = o || {}
         const S = normSeries(series, ctx).map((s, i, all) => {
           const q = { name: s.name != null ? clean(s.name) : (all.length > 1 ? `series ${i + 1}` : ''), pts: s.pts, tone: T(s.tone || (i === 0 ? 'accent' : CATS[(i - 1) % 6])) }
+          // dots, not a line: the series' own `dots`, else the plot's
+          if (s.dots != null ? s.dots : o.dots) q.dots = true
           if (s.id != null || s.cite || s.examples || s.meta) {
             q.meta = metaOf(Object.assign({}, s.meta, { label: s.label || q.name, cite: s.cite, examples: s.examples }), 'plot series')
             q.region = regionId(ctx, s.id, 'plot series', q.meta)
@@ -527,7 +529,6 @@
           return r
         }
         const n = node('plot', { series: S, h: clamp(int(o.h, 10), 3, 60), x: axis(o.x), y: axis(o.y) })
-        if (o.dots) n.dots = true
         if (o.legend === false) n.legend = false
         // brush: in the browser, a drag across the plot's x axis is an event {type: 'brush', id, from, to} in x's units
         if (o.brush) { const b = typeof o.brush === 'string' ? o.brush : o.id != null ? String(o.id) : 'brush'; n.brush = { id: ID_RE.test(b) ? b : (slug(b) || 'brush') } }
@@ -961,11 +962,20 @@
     if (!Array.isArray(series)) series = series ? [series] : []
     if (series.length && series.every(isNumLike)) series = [{ values: series }]
     else if (series.length && series.every(p => Array.isArray(p) && p.length === 2 && isNumLike(p[0]))) series = [{ points: series }]
+    if (!series.length) warn(ctx, 'plot: no series to draw; give k.plot numbers, [x, y] pairs or series objects')
+    if (series.some(s => !isObj(s))) warn(ctx, 'plot: a series is not an object and is left out; give each series as { name, values } or { name, points }')
     return series.filter(isObj).map(s => {
+      // a point is [x, y] or {x, y}; in `values` a number is a y at its index, and a pair there is a point too
+      const point = p => Array.isArray(p) ? [num(p[0]), p[1] == null ? null : num(p[1])] : isObj(p) ? [num(p.x), p.y == null ? null : num(p.y)] : [NaN, null]
       let pts = []
-      if (Array.isArray(s.points)) pts = s.points.map(p => Array.isArray(p) ? [num(p[0]), p[1] == null ? null : num(p[1])] : [num(p.x), p.y == null ? null : num(p.y)])
-      else if (Array.isArray(s.values)) pts = s.values.map((v, j) => [j, v == null ? null : num(v)])
+      if (Array.isArray(s.points)) pts = s.points.map(point)
+      else if (Array.isArray(s.values)) pts = s.values.map((v, j) => isNumLike(v) ? [j, v == null ? null : num(v)] : point(v))
       pts = pts.filter(p => isFinite(p[0])).map(p => [p[0], p[1] === null || !isFinite(p[1]) ? null : p[1]])
+      // a series with no point to draw says so, so the plot is not quietly empty
+      if (!pts.some(p => p[1] !== null)) {
+        const name = s.name != null ? `"${clean(s.name)}"` : s.id != null ? `"${clean(s.id)}"` : 'a series'
+        warn(ctx, `plot: ${name} has no point to draw; give it values (numbers) or points ([x, y] pairs)`)
+      }
       if (pts.length > MAX_SERIES_POINTS) { warn(ctx, `a plot series has ${pts.length} points; keeps ${MAX_SERIES_POINTS}`); pts = pts.slice(0, MAX_SERIES_POINTS) }
       return Object.assign({}, s, { pts: pts })
     })
