@@ -195,7 +195,7 @@ def cmd_rows(a: argparse.Namespace) -> int:
             print(f"--label names no label {lname.strip()!r}; labels: {', '.join(LB.names(st)) or 'none'}")
             return 1
         lab_value = lab_value.strip() or None
-        with_value = {r for r in lab.get("units") or {} if (LB.value_of(lab, r) == lab_value if lab_value else True)}
+        with_value = {r for r in LB.held(lab) if (LB.value_of(lab, r) == lab_value if lab_value else True)}
     rng = random.Random(a.seed)
     kept: list[S.Row] = []
     matched = total = 0
@@ -632,7 +632,7 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
                                                file holds it
     thimble label NAME --in GLOB --code FILE   label(unit) in Python returns a value, (value, confidence) or None; a
                                                unit is the record as a dict, with `_ref` and `_text` (or the code on
-                                               stdin)
+                                               stdin). None leaves the record outside the label: it is not counted
     thimble label NAME --in GLOB --prompt "DEFINITION"
                                                the model reads each record against the definition, in calls of up to
                                                50 records that run beside the session, through its own model
@@ -640,7 +640,8 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     thimble label NAME --wait [SECONDS]        wait for the model's calls (default 600 s), then the counts
     thimble label NAME --again                 ask the model again for the records that got no value
 
-    --values a,b,c      the values, the positive first (default yes,no)
+    --values a,b,c      the values, the positive first (default yes,no; --code takes the values it returns, the most
+                        common first)
     --where EXPR        only records for which this Python expression is true (r is the record, text its raw text)
     --within L=V        only records the label L gave the value V
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
@@ -685,7 +686,8 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
         scope += f" within {lab['within'][0]}={lab['within'][1]}"
     parts = LB.units_of(st, lab)
     unit = parts[0]["unit"] if len(parts) == 1 else "records"
-    out = [head, f"  {LB.unit_count(s['records'], unit)} of {scope}" + (f" (a trial: {s['records']:,} of {lab.get('matched', 0):,} at random)" if lab.get("trial") else "")]
+    out = [head, f"  {LB.unit_count(s['records'], unit)} of {scope}" + (f" (a trial: {s['records']:,} of {lab.get('matched', 0):,} at random)" if lab.get("trial") else "")
+           + (f"; the code returned None for {s['out']:,} more, which are outside the label" if s["out"] else "")]
     if len(parts) > 1:
         # a file's unit is its own: a count over lines and whole files together is no count of either
         out.append(f"  the records mix units: {LB.units_said(parts)}; count each unit apart")

@@ -97,6 +97,47 @@ def test_code_labels_take_a_value_a_confidence_or_none_and_say_what_failed(root:
     assert "error: chat/room.jsonl#L6: ValueError: no reading" in r.stdout
 
 
+def test_a_code_label_with_no_values_takes_the_values_it_returns_the_most_common_first(root: Path):
+    code = "def label(unit):\n    return 'fern' if unit['agent'] == 'fern' else unit['agent'] + '-team'\n"
+    r = run(root, "label", "team", "--in", "chat/*.jsonl", "--code", stdin=code)
+    assert r.returncode == 0, r.stdout + r.stderr
+    st = Store(root)
+    lab = LB.load(st, "team")
+    # wren, moss and fern each wrote 2: a tie keeps the order the code first returned them; no yes or no
+    assert lab["values"] == ["wren-team", "moss-team", "fern"]
+    card = LB.card_spec(st, lab, None)
+    assert card["title"] == "team: 2 of 6 records are wren-team"
+    # a bool is yes or no, the positive first, whichever is more common
+    r = run(root, "label", "long", "--in", "chat/*.jsonl", "--code", stdin="def label(unit):\n    return len(unit['text']) > 45\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    lab = LB.load(st, "long")
+    assert lab["values"] == ["yes", "no"] and LB.status(lab)["counts"] == {"yes": 1, "no": 5}
+
+
+def test_a_none_from_code_leaves_the_record_outside_the_label(root: Path):
+    code = ("def label(unit):\n"
+            "    if unit['agent'] != 'wren':\n"
+            "        return None\n"
+            "    return ('yes', 1.0) if 'sorry' in unit['text'] else ('no', 1.0)\n")
+    r = run(root, "label", "wren-sorry", "--in", "chat/*.jsonl", "--code", stdin=code)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "2 records of chat/*.jsonl; the code returned None for 4 more" in r.stdout
+    st = Store(root)
+    lab = LB.load(st, "wren-sorry")
+    s = LB.status(lab)
+    assert s["records"] == s["valued"] == 2 and s["failed"] == 0 and s["out"] == 4
+    assert lab["values"] == ["yes", "no"] and s["counts"] == {"yes": 1, "no": 1}
+    card = LB.card_spec(st, lab, None)
+    assert card["title"] == "wren-sorry: 1 of 2 records are yes"
+    assert card["data"]["label"]["records"] == 2 and card["data"]["label"]["failed"] == 0
+    assert "have no value" not in card["text"]
+    # the viewer and the label's rows hold only its records
+    assert LB.page(st, "wren-sorry")["total"] == 2 and len(LB.frame(st, "wren-sorry")) == 2
+    # the same definition again does not count the records outside it as new
+    again = run(root, "label", "wren-sorry", "--in", "chat/*.jsonl", "--code", stdin=code)
+    assert again.returncode == 0 and LB.status(LB.load(st, "wren-sorry"))["records"] == 2
+
+
 def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     r = run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.", "--reason")
     assert r.returncode == 0, r.stdout + r.stderr
