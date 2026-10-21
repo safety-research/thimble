@@ -1,8 +1,8 @@
 // dock.ts: Coverage (what Claude read of the folder, panes/coverage.js) and the label viewer (panes/labels.js), which
 // open in the side panel (side.ts openSide) as threads: the pane at the top, its thread's conversation under it, the
 // input bar at the bottom, so "why was events.jsonl not read?" is asked from Coverage itself. The bar's right side names
-// them: `r coverage 3/7 files` (the folder's files Claude touched: read, searched, counted or computed over) with a
-// small bar of the folder's file types filled by the same share, and `l 2 labels` once the folder has labels; a click
+// them: `r coverage 43% (3/7 files)` (the folder's files Claude touched: read, searched or computed over), and
+// `l 2 labels` once the folder has labels; a click
 // on either, or its key (r, l) from the empty prompt, opens its pane, and the same again closes it. This module is what
 // the side panel does not do for them:
 //
@@ -19,8 +19,6 @@
 // It reads, as the person: nothing it runs counts as what Claude read (shell.tsx leanEnv), and it makes no model call.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { barCells, typeMix } from '../panes/coverage.js'
-import { termColor } from '../draw/palette.js'
 import { detailIsOpen, PANE as PANEL } from './detail'
 import { check as checkLabel, labelGen } from './labels'
 import { instance, patchPaneState, redraw } from './panes'
@@ -36,8 +34,6 @@ type Any = any
 export type Dock = 'coverage' | 'labels'
 /** The key that opens each from the empty prompt, as the bar names it. */
 export const DOCK_KEY: Record<Dock, string> = { coverage: 'r', labels: 'l' }
-/** The cells of the small type bar beside the coverage share in thimble's bar. */
-export const MIX_CELLS = 8
 
 // the module's memory: what each pane shows, and the pages of records read
 const held = {
@@ -103,11 +99,9 @@ export async function readCoverage($: Engine): Promise<void> {
   }
 }
 
-/** The coverage the bar's count read after a turn (shell.tsx recount): the pane shows it, and the small type bar is
- *  made from it. */
-export function noteCoverage(got: Any): { tone: string; seen: boolean; n: number }[] {
+/** The coverage the bar's count read after a turn (shell.tsx recount): the pane shows it. */
+export function noteCoverage(got: Any): void {
   if (got && Array.isArray(got.files)) { held.coverage.cov = got; held.coverage.error = null; held.coverage.gen++ }
-  return Array.isArray(got?.types) ? barCells(typeMix(got.types), MIX_CELLS) : []
 }
 
 /** The folder's labels, read again. */
@@ -256,38 +250,32 @@ export function restPane(k: string, named: { cov: boolean; labels: boolean }): D
 
 // (bare: drawn without its key, which does something else now: shell.tsx)
 type Count = { id: string; text: string; bare?: boolean; bright: boolean }
-type Counts = { cov: number; covFiles?: number; covTouched?: number; labels?: number; mix?: { tone: string; seen: boolean; n: number }[] }
+type Counts = { cov: number; covFiles?: number; covTouched?: number; labels?: number }
 
-/** The bar's counts of the two panes, as fitBar measures them: `r coverage 3/7 files ████████` and `l 2 labels`. The
+/** The bar's counts of the two panes, as fitBar measures them: `r coverage 1% (13/996 files)` and `l 2 labels`. The
  *  coverage is the files Claude touched of the folder's files, each file once whatever its unit: some of it entered
  *  Claude's context, or a query, a rule, a search, a count or a program went over it (0 means Claude looked at no file
  *  at all); how much of each file, and how it was touched, are the pane's to say. */
 export function dockCounts(c: Counts, percent: (x: number) => string): [string, number, string][] {
-  const mix = (c.mix || []).reduce((s, x) => s + x.n, 0)
   const all = c.covFiles ?? 0
-  const words = all ? `${(c.covTouched ?? 0).toLocaleString('en-US')}/${all.toLocaleString('en-US')} ${all === 1 ? 'file' : 'files'}` : percent(c.cov)
+  const words = all ? `${percent(c.cov)} (${(c.covTouched ?? 0).toLocaleString('en-US')}/${all.toLocaleString('en-US')} ${all === 1 ? 'file' : 'files'})` : percent(c.cov)
   return [
-    ['cov', c.cov, `${DOCK_KEY.coverage} coverage ${words}${mix ? ` ${'█'.repeat(mix)}` : ''}`],
+    ['cov', c.cov, `${DOCK_KEY.coverage} coverage ${words}`],
     ['labels', c.labels ?? 0, `${DOCK_KEY.labels} ${c.labels === 1 ? '1 label' : `${(c.labels ?? 0).toLocaleString('en-US')} labels`}`],
   ]
 }
 
-/** One count drawn: its key in the key's color, its words, the coverage's small type bar in the types' colors (seen
- *  bright, the rest pale), the whole a press that opens its pane. */
+/** One count drawn: its key in the key's color and its words, the whole a press that opens its pane. */
 export function dockCountEl($: Engine, els: Any, x: Count, c: Counts, press: boolean): Any {
   const { Button, Text } = els
   const theme = currentTheme()
   const pane: Dock = x.id === 'cov' ? 'coverage' : 'labels'
   const key = DOCK_KEY[pane]
-  const words = (x.bare ? x.text : x.text.slice(key.length + 1)).replace(/ █+$/, '')
+  const words = x.bare ? x.text : x.text.slice(key.length + 1)
   const kids: Any[] = [
     ...(x.bare ? [] : [Text({ key: `ck-${x.id}`, color: keyColor(key, theme), ...(x.bright ? { bold: true } : {}), children: key })]),
     Text({ key: `cw-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.bare ? words : ` ${words}` }),
   ]
-  if (pane === 'coverage' && c.mix?.length) {
-    kids.push(Text({ key: 'cm-gap', children: ' ' }))
-    c.mix.forEach((m, i) => kids.push(Text({ key: `cm-${i}`, color: termColor(m.seen ? m.tone : `${m.tone}-faint`, theme) ?? 'inactive', children: '█'.repeat(m.n) })))
-  }
   if (!press) return Text({ key: `count-${x.id}`, children: kids })
   return Button({ key: `count-${x.id}`, plain: true, label: pane === 'coverage' ? 'open Coverage: what Claude saw' : 'open the labels', onPress: () => toggleDock($, pane), children: kids })
 }

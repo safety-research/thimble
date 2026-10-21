@@ -27,16 +27,17 @@ test('Coverage: → opens the group or the file selected, ← closes the group, 
   const groups = Array.from({ length: 30 }, (_, r) => ({ folder: `runs/r${String(r).padStart(2, '0')}/`, files: 4, touched: r === 1 ? 1 : 0 }))
   const cov = { session: 's', total: { files: 120, touched_files: 1, seen_files: 1 }, files, untouched: rest, groups, types: [] }
   const data = coverage.data({ coverage: { cov } }, {}, { w: 100, h: 40 })
-  let st = { at: itemId('g', 'runs/r01/') }
+  // the tree's top folder, runs/, is open
+  let st = { at: itemId('g', 'runs/r01/'), open: ['runs/'] }
   st = after(coverage, data, st, 'right')
-  assert.deepEqual(st.open, ['runs/r01/'])
+  assert.deepEqual(st.open, ['runs/', 'runs/r01/'])
   // → again on an open group does nothing; ↓ to its file, then ← goes up to the group, and ← again closes it
-  assert.deepEqual(after(coverage, data, st, 'right').open, ['runs/r01/'])
+  assert.deepEqual(after(coverage, data, st, 'right').open, ['runs/', 'runs/r01/'])
   st = { ...st, at: itemId('f', 'runs/r01/x.txt') }
   st = after(coverage, data, st, 'left')
   assert.equal(st.at, itemId('g', 'runs/r01/'))
   st = after(coverage, data, st, 'left')
-  assert.deepEqual(st.open, [])
+  assert.deepEqual(st.open, ['runs/'])
   // → on a file opens its lines; ← goes back to the list, on the file
   const few = coverage.data({ coverage: { cov: { ...cov, untouched: { path: ['b.txt'], unit: ['lines'], units: [3] }, files: [file('a.txt', { status: 'seen', touched: true })], groups: [] } } }, {}, { w: 100, h: 40 })
   st = after(coverage, few, { at: itemId('f', 'a.txt') }, 'right')
@@ -53,7 +54,8 @@ test('Coverage: a row\'s id is one the kit keeps, so the part selected is the pa
   const cov = { session: 's', total: { files: 30, touched_files: 2 }, files, untouched: { path: [], unit: [], units: [] }, groups, types: [] }
   const data = coverage.data({ coverage: { cov } }, {}, { w: 100, h: 40 })
   const run = (state, event) => DK.run(coverage.program, data, { w: 100, h: 40, mode: 'pane', state, ...(event ? { event } : {}) })
-  const d = run({})
+  // the tree's top folder, runs/, open
+  const d = run({ open: ['runs/'] })
   const ids = d.regions.map(r => r.id)
   // every row's id is drawn as the program names it: no id renamed, and the part selected is a part drawn
   assert.ok(!(d.warnings || []).some(w => /characters ids cannot hold/.test(String(w.message || w))), JSON.stringify(d.warnings))
@@ -61,13 +63,13 @@ test('Coverage: a row\'s id is one the kit keeps, so the part selected is the pa
   const second = itemId('g', 'runs/r01/')
   assert.ok(ids.includes(second))
   // the ring moved to the second folder: the program selects it, and its label names the folder
-  const moved = run({}, { type: 'focus', region: second })
+  const moved = run({ open: ['runs/'] }, { type: 'focus', region: second })
   assert.equal(moved.state.at, second)
   assert.match(moved.regions.find(r => r.id === second).meta.label, /^runs\/r01\/: /)
   // ↵ (a press) on it opens it, with its file under it
-  const opened = run({ at: second }, { type: 'press', region: second })
-  assert.deepEqual(opened.state.open, ['runs/r01/'])
-  assert.ok(run(opened.state).regions.some(r => r.id === itemId('f', 'runs/r01/x.txt')))
+  const opened = run({ at: second, open: ['runs/'] }, { type: 'press', region: second })
+  assert.deepEqual(opened.state.open, ['runs/', 'runs/r01/'])
+  assert.ok(run({ open: ['runs/'], ...opened.state }).regions.some(r => r.id === itemId('f', 'runs/r01/x.txt')))
 })
 
 test('Labels: → opens the label selected, as ↵ does; ← goes back to the list', () => {

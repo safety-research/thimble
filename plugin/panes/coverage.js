@@ -1,22 +1,23 @@
 // coverage.js: what this session did with the folder's files, a program on the card runtime (draw/kit.js) over
 // `thimble coverage --json` (engine/kernel/lineage.py coverage). It opens in the side panel (shell/side.ts openSide) as
 // a thread: a question typed under it is about the group, file or lines selected, and carries their refs. The bar's
-// `coverage 3/7 files` opens it (a click, or r). It says in one sentence what Claude did: how many of the folder's
-// files it touched (the bar's count: some of a file entered Claude's context, or a query, a rule, a search, a count or a
-// program went over it; a file only listed by name is not touched), then how much of each unit it read. Each file and
-// each group has two measures, each a bar and its share in the files' own unit, which a legend under the sentence
-// names, always in view:
+// `coverage 1% (13/996 files)` opens it (a click, or r). At its top, two labeled bars of the folder's files, each with
+// its share and count: those read into Claude's context, and those searched or computed over (the bar's count: some of
+// a file entered Claude's context, or a query, a rule, a search, a count or a program went over it; a file only listed
+// by name is not touched). Each file and each folder in the list has the same two measures, each a bar and its share in
+// the files' own unit, which a legend names, always in view:
 //
 //   read      what entered Claude's context
-//   counted   what was counted or computed over: a query, a rule label or a label's model went over it, or Claude read
-//             it (read is part of it)
+//   searched  what was searched or computed over: a search, a count, a query, a rule label or a label's model went over
+//             it, or Claude read it (read is part of it)
 //
 // Overview first, then zoom, then details on demand:
 //
-//   overview   the sentence and the legend; then a folder of a few files (FEW, or as many as fit) lists them all, with
-//              no group to open; a larger one lists its groups, by folder or by file type, those Claude touched first,
-//              and the rest on one line (`8,412 other files, none touched`). ↵ or a press opens a group (or that line)
-//              under itself, and closes it again (listItems)
+//   overview   the two bars and the legend; then a folder of a few files (FEW, or as many as fit) lists them all, with
+//              no group to open; a larger one lists its top folders as a tree (folderTree, treeItems), those Claude
+//              touched first, each with its files' count and shares; ↵ or a press opens a folder one level under itself
+//              (and closes it again), and a folder's files nothing touched are one line (`812 files, none touched`),
+//              which opens to them. By type, the types instead, each opening to its files (listItems)
 //   a file     a strip of the whole file with the lines seen lit, the seen ranges, and the file's own lines around the
 //              one selected (seen lines marked ▌, those a search showed in its color); a press on a range opens its
 //              lines as a citation, over this pane (esc comes back). A PDF has a strip of its pages, and an image or
@@ -39,15 +40,9 @@ const STATUS = ['seen', 'model', 'searched', 'computed', 'named', 'not read']
 // each status as the pane says it, and its tone
 const SAID = { seen: 'read', model: 'computed', searched: 'searched', computed: 'computed', named: 'counted', 'not read': 'none' }
 const TONE = { seen: 'accent', model: 'dim', searched: 'dim', computed: 'dim', named: 'dim', 'not read': 'unseen' }
-// the three parts of a group's bar and the legend's words for them: read into Claude's context, only counted or
-// computed over (a label's model too), not touched
-// (each with its short words, for a pane too narrow for the long ones)
-export const KEY = [['read', 'accent', "read into Claude's context", "read into Claude's context"], ['counted', 'dim', 'counted or computed over (read is part of it)', 'counted or computed over']]
-// the shades of a file's rows: seen, read by a label's model, computed over, untouched
-export const PARTS = ['seen', 'model', 'computed', 'untouched']
-export const GLYPH = { seen: '█', model: '▓', computed: '▒', untouched: '░' }
-// the file types the bar names by color; the others are `other`
-const TYPE_TONES = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
+// the two parts of a row's measures and the legend's words for them: read into Claude's context, and searched or
+// computed over (a label's model too; read is part of it)
+export const KEY = [['read', 'accent', "read into Claude's context"], ['searched', 'dim', 'searched or computed over']]
 const LINES = 400 // characters of one line of a file shown
 // the rows the side panel takes under a pane: its input bar, and its thread's conversation when it has one (up to
 // two fifths of the panel), so a list that fits shows whole above them, the overview in view
@@ -88,12 +83,15 @@ export function itemId(kind, path) {
   return `${kind}:${String(path).replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 40)}.${h.toString(36)}`
 }
 
+const fileOrder = (a, b) => STATUS.indexOf(a.status) - STATUS.indexOf(b.status) || a.path.localeCompare(b.path, 'en', { numeric: true })
+
 export function listItems(data, by, open, room = FEW) {
   const files = data.files || []
   const rest = data.rest || { path: [] }
-  const order = (a, b) => STATUS.indexOf(a.status) - STATUS.indexOf(b.status) || a.path.localeCompare(b.path, 'en', { numeric: true })
+  const order = fileOrder
   const all = () => [...files, ...rest.path.map((_, i) => restFile(rest, i))]
   if (files.length + rest.path.length <= Math.max(FEW, room)) return all().sort(order).map(f => ({ id: itemId('f', f.path), kind: 'file', f, depth: 0 }))
+  if (by !== 'type') return treeItems(data.tree || folderTree(files, rest), rest, open)
   const isOpen = new Set(open || [])
   const keyOf = by === 'type' ? f => f.type : f => f.folder
   const out = []
@@ -110,9 +108,79 @@ export function listItems(data, by, open, room = FEW) {
   const others = list.filter(g => !(g.touched > 0))
   touched.forEach(g => group(g, 0))
   if (others.length) {
-    out.push({ id: 'rest', kind: 'rest', depth: 0, groups: others.length, files: others.reduce((s, g) => s + g.files, 0), any: touched.length > 0 })
+    out.push({ id: 'rest', kind: 'rest', key: 'rest', depth: 0, groups: others.length, files: others.reduce((s, g) => s + g.files, 0), any: touched.length > 0 })
     if (isOpen.has('rest')) others.forEach(g => group(g, 1))
   }
+  return out
+}
+
+/** A file a search or a count went over whole, though none of it was read or computed over: a search, a count or a
+ *  program goes over every line. */
+const wholeOver = f => (f.touched ?? f.status !== 'not read') && (f.status === 'searched' || f.status === 'named')
+
+/** The folder's files as a tree of folders, keyed by path (`runs/`, `runs/r004/`; '' the folder itself). Each folder
+ *  {key, name, files, touched, seenFiles, units: [{unit, units}], read, counted, dirs: [keys], shown: [files touched
+ *  or named here], quiet: [files here nothing touched, as rows], restAt: [indexes of the files here nothing touched,
+ *  in `rest`]}, in a plain object (the pane's data is copied as JSON). A folder's two measures are in its files' unit when they share one, else the mean of its files'. */
+export function folderTree(files, rest) {
+  const tree = Object.create(null)
+  const node = key => {
+    let g = tree[key]
+    if (!g) tree[key] = g = { key, name: key ? key.slice(key.slice(0, -1).lastIndexOf('/') + 1) : './', files: 0, touched: 0, seenFiles: 0, per: {}, readSum: 0, countedSum: 0, dirs: new Set(), shown: [], quiet: [], restAt: [] }
+    return g
+  }
+  const add = (path, unit, units, read, counted, touched, seen) => {
+    const parts = String(path).split('/')
+    let key = ''
+    const chain = [node('')]
+    for (let i = 0; i < parts.length - 1; i++) { const up = key; key += `${parts[i]}/`; node(up).dirs.add(key); chain.push(node(key)) }
+    for (const g of chain) {
+      g.files++; g.touched += touched ? 1 : 0; g.seenFiles += seen ? 1 : 0; g.readSum += read; g.countedSum += counted
+      const u = (g.per[unit] ||= { units: 0, seen: 0, counted: 0 })
+      u.units += units; u.seen += read * units; u.counted += counted * units
+    }
+    return chain[chain.length - 1]
+  }
+  for (const f of files) {
+    const at = add(f.path, unitOf(f), f.units ?? f.rows ?? 0, f.read || 0, wholeOver(f) ? 1 : f.counted || 0, f.touched, f.status === 'seen')
+    ;(f.touched || f.status !== 'not read' ? at.shown : at.quiet).push(f)
+  }
+  const paths = (rest && rest.path) || []
+  for (let i = 0; i < paths.length; i++) add(paths[i], rest.unit[i], rest.units[i] || 0, 0, 0, false, false).restAt.push(i)
+  for (const g of Object.values(tree)) {
+    const units = Object.entries(g.per).map(([unit, u]) => ({ unit, ...u }))
+    const one = units.length === 1 && units[0].units > 0 ? units[0] : null
+    g.units = units.map(u => ({ unit: u.unit, units: u.units }))
+    g.read = one ? Math.min(1, one.seen / one.units) : g.files ? g.readSum / g.files : 0
+    g.counted = one ? Math.min(1, one.counted / one.units) : g.files ? g.countedSum / g.files : 0
+    g.dirs = [...g.dirs]
+    delete g.per; delete g.readSum; delete g.countedSum
+  }
+  return tree
+}
+
+/** The tree's rows, as the folders `open` expand it: in each folder its folders, those Claude touched first, each with
+ *  its rows under it when open; then its files Claude touched; then one line for its files nothing touched (`812 files,
+ *  none touched`), which opens to them (`rest:` and the folder's key in `open`). */
+export function treeItems(tree, rest, open) {
+  const isOpen = new Set(open || [])
+  const out = []
+  const order = (a, b) => (b.touched > 0) - (a.touched > 0) || b.read - a.read || b.counted - a.counted || b.touched - a.touched || a.key.localeCompare(b.key, 'en', { numeric: true })
+  const level = (key, depth) => {
+    const g = tree[key]
+    if (!g) return
+    for (const d of g.dirs.map(x => tree[x]).sort(order)) {
+      out.push({ id: itemId('g', d.key), kind: 'group', g: d, depth, tree: true })
+      if (isOpen.has(d.key)) level(d.key, depth + 1)
+    }
+    for (const f of [...g.shown].sort(fileOrder)) out.push({ id: itemId('f', f.path), kind: 'file', f, depth })
+    const quiet = g.quiet.length + g.restAt.length
+    if (!quiet) return
+    const rk = `rest:${key}`
+    out.push({ id: key ? itemId('r', key) : 'rest', kind: 'rest', key: rk, depth, groups: 0, files: quiet, any: false, tree: true })
+    if (isOpen.has(rk)) for (const f of [...g.quiet, ...g.restAt.map(i => restFile(rest, i))].sort(fileOrder)) out.push({ id: itemId('f', f.path), kind: 'file', f, depth: depth + 1 })
+  }
+  level('', 0)
   return out
 }
 
@@ -162,78 +230,6 @@ export function partsOf(g) {
   return { seen, model, computed, untouched: Math.max(0, rows - seen - model - computed) }
 }
 
-/** The file types as the bar draws them: the largest by rows, each with its tone, its files, those read and those
- *  touched, and its rows in the four shades; past six, one `other`. Each {type, rows, files, seenFiles, touchedFiles,
- *  tone, types, seen, model, computed, untouched}. */
-export function typeMix(types) {
-  const all = (types || []).filter(t => t && t.files > 0)
-  const named = all.slice(0, all.length > TYPE_TONES.length ? TYPE_TONES.length - 1 : TYPE_TONES.length)
-  const rest = all.slice(named.length)
-  const out = named.map((t, i) => ({ type: t.type, rows: t.rows, files: t.files, seenFiles: t.seen_files || 0, touchedFiles: t.touched || 0, tone: TYPE_TONES[i], types: [t.type], ...partsOf(t) }))
-  if (rest.length) {
-    const sum = key => rest.reduce((s, t) => s + partsOf(t)[key], 0)
-    out.push({ type: 'other', rows: rest.reduce((s, t) => s + t.rows, 0), files: rest.reduce((s, t) => s + t.files, 0), seenFiles: rest.reduce((s, t) => s + (t.seen_files || 0), 0), touchedFiles: rest.reduce((s, t) => s + (t.touched || 0), 0), tone: 'dim', types: rest.map(t => t.type), seen: sum('seen'), model: sum('model'), computed: sum('computed'), untouched: sum('untouched') })
-  }
-  return out
-}
-
-/** `cells` shared by `weights`, the leftover cells going to the largest remainders, every non-zero weight at least one
- *  cell while there are cells for each. */
-export function shareCells(weights, cells) {
-  const total = weights.reduce((s, x) => s + x, 0)
-  if (!total || cells <= 0) return weights.map(() => 0)
-  const exact = weights.map(x => (x * cells) / total)
-  const out = exact.map(Math.floor)
-  const order = exact.map((c, i) => ({ i, r: c - Math.floor(c) })).sort((a, b) => b.r - a.r)
-  for (let k = 0, left = cells - out.reduce((a, b) => a + b, 0); k < left; k++) out[order[k % order.length].i]++
-  if (weights.filter(x => x > 0).length <= cells) {
-    weights.forEach((x, i) => {
-      if (x <= 0 || out[i]) return
-      const big = out.reduce((b, c, j) => (c > out[b] ? j : b), 0)
-      out[big]--
-      out[i] = 1
-    })
-  }
-  return out
-}
-
-/** The bar as cells: each type's cells by its rows, then within them its seen, model-read, computed and untouched
- *  rows in that order (each part with rows at least one cell while there is room). [{tone, part, n}] in order. */
-export function mixCells(mix, cells) {
-  const per = shareCells(mix.map(t => t.rows), cells)
-  const out = []
-  mix.forEach((t, i) => {
-    const c = per[i]
-    if (!c) return
-    const inner = shareCells(PARTS.map(p => t[p] || 0), c)
-    PARTS.forEach((p, j) => { if (inner[j]) out.push({ tone: t.tone, part: p, n: inner[j] }) })
-  })
-  return out
-}
-
-/** The small bar in thimble's bar, filled from the left by the share of files touched, as its number is: the files
- *  touched first (at least one cell when any was, and one pale cell left while any was not), then the files not touched,
- *  pale; each part shared among the file types by their files, in the types' colors. How much of each file is the
- *  pane's to show, not this one's. [{tone, seen, n}] (seen: lit). */
-export function barCells(mix, cells) {
-  const files = mix.reduce((s, t) => s + t.files, 0)
-  const hit = t => t.touchedFiles ?? t.seenFiles ?? 0
-  const touched = mix.reduce((s, t) => s + hit(t), 0)
-  if (!files || cells <= 0) return []
-  let lit = Math.round((cells * touched) / files)
-  if (touched > 0) lit = Math.max(1, lit)
-  if (touched < files) lit = Math.min(cells - 1, lit)
-  const on = shareCells(mix.map(hit), lit)
-  const off = shareCells(mix.map(t => t.files - hit(t)), cells - lit)
-  return [...mix.map((t, i) => ({ tone: t.tone, seen: true, n: on[i] })), ...mix.map((t, i) => ({ tone: t.tone, seen: false, n: off[i] }))].filter(c => c.n > 0)
-}
-
-/** Cells as markup: each part its glyph, untouched pale. */
-export function cellsMarkup(cells) {
-  return cells.map(c => `{${c.part === 'untouched' ? `${c.tone}-faint` : c.tone}:${GLYPH[c.part].repeat(c.n)}}`).join('')
-}
-
-
 export default {
   name: 'coverage',
   title: 'Coverage',
@@ -254,7 +250,7 @@ export default {
     const s = stores.coverage || {}
     const cov = s.cov
     if (!cov) return { loading: s.error ? null : 'reading what this session saw…', error: s.error || null, w: size.w, h: size.h }
-    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || typeOfPath(f.path), folder: f.folder || folderOf(f.path), kind: f.kind || '', unit: f.unit || null, units: f.units ?? null, seen_units: f.seen_units ?? null, said: f.said || null, pages: f.pages || [], rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], model_labels: f.model_labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [], touched: f.touched ?? f.status !== 'not read', read: f.read_share ?? (f.status === 'seen' ? f.share || 0 : 0), counted: f.counted_share ?? Math.max(f.read_share ?? 0, f.status === 'seen' ? f.share || 0 : 0) }))
+    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || typeOfPath(f.path), folder: f.folder || folderOf(f.path), kind: f.kind || '', unit: f.unit || null, units: f.units ?? null, seen_units: f.seen_units ?? null, said: f.said || null, pages: f.pages || [], rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], model_labels: f.model_labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [], touched: f.touched ?? f.status !== 'not read', read: f.read_share ?? (f.status === 'seen' ? f.share || 0 : 0), counted: wholeOver(f) ? 1 : f.counted_share ?? Math.max(f.read_share ?? 0, f.status === 'seen' ? f.share || 0 : 0) }))
     // the files nothing touched stay in columns (cli.py cmd_coverage: their path, unit and size), made into rows only
     // when a list shows them (restFile), so a folder of 100,000 files draws quickly
     const rest = cov.untouched && Array.isArray(cov.untouched.path) ? cov.untouched : { path: [], unit: [], units: [] }
@@ -262,7 +258,7 @@ export default {
       read: g.read_share ?? (g.rows ? (g.seen_rows ?? 0) / g.rows : 0), counted: g.counted_share ?? (g.rows ? Math.min(1, ((g.seen_rows ?? 0) + (g.model_rows || 0) + (g.computed_rows || 0)) / g.rows) : 0) }))
       .sort((a, b) => (b.touched > 0) - (a.touched > 0) || b.read - a.read || b.counted - a.counted || b.touched - a.touched || String(a.key).localeCompare(String(b.key), 'en', { numeric: true }))
     return {
-      total: cov.total || {}, session: cov.session, files, rest, mix: typeMix(cov.types), chat: !!s.chat,
+      total: cov.total || {}, session: cov.session, files, rest, tree: folderTree(files, rest), chat: !!s.chat,
       folder: groups('folder', cov.groups || cov.patterns || []), type: groups('type', cov.types || []), refreshing: !!s.loading, w: size.w, h: size.h,
     }
   },
@@ -303,7 +299,7 @@ export function program(k, data) {
     const it = items.find(x => x.id === id)
     if (!it) return null
     if (it.kind === 'group' || it.kind === 'rest') {
-      const key = it.kind === 'rest' ? 'rest' : it.g.key
+      const key = it.kind === 'rest' ? it.key : it.g.key
       return { open: open.includes(key) ? open.filter(x => x !== key) : [...open, key], at: id }
     }
     if (it.kind === 'file') return { file: it.f.path, at: 'rg-0', from: id }
@@ -318,7 +314,7 @@ export function program(k, data) {
   if (level === 'file') k.on('esc', back, 'Coverage')
   // ← → as in a tree: → opens the group or the file selected; ← closes the group, goes up to the group a file is in, or
   // back from a file to the list
-  const groupKey = it => (it && it.kind === 'rest' ? 'rest' : it && it.kind === 'group' ? it.g.key : null)
+  const groupKey = it => (it && it.kind === 'rest' ? it.key : it && it.kind === 'group' ? it.g.key : null)
   k.on('right', () => {
     const it = items[idx]
     return it && (it.kind === 'file' || (groupKey(it) != null && !open.includes(groupKey(it)))) ? press(it.id) : null
@@ -410,12 +406,42 @@ export function groupLine(g) {
   return `Claude read ${amounts(units)}, from ${of}.`
 }
 
-/** The legend of the groups' bars, always in view: each part's color and what it means, on one row where both fit,
- *  else one row each, in their short words where the long ones do not fit. */
+/** The legend of the rows' bars, always in view: each part's color and what it means, on one row where both fit,
+ *  else one row each. */
 function legend(k) {
   const len = s => Array.from(s).length + 2
   if (KEY.reduce((s, [, , words]) => s + len(words), 0) + 3 * (KEY.length - 1) <= k.w) return k.text(KEY.map(([, tone, words]) => `{${tone}:■} {dim:${k.escape(words)}}`).join('   '), { wrap: false })
-  return k.stack(...KEY.map(([, tone, words, short]) => k.text(`{${tone}:■} {dim:${k.escape(len(words) <= k.w ? words : short)}}`, { wrap: false })))
+  return k.stack(...KEY.map(([, tone, words]) => k.text(`{${tone}:■} {dim:${k.escape(words)}}`, { wrap: false })))
+}
+
+/** The folder's two shares of files, as the bar counts them: read into Claude's context (some of the file entered it),
+ *  and searched or computed over (touched: read, searched, counted or computed over; read is part of it). Each [words,
+ *  share, part, all]. */
+export function topShares(t) {
+  const all = t.files || 0
+  const read = t.seen_files ?? t.read_files ?? 0
+  const touched = t.touched_files ?? read
+  return [[KEY[0][2], all ? read / all : 0, read, all], [KEY[1][2], all ? touched / all : 0, touched, all]]
+}
+
+/** The two labeled bars at the top: `read into Claude's context  ▆▆░░░░  0.4% (4/996 files)`; in a pane too narrow
+ *  for one row each, the words on a row of their own, the bar and the numbers under them. */
+function topBars(k, t) {
+  const rows = topShares(t)
+  const lw = Math.max(...rows.map(([w]) => Array.from(w).length))
+  const tail = ([, v, part, all]) => `${pct(v)} (${n(part)}/${n(all)} ${all === 1 ? 'file' : 'files'})`
+  const tw = Math.max(...rows.map(r => Array.from(tail(r)).length))
+  const W = k.w - 2
+  const wide = W - lw - tw - 4 >= 8
+  const bw = Math.max(0, Math.min(20, wide ? W - lw - tw - 4 : W - tw - 2))
+  return rows.flatMap((r, i) => {
+    const tone = KEY[i][1]
+    const words = k.text(`{dim:${k.escape(pad(r[0], wide ? lw : W))}}`, { wrap: false })
+    const v = lit(r[1], bw)
+    const bar = bw >= 4 ? [k.bar([{ value: v, tone }, { value: 1 - v, tone: 'dim-faint' }], { max: 1, w: bw })] : []
+    const nums = k.text(k.escape(tail(r)), { wrap: false })
+    return wide ? [k.beside(words, ...bar, nums, { gap: 2 })] : [words, k.beside(...bar, nums, { gap: 2 })]
+  })
 }
 
 /** Plain words in rows of at most `w` characters, broken at spaces. */
@@ -429,16 +455,9 @@ export function wrapWords(s, w) {
   return out
 }
 
-/** A subject block whose dim line wraps to the panel's width (a sentence of several units is long). */
-function wrappedSubject(k, title, words, tail = '') {
-  const [first, ...rest] = wrapWords(words, Math.max(20, k.w - 3))
-  const rows = rest.map((t, i) => k.text(`{dim:${k.escape(t)}}${i === rest.length - 1 ? tail : ''}`, { wrap: false }))
-  return subjectBlock(k, { title, line: `{dim:${k.escape(first)}}${rest.length ? '' : tail}`, rows })
-}
-
-/** The overview: the sentence, then the legend. */
+/** The overview: the two bars, then the legend of the rows' bars. */
 function overview(k, data) {
-  return [wrappedSubject(k, 'Coverage', sentence(data.total, data.session), data.refreshing ? '{dim: ◌}' : ''), legend(k)]
+  return [subjectBlock(k, { title: `Coverage${data.refreshing ? ' {dim:◌}' : ''}`, line: '', rows: topBars(k, data.total || {}) }), legend(k)]
 }
 
 function toggles(k, by) {
@@ -446,15 +465,17 @@ function toggles(k, by) {
   return k.beside(one('by-folder', 'by folder', by === 'folder'), k.text('{dim:·}', { wrap: false }), one('by-type', 'by type', by === 'type'), { gap: 1 })
 }
 
-// each row's two measures: a bar and its share, read into Claude's context and counted or computed over. A share
-// stands right-aligned in SHARE cells (`<0.01%` is six), so it is never cut
+// each row's two measures: a bar and its share, read into Claude's context and searched or computed over. A share
+// stands right-aligned in SHARE cells (`<0.01%` is six, the header's `searched` eight), so it is never cut
 const BAR = 10
-const SHARE = 7
+const SHARE = 8
+/** A share as a bar of `w` cells fills it: at least one cell when it is above 0, so a small share still shows. */
+const lit = (v, w) => (v > 0 ? Math.min(1, Math.max(v, 1 / Math.max(1, w))) : 0)
 
 const itemSize = it => (it.kind === 'group' ? sizeText(it.g) : it.kind === 'file' ? fileSize(it.f) : '')
 // a size's number alone (`14,591`), for a pane too narrow for its unit's word
 const itemNum = it => itemSize(it).split(' ')[0] || ''
-const itemName = it => (it.kind === 'group' ? String(it.g.key) : it.kind === 'file' ? (it.depth ? it.f.path.slice(it.f.folder === './' ? 0 : it.f.folder.length) : it.f.path) : '')
+const itemName = it => (it.kind === 'group' ? String(it.tree ? it.g.name : it.g.key) : it.kind === 'file' ? (it.depth ? it.f.path.slice(it.f.folder === './' ? 0 : it.f.folder.length) : it.f.path) : '')
 // a group of one unit says its size in it; a group of mixed units has its files' count alone
 const sizeText = g => (g.units ? (g.units.length === 1 ? sizeOf(g.units) : '') : `${n(g.rows)} rows`)
 const fileSize = f => { const u = unitOf(f); const k = f.units ?? (u === 'lines' ? f.lines : f.rows); return u === 'file' ? '' : `${n(k)} ${k === 1 ? ONE[u] || u : u}` }
@@ -488,13 +509,13 @@ function header(k, what, c) {
   // laid out as a row is, so its words stand over their columns: a measure's word over its bar, or over its share
   // when it has no bar
   const head = w => ` ${c.bar ? pad(w, c.bar + SHARE) : shareCol(w)}`
-  return k.text(`{dim:${pad(what, c.nw)} ${c.fw ? `${pad(what === 'file' ? '' : 'files', c.fw, true)} ` : ''}${c.sw ? pad('size', c.sw, true) : ''}${head('read')}${head('counted')}}`, { wrap: false })
+  return k.text(`{dim:${pad(what, c.nw)} ${c.fw ? `${pad(what === 'file' ? '' : 'files', c.fw, true)} ` : ''}${c.sw ? pad('size', c.sw, true) : ''}${head('read')}${head('searched')}}`, { wrap: false })
 }
 
-/** The two measures, each a space, a bar (while the pane has room for it) and its share: read (the accent) and counted
+/** The two measures, each a space, a bar (while the pane has room for it) and its share: read (the accent) and searched
  *  or computed over (dim), each of the row's whole in its unit. */
 function measures(k, read, counted, c) {
-  const one = (v, tone) => [k.text(' ', { wrap: false }), ...(c.bar ? [k.bar([{ value: v, tone }, { value: 1 - v, tone: 'dim-faint' }], { max: 1, w: c.bar })] : []), k.text(shareCol(pct(v)), { wrap: false })]
+  const one = (v, tone) => [k.text(' ', { wrap: false }), ...(c.bar ? [k.bar([{ value: lit(v, c.bar), tone }, { value: 1 - lit(v, c.bar), tone: 'dim-faint' }], { max: 1, w: c.bar })] : []), k.text(shareCol(pct(v)), { wrap: false })]
   return [...one(read, 'accent'), ...one(counted, 'dim')]
 }
 
@@ -508,18 +529,20 @@ function itemRow(k, it, by, c, on) {
   const size = s => (c.size === 'full' ? pad(s, c.sw, true) : c.size === 'num' ? pad(String(s).split(' ')[0] || '', c.sw, true) : '')
   if (it.kind === 'rest') {
     const words = `${n(it.files)} ${it.any ? 'other ' : ''}file${it.files === 1 ? '' : 's'}, none touched`
+    if (it.tree) return k.region(it.id, { label: words }, k.text(`${ind}{dim:${k.escape(words)}}`, { wrap: false }))
     return k.region(it.id, { label: `${words} (${n(it.groups)} ${by === 'type' ? 'types' : 'folders'})` }, k.text(`${mark}{dim:${k.escape(words)} · ${n(it.groups)} ${by === 'type' ? (it.groups === 1 ? 'type' : 'types') : it.groups === 1 ? 'folder' : 'folders'}}`, { wrap: false }))
   }
   if (it.kind === 'group') {
     const g = it.g
-    const key = cut(by === 'type' ? `${g.key} files` : g.key, nw - ind.length)
+    const key = cut(by === 'type' ? `${g.key} files` : it.tree ? g.name : g.key, nw - ind.length)
     const name = on ? `**${k.escape(key)}**` : k.escape(key)
     const left = `${mark}${ind}${name}${' '.repeat(Math.max(0, nw - ind.length - Array.from(key).length))} ${c.fw ? `${pad(n(g.files), c.fw, true)} ` : ''}${size(sizeText(g))}`
-    return k.beside(k.region(it.id, { label: `${g.key}: ${[`${n(g.files)} file${g.files === 1 ? '' : 's'}`, sizeText(g)].filter(Boolean).join(', ')}; Claude read ${pct(g.read)} and counted or computed over ${pct(g.counted)} of them`, ...(by === 'folder' && g.key !== './' ? { ref: `${g.key}*` } : {}) },
+    return k.beside(k.region(it.id, { label: `${g.key}: ${[`${n(g.files)} file${g.files === 1 ? '' : 's'}`, sizeText(g)].filter(Boolean).join(', ')}; Claude read ${pct(g.read)} and searched or computed over ${pct(g.counted)} of them`, ...(by === 'folder' && g.key !== './' ? { ref: `${g.key}*` } : {}) },
       k.text(left, { wrap: false })), ...measures(k, g.read, g.counted, c), { gap: 0 })
   }
   const f = it.f
-  const shown = leftCut(ind + itemName(it), nw)
+  // (a deep name is cut at its start, its indent kept)
+  const shown = ind + leftCut(itemName(it), Math.max(4, nw - ind.length))
   const name = on ? `**${k.escape(shown)}**` : k.escape(shown)
   const left = `${mark}${name}${' '.repeat(Math.max(0, nw - Array.from(shown).length))} ${c.fw ? `${pad('', c.fw)} ` : ''}${size(fileSize(f))}`
   return k.beside(k.region(it.id, { label: `${f.path}: ${fileWords(f)}`, ref: fileRef(f) }, k.text(left, { wrap: false })), ...measures(k, f.read || 0, f.counted || 0, c), { gap: 0 })

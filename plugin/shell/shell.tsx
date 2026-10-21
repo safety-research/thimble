@@ -1761,7 +1761,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-//   thimble  v visualize · s squeeze · c 11 claims                                     t 2 threads · r coverage 3/7 files ▆▆▃▁
+//   thimble  v visualize · s squeeze · c 11 claims                                t 2 threads · r coverage 43% (3/7 files)
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
 // keys act on (a lit one with its note in place of its name; c with how many claims the session holds, bright for a
@@ -1791,7 +1791,6 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     const now = await $.clock.now()
     const root = await rootHere($)
     let cov = old?.cov ?? 0
-    let mix = old?.mix ?? []
     // the folder's files: coverage shows from the session's start (seen 0%) once there is a folder of data to see.
     // Before Claude's first thimble command the folder is the session's own (as the Coverage pane reads it), never the
     // home folder; the kernel's count writes nothing there
@@ -1812,14 +1811,14 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         covFiles = Number(got.total?.files) || files.length
         covTouched = Number(got.total?.touched_files ?? files.filter(f => f?.touched).length) || 0
         cov = covFiles ? covTouched / covFiles : 0
-        // the Coverage pane shows it, and the bar's small type bar is made from it (dock.ts)
-        mix = noteCoverage(got)
+        // the Coverage pane shows it (dock.ts)
+        noteCoverage(got)
       } catch {
         // the line keeps the last share it had
       }
     }
     const claims = await claimCount($).catch(() => old?.claims ?? 0)
-    const next: LineCounts = { claims, threads: threadCount(), cov, covFiles, covTouched, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
+    const next: LineCounts = { claims, threads: threadCount(), cov, covFiles, covTouched, labels: await countLabels($, root), at: now, changed: { ...(old?.changed || {}) } }
     const keys = ['claims', 'threads', 'cov', 'labels'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : (next[k] ?? 0) > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
@@ -2149,7 +2148,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   const items: [string, number, string, string?][] = c ? [
     // t: the list of them in the side panel
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`, 't'],
-    // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 3/7 files ▆▆▃▁`, `l 2 labels` (their
+    // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 43% (3/7 files)`, `l 2 labels` (their
     // key in their words)
     ...dockCounts(c, percent),
   ] : []
