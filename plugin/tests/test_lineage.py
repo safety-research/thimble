@@ -57,6 +57,23 @@ def test_a_dict_of_numbers_opens_rows_a_count_its_frames_and_a_share_all_rows_re
     assert r["why"] == f"{q['id']} computed this value over all 12 rows it read (edits.jsonl), and it does not keep which of them the value used"
 
 
+def test_a_count_of_a_filtered_frame_opens_the_filtered_rows(root: Path) -> None:
+    # made-up crew list: rows 2, 4 and 5 have no age
+    (root / "crew.csv").write_text("name,age,deck\nkai,31,A\nlou,,B\nmo,22,B\nned,,C\nola,,C\npia,47,A\n")
+    st = Store(root)
+    # a count of missing values, never named as a frame: its rows are the three with no age, not all six
+    q = Q.run(st, "no age", 'import pandas as pd\ndf = load("crew.csv")\na = pd.to_numeric(df.age, errors="coerce")\na.isna().sum()')
+    r = LIN.resolve(st, f"{q['id']}#row=1@value")
+    assert r["count"] == 3 and r["rows"] == ["crew.csv#row=2,4-5"] and "why" not in r
+    # a count of a condition's true values
+    q = Q.run(st, "deck c", 'df = load("crew.csv")\nc = df.deck == "C"\nc.sum()')
+    assert LIN.resolve(st, f"{q['id']}#row=1@value")["rows"] == ["crew.csv#row=4-5"]
+    # a count that two different row sets fit rests on every row read, as before
+    q = Q.run(st, "two", 'df = load("crew.csv")\na = df.deck == "A"\nb = df.deck == "B"\nb.sum()')
+    r = LIN.resolve(st, f"{q['id']}#row=1@value")
+    assert r["count"] == 6 and "why" in r
+
+
 def test_values_with_no_rows_say_why_in_one_line(root: Path) -> None:
     st = Store(root)
     # computed from no source rows
