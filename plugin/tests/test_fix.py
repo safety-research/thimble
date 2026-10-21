@@ -196,6 +196,9 @@ def test_a_folder_marketplace_install_turns_the_copy_on_and_off_like_a_github_on
     clone = tmp_path / "src"
     (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"source": {"source": "directory", "path": str(clone)}}}))
     (cc / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {"thimble@thimble": [{"installPath": str(cc / "x")}]}}))
+    # Claude Code keeps the marketplace's source in the user settings too, and refuses another source until it changes
+    settings = {"theme": "dark", "extraKnownMarketplaces": {"thimble": {"source": {"source": "directory", "path": str(clone)}}}}
+    (cc / "settings.json").write_text(json.dumps(settings))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
     stub = tmp_path / "claude-stub"
     stub.write_text(CLAUDE_STUB.format(log=tmp_path / "claude.log"))
@@ -205,7 +208,10 @@ def test_a_folder_marketplace_install_turns_the_copy_on_and_off_like_a_github_on
     assert not FX.from_plugin_dir()
     fx = FX.new("Claims newest first", "feature")
     assert "/reload-plugins" in FX.use(fx["slug"]) and FX.active_slug() == fx["slug"] and FX.latest() == fx["slug"]
+    now = json.loads((cc / "settings.json").read_text())
+    assert now["theme"] == "dark" and now["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(Path(fx["worktree"]).resolve())}
     assert FX.undo().startswith(f"thimble is back to the release from {clone}")
+    assert json.loads((cc / "settings.json").read_text())["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
     assert log(env, "claude") == [f"plugin marketplace add {fx['worktree']}", f"plugin marketplace add {clone}",
                                   "plugin marketplace update thimble", "plugin update thimble@thimble"]
     assert FX.active_slug() is None

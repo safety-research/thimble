@@ -93,8 +93,12 @@ def upstream() -> str:
     return m.group(1) if m else "safety-research/thimble"
 
 
+def config_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
 def plugins_dir() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "plugins"
+    return config_dir() / "plugins"
 
 
 def read_json(p: Path) -> Any:
@@ -234,6 +238,43 @@ def active_slug() -> str | None:
         return None
 
 
+def _marketplace_entry() -> dict[str, Any] | None:
+    """The thimble marketplace's source as Claude Code records it ({source: github, repo} or {source: directory, path})."""
+    src = ((read_json(plugins_dir() / "known_marketplaces.json") or {}).get("thimble") or {}).get("source")
+    return src if isinstance(src, dict) else None
+
+
+def _entry_of(source: str) -> dict[str, Any]:
+    if re.match(r"^[\w.-]+/[\w.-]+$", source) and not Path(source).exists():
+        return {"source": "github", "repo": source}
+    if re.match(r"^[a-z]+://", source):
+        return {"source": "git" if source.endswith(".git") else "url", "url": source}
+    return {"source": "directory", "path": str(Path(source).expanduser().resolve())}
+
+
+def _repoint(source: str, entry: dict[str, Any] | None = None) -> None:
+    """Point the thimble marketplace at `source`. Claude Code also keeps the marketplace's source in its user settings
+    (extraKnownMarketplaces) and refuses to add it again from another source until that entry changes, as its own
+    message says. Removing the marketplace instead would uninstall thimble and delete its options. So the entry changes
+    first, and nothing else in the file; then Claude Code adds the marketplace from the new source."""
+    p = config_dir() / "settings.json"
+    try:
+        settings = json.loads(p.read_text())
+    except FileNotFoundError:
+        settings = None
+    except (OSError, ValueError):
+        raise FixError(f"thimble cannot read Claude Code's settings ({p}) to change where its marketplace reads from. "
+                       f"Run: claude plugin marketplace add {source}")
+    known = (settings or {}).get("extraKnownMarketplaces")
+    if isinstance(known, dict) and isinstance(known.get("thimble"), dict):
+        known["thimble"]["source"] = entry or _entry_of(source)
+        tmp = p.with_suffix(".json.thimble-tmp")
+        tmp.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+        os.chmod(tmp, p.stat().st_mode & 0o777)
+        tmp.replace(p)
+    run([claude(), "plugin", "marketplace", "add", source])
+
+
 def _marketplace_source() -> str | None:
     src = ((read_json(plugins_dir() / "known_marketplaces.json") or {}).get("thimble") or {}).get("source") or {}
     return src.get("repo") or src.get("url") or src.get("path")
@@ -300,8 +341,8 @@ def use(slug: str) -> str:
     prev = _marketplace_source()
     rel = fixes_home() / "release.json"
     if prev and not str(prev).startswith(str(fixes_home())):
-        write_json(rel, {"source": prev})
-    run([claude(), "plugin", "marketplace", "add", fx["worktree"]])
+        write_json(rel, {"source": prev, "entry": _marketplace_entry()})
+    _repoint(fx["worktree"])
     if not _installed():
         run([claude(), "plugin", "install", "thimble@thimble"])
     (fixes_home() / "active").write_text(slug + "\n")
@@ -323,8 +364,9 @@ def undo() -> str:
         return (f"This session loads the fix with --plugin-dir, which Claude Code keeps until it quits. To go back to "
                 f"the release, quit and run: {_restart(back)}")
     slug = active_slug()
-    prev = (read_json(fixes_home() / "release.json") or {}).get("source") or upstream()
-    run([claude(), "plugin", "marketplace", "add", prev])
+    rel = read_json(fixes_home() / "release.json") or {}
+    prev = rel.get("source") or upstream()
+    _repoint(prev, rel.get("entry") if rel.get("source") else None)
     run([claude(), "plugin", "marketplace", "update", "thimble"], check=False)
     run([claude(), "plugin", "update", "thimble@thimble"], check=False)
     try:
