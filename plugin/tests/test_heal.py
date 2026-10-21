@@ -135,3 +135,44 @@ def test_the_command_reads_texts_and_writes_json(st: Store) -> None:
     out = json.loads(p.stdout)
     assert out[0]["changes"][0]["state"] == "contradicted" and out[1]["changes"] == []
     assert "heal" not in subprocess.run([sys.executable, str(ENGINE / "thimble.py"), "--help"], capture_output=True, text=True, env=env).stdout
+
+
+def test_a_number_in_a_key_name_or_a_column_name_is_not_the_value(st: Store) -> None:
+    # the 20 is part of the column name from_20 (and of the row's name), not the count the row holds
+    Q.run(st, "edits from 20.x", 'df = load("saves.jsonl")\ndf["from_20"] = df.id.map(lambda i: "yes" if i < 6 else "no")\ntally(df, "from_20")')
+    text, c = one(st, "Most came from [addresses starting with 20.](r3#from_20=yes@n).")
+    assert c["state"] == H.LINKED and c["how"] == H.KEPT
+    # words that are only a number state the value: a day's part in a key does not hide a wrong count
+    text, c = one(st, "June 1 had [1](r1#day=2026-06-01@n) saves.")
+    assert c["state"] == H.CONTRADICTED and c["source"] == "3"
+
+
+def test_a_query_named_in_the_words_is_no_number(st: Store) -> None:
+    # r1 holds 2 and 5, r2 holds 7 and 3: the words r1, r2 name the queries, so nothing is re-pointed
+    r = H.heal(st, "By day ([r1](r1)) and by user ([r2](r2)).")
+    assert [(c.state, c.how, c.to) for c in r.changes] == [(H.LINKED, H.KEPT, "r1"), (H.LINKED, H.KEPT, "r2")]
+    assert r.text == "By day ([r1](r1)) and by user ([r2](r2))."
+
+
+def test_a_mistyped_file_path_is_moved_only_to_a_file(st: Store) -> None:
+    d = st.root / "session-data"
+    d.mkdir()
+    (d / "1a2b3c4d-0fa5-4903-8f38-b8fbbb218913.jsonl").write_text(
+        json.dumps({"text": "start"}) + "\n" + json.dumps({"text": "training has been done for 20 minutes"}) + "\n")
+    (d / "9f9f9f9f-0000-0000-0000-000000000000.jsonl").write_text(json.dumps({"text": "20 rows"}) + "\n" * 2)
+    # a query the text cites holds 20 too: it is never where a file citation goes
+    Q.run(st, "twenty", 'import pandas as pd\npd.DataFrame({"run": ["a"], "minutes": [20]})')
+    text = ("The run waited [~20 minutes](session-data/1a2b3c4d-0fa5-4903-8f38-b5e0b1d1b55b.jsonl#L2) "
+            "after [its last job](r3#run=a@minutes).")
+    r = H.heal(st, text)
+    c = r.changes[0]
+    assert (c.state, c.how, c.to) == (H.LINKED, H.PATH, "session-data/1a2b3c4d-0fa5-4903-8f38-b8fbbb218913.jsonl#L2")
+    # no file beside it fits (the line is past its end): it is gone, with its reason, and never moved to the query
+    r = H.heal(st, text.replace("#L2", "#L9"))
+    c = r.changes[0]
+    assert (c.state, c.how, c.to) == (H.QUIET, H.GONE, None)
+    assert c.why.startswith("the cited place is gone (no file session-data/1a2b3c4d-0fa5-4903-8f38-b5e0b1d1b55b.jsonl")
+    assert str(st.root) not in c.why
+    # a line that does not exist in the right file: gone too, never a query cell
+    _, c = one(st, "It took [20 minutes](notes.md#L40).")
+    assert (c["state"], c["how"]) == (H.QUIET, H.GONE) and "to" not in c

@@ -50,7 +50,7 @@ export function frameOf(rec, i) {
   // a gloss on words inside the citation's words: a click on those words opens the citation, so its card offers the gloss
   const inner = m.kind === 'cite' ? rec.marks.map((x, j) => (x && x.kind === 'gloss' && x.start >= m.start && x.end <= m.end ? frameOf(rec, j) : null)).filter(Boolean) : []
   // what the healing pass found (message.js healedRecord): the card says it above the place
-  const heal = m.kind === 'cite' && (m.heal === 'bad' || m.heal === 'quiet') ? { heal: m.heal, why: String(m.why || '') }
+  const heal = m.kind === 'cite' && (m.heal === 'bad' || m.heal === 'quiet' || m.heal === 'gone') ? { heal: m.heal, why: String(m.why || '') }
     : m.kind === 'cite' && m.heal === 'moved' && m.wrote ? { heal: 'moved', wrote: String(m.wrote) } : {}
   return { row: rec.row, i, kind: m.kind === 'spark' ? 'spark' : 'cite', ref: m.ref, label: m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label || m.ref || ''), ...(inner.length ? { inner } : {}), ...heal }
 }
@@ -202,8 +202,10 @@ export function program(k, data) {
  *  section open in place of it, else its drawings with the part that holds the value marked, and why it was cited. */
 export function cardBody(k, card, top, open) {
   const parts = []
-  // a citation the healing pass found wrong: a red × and its reason; one it unwrapped: why, in grey
+  // a citation the healing pass found wrong: a red × and its reason; one whose place is gone: a grey ? and what is
+  // missing; one it unwrapped: why, in grey
   if (top && top.heal === 'bad') parts.push(k.text(`{bad:× ${k.escape(top.why || 'the cited place contradicts this value')}}`))
+  else if (top && top.heal === 'gone') parts.push(k.text(`{dim:? ${k.escape(top.why || 'the cited place is gone')}}`))
   else if (top && top.heal === 'quiet' && top.why) parts.push(k.text(`{dim:${k.escape(top.why)}}`))
   // one it re-pointed: where it pointed as written, so the fix is not invisible
   else if (top && top.heal === 'moved' && top.wrote) parts.push(k.text(`{dim:moved here from ${k.escape(top.wrote)}, which does not show this value}`))
@@ -211,6 +213,8 @@ export function cardBody(k, card, top, open) {
     parts.push(k.text(`{dim:${top.kind === 'gloss' ? 'drawing the explainer…' : 'reading it through the kernel…'}}`))
   } else if (card.problem || card.error) {
     parts.push(k.text(`{dim:${k.escape(String(card.problem || card.error))}}`))
+  } else if (card.unresolved && top && top.heal === 'gone' && top.why) {
+    // a citation whose place is gone: the line above already says what is missing
   } else if (open) {
     if (open.problem) parts.push(k.text(`{dim:${k.escape(String(open.problem))}}`))
     ;(open.drawings || []).forEach((d, j) => {

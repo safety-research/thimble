@@ -77,29 +77,36 @@ test('a card detail reads a takeaway citation whose ref holds brackets as one li
   assert.deepEqual(runs, [{ s: 'Girls: ' }, { s: '19', link: 'r4#age=child%20(0-12)&group=b@kept' }, { s: ' of 32, ' }, { s: 'most', bold: true }, { s: ' of them.' }])
 })
 
-test('the healing pass in a drawing: a spinner while it runs, a re-pointed citation opens its new place, an unwrapped one is grey, a contradicted one has a red ×', () => {
-  const text = 'Busiest: [5](r1#day=a@n). Gone: [12](r9@n). Wrong: [4](r1#day=b@n).'
+test('the healing pass in a drawing: a spinner while it runs, a re-pointed citation opens its new place, one whose place is gone has a grey ?, an unwrapped one is grey, a contradicted one has a red ×', () => {
+  const text = 'Busiest: [5](r1#day=a@n). Gone: [12](r9@n). Wrong: [4](r1#day=b@n). Many: [7](r1@n).'
   const rec = { ...newRecord({ row: 'x', session: 's', text }) }
   assert.equal(needsHeal(rec), true)
   const checking = healedRecord(rec, { checking: true })
   const runs = inline(text, 0, text.length, checking.marks)
-  assert.equal(runs.filter(r => r.tag === 'checking').length, 3)
+  assert.equal(runs.filter(r => r.tag === 'checking').length, 4)
   assert.equal(healInput(rec), text)
   const healed = { ...rec, heal: { key: textKey(text), changes: [
     { label: '5', ref: 'r1#day=a@n', state: 'linked', how: 'cell', to: 'r1#day=c@n' },
     { label: '12', ref: 'r9@n', state: 'quiet', how: 'gone', why: 'the cited place is gone (no query r9)' },
     { label: '4', ref: 'r1#day=b@n', state: 'contradicted', how: 'contradicted', to: 'r1#day=b@n', why: 'the cited place shows 3' },
+    { label: '7', ref: 'r1@n', state: 'quiet', how: 'several', why: 'several places show 7' },
   ] } }
   assert.equal(needsHeal(healed), false)
   const m = healedRecord(healed).marks
-  assert.deepEqual([m[0].ref, m[0].wrote, m[1].heal, m[2].heal, m[2].why], ['r1#day=c@n', 'r1#day=a@n', 'quiet', 'bad', 'the cited place shows 3'])
+  assert.deepEqual([m[0].ref, m[0].wrote, m[1].heal, m[1].why, m[2].heal, m[2].why, m[3].heal],
+    ['r1#day=c@n', 'r1#day=a@n', 'gone', 'the cited place is gone (no query r9)', 'bad', 'the cited place shows 3', 'quiet'])
+  // a citation whose place is gone reads as one that failed (a grey ? after its words), never as plain grey words;
+  // only a contradicted one has the red ×
   const drawn = inline(text, 0, text.length, m)
-  assert.deepEqual(drawn.filter(r => r.tag).map(r => r.s), [' ×'])
+  assert.deepEqual(drawn.filter(r => r.tag).map(r => [r.s, r.tag]), [[' ?', 'gone'], [' ×', 'bad']])
+  // its card in the tray says what is missing
+  const f = frameOf(healedRecord(healed), 1)
+  assert.deepEqual([f.heal, f.why], ['gone', 'the cited place is gone (no query r9)'])
   // a squeeze's new text is a new key: its own pass, the old result left alone
   assert.equal(needsHeal({ ...healed, shown: 'Busiest: [5](r1#day=a@n).' }), true)
 })
 
-test('an explainer and a re-pointed citation\'s card show what the healing pass did: grey, ×, the new place, and where it was moved from', async () => {
+test('an explainer and a re-pointed citation\'s card show what the healing pass did: grey with a ? when its place is gone, ×, the new place, and where it was moved from', async () => {
   const gloss = { term: 'edits', body: 'Wren made [7](r1#day=a@n) edits, [12](r9@n) in all, and [4](r1#day=b@n) reverts.' }
   const heal = { changes: [
     { label: '7', ref: 'r1#day=a@n', state: 'linked', how: 'cell', to: 'r1#day=c@n' },
@@ -108,7 +115,7 @@ test('an explainer and a re-pointed citation\'s card show what the healing pass 
   ] }
   const card = explainerCard({ gloss, heal })
   const text = card.parts[0].data.text
-  assert.ok(text.includes('{dim:12}') && text.includes('{bad: ×}'))
+  assert.ok(text.includes('{dim:12}{dim: ?}') && text.includes('{bad: ×}'))
   assert.deepEqual(card.links.map(l => l.ref), ['r1#day=c@n', 'r1#day=b@n'])
   assert.equal(healMd('see [it](auth.py:88)'), 'see [it](auth.py#L88)')
   const rec = { ...newRecord({ row: 'x', session: 's', text: 'Wren made [7](r1#day=a@n) edits.' }) }

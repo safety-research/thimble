@@ -12,6 +12,9 @@ For each citation whose words state a number and whose place does not show it:
       the place shows;
   (d) else (the place is gone, or holds no number) it is unwrapped to its words.
 
+A citation of a source file's place is checked for its place only. When the place is gone, it is re-pointed only to
+a place in a file (the file a mistyped path means, `_sibling`), never to a query or a card, else it is unwrapped.
+
 A citation whose words state no number is only checked for its place: one that does not resolve is unwrapped. The
 words of the text are never changed, only a citation's ref or its link. `analyst=True` keeps every link (re-pointed
 or as written): the analyst's own citations are never unwrapped.
@@ -38,7 +41,8 @@ LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
 # how a citation ended: kept as written; re-pointed inside the cited query or card, at another one the text cites, or
 # at a query of the session; no place holds it; several places hold it
 KEPT, CELL, CITED, SESSION = "kept", "cell", "cited", "session"
-# a source path written from a subfolder, re-pointed at the one file under the root whose path ends with it
+# a source path re-pointed at the file it means: written from a subfolder (the one file under the root whose path ends
+# with it), or mistyped (the one file beside it whose name starts the same way and holds the cited place)
 PATH = "path"
 NO_HOME, SEVERAL, GONE = "no_home", "several", "gone"
 
@@ -374,6 +378,52 @@ def _at_source(st: Store, p: dict[str, Any], ref: str) -> _At:
     return _At(holds=True, moved=R.format_source({**p, "path": rel}) if rel != p.get("path") else None)
 
 
+def _sibling(st: Store, p: dict[str, Any], label: str) -> str | None:
+    """The ref of the same place in the file that a mistyped path means, such as a session id with a wrong tail: the
+    file in the same folder, of the same type, whose name is as long as the name written and starts the same way (at
+    least half of it, and 8 characters), where the cited place exists and, when the words state a number, shows it.
+    Only one file may fit. A citation of a file is never moved to a query or a card: those hold other things that may
+    show the same number by chance."""
+    path = p.get("path") or ""
+    folder, _, name = path.rpartition("/")
+    d = st.root / folder if folder else st.root
+    if not name or not d.is_dir():
+        return None
+    stem, dot, ext = name.rpartition(".")
+    stem = stem if dot else name
+
+    def shared(other: str) -> int:
+        n = 0
+        for a, b in zip(stem, other):
+            if a != b:
+                break
+            n += 1
+        return n
+
+    need = max(8, len(stem) // 2)
+    fits: list[str] = []
+    try:
+        names = sorted(x.name for x in d.iterdir() if x.is_file() and x.name != name)
+    except OSError:
+        return None
+    for other in names:
+        o_stem, o_dot, o_ext = other.rpartition(".")
+        o_stem = o_stem if o_dot else other
+        if (o_ext if o_dot else "") != (ext if dot else "") or len(o_stem) != len(stem) or shared(o_stem) < need:
+            continue
+        ref = R.format_source({**p, "path": f"{folder}/{other}" if folder else other})
+        try:
+            rows = S.fetch(st.root, ref, limit=50)
+        except (R.RefError, OSError, ValueError):
+            continue
+        if p["kind"] not in ("file", "table") and not rows:
+            continue
+        if _numbers(label) and not any(_shows(label, S.text_of(r)) for r in rows):
+            continue
+        fits.append(ref)
+    return fits[0] if len(fits) == 1 else None
+
+
 def _pick(hits: list[Place], at: _At) -> Place | None:
     """The one place to re-point at inside the cited query or card: the only place that holds the number; else the only
     one in the cited row, else the only one in the cited column."""
@@ -446,7 +496,7 @@ class _Pass:
         p = _parse(ref)
         if p is None:
             return Change(label, ref, LINKED, KEPT, to=ref)  # not a ref the kernel reads: left as it is
-        words = O.unkeyed(label, p.get("keys"))  # a number that names the cited row is not the value it holds
+        words = O.unkeyed(label, p)  # a number the ref names (a key, a column) is not the value the place holds
         own = _owner(p)
         num = bool(_numbers(words))
         if p["kind"] == "query":
@@ -454,7 +504,14 @@ class _Pass:
         elif p["kind"] == "object":
             at = _at_card(self.rd, p, words) if num else (_At() if self.rd.card(p["object"]) else _At(False, f"no card {p['object']}"))
         else:
+            # a citation of a file's place is re-pointed only to a place in a file, never to a query or a card
             at = _at_source(self.st, p, ref)
+            if at.exists:
+                return Change(label, ref, LINKED, PATH, to=at.moved) if at.moved else Change(label, ref, LINKED, KEPT, to=ref)
+            fixed = _sibling(self.st, p, words)
+            if fixed:
+                return Change(label, ref, LINKED, PATH, to=fixed)
+            return self._quiet(label, ref, GONE, WHY_GONE.format(problem=str(at.problem).replace(f" under {self.st.root}", "")))
         if at.exists and at.moved:
             return Change(label, ref, LINKED, PATH, to=at.moved)
         if at.exists and (at.holds or not num):

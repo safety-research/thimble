@@ -225,4 +225,18 @@ def test_the_lineage_line_says_no_rows_stand_behind_values_when_none_were_read(r
     assert "No rows stand behind" not in CLI._lineage_line(q2)
 
 
+def test_the_lineage_line_of_a_count_with_no_key(root: Path) -> None:
+    from kernel import cli as CLI
+
+    st = Store(root)
+    # a query that prints and ends with len(d): no key column found its rows, the count rests on the rows of d
+    q = Q.run(st, "print runs", 'd = load("runs.csv")\nfor _, r in d.iterrows():\n    print(r.run)\nlen(d)')
+    assert q["error"] is None and not q.get("keys")
+    line = CLI._lineage_line(q)
+    assert "found by" not in line and "Each value counts the rows of `d`" in line
+    # with no rows behind it, the line says so plainly and suggests no citation
+    line = CLI._lineage_line({**q, "rows": None, "lineage": "matched"})
+    assert line.startswith("No key and no rows stand behind these values") and "Cite" not in line
+
+
 # ------------------------------------------------------------------ run, and the ids from before it was named run

@@ -234,7 +234,7 @@ def _cite(st: Store, ref: str, where: str, ctx: dict[str, Any], quote: str | Non
                 if col is None:
                     raise R.RefError(f"{q['id']}'s output has no column {p['col']!r}")
                 c["value"] = row[col]
-                if label is not None and not number_matches(unkeyed(label, p.get("keys")), row[col]):
+                if label is not None and not number_matches(unkeyed(label, p), row[col]):
                     raise R.RefError(f"the citation shows {label!r} but {ref} holds {row[col]!r}")
                 if q.get("rows") and idx[0] < len(q["rows"]):
                     c["rows"] = Q.value_rows(q, idx[0], col)
@@ -273,7 +273,8 @@ def _merge_rows(lists: list[list[str]]) -> list[str]:
         return flat
 
 
-NUM_RE = re.compile(r"[-−]?\d[\d,]*(?:\.\d+)?")
+# a number in words: never the digits of a name such as r5, R3 or ip16 (a letter, an underscore or a digit before them)
+NUM_RE = re.compile(r"(?<![A-Za-z_\d.,])[-−]?\d[\d,]*(?:\.\d+)?")
 # a scale written after a number: 12k, 1.17M, 2.4 billion
 _SCALE_RE = re.compile(r"\s?(k|K|M|B|bn|thousand|million|billion)(?![A-Za-z])")
 _SCALES = {"k": 1e3, "K": 1e3, "thousand": 1e3, "M": 1e6, "million": 1e6, "B": 1e9, "bn": 1e9, "billion": 1e9}
@@ -284,25 +285,38 @@ def _tight(label: str) -> str:
     return label.replace(" ", "").replace(" ", "")
 
 
-def unkeyed(label: str, keys: dict[str, Any] | None) -> str:
-    """The words of a citation without the numbers that name its row: in `[addresses starting with 20.](r9#first=20@n)`
-    the 20 says which row it is, not the value the row holds."""
-    named = set()
-    for v in (keys or {}).values():
+def unkeyed(label: str, ref: dict[str, Any] | None) -> str:
+    """The words of a citation without the numbers its ref names (a parsed ref). Such a number says which row or
+    column the place is, not the value it holds: in `[edits from addresses starting with 20.](r9#from_20=yes@n)` the
+    20 is part of a key's name, and in `[addresses starting with 20.](r9#first=20@n)` it is a key's value. Words that
+    are only a number state the value, so there only a number equal to a whole key value is dropped: in
+    `[6](r9#week=2026-06-01@n)` the 6 is the count, but `[2024](r9#year=2024@n)` names the row."""
+    keys = (ref or {}).get("keys") or {}
+    whole: set[float] = set()
+    for v in keys.values():
         try:
-            named.add(float(str(v).replace(",", "")))
+            whole.add(abs(float(str(v).replace(",", ""))))
         except ValueError:
             pass
+    named = set(whole)
+    if not _BARE_RE.fullmatch(_tight(label or "").strip()):
+        for s in [*keys, *keys.values(), (ref or {}).get("col")]:
+            for tok in re.findall(r"\d+(?:\.\d+)?", str(s or "").replace(",", "")):
+                named.update(float(t) for t in {tok, *tok.split(".")} if t)
     if not named:
         return label
 
     def drop(m: re.Match) -> str:
         try:
-            return " " if float(m[0].replace("−", "-").replace(",", "")) in named else m[0]
+            return " " if abs(float(m[0].replace("−", "-").replace(",", ""))) in named else m[0]
         except ValueError:
             return m[0]
 
     return NUM_RE.sub(drop, _tight(label))
+
+
+# words that are only a number: 8,452, ~20, 58%, 1.2M
+_BARE_RE = re.compile(r"[~≈]?\s*[-−]?\d[\d,]*(?:\.\d+)?\s*(?:%|k|K|M|B|bn)?")
 
 
 def number_matches(label: str, value: Any) -> bool:

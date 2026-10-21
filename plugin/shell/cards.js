@@ -105,7 +105,7 @@ export function linkedText(md, links, look = null) {
     const c = look ? look(m[1], m[2]) : null
     const ref = c && c.to && c.state === 'linked' ? c.to : citeRef(m[2])
     const k = c && c.state === 'quiet' ? -1 : links.findIndex(x => x.ref === ref)
-    out += c && c.state === 'quiet' ? `{dim:${esc(m[1])}}` : k >= 0 ? `{cite:[${esc(citeWords(m[1], links[k].ref))}](#${links[k].id})}${c && c.state === 'contradicted' ? '{bad: ×}' : ''}` : esc(m[1])
+    out += c && c.state === 'quiet' ? `{dim:${esc(m[1])}}${c.how === 'gone' ? '{dim: ?}' : ''}` : k >= 0 ? `{cite:[${esc(citeWords(m[1], links[k].ref))}](#${links[k].id})}${c && c.state === 'contradicted' ? '{bad: ×}' : ''}` : esc(m[1])
     i = m.index + m[0].length
   }
   return out + esc(s.slice(i)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
@@ -414,7 +414,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   const right = `cite · ${short(files || ref, 40)}`
   const deep = Math.max(room + 6, 14)
   if (r.error && kind !== 'code') {
-    return { title: label, right, parts: [{ program: RECORDS_PROGRAM, data: { head: '', recs: [], empty: `${ref} does not resolve: ${short(r.error, 200)}`, max: 1, more: '' } }], sections: [], links: [] }
+    return { title: label, right, parts: [{ program: RECORDS_PROGRAM, data: { head: '', recs: [], empty: `${ref} does not resolve: ${short(r.error, 200)}`, max: 1, more: '' } }], sections: [], links: [], unresolved: true }
   }
   const about = query?.about ? esc(short(query.about, 80)) : ''
   if (kind === 'query' || kind === 'series') {

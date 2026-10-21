@@ -254,7 +254,7 @@ def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
     if frag and len(idx) == 1 and "col" in p:
         return None
     words = " ".join(str(label).replace("**", "").split()).strip("\"“”'")
-    nums = unkeyed(words, p.get("keys"))  # a number that names the cited rows is not the value
+    nums = unkeyed(words, p)  # a number the ref names (a key, a column) is not the value
     hits: list[tuple[int, str]] = []
     has_num = bool(NUM_RE.search(nums))
     keys = set(q.get("keys") or [])

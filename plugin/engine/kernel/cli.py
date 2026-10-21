@@ -330,6 +330,13 @@ def _lineage_line(q: dict[str, Any]) -> str:
     if q.get("lineage_error"):
         say = (f"No rows per output row: thimble could not find them ({q['lineage_error']}), so each value rests on all the "
                "rows read (tally() keeps them per row).")
+    keys = ", ".join(q.get("keys") or [])
+    if not keys and mode in ("matched", "key", "superset"):
+        # no key column found the rows: a value that counts one frame's rows (len(d)) rests on those rows, and a value
+        # with no rows has nothing behind it, so no citation is suggested
+        if not any(q.get("rows") or []):
+            return "No key and no rows stand behind these values: a citation of a value opens no records."
+        say = f"Each value counts the rows of `{q.get('frame') or 'a frame the query made'}`, and a citation of it opens those rows."
     if (mode or "query") == "query" and q.get("rows") is None and not q.get("read"):
         # no rows per output row and none read through load() or use(): nothing stands behind a value, and the line
         # says so, with how a query keeps them (a database or a JSON file read in code keeps none)
@@ -343,8 +350,8 @@ def _lineage_line(q: dict[str, Any]) -> str:
     elif how == "kept":
         # rows of a table an earlier query kept, grouped: each rests on what that query found for it
         by = next((u.get("query") for u in q.get("uses") or [] if u.get("name") == q.get("frame")), None)
-        say = (f"Each output row keeps the rows behind the rows of `{q.get('frame')}` it groups (found by "
-               f"{', '.join(q.get('keys') or [])}" + (f", as {by} kept them" if by else "") + ").")
+        say = (f"Each output row keeps the rows behind the rows of `{q.get('frame')}` it groups"
+               + (f" (found by {keys}" + (f", as {by} kept them" if by else "") + ")" if keys else f" (as {by} kept them)" if by else "") + ".")
     if q.get("cells") and mode != "loop" and q.get("loop"):
         say += f" A count its loop kept rows for (in `{q.get('loop')}`) opens those rows."
     elif q.get("cells") and q.get("cells_by"):
