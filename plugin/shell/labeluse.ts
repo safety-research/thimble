@@ -23,6 +23,7 @@ import { currentTheme, leanEnv, rootHere } from './shell'
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
+/** A label the row names. `tones`, set only under a card (withTones): the tones the card's cells give its values. */
 export type UsedLabel = { name: string; values: string[]; tones?: Record<string, string>; kind?: string; rule?: string; card?: string | null }
 
 const USE = { plugin: 'thimble', key: 'labeluse' } as const
@@ -75,9 +76,13 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; theme:
     const def = defLine(l, Math.max(DEF_MIN, (o.width ?? 80) - rest))
     if (def) kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ' · ' }), Text({ key: `${o.key}-dd${i}`, children: def }))
     shownValues.forEach((v, j) => {
-      const color = termColor(toneBeside(l, v), o.theme)
+      // under a card (`tones`, withTones): the color the card gives the value, or a plain dim dot where it gives none,
+      // so the row never shows a color the card does not use; under an answer: the label's own colors
+      const tone = l.tones ? l.tones[v] : toneBeside(l, v)
+      const color = tone ? termColor(tone, o.theme) : null
+      const words = color ? [Text({ color, children: `● ${v}` })] : l.tones ? [Text({ dimColor: true, children: '●' }), Text({ children: ` ${v}` })] : [Text({ children: `● ${v}` })]
       kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
-      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: [Text({ ...(color ? { color } : {}), children: `● ${v}` })] }))
+      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: words }))
     })
   })
   return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: kids })
