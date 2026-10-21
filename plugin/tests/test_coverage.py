@@ -288,3 +288,31 @@ def test_a_working_folder_of_links_counts_the_files_they_point_to(tmp_path: Path
     assert S.list_sources(work) == ["README.md", "boats.jsonl"]
     assert sorted(p.name for p in work.iterdir()) == before
     assert sorted(p.name for p in data.iterdir()) == ["README.md", "boats.jsonl", "shots"]
+
+
+def test_the_json_of_a_folder_of_many_files_stays_small(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # the shell reads the first 4 MB of a command's output: a folder of many files lists a few of each folder, and
+    # says how many more there are, while the totals count them all
+    from kernel import cli as CLI
+
+    d = tmp_path / "shots"
+    for day in ("d1", "d2", "d3"):
+        (d / day).mkdir(parents=True)
+        for i in range(40):
+            (d / day / f"{i}.png").write_bytes(b"")
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    monkeypatch.chdir(d)
+    monkeypatch.setattr(CLI, "COVER_UNTOUCHED_MAX", 50)
+    monkeypatch.setattr(CLI, "COVER_PER_FOLDER", 10)
+    import contextlib
+    import io
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert CLI.main(["coverage", "--json"]) == 0
+    got = json.loads(out.getvalue())
+    assert got["total"]["files"] == 120
+    assert len(got["untouched"]["path"]) == 30 and got["cut"] == {"files": 0, "untouched": 90}
+    assert {p.split("/")[0] for p in got["untouched"]["path"]} == {"d1", "d2", "d3"}

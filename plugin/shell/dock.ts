@@ -58,8 +58,9 @@ async function thimble($: Engine, root: string, args: string[], env?: Record<str
 
 /** How long one count of the folder's coverage may run. The first count of a big folder reads every row of its
  *  tables (about a minute for 18 GB of records); the kernel keeps the row counts, so later counts are quick. A count
- *  stopped early keeps nothing, so a short limit would stop every count of such a folder. */
-export const COVER_TIMEOUT_MS = 20 * 60 * 1000
+ *  stopped early keeps nothing, so a short limit would stop every count of such a folder (10 minutes is the most
+ *  Claude Code allows). */
+export const COVER_TIMEOUT_MS = 600000
 const counting = new Map<string, Promise<{ ok: boolean; out: string; err: string }>>()
 
 /** `thimble coverage --json` of the session's reads in `root`, one count at a time per folder: the bar's count and
