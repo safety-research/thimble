@@ -35,6 +35,7 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   on('session.start', (_$, e) => ({ cwd: e.cwd }) as never)
   on('session.id', () => ({ value: 's-1' }))
   on('session.cwd', () => ({ value: '/data' }))
+  on('session.root', () => ({ value: '/data' }))
   on('tool.call', (_$, e) => {
     if (String(e.tool) === 'Read') return { result: '     3\tone\n     4\ttwo\n' }
     if (String(e.tool) === 'Grep') return { result: '/data/a.jsonl:9:hit' }
@@ -57,4 +58,6 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   expect(String(rows[0].cwd)).toBe('/data')
   expect(kept![0]).toBe('/th/lean/seen/s-1.jsonl')
   expect(env.THIMBLE_SESSION).toBe('s-1')
+  // the folder the session started in, where `thimble` keeps the records after a `cd` (kernel/store.py find_root)
+  expect(env.THIMBLE_START).toBe('/data')
 })
