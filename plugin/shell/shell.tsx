@@ -38,7 +38,7 @@ import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCoun
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteEdit, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
-import { base as trayBase, open as trayOpen, order as markOrder, top as trayTop } from './tray.js'
+import { base as trayBase, open as trayOpen, order as markOrder, stepFrom, top as trayTop } from './tray.js'
 import { catchUpEl, keyColor, markColors, messageEl } from './view'
 import { markNextTurn, record as recordEvent } from '../telemetry/telemetry'
 import { ownTurn } from '../observer/observer'
@@ -1298,7 +1298,8 @@ async function stepMark($: Engine, dir: number): Promise<void> {
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === base.i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
   let next: { row: string; i?: number; card?: ObjRef } | null = null
-  if (at >= 0) next = list[(at + (dir > 0 ? 1 : -1) + list.length) % list.length] ?? null
+  // past the newest reply's last stop (or before the oldest reply's first), the tray stays where it is
+  if (at >= 0) { next = stepFrom(list, at, dir); if (!next) return }
   else {
     // from rest: what the message the keys act on holds (] its first mark, [ its last card), else the latest message's
     const row = await actingRow($)
@@ -1317,7 +1318,7 @@ async function stepSide($: Engine, frame: TrayFrame | null, dir: number): Promis
   if (!frame || frame.row == null) return
   const list = await focusOrder($)
   const at = list.findIndex(p => p.row === frame.row && p.i === frame.i)
-  const next = at >= 0 ? list[(at + dir + list.length) % list.length] : null
+  const next = at >= 0 ? stepFrom(list, at, dir) : null
   if (!next) return
   if (next.card) { await openDetail($, next.card, null, { side: 'keep' }); return }
   const rec = await recordNow($, next.row)
@@ -1461,6 +1462,16 @@ async function pickOption($: Engine, row: string, key: string, choice: string): 
   const rec = await recordNow($, row)
   if (!rec || key !== 'v') return false
   await setPick($, null)
+  // the view picked is no longer proposed: v stays lit only for the views still to make, so it is not lit beside the
+  // card it drew (v with none left asks for another view at once)
+  const v = (rec.verbs ?? {}).v
+  if (v && Array.isArray(v.proposals) && v.proposals.includes(choice)) {
+    const verbs = { ...rec.verbs }
+    const left = v.proposals.filter(p => p !== choice)
+    if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} view${left.length === 1 ? '' : 's'} ready` }
+    else delete verbs.v
+    await saveRecord($, { ...rec, verbs })
+  }
   // outside the press, but from its own work (not a timer), so this plugin's hooks hear the calls of the agent it starts
   void askForView($, rec, choice).catch(() => undefined)
   return true

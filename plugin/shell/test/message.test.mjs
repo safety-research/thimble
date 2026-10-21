@@ -7,7 +7,7 @@ import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLin
 import { linkRuns } from '../carddetail.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
 import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withObserver, wrapRuns } from '../message.js'
-import { back, base, open, order, push, step, top } from '../tray.js'
+import { back, base, open, order, push, step, stepFrom, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../draw/term.js'
@@ -115,4 +115,22 @@ test('an explainer and a re-pointed citation\'s card show what the healing pass 
   const healed = healedRecord({ ...rec, heal: { key: textKey(rec.text), changes: [heal.changes[0]] } })
   const f = frameOf(healed, 0)
   assert.deepEqual([f.ref, f.heal, f.wrote], ['r1#day=c@n', 'moved', 'r1#day=a@n'])
+})
+
+test('a heads-up whose words hold an explainer\'s term keeps its mark, and the explainer stands where its term is said again', () => {
+  const text = 'Each surge came from more than a hundred different network ranges. Later, the network ranges are the better clue.'
+  const glosses = { ...glossesOf([{ term: 'network ranges', body: 'An address cut to its first two numbers.' }], text), ...headsOf({ term: 'more than a hundred different network ranges', title: 'Most ranges may be one provider', bullets: ['Addresses that start with 20. made most edits.'] }, text) }
+  const rec = withObserver(newRecord({ row: 'r1', session: 's', text }), { verbs: {}, glosses })
+  const at = id => rec.marks.find(m => m.gloss === id)
+  assert.equal(text.slice(at('h1').start, at('h1').end), 'more than a hundred different network ranges')
+  assert.equal(text.slice(at('g1').start, at('g1').end), 'network ranges')
+  assert.ok(at('g1').start > at('h1').end)
+})
+
+test('] stops at the newest reply\'s last stop and [ at the oldest reply\'s first: neither runs on into the other end', () => {
+  const list = [{ row: 'r1', i: 0 }, { row: 'r1', i: 1 }, { row: 'r2', i: 0 }, { row: 'r2', card: { id: 'c1' } }]
+  assert.deepEqual(stepFrom(list, 2, 1), { row: 'r2', card: { id: 'c1' } })
+  assert.equal(stepFrom(list, 3, 1), null)
+  assert.equal(stepFrom(list, 0, -1), null)
+  assert.equal(step(order([{ row: 'r1', marks: [{}] }, { row: 'r2', marks: [{}, {}] }]), { row: 'r2', i: 1 }, 1), null)
 })

@@ -2084,7 +2084,9 @@ def cite_example(q: dict[str, Any]) -> str | None:
         return None
     r = table[0]
     keys = [k for k in q.get("keys") or [] if k in r]
-    vals = [k for k in r if k not in keys and isinstance(r[k], (int, float)) and not isinstance(r[k], bool)]
+    # a value column: never `index`, where the rows sat before a sort or a filter (the table keeps it beside the values,
+    # but it is no value of the output)
+    vals = [k for k in r if k not in keys and k != "index" and isinstance(r[k], (int, float)) and not isinstance(r[k], bool)]
     col = vals[0] if vals else None
     if col is None:
         return None

@@ -48,7 +48,17 @@ export function program(k, data) {
     return m ? pick(Number(m[1]))() : null
   })
   // one row of options, wrapped to the width: the first picked by ↵ in words, each a press
-  const items = opts.map((o, i) => k.region(`opt-${i}`, { label: o }, k.text(`${i ? '{dim:' : '{accent:'}▸ ${i + 1}} ${i ? k.escape(o) : `**${k.escape(o)}**`}`, { wrap: false })))
-  if (k.len(opts.map((o, i) => `▸ ${i + 1} ${o}`).join('   ')) <= k.w) return k.beside(...items, { gap: 3 })
-  return k.stack(items)
+  if (k.len(opts.map((o, i) => `▸ ${i + 1} ${o}`).join('   ')) <= k.w) return k.beside(...opts.map((o, i) => item(k, o, i, o)), { gap: 3 })
+  // one option a row, each name cut to the width with … (the whole name is what the pick asks for)
+  return k.stack(opts.map((o, i) => item(k, o, i, fit(k, o, k.w - k.len(`▸ ${i + 1} `)))))
+}
+
+const item = (k, o, i, shown) => k.region(`opt-${i}`, { label: o }, k.text(`${i ? '{dim:' : '{accent:'}▸ ${i + 1}} ${i ? k.escape(shown) : `**${k.escape(shown)}**`}`, { wrap: false }))
+
+function fit(k, s, room) {
+  if (k.len(s) <= room) return s
+  const chars = Array.from(s)
+  let n = Math.max(1, room - 1)
+  while (n > 1 && k.len(chars.slice(0, n).join('')) > room - 1) n--
+  return chars.slice(0, n).join('').trimEnd() + '…'
 }

@@ -296,7 +296,11 @@ export function placeMarks(text, glosses = {}, prev = [], { original = null } = 
     const old = (prev || []).find(p => p.kind === 'spark' && p.ref === m.ref && Array.isArray(p.values))
     if (old) m.values = old.values
   }
-  for (const [id, g] of Object.entries(glosses || {})) {
+  // the heads-up first: its words are often a longer phrase that holds an explainer's term ("more than a hundred
+  // different network ranges" holds "network ranges"), and a mark never stands on another's words, so the explainer
+  // then stands where its term is said again, and both show
+  const order = Object.entries(glosses || {}).sort(([, x], [, y]) => (y?.kind === 'heads') - (x?.kind === 'heads'))
+  for (const [id, g] of order) {
     const term = g && g.term
     const at = original == null ? findTerm(text, term, marks) : anchorTerm(text, term, marks)
     if (at) { marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id, ...(at.how && at.how !== 'term' ? { anchor: at.how } : {}) }); continue }
@@ -620,6 +624,8 @@ export function recordFor(kept, { row, session, text, at }) {
 const VERB_KEYS = ['v', 's']
 // a string's words on one line, cut to `n` characters only where a caller gives `n`
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
+// the same, with … where it is cut
+const clip = (v, n) => { const t = str(v); return Array.from(t).length <= n ? t : Array.from(t).slice(0, n - 1).join('').trimEnd() + '…' }
 
 /**
  * The observer's verbs as the record keeps them: each of v and s, lit only when the observer gave it, with its note of
@@ -635,7 +641,8 @@ export function verbsOf(out) {
     const note = str(v.note, 40)
     const r = { lit: true, note }
     if (k === 'v') {
-      r.proposals = (Array.isArray(v.proposals) ? v.proposals : []).map(p => str(typeof p === 'string' ? p : p?.title, 60)).filter(Boolean).slice(0, 2)
+      // each name whole: it is what v asks Claude to draw, and the line under the message cuts it to its width, with …
+      r.proposals = (Array.isArray(v.proposals) ? v.proposals : []).map(p => clip(typeof p === 'string' ? p : p?.title, 160)).filter(Boolean).slice(0, 2)
       if (!r.proposals.length && !note) continue
     }
     if (k === 's') {
