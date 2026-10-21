@@ -1503,8 +1503,9 @@ def table_only(result: Any) -> dict[str, Any]:
 
 def _summary(out: dict[str, Any], values: list[Any], ns: dict[str, Any], frames: list[Any]) -> None:
     """The rows behind a summary's values: a count that equals the rows of exactly one frame the query made rests on
-    that frame's rows (matched); any other value rests on all the rows the query read (summary), which `why_rows`
-    marks, since which of them the value used is not kept."""
+    that frame's rows (matched), and a count of the missing or true values of one series on those rows (_masked_rows);
+    any other value rests on all the rows the query read (summary), which `why_rows` marks, since which of them the
+    value used is not kept."""
     whole: list[str] | None = None
     rows: list[list[str]] = []
     marks: list[str | None] = []
@@ -1517,6 +1518,11 @@ def _summary(out: dict[str, Any], values: list[Any], ns: dict[str, Any], frames:
             rows.append(rowsets_of([hits[0][1]]))
             marks.append(None)
             names.add(hits[0][0])
+            continue
+        masked = _masked_rows(ns, frames, v) if not hits and isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+        if masked:
+            rows.append(masked)
+            marks.append(None)
             continue
         if whole is None:
             # the rows the query read: the frames it loaded or used (every frame it made is cut from those)
@@ -1534,6 +1540,41 @@ def _summary(out: dict[str, Any], values: list[Any], ns: dict[str, Any], frames:
     else:
         out["mode"] = "matched"
         out["frame"] = next(iter(names)) if len(names) == 1 else None
+
+
+MASK_COLS = 60  # columns of a frame checked for a count of its missing or true values
+
+
+def _masked_rows(ns: dict[str, Any], frames: list[Any], v: int) -> list[str] | None:
+    """The rows behind a count of a filtered frame the query never named (`a.isna().sum()`, `old.sum()` for a series of
+    true and false): a
+    series of the query, or a column of a frame that holds source rows, aligned with that frame by index, whose
+    missing values or true values number `v`. Those rows of the frame, as row sets, when exactly one set of rows fits;
+    else None (the value rests on every row the query read)."""
+    import pandas as pd
+
+    held = _named_frames(ns, frames, lambda f: True)
+    if not held:
+        return None
+    series = [x for x in ns.values() if isinstance(x, pd.Series)]
+    found: dict[tuple[str, ...], list[str]] = {}
+    for _, f in held:
+        cols = [c for c in f.columns if not (isinstance(c, str) and c.startswith("_"))][:MASK_COLS]
+        for s in [f[c] for c in cols] + [x for x in series if x.index.equals(f.index)]:
+            try:
+                masks = [s.isna()]
+                if pd.api.types.is_bool_dtype(s):
+                    masks.append(s.astype(bool))
+                for m in masks:
+                    if int(m.sum()) == v:
+                        got = rowsets_of([f[m.to_numpy()]])
+                        if got:
+                            found.setdefault(tuple(got), got)
+            except Exception:  # noqa: BLE001 — a column that cannot be read as a mask is no candidate
+                continue
+            if len(found) > 1:
+                return None
+    return next(iter(found.values())) if len(found) == 1 else None
 
 
 def _named_frames(ns: dict[str, Any], frames: list[Any], pred, lists: bool = False) -> list[tuple[str, Any]]:

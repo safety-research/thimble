@@ -65,7 +65,7 @@ export function linksIn(md, look = null) {
     if (c && c.state === 'quiet') continue
     const ref = c && c.to && c.state === 'linked' ? c.to : citeRef(m[2])
     if (!ref || out.some(x => x.ref === ref)) continue
-    out.push({ id: `n${out.length + 1}`, ref, label: citeWords(m[1], ref), ...(c && c.to && c.to !== c.ref && c.state === 'linked' ? { wrote: c.ref } : {}) })
+    out.push({ id: `n${out.length + 1}`, ref, label: citeWords(m[1], ref), ...(c && c.to && c.to !== c.ref && c.state === 'linked' && c.how !== 'folder' ? { wrote: c.ref } : {}) })
   }
   return out.slice(0, MAX_LINKS)
 }
@@ -165,7 +165,7 @@ const parts = []
 for (const r of data.rows) {
   const gutter = k.text((r.hot ? '{accent:' : '{dim:') + k.escape(r.n.padStart(nw)) + '}' + (r.hot ? ' {accent:▌}' : '  '), { w: nw + 2, wrap: false })
   const body = r.hot
-    ? k.stack(k.text(r.text || ' ', { max: data.hotMax }), r.meta ? k.text('{dim:' + k.escape(r.meta) + '}', { wrap: false }) : false)
+    ? k.stack(k.text(r.text || ' ', { max: data.hotMax }), r.meta ? k.text('{dim:' + k.escape(r.meta) + '}', { max: 2 }) : false)
     : k.text((data.plain ? (r.text || ' ') : '{dim:' + (r.text || ' ') + '}') + (r.meta ? '  {dim:' + k.escape(r.meta) + '}' : ''), { wrap: false })
   parts.push(k.beside(gutter, body, { gap: 1 }))
 }
@@ -210,9 +210,12 @@ return k.stack(parts)`
 const RECORDS_PROGRAM = `
 const parts = []
 if (data.head) parts.push(k.text(data.head, { wrap: false }))
-const w = Math.max(4, ...data.recs.map(r => k.len(r.ref)))
+// the record's place keeps its line or row whole: a long one loses the start of its path, and the column never shrinks
+const cap = Math.max(10, Math.min(24, Math.floor(k.w / 3)))
+const place = s => (k.len(s) > cap ? '…' + s.slice(s.length - cap + 1) : s)
+const w = Math.max(4, ...data.recs.map(r => k.len(place(r.ref))))
 for (const r of data.recs) parts.push(k.beside(
-  k.text((r.hot ? '{accent:' : '{dim:') + k.escape(r.ref) + '}', { w, wrap: false }),
+  k.text((r.hot ? '{accent:' : '{dim:') + k.escape(place(r.ref)) + '}', { w, minW: w, wrap: false }),
   k.text(k.escape(r.text) + (r.meta ? '  {dim:' + k.escape(r.meta) + '}' : ''), { max: data.max, bold: !!r.hot }),
   { gap: 2 }))
 if (!data.recs.length) parts.push(k.text('{dim:' + k.escape(data.empty) + '}'))
@@ -344,7 +347,7 @@ const hasRows = r => r.count > 0 && entryWords(r) !== null
  *  own word (`347 records of revisions.jsonl behind it`, `r records`). */
 function rowsSection(r, what, room) {
   const w = entryWords(r) || { many: 'rows', one: 'row' }
-  const recs = (r.records || []).map(x => ({ ref: short(String(x.ref).replace(/^.*\//, ''), 30), text: short(String(x.words || x.text || ''), 400), meta: short(String(x.meta || ''), 60) }))
+  const recs = (r.records || []).map(x => ({ ref: String(x.ref).replace(/^.*\//, ''), text: short(String(x.words || x.text || ''), 400), meta: short(String(x.meta || ''), 60) }))
   const total = r.count != null ? r.count : recs.length
   const files = filesOf(r, null)
   const head = r.count != null

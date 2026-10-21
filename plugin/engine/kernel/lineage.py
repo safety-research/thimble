@@ -373,6 +373,64 @@ def _window(text: str, at: tuple[int, int], width: int) -> tuple[str, tuple[int,
     return pre + text[lo:hi] + ("…" if hi < len(text) else ""), (a - lo + len(pre), b - lo + len(pre))
 
 
+_TIME_KEYS = ("ts", "time", "timestamp", "date", "at", "when", "created_at", "updated_at")
+_STAMP = re.compile(r"^(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d(?::\d\d)?)")
+_HASH = re.compile(r"[0-9a-f]{12,64}")
+
+
+def fields_line(v: dict[str, Any], label: str | None, shown: str = "", width: int = 160) -> str:
+    """A cited record's fields that its words leave out, in one short line: the fields the citation's words name
+    first (`14:38` names the time, `marked forced` the flag `forced`), then, for an event row with no sentence in it,
+    its time and its other fields. A nested object's fields read as the record's own (`params.forced` as `forced`); a
+    hash is cut to 7 characters or to as many as the words write, a true flag reads as its name, and a false or empty
+    one, or the row's id, is left out.
+    '' when nothing is left to show."""
+    flat: list[tuple[str, Any]] = []
+    for k, x in v.items():
+        if isinstance(x, dict):
+            flat += [(str(k2), y) for k2, y in x.items() if not isinstance(y, (dict, list))]
+        elif not isinstance(x, list):
+            flat.append((str(k), x))
+
+    lab = (label or "").lower()
+    tokens = {t for t in re.findall(r"[\w:./#-]+", lab) if len(t) >= 2}
+
+    def text(k: str, x: Any) -> str | None:
+        if isinstance(x, bool):
+            return k if x else None
+        if x is None or x == "" or re.fullmatch(r"id|uuid|.*_uuid", k, re.I):
+            return None
+        s = " ".join(str(x).split())
+        m = _STAMP.match(s)
+        if m:
+            return f"{m[1]} {m[2]}"
+        if _HASH.fullmatch(s):
+            # as long as the words write it (`d8daa160`), else 7 characters
+            s = s[:max([7] + [len(t) for t in tokens if len(t) >= 4 and s.startswith(t)])]
+        s = s if len(s) <= 40 else s[:39] + "…"
+        return f"{k} {s}"
+
+    said = shown.lower()
+    named, rest = [], []
+    for k, x in flat:
+        t = text(k, x)
+        if not t or (not isinstance(x, bool) and str(x).lower() in said):
+            continue
+        hit = k.lower() in tokens or any(any(c.isdigit() for c in tok) and tok in t.lower() for tok in tokens)
+        (named if hit else rest).append((k, t))
+    event = not any(isinstance(v.get(k), str) and v[k].strip() for k in WORD_KEYS) and not _long_words(v)
+    if event:
+        rest.sort(key=lambda kt: 0 if kt[0].lower() in _TIME_KEYS else 1)
+    picked = [t for _, t in named] + ([t for _, t in rest] if event else [])
+    out = ""
+    for t in picked:
+        nxt = f"{out} · {t}" if out else t
+        if len(nxt) > width:
+            break
+        out = nxt
+    return out
+
+
 def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: int, prefer: str | None = None) -> dict[str, Any]:
     """One row of a span: a line of text as written, or a record as its words (with whose and where). A cited row
     whose words a citation quotes reads as the field that holds them, with the quote's place (`at`)."""
@@ -402,6 +460,10 @@ def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: in
                 break
     if "text" not in out:
         out["text"] = words or excerpt(row, width)
+    if hot and "at" not in out and isinstance(row.value, dict) and row.value.get("type") not in ("assistant", "user"):
+        # the value the citation's words name is shown, not one key away: the record's fields its words leave out
+        extra = fields_line(row.value, label, f"{out['text']} {meta}")
+        meta = " · ".join(x for x in (extra, meta) if x)
     if meta:
         out["meta"] = meta
     return out

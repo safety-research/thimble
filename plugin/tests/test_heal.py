@@ -102,8 +102,10 @@ def test_a_path_written_from_a_subfolder(st: Store) -> None:
         (st.root / rel).parent.mkdir(parents=True, exist_ok=True)
         (st.root / rel).write_text("import os\nprint(os.sep)\n")
     text, c = one(st, "It [prints the separator](src/main.py#L2).")
-    assert (c["state"], c["how"], c["to"]) == (H.LINKED, H.PATH, "app/src/main.py#L2")
+    assert (c["state"], c["how"], c["to"]) == (H.LINKED, H.FOLDER, "app/src/main.py#L2")
     assert text == "It [prints the separator](app/src/main.py#L2)."
+    # the same place named from the folder the session was in: not a repair
+    assert H.heal(st, "It [prints the separator](src/main.py#L2).").record()["changed"] is False
     # two files end with the path: the failure line names them
     text, c = one(st, "It [imports os](lib/util.py#L1).", analyst=True)
     assert c["state"] == H.QUIET and c["how"] == H.GONE
