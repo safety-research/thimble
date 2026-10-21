@@ -121,7 +121,16 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       const region = grid.regions.find(r => r.id === id)
       const label = String(region?.meta?.label || id)
       if (region?.meta?.knob) { kids.push(...dial(run, id, label)); continue }
-      kids.push(Button({ key: `r|${key}|${y}|${id}`, plain: true, label, children: run.map(text), onPress: () => opts.onPress!(id) }))
+      // Claude Code draws a press inverse under the pointer and the ring, which leaves a bar a thin line on a block of
+      // the text's color: a run of words and marks is a press on its words alone (its first words keep the key the
+      // ring stands on), and its marks are drawn beside them. A run of marks alone stays one press.
+      const parts = run.some(g => !g.c.m) && run.some(g => g.c.m) ? splitMarks(run) : [run]
+      let n = 0
+      for (const part of parts) {
+        if (part[0]!.c.m) { kids.push(Text({ wrap: 'truncate-end', children: part.map(text) })); continue }
+        kids.push(Button({ key: `r|${key}|${y}|${id}${n ? `|#${n}` : ''}`, plain: true, label, children: part.map(text), onPress: () => opts.onPress!(id) }))
+        n++
+      }
     }
     return Box({ flexDirection: 'row', children: kids })
 
@@ -150,8 +159,19 @@ function isFramed(grid: Grid): boolean {
   return !!top && top[0]?.ch === '╭' && top[grid.w - 1]?.ch === '╮'
 }
 
-/** The region id a cell Button's key names, or null. */
+/** A region's run of a row cut where it turns from words to marks and back: [[words], [marks], [words]…]. */
+function splitMarks<T extends { c: Cell }>(run: T[]): T[][] {
+  const out: T[][] = []
+  for (const g of run) {
+    const last = out[out.length - 1]
+    if (last && !!last[0]!.c.m === !!g.c.m) last.push(g)
+    else out.push([g])
+  }
+  return out
+}
+
+/** The region id a cell Button's key names (a later press of its row, `|#2`, names it too), or null. */
 export function regionOfKey(k: string): string | null {
-  const parts = String(k).split('|')
+  const parts = String(k).replace(/\|#\d+$/, '').split('|')
   return parts[0] === 'r' && parts.length >= 4 ? parts.slice(3).join('|') : null
 }
