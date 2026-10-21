@@ -340,6 +340,46 @@ async def run_script(script: Path, req: dict[str, Any], corpus: Path, *, extra_r
         shutil.rmtree(run_dir, ignore_errors=True)
 
 
+TEST_S = 300.0
+TEST_OUT = 12_000
+
+
+async def run_tests(copy: Path, args: Sequence[str], *, timeout: float = TEST_S, unsandboxed: bool = False) -> dict[str, Any]:
+    """{ok, text}: pytest over `args` (paths of the copy, and pytest's own -flags) in a fix's copy of thimble
+    (fixcopy.py), in the sandbox as a card's code runs: the copy is shown read-only and is the run's working folder,
+    the run writes only its own folder, and it has no network and none of the server's environment. Only this
+    server's Python runs, so the tests that need what it lacks (pytest, pandas) say so in their output."""
+    copy = copy.resolve()
+    st = status()
+    if not st.kind and not unsandboxed:
+        return {"ok": False, "text": f"The tests did not run: thimble browser runs code only in a sandbox, and found "
+                                     f"none: {st.why}. {st.fix}"}
+    run_dir = Path(tempfile.mkdtemp(prefix="thimble-test-")).resolve()
+    command = [sys.executable, "-I", "-m", "pytest", "-q", "-p", "no:cacheprovider", *args]
+    try:
+        env = child_env(run_dir)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        if st.kind:
+            argv = launcher_argv(st.node, rules_for(copy, run_dir), command, env)
+            env = launcher_env(run_dir)
+        else:
+            argv = command
+        proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.DEVNULL,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                                                    env=env, cwd=str(copy), start_new_session=True)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        except asyncio.TimeoutError:
+            await _stop(proc)
+            return {"ok": False, "text": f"The tests did not finish in {timeout:g} s and were stopped."}
+        text = out.decode(errors="replace")
+        if len(text) > TEST_OUT:
+            text = "[...]\n" + text[-TEST_OUT:]
+        return {"ok": proc.returncode == 0, "text": text.strip() or f"pytest exited with {proc.returncode}"}
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
 async def _stop(proc: asyncio.subprocess.Process) -> None:
     """Stop a run's process group: SIGTERM, which run.mjs passes on and cleans up after, then SIGKILL if it is still
     there after STOP_S."""

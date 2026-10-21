@@ -18,7 +18,9 @@ def test_a_thread_copies_main_up_to_its_last_finished_turn():
 def test_every_agent_has_a_fixed_tool_set_and_no_shell():
     from thimble_browser.features import views  # noqa: F401  (adds the view builder)
 
-    given = {name for f in features.all_features() for name in f.tools}
+    from thimble_browser import fixcopy  # noqa: PLC0415  (the fix tools, confined to a fix's copy)
+
+    given = {name for f in features.all_features() for name in f.tools} | set(fixcopy.TOOLS)
     assert set(agent.AGENTS) == {"main", "dev"}
     for name, a in agent.AGENTS.items():
         for t in a.tool_names():

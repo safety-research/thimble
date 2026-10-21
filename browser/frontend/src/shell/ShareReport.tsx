@@ -6,8 +6,9 @@
 // The preview shows the exact text the issue would carry, each placeholder of a removed detail marked; beside it the
 // privacy scan's hits, each with Keep (never for a key or a token). Not now closes it; Edit changes the text and the
 // scan runs again; Save as file downloads one Markdown file; Send opens the issue under the person's own GitHub
-// login. Only these clicks answer the preview: they carry the ask id, which the agent never sees. thimble browser does
-// not change thimble's code itself, so Fix this drafts a report too and the preview says so in one line.
+// login. Only these clicks answer the preview: they carry the ask id, which the agent never sees. A fix that changed
+// thimble's code (fixcopy.py on the server) also shows its pull request: the files it changes and the diff, which Send
+// opens as a draft pull request beside the issue. Fix this sends `/fix <the failure>`, the same flow as the top bar's Fix….
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { apiBase } from '../lib/browserKey'
@@ -31,9 +32,20 @@ export interface IssueDraft {
   ask: string
   repo: string
   login?: string | null
+  /** `change` when the fix changed thimble's code: the pull request's text, its diff and the files it changes */
+  kind?: 'change' | 'request'
+  pr?: string
+  diff?: string
+  files?: { path: string; added: number; removed: number }[]
 }
 
-export const FIX_LINE = 'thimble browser does not change thimble’s code: fixes are made from the terminal plugin for now, so this is a report.'
+/** The diff's lines, each with its kind for its tint. Pure. */
+export function diffLines(diff: string): { text: string; kind: 'add' | 'del' | 'file' | 'hunk' | 'ctx' }[] {
+  return diff.split('\n').map((text) => ({
+    text,
+    kind: text.startsWith('diff --git') || text.startsWith('+++') || text.startsWith('---') ? 'file' : text.startsWith('@@') ? 'hunk' : text.startsWith('+') ? 'add' : text.startsWith('-') ? 'del' : 'ctx',
+  }))
+}
 export const NEVER = ['your files, their names and folders', 'record values, names, emails', 'chats, transcripts and cards', 'keys and tokens (no Keep)']
 
 /** What a hit is, as the scan column names it. Pure. */
@@ -60,7 +72,7 @@ export function hitKind(kind: string): string {
 export function reportMessage(mode: 'fix' | 'report', text: string): string {
   const what = text.trim()
   if (!what) return 'I want to report a problem with thimble. Ask me what happened, then draft the report.'
-  return mode === 'fix' ? `Fix this problem in thimble: ${what}` : `Report this problem with thimble: ${what}`
+  return mode === 'fix' ? `/fix ${what}` : `Report this problem with thimble: ${what}`
 }
 
 /** The text cut into plain runs and marked runs, each mark a replacement of a removed hit. Pure. */
@@ -125,8 +137,10 @@ export function ReportThis({ text, className = '' }: { text: string; className?:
 }
 
 /** The preview itself, for one draft. */
-export function ShareReportDialog({ ws, draft: first, fix = false, onClose }: { ws: string; draft: IssueDraft; fix?: boolean; onClose: () => void }) {
+export function ShareReportDialog({ ws, draft: first, onClose }: { ws: string; draft: IssueDraft; onClose: () => void }) {
   const [draft, setDraft] = useState(first)
+  const [tab, setTab] = useState<'issue' | 'change'>('issue')
+  const change = !!draft.files?.length
   const [editing, setEditing] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -159,27 +173,53 @@ export function ShareReportDialog({ ws, draft: first, fix = false, onClose }: { 
     })
   const send = () =>
     act('send', async () => {
-      const r = await call<{ url?: string }>(ws, `/${draft.slug}/send`, 'POST', { answer: 'send', ask: draft.ask })
-      bus.emit('toast', { text: `Sent as an issue: ${r.url ?? ''}` })
+      const r = await call<{ url?: string; pr_url?: string }>(ws, `/${draft.slug}/send`, 'POST', { answer: 'send', ask: draft.ask })
+      bus.emit('toast', { text: r.pr_url ? `Sent as drafts: pull request ${r.pr_url} · issue ${r.url ?? ''}` : `Sent as an issue: ${r.url ?? ''}` })
       onClose()
     })
   const pieces = markPieces(draft.text, removed.map((h) => h.replacement))
   return (
     <div className="share-scrim" role="presentation" onClick={onClose}>
-      <div className="share-dialog" role="dialog" aria-modal="true" aria-label="Share this report" onClick={(e) => e.stopPropagation()}>
+      <div className="share-dialog" role="dialog" aria-modal="true" aria-label={change ? 'Share this fix' : 'Share this report'} onClick={(e) => e.stopPropagation()}>
         <header className="share-head">
-          <h2>Share this report</h2>
+          <h2>{change ? 'Share this fix' : 'Share this report'}</h2>
           <p>
-            Nothing has been sent. GitHub receives exactly this text: an issue on {draft.repo}, from {login ? `your login @${login}` : 'your GitHub login'}.
+            Nothing has been sent. GitHub receives exactly this{' '}
+            {change ? `: a draft pull request with the change below and an issue that links it` : ' text: an issue'}, on {draft.repo}, from{' '}
+            {login ? `your login @${login}` : 'your GitHub login'}.
           </p>
-          {fix && <p className="share-fixline">{FIX_LINE}</p>}
         </header>
         <div className="share-body">
           <div className="share-main">
             <div className="share-tabs" role="tablist">
-              <span role="tab" aria-selected="true" className="share-tab on">Issue</span>
+              <button type="button" role="tab" aria-selected={tab === 'issue'} className={`share-tab${tab === 'issue' ? ' on' : ''}`} onClick={() => setTab('issue')}>
+                Issue
+              </button>
+              {change && (
+                <button type="button" role="tab" aria-selected={tab === 'change'} className={`share-tab${tab === 'change' ? ' on' : ''}`} onClick={() => setTab('change')} data-testid="share-change-tab">
+                  Pull request · {draft.files!.length} file{draft.files!.length === 1 ? '' : 's'}
+                </button>
+              )}
             </div>
-            {editing != null ? (
+            {tab === 'change' && change ? (
+              <div className="share-change" data-testid="share-change">
+                <ul className="share-files">
+                  {draft.files!.map((f) => (
+                    <li key={f.path}>
+                      <code>{f.path}</code> <span className="share-add">+{f.added}</span> <span className="share-del">−{f.removed}</span>
+                    </li>
+                  ))}
+                </ul>
+                <pre className="share-text share-diff">
+                  {diffLines(draft.diff ?? '').map((l, i) => (
+                    <span key={i} className={`share-dl share-dl-${l.kind}`}>
+                      {l.text}
+                      {'\n'}
+                    </span>
+                  ))}
+                </pre>
+              </div>
+            ) : editing != null ? (
               <textarea className="share-text share-edit" aria-label="The issue text" value={editing} onChange={(e) => setEditing(e.target.value)} />
             ) : (
               <pre className="share-text" data-testid="share-text">
@@ -252,10 +292,8 @@ export function ShareReportDialog({ ws, draft: first, fix = false, onClose }: { 
 /** Where the flow lives in the page: it sends main the report request and opens the preview when a draft is ready. */
 export function ShareReportHost({ ws }: { ws: string }) {
   const [draft, setDraft] = useState<IssueDraft | null>(null)
-  const [fix, setFix] = useState(false)
   useEffect(() => {
     const start = (mode: 'fix' | 'report', text: string) => {
-      setFix(mode === 'fix')
       bus.emit('openChat', { chatId: 'main', send: reportMessage(mode, text) })
     }
     const offs = [
@@ -271,5 +309,5 @@ export function ShareReportHost({ ws }: { ws: string }) {
     return () => offs.forEach((off) => off())
   }, [ws])
   if (!draft) return null
-  return <ShareReportDialog key={draft.slug} ws={ws} draft={draft} fix={fix} onClose={() => setDraft(null)} />
+  return <ShareReportDialog key={`${draft.slug}|${draft.ask}`} ws={ws} draft={draft} onClose={() => setDraft(null)} />
 }
