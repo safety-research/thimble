@@ -795,9 +795,6 @@ def entries_of(st: Store, rowsets: list[str]) -> dict[str, Any]:
 # the line ranges and search hits kept per file for the coverage pane
 RANGES_MAX = 300
 HITS_MAX = 400
-# a query's output rows printed whole: pandas shows a table of up to this many rows, else its first and last five
-PRINTED_ALL = 60
-PRINTED_ENDS = 5
 
 
 def _ranges_len(ranges: list[tuple[int, int]]) -> int:
@@ -828,27 +825,34 @@ def _line_of(ref: str) -> int | None:
 
 def type_of(path: str) -> str:
     """A file's type as the coverage pane groups it: its extension (`jsonl`, `py`), else `no extension`."""
-    return Path(path).suffix.lower().lstrip(".") or "no extension"
+    name = path.rsplit("/", 1)[-1]
+    dot = name.rfind(".")
+    return name[dot + 1:].lower() if 0 < dot < len(name) - 1 else "no extension"
 
 
-# a source row's ref as a tool's output names it: a path, `#`, and the row's place in its file (revisions.jsonl#L4111,
-# runs.csv#row=3, forge.db#prs/12, run.json#/messages/3)
-REF_IN_TEXT = re.compile(r"[^\s'\"`()\[\]<>{}|#=:,]+#[^\s'\"`()\[\]<>{}|#]+")
-PRINTED_REFS_MAX = 2000
+def folder_of(path: str) -> str:
+    """A file's folder as the coverage pane groups files: `runs/r004/`, or `./` for the top folder."""
+    return path.rsplit("/", 1)[0] + "/" if "/" in path else "./"
 
 
-def printed_refs(text: str, cap: int = PRINTED_REFS_MAX) -> list[str]:
-    """The row refs a tool's output names, once each, in order (hooks/kernel.ts keeps the same of a Bash output). A ref
-    cut short by its printer (`…`, `...`) names no row."""
-    out: dict[str, None] = {}
-    for m in REF_IN_TEXT.finditer(text or ""):
-        t = m.group(0)
-        if t.endswith(("…", "...")):
-            continue
-        out.setdefault(t.rstrip(".,;:"), None)
-        if len(out) >= cap:
-            break
-    return list(out)
+def shares(o: dict[str, Any]) -> tuple[float, float]:
+    """A file's two measures in its own unit: the share read into Claude's context, and the share counted or computed
+    over (read is part of it): a query, a rule label or a label's model went over it, or Claude read it."""
+    units = max(1, o.get("units") or 0)
+    read = min(1.0, (o.get("seen_units") or 0) / units)
+    if o.get("unit") == "file":
+        return read, 1.0 if read or o.get("computed") or o.get("model") else 0.0
+    return read, min(1.0, ((o.get("seen_units") or 0) + (o.get("model_units") or 0) + (o.get("computed_units") or 0)) / units)
+
+
+def _program(cmd: str) -> str:
+    """A command's first program past `cd`, as coverage names what touched a file."""
+    for pipe in SH.pipelines(cmd):
+        for stage in pipe:
+            prog, _ = SH.program(stage["words"])
+            if prog and prog != "cd":
+                return prog
+    return "Bash"
 
 
 def _query_printed(st: Store, qid: str) -> dict[str, Any] | None:
@@ -862,14 +866,16 @@ def _query_printed(st: Store, qid: str) -> dict[str, Any] | None:
 
 
 def _printed_rows(q: dict[str, Any] | None) -> list[str]:
-    """The source rows a query printed whole: its output rows that each stand for one source row (a listing of rows, not
-    a count), as many as pandas prints of its table. An aggregate's rows stand for many rows, whose text never showed."""
+    """The source rows a query's result showed Claude: the rows of its table that thimble displayed (query.shown_rows:
+    only a table that shows its rows' fields beside their refs), each of which stands for one source row (a listing of
+    rows, not a count). An aggregate's rows stand for many rows, whose text never showed."""
     if not q:
         return []
     rows = q.get("rows") or []
-    idx = range(len(rows)) if len(rows) <= PRINTED_ALL else [*range(PRINTED_ENDS), *range(len(rows) - PRINTED_ENDS, len(rows))]
     out = []
-    for i in idx:
+    for i in q.get("shown_rows") or []:
+        if not 0 <= int(i) < len(rows):
+            continue
         sets = rows[i] if isinstance(rows[i], list) else [rows[i]]
         try:
             if R.count(sets) == 1:
@@ -952,29 +958,6 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             else:
                 per[f]["shown"].add(ref)
 
-    def seen_named(refs: list[str], cwd: str | None = None) -> None:
-        """Rows a tool's output named by their refs: each ref of one row of a source file reached Claude's context with
-        the output (a section of a Markdown file is one row, though it spans lines). Paths are the root's, or the
-        command's folder's."""
-        for t in refs:
-            path, _, frag = str(t).partition("#")
-            if not frag:
-                continue
-            f = path if path in per else st.rel(str(Path(cwd) / path) if cwd and not Path(path).is_absolute() else path)
-            if f not in per:
-                continue
-            ref = f"{f}#{frag}"
-            try:
-                p = R.parse(ref)
-                n = R.size(p)
-            except Exception:  # noqa: BLE001 — words after a `#` that name no row
-                continue
-            nums = p.get("nums") or []
-            section = (p.get("kind") == "lines" and bool(nums) and cnt.get(f, {}).get("kind") in ("markdown", "diff")
-                       and nums == list(range(nums[0], nums[-1] + 1)))
-            if p.get("kind") != "file" and (n == 1 or section):
-                seen_ref(ref)
-
     label_names: set[str] = set()
     for r in st.ledger(session):
         k = r.get("kind")
@@ -986,13 +969,10 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                     if not n:
                         per[f]["named"] = True
                         per[f]["by"].add("thimble")
-            # rows of its output printed whole entered Claude's context, and so did each row its printed output names
-            # by its ref (a script that prints `r._ref` beside a row's fields), as far as the output Claude read goes
-            q = _query_printed(st, str(r.get("id") or ""))
-            for ref in _printed_rows(q):
+            # the rows of its result that thimble showed Claude entered its context; a ref printed by itself (a print
+            # of `_refs`) names a row without its content, so the file is only computed over
+            for ref in _printed_rows(_query_printed(st, str(r.get("id") or ""))):
                 seen_ref(ref)
-            if q:
-                seen_named(printed_refs(str(q.get("stdout") or "")[: Q.CUT]))
         elif k in ("rows", "resolve"):
             for ref in r.get("shown") or []:
                 f = ref.split("#")[0]
@@ -1072,8 +1052,14 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             cmd = str(s.get("command") or "")
             if re.match(r"^\s*thimble(\s|$)", cmd):
                 continue
-            # rows its output named by their refs (a script that printed rows with their refs)
-            seen_named(s.get("refs") or [], s.get("cwd"))
+            # a ref its output named (a script that printed `_refs`) is a row's name, not its content: its file is
+            # touched, none of it read
+            for t in s.get("refs") or []:
+                path = str(t).partition("#")[0]
+                f = path if path in per else st.rel(str(Path(s.get("cwd") or root) / path))
+                if f in per:
+                    per[f]["named"] = True
+                    per[f]["by"].add(_program(cmd))
             # what reached Claude is at most the lines the command printed (a long output is cut)
             left = s.get("out_lines")
             for f, how, span, prog in SH.shows(cmd, files, root, s.get("cwd"), lambda f: cnt.get(f, {}).get("lines") or 0):
@@ -1096,11 +1082,20 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                 x["searched" if how == "searched" else "named"] = True
                 x["searched_by" if how == "searched" else "by"].add(prog)
     out_files = []
-    group = S.group_of(files)
-    pattern = S.pattern_of(files)
     for f in files:
         c, x = cnt.get(f, {}), per[f]
         rows, lines = c.get("rows", 0), c.get("lines", 0)
+        if not (x["computed"] or x["queries"] or x["shown"] or x["lines"] or x["searched"] or x["matched"] or x["named"]
+                or x["hits"] or x["model"] or x["labels"] or x["pages"] or x["whole"]):
+            # a file nothing touched, the most of a large folder: its size and nothing else, quickly
+            unit = unit_of[f]
+            units = 1 if unit == "file" else lines if unit == "lines" else rows
+            out_files.append({"path": f, "kind": c.get("kind"), "unit": unit, "units": units, "seen_units": 0,
+                              "model_units": 0, "computed_units": 0, "rows": rows, "lines": lines, "status": "not read",
+                              "seen": False, "read": False, "touched": False, "share": 0.0, "model": 0, "computed": 0,
+                              "model_rows": 0, "computed_rows": 0, "read_share": 0.0, "counted_share": 0.0,
+                              "type": type_of(f), "folder": folder_of(f), "said": "none"})
+            continue
         unit = unit_of[f]
         seen_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
         pages = _merged(x["pages"]) if unit == "pages" and not x["whole"] else ([[1, max(1, rows)]] if unit == "pages" else [])
@@ -1148,19 +1143,25 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                           "queries": sorted(set(q for q in x["queries"] if q)),
                           "shown": len(x["shown"]), "searched": x["searched"], "matched": x["matched"],
                           "hits": len(x["hits"]), "named": x["named"], "by": sorted(x["by"]),
-                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "group": group.get(f, f),
-                          "pattern": pattern.get(f, f),
+                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "folder": folder_of(f),
                           # which lines entered Claude's context, and which of them a search showed
                           "ranges": _merged(x["lines"]),
                           "hit_lines": sorted({n for n in map(_line_of, x["hits"]) if n})[:HITS_MAX]})
         out_files[-1]["said"] = file_line(out_files[-1])
-    groups: dict[str, dict[str, Any]] = {}
-    patterns: dict[str, dict[str, Any]] = {}
+        out_files[-1]["read_share"], out_files[-1]["counted_share"] = shares(out_files[-1])
+    # the files by folder and by type, each group with the two measures: read and counted, in its files' unit (when
+    # they share one), else the mean of its files' shares
+    folders: dict[str, dict[str, Any]] = {}
     types: dict[str, dict[str, Any]] = {}
     for e in out_files:
-        for key, name, into in ((e["group"], "group", groups), (e["pattern"], "pattern", patterns), (e["type"], "type", types)):
-            G = into.setdefault(key, {name: key, "files": 0, "rows": 0, "seen_rows": 0.0, "model_rows": 0, "computed_rows": 0,
-                                      "touched": 0, "seen_files": 0, "by_status": defaultdict(int), "computed": 0, "units": {}})
+        for key, name, into in ((e["folder"], "folder", folders), (e["type"], "type", types)):
+            G = into.get(key)
+            if G is None:
+                G = into[key] = {name: key, "files": 0, "rows": 0, "seen_rows": 0.0, "model_rows": 0, "computed_rows": 0,
+                                 "touched": 0, "seen_files": 0, "by_status": defaultdict(int), "computed": 0, "units": {},
+                                 "read_sum": 0.0, "counted_sum": 0.0}
+            G["read_sum"] += e["read_share"]
+            G["counted_sum"] += e["counted_share"]
             _add_units(G["units"], e)
             G["files"] += 1
             G["rows"] += e["rows"]
@@ -1171,8 +1172,16 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             G["seen_files"] += int(e["seen"])
             G["by_status"][e["status"]] += 1
             G["computed"] += e["computed"]
-    for G in [*groups.values(), *patterns.values(), *types.values()]:
+    for G in [*folders.values(), *types.values()]:
         G["units"] = _units_list(G["units"])
+        if len(G["units"]) == 1 and G["units"][0]["units"]:
+            u = G["units"][0]
+            G["read_share"] = min(1.0, u["seen"] / u["units"])
+            G["counted_share"] = min(1.0, (u["seen"] + u["model"] + u["computed"]) / u["units"])
+        else:
+            G["read_share"], G["counted_share"] = G["read_sum"] / G["files"], G["counted_sum"] / G["files"]
+        del G["read_sum"], G["counted_sum"]
+        G["group"] = G.get("folder", G.get("type"))
         G["by_status"] = dict(G["by_status"])
         G["seen_rows"] = round(G["seen_rows"])
         G["read_rows"] = G["seen_rows"]
@@ -1206,8 +1215,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     total.update(read_files=total["seen_files"], read_rows=total["seen_rows"], read_share=total["seen_share"],
                  not_read_files=total["not_seen_files"], not_read_rows=total["not_seen_rows"])
     return {"root": str(st.root), "session": st.session if session == "" else session, "files": out_files,
-            "groups": sorted(groups.values(), key=lambda g: -g["rows"]),
-            "patterns": sorted(patterns.values(), key=lambda g: (-g["rows"], g["pattern"])),
+            "groups": sorted(folders.values(), key=lambda g: (-g["touched"], -g["files"], g["folder"])),
             "types": sorted(types.values(), key=lambda g: (-g["rows"], g["type"])),
             "total": total}
 

@@ -95,14 +95,30 @@ def file_kind(path: Path) -> str:
 def list_files(root: Path) -> list[str]:
     """Every file under root that coverage counts, relative, sorted: the sources, and the other files that are not
     hidden (a PDF, an image, a binary), under the same folders list_sources walks."""
-    out = []
-    for d, dirs, files in os.walk(root):
-        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not x.startswith("."))
-        for f in files:
-            p = Path(d) / f
-            if p.is_symlink() or (f.startswith(".") and not kind_of(p)):
+    out: list[str] = []
+
+    # by os.scandir and plain strings: a folder of 100,000 files is walked in well under a second
+    def walk(d: str, rel: str) -> None:
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            return
+        dirs = []
+        for e in entries:
+            try:
+                if e.is_symlink():
+                    continue
+                if e.is_dir(follow_symlinks=False):
+                    dirs.append(e.name)
+                elif not (e.name.startswith(".") and not kind_of(Path(e.name))):
+                    out.append(rel + e.name)
+            except OSError:
                 continue
-            out.append(os.path.relpath(p, root))
+        for x in sorted(dirs):
+            if x not in SKIP_DIRS and not x.startswith("."):
+                walk(os.path.join(d, x), f"{rel}{x}/")
+
+    walk(str(root), "")
     return sorted(out)
 
 
@@ -439,15 +455,15 @@ def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, di
     out, changed = {}, False
     # the files not counted yet (or changed since), counted together first
     stats: dict[str, Any] = {}
+    base = str(root)
     for rel in rels:
         try:
-            stats[rel] = (root / rel).stat()
+            stats[rel] = os.stat(f"{base}/{rel}")
         except OSError:
             continue
     todo = [r for r, st in stats.items() if not ((c := cache.get(r)) and c.get("key") == f"{st.st_size}:{st.st_mtime_ns}")]
     fresh = _count_many(root, todo, {r: stats[r].st_size for r in todo}) if todo else {}
     for rel in rels:
-        p = root / rel
         st = stats.get(rel)
         if st is None:
             continue
@@ -456,6 +472,7 @@ def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, di
         if c and c.get("key") == key:
             out[rel] = c
             continue
+        p = root / rel
         kind = kind_of_file(root, rel) or file_kind(p)
         rows = fresh[rel] if rel in fresh else count_rows(root, rel)
         lines = rows if kind in ("jsonl", "transcript", "text") else (count_lines(p) if kind in ("markdown", "diff", "csv", "json") and st.st_size < 256 * 1024 * 1024 else 0)

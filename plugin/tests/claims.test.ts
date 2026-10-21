@@ -1,6 +1,6 @@
 // Claims in a session (claims/, shell/panes.ts): after two turns of work, c opens the Claims pane with the ring on the
 // selected dot rather than on the input bar, so the first arrow walks the claims from it, and a letter still starts a
-// question. Coverage (r) opens the same way, on its selected group, so ↵ opens its files. `claude plugin test plugin`.
+// question. Coverage (r) opens the same way, on its selected row, so ↵ opens it. `claude plugin test plugin`.
 // The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -231,7 +231,7 @@ const COV = {
   total: { files: 2, rows: 20, seen_rows: 3, seen_files: 1, touched_files: 1 },
 }
 
-test('Coverage opens with the ring on the selected group, not on the input bar: ↵ opens its files at once, as a click does', async ($, on) => {
+test('Coverage opens with the ring on the selected file, not on the input bar: ↵ opens its lines at once, as a click does', async ($, on) => {
   const w = world(on, [FORK1], { cov: COV })
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   // r opens Coverage once a moment passed with no letter after it
@@ -240,11 +240,11 @@ test('Coverage opens with the ring on the selected group, not on the input bar: 
   await w.clock.settle()
   for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
   const drawn = JSON.stringify(await $.ui.render(PANE))
-  expect(drawn).toContain('Ask about *.jsonl')
+  expect(drawn).toContain('Ask about revisions.jsonl')
   expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
-  // the ring stands on the selected group's row, so ↵ presses it: its files open
+  // a folder of two files lists them, with no group to open; the ring stands on the first, so ↵ opens its lines
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
-  await ui.press({ key: await rowKey($, 'g-0') })
+  await ui.press({ key: await rowKey($, 'f:revisions.jsonl') })
   await w.clock.settle()
-  expect(textOf(await $.ui.render(PANE))).toContain('Claude read 3 of their 20 rows (15%), from 1 of 2 files.')
+  expect(textOf(await $.ui.render(PANE))).toContain('read 3 of 10 records (30%)')
 })

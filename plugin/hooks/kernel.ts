@@ -58,8 +58,8 @@ export function grepHits(text: string): { files: string[]; lines: Record<string,
 }
 
 /** The row refs a command's output names, once each, in order: a path, `#` and the row's place in its file
- *  (`revisions.jsonl#L4111`, `runs.csv#row=3`, `forge.db#prs/12`). Coverage counts those of source rows as seen
- *  (engine/kernel/lineage.py printed_refs reads a query's output the same way). A ref cut short (`…`) names no row. */
+ *  (`revisions.jsonl#L4111`, `runs.csv#row=3`, `forge.db#prs/12`). Coverage counts the files they name as touched; a
+ *  ref is a row's name, not its content, so no row of them is read. A ref cut short (`…`) names no row. */
 export function rowRefs(text: string): string[] {
   const out = new Set<string>()
   for (const m of text.matchAll(/[^\s'"`()[\]<>{}|#=:,]+#[^\s'"`()[\]<>{}|#]+/g)) {
