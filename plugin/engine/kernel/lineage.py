@@ -382,7 +382,8 @@ def fields_line(v: dict[str, Any], label: str | None, shown: str = "", width: in
     """A cited record's fields that its words leave out, in one short line: the fields the citation's words name
     first (`14:38` names the time, `marked forced` the flag `forced`), then, for an event row with no sentence in it,
     its time and its other fields. A nested object's fields read as the record's own (`params.forced` as `forced`); a
-    hash is cut to 7 characters, a true flag reads as its name, and a false or empty one, or the row's id, is left out.
+    hash is cut to 7 characters or to as many as the words write, a true flag reads as its name, and a false or empty
+    one, or the row's id, is left out.
     '' when nothing is left to show."""
     flat: list[tuple[str, Any]] = []
     for k, x in v.items():
@@ -390,6 +391,9 @@ def fields_line(v: dict[str, Any], label: str | None, shown: str = "", width: in
             flat += [(str(k2), y) for k2, y in x.items() if not isinstance(y, (dict, list))]
         elif not isinstance(x, list):
             flat.append((str(k), x))
+
+    lab = (label or "").lower()
+    tokens = {t for t in re.findall(r"[\w:./#-]+", lab) if len(t) >= 2}
 
     def text(k: str, x: Any) -> str | None:
         if isinstance(x, bool):
@@ -401,12 +405,11 @@ def fields_line(v: dict[str, Any], label: str | None, shown: str = "", width: in
         if m:
             return f"{m[1]} {m[2]}"
         if _HASH.fullmatch(s):
-            s = s[:7]
+            # as long as the words write it (`d8daa160`), else 7 characters
+            s = s[:max([7] + [len(t) for t in tokens if len(t) >= 4 and s.startswith(t)])]
         s = s if len(s) <= 40 else s[:39] + "…"
         return f"{k} {s}"
 
-    lab = (label or "").lower()
-    tokens = {t for t in re.findall(r"[\w:./#-]+", lab) if len(t) >= 2}
     said = shown.lower()
     named, rest = [], []
     for k, x in flat:

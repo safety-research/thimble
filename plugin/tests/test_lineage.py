@@ -148,6 +148,9 @@ def test_a_cited_event_row_shows_the_time_hashes_and_flag_its_words_name(root: P
     assert hot["meta"].startswith("2026-05-04 09:21:47")
     assert "old a1b2c3d" in hot["meta"] and "new 0f1e2d3" in hot["meta"] and "forced" in hot["meta"]
     assert "created" not in hot["meta"] and "id 2" not in hot["meta"]
+    # words that write a hash longer than 7 characters name it, and it is shown as long as they write it
+    hot = next(r for r in LIN.span(st, "audit.jsonl#L2", label="from a1b2c3d4 to 0f1e2d3c")["rows"] if r["hot"])
+    assert hot["meta"].startswith("old a1b2c3d4 · new 0f1e2d3c")
     # words that name the flag put it first
     hot = next(r for r in LIN.span(st, "audit.jsonl#L2", label="the branch moved, marked forced")["rows"] if r["hot"])
     assert hot["meta"].startswith("forced · 2026-05-04 09:21:47")
