@@ -247,3 +247,35 @@ def test_a_wrong_number_is_not_moved_to_an_index_cell_or_by_two_digits_to_anothe
         c = next(x.record() for x in r.changes if x.label == wrong)
         assert c["state"] == H.CONTRADICTED and c["source"] == "3", (wrong, c)
         assert f"[{wrong}](r2#user=kestrel@n)" in r.text
+
+
+def test_a_quote_not_in_the_cited_line_is_corrected_or_contradicted(st: Store) -> None:
+    goals = ["Pick your own goal!", "Each agent: maximize your assigned goal!", "Holiday: rest and read", "Run a shop!",
+             "Holiday: rest and read", "Organize an event!"]
+    with open(st.root / "goals.jsonl", "w") as f:
+        for i, g in enumerate(goals):
+            f.write(json.dumps({"id": f"g{i}", "goal": g, "created_at": f"2026-05-0{i + 1} 09:00:00.123"}) + "\n")
+    # the quoted words are on line 2 alone: the citation is re-pointed there, a correction
+    text, c = one(st, 'The goal was ["Each agent: maximize your assigned goal!"](goals.jsonl#L6).')
+    assert (c["state"], c["how"], c["to"]) == (H.LINKED, H.QUOTE, "goals.jsonl#L2")
+    assert text == 'The goal was ["Each agent: maximize your assigned goal!"](goals.jsonl#L2).'
+    # the cited line holds them: kept, typographic quotes and case aside
+    _, c = one(st, "It said “each agent: Maximize your assigned goal!” [here](goals.jsonl#L2).")
+    assert c["how"] == H.KEPT
+    _, c = one(st, 'It said [“each agent: Maximize your assigned goal!”](goals.jsonl#L2).')
+    assert c["how"] == H.KEPT
+    # words in several lines: a red × that says where they are
+    _, c = one(st, 'A break: ["Holiday: rest and read"](goals.jsonl#L1).')
+    assert c["state"] == H.CONTRADICTED
+    assert c["why"] == "the cited line does not hold these words; lines 3 and 5 of goals.jsonl hold them"
+    # words in no line: a red × with its reason
+    _, c = one(st, 'The goal was ["Win the game at any cost"](goals.jsonl#L2).')
+    assert c["state"] == H.CONTRADICTED and c["why"] == "the cited line does not hold these words"
+    # words that describe the line, with no quotation marks, are not checked as a quote
+    _, c = one(st, "The goal was [a holiday](goals.jsonl#L2).")
+    assert c["how"] == H.KEPT
+
+
+def test_a_re_pointed_number_says_what_the_place_as_written_shows(st: Store) -> None:
+    _, c = one(st, "The busiest day had [5](r1#day=2026-06-01@n) saves.")
+    assert c["to"] == "r1#day=2026-06-02@n" and c["source"] == "3"
