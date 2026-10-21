@@ -28,7 +28,7 @@ import { citeRef, isRef } from './object.js'
  * Each `[words](target)` of a text, as the regex's matches read ({index, 0: whole, 1: words, 2: target}). A target may
  * hold balanced brackets, and a query ref may hold spaces up to its closing bracket, so a ref Claude wrote with a key's
  * words in it, `[202](r11#run_result=won (clean ep)@median)`, is one link and nothing of it spills into the prose (the
- * kernel's refs.link_spans reads the same).
+ * kernel's refs.link_spans reads the same). A target in angle brackets is read without them.
  */
 export function linkSpans(text) {
   const s = String(text || '')
@@ -48,7 +48,8 @@ export function linkSpans(text) {
       else if (s[j] === ')') { if (depth === 0) break; depth-- }
     }
     if (j >= s.length || s[j] !== ')') { i = a + 1; continue }
-    const target = s.slice(b + 2, j)
+    // a target in angle brackets, as markdown writes one with spaces: `[3,693](<r9#span=other days@n>)`
+    const target = s.slice(b + 2, j).trim().replace(/^<([^<>\n]*)>$/, '$1')
     if (target.trim() && (!/\s/.test(target.trim()) || /^[qr]\d+#/.test(target.trim()))) {
       const m = [s.slice(a, j + 1), words, target]
       m.index = a

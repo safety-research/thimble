@@ -31,6 +31,15 @@ test('the record holds the cites and sparks Claude wrote, as offsets into its ma
   assert.deepEqual(rec.glosses, {})
 })
 
+test('a link target in angle brackets, as markdown writes one with spaces, is a citation without the brackets', () => {
+  const text = 'The other days had [3,693](<r9#span=other days@n>) edits.'
+  const [m] = linkMarks(text)
+  assert.equal(m.kind, 'cite')
+  assert.equal(m.ref, 'r9#span=other days@n')
+  assert.equal(m.label, '3,693')
+  assert.equal(text.slice(m.start, m.end), '[3,693](<r9#span=other days@n>)')
+})
+
 test('links inside code, and links to the web, are not marks', () => {
   const t = 'See `[a](q1#row=1@n)` and [docs](https://example.org/x) and\n```\n[b](q2)\n```\nand [c](q3#row=2@n).'
   const marks = linkMarks(t)
