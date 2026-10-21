@@ -244,6 +244,11 @@ def _cite(st: Store, ref: str, where: str, ctx: dict[str, Any], quote: str | Non
             if not find_id(st, p["object"]):
                 raise R.RefError(f"no card {p['object']}")
         else:
+            rel = S.locate(st.root, p.get("path", ""))
+            if rel != p.get("path"):
+                # a path written from a subfolder: the one file under the root whose path ends with it
+                c["wrote"], c["ref"] = ref, R.format_source({**p, "path": rel})
+                ref, p = c["ref"], R.parse(c["ref"])
             got = S.fetch(st.root, ref, limit=1 if p["kind"] in ("file", "table") else None)
             if p["kind"] not in ("file", "table"):
                 c["rows"] = [R.format_source(p)]

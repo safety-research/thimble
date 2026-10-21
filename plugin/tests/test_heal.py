@@ -96,6 +96,20 @@ def test_any_number_in_the_words_and_a_scale(st: Store) -> None:
         assert c["state"] == H.CONTRADICTED and c["source"] == "1,170,232", words
 
 
+def test_a_path_written_from_a_subfolder(st: Store) -> None:
+    # a session that ran `cd app` cites src/main.py: the one file under the root whose path ends with it
+    for rel in ["app/src/main.py", "a/lib/util.py", "b/lib/util.py"]:
+        (st.root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (st.root / rel).write_text("import os\nprint(os.sep)\n")
+    text, c = one(st, "It [prints the separator](src/main.py#L2).")
+    assert (c["state"], c["how"], c["to"]) == (H.LINKED, H.PATH, "app/src/main.py#L2")
+    assert text == "It [prints the separator](app/src/main.py#L2)."
+    # two files end with the path: the failure line names them
+    text, c = one(st, "It [imports os](lib/util.py#L1).", analyst=True)
+    assert c["state"] == H.QUIET and c["how"] == H.GONE
+    assert "2 files end with /lib/util.py: a/lib/util.py, b/lib/util.py" in c["why"]
+
+
 def test_versioning(st: Store) -> None:
     text = "The busiest day had [5](r1#day=2026-06-01@n) saves, and [12](r9@n) in all."
     r = H.heal(st, text)

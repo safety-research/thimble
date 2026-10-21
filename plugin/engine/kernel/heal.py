@@ -38,6 +38,8 @@ LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
 # how a citation ended: kept as written; re-pointed inside the cited query or card, at another one the text cites, or
 # at a query of the session; no place holds it; several places hold it
 KEPT, CELL, CITED, SESSION = "kept", "cell", "cited", "session"
+# a source path written from a subfolder, re-pointed at the one file under the root whose path ends with it
+PATH = "path"
 NO_HOME, SEVERAL, GONE = "no_home", "several", "gone"
 
 WHY_CONTRADICTED = "the cited place shows {source}"
@@ -276,6 +278,7 @@ class _At:
     row: int | None = None
     col: str | None = None
     keys: dict[str, str] | None = None
+    moved: str | None = None  # the ref with the file's path under the root, when the ref names it from a subfolder
 
 
 def _at_query(rd: _Reader, p: dict[str, Any], label: str, ref: str) -> _At:
@@ -361,12 +364,14 @@ def _at_card(rd: _Reader, p: dict[str, Any], label: str) -> _At:
 
 def _at_source(st: Store, p: dict[str, Any], ref: str) -> _At:
     try:
+        rel = S.locate(st.root, p.get("path", ""))
         got = S.fetch(st.root, ref, limit=1 if p["kind"] in ("file", "table") else 50)
     except (R.RefError, OSError, ValueError) as e:
         return _At(False, str(e))
     if p["kind"] not in ("file", "table") and not got:
         return _At(False, f"{ref} names no rows")
-    return _At(holds=True)  # a source row is checked for its place only: its words may count or describe it
+    # a source row is checked for its place only: its words may count or describe it
+    return _At(holds=True, moved=R.format_source({**p, "path": rel}) if rel != p.get("path") else None)
 
 
 def _pick(hits: list[Place], at: _At) -> Place | None:
@@ -450,6 +455,8 @@ class _Pass:
             at = _at_card(self.rd, p, words) if num else (_At() if self.rd.card(p["object"]) else _At(False, f"no card {p['object']}"))
         else:
             at = _at_source(self.st, p, ref)
+        if at.exists and at.moved:
+            return Change(label, ref, LINKED, PATH, to=at.moved)
         if at.exists and (at.holds or not num):
             return Change(label, ref, LINKED, KEPT, to=ref)
         if not num:
