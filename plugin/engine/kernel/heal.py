@@ -8,8 +8,8 @@ For each citation whose words state a number and whose place does not show it:
   (b) else the other queries and cards the text cites, then (only for a specific number, and only when the cited
       place holds no other number) the session's queries, newest first;
   (c) else it is contradicted when the cited place holds a different number (the same row and column, the same card
-      part), or when a cited query or row shows the number nowhere; it keeps its words and ref, and `why` says what
-      the place shows;
+      part), or when a cited query or row shows the number nowhere (a column of several rows shows its total too); it
+      keeps its words and ref, and `why` says what the place shows;
   (d) else (the place is gone, or holds no number) it is unwrapped to its words.
 
 A citation of a source file's place is checked for its place only. When the place is gone, it is re-pointed only to
@@ -308,6 +308,12 @@ def _at_query(rd: _Reader, p: dict[str, Any], label: str, ref: str) -> _At:
     if any(_shows(label, v) for v in vals):
         at.holds = True
         return at
+    if "col" in p and at.row is None:
+        # a column of several rows: the citation opens them all, and its total is the value it shows
+        nums = [v for v in vals if _is_number(v)]
+        if nums and number_matches(label, sum(nums)):
+            at.holds = True
+            return at
     if not frag and not table:
         # a query whose output is text: the number anywhere in it
         at.holds = _shows(label, q.get("stdout") or "")

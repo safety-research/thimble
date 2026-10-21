@@ -190,3 +190,15 @@ def test_a_time_is_no_value_and_a_number_word_is_one(st: Store) -> None:
     # "the one" names a row, not a count
     text, c = one(st, "Then [the one at 23:00](r3#hour=2026-06-01T23@n).")
     assert c["how"] == H.KEPT
+
+
+def test_a_column_of_several_rows_shows_its_total(st: Store) -> None:
+    # r1@n opens the three days' rows (3, 5, 2): their total is the value the column shows
+    text, c = one(st, "There were [10](r1@n) saves in all.")
+    assert c["state"] == H.LINKED and c["how"] == H.KEPT and text == "There were [10](r1@n) saves in all."
+    # rounded as the words round it: 1 + 1.667 + 0.667
+    Q.run(st, "saves per day, thirds", 'df = load("saves.jsonl")\ndf.groupby("day").size().rename("n") / 3')  # r3
+    assert one(st, "About [3.3](r3@n) in all.")[1]["how"] == H.KEPT
+    # a number that is neither the total nor a cell is still contradicted
+    text, c = one(st, "There were [11](r1@n) saves in all.")
+    assert c["state"] == H.CONTRADICTED and text == "There were [11](r1@n) saves in all."
