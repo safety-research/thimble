@@ -5,7 +5,7 @@
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { diffLines, markPieces, reportMessage, ReportThis, ShareReportDialog, type IssueDraft } from '../../src/shell/ShareReport.tsx'
-import { fixLine, fixMessage } from '../../src/shell/FixEntry.tsx'
+import { FixState, fixLine, fixMessage } from '../../src/shell/FixEntry.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -119,6 +119,40 @@ test("the top bar's Fix… sends /fix, and the fix line offers what the fix's st
   expect(fixLine(f, null)).toEqual({ words: 'fixing: Sort claims newest first', actions: [] })
   expect(fixLine({ ...f, status: 'applied' }, 'sort-claims')).toEqual({ words: '✓ fixed: Sort claims newest first', good: true, actions: ['submit', 'undo'] })
   expect(fixLine({ ...f, status: 'ready' }, null)?.actions).toEqual(['try', 'submit'])
+  // the terminal plugin's marketplace may run the fix (applied), but the browser does not: Try it is offered
+  expect(fixLine({ ...f, status: 'applied' }, null)?.actions).toEqual(['try', 'submit'])
   expect(fixLine({ ...f, status: 'sent' }, null)).toBeNull()
   expect(fixLine({ ...f, status: 'sent' }, 'sort-claims')).toEqual({ words: '✓ fixed: Sort claims newest first · sent', good: true, actions: ['undo'] })
+})
+
+test('Undo restarts the browser on the release: one toast in browser words, then the page reloads', async () => {
+  const f = { slug: 'sort-claims', title: 'Sort claims newest first', status: 'ready' }
+  let boot = 'boot-a'
+  const posted: string[] = []
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    const u = String(url)
+    if (u.endsWith('/health')) return json({ ok: true, boot })
+    if (init?.method === 'POST') {
+      posted.push(u)
+      boot = 'boot-b' // the server restarts
+      return json({ fixes: [f], active: null, restarting: true, said: 'Restarting thimble browser without your fix. The page reloads when it is back.' })
+    }
+    return json({ fixes: [f], active: 'sort-claims' })
+  })
+  const reload = vi.fn()
+  vi.stubGlobal('location', { ...window.location, reload })
+  const toasts: string[] = []
+  const off = bus.on('toast', (t) => toasts.push(t.text))
+  const el = await mount(<FixState ws="w" />)
+  await settle()
+  const undo = el.querySelector('[data-fix-action="undo"]') as HTMLButtonElement
+  expect(el.textContent).toContain('✓ fixed: Sort claims newest first')
+  await act(async () => undo.click())
+  await act(async () => new Promise((r) => setTimeout(r, 700)))
+  expect(posted).toHaveLength(1)
+  expect(posted[0]).toMatch(/\/ws\/w\/fixes\/undo$/)
+  expect(toasts).toEqual(['Restarting thimble browser without your fix. The page reloads when it is back.'])
+  expect(toasts.join(' ')).not.toContain('reload-plugins')
+  expect(reload).toHaveBeenCalledTimes(1)
+  off()
 })

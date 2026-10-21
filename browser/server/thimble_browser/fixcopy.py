@@ -9,7 +9,7 @@ same place the terminal's `thimble fix` uses), and the agent works in it with th
     fix_read  {slug, path}            one file of the copy, with line numbers
     fix_edit  {slug, path, old, new}  replaces `old` (found once) with `new`; with no `old`, writes the whole file
     fix_test  {slug, path?, args?}    the copy's own tests (pytest), run in the browser's sandbox, the copy read-only
-    fix_use   {slug} / fix_undo {}    turns the copy on for the person's thimble, or back to the release (kernel)
+    fix_use   {slug} / fix_undo {}    marks the copy ready; the page's Try it and Undo restart the browser (restart.py)
 
 Every path goes through `inside`, which refuses a path outside the copy however it is written: `..`, an absolute path,
 a symlink that leads out (the file's own, or a folder's on the way), and the copy's .git. The agent gets no shell and
@@ -157,25 +157,25 @@ async def fix_test(t: Any, args: dict[str, Any]) -> Result:
 
 
 async def fix_use(t: Any, args: dict[str, Any]) -> Result:
+    """Marks the copy ready. It changes neither the terminal plugin nor this server: the page's Try it restarts the
+    browser from the copy (restart.py), which would stop this agent's own turn if the tool did it."""
     from .kernel_fix import fix  # noqa: PLC0415
 
     slug = str(args.get("slug"))
     _copy(slug)
-    said = fix.use(slug, plugin_dir=False)
+    fx = fix.load(slug)
+    if fx.get("status") == "working":
+        fx["status"] = "ready"
+        fix.save(fx)
     from .hub import hub  # noqa: PLC0415
 
-    hub.publish(t.ws, {"type": "fix", "slug": slug, "status": fix.load(slug).get("status")})
-    return Result(said)
+    hub.publish(t.ws, {"type": "fix", "slug": slug, "status": fx.get("status")})
+    return Result(f"The fix {slug} is ready. Try it on the page's fix line restarts thimble browser from the copy, and "
+                  "Undo there goes back to the release.")
 
 
 async def fix_undo(t: Any, args: dict[str, Any]) -> Result:
-    from .kernel_fix import fix  # noqa: PLC0415
-
-    said = fix.undo(plugin_dir=False)
-    from .hub import hub  # noqa: PLC0415
-
-    hub.publish(t.ws, {"type": "fix", "slug": "", "status": "undone"})
-    return Result(said)
+    return Result("Undo on the page's fix line restarts thimble browser on the release. This tool changes nothing.")
 
 
 TOOLS = {"fix_start": fix_start, "fix_files": fix_files, "fix_read": fix_read, "fix_edit": fix_edit,

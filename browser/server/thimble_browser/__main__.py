@@ -16,7 +16,7 @@ from pathlib import Path
 
 import uvicorn
 
-from . import home, llm, sandbox_note, settings
+from . import home, llm, restart, sandbox_note, settings
 from .app import build
 
 DEFAULT_PORT = 8000
@@ -25,6 +25,8 @@ DEFAULT_PORT = 8000
 def free_port(want: int) -> int:
     for port in [want, *range(want + 1, want + 50)]:
         with socket.socket() as s:
+            # as uvicorn binds: a port that this server left a moment ago (a restart) is free again
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("127.0.0.1", port))
                 return port
@@ -79,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"thimble browser: {folder} is not a folder", file=sys.stderr)
         return 2
     port = free_port(a.port)
+    restart.RUN.update(argv=list(sys.argv[1:] if argv is None else argv), port=port)
     app, auth, sessions = build(port, unsandboxed=a.no_sandbox)
     if port != a.port:
         print(f"  port {a.port} is in use, so thimble browser uses {port}")
