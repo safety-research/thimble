@@ -7,7 +7,7 @@
 // not repeated in the card: they sit in their tint just above it. The card's text shows no marks of its own (NoMarks).
 // Explainers carry a dotted underline in their ink, as the terminal draws them; a check's mark is the tint alone. The
 // words carry `data-mark`, so the sidebar's found list can bring them into view (lib/marks revealMark).
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { bus } from '../lib/bus'
 import { lensColors, type Lens, type Mark } from '../lib/marks'
 import { ChatMarkdown, NoMarks } from '../chat/markdown'
@@ -29,16 +29,24 @@ export function LensMark({ mark, lens, children }: { mark: Mark; lens?: Lens; ch
       document.removeEventListener('keydown', key)
     }
   }, [open])
-  // the card opens under the words and stays inside the text's column: no wider than it, and shifted left when it
-  // would pass its right edge, never past its left
-  const place = (card: HTMLSpanElement | null) => {
-    if (!card) return
-    const col = (card.closest('.chat-msg, .bcell-take, .wu-page, .chat-card') ?? document.body).getBoundingClientRect()
-    if (card.getBoundingClientRect().width > col.width) card.style.width = `${col.width}px`
-    const r = card.getBoundingClientRect()
-    const shift = Math.max(col.left - r.left, Math.min(0, col.right - r.right))
-    if (shift) card.style.left = `${shift}px`
-  }
+  // the card opens under the words, or above them when there is no room below, and stays inside what shows of the
+  // page: no wider than the text's column, shifted left when it would pass its right edge (never past its left), and,
+  // when neither side has room for all of it, on the larger side with its own scroll
+  const card = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const el = card.current
+    if (!open || !el || !box.current) return
+    const term = box.current.querySelector<HTMLElement>('.lens-mark-term')
+    const place = () => placeLensCard(el, term)
+    place()
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null
+    ro?.observe(el)
+    window.addEventListener('resize', place)
+    return () => {
+      ro?.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [open])
   const explainer = mark.lens === 'explain'
   return (
     <span
@@ -68,7 +76,7 @@ export function LensMark({ mark, lens, children }: { mark: Mark; lens?: Lens; ch
         {children}
       </span>
       {open && (
-        <span className="lens-card" role="note" aria-label={`${name}: ${mark.title || mark.term}`} ref={place}>
+        <span className="lens-card" role="note" aria-label={`${name}: ${mark.title || mark.term}`} ref={card}>
           <span className="lens-card-kind">
             <span className="lens-card-swatch" aria-hidden="true" />
             {name}
@@ -104,4 +112,48 @@ export function LensMark({ mark, lens, children }: { mark: Mark; lens?: Lens; ch
       )}
     </span>
   )
+}
+
+const GAP = 6
+const MARGIN = 8
+
+/** The part of the window that an element inside scrolling boxes shows: the window, cut by each box around `el` that
+ * clips what overflows it. */
+function shownArea(el: HTMLElement): { top: number; bottom: number; left: number; right: number } {
+  const area = { top: MARGIN, bottom: window.innerHeight - MARGIN, left: MARGIN, right: window.innerWidth - MARGIN }
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const st = getComputedStyle(p)
+    if (st.overflowY === 'visible' && st.overflowX === 'visible') continue
+    const r = p.getBoundingClientRect()
+    area.top = Math.max(area.top, r.top)
+    area.bottom = Math.min(area.bottom, r.bottom)
+    area.left = Math.max(area.left, r.left)
+    area.right = Math.min(area.right, r.right)
+  }
+  return area
+}
+
+/** Place a mark's card by its words (`term`): below them when it fits there, else above them when it fits there, else
+ * on the side with more room, its height cut to that room. Across, it stays inside the text's column and what shows of
+ * the page. */
+export function placeLensCard(card: HTMLElement, term: HTMLElement | null): void {
+  card.classList.remove('is-above')
+  card.style.maxHeight = ''
+  card.style.left = ''
+  card.style.width = ''
+  const area = shownArea(card)
+  const colBox = (card.closest('.chat-msg, .bcell-take, .wu-page, .chat-card') ?? document.body).getBoundingClientRect()
+  const col = { left: Math.max(colBox.left, area.left), right: Math.min(colBox.right, area.right) }
+  const width = col.right - col.left
+  if (width > 0 && card.getBoundingClientRect().width > width) card.style.width = `${width}px`
+  const r = card.getBoundingClientRect()
+  const shift = Math.max(col.left - r.left, Math.min(0, col.right - r.right))
+  if (shift) card.style.left = `${shift}px`
+  const words = (term ?? card.parentElement ?? card).getBoundingClientRect()
+  const below = area.bottom - words.bottom - GAP
+  const above = words.top - area.top - GAP
+  const h = r.height
+  if (h <= below) return
+  if (h <= above || above > below) card.classList.add('is-above')
+  if (h > Math.max(above, below)) card.style.maxHeight = `${Math.max(0, Math.floor(Math.max(above, below)))}px`
 }
