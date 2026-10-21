@@ -135,6 +135,32 @@ test('a column of a one-row table cited as a series is drawn as one value, not a
   assert.deepEqual(sourceCard({ ref: 'r4@n', label: 'n', resolved: { ref: 'r4@n', rows: [], records: [], chain: [] }, query: two }).parts[0].data.rows.map(x => x.value), [400, 240])
 })
 
+test("a code citation's preview keeps every line's indent: the cited lines and the lines around them", () => {
+  const lines = [
+    { n: 10, text: 'def walk(node):' },
+    { n: 11, text: '    if node is None:' },
+    { n: 12, text: '        return 0' },
+    { n: 13, text: '\tfor kid in node.kids:' },
+    { n: 14, text: '        total += walk(kid)' },
+    { n: 15, text: '    return total' },
+  ]
+  // the kernel's span of a quote, and the code file's lines read by the card: both keep the spaces
+  for (const card of [
+    sourceCard({ ref: 'pkg/tree.py#L12-13', label: 'the base case', resolved: { span: { rows: lines.map(l => ({ ...l, hot: l.n === 12 || l.n === 13 })), cited: 2 } } }),
+    sourceCard({ ref: 'pkg/tree.py#L12-13', label: 'the base case', resolved: {}, lines }),
+  ]) {
+    const t = gridText(draw(card.parts[0], 60, 12)).split('\n').map(l => l.trimEnd())
+    assert.deepEqual(t.slice(0, 6), [
+      '10   def walk(node):',
+      '11       if node is None:',
+      '12 ▌         return 0',
+      '13 ▌     for kid in node.kids:',
+      '14           total += walk(kid)',
+      '15       return total',
+    ])
+  }
+})
+
 test("a citation's rows section names the cited files' own entries: records, rows or lines, and none for a whole file", () => {
   const query = { id: 'q4', about: 'survivors by class and sex', keys: ['class', 'sex'], table: [{ class: 3, sex: 'male', n: 347 }, { class: 1, sex: 'female', n: 94 }] }
   const ofRecords = { count: 347, rows: ['revisions.jsonl#L1-347'], records: [], chain: [], unit: 'records', unit_one: 'record' }
