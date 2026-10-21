@@ -233,3 +233,15 @@ def test_a_number_with_no_sign_states_the_size_and_a_signed_one_the_sign_too(st:
     assert c["state"] == H.LINKED and c["how"] == H.KEPT
     text, c = one(st, "The low group sat [+14.2](r3#group=low@vs_all) points.")
     assert c["state"] == H.CONTRADICTED
+
+
+def test_a_wrong_number_is_not_moved_to_an_index_cell_or_by_two_digits_to_another_cited_query(st: Store) -> None:
+    # saves per day, sorted, with the `index` column a sorted frame keeps (r3: 18-20; r4: 126-128 and `last` 12-19)
+    day = 'df = load("saves.jsonl")\nout = df.groupby("day").agg(saves=("id", "size"), last=("id", "max")).reset_index()\n'
+    Q.run(st, "saves per day", day + 'out.index = out.index + 18\nout.sort_values("saves")')
+    Q.run(st, "saves per day", day + 'out.index = out.index + 126\nout["last"] = out["last"] + 10\nout.sort_values("saves")')
+    for wrong, other in [("19", "r3"), ("127", "r4"), ("17", "r4")]:
+        r = H.heal(st, f"Kestrel made [{wrong}](r2#user=kestrel@n) saves ([the days]({other})).")
+        c = next(x.record() for x in r.changes if x.label == wrong)
+        assert c["state"] == H.CONTRADICTED and c["source"] == "3", (wrong, c)
+        assert f"[{wrong}](r2#user=kestrel@n)" in r.text
