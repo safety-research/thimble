@@ -451,7 +451,8 @@ async def read_all(ws: str, lid: str | None = None, surfaces: list[str] | None =
     if "chat" in surfaces:
         parts: list[str] = []
         for r in reversed(chats.records(ws, "main")):
-            if r.get("type") == "user":
+            # the answer is the text after the turn's last call: words before a call are a note on the way there
+            if r.get("type") in ("user", "tool_use", "tool_result"):
                 break
             if r.get("type") == "text":
                 parts.insert(0, r.get("delta") or "")

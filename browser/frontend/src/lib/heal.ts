@@ -4,6 +4,7 @@
 // place it was re-pointed to, a red × when the cited place shows another value, or grey when its place is gone.
 import { createContext, createElement, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { api, type HealResult } from './api'
+import type { ResolvedRef } from './types'
 import { bus } from './bus'
 import { splitValueRef } from './refs'
 import { workspaceFromUrl } from './workspace'
@@ -166,9 +167,45 @@ let failedVersion = 0
 export function refFailure(err: unknown): string | null {
   const m = /^(\d{3}) ?([\s\S]*)$/.exec((err as Error)?.message ?? '')
   if (!m) return null
-  if (m[1] === '404' || m[1] === '410') return 'the cited place is gone'
-  if (m[1] === '400') return m[2].trim() || 'the cited place cannot be read'
+  const said = plainDetail(m[2])
+  if (m[1] === '404' || m[1] === '410') return said ? `the cited place is gone (${said})` : 'the cited place is gone'
+  if (m[1] === '400') return said || 'the cited place cannot be read'
   return null
+}
+
+/** The server's detail when it reads as plain words for the analyst; null for a system error or one that names a path
+ * on the server's disk, which says nothing they can use. Pure. */
+export function plainDetail(detail: string): string | null {
+  const d = detail.trim()
+  if (!d || d.length > 160 || /\[Errno|Traceback|(?:^|[\s'"(])\/(?:[\w.-]+\/)+/.test(d)) return null
+  return d
+}
+
+// A citation of a file is checked once its chip shows, as the hover would read it: the server reads a path written from
+// a subfolder at the file it means (corpus.locate), and a place that is not there marks the citation failed in place.
+const fileChecks = new Map<string, Promise<ResolvedRef | null>>()
+
+/** What a file citation resolves to (its `ref` names the file as the folder holds it), or null when it failed, which
+ * then draws as failed on every chip of it. One request per workspace and ref. */
+export function checkFileRef(ws: string, ref: string): Promise<ResolvedRef | null> {
+  const k = `${ws}\n${norm(ref)}`
+  let got = fileChecks.get(k)
+  if (!got) {
+    got = api.resolveRef(ws, ref).then(
+      (r) => {
+        markRefFailed(ws, ref, null)
+        return r
+      },
+      (err: unknown) => {
+        const why = refFailure(err)
+        if (why) markRefFailed(ws, ref, why)
+        else fileChecks.delete(k) // no answer says nothing about the citation: a later look asks again
+        return null
+      },
+    )
+    fileChecks.set(k, got)
+  }
+  return got
 }
 
 /** Record that `ref` failed with `why`, or that it opened again (null). */

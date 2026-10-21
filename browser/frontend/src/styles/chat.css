@@ -96,6 +96,23 @@
 .chat-nested {
   padding: 4px 0;
 }
+/* a note Claude wrote on the way to its reply, before a later call of the turn (chat/tidy midTurnTexts): one of the
+   steps, in the secondary ink at the size of a call line, with no hairline or gap of a message of its own */
+.chat-step-note .chat-text {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.chat-step-note::after {
+  background: var(--text-tertiary);
+}
+.chat-assistant + .chat-step-note,
+.chat-step-note + .chat-assistant {
+  margin-top: 0;
+}
+.chat-assistant + .chat-step-note::before,
+.chat-step-note + .chat-assistant::before {
+  display: none;
+}
 .chat-text {
   min-width: 0;
   padding: 0 2px;

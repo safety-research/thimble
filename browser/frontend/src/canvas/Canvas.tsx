@@ -18,7 +18,7 @@ import { freeKeyHeld, pointKeyHeld } from '../lib/platform'
 import { takesSideways } from '../lib/scrolls'
 import { registerCells } from '../lib/cellName'
 import { parseRef } from '../lib/refs'
-import { revealCell, revealLines } from '../lib/tableCell'
+import { partOf, revealCell, revealLines, revealPart } from '../lib/tableCell'
 import { track } from '../lib/telemetry'
 import type { CanvasResponse, Cell, ChatMeta, Filters, Pos } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -1217,8 +1217,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       const cited = { col: p.col, row: p.row }
       window.setTimeout(() => {
         void revealCell(el, cited.col, cited.row, '.outputs-html table').then((td) => {
-          if (!td) return flash(el)
-          centreOnPart(td)
+          // a part a program draws whose id holds a slash reads like a column and a row
+          const part = td ?? revealPart(el, `${cited.col}/${cited.row}`)
+          if (!part) return flash(el)
+          centreOnPart(part as HTMLElement)
         })
       }, 120)
     } else if (el && cellId && p?.kind === 'cell' && p.out != null && p.line != null) {
@@ -1242,6 +1244,15 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         setLabelPanel(null)
         setDetail(cited.cell)
         setCite({ ...cited, seq: Date.now() })
+      }, 120)
+    } else if (el && p?.kind === 'cell' && partOf(ref) && p.exec == null && p.step == null) {
+      // a part the card's program draws (`card:<id>#merged`): the part is marked as a cited cell is, in the card the
+      // view opened on; a card that draws no such part is flashed whole
+      const part = partOf(ref) as string
+      window.setTimeout(() => {
+        const box = still ? null : revealPart(el, part)
+        if (box) centreOnPart(box as HTMLElement)
+        else flash(el)
       }, 120)
     } else if (el) flash(el)
     settling.current = {
