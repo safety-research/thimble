@@ -375,6 +375,31 @@ test('Coverage: ↓ moves the selection with the ring, and the input bar names t
   expect(textOf(await $.ui.render(PANE))).toContain('file ·')
 })
 
+// A file nothing touched opens as its own page, with no line to walk: its title is the part, so the ring stays on the
+// pane (never on the input bar), the input bar names the file (not the pane), and the bar says esc goes back a level
+test('Coverage: ↵ on an untouched file opens it on the file, and the bar says esc back', async ($, on) => {
+  const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 14, bodyColumns: 160, scroll: { offset: 0, bodyRows: 14 }, view: {} }, viewport: { columns: 160, rows: 40, isFullscreen: true } } as never
+  const w = world(on, [FORK1], { cov: COV })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  await press($, w.clock, key('r'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  const bar = async () => { await $.ui.render(BAND); await w.clock.settle(); return textOf(await $.ui.render(BAND)) }
+  expect(await bar()).toContain('esc close')
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
+  await ui.press({ key: await rowKey($, 'f:pages\\.jsonl') })
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  const drawn = JSON.stringify(await $.ui.render(PANE))
+  expect(textOf(await $.ui.render(PANE))).toContain('file ·')
+  expect(drawn).toContain('Ask about pages.jsonl: none')
+  expect(drawn).not.toContain('Ask about Coverage')
+  expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  expect(await bar()).toContain('esc back')
+  expect(await bar()).not.toContain('esc close')
+})
+
 // Claude Code gives ← and → to the prompt even while a pane holds the keys (its panes bind ↑ ↓ tab ↵ esc, never ← →),
 // and ↑ reaches the prompt in the moment before the panel holds them. A suggestion → takes, or a history entry ↑
 // recalls, fills the prompt, and Claude Code then refuses the panel the keys: esc, ↑ and the letters all went to the

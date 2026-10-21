@@ -203,6 +203,8 @@ export function paneDrawing(name: string, args: Record<string, unknown> = {}): A
 export async function paneTakes($: Engine, name: string, args: Record<string, unknown>, event: Record<string, unknown>): Promise<boolean> {
   const inst = instance(name, args)
   await load($, inst)
+  // (read as paneRun reads it: a drawing that asks, such as the bar's `esc back`, is drawn again when the pane is)
+  await $.state.get({ ...VER, id: inst.id })
   const known = inst.drawing ?? (await paneRun($, name, args, inst.size ?? { w: 100, h: 30 }))
   return takes(known, event)
 }
