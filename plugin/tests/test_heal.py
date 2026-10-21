@@ -192,6 +192,24 @@ def test_a_time_is_no_value_and_a_number_word_is_one(st: Store) -> None:
     assert c["how"] == H.KEPT
 
 
+def test_a_time_or_an_agent_name_in_the_words_states_no_value(st: Store) -> None:
+    # merges in the order they landed: when, minutes since 14:00, by whom, which PR, and the running total
+    Q.run(st, "merges over time", 'import pandas as pd\n'
+          'prs = [102, 107, 101, 116, 109, 103, 108, 110, 104, 117, 131, 125, 114, 121, 119, 132, 120, 130, 113, 106]\n'
+          'mins = [35, 42, 46, 47, 50, 52, 57, 64, 67, 67, 67, 72, 72, 77, 82, 90, 102, 107, 112, 120]\n'
+          'pd.DataFrame({"ts": [f"{14 + m // 60}:{m % 60:02d}" for m in mins], "minute": mins, '
+          '"agent": [f"agent-{i % 12 + 1:02d}" for i in range(20)], "pr": prs, "cum": range(1, 21)})')  # r3
+    # the cited rows are right: 16 (cum of #132), 15 (cum of #119), and 4 and 14 (cum of #116 and #121) are elsewhere,
+    # but 16:00, 15:12 and 14:35 say when and agent-04 names who, so no number is checked and nothing moves
+    for label, ref in [("#106 at 16:00", "r3#pr=106@minute"), ("15:12", "r3#pr=114@cum"),
+                       ("#102 by agent-04 at 14:35", "r3#pr=102@minute")]:
+        text, c = one(st, f"See [{label}]({ref}).")
+        assert (c["state"], c["how"], c["to"]) == (H.LINKED, H.KEPT, ref), label
+    # a count beside a time is still checked
+    text, c = one(st, "By then [25 had merged at 15:12](r3#pr=114@cum).")
+    assert c["state"] == H.CONTRADICTED and c["source"] == "13"
+
+
 def test_a_column_of_several_rows_shows_its_total(st: Store) -> None:
     # r1@n opens the three days' rows (3, 5, 2): their total is the value the column shows
     text, c = one(st, "There were [10](r1@n) saves in all.")
