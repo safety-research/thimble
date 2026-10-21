@@ -1,6 +1,7 @@
 """Try it and Undo act on thimble browser itself (restart.py): the server restarts from the fix's copy, or from the
 release, and never runs `claude` or changes the terminal plugin. A normal install has pytest, so a fix's tests run.
 All names and data are made up."""
+import asyncio
 import json
 import os
 import re
@@ -154,3 +155,15 @@ def test_a_normal_install_has_pytest_for_a_fixs_tests():
     assert '"pytest' in dev
     # this test runs in the server's Python, set up as install.sh sets it up: the fix's tests use it
     assert sandbox.test_python() == sys.executable
+
+
+def test_a_fixs_browser_tests_import_the_copys_server_code(tmp_path):
+    copy = tmp_path / "copy"
+    (copy / "browser" / "server" / "thimble_browser").mkdir(parents=True)
+    (copy / "browser" / "server" / "thimble_browser" / "__init__.py").write_text("MADE_UP = 'from the copy'\n")
+    (copy / "browser" / "server" / "tests").mkdir()
+    (copy / "browser" / "server" / "tests" / "test_made_up.py").write_text(
+        "import thimble_browser\n\ndef test_the_copy():\n    assert thimble_browser.MADE_UP == 'from the copy'\n")
+    res = asyncio.run(sandbox.run_tests(copy, ["browser/server/tests/test_made_up.py"], unsandboxed=True))
+    assert res["ok"], res["text"]
+    assert "1 passed" in res["text"]

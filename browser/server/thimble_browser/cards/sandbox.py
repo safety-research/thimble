@@ -378,7 +378,9 @@ async def run_tests(copy: Path, args: Sequence[str], *, timeout: float = TEST_S,
                                      "Install it with `uv sync --project browser/server --extra dev` in the thimble "
                                      "checkout, or set THIMBLE_PYTHON to a Python that has pytest."}
     run_dir = Path(tempfile.mkdtemp(prefix="thimble-test-")).resolve()
-    command = [py, "-I", "-m", "pytest", "-q", "-p", "no:cacheprovider", *args]
+    # the copy's own browser server comes first on the path, so its tests import the copy's code, not the release's
+    command = [py, "-I", "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", f"pythonpath={copy / 'browser' / 'server'}",
+               *args]
     try:
         env = child_env(run_dir)
         # the sandbox hides the system's user list, and thimble's tests read a user name (the privacy scan's)
