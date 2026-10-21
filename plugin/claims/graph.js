@@ -46,16 +46,18 @@ const sentenceOf = s => one(s).replace(/([\p{L}\p{N}%)"'”’])$/u, '$1.')
 const MAX_EVIDENCE = 4
 const MAX_SENTENCE = 4
 
-/** Words wrapped to lines of at most n characters (a word longer than n is cut). */
+/** Words wrapped to lines of at most n characters; a word longer than n goes on over the next lines, so no letter is
+ *  lost. */
 export function wrap(text, n) {
   const out = []
   let cur = ''
   for (const w of one(text).split(' ')) {
     if (!w) continue
-    const word = w.length > n ? w.slice(0, n - 1) + '…' : w
-    if (!cur) cur = word
-    else if (cur.length + 1 + word.length <= n) cur += ' ' + word
-    else { out.push(cur); cur = word }
+    let word = Array.from(w)
+    if (cur && Array.from(cur).length + 1 + word.length <= n) { cur += ' ' + word.join(''); continue }
+    if (cur) out.push(cur)
+    while (word.length > n) { out.push(word.slice(0, n).join('')); word = word.slice(n) }
+    cur = word.join('')
   }
   if (cur) out.push(cur)
   return out
@@ -526,7 +528,10 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
   if (box) {
     const inner = Math.max(20, Math.min(W - 6, 92))
     const who = saidWords(claim)
-    const words = wrap(`${sentenceOf(claim.text)}${who ? ` · ${who}` : ''}`, inner - 2).slice(0, MAX_SENTENCE)
+    const all = wrap(`${sentenceOf(claim.text)}${who ? ` · ${who}` : ''}`, inner - 2)
+    const words = all.slice(0, MAX_SENTENCE)
+    // a sentence longer than the box's lines says so where it stops
+    if (all.length > MAX_SENTENCE) words[MAX_SENTENCE - 1] = cut(words[MAX_SENTENCE - 1] + ' ' + all[MAX_SENTENCE], inner - 2)
     const said = words.map((l, i) => {
       // the words of who said it stay dim
       const at = who && i === words.length - 1 ? l.lastIndexOf(` · ${who}`) : -1
@@ -536,7 +541,9 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
     const more = box.open === 'ev' ? (box.evidence.length ? evidenceRows(k, box.evidence) : [{ text: '{dim:It cites no rows.}', part: null }])
       : box.open === 'hist' ? historyRows(k, box.history, claim, tone) : []
     const lines = [...said, ...more].slice(0, Math.max(1, lay.h - 2))
-    const vis = t => k.len(String(t).replace(/\\(.)/g, '$1').replace(/\{[A-Za-z0-9-]+:/g, '').replace(/[{}]/g, '').replace(/\*\*/g, ''))
+    // the cells a line of markup takes: an escaped character is one cell (the braces of "{ }" in a claim's words
+    // count), a tone's "{name:", its closing brace and ** take none
+    const vis = t => k.len(String(t).replace(/\\(.)|\{[A-Za-z][\w-]*:|\*\*|[{}]/g, (m, esc) => esc ?? ''))
     const bw = Math.min(W, Math.max(30, ...lines.map(l => Math.min(inner, vis(l.text)))) + 4)
     const bh = lines.length + 2
     const p = lay.pos.get(claim.id)

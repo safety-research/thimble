@@ -78,3 +78,25 @@ test('the claims graph uses the whole pane, and a claim selected opens a framed 
     assert.ok(at.x >= 0 && at.x + bw <= 136 && at.y >= 0 && at.y + bh <= 30)
   }
 })
+
+function linkedClaims() {
+  const st = emptyStore('s')
+  const quotes = ['The keys (v, s, ], 1, { }) need a reply to act on, and the bar finder returns null when there is no reply yet',
+    ...Array.from({ length: 23 }, (_, i) => `Note ${i + 2} was a tip number ${i + 2}`)]
+  applyTurn(st, { places: [{ row: 'r1', by: 'claude', turn: 1, text: quotes.map(q => q + '.').join(' ') }], turn: 1,
+    out: { claims: quotes.map((q, i) => ({ quote: q, cluster: `group ${(i % 4) + 1}`, ...(i ? { links: [{ to: `c${Math.max(1, i - 1 - (i % 3))}`, how: 'supports' }] } : {}) })) } })
+  return pane.data({ claims: st, threads: [] })
+}
+
+test("a claim's box wraps its whole sentence, braces and all, with no word cut", () => {
+  const data = linkedClaims()
+  const { text: box } = draw(data, { w: 110, h: 34, state: { claim: 'c1' } })
+  // the words inside the box's frame, from the row under its top edge to the row over its bottom edge
+  const rows = box.split('\n').map(l => [...l])
+  const top = rows.findIndex(r => /╭─{20,}╮/.test(r.join('')))
+  const left = rows[top].join('').search(/╭─{20,}╮/), right = rows[top].lastIndexOf('╮')
+  const bottom = rows.findIndex((r, y) => y > top && r[left] === '╰')
+  const said = rows.slice(top + 1, bottom).map(r => r.slice(left + 4, right).join('').trim()).join(' ')
+  assert.match(said, /returns null when there is no reply yet\./)
+  assert.doesNotMatch(said, /…/)
+})
