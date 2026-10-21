@@ -5,7 +5,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { slim } from '../observer/evidence.js'
-import { promptStub } from './stubs'
+import { press, promptStub } from './stubs'
 
 const ROOT = '/data'
 const DIR = `${ROOT}/thimble/objects`
@@ -169,6 +169,30 @@ test('after a turn that saved an object: one look reads its lineage, lights the 
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('side agent')
   // the session's file keeps what it lit, for measuring
   expect(JSON.parse(w.files[OBS]!).log.find((r: { kind: string }) => r.kind === 'look').verbs_lit).toEqual(['v'])
+})
+
+test('v after a pick names the views still to make: its note says one more, and its line\'s keys name the one option left', async ($, on) => {
+  const w = world(on, { fork: { line: null, settled: false, verbs: { v: { note: '2 views ready', proposals: ['saves by day', 'saves by wiki'] } }, glosses: [] } })
+  const clock = w.clock
+  await turn($, w, clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
+  await clock.settle()
+  await reply($)
+  await clock.settle()
+  const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
+  // v opens the line of two views, drawn under the reply; 1 picks the first
+  await press($, clock, key('v'))
+  await reply($)
+  await clock.settle()
+  expect(textOf(await $.ui.render(BAND))).toContain('1 2 pick')
+  await press($, clock, key('1'))
+  const bar = textOf(await $.ui.render(BAND))
+  expect(bar).toContain('1 more view')
+  expect(bar).not.toContain('view ready')
+  // v again, before the line is drawn under the reply: the bar names the one option left
+  await press($, clock, key('v'))
+  const again = textOf(await $.ui.render(BAND))
+  expect(again).toContain('1 pick')
+  expect(again).not.toContain('2 pick')
 })
 
 test('the pass is a fork of the session: its prompt is the frame, the lenses, the message to read and the evidence; each call and the turn are lines in the session events, with each lens\'s share', async ($, on) => {

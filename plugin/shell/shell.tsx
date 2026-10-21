@@ -1473,7 +1473,8 @@ async function pickOption($: Engine, row: string, key: string, choice: string): 
   if (v && Array.isArray(v.proposals) && v.proposals.includes(choice)) {
     const verbs = { ...rec.verbs }
     const left = v.proposals.filter(p => p !== choice)
-    if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} view${left.length === 1 ? '' : 's'} ready` }
+    // what is ready is the views not drawn yet, not the card just asked for: `1 more view`
+    if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} more view${left.length === 1 ? '' : 's'}` }
     else delete verbs.v
     await saveRecord($, { ...rec, verbs })
   }
@@ -1780,7 +1781,9 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   }
   if (kind === 'proposals') {
     if (!pick || pick.verb === 's') return undefined
-    const d = paneDrawing('proposals', { row: pick.row, verb: pick.verb }) ?? (await paneNow($, 'proposals', { row: pick.row, verb: pick.verb }))
+    // run now, as the tray is: the line's last drawing may be from before a pick took its view out of the record (the
+    // line is drawn again only where the transcript shows it), and the bar names the options left
+    const d = await paneNow($, 'proposals', { row: pick.row, verb: pick.verb })
     return { keys: barText([d]) || '0 close' }
   }
   // a card under a reply with the focus (] reached it): its own keys, those that reach it here, then the host's
