@@ -2424,6 +2424,9 @@
         // a row (right) or two columns (down) on the side for each edge that leaves or enters there
         if (R) bh = Math.max(bh, 2 + v.down.length, 2 + v.up.length)
         else bw = Math.max(bw, 1 + 2 * v.down.length + 1, 1 + 2 * v.up.length + 1)
+        // boxes of one parity across, so two boxes one above the other can share a middle column: an arrow between
+        // boxes 33 and 32 wide jogs one column on its way down
+        if (!R && bw % 2) bw++
         v.bw = bw; v.bh = bh
         v.cw = R ? bh : bw
         v.mw = R ? bw : bh
