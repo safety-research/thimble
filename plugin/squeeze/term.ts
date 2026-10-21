@@ -27,11 +27,10 @@ import { newRecord, remark as remarkAny } from '../shell/message.js'
 import { modelWhy } from '../shell/why.js'
 import { tracked } from '../telemetry/telemetry'
 import { featureOn } from '../settings/features.mjs'
-import { lookPending } from '../observer/observer'
-import { answerRow, cardsUnder, closeTray, drawnTextOf, leanEnv, loadObject, prepared, questionBefore, recordNow, rootHere, saveRecord, setCardsUnder, tellMain } from '../shell/shell'
+import { cardsUnder, closeTray, drawnTextOf, leanEnv, loadObject, prepared, questionBefore, recordNow, rootHere, saveRecord, setCardsUnder, tellMain } from '../shell/shell'
 import { noteEdit } from '../shell/runtime'
 import { sessionKey } from '../hooks/conversation'
-import { ARRIVE, SCALE, answerText, applyRewrite, cardListsAt, cardSpec, cardsAfter, cardsKnown, catchUpText, checkRewrite, chipsOf, drawnOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, queryIdsOf, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, toolkitOf, unplacedMoves, withLater } from './chips.mjs'
+import { ARRIVE, SCALE, answerText, applyRewrite, cardListsAt, cardSpec, cardsAfter, cardsKnown, catchUpText, checkRewrite, chipsOf, drawnOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, queryIdsOf, readReply, setWords, settledNote, shownKey, request, restore, revealStep, rowsOf, termsOf, toolkitOf, withLater } from './chips.mjs'
 import { spinFrame } from '../shell/busy'
 
 type Engine = EngineInterface
@@ -50,8 +49,6 @@ const SQZTOLD = { plugin: 'thimble', key: 'sqztold' } as const
 const remark = (rec: MsgRecord) => remarkAny(rec) as MsgRecord
 const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }
 const TICK = 50
-// the longest a step on Interpretation waits for the observer's look to say where the original stands
-const LEVELS_WAIT_MS = 30000
 const BLANK: SqzUi = { focus: 'length', running: null, error: null, tick: 0 }
 
 // the module's memory: the call running per row and the one wanted after it; the text writing in per row; the
@@ -140,7 +137,6 @@ export async function setLevels($: Engine, row: string, at: At, key: string | nu
   try {
     let next: Want | null = { at, key }
     while (next) {
-      next = { at: await fromObserved($, row, next.at), key: next.key }
       await once($, row, next)
       const j = inflight.get(row)!
       next = j.want
@@ -157,29 +153,6 @@ export async function setLevels($: Engine, row: string, at: At, key: string | nu
     await setUi($, row, { running: null, want: null, asked: null })
     await markRecord($, row, { want: null, error: (await uiOf($, row)).error ?? null })
   }
-}
-
-/**
- * A step on Interpretation or Background of the latest answer, made before the observer said where the original
- * stands on it, while its look still runs: it waits for that look (at most LEVELS_WAIT_MS) and then counts from the
- * level the look gave, so a change never starts from the chip's middle when the look is about to say otherwise. A
- * change of Length alone, or of a chip already placed, goes at once. Returns the levels to write.
- */
-async function fromObserved($: Engine, row: string, at: At): Promise<At> {
-  const rec = await recordNow($, row)
-  if (!rec || !unplacedMoves(rec, at).length) return at
-  const look = row === (await answerRow($)) ? lookPending() : null
-  if (!look) return at
-  await Promise.race([look, new Promise<void>(done => { $.clock.after(LEVELS_WAIT_MS, () => done()) })])
-  const now = (await recordNow($, row)) || rec
-  const to = rebaseAt(rec, now, at) as At
-  // a change pressed while this one waited counted from the middle too; the chips show the latest, as counted now
-  const j = inflight.get(row)
-  if (j?.want) j.want = { at: rebaseAt(rec, now, j.want.at) as At }
-  const shows = j?.want?.at ?? to
-  await setUi($, row, { want: shows })
-  await markRecord($, row, { want: shows, error: null })
-  return to
 }
 
 /** The record's squeeze with `want` (where the chips go) and `error` (why the last call failed) set or cleared. */

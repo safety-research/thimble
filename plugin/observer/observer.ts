@@ -1,6 +1,6 @@
 // The observer: thimble's always-on, quiet part. It reads each of Claude's messages with the whole session, once,
 // after the message exists. All it gives reaches the person: explain marks and important details on the message's
-// words, lit verbs, where the answer stands on squeeze's chips, and the session's claims. It tells Claude nothing. The
+// words, lit verbs, and the session's claims. It tells Claude nothing. The
 // session it reads holds what the person engaged with (shell/engaged.js): the explainers, details and citations they
 // opened, and what they asked in side threads.
 //
@@ -27,10 +27,8 @@
 //    each lens's share.
 // 3. A pass that fails is tried once more (a failed sign-in is said at once); a second failure is said in a toast with
 //    its fix.
-// 4. Each lens merges its part (lit verbs, explain marks, a heads-up, squeeze levels, claims). The verbs go in
-//    the newest message's record; an explain mark or a heads-up goes in the record of the message that holds its term.
-//    Order with squeeze: a step the person makes on Interpretation or Background before the pass has said where the
-//    answer stands waits for the look (lookPending) and counts from the level it gives.
+// 4. Each lens merges its part (lit verbs, explain marks, a heads-up, claims). The verbs go in the newest message's
+//    record; an explain mark or a heads-up goes in the record of the message that holds its term.
 //
 // Features (settings/features.mjs): each lens belongs to a feature the person turns on or off in /thimble-settings,
 // and the observer runs only while one of those features is on. A lens turned off (there, or with
@@ -98,27 +96,6 @@ const S = {
   log: [] as Record<string, unknown>[],
   glossed: [] as string[],
   headsGiven: [] as string[], // the titles of the heads-ups placed in this session, for the lens's digest
-}
-
-// the looks to come and the one running: a promise that settles when the queue is empty and the last look has merged,
-// so a squeeze step that needs the levels a look gives can wait for them (squeeze/term.ts)
-let pendingLook: { promise: Promise<void>; settle: () => void } | null = null
-function lookAhead(): void {
-  if (pendingLook) return
-  let settle = () => {}
-  const promise = new Promise<void>(done => { settle = done })
-  pendingLook = { promise, settle }
-}
-function lookEnded(): void {
-  const p = pendingLook
-  pendingLook = null
-  p?.settle()
-}
-/** While a look is on its way or running and will say where the answer stands on squeeze's chips: a promise that
- *  settles when it has merged its lenses (or ended); else null. */
-export function lookPending(): Promise<void> | null {
-  if (!lensOn(LENSES.find(l => l.name === 'squeeze'))) return null
-  return pendingLook?.promise ?? null
 }
 
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
@@ -257,7 +234,6 @@ const rowKeys = () => [['cards', 'v visualize'], ['squeeze', 's squeeze'], ['cla
 /** One of Claude's messages into the queue; the worker takes it a moment later. */
 async function enqueue($: Engine, m: Omit<Msg, 'at' | 't'>): Promise<void> {
   S.queue.push({ ...m, at: await $.clock.now(), t: Date.now() })
-  lookAhead()
   $.clock.after(LOOK_DELAY, () => { void drain($) })
 }
 
@@ -273,7 +249,6 @@ async function drain($: Engine): Promise<void> {
   } finally {
     S.busy = false
     if (S.queue.length) $.clock.after(LOOK_DELAY, () => { void drain($) })
-    else lookEnded()
   }
 }
 
@@ -623,5 +598,4 @@ export function resetObserver(): void {
     prompt: { text: '', typed: true, verb: '', from: 'composer' }, texts: [], queue: [], busy: false,
     log: [], glossed: [], headsGiven: [],
   })
-  lookEnded()
 }

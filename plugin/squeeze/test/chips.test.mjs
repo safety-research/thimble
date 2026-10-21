@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MEANS, checkRewrite, chipsOf, readReply, request, revealCut } from '../chips.mjs'
+import { MEANS, checkRewrite, chipsOf, levelWords, readReply, request, revealCut } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -84,7 +84,7 @@ test('the request carries only the definition of each level picked, and Length a
   assert.match(tail, /"for my boss": fully\. Write the whole text as these words ask\./)
   // no other level of any chip is defined, and the input (the original) stays in the cached head
   for (const [chip, at] of [['length', 3], ['interpret', 0]]) {
-    MEANS[chip].forEach((m, i) => { if (i !== at) assert.ok(!tail.includes(m(words).split('.')[0]), `${chip} level ${i} is not in the request`) })
+    MEANS[chip].forEach((m, i) => { if (i !== at && m(words)) assert.ok(!tail.includes(m(words).split('.')[0]), `${chip} level ${i} is not in the request`) })
   }
   assert.ok(!tail.includes(MEANS.own[1]()) && !tail.includes(MEANS.own[2]()))
   assert.ok(!tail.includes('<original>'))
@@ -94,5 +94,24 @@ test('the request carries only the definition of each level picked, and Length a
   assert.ok(!one.includes('Interpretation'))
   // a record of before (one line first, a Background chip) reads on the scales now
   const old = chipsOf({ text: TEXT, squeeze: { at: { length: 4, familiarity: 0 }, scale: 3, versions: { 'length=4': 'x' } } })
-  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'interpret=some interpretation'])
+  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'interpret=as written'])
+})
+
+test('Interpretation starts at the original, as written, in its middle, and adds nothing to the request there', () => {
+  const [, interp] = chipsOf({ text: TEXT })
+  assert.deepEqual(interp.levels, ['facts only', 'as written', 'expert reading'])
+  assert.equal(interp.level, 1)
+  assert.equal(levelWords(interp), 'as written')
+  assert.equal(MEANS.interpret[1](), '')
+  // a record from before, where an observer placed the original on the chip, starts at as written too
+  const old = chipsOf({ text: TEXT, verbs: { s: { lit: false, at: { interpretation: 'facts only' } } } })[1]
+  assert.equal(old.level0, 1)
+  assert.equal(levelWords(old), 'as written')
+  // a step either way is named with its own definition; the middle is not named
+  const down = request({ text: TEXT, squeeze: { at: { interpret: 0 }, scale: 4 } }, { system: 'S' }).prompt[1].text
+  assert.match(down, /- Interpretation: facts only\. State what was found/)
+  const up = request({ text: TEXT, squeeze: { at: { interpret: 2 }, scale: 4 } }, { system: 'S' }).prompt[1].text
+  assert.match(up, /- Interpretation: expert reading\. Lead with Claude's reading/)
+  const mid = request({ text: TEXT, squeeze: { at: { interpret: 1 }, scale: 4 } }, { system: 'S' }).prompt[1].text
+  assert.ok(!mid.includes('Interpretation'))
 })

@@ -42,12 +42,9 @@ const merge = async (name, reply, o) => {
   await lens.merge(lens.read(parseAnswer(JSON.stringify(reply))), ctx)
   return { ctx, did }
 }
-test('the actions, squeeze and explain lenses each put their part where it goes', async () => {
+test('the actions and explain lenses each put their part where it goes', async () => {
   const a = await merge('actions', { verbs: { v: { note: '2 views ready', proposals: ['overwrites per day, June 18 marked', 'b', 'c'] }, s: { at: { interpret: 'report' } } } })
   assert.deepEqual(a.ctx.verbs, { v: { lit: true, note: '2 views ready', proposals: ['overwrites per day, June 18 marked', 'b'] } })
-  const s = await merge('squeeze', { verbs: { s: { at: { interpret: 'report', familiarity: 'fluent' } } } })
-  assert.deepEqual(s.ctx.verbs.s.at, { interpret: 'report', familiarity: 'fluent' })
-  assert.equal(s.ctx.verbs.s.lit, false)
   const g = { term: 'p95', body: 'b' }
   assert.deepEqual((await merge('explain', { glosses: [g] })).ctx.glosses, [g])
   // every explain the pass gives is kept: no count and no backoff

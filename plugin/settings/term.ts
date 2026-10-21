@@ -68,7 +68,8 @@ async function costsNow($: Engine): Promise<{ looks: number; w: number; main: nu
 /** What the features that read answers cost together, in one line: they share one model call after each reply. */
 export function costLine(values: Record<string, boolean>, c: { looks: number; w: number; main: number } | null): string {
   const none = SWITCHES.filter(s => !s.lenses.length).map(s => s.title)
-  const which = none.length ? `All features but ${none.join(' and ')}` : 'These features'
+  const list = none.length > 1 ? `${none.slice(0, -1).join(', ')} and ${none.at(-1)}` : none[0]
+  const which = none.length ? `All features but ${list}` : 'These features'
   if (!switchesFrom(values)('observer')) return `${which} share one model call after each reply. With all of them off, thimble makes no such call.`
   const measured = c && c.main > 0 ? ` This session: ${c.looks} call${c.looks === 1 ? '' : 's'}, ${pct(c.w / c.main)} of what Claude's own turns cost.` : ''
   return `${which} share one model call after each reply.${measured}`

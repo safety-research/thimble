@@ -18,7 +18,6 @@ export const TEXTS = {
     reads: 'observer/observer.ts',
   },
   'lens-actions': { about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', optional: true },
-  'lens-squeeze': { about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', optional: true },
   'lens-heads': { about: 'lens: an important detail of the answer, an orange mark that opens a heads-up card', reads: 'the pass', optional: true },
   'explain-expand': {
     about: "an explainer written again at more length (e on an explainer): one side call over the term, the answer and the files it cites",

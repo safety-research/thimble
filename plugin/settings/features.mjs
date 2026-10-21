@@ -25,9 +25,9 @@ export const SWITCHES = [
     costs: 'A small part of the call after each reply; then one card each time you ask.',
   },
   {
-    key: 'squeeze', title: 'Squeeze and catch-up', default: true, lenses: ['squeeze'], bar: ['s'], surfaces: ['terminal'],
+    key: 'squeeze', title: 'Squeeze and catch-up', default: true, lenses: [], bar: ['s'], surfaces: ['terminal'],
     does: 's makes an answer shorter or longer, and catches you up on replies you missed.',
-    costs: 'A few words of the call after each reply; then one rewrite each time you ask.',
+    costs: 'One rewrite each time you ask.',
   },
   {
     key: 'explain', title: 'Explainers', default: true, lenses: ['explain'], surfaces: ['terminal'],

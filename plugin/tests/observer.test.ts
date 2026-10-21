@@ -226,7 +226,7 @@ test('the pass is a fork of the session: its prompt is the frame, the lenses, th
   expect(w.forks.length).toBe(1)
   expect(w.efforts).toEqual([])
   const p = w.forks[0]!
-  for (const x of ['FRAME', 'LENS actions', 'LENS squeeze', 'LENS explain', 'LENS heads', 'LENS claims', 'REPLY {"verbs": {}, "glosses": [], "heads": null, "claims": []}', 'NOW', 'when did they edit most?', '01-saves']) expect(p).toContain(x)
+  for (const x of ['FRAME', 'LENS actions', 'LENS explain', 'LENS heads', 'LENS claims', 'REPLY {"verbs": {}, "glosses": [], "heads": null, "claims": []}', 'NOW', 'when did they edit most?', '01-saves']) expect(p).toContain(x)
   expect(p.indexOf('LENS claims')).toBeLessThan(p.indexOf('NOW'))
   expect(p).not.toContain('LENS line')
   expect(p).not.toContain('notes')
@@ -245,7 +245,7 @@ test('the pass is a fork of the session: its prompt is the frame, the lenses, th
   expect(pass.effort).toBeUndefined()
   expect(pass.blocked).toBe(false)
   expect(pass.usage).toEqual(USAGE)
-  expect(Object.keys(pass.lenses as Json)).toEqual(['actions', 'squeeze', 'explain', 'heads', 'claims'])
+  expect(Object.keys(pass.lenses as Json)).toEqual(['actions', 'explain', 'heads', 'claims'])
   expect((pass.lens_prompts as Json).actions).toBe('lens-actions')
   // one look line in the events: what it lit
   const look = w.events.find(e => e.kind === 'look')!
