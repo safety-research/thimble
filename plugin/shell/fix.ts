@@ -6,7 +6,8 @@
 //                 the person types their next prompt. f or F sends a turn to main (fixask.js), as v does
 //   refreshFixes  $THIMBLE_HOME/fixes/*/fix.json: a fix that works shows in the bar (`fixing: <title>`); one that the
 //                 person's thimble now uses shows one line, `✓ Your thimble now has the fix: <title>`, with
-//                 `p share it · u undo`. u runs `thimble fix undo` as the person
+//                 `p share it · u undo`. u runs `thimble fix undo` as the person. Each switch it sees (a fix on, a new
+//                 round, the fix off) loads the plugins once, so the person never types /reload-plugins
 //   fixCommand    /thimble:fix, the one way in: words are the change the person wants (the command's text asks Claude,
 //                 commands/fix.md); submit, undo and try do what p and u do, for the fix that is on or the newest;
 //                 remove turns a fix off and deletes its copy and its record
@@ -76,10 +77,20 @@ function sayLine($: Engine, said: string): void {
   } else $.ui.toast(said)
 }
 
-/** Load the plugins again once the session is idle, when a switch of thimble asks for it (the kernel's line names
- *  /reload-plugins), so the person sees the fix, or the release, without typing it. */
-async function reloadFor($: Engine, said: string): Promise<void> {
-  if (/\/reload-plugins/.test(said)) await $.command.run({ command: 'reload-plugins' }).catch(() => undefined)
+/** A load of the plugins asked for and not run yet. Claude Code refuses one asked from inside a tool call (it would
+ *  wait on the turn the call holds), so it stays due until the next look outside one: turn.complete looks again. */
+let reloadDue = false
+
+/** Load the plugins again once the session is idle, so the person sees the fix, or the release, without typing
+ *  /reload-plugins. refreshFixes asks for it once per switch of thimble (a fix on, off, or a new round of it). */
+async function reloadPlugins($: Engine): Promise<void> {
+  if (!reloadDue) return
+  reloadDue = false
+  try {
+    await $.command.run({ command: 'reload-plugins' })
+  } catch {
+    reloadDue = true
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ the failure line
@@ -142,20 +153,21 @@ async function undoFix($: Engine, slug: string, title = slug): Promise<string> {
   const line = switchLine(said, `thimble is back to the release, without your fix '${title}'.`)
   sayLine($, line)
   await noteForClaude($, `The analyst undid the fix ${slug}. ${said}`)
-  await reloadFor($, said)
+  // the fix went off: refreshFixes loads the release
+  void refreshFixes($).catch(() => undefined)
   return line
 }
 
 /** Remove a fix (/thimble:fix remove): the kernel turns it off when it is on, then deletes its copy and its record. */
 async function removeFix($: Engine, slug: string, title = slug): Promise<string> {
   const r = await kernel($, ['remove', slug])
+  // a fix that was on went off: refreshFixes loads the release
   void refreshFixes($).catch(() => undefined)
   if (!r.ok) return `× The fix was not removed: ${cut(said(r.out) || 'thimble fix remove gave nothing', 220)}`
   const l = await fixLineNow($)
   if (l?.kind === 'applied' && l.slug === slug) await $.state.set(LINE, null)
   const out = lastLine(r.out)
   await noteForClaude($, `The analyst removed the fix ${slug}. ${out}`)
-  $.clock.after(0, () => { void reloadFor($, out) })
   const size = /\(([^()]+)\)\.?$/.exec(out)?.[1]
   const was = /back to the release/.test(out) ? 'thimble is back to the release. ' : ''
   return switchLine(out, `${was}Removed the fix '${title}': its copy and its record${size ? ` (${size})` : ''}.`)
@@ -215,11 +227,9 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
   if (v.verb === 'remove') return { text: await removeFix($, f.slug, f.title) }
   if (v.verb === 'try') {
     const r = await kernel($, ['use', f.slug])
+    // the fix came on: refreshFixes says so and loads it
     void refreshFixes($).catch(() => undefined)
-    if (r.ok) {
-      await noteForClaude($, `The analyst turned the fix ${f.slug} on again. ${r.out.split('\n')[0]}`)
-      $.clock.after(0, () => { void reloadFor($, r.out) })
-    }
+    if (r.ok) await noteForClaude($, `The analyst turned the fix ${f.slug} on again. ${r.out.split('\n')[0]}`)
     return { text: r.ok ? switchLine(r.out.split('\n')[0]!, `✓ Your thimble has the fix again: ${f.title}`) : `× ${cut(said(r.out) || 'thimble fix use gave nothing', 240)}` }
   }
   // submit, a moment after the command has answered: the review opens, or Claude writes the draft first
@@ -232,10 +242,41 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
 /** Each fix as last seen: its status, the time of its last use (each `thimble fix use` is a round of the fix) and its
  *  title, so each round that came into use is said once. Empty until the first look. */
 const seen = new Map<string, { status: string; used: number; title: string }>()
+/** The fix the marketplace pointed at when last looked (fixes/active), so a fix that went off is seen once. */
+let wasActive: string | null = null
 /** The fixes whose draft the person asked for (p) and whose preview has not opened yet. */
 const shareWait = new Set<string>()
+/** Whether this load of the module looked already (its first look starts followFix). */
 let looked = false
+/** Whether the fixes were seen before this look, in this load of the module or in the one before a reload of the
+ *  plugins. Each switch reloads them, and a later round must not look like the session's first look. */
+let known = false
+/** What was seen, kept for the session by the host ($.state outlives a reload of the plugin's code). */
+const SEEN = { plugin: 'thimble', key: 'fixseen' } as const
+let restoring: Promise<void> | null = null
+function restoreSeen($: Engine): Promise<void> {
+  restoring ??= (async () => {
+    const v = (await $.state.get(SEEN).catch(() => ({ value: null }))).value as { fixes?: Record<string, { status: string; used: number; title: string }>; active?: string | null } | null | undefined
+    if (!v) return
+    for (const [slug, f] of Object.entries(v.fixes || {})) if (!seen.has(slug)) seen.set(slug, f)
+    wasActive = v.active ?? null
+    known = true
+  })()
+  return restoring
+}
 let poll: { cancel?: () => void } | null = null
+
+/** For tests: this module's memory gone, as a reload of the plugin's code leaves it (the host's $.state stays). */
+export function forgetFixes(): void {
+  seen.clear()
+  shareWait.clear()
+  wasActive = null
+  looked = false
+  known = false
+  restoring = null
+  poll = null
+  reloadDue = false
+}
 
 /** The fixes in $THIMBLE_HOME/fixes, and which is in use. */
 async function listFixes($: Engine): Promise<{ fixes: Fix[]; active: string | null }> {
@@ -252,9 +293,15 @@ async function listFixes($: Engine): Promise<{ fixes: Fix[]; active: string | nu
 }
 
 /** Look at the fixes again: the bar's `fixing` note, and the one line when a fix came into use. While one works, it
- *  is looked at every few seconds (the person asked for that fix), and never once none works. */
+ *  is looked at every few seconds (the person asked for that fix), and never once none works. Each switch of thimble
+ *  seen here (a fix on, a new round of it, or the fix that was on gone off), whoever made it (Claude, a subagent, or
+ *  the person's u, try or remove), loads the plugins once. */
 export async function refreshFixes($: Engine): Promise<void> {
+  await restoreSeen($)
   const { fixes, active } = await listFixes($)
+  // the fix that was on went off (undo, remove), or another took its place: the session loads what is on now
+  let reload = known && wasActive !== null && wasActive !== active
+  wasActive = active
   // 'ready' is a fix that is not in use (after undo, or a send that was cancelled): only 'working' still works
   const working = fixes.filter(f => f.status === 'working')
   await $.state.set(FIXES, working.map(f => ({ slug: f.slug, title: f.title, kind: f.kind })))
@@ -268,13 +315,15 @@ export async function refreshFixes($: Engine): Promise<void> {
     await openAskOnce($, f.slug, !looked)
     const was = seen.get(f.slug)
     seen.set(f.slug, { status: f.status, used: f.used, title: f.title })
-    if (!looked || f.status !== 'applied' || active !== f.slug) continue
+    if (!known || f.status !== 'applied' || active !== f.slug) continue
     if (was?.status !== 'applied' || was.used !== f.used) {
       // a fix turned on, or a later round of the same fix: the person tries the newest copy at once
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
       await $.state.set(LINE, { kind: 'applied', slug: f.slug, title: f.title })
-      // the plugins load again once the session is idle, so they try it at once
-      if (!(await ownFix($))) await reloadFor($, '/reload-plugins')
+      // the marketplace points at the copy (fixes/active), which Claude Code reads in place: the plugins load again
+      // once the session is idle, so the person tries this round at once. That holds when the session already runs
+      // the copy, from an earlier round
+      reload = true
     } else if (was.title !== f.title) {
       // a round changed what the fix does, and its title says so now (`thimble fix title`)
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
@@ -283,6 +332,11 @@ export async function refreshFixes($: Engine): Promise<void> {
     }
   }
   looked = true
+  known = true
+  // kept before the reload, so the module the reload loads goes on from here
+  await $.state.set(SEEN, { fixes: Object.fromEntries(seen), active }).catch(() => undefined)
+  if (reload) reloadDue = true
+  await reloadPlugins($)
   if ((working.length || shareWait.size) && !poll) {
     try { poll = $.clock.every(3000, () => { void refreshFixes($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { poll = null }
   } else if (!working.length && !shareWait.size && poll) {
@@ -315,7 +369,11 @@ async function followFix($: Engine, f: Fix): Promise<void> {
   const moved = off || (before?.base && after?.base && before.base !== after.base)
   if (moved) {
     await noteForClaude($, `thimble's fix ${f.slug} followed the newest release: ${line}`)
-    await $.command.run({ command: 'reload-plugins' }).catch(() => undefined)
+    // this load is the switch's one: refreshFixes does not load it again when it sees the fix off
+    wasActive = ((await readText($, `${await home($)}/fixes/active`)) || '').trim() || null
+    await $.state.set(SEEN, { fixes: Object.fromEntries(seen), active: wasActive }).catch(() => undefined)
+    reloadDue = true
+    await reloadPlugins($)
   }
 }
 

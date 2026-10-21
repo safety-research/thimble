@@ -182,6 +182,8 @@ declare module 'claude-code' {
       fixline: { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | null
       /** the fixes that work now (shell/fix.ts), for the bar's note */
       fixes: { slug: string; title: string; kind: string }[]
+      /** each fix as refreshFixes last saw it, and the one that was on (shell/fix.ts), kept across a reload of the plugin */
+      fixseen: { fixes: Record<string, { status: string; used: number; title: string }>; active: string | null }
       /** a fix's share as its preview reads it, by slug (shell/fix.ts); never the ask's id */
       fixshare: StateFamily<unknown>
       /** the labels of a set of records, by folder, generation and refs (`thimble label --of`) */

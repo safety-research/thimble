@@ -148,15 +148,24 @@ if [ "$plugin" = 1 ]; then
       claude plugin marketplace update thimble
       claude plugin update thimble@thimble
     else
-      # each feature's default, from the manifest's userConfig, so a fresh install has no option left unset
+      # each feature's default, from the userConfig of the plugin this installs (the marketplace just added: GitHub's,
+      # or this checkout with --local), so a fresh install has no option left unset and none its version lacks
       config=()
       while IFS= read -r kv; do [ -n "$kv" ] && config+=(--config "$kv"); done < <(cd / && "$py" -c '
-import json, sys
-for k, v in (json.load(open(sys.argv[1])).get("userConfig") or {}).items():
+import json, os, sys
+plugins = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins")
+try:
+    at = json.load(open(os.path.join(plugins, "known_marketplaces.json")))["thimble"]["installLocation"]
+    entry = next(p for p in json.load(open(os.path.join(at, ".claude-plugin", "marketplace.json")))["plugins"]
+                 if p.get("name") == "thimble")
+    manifest = json.load(open(os.path.join(at, entry["source"], ".claude-plugin", "plugin.json")))
+except (OSError, ValueError, KeyError, TypeError, StopIteration):
+    sys.exit(0)  # no defaults to give: Claude Code installs the plugin with its own
+for k, v in (manifest.get("userConfig") or {}).items():
     if "default" in v:
         print(k + "=" + json.dumps(v["default"]))
-' "$root/plugin/.claude-plugin/plugin.json")
-      claude plugin install thimble@thimble "${config[@]}"
+')
+      claude plugin install thimble@thimble ${config[@]+"${config[@]}"}
     fi
     say "The plugin works in a new claude session, in a folder of data files that you trust."
   else
