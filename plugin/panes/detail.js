@@ -10,7 +10,8 @@
 //          the first record shown, prog: the program, pages: 'all' | 'one' (a card with pages)}
 //   presses: a part selects it, the selected part shows its rows (again: hides them), a version shows it, a knob's
 //          ◂ ▸ turns it, a record of the rows opens it as a citation, a label opens it in the panel
-//   actions (above the input bar, `act:<id>`): Rows (the selected part's records) · Code (the program, its lines that
+//   actions (above the input bar, `act:<id>`): Records, Rows or Lines (the selected part's entries, in their files' own
+//          word; none when they are whole files) · Code (the program, its lines that
 //          drew the part lit) · Earlier version (the card before the analyst's last change; from the first, the newest). What one opens is the `side:opened` region, which the side panel draws right above the
 //          actions, under the thread's conversation; the card stays at the top. keys: none of its own beside esc (the
 //          code, then the rows, then the panel goes back); the ring walks the parts (↑ ↓, tab) and ↵ presses the one
@@ -29,7 +30,7 @@
 //
 // The card's own keys and presses (its program's k.on) come before these: the host routes them to the card first.
 import { examplesView, exampleSet, linkRuns, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
-import { healLook } from '../shell/cards.js'
+import { entryWords, healLook } from '../shell/cards.js'
 import { toneBeside } from './labels.js'
 import { subjectBlock } from './subject.js'
 import { pageId, pageOf, turn as turnKnob } from '../draw/handoff.js'
@@ -167,8 +168,10 @@ export function program(k, data) {
     if (r === region) return { bar: bar ? null : 'examples', ex: 0 }
     return pick(r)
   })
-  // the actions above the input bar, in words: the selected part's rows, and the card's code (the open one `:on`)
-  k.on(bar && !prog ? 'act:rows:on' : 'act:rows', () => ({ bar: bar && !prog ? null : 'examples', ex: 0, prog: false }), 'Rows')
+  // the actions above the input bar, in words: the selected part's entries in their files' own word (Records, Rows,
+  // Lines), and the card's code (the open one `:on`). A part whose records are whole files has no entries to show.
+  const words = partWords(k, data, part)
+  if (words) k.on(bar && !prog ? 'act:rows:on' : 'act:rows', () => ({ bar: bar && !prog ? null : 'examples', ex: 0, prog: false }), words.many.replace(/^./, c => c.toUpperCase()))
   k.on(prog ? 'act:code:on' : 'act:code', () => ({ prog: !prog }), 'Code')
   // the card as first made and after each change the analyst asked for (carddetail.js editsOf): a step back through
   // them, and from the first to the card now
@@ -221,7 +224,7 @@ export function program(k, data) {
   // what an action opened: the code, else the selected part's rows, in the `side:opened` region the panel draws above the
   // input bar
   const below = prog ? programView(k, data, part, W) : bar ? barView(k, data, part, bar, ex, W) : null
-  return k.stack(head, takeaway, k.text(' '), k.embed(data.drawing), below ? k.region('side:opened', { label: prog ? 'the code' : 'the rows' }, below) : false)
+  return k.stack(head, takeaway, k.text(' '), k.embed(data.drawing), below ? k.region('side:opened', { label: prog ? 'the code' : `the ${(words || ROWS).many}` }, below) : false)
 }
 
 /** The ids the links in a drawing's words point at (`[words](#id)`), each once, in the order drawn. */
@@ -241,6 +244,21 @@ export function linkTargets(root) {
   return out
 }
 
+
+const ROWS = { many: 'rows', one: 'row' }
+
+/** What the selected part's entries are called, in their files' own word (cards.js entryWords: the `unit` thimble
+ *  resolve gives, from the one mapping coverage counts by): records of JSON and JSONL, rows of a table, lines of text.
+ *  null when the rows behind the part are whole files (an image, a PDF, a file cited whole) and the program attached
+ *  no records; `rows` while the answer is not in hand. It asks for what the rows under the card ask for. */
+export function partWords(k, data, part) {
+  const refs = part ? data.refs[part.id] || [] : []
+  const resolved = refs.length ? k.want({ rows: refs, n: 8 }) : null
+  if (!resolved || resolved.error) return ROWS
+  const w = entryWords(resolved)
+  if (w && !(resolved.count == null && (resolved.rows || []).length)) return w
+  return exampleSet({ examples: data.examples }, { examples: part.examples }) ? w || ROWS : null
+}
 
 /** The records the examples bar shows for a part: those the program attached, else the rows behind the part. */
 function exampleRecords(k, data, part) {
