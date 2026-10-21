@@ -50,7 +50,7 @@ import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedO
 import { SCALE, cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, setWords, withOwn } from '../squeeze/chips.mjs'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
-import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
+import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTitle, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf, scopeOf as trayScopeOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { hex as toneHex, mix, setAutoTheme, termColor } from '../draw/palette.js'
@@ -1701,17 +1701,19 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
   }
 }
 
-/** The thread the side panel shows, as `thimble:main/<it>` (the thread list as `thimble:threads`). Null in main. */
-async function threadInFront($: Engine): Promise<string | null> {
+/** The thread the side panel shows, as `thimble:main/<it>` (the thread list as `thimble:threads`), with the plain name
+ *  the bar says where it has less room: the pane's own (`Coverage`), or the card's. Null in main. */
+async function threadInFront($: Engine): Promise<{ label: string; short: string } | null> {
   if (!detailIsOpen()) return null
   const v = await sideNow($)
   if (v?.kind === 'pane') {
-    if (v.pane === 'threads') return 'thimble:threads'
+    const plain = String(v.title || paneTitle(v.pane, v.args))
+    if (v.pane === 'threads') return { label: 'thimble:threads', short: plain }
     const s = paneSubject(v)
-    return s ? `thimble:${s.name}` : null
+    return s ? { label: `thimble:${s.name}`, short: plain } : null
   }
   const sel = (await $.state.get(SEL)).value as Sel | null
-  return sel && !sel.cite && !sel.cites ? `thimble:main/${objectWords(sel.id)}` : null
+  return sel && !sel.cite && !sel.cites ? { label: `thimble:main/${objectWords(sel.id)}`, short: objectWords(sel.id) } : null
 }
 
 /** An object's id as the person reads it: without the number it was saved under, its dashes spaces (`01-label-kind`:
@@ -1875,7 +1877,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 }
 
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
-type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown; dim?: boolean }
+type BarSeg = { key: string; words: string; short?: string; yields?: boolean; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown; dim?: boolean }
 
 /** The keys each bar named, oldest first, with when it first showed them. A key the line named a moment ago
  *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
@@ -1993,12 +1995,13 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
         // at rest: the newest reply (or the catch-up in its place), named by nothing
       } else if (isCatchUp(rec)) {
         const n = Number(rec.catchup!.replies) || 0
-        left.push({ key: '{ }', words: `catch-up of ${n} replies`, short: 'catch-up', color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
+        left.push({ key: '{ }', words: `catch-up of ${n} replies`, short: 'catch-up', yields: true, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
       } else if (place.all.length > 1 && place.at >= 0 && (place.at < place.all.length - 1 || place.since > 1)) {
         // an earlier reply picked: its first words too, since a key cannot scroll the transcript to it
         const which = `reply ${place.at + 1} of ${place.all.length}`
         const begins = place.at < place.all.length - 1 ? cut(lineOf(shownOf(rec)), 36) : ''
-        left.push({ key: '{ }', words: begins ? `${which}: ${begins}` : which, short: which, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
+        // its words give way before the counts do: cut at their end, down to `reply 2 of 4` (host.js fitBar)
+        left.push({ key: '{ }', words: begins ? `${which}: ${begins}` : which, short: which, yields: true, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
       }
     }
   }
@@ -2032,7 +2035,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   })
   const where = o.preview ? null : await threadInFront($)
   if (!left.length && !counts.length && !where) return null
-  const fit = fitBar({ label: where ?? 'thimble', left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bare?: boolean; bright: boolean }[]; cut: boolean }
+  const fit = fitBar({ label: where?.label ?? 'thimble', labelShort: where?.short, left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bare?: boolean; bright: boolean }[]; cut: boolean }
   // the label names whose keys these are; it is no link and no press, so it is drawn plain (an underline is a
   // citation's look)
   // in main, a click on it opens thimble's settings in the side panel
