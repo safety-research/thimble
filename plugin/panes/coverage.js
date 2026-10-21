@@ -437,7 +437,8 @@ function topBars(k, t) {
   return rows.flatMap((r, i) => {
     const tone = KEY[i][1]
     const words = k.text(`{dim:${k.escape(pad(r[0], wide ? lw : W))}}`, { wrap: false })
-    const bar = bw >= 4 ? [k.bar([{ value: r[1], tone }, { value: 1 - r[1], tone: 'dim-faint' }], { max: 1, w: bw })] : []
+    const v = lit(r[1], bw)
+    const bar = bw >= 4 ? [k.bar([{ value: v, tone }, { value: 1 - v, tone: 'dim-faint' }], { max: 1, w: bw })] : []
     const nums = k.text(k.escape(tail(r)), { wrap: false })
     return wide ? [k.beside(words, ...bar, nums, { gap: 2 })] : [words, k.beside(...bar, nums, { gap: 2 })]
   })
@@ -468,6 +469,8 @@ function toggles(k, by) {
 // stands right-aligned in SHARE cells (`<0.01%` is six, the header's `searched` eight), so it is never cut
 const BAR = 10
 const SHARE = 8
+/** A share as a bar of `w` cells fills it: at least one cell when it is above 0, so a small share still shows. */
+const lit = (v, w) => (v > 0 ? Math.min(1, Math.max(v, 1 / Math.max(1, w))) : 0)
 
 const itemSize = it => (it.kind === 'group' ? sizeText(it.g) : it.kind === 'file' ? fileSize(it.f) : '')
 // a size's number alone (`14,591`), for a pane too narrow for its unit's word
@@ -512,7 +515,7 @@ function header(k, what, c) {
 /** The two measures, each a space, a bar (while the pane has room for it) and its share: read (the accent) and searched
  *  or computed over (dim), each of the row's whole in its unit. */
 function measures(k, read, counted, c) {
-  const one = (v, tone) => [k.text(' ', { wrap: false }), ...(c.bar ? [k.bar([{ value: v, tone }, { value: 1 - v, tone: 'dim-faint' }], { max: 1, w: c.bar })] : []), k.text(shareCol(pct(v)), { wrap: false })]
+  const one = (v, tone) => [k.text(' ', { wrap: false }), ...(c.bar ? [k.bar([{ value: lit(v, c.bar), tone }, { value: 1 - lit(v, c.bar), tone: 'dim-faint' }], { max: 1, w: c.bar })] : []), k.text(shareCol(pct(v)), { wrap: false })]
   return [...one(read, 'accent'), ...one(counted, 'dim')]
 }
 
