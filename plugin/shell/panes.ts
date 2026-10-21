@@ -131,6 +131,9 @@ async function stores($: Engine, inst: Inst): Promise<Record<string, unknown>> {
   return out
 }
 
+// a read with no answer after three asks: one line, with its fix
+const NO_ANSWER = { error: 'no answer came after three tries; close this and open it again', problem: 'no answer came after three tries; close this and open it again' }
+
 /** The program run on its stores and state now (with an event, the program answers it). `keep` false: the drawing is
  *  only read (paneTry), never kept as the pane's last, and its wants are not asked. */
 export async function paneRun($: Engine, name: string, args: Record<string, unknown>, size: Size, event: Record<string, unknown> | null = null, keep = true): Promise<Any> {
@@ -157,7 +160,7 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
     inst.tries.set(w.key, tries)
     inst.asked.set(w.key, now)
     if (tries > 3) {
-      inst.got = { ...inst.got, [w.key]: { error: 'no answer came after three tries; close this and open it again', problem: 'no answer came after three tries; close this and open it again' } }
+      inst.got = { ...inst.got, [w.key]: NO_ANSWER }
       $.clock.after(0, () => { void redraw($, inst) })
       continue
     }
@@ -168,8 +171,10 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
         // a read Claude Code cut short (its call aborted with the drawing that asked for it) is no answer: asked again at
         // the next drawing, up to the three asks, so a card opened by a click never stays on that failure
         const why = String((v as { error?: unknown; problem?: unknown } | undefined)?.error ?? (v as { problem?: unknown } | undefined)?.problem ?? '')
-        if (/\baborted\b/.test(why) && (inst.tries.get(w.key) ?? 0) < 3) { inst.asked.delete(w.key); await redraw($, inst); return }
-        inst.got = { ...inst.got, [w.key]: v === undefined ? { error: 'the host gave no answer' } : v }
+        // the third cut short is said as the failure it is, in one plain line with its fix, not as the host's word
+        const cut = /\baborted\b/.test(why)
+        if (cut && (inst.tries.get(w.key) ?? 0) < 3) { inst.asked.delete(w.key); await redraw($, inst); return }
+        inst.got = { ...inst.got, [w.key]: cut ? NO_ANSWER : v === undefined ? { error: 'the host gave no answer' } : v }
         await redraw($, inst)
       })()
     })
