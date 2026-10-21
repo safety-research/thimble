@@ -26,7 +26,8 @@
 //         the cited files' own word, when entries stand behind it; c code)
 //         · o open the first citation inside the card (the rest by a click; 2–9 still open them, unnamed) · 0 back (or
 //         close; esc too): esc at the prompt never reaches a plugin, so 0 stays named · ] [ the next and the one before
-//         (the host's order of marks and cards: k.do('step')). Letters for what the person does, so the line reads as
+//         (the host's order of marks and cards: k.do('step')), ] named while there is a next (the `steps` read), else [
+//         where there is one before. Letters for what the person does, so the line reads as
 //         words (`a ask · o open … · 0 close`), never as a number
 //   asks of the host: thread {frame} (the side panel on this card, its input bar holding the keys), expand {frame},
 //         step, close
@@ -98,13 +99,15 @@ export const sameFrame = (a, b) => !!a && !!b && (a.row != null || b.row != null
 export default {
   name: 'tray',
   title: 'cite & explain',
-  reads: () => ['threads'],
+  reads: () => ['threads', 'steps'],
   stateKey: () => 'tray',
   data(stores) {
     const list = Array.isArray(stores.threads) ? stores.threads : []
     // a thread as the tray reads it: its key, its status, its turns (each question and answer), its error
     return {
       threads: list.map(t => ({ key: t.key || (t.scope ? threadKey(t.scope) : ''), status: t.status || '', error: t.error || '', turns: (t.turns || []).map(x => ({ role: x.role === 'user' ? 'person' : x.role, text: String(x.text || '') })) })),
+      // whether ] and [ go anywhere from this mark ({next, prev}; null where the host does not say)
+      steps: stores.steps && typeof stores.steps === 'object' ? stores.steps : null,
     }
   },
   program,
@@ -160,8 +163,11 @@ export function program(k, data) {
   links.forEach((l, j) => k.on(String(j + 2), () => openLink(l)))
   k.on('0', back, open || stack.length > 1 ? 'back' : 'close')
   k.on('esc', back)
-  k.on(']', () => { k.do('step', { dir: 1 }) }, 'next')
-  k.on('[', () => { k.do('step', { dir: -1 }) })
+  // ] is named while there is a next mark or card; at the newest reply's last stop, [ is named instead, where there
+  // is one before (both still work unnamed)
+  const steps = data.steps || { next: true, prev: true }
+  k.on(']', () => { k.do('step', { dir: 1 }) }, steps.next !== false ? 'next' : undefined)
+  k.on('[', () => { k.do('step', { dir: -1 }) }, steps.next === false && steps.prev !== false ? 'previous' : undefined)
   // the gloss on the citation's words (frameOf `inner`): over the citation, as a citation inside a card opens
   const onWords = !open && Array.isArray(top.inner) ? top.inner.find(f => f && f.kind === 'gloss') : null
   const wordsHeads = !!(onWords && onWords.gloss && onWords.gloss.kind === 'heads')

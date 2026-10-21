@@ -1296,12 +1296,32 @@ async function listThreads($: Engine): Promise<void> {
   await openThreads($)
 }
 
-async function stepMark($: Engine, dir: number): Promise<void> {
+/** Where ] and [ stand now in what they move through: the tray's mark, else the card with the focus (-1: neither). */
+async function stepPlace($: Engine): Promise<{ list: { row: string; i?: number; card?: ObjRef }[]; at: number }> {
   const list = await focusOrder($)
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const base = trayBase(tray) as TrayFrame | null
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === base.i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
+  return { list, at }
+}
+
+/** Whether ] and [ go anywhere from where they stand: at the newest reply's last stop ] stays where it is, and at the
+ *  oldest reply's first [ does, so the bar does not name a key there that does nothing. */
+export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean }> {
+  const { list, at } = await stepPlace($)
+  if (at < 0) return { next: true, prev: true }
+  return { next: !!stepFrom(list, at, 1), prev: !!stepFrom(list, at, -1) }
+}
+
+/** The bar's words for ] and [ (the tray's and a focused card's): `] next` while there is a next, else `[ previous`
+ *  where there is one before. */
+function stepWords(ends: { next: boolean; prev: boolean }): string[] {
+  return ends.next ? ['] next'] : ends.prev ? ['[ previous'] : []
+}
+
+async function stepMark($: Engine, dir: number): Promise<void> {
+  const { list, at } = await stepPlace($)
   let next: { row: string; i?: number; card?: ObjRef } | null = null
   // past the newest reply's last stop (or before the oldest reply's first), the tray stays where it is
   if (at >= 0) { next = stepFrom(list, at, dir); if (!next) return }
@@ -1799,7 +1819,7 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   const pk = pageKnob(d)
   const ask = `${d && cardTakesKey(d, 'a') ? '1' : 'a'} ask`
   const pages = pk && !(d && cardTakesKey(d, 'o')) ? [PAGES_DEFAULT === 'all' ? `o read all ${pagesWord(pk)}` : `o open ${pagesWord(pk)}`] : []
-  return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), ask, ...pages, '] next', '0 back'].join(' · ') }
+  return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), ask, ...pages, ...stepWords(await stepEnds($)), '0 back'].join(' · ') }
 }
 
 /** A passage of a reply as a mark of it: its side thread is the passage's, as a citation's is the citation's. */
@@ -2831,6 +2851,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     }
     // the session's side threads: the tray shows a mark's
     case 'threads': return threadList()
+    // whether ] and [ go anywhere from the tray's mark: the tray names only a key that does
+    case 'steps': return stepEnds($)
     // the session's claims, with the folder's offer (claims/term.ts)
     case 'claims': return claimsPaneStore($)
     // thimble's switches (settings/term.ts)
