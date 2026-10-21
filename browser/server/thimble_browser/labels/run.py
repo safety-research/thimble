@@ -6,7 +6,8 @@ counts and the card fill in during the run.
   the first read it from the cache, and structured JSON answers. The calls run at once, as many as the Pacer lets: it
   starts at CONCURRENCY, halves when the API answers 429 or 529 (the call waits and goes again), and grows back one at a
   time while calls go through.
-- regex: Python's re searches each unit's text; a unit that matches takes the first value, any other the second.
+- regex: Python's re searches each unit's text (a JSON or JSONL record's values, decoded: regex_text); a unit that
+  matches takes the first value, any other the second.
 - code: the label's `label(unit)` runs in the sandbox (code_runner.py through cards/sandbox.run_script), CODE_CHUNK units
   per run of it.
 
@@ -26,7 +27,7 @@ import anthropic
 
 from .. import settings, home, llm
 from ..cards import sandbox
-from . import classify, store, units as units_mod
+from . import classify, regextext, store, units as units_mod
 
 log = logging.getLogger("thimble_browser.labels")
 
@@ -380,12 +381,20 @@ async def _prompt(ws: str, concept: dict[str, Any], found: list[Any], rec: dict[
 
 # ---- regex
 
+def regex_text(u: Any) -> str:
+    """The text a regex reads of a unit: a JSON or JSONL record's values, decoded, one per line (regextext.py, the same
+    as the plugin's), the text a person reads; any other unit's text (a line, a CSV row's `column: value` lines, a
+    whole file) as before."""
+    if "#" in u.ref and units_mod.kind_of(u.path or "") in ("json", "jsonl"):
+        return regextext.json_text(u.value)
+    return u.text
+
 def _regex_rows(concept: dict[str, Any], rx: re.Pattern, chunk: list[Any]) -> list[dict[str, Any]]:
     values = concept["labels"]
     other = values[1] if len(values) > 1 else None
     rows = []
     for u in chunk:
-        m = rx.search(u.text[:units_mod.WHOLE_CHARS])
+        m = rx.search(regex_text(u)[:units_mod.WHOLE_CHARS])
         if m:
             span = m.group(0)
             rows.append(_row(u, values[0], 1.0, "regex", spans=[span[:500]] if span.strip() else None))

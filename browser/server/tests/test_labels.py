@@ -42,12 +42,13 @@ async def _define(ws, name, kind, text, values, glob=("runs/*.jsonl",), unit="re
 
 async def test_a_regex_label_marks_what_it_matches(runs):
     ws = home.open_folder(runs)
-    k = await _define(ws, "failed", "regex", r'"outcome": "failed"', ["failed", "other"])
+    # a JSON lines record is read as its values (regextext.py), so the pattern is over "failed", not its key and quotes
+    k = await _define(ws, "failed", "regex", r"(?m)^failed$", ["failed", "other"])
     await run.start(ws, runs, k, paths=["runs/*.jsonl"])
     rec = await run.wait(ws, k["id"], 30)
     assert rec["status"] == "done" and rec["total"] == 6 and rec["matches"] == 1
     hit = store.merged(ws, k["id"])["runs/r1.jsonl#L3"]
-    assert hit["label"] == "failed" and hit["spans"] == ['"outcome": "failed"']
+    assert hit["label"] == "failed" and hit["spans"] == ["failed"]
     assert store.read(ws, k["id"])["applications"][-1]["matches"] == 1
 
 
