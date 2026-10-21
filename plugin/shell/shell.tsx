@@ -57,7 +57,7 @@ import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
-import { failNotice, fixAction, fixAskFromFeed, fixBar, fixKeyOf, fixStore, pressFix, promptTyped, refreshFixes } from './fix'
+import { failNotice, fixAction, fixAskFromFeed, fixBar, fixCommand, fixKeyOf, fixStore, pressFix, promptTyped, refreshFixes } from './fix'
 import { answerAsk, askFromFeed, checksDone, checksPending, labelAskNow, labelFromFeed, labelsOf, setLabelAsk } from './labels'
 import type { LabelAsk } from './labels'
 import { cardLegend, cardsLabels, labelsRow } from './labeluse'
@@ -3502,6 +3502,13 @@ export const registerShell: Register = (on, options) => {
       // a prompt goes in as typed when the shell cannot say what it carries
     }
     return context.length ? next({ ...e, context: [...(e.context ?? []), ...context] }) : next(e)
+  }).catch(($, e, next) => next(e))
+
+  // /thimble:fix [words] (commands/fix.md): submit, undo, try and the list are answered here; any other words are the
+  // change the person wants, which the command's own text asks Claude to make (fix.ts)
+  on('command.run', { command: /^(thimble:)?fix$/ }, async ($, e, next) => {
+    const r = await fixCommand($, e.args)
+    return r ?? next(e)
   }).catch(($, e, next) => next(e))
 
   // /squeeze [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
