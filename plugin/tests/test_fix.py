@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -451,3 +452,24 @@ def test_remove_turns_the_fix_off_and_deletes_its_copy_branch_and_record(on, cap
     assert not FX.fix_dir(fx["slug"]).exists() and FX.all_slugs() == []
     assert fx["worktree"] not in sh("git", "worktree", "list", cwd=src) and fx["branch"] not in sh("git", "branch", cwd=src)
     assert cli.main(["fix", "remove", fx["slug"]]) == 1 and "no fix rows-reads-a-semicolon" in capsys.readouterr().out
+
+
+def test_each_use_is_a_round_and_a_later_round_can_retitle_the_fix(env: Path, tmp_path: Path, monkeypatch):
+    # each `use` stamps the fix, so the plugin loads the copy again for a second round; the title follows the round
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    stub = tmp_path / "claude-stub"
+    stub.write_text(CLAUDE_STUB.format(log=tmp_path / "claude.log"))
+    stub.chmod(0o755)
+    monkeypatch.setenv("THIMBLE_CLAUDE", str(stub))
+    fx = FX.new("Draw card titles in violet")
+    first = FX.use(fx["slug"], plugin_dir=False)
+    stamp = FX.load(fx["slug"])["used"]
+    assert "thimble fix title" not in first
+    time.sleep(0.01)
+    second = FX.use(fx["slug"], plugin_dir=False)
+    assert FX.load(fx["slug"])["used"] > stamp
+    assert f'thimble fix title {fx["slug"]} "<new title>"' in second and "'Draw card titles in violet'" in second
+    assert "now called 'Draw card titles in teal'" in FX.retitle(fx["slug"], "Draw card titles in teal")
+    assert FX.load(fx["slug"])["title"] == "Draw card titles in teal" and FX.load(fx["slug"])["slug"] == fx["slug"]
+    with pytest.raises(FX.FixError):
+        FX.retitle(fx["slug"], "  ")

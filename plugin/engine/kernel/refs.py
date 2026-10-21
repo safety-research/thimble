@@ -505,7 +505,8 @@ def value_slug(s: Any) -> str:
 
 def link_spans(text: str):
     """(label, target, start, end) of each `[label](target)`. A target may hold balanced brackets, and a query ref
-    (r3#...) may hold spaces up to its closing bracket, so `[202](r11#run_result=won (clean ep)@median)` is one link."""
+    (r3#...) may hold spaces up to its closing bracket, so `[202](r11#run_result=won (clean ep)@median)` is one link. A
+    target in angle brackets is read without them."""
     s = text or ""
     i = 0
     while True:
@@ -532,6 +533,9 @@ def link_spans(text: str):
             i = a + 1
             continue
         target = s[b + 2:j].strip()
+        # a target in angle brackets, as markdown writes one with spaces: [3,693](<r9#span=other days@n>)
+        if len(target) > 1 and target[0] == "<" and target[-1] == ">" and not re.search(r"[<>\n]", target[1:-1]):
+            target = target[1:-1].strip()
         if target and (not re.search(r"\s", target) or re.match(r"^" + QUERY_ID + "#", target)):
             yield label, target, a, j + 1
         i = j + 1

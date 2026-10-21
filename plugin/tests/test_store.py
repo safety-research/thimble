@@ -176,3 +176,9 @@ def test_records_stay_in_the_folder_the_session_started_in(tmp_path: Path, monke
     assert STORE.find_root(other) == other.resolve()
     monkeypatch.delenv("THIMBLE_START")
     assert STORE.find_root(data / "src") == (data / "src").resolve()
+
+
+def test_a_link_target_in_angle_brackets_is_read_without_them():
+    # markdown writes a target with spaces in angle brackets: the link is one citation, its ref without the brackets
+    text = "The other days had [3,693](<r9#span=other days@n>) edits, and [12](r8#day=2026-06-18@n) more."
+    assert [(lab, t) for lab, t, _, _ in R.link_spans(text)] == [("3,693", "r9#span=other days@n"), ("12", "r8#day=2026-06-18@n")]

@@ -148,7 +148,15 @@ if [ "$plugin" = 1 ]; then
       claude plugin marketplace update thimble
       claude plugin update thimble@thimble
     else
-      claude plugin install thimble@thimble
+      # each feature's default, from the manifest's userConfig, so a fresh install has no option left unset
+      config=()
+      while IFS= read -r kv; do [ -n "$kv" ] && config+=(--config "$kv"); done < <(cd / && "$py" -c '
+import json, sys
+for k, v in (json.load(open(sys.argv[1])).get("userConfig") or {}).items():
+    if "default" in v:
+        print(k + "=" + json.dumps(v["default"]))
+' "$root/plugin/.claude-plugin/plugin.json")
+      claude plugin install thimble@thimble "${config[@]}"
     fi
     say "The plugin works in a new claude session, in a folder of data files that you trust."
   else

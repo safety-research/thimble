@@ -417,10 +417,27 @@ def use(slug: str, plugin_dir: bool | None = None) -> str:
     if not _installed():
         run([claude(), "plugin", "install", "thimble@thimble"])
     (fixes_home() / "active").write_text(slug + "\n")
+    again = bool(fx.get("used"))
     fx["status"] = "applied" if fx["status"] in ("working", "ready", "applied") else fx["status"]
     fx["via"] = "marketplace"
+    # each use is a round of the fix: the plugin loads the copy again for the person at each new stamp
+    fx["used"] = time.time()
     save(fx)
-    return f"thimble now runs the fix {slug} from {fx['worktree']}/plugin. {RELOAD} `thimble fix undo` goes back to the release."
+    said = f"thimble now runs the fix {slug} from {fx['worktree']}/plugin. {RELOAD} `thimble fix undo` goes back to the release."
+    if again:
+        said += (f"\nThe person sees this fix as '{fx['title']}'. When this round changed what the fix does, give it a "
+                 f"title that says what it does now: thimble fix title {slug} \"<new title>\"")
+    return said
+
+
+def retitle(slug: str, title: str) -> str:
+    """A new title for a fix, when a later round changed what it does: the person sees the title in thimble."""
+    fx = load(slug)
+    if not title.strip():
+        raise FixError(f'give the new title in a few words: thimble fix title {slug} "Draw card titles in teal"')
+    fx["title"] = title.strip()
+    save(fx)
+    return f"The fix {slug} is now called '{fx['title']}'."
 
 
 def undo(plugin_dir: bool | None = None) -> str:

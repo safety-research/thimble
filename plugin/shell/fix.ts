@@ -36,7 +36,7 @@ const SHARE = { plugin: 'thimble', key: 'fixshare' } as const
 const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/
 
 export type FixLine = { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string }
-type Fix = { slug: string; title: string; kind: string; status: string; created: number }
+type Fix = { slug: string; title: string; kind: string; status: string; created: number; used: number }
 
 const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
 
@@ -120,12 +120,16 @@ export async function pressFix($: Engine, what: 'fix' | 'report' | 'share' | 'un
     return
   }
   if (l.kind !== 'applied') return
-  if (what === 'undo') { await undoFix($, l.slug); return }
+  if (what === 'undo') { await undoFix($, l.slug, l.title); return }
   await submitFix($, l.slug, l.title)
 }
 
-/** Back to the release (u, /thimble:fix undo): the kernel's own words say what happened, or the one command to run. */
-async function undoFix($: Engine, slug: string): Promise<string> {
+/** The person's line for a switch of thimble: the fix's title, never the copy's or the release's path, which only
+ *  Claude needs (noteForClaude gets the kernel's own line). A line with a command to run is the kernel's, whole. */
+const switchLine = (said: string, line: string) => (/quit and run: /.test(said) ? said : line)
+
+/** Back to the release (u, /thimble:fix undo): what happened in the person's words, or the one command to run. */
+async function undoFix($: Engine, slug: string, title = slug): Promise<string> {
   const r = await kernel($, ['undo'])
   if (!r.ok) {
     const t = `× The fix was not undone: ${cut(lastLine(r.out) || 'thimble fix undo gave nothing', 200)}. Ask Claude to run \`thimble fix undo\`.`
@@ -135,23 +139,26 @@ async function undoFix($: Engine, slug: string): Promise<string> {
   const said = lastLine(r.out) || 'Your thimble is the release again.'
   // a --plugin-dir session runs the fix until it quits: its line stays until then
   if (!/quit and run: /.test(said)) await $.state.set(LINE, null)
-  sayLine($, said)
+  const line = switchLine(said, `thimble is back to the release, without your fix '${title}'.`)
+  sayLine($, line)
   await noteForClaude($, `The analyst undid the fix ${slug}. ${said}`)
   await reloadFor($, said)
-  return said
+  return line
 }
 
 /** Remove a fix (/thimble:fix remove): the kernel turns it off when it is on, then deletes its copy and its record. */
-async function removeFix($: Engine, slug: string): Promise<string> {
+async function removeFix($: Engine, slug: string, title = slug): Promise<string> {
   const r = await kernel($, ['remove', slug])
   void refreshFixes($).catch(() => undefined)
   if (!r.ok) return `× The fix was not removed: ${cut(said(r.out) || 'thimble fix remove gave nothing', 220)}`
   const l = await fixLineNow($)
   if (l?.kind === 'applied' && l.slug === slug) await $.state.set(LINE, null)
-  const line = lastLine(r.out)
-  await noteForClaude($, `The analyst removed the fix ${slug}. ${line}`)
-  $.clock.after(0, () => { void reloadFor($, line) })
-  return line
+  const out = lastLine(r.out)
+  await noteForClaude($, `The analyst removed the fix ${slug}. ${out}`)
+  $.clock.after(0, () => { void reloadFor($, out) })
+  const size = /\(([^()]+)\)\.?$/.exec(out)?.[1]
+  const was = /back to the release/.test(out) ? 'thimble is back to the release. ' : ''
+  return switchLine(out, `${was}Removed the fix '${title}': its copy and its record${size ? ` (${size})` : ''}.`)
 }
 
 /** The review of a fix (p, /thimble:fix submit): it opens when a draft waits for the person, else Claude writes the
@@ -204,16 +211,16 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
   if (v.verb === 'remove' && !v.slug && !fixes.some(x => x.slug === on)) return { text: 'Name the fix to remove: /thimble:fix remove <name>. /thimble:fix lists them.' }
   const f = v.slug ? fixes.find(x => x.slug === v.slug) ?? null : await currentFix($, fixes, active, v.verb)
   if (!f) return { text: v.slug ? `There is no fix ${v.slug}. /thimble:fix lists them.` : 'No fix yet. Say what you want changed: /thimble:fix <what you want changed>' }
-  if (v.verb === 'undo') return { text: await undoFix($, f.slug) }
-  if (v.verb === 'remove') return { text: await removeFix($, f.slug) }
+  if (v.verb === 'undo') return { text: await undoFix($, f.slug, f.title) }
+  if (v.verb === 'remove') return { text: await removeFix($, f.slug, f.title) }
   if (v.verb === 'try') {
     const r = await kernel($, ['use', f.slug])
     void refreshFixes($).catch(() => undefined)
     if (r.ok) {
-      await noteForClaude($, `The analyst turned the fix ${f.slug} on again. ${lastLine(r.out)}`)
+      await noteForClaude($, `The analyst turned the fix ${f.slug} on again. ${r.out.split('\n')[0]}`)
       $.clock.after(0, () => { void reloadFor($, r.out) })
     }
-    return { text: r.ok ? lastLine(r.out) : `× ${cut(said(r.out) || 'thimble fix use gave nothing', 240)}` }
+    return { text: r.ok ? switchLine(r.out.split('\n')[0]!, `✓ Your thimble has the fix again: ${f.title}`) : `× ${cut(said(r.out) || 'thimble fix use gave nothing', 240)}` }
   }
   // submit, a moment after the command has answered: the review opens, or Claude writes the draft first
   $.clock.after(0, () => { void submitFix($, f.slug, f.title).catch(err => $.ui.toast(`× The review did not open: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
@@ -222,8 +229,9 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
 
 // ------------------------------------------------------------------------------------------------ fixes that work
 
-/** Each fix's status as last seen, so a fix that came into use is said once. Empty until the first look. */
-const seen = new Map<string, string>()
+/** Each fix as last seen: its status, the time of its last use (each `thimble fix use` is a round of the fix) and its
+ *  title, so each round that came into use is said once. Empty until the first look. */
+const seen = new Map<string, { status: string; used: number; title: string }>()
 /** The fixes whose draft the person asked for (p) and whose preview has not opened yet. */
 const shareWait = new Set<string>()
 let looked = false
@@ -237,7 +245,7 @@ async function listFixes($: Engine): Promise<{ fixes: Fix[]; active: string | nu
   const fixes: Fix[] = []
   for (const slug of names) {
     const f = await readJson($, `${h}/fixes/${slug}/fix.json`)
-    if (f && typeof f === 'object') fixes.push({ slug, title: String(f.title || slug), kind: String(f.kind || 'fix'), status: String(f.status || ''), created: Number(f.created) || 0 })
+    if (f && typeof f === 'object') fixes.push({ slug, title: String(f.title || slug), kind: String(f.kind || 'fix'), status: String(f.status || ''), created: Number(f.created) || 0, used: Number(f.used) || 0 })
   }
   const active = ((await readText($, `${h}/fixes/active`)) || '').trim() || null
   return { fixes, active }
@@ -259,12 +267,19 @@ export async function refreshFixes($: Engine): Promise<void> {
     // a draft that waits for the person opens its preview, also when it was written outside a turn (a subagent's)
     await openAskOnce($, f.slug, !looked)
     const was = seen.get(f.slug)
-    seen.set(f.slug, f.status)
-    if (looked && f.status === 'applied' && was !== 'applied' && active === f.slug) {
+    seen.set(f.slug, { status: f.status, used: f.used, title: f.title })
+    if (!looked || f.status !== 'applied' || active !== f.slug) continue
+    if (was?.status !== 'applied' || was.used !== f.used) {
+      // a fix turned on, or a later round of the same fix: the person tries the newest copy at once
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
       await $.state.set(LINE, { kind: 'applied', slug: f.slug, title: f.title })
-      // turned on for the person: the plugins load again once the session is idle, so they try it at once
+      // the plugins load again once the session is idle, so they try it at once
       if (!(await ownFix($))) await reloadFor($, '/reload-plugins')
+    } else if (was.title !== f.title) {
+      // a round changed what the fix does, and its title says so now (`thimble fix title`)
+      $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
+      const l = await fixLineNow($)
+      if (l?.kind === 'applied' && l.slug === f.slug) await $.state.set(LINE, { ...l, title: f.title })
     }
   }
   looked = true
