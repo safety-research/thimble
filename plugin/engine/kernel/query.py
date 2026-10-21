@@ -201,28 +201,41 @@ def _parse_frame(root: Path, rel: str, table: str | None):
     return df
 
 
-_CODE = re.compile(r"^[+-]?0\d")
-
-
 def _csv_numbers(df):
     """A CSV's columns of numbers as numbers, as a reader of the table expects: a sum adds, a sort orders by size. A
     column turns only when each of its filled cells is a number; an empty cell is then NaN. A column with a code that
     starts with 0 (a zip code, "007") stays text, since a number would drop the 0."""
+    import numpy as np
     import pandas as pd
 
+    code = re.compile(r"\s*[+-]?0\d")
     for c in df.columns:
         col = df[c]
         if not (pd.api.types.is_object_dtype(col) or pd.api.types.is_string_dtype(col)):
             continue
-        text = col.astype(object).map(lambda v: v.strip() if isinstance(v, str) else v)
-        filled = text[text.map(lambda v: isinstance(v, str) and v != "")]
-        if (filled.empty or not text.dropna().map(lambda v: isinstance(v, str)).all()
-                or filled.map(lambda v: bool(_CODE.match(v))).any()):
+        arr = col.to_numpy(dtype=object)
+        # (a row with more cells than the header holds a list under None: no number, so the column stays)
+        if not all(v is None or type(v) is str for v in arr):
             continue
-        nums = pd.to_numeric(filled, errors="coerce")
-        if nums.isna().any() or pd.api.types.is_object_dtype(nums) or not nums.map(math.isfinite).all():
+        empty = np.fromiter((v is None or not v.strip() for v in arr), bool, len(arr))
+        filled = arr[~empty]
+        if not len(filled):
             continue
-        df[c] = pd.to_numeric(text.where(text != ""), errors="coerce")
+        try:
+            # the first cells first, so a column of words is passed over without reading all of it
+            if np.isnan(pd.to_numeric(filled[:50], errors="coerce").astype(float)).any():
+                continue
+            nums = pd.to_numeric(filled, errors="coerce")
+        except (TypeError, ValueError):
+            continue
+        if (nums.dtype == object or not np.isfinite(nums.astype(float)).all()
+                or any(v[:1] in "0+- \t" and code.match(v) for v in filled)):
+            continue
+        if empty.any():
+            out = np.full(len(arr), np.nan)
+            out[~empty] = nums
+            nums = out
+        df[c] = nums
     return df
 
 
