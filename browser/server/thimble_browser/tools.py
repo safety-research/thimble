@@ -24,7 +24,7 @@ from typing import Any, Awaitable, Callable
 
 import jsonschema
 
-from . import canvas, corpus, prompts
+from . import canvas, chats, corpus, prompts
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -234,7 +234,7 @@ class Tools:
             elif ref.startswith(("card:", "cell:")):
                 canvas.resolve_card_ref(self.ws, ref)
             else:
-                corpus.resolve(self.folder, ref)
+                corpus.resolve(self.folder, ref, read=lambda: chats.read_paths(self.ws, self.folder))
             return None
         except Exception as e:  # noqa: BLE001
             return str(e) or type(e).__name__

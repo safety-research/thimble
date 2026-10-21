@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import canvas, corpus, tools
+from .. import canvas, chats, corpus, tools
 from ..tools import Result
 from . import Feature
 from .cards import describe
@@ -27,7 +27,7 @@ def resolve(ws: str, folder: Any, ref: str, value: str | None = None) -> dict[st
         _, cell = canvas.find(ws, ref)
         got["record"] = cell
         return got
-    got = corpus.resolve(folder, ref)
+    got = corpus.resolve(folder, ref, read=lambda: chats.read_paths(ws, folder))
     if got["kind"] in ("record", "range"):
         end = got.get("meta", {}).get("end", got["line"])
         page = corpus.page(folder, got["path"], got["line"], end - got["line"] + 1)
@@ -57,7 +57,7 @@ async def read_ref(t: Any, args: dict[str, Any]) -> Result:
             _, cell = canvas.find(t.ws, ref)
             got = canvas.resolve_card_ref(t.ws, ref)
             return Result(describe(cell) + ("" if got["kind"] == "cell" else f"\n\n{got['excerpt']}"))
-        got = corpus.resolve(t.folder, ref)
+        got = corpus.resolve(t.folder, ref, read=lambda: chats.read_paths(t.ws, t.folder))
         return Result(f"{got.get('path')} ({got['kind']})\n{got.get('excerpt', '')}")
     except (KeyError, FileNotFoundError, IndexError, corpus.OutsideFolder, ValueError) as e:
         return Result(f"no such place: {ref} ({e})", True)

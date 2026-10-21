@@ -1407,7 +1407,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const fresh = useFreshViewers(workspace, viewer?.slug)
   // a file that could not be read says so, and so does a binary one (an archive, a file of a type no view reads), whose
   // bytes read as text would be noise
-  const noViewReason: string | null = isDatabase || !loaded || loading ? null : error && records.length === 0 ? `Could not read it. ${error}` : binary ? binaryReason(binarySize ?? builtins.binarySize) : null
+  const noViewReason: string | null = isDatabase || !loaded || loading ? null : error && records.length === 0 ? `Could not read it: ${error.replace(/^\d{3} /, '')}` : binary ? binaryReason(binarySize ?? builtins.binarySize) : null
   // the fragment is named when nothing here reads it (a sheet cell of a spreadsheet no view claims)
   const unread = fragment != null && targetOf(targetRef, path) == null && !recordAt && !recordPending ? fragment : null
   const page: SourcePage = useMemo(() => ({ path, kind, total_lines: total ?? 0, start: first ?? 1, records }), [path, kind, total, first, records])
