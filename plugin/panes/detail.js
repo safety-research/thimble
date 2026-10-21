@@ -202,11 +202,15 @@ export function program(k, data) {
   ])
   const head = subjectBlock(k, {
     title: k.escape(cut(data.title, W - 4)),
-    line: `card${where ? ` · ${where}` : ''}`,
+    // (a card says what it is only beside its version: a line of the one word `card` says nothing the panel does not)
+    line: where ? `card · ${where}` : '',
     rows: labelRows,
   })
   // the takeaway: its citations of a part select that part (and the selected part's are bold)
-  const take = String(data.text || data.question || '').replace(/\s+/g, ' ').trim()
+  const take0 = String(data.text || data.question || '').replace(/\s+/g, ' ').trim()
+  // a takeaway that says the title again (a label's card: `kind: 4,174 of … records are …` over `4,174 of … records
+  // are ….`) is left out
+  const take = sameWords(take0, data.title) ? '' : take0
   const refsOf = id => data.refs[id] || []
   // the healing pass: a citation it unwrapped in grey, one it found contradicted with a red ×, one it re-pointed at its
   // new place
@@ -254,10 +258,20 @@ const ROWS = { many: 'rows', one: 'row' }
 export function partWords(k, data, part) {
   const refs = part ? data.refs[part.id] || [] : []
   const resolved = refs.length ? k.want({ rows: refs, n: 8 }) : null
+  // (while the rows are being read their unit is not known: no word yet, rather than `Rows` that turns into `Records`)
+  if (refs.length && !resolved) return null
   if (!resolved || resolved.error) return ROWS
   const w = entryWords(resolved)
   if (w && !(resolved.count == null && (resolved.rows || []).length)) return w
   return exampleSet({ examples: data.examples }, { examples: part.examples }) ? w || ROWS : null
+}
+
+/** Whether `text` says nothing more than `title`: its words (a link's words, without its target) are the title's, or its
+ *  end. */
+export function sameWords(text, title) {
+  const words = s => String(s || '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const a = words(text), b = words(title)
+  return !!a && !!b && (b === a || b.endsWith(` ${a}`))
 }
 
 /** The records the examples bar shows for a part: those the program attached, else the rows behind the part. */
