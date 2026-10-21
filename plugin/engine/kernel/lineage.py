@@ -507,6 +507,8 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     except R.RefError as e:
         out["error"] = str(e)
         out["records"] = []
+    # what the files call their entries (records, rows, lines), as coverage counts them
+    out.update(entries_of(st, rowsets))
     # why the value has no rows of its own, or why its rows are all the query read: one plain line for the person
     why = next((c["why"] for c in reversed(chain) if c.get("why")), None)
     if why:
@@ -554,6 +556,8 @@ def resolve_many(st: Store, refs: list[str], n: int = 5, pick: str = "spread") -
     except R.RefError as e:
         out["error"] = str(e)
         out["records"] = []
+    # what the files call their entries (records, rows, lines), as coverage counts them
+    out.update(entries_of(st, rowsets))
     if whys:
         out["why"] = whys[0] if len(whys) == 1 else f"{whys[0]} (and {len(whys) - 1} more reasons)"
     return out
@@ -759,6 +763,35 @@ UNIT_OF_KIND = {"jsonl": "records", "transcript": "records", "json": "records", 
 ONE = {"records": "record", "rows": "row", "lines": "line", "pages": "page", "file": "file"}
 # what a query or a label goes over of a file whose rows are not its unit: a Markdown file's sections, a diff's hunks
 ROW_WORD = {"markdown": "sections", "diff": "hunks"}
+ONE.update(sections="section", hunks="hunk", entries="entry")
+# programs that only list files by name: a file they named and nothing else touched is not touched
+LISTS = {"ls", "find", "tree", "du", "stat", "file", "git", "fd"}
+
+
+def entry_word(kind: str | None) -> str | None:
+    """What one file kind's entries are called, the word coverage counts it in: records of JSON and JSONL, rows of a
+    table, lines of text (a Markdown file's sections, a diff's hunks); None for a file with no entries (an image, a
+    PDF)."""
+    unit = ROW_WORD.get(kind or "") or UNIT_OF_KIND.get(kind or "")
+    return unit if unit in ("records", "rows", "lines", "sections", "hunks") else None
+
+
+def entries_of(st: Store, rowsets: list[str]) -> dict[str, Any]:
+    """The word for the entries behind a value: the word of the kind most of them come from, `entries` when no kind
+    holds most of them, and None when they are whole files with no entries. {"unit": plural, "unit_one": singular}."""
+    by: dict[str | None, int] = defaultdict(int)
+    for x in rowsets:
+        try:
+            n = R.count([x]) or 1
+        except Exception:  # noqa: BLE001 — a row set it cannot count still names its file
+            n = 1
+        by[entry_word(S.kind_of_file(st.root, x.split("#")[0]))] += n
+    if not by:
+        return {"unit": None, "unit_one": None}
+    word, most = max(by.items(), key=lambda kv: kv[1])
+    if most * 2 <= sum(by.values()):
+        word = "entries"
+    return {"unit": word, "unit_one": ONE.get(word) if word else None}
 # the line ranges and search hits kept per file for the coverage pane
 RANGES_MAX = 300
 HITS_MAX = 400
@@ -1081,6 +1114,9 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
         seen = bool(seen_lines or x["shown"] or seen_units)
         status = ("seen" if seen else "model" if x["model"] else "searched" if x["searched"] else
                   "computed" if x["computed"] else "named" if x["named"] else "not read")
+        # touched: some of it seen, or a query, a rule, a model, a search, a count or a program went over it; a file
+        # only listed by name (ls, find) is not touched
+        listed = status == "named" and bool(x["by"]) and x["by"] <= LISTS
         computed = min(x["computed"], rows) if rows else x["computed"]
         model = min(x["model"], rows) if rows else x["model"]
         if unit in ("pages", "file"):
@@ -1105,7 +1141,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
         out_files.append({"path": f, "kind": c.get("kind"), "unit": unit, "units": units, "seen_units": seen_units,
                           "model_units": round(model_part * per_unit), "computed_units": round(computed_part * per_unit),
                           "pages": pages, "rows": rows, "lines": lines, "status": status,
-                          "seen": seen, "read": seen, "touched": status != "not read", "share": share,
+                          "seen": seen, "read": seen, "touched": status != "not read" and not listed, "listed": listed, "share": share,
                           "seen_lines": seen_lines, "read_lines": seen_lines, "seen_rows": round(seen_rows),
                           "model": model, "model_rows": round(model_part), "computed": computed,
                           "computed_rows": round(computed_part), "labels": sorted(x["labels"]),
@@ -1146,17 +1182,18 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     computed_rows = sum(o["computed_rows"] for o in out_files)
     not_seen = [o for o in out_files if not o["seen"]]
     seen_files = len(out_files) - len(not_seen)
-    # the bar's share is of files, read when some of a file entered Claude's context: each file counts once, whatever its
-    # unit, so an image weighs as much as a log of 14,591 records; what a query or a rule only computed over is not read
-    total = {"files": len(files), "rows": rows_all,
-             "touched_files": sum(1 for o in out_files if o["touched"]), "seen_files": seen_files,
+    touched_files = sum(1 for o in out_files if o["touched"])
+    # the bar's share is of files touched: each file counts once, whatever its unit, and a file a query counted over
+    # counts as much as one Claude read; 0 means Claude looked at no file at all
+    total = {"files": len(files), "rows": rows_all, "touched_files": touched_files,
+             "touched_share": touched_files / len(files) if files else 0.0, "seen_files": seen_files,
              "seen_rows": round(seen_rows), "seen_share": seen_files / len(files) if files else 0.0,
              "model_files": sum(1 for o in out_files if o["model"]), "model_rows": model_rows,
              "model_share": model_rows / rows_all if rows_all else 0.0,
              "computed_files": sum(1 for o in out_files if o["computed_rows"]), "computed_rows": computed_rows,
              "computed_share": computed_rows / rows_all if rows_all else 0.0,
              "not_seen_files": len(not_seen), "not_seen_rows": sum(o["rows"] for o in not_seen),
-             "untouched_files": sum(1 for o in not_seen if o["status"] == "not read")}
+             "untouched_files": sum(1 for o in out_files if not o["touched"])}
     every: dict[str, dict[str, int]] = {}
     unread: dict[str, dict[str, int]] = {}
     for o in out_files:
@@ -1205,7 +1242,7 @@ def file_line(o: dict[str, Any]) -> str:
         by = o.get("searched_by") or []
         bits.append("searched" + (f" by {', '.join(by[:4])}" if by else "") + "; which lines it showed is not known")
     if s == "named":
-        bits.append(f"only named, listed or counted{_by(o)}")
+        bits.append(f"only listed by name{_by(o)}" if o.get("listed") else f"only named or counted{_by(o)}")
     if s in ("model", "computed", "named"):
         bits[-1] += "; Claude read none of it"
     if not bits:
@@ -1270,30 +1307,36 @@ def percent(part: float) -> str:
 
 
 def coverage_sentence(cov: dict[str, Any]) -> str:
-    """What the session read, in words that claim no more than happened: first the share of files read (the bar's
-    number), then each unit's part; a file is read when some of it entered Claude's context; what a label's model read
-    and what a query or a rule computed over are said apart, and a search, a listing or a count is not read."""
+    """What the session did, in words that claim no more than happened: first the files touched (the bar's number: a
+    file is touched when some of it entered Claude's context, or a query, a rule, a search, a count or a program went
+    over it), then what was read, each unit apart; what a label's model read and what a query or a rule computed over
+    are said apart. A file only listed by name is not touched."""
     t = cov["total"]
     if not t["files"]:
         return "There are no files."
     units = t.get("units") or []
     share = amounts(units)
-    if not t["not_seen_files"]:
-        out = [f"Read all {t['files']:,} files, at least in part: {share} entered Claude's context."]
-    elif t["seen_files"]:
-        out = [f"Read {t['seen_files']:,} of {t['files']:,} files ({percent(t['seen_files'] / t['files'])}), at least in part: "
-               f"{share} entered Claude's context; {t['touched_files']:,} were touched in some way."]
+    touched, files = t.get("touched_files", 0), t["files"]
+    if not touched:
+        out = [f"Touched 0 of {files:,} files: Claude has not looked at any of them."]
     else:
-        out = [f"Read: no part of the {t['files']:,} files entered Claude's context; {t['touched_files']:,} were touched in some way."]
+        out = [f"Touched {touched:,} of {files:,} files (read, searched, counted or computed over)."]
+    if not t["not_seen_files"]:
+        out.append(f"Read all {files:,} files, at least in part: {share} entered Claude's context.")
+    elif t["seen_files"]:
+        out.append(f"Read {t['seen_files']:,} of the files, at least in part: {share} entered Claude's context.")
+    elif touched:
+        out.append("Read: no part of any file entered Claude's context.")
     model, computed = amounts(units, "model"), amounts(units, "computed")
     if model:
         out.append(f"Read by a label's model: {model}.")
     if computed:
         out.append(f"Computed over by a query or a rule label, none of it read: {computed}.")
     if t["not_seen_files"]:
-        by = {k: [o["path"] for o in cov["files"] if o["status"] == k] for k in ("model", "searched", "computed", "named", "not read")}
+        by = {k: [o["path"] for o in cov["files"] if (o["status"] == k and o["touched"]) or (k == "not read" and not o["touched"])]
+              for k in ("model", "searched", "computed", "named", "not read")}
         words = {"model": "read only by a label's model", "searched": "searched, which lines a search showed is not known",
-                 "computed": "only computed over", "named": "only named, listed or counted", "not read": "not touched"}
+                 "computed": "only computed over", "named": "only named or counted", "not read": "not touched"}
         parts = [f"{len(by[k]):,} {words[k]} ({_few(by[k])})" for k in ("not read", "computed", "model", "named", "searched") if by[k]]
         n = t["not_seen_files"]
         sizes = _sizes(t.get("not_seen_units") or [])

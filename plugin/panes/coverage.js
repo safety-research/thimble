@@ -1,9 +1,9 @@
 // coverage.js: what this session did with the folder's files, a program on the card runtime (draw/kit.js) over
 // `thimble coverage --json` (engine/kernel/lineage.py coverage). It opens in the side panel (shell/side.ts openSide) as
 // a thread: a question typed under it is about the group, file or lines selected, and carries their refs. The bar's
-// `coverage 34%` opens it (a click, or r). It says in one sentence what Claude read: how many of the folder's files
-// (the bar's share: a file is read when some of it entered Claude's context, what the kernel calls seen), then each
-// unit's part. Each group of files has one bar of its rows in three parts, which a legend under the sentence names,
+// `coverage 3/7 files` opens it (a click, or r). It says in one sentence what Claude did: how many of the folder's
+// files it touched (the bar's count: some of a file entered Claude's context, or a query, a rule, a search, a count or a
+// program went over it; a file only listed by name is not touched), then how much of each unit it read. Each group of files has one bar of its rows in three parts, which a legend under the sentence names,
 // always in view:
 //
 //   read      some lines entered Claude's context
@@ -101,17 +101,17 @@ export function partsOf(g) {
   return { seen, model, computed, untouched: Math.max(0, rows - seen - model - computed) }
 }
 
-/** The file types as the bar draws them: the largest by rows, each with its tone, its files and those read, and its
- *  rows in the four shades; past six, one `other`. Each {type, rows, files, seenFiles, tone, types, seen, model,
- *  computed, untouched}. */
+/** The file types as the bar draws them: the largest by rows, each with its tone, its files, those read and those
+ *  touched, and its rows in the four shades; past six, one `other`. Each {type, rows, files, seenFiles, touchedFiles,
+ *  tone, types, seen, model, computed, untouched}. */
 export function typeMix(types) {
   const all = (types || []).filter(t => t && t.files > 0)
   const named = all.slice(0, all.length > TYPE_TONES.length ? TYPE_TONES.length - 1 : TYPE_TONES.length)
   const rest = all.slice(named.length)
-  const out = named.map((t, i) => ({ type: t.type, rows: t.rows, files: t.files, seenFiles: t.seen_files || 0, tone: TYPE_TONES[i], types: [t.type], ...partsOf(t) }))
+  const out = named.map((t, i) => ({ type: t.type, rows: t.rows, files: t.files, seenFiles: t.seen_files || 0, touchedFiles: t.touched || 0, tone: TYPE_TONES[i], types: [t.type], ...partsOf(t) }))
   if (rest.length) {
     const sum = key => rest.reduce((s, t) => s + partsOf(t)[key], 0)
-    out.push({ type: 'other', rows: rest.reduce((s, t) => s + t.rows, 0), files: rest.reduce((s, t) => s + t.files, 0), seenFiles: rest.reduce((s, t) => s + (t.seen_files || 0), 0), tone: 'dim', types: rest.map(t => t.type), seen: sum('seen'), model: sum('model'), computed: sum('computed'), untouched: sum('untouched') })
+    out.push({ type: 'other', rows: rest.reduce((s, t) => s + t.rows, 0), files: rest.reduce((s, t) => s + t.files, 0), seenFiles: rest.reduce((s, t) => s + (t.seen_files || 0), 0), touchedFiles: rest.reduce((s, t) => s + (t.touched || 0), 0), tone: 'dim', types: rest.map(t => t.type), seen: sum('seen'), model: sum('model'), computed: sum('computed'), untouched: sum('untouched') })
   }
   return out
 }
@@ -150,19 +150,20 @@ export function mixCells(mix, cells) {
   return out
 }
 
-/** The small bar in thimble's bar, filled from the left by the share of files read, as its number is: the files read
- *  first (at least one cell when any was read, and one pale cell left while any was not), then the files not read, pale;
- *  each part shared among the file types by their files, in the types' colors. What was computed over is the pane's to
- *  show, not this one's. [{tone, seen, n}]. */
+/** The small bar in thimble's bar, filled from the left by the share of files touched, as its number is: the files
+ *  touched first (at least one cell when any was, and one pale cell left while any was not), then the files not touched,
+ *  pale; each part shared among the file types by their files, in the types' colors. How much of each file is the
+ *  pane's to show, not this one's. [{tone, seen, n}] (seen: lit). */
 export function barCells(mix, cells) {
   const files = mix.reduce((s, t) => s + t.files, 0)
-  const seen = mix.reduce((s, t) => s + (t.seenFiles || 0), 0)
+  const hit = t => t.touchedFiles ?? t.seenFiles ?? 0
+  const touched = mix.reduce((s, t) => s + hit(t), 0)
   if (!files || cells <= 0) return []
-  let lit = Math.round((cells * seen) / files)
-  if (seen > 0) lit = Math.max(1, lit)
-  if (seen < files) lit = Math.min(cells - 1, lit)
-  const on = shareCells(mix.map(t => t.seenFiles || 0), lit)
-  const off = shareCells(mix.map(t => t.files - (t.seenFiles || 0)), cells - lit)
+  let lit = Math.round((cells * touched) / files)
+  if (touched > 0) lit = Math.max(1, lit)
+  if (touched < files) lit = Math.min(cells - 1, lit)
+  const on = shareCells(mix.map(hit), lit)
+  const off = shareCells(mix.map(t => t.files - hit(t)), cells - lit)
   return [...mix.map((t, i) => ({ tone: t.tone, seen: true, n: on[i] })), ...mix.map((t, i) => ({ tone: t.tone, seen: false, n: off[i] }))].filter(c => c.n > 0)
 }
 
@@ -312,18 +313,19 @@ export function rangesOf(f) {
   })
 }
 
-/** What Claude read, in one plain sentence: the share of files read, as the bar says it (a file is read when some of
- *  it entered Claude's context), then the part of each unit it read some of: `Claude read 3 of the folder's 4 files
- *  (75%): 7 of 42,205 records (0.01%).`; whole files alone have no parts. */
+/** What Claude did, in one plain sentence: the files touched, as the bar says them (read, searched, counted or
+ *  computed over), then the part of each unit it read some of: `Claude touched 3 of the folder's 4 files and read 7 of
+ *  42,205 records (0.01%).`; whole files alone have no parts. */
 export function sentence(t, session) {
   const who = session === null ? "Claude's sessions" : 'Claude'
-  const files = t.seen_files ?? t.read_files ?? 0
+  const touched = t.touched_files ?? t.seen_files ?? 0
   const all = t.files || 0
-  const head = `${who} read ${n(files)} of the folder's ${n(all)} file${all === 1 ? '' : 's'} (${pct(all ? files / all : 0)})`
-  // (whole files alone add nothing to the files read)
+  const head = `${who} touched ${n(touched)} of the folder's ${n(all)} file${all === 1 ? '' : 's'}`
+  // (whole files alone add nothing to the files touched)
   const units = (t.units || []).filter(u => u.seen > 0)
   const said = units.length === 1 && units[0].unit === 'file' ? '' : amounts(units)
-  return said ? `${head}: ${said}.` : `${head}.`
+  if (said) return `${head} and read ${said}.`
+  return touched && !(t.seen_files > 0) ? `${head} and read none of their lines into its context.` : `${head}.`
 }
 
 /** A group's line under its name: what Claude read of its files, in their unit. */

@@ -223,12 +223,12 @@ test('↑↓ walk the claims in the pane\'s order, wherever Claude Code\'s ring 
 const COV = {
   session: 's-1',
   files: [
-    { path: 'revisions.jsonl', type: 'jsonl', pattern: '*.jsonl', rows: 10, lines: 10, status: 'seen', share: 0.3, seen_lines: 3, ranges: [[2, 4]] },
+    { path: 'revisions.jsonl', type: 'jsonl', pattern: '*.jsonl', rows: 10, lines: 10, status: 'seen', touched: true, share: 0.3, seen_lines: 3, ranges: [[2, 4]] },
     { path: 'pages.jsonl', type: 'jsonl', pattern: '*.jsonl', rows: 10, lines: 10, status: 'not read', share: 0, seen_lines: 0, ranges: [] },
   ],
   patterns: [{ pattern: '*.jsonl', files: 2, rows: 20, seen_rows: 3, seen_files: 1, by_status: { seen: 1, 'not read': 1 } }],
-  types: [{ type: 'jsonl', files: 2, rows: 20, seen_rows: 3, seen_files: 1, by_status: { seen: 1, 'not read': 1 } }],
-  total: { files: 2, rows: 20, seen_rows: 3, seen_share: 0.15, seen_files: 1 },
+  types: [{ type: 'jsonl', files: 2, rows: 20, seen_rows: 3, seen_files: 1, touched: 1, by_status: { seen: 1, 'not read': 1 } }],
+  total: { files: 2, rows: 20, seen_rows: 3, seen_files: 1, touched_files: 1 },
 }
 
 test('Coverage opens with the ring on the selected group, not on the input bar: ↵ opens its files at once, as a click does', async ($, on) => {

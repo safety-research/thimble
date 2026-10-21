@@ -2,8 +2,9 @@
 (Read, cat, head, tail, sed, `thimble rows`, a search that showed them by line, a query that printed them as rows). A
 query or a rule label that only went over its rows computed over it, and a label's model that read its records is said
 apart; neither is seen. A file only named, listed or counted (wc, ls, find, git ls-files, grep -c) is not seen, nor is
-one a shell search went over. The coverage text, the bar's share (total.seen_share), the object's snapshot and trace
-use the one rule. Run: python -m pytest plugin/tests"""
+one a shell search went over. The bar counts the files touched (total.touched_files): seen, or gone over by a query,
+a rule, a search, a count or a program; a file only listed by name (ls, find) is not touched. The coverage text, the
+object's snapshot and trace use the one rule. Run: python -m pytest plugin/tests"""
 from __future__ import annotations
 
 import json
@@ -74,17 +75,18 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     assert lines == {"src/a.py": 30, "src/b.py": 30, "src/c.py": 5, "src/d.py": 3, "src/j.py": 4}
     t = cov["total"]
     assert (t["seen_files"], t["not_seen_files"], t["untouched_files"], t["touched_files"]) == (5, 8, 0, 13)
-    # the bar's share is of files: each file once, whatever its unit
-    assert t["seen_share"] == pytest.approx(5 / 13) and t["read_share"] == t["seen_share"]
+    # the bar's share is of files touched, each file once whatever its unit: a count over a file touches it
+    assert t["touched_share"] == 1.0
     text = LIN.coverage_text(cov)
-    assert "Every source file" not in text and "touched." not in text
-    assert ("Read 5 of 13 files (38%), at least in part: 0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's "
-            "context; 13 were touched in some way. Not read: 8 files (3 rows and 210 lines): 7 only named, listed or counted (runs.csv, "
-            "src/f.py, src/g.py, src/h.py and 3 more); 1 searched, which lines a search showed is not known (src/e.py).") in text
+    assert "Every source file" not in text
+    assert ("Touched 13 of 13 files (read, searched, counted or computed over). Read 5 of the files, at least in part: "
+            "0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's context. Not read: 8 files (3 rows and 210 lines): "
+            "7 only named or counted (runs.csv, src/f.py, src/g.py, src/h.py and 3 more); 1 searched, which lines a search "
+            "showed is not known (src/e.py).") in text
     assert "  src/c.py  read 5 of 30 lines (17%)\n" in text
-    assert "runs.csv  only named, listed or counted (wc); Claude read none of it" in text
-    assert "src/g.py  only named, listed or counted (find, ls, wc)" in text
-    assert "src/h.py  only named, listed or counted (cat > a file, find, ls, wc)" in text
+    assert "runs.csv  only named or counted (wc); Claude read none of it" in text
+    assert "src/g.py  only named or counted (find, ls, wc)" in text
+    assert "src/h.py  only named or counted (cat > a file, find, ls, wc)" in text
     assert "src/e.py  searched by grep; which lines it showed is not known" in text
 
 
@@ -92,8 +94,9 @@ def test_reading_every_file_says_so_and_how_much(code: Path, tmp_path: Path) -> 
     saw(tmp_path, code, [bash("head -3 src/*.py runs.csv", 60)])
     cov = LIN.coverage(Store(code))
     assert all(o["status"] == "seen" for o in cov["files"])
-    assert LIN.coverage_sentence(cov) == ("Read all 13 files, at least in part: 2 of 3 rows (67%) and 36 of 360 lines (10%) "
-                                          "entered Claude's context.")
+    assert LIN.coverage_sentence(cov) == ("Touched 13 of 13 files (read, searched, counted or computed over). Read all 13 "
+                                          "files, at least in part: 2 of 3 rows (67%) and 36 of 360 lines (10%) entered "
+                                          "Claude's context.")
 
 
 def test_rows_a_query_or_a_script_printed_by_their_refs_are_seen(code: Path, tmp_path: Path) -> None:
@@ -156,8 +159,49 @@ def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: P
     text = LIN.coverage_text(cov)
     assert text.startswith("Coverage of this session · 6 files: 200 records, 40 rows, 7 lines, 5 pages and 2 other files\n")
     assert "  chart.png  seen\n" in text and "  song.mp3  none\n" in text
-    assert ("Read 4 of 6 files (67%), at least in part: 3 of 200 records (2%), 4 of 40 rows (10%), 0 of 7 lines (0%), "
-            "2 of 5 pages (40%) and 1 of 2 other files entered Claude's context") in text
-    assert cov["total"]["seen_share"] == pytest.approx(4 / 6)
+    assert ("Touched 5 of 6 files (read, searched, counted or computed over). Read 4 of the files, at least in part: "
+            "3 of 200 records (2%), 4 of 40 rows (10%), 0 of 7 lines (0%), 2 of 5 pages (40%) and 1 of 2 other files "
+            "entered Claude's context") in text
+    assert cov["total"]["touched_share"] == pytest.approx(5 / 6)
     # never which rows: no line or row numbers in the text
     assert "10" not in text.replace("(10%)", "")
+
+
+def test_a_full_count_with_no_line_read_touches_the_file_and_a_listing_does_not(code: Path, tmp_path: Path) -> None:
+    """Coverage 0 means Claude looked at no file at all: a count over every line touches a file though none of its
+    lines entered Claude's context; a file only listed by name is not touched."""
+    saw(tmp_path, code, [bash("ls src/ runs.csv", 13), bash("wc -l runs.csv", 1)])
+    cov = LIN.coverage(Store(code))
+    t = cov["total"]
+    assert (t["touched_files"], t["seen_files"], t["files"]) == (1, 0, 13)
+    assert t["touched_share"] == pytest.approx(1 / 13)
+    by = {o["path"]: o for o in cov["files"]}
+    assert by["runs.csv"]["touched"] and not by["src/a.py"]["touched"]
+    assert by["src/a.py"]["said"] == "only listed by name (ls); Claude read none of it"
+    assert LIN.coverage_sentence(cov).startswith("Touched 1 of 13 files (read, searched, counted or computed over). "
+                                                 "Read: no part of any file entered Claude's context.")
+    saw(tmp_path, code, [bash("ls src/", 12)])
+    t = LIN.coverage(Store(code))["total"]
+    assert t["touched_files"] == 0 and t["touched_share"] == 0
+    assert LIN.coverage_sentence(LIN.coverage(Store(code))).startswith("Touched 0 of 13 files: Claude has not looked at any of them.")
+
+
+def test_the_entries_behind_a_value_take_their_files_word(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Records of a JSONL file, rows of a table, lines of text; the word of the kind most of them come from, `entries`
+    when no kind holds most, and none for whole files with no entries."""
+    d = tmp_path / "words"
+    d.mkdir()
+    (d / "trials.jsonl").write_text("".join(json.dumps({"trial": i}) + "\n" for i in range(1, 11)))
+    (d / "scores.csv").write_text("team,score\n" + "".join(f"t{i},{i}\n" for i in range(10)))
+    (d / "notes.txt").write_text("".join(f"line {i}\n" for i in range(10)))
+    (d / "chart.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(64))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    st = Store(d)
+    assert LIN.entries_of(st, ["trials.jsonl#L1-3"]) == {"unit": "records", "unit_one": "record"}
+    assert LIN.entries_of(st, ["scores.csv#L2-3"])["unit"] == "rows"
+    assert LIN.entries_of(st, ["notes.txt#L4"])["unit"] == "lines"
+    # most from the JSONL file: its word; an even split: entries
+    assert LIN.entries_of(st, ["trials.jsonl#L1-3", "scores.csv#L2"])["unit"] == "records"
+    assert LIN.entries_of(st, ["trials.jsonl#L1", "scores.csv#L2"]) == {"unit": "entries", "unit_one": "entry"}
+    assert LIN.entries_of(st, ["chart.png"]) == {"unit": None, "unit_one": None}
