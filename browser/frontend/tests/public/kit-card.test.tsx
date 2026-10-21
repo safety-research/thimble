@@ -98,3 +98,13 @@ test("a code line's indent stays when its text wraps", () => {
   const texts = renderSvg(drawing, { w: 60 }).svg.match(/<text[^>]*>.*?<\/text>/g) || []
   expect(texts.map((t) => t.replace(/<[^>]+>/g, ''))).toContain('        if a:')
 })
+
+test("a key that wraps keeps each mark on the line of its name", () => {
+  const names = ['ash', 'birch', 'cedar', 'elm', 'fir', 'oak']
+  for (const w of [14, 20, 26]) {
+    const drawing = DrawKit.run(`return k.legend(${JSON.stringify(names.map((n, i) => [n, 'c' + (i + 1)]))})`, {}, { w, h: 10, surface: 'browser' }) as Drawing
+    const lines = (renderSvg(drawing, { w }).svg.match(/<text[^>]*>.*?<\/text>/g) || []).map((t) => t.replace(/<[^>]+>/g, ''))
+    expect(lines.length).toBeGreaterThan(1)
+    for (const l of lines) expect(l).toMatch(/^■ [a-z]+( {3}■ [a-z]+)*$/)
+  }
+})

@@ -135,6 +135,14 @@
     return fallback
   }
   function knownTone(name) { const k = String(name).toLowerCase().replace(/-faint$/, ''); return TONES.indexOf(k) >= 0 || !!ALIAS[k] || /^c\d+$/.test(k) }
+  // the warning for names a key draws in one tone: k.cat and a stacked bar's parts take the six category tones in turn
+  function sharedTone(names, t) {
+    const list = names.map(l => `"${l}"`)
+    const who = list.length > 2 ? list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1] : list.join(' and ')
+    return CATS.indexOf(t) >= 0
+      ? `${who} share tone ${t}: there are six category tones, so name six and put the rest in other (dim)`
+      : `${who} share tone ${t}: give each name in a key a tone of its own`
+  }
   function warn(ctx, msg) { if (ctx && ctx.warnings.indexOf(msg) < 0 && ctx.warnings.length < 60) ctx.warnings.push(msg) }
 
   // ---------------------------------------------------------------- inline markup -> runs
@@ -497,10 +505,15 @@
         return k.stack(kn, list)
       },
       // ■ label   ■ label : one text
+      // Each mark is joined to its name by a no-break space, so a wrap never leaves a mark at the end of one line and
+      // its name at the start of the next. Two names in one tone cannot be told apart, so that warns.
       legend(items, o) {
         o = o || {}
         const its = (Array.isArray(items) ? items : []).map(it => Array.isArray(it) ? { label: it[0], tone: it[1] } : it).filter(isObj)
-        const n = k.text(its.map(it => { const t = T(it.tone); return `{${t}:${t === 'unseen' ? '░' : '■'}} {dim:${escapeMarkup(it.label)}}` }).join('   '), o)
+        const named = {}
+        its.forEach(it => { const t = T(it.tone), l = String(it.label); if (!(named[t] || (named[t] = [])).includes(l)) named[t].push(l) })
+        Object.keys(named).forEach(t => { if (named[t].length > 1) warn(ctx, sharedTone(named[t], t)) })
+        const n = k.text(its.map(it => { const t = T(it.tone); return `{${t}:${t === 'unseen' ? '░' : '■'}}\u00a0{dim:${escapeMarkup(it.label)}}` }).join('   '), o)
         n.legend = its.map(it => String(it.label))
         return n
       },

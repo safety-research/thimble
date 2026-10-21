@@ -55,7 +55,8 @@ const fmtTick = v => !isFinite(v) ? '' : Math.abs(v) >= 1000 ? Math.round(v).toL
 // ---------------------------------------------------------------- measuring type
 // Widths of a Helvetica-like face in em, for measuring where there is no canvas (Node, tests).
 const NARROW = 'il.,:;|!\'`ijl'
-const SEMI = 'fjrtI()[]{}" -'
+// (a no-break space is as wide as a space: it joins a key's mark to its name)
+const SEMI = 'fjrtI()[]{}" \u00a0-'
 const WIDE = 'mwMW@%'
 export function approxMeasure(s, o = {}) {
   const size = o.size || 13
