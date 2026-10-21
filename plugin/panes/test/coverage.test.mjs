@@ -42,3 +42,40 @@ test('a group and a file say how much in their unit, never which rows', () => {
   assert.equal(fileWords({ status: 'seen', unit: 'records', units: 14591, seen_units: 3, ranges: [[8256, 8256]] }), 'read 3 of 14,591 records (0.02%)')
   assert.equal(fileWords({ status: 'not read' }), 'none')
 })
+
+test('a folder of a few files lists them all; a large one lists the touched groups first and the rest on one line, each opening on Enter', async () => {
+  const { listItems } = await import('../coverage.js')
+  const file = (path, o = {}) => ({ path, folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : './', type: path.split('.').pop(), status: 'not read', ...o })
+  // four files: no group to open
+  const few = listItems({ files: [file('a.jsonl', { status: 'seen' }), file('b.csv'), file('c.md'), file('d.png')], folder: [] }, 'folder', [], 20)
+  assert.deepEqual(few.map(x => x.kind), ['file', 'file', 'file', 'file'])
+  // 400 files in 40 folders, Claude touched two of them: those first, the other 38 folders on one line
+  const files = [file('runs/r01/x.jsonl', { status: 'seen' }), file('runs/r02/y.jsonl', { status: 'computed' })]
+  const rest = { path: [], unit: [], units: [] }
+  for (let r = 0; r < 40; r++) for (let i = 0; i < 10; i++) if (!((r === 1 && i === 0) || (r === 2 && i === 0))) { rest.path.push(`runs/r${String(r).padStart(2, '0')}/f${i}.txt`); rest.unit.push('lines'); rest.units.push(3) }
+  const folder = Array.from({ length: 40 }, (_, r) => ({ key: `runs/r${String(r).padStart(2, '0')}/`, files: 10, touched: r === 1 || r === 2 ? 1 : 0 }))
+    .sort((a, b) => b.touched - a.touched)
+  const data = { files, rest, folder }
+  const top = listItems(data, 'folder', [], 20)
+  assert.deepEqual(top.map(x => x.id), ['g:runs/r01/', 'g:runs/r02/', 'rest'])
+  assert.equal(top[2].files, 380)
+  assert.equal(top[2].groups, 38)
+  // Enter on a group opens its files under it; on the line of the others, their folders
+  const open = listItems(data, 'folder', ['runs/r01/', 'rest'], 20)
+  assert.deepEqual(open.slice(0, 3).map(x => x.id), ['g:runs/r01/', 'f:runs/r01/x.jsonl', 'f:runs/r01/f1.txt'])
+  assert.equal(open.filter(x => x.kind === 'file').length, 10)
+  assert.equal(open.filter(x => x.kind === 'group' && x.depth === 1).length, 38)
+})
+
+test("each row has two measures in its own unit: read into Claude's context, and counted or computed over (read is part of it)", async () => {
+  const { default: pane, program } = await import('../coverage.js')
+  await import('../../draw/kit.js')
+  const { gridText, renderTerm } = await import('../../draw/term.js')
+  const cov = { session: 's', total: { files: 2, touched_files: 1, seen_files: 1, units: [{ unit: 'records', units: 40, seen: 8 }, { unit: 'rows', units: 30, seen: 0 }] },
+    files: [{ path: 'events.jsonl', type: 'jsonl', unit: 'records', units: 40, seen_units: 8, status: 'seen', touched: true, read_share: 0.2, counted_share: 1 }],
+    untouched: { path: ['runs.csv'], unit: ['rows'], units: [30] }, groups: [], types: [] }
+  const data = pane.data({ coverage: { cov } }, {}, { w: 100, h: 30 })
+  const text = gridText(renderTerm(globalThis.DrawKit.run(program, data, { w: 100, h: 30, mode: 'pane' }), { w: 100 }))
+  assert.match(text, /events\.jsonl +40 records +\S+ +20% +\S+ +100%/)
+  assert.match(text, /runs\.csv +30 rows +\S+ +0% +\S+ +0%/)
+})

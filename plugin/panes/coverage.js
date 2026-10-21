@@ -3,22 +3,20 @@
 // a thread: a question typed under it is about the group, file or lines selected, and carries their refs. The bar's
 // `coverage 3/7 files` opens it (a click, or r). It says in one sentence what Claude did: how many of the folder's
 // files it touched (the bar's count: some of a file entered Claude's context, or a query, a rule, a search, a count or a
-// program went over it; a file only listed by name is not touched), then how much of each unit it read. Each group of files has one bar of its rows in three parts, which a legend under the sentence names,
-// always in view:
+// program went over it; a file only listed by name is not touched), then how much of each unit it read. Each file and
+// each group has two measures, each a bar and its share in the files' own unit, which a legend under the sentence
+// names, always in view:
 //
-//   read      some lines entered Claude's context
-//   counted   only counted or computed over: a query, a rule label or a label's model went over them, and none entered
-//             Claude's context
-//   not touched
+//   read      what entered Claude's context
+//   counted   what was counted or computed over: a query, a rule label or a label's model went over it, or Claude read
+//             it (read is part of it)
 //
 // Overview first, then zoom, then details on demand:
 //
-//   overview   the sentence and the legend; then the files grouped by wildcard pattern (`runs/*.jsonl`, the `*` lit,
-//              so it is clear which files a row stands for), or by file type, each group with its files, its rows and
-//              its bar
-//   a group    its files, one line each: its name, then what happened to it in its own unit (`read 3 of 14,591
-//              records (0.02%)`, `read 2 of 12 pages (16%)`, an image `seen`), what a label's model read, what was
-//              computed over, or `none`; never which rows (the kernel's words, `said`, which `thimble coverage` prints too)
+//   overview   the sentence and the legend; then a folder of a few files (FEW, or as many as fit) lists them all, with
+//              no group to open; a larger one lists its groups, by folder or by file type, those Claude touched first,
+//              and the rest on one line (`8,412 other files, none touched`). ↵ or a press opens a group (or that line)
+//              under itself, and closes it again (listItems)
 //   a file     a strip of the whole file with the lines seen lit, the seen ranges, and the file's own lines around the
 //              one selected (seen lines marked ▌, those a search showed in its color); a press on a range opens its
 //              lines as a citation, over this pane (esc comes back). A PDF has a strip of its pages, and an image or
@@ -27,11 +25,11 @@
 // Each file is counted in its own unit (kernel/lineage.py UNITS): records of a JSONL or JSON file, rows of a table,
 // lines of text, pages of a PDF, and an image or any other file as one whole file.
 //
-//   state: {by: 'pattern' | 'type', group: the group open, file: the file open, at: the part selected, range: the range}
-//   presses: a group opens its files, a file its lines, a range its lines as a citation; `by pattern` and `by type`
-//            group the files. keys: none of its own: the side panel's ring walks the parts (↑ ↓, tab), starting on the
-//            part selected, ↵ presses the one it is on, esc goes back a level (at the top, esc is the panel's: back, or
-//            close)
+//   state: {by: 'folder' | 'type', open: the groups open, file: the file open, at: the part selected}
+//   presses: a group opens its files under it, a file its lines, a range its lines as a citation; `by folder` and
+//            `by type` group the files. keys: none of its own: the side panel's ring walks the parts (↑ ↓, tab), starting on the
+//            part selected, ↵ presses the one it is on, esc goes back from a file to the list (at the top, esc is the
+//            panel's: back, or close)
 //   wants: {lines: path, from, to} (the file's lines around a range, read by the host)
 //   asks of the host: open {mark: {kind: 'cite', ref, label}} (a seen range, as a citation)
 
@@ -43,7 +41,7 @@ const SAID = { seen: 'read', model: 'computed', searched: 'searched', computed: 
 const TONE = { seen: 'accent', model: 'dim', searched: 'dim', computed: 'dim', named: 'dim', 'not read': 'unseen' }
 // the three parts of a group's bar and the legend's words for them: read into Claude's context, only counted or
 // computed over (a label's model too), not touched
-export const KEY = [['read', 'accent', "read into Claude's context"], ['counted', 'dim', 'only counted or computed over'], ['untouched', 'dim-faint', 'not touched']]
+export const KEY = [['read', 'accent', "read into Claude's context"], ['counted', 'dim', 'counted or computed over (read is part of it)']]
 // the shades of a file's rows: seen, read by a label's model, computed over, untouched
 export const PARTS = ['seen', 'model', 'computed', 'untouched']
 export const GLYPH = { seen: '█', model: '▓', computed: '▒', untouched: '░' }
@@ -60,6 +58,56 @@ const ONE = { records: 'record', rows: 'row', lines: 'line', pages: 'page', file
 const unitOf = f => f.unit || (/^(jsonl|transcript)$/.test(f.type) ? 'records' : 'lines')
 const cut = (s, k) => (Array.from(String(s)).length <= k ? String(s) : Array.from(String(s)).slice(0, Math.max(0, k - 1)).join('') + '…')
 const pad = (s, k, right = false) => { const t = cut(s, k); const sp = ' '.repeat(Math.max(0, k - Array.from(t).length)); return right ? sp + t : t + sp }
+
+/** A file's folder (kernel/lineage.py folder_of): `runs/r004/`, or `./` for the top folder. */
+export const folderOf = p => (String(p).includes('/') ? String(p).slice(0, String(p).lastIndexOf('/') + 1) : './')
+/** A file's type (kernel/lineage.py type_of): its extension, else `no extension`. */
+export function typeOfPath(p) {
+  const name = String(p).slice(String(p).lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : 'no extension'
+}
+// a folder of at most this many files shows them all, with no group to open (or as many as the pane has rows for)
+export const FEW = 12
+
+/** What the list shows, in order, as the default expands it: a folder of a few files (FEW, or as many as fit `room`)
+ *  its files, with no group to open; a larger one its groups (by folder or by type) that Claude touched, first, each
+ *  with its files under it when open, then one line for the groups nothing touched (`8,412 other files, none touched`),
+ *  which opens to them. `open`: the keys of the groups open (`rest` for that line). Each item {id, kind: 'file' |
+ *  'group' | 'rest', f | g, depth, files}. */
+export function listItems(data, by, open, room = FEW) {
+  const files = data.files || []
+  const rest = data.rest || { path: [] }
+  const order = (a, b) => STATUS.indexOf(a.status) - STATUS.indexOf(b.status) || a.path.localeCompare(b.path, 'en', { numeric: true })
+  const all = () => [...files, ...rest.path.map((_, i) => restFile(rest, i))]
+  if (files.length + rest.path.length <= Math.max(FEW, room)) return all().sort(order).map(f => ({ id: `f:${f.path}`, kind: 'file', f, depth: 0 }))
+  const isOpen = new Set(open || [])
+  const keyOf = by === 'type' ? f => f.type : f => f.folder
+  const out = []
+  const group = (g, depth) => {
+    out.push({ id: `g:${g.key}`, kind: 'group', g, depth })
+    if (!isOpen.has(g.key)) return
+    // its files, read once a group is open
+    const mine = files.filter(f => keyOf(f) === g.key)
+    for (let i = 0; i < rest.path.length; i++) if ((by === 'type' ? typeOfPath(rest.path[i]) : folderOf(rest.path[i])) === g.key) mine.push(restFile(rest, i))
+    for (const f of mine.sort(order)) out.push({ id: `f:${f.path}`, kind: 'file', f, depth: depth + 1 })
+  }
+  const list = data[by] || []
+  const touched = list.filter(g => g.touched > 0)
+  const others = list.filter(g => !(g.touched > 0))
+  touched.forEach(g => group(g, 0))
+  if (others.length) {
+    out.push({ id: 'rest', kind: 'rest', depth: 0, groups: others.length, files: others.reduce((s, g) => s + g.files, 0), any: touched.length > 0 })
+    if (isOpen.has('rest')) others.forEach(g => group(g, 1))
+  }
+  return out
+}
+
+/** A file nothing touched, from the record's columns, as a row of the list. */
+function restFile(rest, i) {
+  const p = rest.path[i], unit = rest.unit[i], units = rest.units[i]
+  return { path: p, type: typeOfPath(p), folder: folderOf(p), unit, units, rows: units, lines: unit === 'lines' ? units : 0, status: 'not read', said: 'none', touched: false, read: 0, counted: 0, ranges: [], hit_lines: [], pages: [], by: [], searched_by: [], queries: [], labels: [] }
+}
 
 /** A share as the bar says it (shell.tsx percent): 34%, a decimal under 1%, and 100% only when all. */
 export function pct(part) {
@@ -172,14 +220,6 @@ export function cellsMarkup(cells) {
   return cells.map(c => `{${c.part === 'untouched' ? `${c.tone}-faint` : c.tone}:${GLYPH[c.part].repeat(c.n)}}`).join('')
 }
 
-/** The strongest status of a set of files (by_status), for ordering groups: seen first, untouched last. */
-const rank = by => STATUS.findIndex(s => (by || {})[s] > 0)
-
-/** A wildcard pattern with its `*` lit: the part of the name that stands for many files (in a bold row, bold). */
-function patternText(k, p, bold = false) {
-  const parts = String(p).split('*').map(x => k.escape(x))
-  return bold ? `**${parts.join('{accent:\\*}')}**` : parts.join('{accent:**\\***}')
-}
 
 export default {
   name: 'coverage',
@@ -201,12 +241,16 @@ export default {
     const s = stores.coverage || {}
     const cov = s.cov
     if (!cov) return { loading: s.error ? null : 'reading what this session saw…', error: s.error || null, w: size.w, h: size.h }
-    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || '', kind: f.kind || '', unit: f.unit || null, units: f.units ?? null, seen_units: f.seen_units ?? null, said: f.said || null, pages: f.pages || [], group: f.pattern || f.group || f.path, rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [] }))
-    const groups = (key, list) => list.map(g => ({ key: g[key], files: g.files, rows: g.rows, units: g.units || null, touched: g.touched ?? 0, seenFiles: g.seen_files ?? 0, ...partsOf(g), by: g.by_status || {} }))
-      .sort((a, b) => (rank(a.by) - rank(b.by)) || (b.rows - a.rows) || String(a.key).localeCompare(String(b.key)))
+    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || typeOfPath(f.path), folder: f.folder || folderOf(f.path), kind: f.kind || '', unit: f.unit || null, units: f.units ?? null, seen_units: f.seen_units ?? null, said: f.said || null, pages: f.pages || [], rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [], touched: f.touched ?? f.status !== 'not read', read: f.read_share ?? (f.status === 'seen' ? f.share || 0 : 0), counted: f.counted_share ?? Math.max(f.read_share ?? 0, f.status === 'seen' ? f.share || 0 : 0) }))
+    // the files nothing touched stay in columns (cli.py cmd_coverage: their path, unit and size), made into rows only
+    // when a list shows them (restFile), so a folder of 100,000 files draws quickly
+    const rest = cov.untouched && Array.isArray(cov.untouched.path) ? cov.untouched : { path: [], unit: [], units: [] }
+    const groups = (key, list) => list.map(g => ({ key: g[key] ?? g.group ?? g.pattern, files: g.files, rows: g.rows, units: g.units || null, touched: g.touched ?? 0, seenFiles: g.seen_files ?? 0, ...partsOf(g), by: g.by_status || {},
+      read: g.read_share ?? (g.rows ? (g.seen_rows ?? 0) / g.rows : 0), counted: g.counted_share ?? (g.rows ? Math.min(1, ((g.seen_rows ?? 0) + (g.model_rows || 0) + (g.computed_rows || 0)) / g.rows) : 0) }))
+      .sort((a, b) => (b.touched > 0) - (a.touched > 0) || b.read - a.read || b.counted - a.counted || b.touched - a.touched || String(a.key).localeCompare(String(b.key), 'en', { numeric: true }))
     return {
-      total: cov.total || {}, session: cov.session, files, mix: typeMix(cov.types), chat: !!s.chat,
-      pattern: cov.patterns ? groups('pattern', cov.patterns) : groups('group', cov.groups || []), type: groups('type', cov.types || []), refreshing: !!s.loading, w: size.w, h: size.h,
+      total: cov.total || {}, session: cov.session, files, rest, mix: typeMix(cov.types), chat: !!s.chat,
+      folder: groups('folder', cov.groups || cov.patterns || []), type: groups('type', cov.types || []), refreshing: !!s.loading, w: size.w, h: size.h,
     }
   },
   program,
@@ -218,56 +262,47 @@ export function program(k, data) {
     return k.text(`{dim:◌ ${k.escape(data.loading || 'reading what this session saw…')}}`)
   }
   const st = k.state || {}
-  const by = st.by === 'type' ? 'type' : 'pattern'
+  const by = st.by === 'type' ? 'type' : 'folder'
   const W = Math.max(40, k.w)
-  const fileOf = p => data.files.find(f => f.path === p) || null
-  const groupList = data[by]
-  const group = st.group != null ? groupList.find(g => g.key === st.group) || null : null
-  const file = st.file ? fileOf(st.file) : null
-  const level = file ? 'file' : group ? 'group' : 'top'
+  const restAt = st.file && data.rest ? data.rest.path.indexOf(st.file) : -1
+  const file = st.file ? data.files.find(f => f.path === st.file) || (restAt >= 0 ? restFile(data.rest, restAt) : null) : null
+  const level = file ? 'file' : 'top'
+  const open = Array.isArray(st.open) ? st.open : []
 
   // ---- the items of this level, in order: what the ring walks
-  const inGroup = g => data.files.filter(f => (by === 'type' ? f.type : f.group) === g.key)
-    .sort((a, b) => STATUS.indexOf(a.status) - STATUS.indexOf(b.status) || a.path.localeCompare(b.path, 'en', { numeric: true }))
+  const head = level === 'top' ? overview(k, data) : []
+  const room = Math.max(3, k.h - head.length - 4 - chromeOf(k, data.chat))
   const ranges = file ? rangesOf(file) : []
-  const items = level === 'top' ? groupList.map((g, i) => ({ id: `g-${i}`, g })) : level === 'group' ? inGroup(group).map((f, i) => ({ id: `f-${i}`, f })) : ranges.map((r, i) => ({ id: `rg-${i}`, r }))
+  const items = level === 'top' ? listItems(data, by, open, room) : ranges.map((r, i) => ({ id: `rg-${i}`, r }))
   const ids = items.map(x => x.id)
-  const at = ids.includes(st.at) ? st.at : st.at === 'by-pattern' || st.at === 'by-type' || st.at === 'back' ? st.at : ids[0] || null
+  const at = ids.includes(st.at) ? st.at : st.at === 'by-folder' || st.at === 'by-type' ? st.at : ids[0] || null
   const idx = ids.indexOf(at)
 
-  // ---- what the person does
-  const open = id => {
-    if (id === 'by-pattern' || id === 'by-type') return { by: id.slice(3), group: null, file: null, at: id }
+  // ---- what the person does: a group or the line of the others opens under itself (and closes again), a file opens
+  // its lines, a seen range opens as a citation
+  const press = id => {
+    if (id === 'by-folder' || id === 'by-type') return { by: id.slice(3), open: [], file: null, at: id }
     const it = items.find(x => x.id === id)
     if (!it) return null
-    if (it.g) return { group: it.g.key, file: null, at: 'f-0' }
-    if (it.f) return { file: it.f.path, at: 'rg-0' }
-    // a seen range: its lines as a citation, over this pane
+    if (it.kind === 'group' || it.kind === 'rest') {
+      const key = it.kind === 'rest' ? 'rest' : it.g.key
+      return { open: open.includes(key) ? open.filter(x => x !== key) : [...open, key], at: id }
+    }
+    if (it.kind === 'file') return { file: it.f.path, at: 'rg-0', from: id }
     if (it.r && file) { k.do('open', { mark: { kind: 'cite', ref: rangeRef(file, it.r), label: `${file.path} ${rangeWords(it.r)}` } }); return { at: id } }
     return { at: id }
   }
-  const back = () => (file ? { file: null, at: `f-${Math.max(0, inGroup(group || { key: null }).findIndex(f => f.path === file.path))}` }
-    : group ? { group: null, at: `g-${Math.max(0, groupList.findIndex(g => g.key === group.key))}` } : null)
-  // the ring on a part selects it; a press opens it (a group, a file, a seen range as a citation)
   k.on('focus', e => (e.region ? { at: e.region } : null))
-  k.on('press', e => (e.region ? open(e.region) : null))
-  k.on('return', () => (at ? open(at) : null))
-  // esc goes back a level; the host draws the way back as a press that does the same
-  if (level !== 'top') k.on('esc', back, level === 'file' ? String(group ? group.key : 'the files') : 'Coverage')
+  k.on('press', e => (e.region ? press(e.region) : null))
+  k.on('return', () => (at ? press(at) : null))
+  // esc goes back from a file to the list, on the file
+  if (level === 'file') k.on('esc', () => ({ file: null, at: st.from || `f:${file.path}` }), 'Coverage')
   if (at) k.select(at)
 
-  const t = data.total
-  const head = level === 'top' ? overview(k, data) : []
   if (level === 'top') {
-    const rows = Math.max(3, k.h - head.length - 3 - chromeOf(k, data.chat))
-    const sw = sizeW(groupList)
-    return k.stack(...head, k.text(' '), toggles(k, by), listOf(k, items, idx, rows, (it, on) => groupRow(k, it.g, by, W, sw, on, it.id), header(k, by === 'type' ? 'type' : 'pattern', W, sw)))
-  }
-  if (level === 'group') {
-    const title = wrappedSubject(k, by === 'type' ? `${k.escape(group.key)} files` : String(group.key).split('*').map(x => k.escape(x)).join('{accent:\\*}'), groupLine(group))
-    const rows = Math.max(3, k.h - 4 - chromeOf(k, data.chat))
-    const pw = pathW(items.map(x => x.f), group, by, W)
-    return k.stack(title, k.text(' '), listOf(k, items, idx, rows, (it, on) => fileRow(k, it.f, group, by, W, pw, on, it.id), fileHeader(k, pw)))
+    const sw = sizeW(items)
+    const many = items.some(x => x.kind !== 'file')
+    return k.stack(...head, k.text(' '), many ? toggles(k, by) : false, listOf(k, items, idx, room, (it, on) => itemRow(k, it, by, W, sw, on), header(k, many ? by : 'file', W, sw)))
   }
   // ---- one file, in its own unit: an image or another whole file has only its words, a PDF a strip of its pages
   const unit = unitOf(file)
@@ -295,9 +330,9 @@ export function program(k, data) {
   out.push(listOf(k, items, idx, shown, (it, on) => rangeRow(k, it.r, on, it.id, 'lines', file), null))
   out.push(k.text(' '))
   const r = ranges[Math.max(0, idx)] || ranges[0]
-  const room = Math.max(3, k.h - out.length - 1 - chromeOf(k, data.chat))
-  const from = Math.max(1, Math.min(r.from - 2, Math.max(1, total - room + 1)))
-  const to = Math.min(total || r.to, from + room - 1)
+  const space = Math.max(3, k.h - out.length - 1 - chromeOf(k, data.chat))
+  const from = Math.max(1, Math.min(r.from - 2, Math.max(1, total - space + 1)))
+  const to = Math.min(total || r.to, from + space - 1)
   const got = k.want({ lines: file.path, from, to })
   out.push(linesView(k, file, got, from, to, W))
   return k.stack(out)
@@ -367,54 +402,59 @@ function overview(k, data) {
 
 function toggles(k, by) {
   const one = (id, words, on) => k.region(id, { label: `group the files ${words}` }, k.text(on ? `{accent:**${words}**}` : `{dim:${words}}`, { wrap: false }))
-  return k.beside(one('by-pattern', 'by pattern', by === 'pattern'), k.text('{dim:·}', { wrap: false }), one('by-type', 'by type', by === 'type'), { gap: 1 })
+  return k.beside(one('by-folder', 'by folder', by === 'folder'), k.text('{dim:·}', { wrap: false }), one('by-type', 'by type', by === 'type'), { gap: 1 })
 }
 
-// a group's row: its name, its files, its rows, its bar in three parts and the share read
-const BAR = 24
+// each row's two measures: a bar and its share, read into Claude's context and counted or computed over
+const BAR = 10
 
 function nameW(W, sw = 14) {
-  return Math.max(16, W - 3 - 6 - (sw + 1) - (BAR + 2) - 10)
+  return Math.max(14, W - 3 - 6 - (sw + 1) - 2 * (BAR + 7) - 1)
 }
 
-/** The size column: as wide as the groups' longest size (`14,591 records`), so no one unit sets it. */
-const sizeW = groups => Math.min(18, Math.max(4, ...groups.map(g => Array.from(sizeText(g)).length)))
-const sizeText = g => (g.units ? sizeOf(g.units) : `${n(g.rows)} rows`)
+/** The size column: as wide as the rows' longest size (`14,591 records`), so no one unit sets it. */
+const sizeW = items => Math.min(18, Math.max(4, ...items.map(it => Array.from(itemSize(it)).length)))
+const itemSize = it => (it.kind === 'group' ? sizeText(it.g) : it.kind === 'file' ? fileSize(it.f) : '')
+// a group of one unit says its size in it; a group of mixed units has its files' count alone
+const sizeText = g => (g.units ? (g.units.length === 1 ? sizeOf(g.units) : '') : `${n(g.rows)} rows`)
+const fileSize = f => { const u = unitOf(f); const k = f.units ?? (u === 'lines' ? f.lines : f.rows); return u === 'file' ? '' : `${n(k)} ${k === 1 ? ONE[u] || u : u}` }
 
 function header(k, what, W, sw) {
   // laid out as a row is, so its words stand over their columns
-  return k.beside(k.text(`{dim:  ${pad(what, nameW(W, sw))} ${pad('files', 5, true)} ${pad('size', sw, true)}  }`, { wrap: false }), k.text(' '.repeat(BAR), { wrap: false, w: BAR }), k.text(`{dim: ${pad('read', 5, true)}}`, { wrap: false }))
+  return k.text(`{dim:  ${pad(what, nameW(W, sw))} ${pad(what === 'file' ? '' : 'files', 5, true)} ${pad('size', sw, true)}  ${pad('read', BAR + 6)} ${pad('counted', BAR + 6)}}`, { wrap: false })
 }
 
-function groupRow(k, g, by, W, sw, on, id) {
+/** The two measures as two bars, each with its share: read (the accent) and counted or computed over (dim), each of
+ *  the row's whole in its unit. */
+function measures(k, read, counted) {
+  const bar = (v, tone) => k.bar([{ value: v, tone }, { value: 1 - v, tone: 'dim-faint' }], { max: 1, w: BAR })
+  return [bar(read, 'accent'), k.text(` ${pad(pct(read), 5, true)} `, { wrap: false }), bar(counted, 'dim'), k.text(` ${pad(pct(counted), 5, true)}`, { wrap: false })]
+}
+
+function itemRow(k, it, by, W, sw, on) {
   const nw = nameW(W, sw)
-  const name = by === 'type' ? (on ? `**${k.escape(cut(g.key, nw))}**` : k.escape(cut(g.key, nw))) : patternText(k, cut(g.key, nw), on)
-  const len = Array.from(cut(g.key, nw)).length
-  const share = g.rows ? g.seen / g.rows : 0
-  const counted = (g.model || 0) + (g.computed || 0)
-  const left = `${on ? '{accent:**▸**} ' : '  '}${name}${' '.repeat(Math.max(0, nw - len))} ${pad(n(g.files), 5, true)} ${pad(sizeText(g), sw, true)}  `
-  // its rows in the legend's three parts: a bar as a card draws one, so a selected row keeps its colors and its height
-  const bar = k.bar([{ value: g.seen, tone: 'accent' }, { value: counted, tone: 'dim' }, { value: g.untouched, tone: 'dim-faint' }], { max: Math.max(1, g.rows), w: BAR })
-  const row = k.beside(k.text(left, { wrap: false }), bar, k.text(` ${pad(pct(share), 5, true)}`, { wrap: false }))
-  // a pattern's group carries its pattern, which `thimble rows` reads, so a question about it names its files
-  return k.region(id, { label: `${g.key}: ${n(g.files)} file${g.files === 1 ? '' : 's'}, ${sizeText(g)}; Claude read ${pct(share)} of them`, ...(by === 'pattern' ? { ref: g.key } : {}) }, row)
+  const ind = '  '.repeat(it.depth || 0)
+  const mark = on ? '{accent:**▸**} ' : '  '
+  if (it.kind === 'rest') {
+    const words = `${n(it.files)} ${it.any ? 'other ' : ''}file${it.files === 1 ? '' : 's'}, none touched`
+    return k.region(it.id, { label: `${words} (${n(it.groups)} ${by === 'type' ? 'types' : 'folders'})` }, k.text(`${mark}{dim:${k.escape(words)} · ${n(it.groups)} ${by === 'type' ? (it.groups === 1 ? 'type' : 'types') : it.groups === 1 ? 'folder' : 'folders'}}`, { wrap: false }))
+  }
+  if (it.kind === 'group') {
+    const g = it.g
+    const key = cut(by === 'type' ? `${g.key} files` : g.key, nw - ind.length)
+    const name = on ? `**${k.escape(key)}**` : k.escape(key)
+    const left = `${mark}${ind}${name}${' '.repeat(Math.max(0, nw - ind.length - Array.from(key).length))} ${pad(n(g.files), 5, true)} ${pad(sizeText(g), sw, true)}  `
+    return k.region(it.id, { label: `${g.key}: ${n(g.files)} file${g.files === 1 ? '' : 's'}, ${sizeText(g)}; Claude read ${pct(g.read)} and counted or computed over ${pct(g.counted)} of them`, ...(by === 'folder' && g.key !== './' ? { ref: `${g.key}*` } : {}) },
+      k.beside(k.text(left, { wrap: false }), ...measures(k, g.read, g.counted), { gap: 0 }))
+  }
+  const f = it.f
+  const shown = leftCut(ind + (it.depth ? f.path.slice(f.folder === './' ? 0 : f.folder.length) : f.path), nw)
+  const name = on ? `**${k.escape(shown)}**` : k.escape(shown)
+  const left = `${mark}${name}${' '.repeat(Math.max(0, nw - Array.from(shown).length))} ${pad('', 5)} ${pad(fileSize(f), sw, true)}  `
+  return k.region(it.id, { label: `${f.path}: ${fileWords(f)}`, ref: fileRef(f) }, k.beside(k.text(left, { wrap: false }), ...measures(k, f.read || 0, f.counted || 0), { gap: 0 }))
 }
 
-/** A file as its group's list names it: by its name alone when the group's pattern names its folder (the header says
- *  it), else by its path, cut from the left so its name stays. */
-function nameIn(f, group, by) {
-  const slash = String(group.key).lastIndexOf('/')
-  const folder = by === 'pattern' && slash > 0 && !String(group.key).slice(0, slash).includes('*') ? String(group.key).slice(0, slash + 1) : ''
-  return folder && f.path.startsWith(folder) ? f.path.slice(folder.length) : f.path
-}
 const leftCut = (s, k) => (Array.from(s).length <= k ? s : '…' + Array.from(s).slice(-(k - 1)).join(''))
-
-/** The name column of a group's files: as wide as its longest name, at most 45% of the row. */
-const pathW = (files, group, by, W) => Math.max(10, Math.min(Math.floor(W * 0.45), Math.max(4, ...files.map(f => Array.from(nameIn(f, group, by)).length))))
-
-function fileHeader(k, pw) {
-  return k.text(`{dim:  ${pad('file', pw)}  what Claude did with it}`, { wrap: false })
-}
 
 /** What happened to a file, in its own unit and never which rows: the kernel's words (`said`, as `thimble coverage`
  *  prints them), such as `read 3 of 14,591 records (0.02%)`, `seen` (an image) or `none`. */
@@ -434,14 +474,6 @@ function wordsMarkup(k, f, w = 400) {
   const at = words.search(/[ ;]/)
   const head = at < 0 ? words : words.slice(0, at)
   return `{${TONE[f.status]}:${k.escape(head)}}{dim:${k.escape(at < 0 ? '' : words.slice(at))}}`
-}
-
-function fileRow(k, f, group, by, W, pw, on, id) {
-  const shown = leftCut(nameIn(f, group, by), pw)
-  const name = k.escape(shown)
-  const words = fileWords(f)
-  const line = `${on ? '{accent:**▸**} ' : '  '}${on ? `**${name}**` : name}${' '.repeat(Math.max(0, pw - Array.from(shown).length))}  ${wordsMarkup(k, f, Math.max(10, W - pw - 6))}`
-  return k.region(id, { label: `${f.path}: ${words}`, ref: fileRef(f) }, k.text(line, { wrap: false }))
 }
 
 /** A file as a ref: the lines that entered Claude's context, else the file (a PDF's pages and a whole file are the
