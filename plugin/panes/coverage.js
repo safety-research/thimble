@@ -297,7 +297,23 @@ export function program(k, data) {
   k.on('press', e => (e.region ? press(e.region) : null))
   k.on('return', () => (at ? press(at) : null))
   // esc goes back from a file to the list, on the file
-  if (level === 'file') k.on('esc', () => ({ file: null, at: st.from || `f:${file.path}` }), 'Coverage')
+  const back = () => ({ file: null, at: st.from || `f:${file.path}` })
+  if (level === 'file') k.on('esc', back, 'Coverage')
+  // ← → as in a tree: → opens the group or the file selected; ← closes the group, goes up to the group a file is in, or
+  // back from a file to the list
+  const groupKey = it => (it && it.kind === 'rest' ? 'rest' : it && it.kind === 'group' ? it.g.key : null)
+  k.on('right', () => {
+    const it = items[idx]
+    return it && (it.kind === 'file' || (groupKey(it) != null && !open.includes(groupKey(it)))) ? press(it.id) : null
+  })
+  k.on('left', () => {
+    if (level === 'file') return back()
+    const it = items[idx]
+    if (!it) return null
+    if (groupKey(it) != null && open.includes(groupKey(it))) return { open: open.filter(x => x !== groupKey(it)), at: it.id }
+    for (let j = idx - 1; j >= 0; j--) if ((items[j].depth || 0) < (it.depth || 0)) return { at: items[j].id }
+    return null
+  })
   if (at) k.select(at)
 
   if (level === 'top') {

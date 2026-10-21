@@ -189,6 +189,9 @@ function shownLabel(data, st) {
 export default {
   name: 'labels',
   title: 'Labels',
+  // the ring starts on the label (or the record) selected, so ↵ opens it at once, as a click does; a letter still starts
+  // a question
+  ringStart: 'part',
   local: ['at'],
   reads: () => ['labels'],
   stateKey: () => 'labels',
@@ -229,6 +232,8 @@ function listView(k, data, st, W) {
   const open = i => (list[i] ? { open: list[i].name, from: 'list', filter: null, rec: 0, at: null } : null)
   k.on('focus', e => (e.region && ids.includes(e.region) ? { at: e.region } : null))
   k.on('press', e => (ids.includes(e.region) ? open(ids.indexOf(e.region)) : null))
+  // → opens the label selected, as ↵ does
+  k.on('right', () => (idx >= 0 ? open(idx) : null))
   if (at) k.select(at)
   const head = subjectBlock(k, { title: 'Labels', line: `${n(list.length)} label${list.length === 1 ? '' : 's'} in this folder${data.refreshing ? ' · ◌' : ''}` })
   if (!list.length) return k.stack(head, k.text('{dim:No labels here yet. When Claude sorts records into categories, it makes a label, and the label shows here.}'))
@@ -306,7 +311,12 @@ function labelView(k, data, st, lab, W) {
   if (hasDef) k.on(shown ? 'act:def:on' : 'act:def', () => ({ fold: shown, ...(shown && st.at === 'def-more' ? { at: null } : {}) }), 'Definition')
   if (lab.card) k.on('act:made', () => { k.do('reveal', { card: lab.card }); return null }, 'Where Claude made it')
   // esc goes back to the list when the list opened this label; else the panel's esc (back, or close)
-  if (st.from === 'list' && (data.list || []).length > 1) k.on('esc', () => ({ open: null, from: null, filter: null, rec: 0, at: null }), 'labels')
+  // (← does the same)
+  if (st.from === 'list' && (data.list || []).length > 1) {
+    const back = () => ({ open: null, from: null, filter: null, rec: 0, at: null })
+    k.on('esc', back, 'labels')
+    k.on('left', back)
+  }
   const at = st.at === 'def-more' && !shown ? `rec-${rec}` : st.at || `rec-${rec}`
   k.select(at)
 

@@ -31,7 +31,7 @@ const FORK2 = { notes: [], verbs: {}, glosses: [], claims: [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown } = {}) {
+function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown; labels?: Any[] } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
@@ -40,7 +40,7 @@ function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown } =
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   const files: Record<string, string> = {}
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` || e.path.endsWith('.md') }))
-  on('fs.list', () => ({ value: [] }))
+  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/thimble/labels') ? (o.labels ?? []).map(l => ({ name: `${l.name}.json`, kind: 'file' })) : [] }))
   on('fs.stat', (_$: unknown, e: { path: string }) => (e.path in files ? { value: { kind: 'file', size: files[e.path]!.length, mtimeMs: 0 } } : { value: { kind: 'missing', size: 0, mtimeMs: 0 } }) as never)
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
@@ -53,18 +53,22 @@ function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown } =
     let out = '{}'
     if (e.argv.some(a => a.endsWith('estimate.mjs'))) out = JSON.stringify({ kind: 'runs', offer: { what: '3 trials', minutes: 4, tokens: 310000, read: 'trials/', detail: '3 transcripts · 2 KB' } })
     else if (e.argv.some(a => a.endsWith('objects.mjs'))) out = '[]'
+    else if (e.argv.includes('label')) out = JSON.stringify(e.argv.includes('--records') ? { records: [{ i: 0, ref: 'revisions.jsonl#L3', value: 'yes', words: 'Kestrel saved Lexicon', by: 'regex' }] } : o.labels ?? [])
     else if (e.argv.includes('coverage')) out = e.argv.includes('--json') ? JSON.stringify(o.cov ?? {}) : 'Coverage of this session · 4 source files'
     else if (e.argv.includes('resolve')) out = JSON.stringify({ ref: e.argv[e.argv.indexOf('resolve') + 1], chain: [{ step: 'query', id: 'q4', about: 'share by user', value: '41%' }], rows: ['revisions.jsonl#L28-31'], count: 4, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }], notes: [] })
     else if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: { kit: 1, w: 40, h: 1, root: { t: 'text', runs: [{ s: 'rows', tone: 'ink' }] }, cites: {}, examples: {}, regions: [], warnings: [] } })
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  // the side panel as Claude Code keeps it: whether it is open, whether it holds the keys, and whether Claude Code gives
+  // them when the panel asks (`grant`: false while a key is still in the prompt, which refuses an open's focus)
+  const keys = { open: false, panel: false, grant: true }
   const opened: Record<string, unknown>[] = []
-  on('ui.open', (_$: unknown, e: Record<string, unknown>) => { opened.push(e); return { value: { isPlaced: true } } })
+  on('ui.open', (_$: unknown, e: Record<string, unknown>) => { opened.push(e); keys.open = true; if (e.focus && keys.grant) keys.panel = true; return { value: { isPlaced: true } } })
   const focused: string[] = []
   on('ui.focus', (_$: unknown, e: Any) => { focused.push(String(e.key ?? e.element)); return { value: {} } })
   const closed: string[] = []
-  on('ui.close', (_$: unknown, e: Any) => { closed.push(String(e.id)); return { value: undefined } })
-  on('ui.panes', () => ({ value: [] }))
+  on('ui.close', (_$: unknown, e: Any) => { closed.push(String(e.id)); keys.open = false; keys.panel = false; return { value: undefined } })
+  on('ui.panes', () => ({ value: keys.open ? [{ id: 'object', title: 'Claims', isShown: true, isFocused: keys.panel, isPlaced: true, plugin: 'thimble' }] : [] }))
   on('ui.scroll', () => ({ value: {} }))
   const toasts: string[] = []
   on('ui.toast', (_$: unknown, e: unknown) => { toasts.push(typeof e === 'string' ? e : String((e as { text?: string })?.text ?? JSON.stringify(e))); return { value: undefined } })
@@ -106,7 +110,7 @@ function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown } =
   on('session.send', (_$: unknown, e: Any) => { sent.push(e); return { isDelivered: true } })
   on('turn.step', async function* (_$: unknown, e: Any) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [{ id: 'u1', name: 'Bash', input: {} }] } })
   const clock = mock.clock(on, { now: NOW })
-  return { files, runs, prompts, submitted, clock, opened, focused, closed, toasts, spawns, sent, appended, started: false }
+  return { files, runs, prompts, submitted, clock, opened, focused, closed, toasts, spawns, sent, appended, keys, started: false }
 }
 
 function textOf(n: Any): string {
@@ -249,4 +253,99 @@ test('Coverage opens with the ring on the selected file, not on the input bar: �
   await ui.press({ key: await rowKey($, 'f:revisions.jsonl') })
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).toContain('read 3 of 10 records (30%)')
+})
+
+// The side panel holds the keys the same way whatever it shows (shell/detail.tsx holdKeys). Claude Code refuses a pane
+// the keys while a key is still in the prompt, so the pane a key opens (c Claims, r Coverage, l the labels) asks for
+// them again a little later, while it does not have them. Without that, every key after the open went to the prompt.
+const LABELS = [
+  { name: 'coordination', values: ['yes', 'no'], counts: { yes: 4, no: 6 }, records: 10, kind: 'regex', rule: 'relay|deadline', in: 'revisions.jsonl' },
+  { name: 'fetches', values: ['yes', 'no'], counts: { yes: 7, no: 3 }, records: 10, kind: 'regex', rule: 'proxy', in: 'revisions.jsonl' },
+]
+
+/** A key from the empty prompt opens a pane while Claude Code still refuses the panel the keys. Once the key has left the
+ *  prompt, the panel holds the keys, with the ring on the part selected and never on the input bar. */
+async function opensHoldingKeys($: Any, w: Any, k: string): Promise<string> {
+  w.keys.grant = false
+  await press($, w.clock, key(k))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  w.ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  expect(w.keys.open).toBe(true)
+  expect(w.keys.panel).toBe(false)
+  // the key has left the prompt: the panel's next request for the keys is granted
+  w.keys.grant = true
+  w.focused.length = 0
+  await w.clock.advance(2000)
+  await w.clock.settle()
+  expect(w.keys.panel).toBe(true)
+  const drawn = JSON.stringify(await $.ui.render(PANE))
+  await w.clock.settle()
+  expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  return drawn
+}
+
+test('Claims takes the keys again when a request is refused while its key is still in the prompt, the ring on the selected dot', async ($, on) => {
+  const w = await twoTurns($, on)
+  const drawn = await opensHoldingKeys($, w, 'c')
+  // the ring's cell beside the selected dot
+  expect(drawn).toContain(`g|side|${(await rowKey($, 'n-c4')).split('|')[2]}`)
+})
+
+test('Coverage takes the keys again when its open is refused, the ring on the selected file', async ($, on) => {
+  const w = world(on, [FORK1], { cov: COV })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  const drawn = await opensHoldingKeys($, w, 'r')
+  expect(drawn).toContain(`g|side|${(await rowKey($, 'f:revisions.jsonl')).split('|')[2]}`)
+})
+
+test('the labels hold the keys on the label selected: ↵ opens it, the way back goes to the list, and → opens it too', async ($, on) => {
+  const w = world(on, [FORK1], { labels: LABELS })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  const drawn = await opensHoldingKeys($, w, 'l')
+  expect(drawn).toContain('2 labels in this folder')
+  // the ring stands on the first label's gutter cell, so ↵ (Claude Code's press on it) opens that label
+  const gutter = `g|side|${(await rowKey($, 'lb-0')).split('|')[2]}`
+  expect(drawn).toContain(gutter)
+  await w.ui.press({ key: gutter })
+  await w.clock.settle()
+  for (let i = 0; i < 2; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  expect(textOf(await $.ui.render(PANE))).toContain('label over revisions.jsonl')
+  // back to the list (the press at the top does what esc does), and the keys stay with the panel
+  await w.ui.press({ key: 'side-back' })
+  await w.clock.settle()
+  for (let i = 0; i < 2; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  const list = JSON.stringify(await $.ui.render(PANE))
+  expect(list).toContain('2 labels in this folder')
+  // → from the ring in the gutter onto the selected label's own row (Claude Code's nearest press to the right) opens it
+  const row = await rowKey($, 'lb-0')
+  const g = `g|side|${row.split('|')[2]}`
+  await $.ui.focus({ requestId: 'object', element: g, origin: { kind: 'person' } } as never)
+  await $.ui.focus({ requestId: 'object', element: row, origin: { kind: 'person' } } as never)
+  await w.clock.advance(50)
+  await w.clock.settle()
+  for (let i = 0; i < 2; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  expect(textOf(await $.ui.render(PANE))).toContain('label over revisions.jsonl')
+})
+
+test('a key of a pane\'s program typed while the prompt had the keys (e in Claims) gives them back to the panel, again until it holds them', async ($, on) => {
+  const w = await twoTurns($, on)
+  await press($, w.clock, key('c'))
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  expect(w.keys.panel).toBe(true)
+  // the person's e went to the prompt (the program's key), and Claude Code keeps the keys there for a moment
+  w.keys.panel = false
+  w.keys.grant = false
+  await press($, w.clock, key('e'))
+  await w.clock.advance(100)
+  await w.clock.settle()
+  expect(w.keys.panel).toBe(false)
+  w.keys.grant = true
+  await w.clock.advance(2000)
+  await w.clock.settle()
+  expect(w.keys.panel).toBe(true)
+  // e opened the claim's evidence
+  expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/evidence/)
 })
