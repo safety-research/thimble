@@ -288,7 +288,8 @@ def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
     if frag and len(idx) == 1 and "col" in p:
         return None
     words = " ".join(str(label).replace("**", "").split()).strip("\"“”'")
-    nums = unkeyed(words, p)  # a number the ref names (a key, a column) is not the value
+    from .shown import without_dates
+    nums = unkeyed(without_dates(words), p)  # a number the ref names (a key, a column) is not the value; a date's digits neither
     hits: list[tuple[int, str]] = []
     has_num = bool(NUM_RE.search(nums))
     keys = set(q.get("keys") or [])
@@ -658,6 +659,13 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     about = about_rows(chain)
     if about:
         out["about"] = about
+    if p["kind"] == "query" and label:
+        # where the query shows the values the words state: its output rows and the lines it printed (shown.py)
+        from . import shown as SW
+        q = Q.get(st, p["query"])
+        if q:
+            step = next((c for c in chain if c.get("step") == "query"), {})
+            out["shown"] = SW.find(q, label, step.get("value"), [str(v) for v in (p.get("keys") or {}).values()])
     # a citation of rows of a file: the span as a person reads it, with the words its citation quotes marked
     sp = span(st, ref, label) if p["kind"] not in ("object", "query", "file", "table") else None
     if sp:
