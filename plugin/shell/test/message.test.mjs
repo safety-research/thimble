@@ -38,6 +38,12 @@ test('links inside code, and links to the web, are not marks', () => {
   assert.equal(marks[0].label, 'c')
 })
 
+test('a citation after a fenced block and inline code spans is a mark: the fence\'s backticks never pair with a span\'s', () => {
+  const t = '```bash\npkill -f x\n```\n\nThe `pkill -f` ran; the `pkill` calls ended at [step 8,000](a.jsonl#L5) and no `x` ran.'
+  const marks = linkMarks(t)
+  assert.deepEqual(marks.map(m => [m.kind, m.label]), [['cite', 'step 8,000']])
+})
+
 // the message's drawing (view.ts), loaded as TypeScript: its imports name modules without their extension, as the plugin's
 // bundler reads them, so a resolve hook adds `.ts`. Skipped on a Node that cannot run TypeScript
 register('data:text/javascript,' + encodeURIComponent('export async function resolve(s, c, next) { try { return await next(s, c) } catch (e) { if (/^\\.\\.?\\//.test(s) && !/\\.[cm]?[jt]sx?$/.test(s)) return next(s + ".ts", c); throw e } }'))

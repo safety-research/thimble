@@ -76,9 +76,14 @@ export function codeRanges(text) {
   const out = []
   const fence = /^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1\2[`~]*[ \t]*(?=\n|$)|(?![\s\S]))/gm
   for (const m of s.matchAll(fence)) out.push([m.index, m.index + m[0].length])
-  const inFence = i => out.some(([a, b]) => i >= a && i < b)
+  // inline spans are read on a copy with each fence blanked (same length), so a fence's backticks never pair with a
+  // span's after it
+  let open = ''
+  let at = 0
+  for (const [a, b] of out) { open += s.slice(at, a) + ' '.repeat(b - a); at = b }
+  open += s.slice(at)
   const span = /(`+)([^`\n]|[^`\n][\s\S]*?[^`\n])\1(?!`)/g
-  for (const m of s.matchAll(span)) if (!inFence(m.index)) out.push([m.index, m.index + m[0].length])
+  for (const m of open.matchAll(span)) out.push([m.index, m.index + m[0].length])
   return out.sort((a, b) => a[0] - b[0])
 }
 
