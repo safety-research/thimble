@@ -219,7 +219,7 @@ export function program(k, data) {
     const s = k.escape(r.s)
     if (!r.link) return r.bold ? `**${s}**` : s
     const c = look ? look(r.s, r.link) : null
-    if (c && c.state === 'quiet') return `{dim:${s}}`
+    if (c && c.state === 'quiet') return `{dim:${s}}${c.how === 'gone' ? '{dim: ?}' : ''}`
     const bad = c && c.state === 'contradicted' ? '{bad: ×}' : ''
     const to = partOfLink(c && c.to && c.state === 'linked' ? c.to : r.link, parts, refsOf)
     return (to ? (to === region ? `**{cite:[${s}](#${to})}**` : `{cite:[${s}](#${to})}`) : `{cite:${s}}`) + bad

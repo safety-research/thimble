@@ -84,9 +84,15 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
   if (r.tag) {
-    // the healing pass's glyph after a citation's words: a small spinner while it checks, a red × when contradicted
+    // the healing pass's glyph after a citation's words: a small spinner while it checks, a red × when contradicted, a
+    // grey ? when the cited place is gone
     if (r.tag === 'bad') p.color = 'error'
+    else if (r.tag === 'gone') p.color = on ? 'text' : 'inactive'
     else p.dimColor = true
+  } else if (m.kind === 'cite' && m.heal === 'gone') {
+    // a citation whose place does not exist: still a citation (underlined) but grey, so it reads as one that failed; a
+    // press or the tray says what is missing
+    if (on) { p.backgroundColor = 'selectionBg'; p.color = 'text' } else { p.color = 'inactive'; p.underline = true }
   } else if (m.kind === 'cite' && m.heal === 'quiet') {
     // a value the pass unwrapped: plain grey words (a press still says why)
     if (on) { p.backgroundColor = 'selectionBg'; p.color = 'text' } else p.color = 'inactive'
