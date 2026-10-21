@@ -21,9 +21,9 @@ scripts/install.sh
 ```
 
 The script installs both. It first checks what they need and says what is missing: Claude Code, Python 3.10 or later
-(thimble installs pandas for it) and Node.js 22 or later for the plugin; Node.js 22.12 or later and [uv](https://docs.astral.sh/uv/) for
-the browser workbench. The browser workbench takes about 600 MB of disk, most of it its page's packages and its
-server's Python packages, so install the plugin alone if that is all you need:
+and Node.js 22 or later for the plugin (it installs pandas into thimble's own Python); Node.js 22.12 or later and
+[uv](https://docs.astral.sh/uv/) for the browser workbench. The browser workbench takes about 600 MB of disk, most of
+it its page's packages and its server's Python packages, so install the plugin alone if that is all you need:
 
 - `scripts/install.sh --no-browser` installs the terminal plugin only. So do these two commands, with no clone:
   `claude plugin marketplace add safety-research/thimble`, then `claude plugin install thimble@thimble`.

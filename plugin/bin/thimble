@@ -2,7 +2,7 @@
 # thimble's kernel as one command. Claude Code puts a plugin's bin/ folder on the Bash tool's PATH, so `thimble` runs
 # as a bare command, through the session's permission mode like any other. The Python it runs: THIMBLE_PYTHON, else the
 # plugin's own .venv, else thimble's own Python ($THIMBLE_HOME/python), else python3. Only `thimble run` needs pandas:
-# its first run on a Python without pandas makes thimble's own Python, once (engine/kernel/pyenv.py).
+# the installation makes thimble's own Python with `thimble setup` (engine/kernel/pyenv.py).
 here=$(cd "$(dirname "$0")/.." && pwd)
 # for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs), and
 # `thimble dev stats`, the session's cost and time per feature (telemetry/stats.mjs); the names before dev still work

@@ -86,9 +86,13 @@ The plugin runs `python3` unless you tell it otherwise. Its queries (`thimble ru
 none, thimble makes its own Python with pandas in `~/.thimble/python` (with uv when it is installed, else
 `python3 -m venv` and pip), and uses it from then on:
 
-- `scripts/install.sh` makes it when it installs the plugin.
-- A plugin installed without the script makes it at its first query, which then takes up to a minute longer. If
-  that fails, for example with no network, Claude shows you a command that makes it, which you run in a terminal.
+- `scripts/install.sh` makes it before it installs the plugin. If that fails, for example with no network or a
+  folder it cannot write, the script stops there and says why; fix it and run the script again.
+- A plugin installed without the script makes it when its first session starts, once per machine. A notice in
+  Claude Code says so while it installs, and you can work in the meantime. If that fails, the line says why and gives the
+  command that makes it, which you run in a terminal.
+
+Claude's queries never install anything. Without pandas, a query stops with one line that gives that command.
 
 To use another Python that has pandas, set `THIMBLE_PYTHON` before you start Claude Code, for example
 `export THIMBLE_PYTHON="$HOME/venvs/data/bin/python"`, or add it under `"env"` in `~/.claude/settings.json`. thimble
@@ -145,8 +149,8 @@ The terminal plugin:
 - **No line above the prompt, and no cards.** The plugin is not loaded in this session. Check that the folder is
   trusted and that thimble is enabled in `/plugin`. Managed settings that set `disableAllHooks` turn thimble off.
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
-- **`thimble run needs pandas`.** thimble could not install pandas for itself, and the line says why. Run the
-  command it names in a terminal, or see [Python](#python).
+- **`thimble run needs pandas`.** thimble's own Python is not there yet. Run the command the line names in a
+  terminal, or see [Python](#python).
 - **`1` does not open a card's detail.** Below 144 columns Claude Code does not open a side pane from a key. Type
   `/card` instead, or widen the terminal.
 

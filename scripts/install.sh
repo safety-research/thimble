@@ -133,9 +133,12 @@ say "thimble: everything it needs is installed."
 if [ "$plugin" = 1 ]; then
   step "The terminal plugin"
   if [ "$own_python" = 1 ]; then
-    # pandas, which `thimble run` needs: the plugin's first query would install it too, so a failure here stops nothing
-    "$root/plugin/bin/thimble" setup \
-      || notes+=("pandas is not installed yet: once the line above is fixed, run $root/plugin/bin/thimble setup")
+    # pandas, which `thimble run` needs: thimble's own Python, made now. A failure (no network, a folder it cannot
+    # write) stops here, with the fix, before the plugin is installed.
+    if ! "$root/plugin/bin/thimble" setup; then
+      say "Fix what the line above says, then run scripts/install.sh again. Nothing else was installed."
+      exit 1
+    fi
   fi
   source="safety-research/thimble"
   [ "$local" = 1 ] && source="$root"

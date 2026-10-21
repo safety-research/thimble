@@ -254,8 +254,8 @@ def cmd_rows(a: argparse.Namespace) -> int:
 def cmd_q(a: argparse.Namespace) -> int:
     st = Store()
     if not PY.has_pandas():
-        # the first query on a Python without pandas: thimble installs its own, once, and runs the query there
-        return PY.run_with_pandas(getattr(a, "argv", None) or sys.argv[1:])
+        # it installs nothing: the installation makes thimble's own Python (thimble setup); this says what to run
+        return PY.without_pandas(getattr(a, "argv", None) or sys.argv[1:])
     if a.rerun:
         old = Q.get(st, a.rerun)
         if not old:
@@ -993,10 +993,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
-    # thimble's own Python with pandas, made now (scripts/install.sh, or the person after a failed first query):
-    # neither help nor usage lists it
+    # thimble's own Python with pandas, made now (scripts/install.sh, the session-start hook, or the person after a
+    # query said to): neither help nor usage lists it
     p = sub.add_parser("setup")
-    p.set_defaults(fn=lambda a: PY.setup())
+    p.add_argument("--check", action="store_true")
+    p.set_defaults(fn=lambda a: PY.setup(check=a.check))
     # the shell's healing pass over a text it draws (heal.py): neither help nor usage lists it
     p = sub.add_parser("heal")
     p.add_argument("--from", dest="text_file", metavar="FILE")
