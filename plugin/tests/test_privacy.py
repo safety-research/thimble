@@ -94,3 +94,8 @@ def test_plain_module():
     src = (ENGINE / "kernel" / "privacy.py").read_text()
     imports = re.findall(r"^(?:from|import) (\S+)", src, re.M)
     assert all(not m.startswith(".") and m.split(".")[0] in sys.stdlib_module_names | {"__future__"} for m in imports), imports
+
+
+def test_a_decorator_in_a_diff_is_no_email():
+    hits, out = scan("+@pytest.fixture\n+def rows(): pass\nmail ada@example.invalid")
+    assert [h["found"] for h in hits] == ["ada@example.invalid"] and out.startswith("+@pytest.fixture")

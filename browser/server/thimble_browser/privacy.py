@@ -58,7 +58,7 @@ GENERIC: list[tuple[str, str, str | None]] = [
     ("token", r"[0-9a-f]{32,}(?![0-9A-Za-z])", r"[0-9A-Za-z]"),
     ("token", r"(?=[A-Za-z0-9+/_-]*[0-9])(?=[A-Za-z0-9+/_-]*[a-z])(?=[A-Za-z0-9+/_-]*[A-Z])[A-Za-z0-9+/_-]{40,}={0,2}",
      r"[A-Za-z0-9+/_-]"),
-    ("email", r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}", r"[\w.+%-]"),
+    ("email", r"[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}", r"[\w.+%-]"),
     ("host", r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.]*\d)", r"[\d.]"),
 ]
 # the made-up home folder thimble's tests use and the placeholders its docs use; local addresses; an email at a domain
