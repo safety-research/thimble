@@ -340,3 +340,15 @@ def test_a_second_follow_while_one_runs_changes_nothing(on):
         assert FX.follow(force=True) == f"thimble {fx['version']} + your fix 'Rows reads a semicolon' · u undo"
     assert FX.load(fx["slug"])["base"] == fx["base"] and not undone
     assert FX.follow(force=True) == "thimble 0.11.0 + your fix 'Rows reads a semicolon' · u undo"
+
+
+def test_a_replay_stopped_part_way_replays_only_the_fix(on):
+    fx, src, undone = on
+    first = release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
+    # the copy's branch was moved onto 0.11.0 but its base was never saved (a replay that was stopped)
+    wt = Path(fx["worktree"])
+    FX._commit_local(wt, fx["slug"])
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "rebase", "-q", "--onto", first, fx["base"], fx["branch"], cwd=wt)
+    release(src, "0.11.1", {"plugin/rows.py": (src / "plugin" / "rows.py").read_text() + "# a note\n", "plugin/more.py": "x = 1\n"})
+    assert FX.follow(force=True) == "thimble 0.11.1 + your fix 'Rows reads a semicolon' · u undo"
+    assert "split(';')" in (wt / "plugin" / "rows.py").read_text() and (wt / "plugin" / "more.py").exists() and not undone

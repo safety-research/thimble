@@ -557,8 +557,11 @@ def _follow(slug: str, force: bool, plugin_dir: bool | None) -> str | None:
         return on_line(fx.get("version") or version)
     _commit_local(wt, slug)
     before = git("rev-parse", "HEAD", cwd=wt)
+    # only the fix's own commits replay: the copy's branch may already hold some of the release's (a replay that was
+    # stopped part way)
+    since = git("merge-base", "HEAD", commit, cwd=wt, check=False) or base
     replayed = run(["git", "-c", "user.name=thimble", "-c", "user.email=thimble@localhost", "rebase", "-q", "--onto",
-                    commit, base, fx["branch"]], cwd=wt, check=False).returncode == 0
+                    commit, since, fx["branch"]], cwd=wt, check=False).returncode == 0
     if not replayed:
         run(["git", "rebase", "--abort"], cwd=wt, check=False)
     elif run(["git", "diff", "--quiet", commit, "HEAD"], cwd=wt, check=False).returncode == 0:
