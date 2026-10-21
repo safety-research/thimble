@@ -979,17 +979,15 @@ export async function checkRoot($: Engine): Promise<string | null> {
   return (await rootHere($)) || (await startDir($)) || null
 }
 
-/** The passes that started again after Claude Code cut them short. */
-const healAgain = new Set<string>()
 
 /** A pass that failed. Claude Code stops a child when the drawing that started it is abandoned, as the drawings around
- *  it change (most often when a turn ends). Such a pass starts again once, at the next drawing, and the person hears
- *  nothing of it. Any other failure, or a second cut, is said in one line with its fix. */
+ *  it change (when a turn ends, and while Claude and its agents write). Such a cut is no failure: the pass starts again
+ *  at the next drawing, each time, and the person hears nothing of it. Any other failure is said in one line with its
+ *  fix. */
 function healLost($: Engine, id: string, err: unknown, fix: string): void {
   healing.delete(id)
   const cut = /\baborted$/.test(String((err as Error)?.message ?? err).trim())
-  if (cut && !healAgain.has(id)) {
-    healAgain.add(id)
+  if (cut) {
     healRead.delete(id)
     void $.state.set(HEALTICK, id).catch(() => undefined)
     return
