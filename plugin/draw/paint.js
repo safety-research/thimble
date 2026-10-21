@@ -6,14 +6,14 @@
 // text follows the theme a person picked. A band of rows that holds pixels (a plot, a canvas's px and lines) and
 // no bold or link is one Raster: the cells packed as Claude Code's cell-grid leaf wants them, each cell's glyph
 // with its own foreground and background. A selection marks text one way and marks another (selectionOf): in a Text
-// line the selected region's words are bold in their own color and its marks (a bar's cells, a spark, term.js `m`) are
-// drawn as they are, so a selection never hides or recolors a bar; in a Raster, which has no bold, the words get the
-// palette's `select` background and the marks light up in their own color (palette.js selectedMark), so a selected
-// series is its own dots alone.
+// line the selected region's words are bold in their own color; in a Raster, which has no bold, the words get the
+// palette's `select` background. Its marks (a bar's cells, a spark, term.js `m`) light up in a brighter shade of their
+// own color (palette.js selectedMark) on their own ground, so a selected bar keeps its height and a selected series is
+// its own dots alone.
 // `painted`: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
 // color rather than the terminal's own.
 // No `$`: the caller resolves the elements and hands them in.
-import { hex, selectedHex, selectedMark, termColor } from './palette.js'
+import { hex, isTrack, selectedHex, selectedMark, termColor } from './palette.js'
 
 const DEFAULT = 0x01000000
 const rgb = h => parseInt(String(h).slice(1, 7), 16)
@@ -79,12 +79,14 @@ export function paintGrid(grid, els, opts = {}) {
       wrap: 'truncate-end',
       children: segs.map(g => {
         const p = { children: g.s }
-        // a selection marks its words, bold in their own color, and never hides or recolors a mark (a bar's cells)
-        const color = termColor(g.c.tone, theme, { painted: !!opts.painted })
+        // a selection marks its words bold in their own color, and its marks (a bar's cells) in a brighter shade of
+        // their own (palette.js selectedMark), so a selected bar keeps its height and its parts stay apart
+        const lit = g.sel === 'mark'
+        const color = lit && !isTrack(g.c.tone) ? selectedMark(g.c.tone, theme) : termColor(g.c.tone, theme, { painted: !!opts.painted })
         if (color) p.color = color
         if (g.c.b || g.sel === 'text') p.bold = true
         if (g.c.ref) p.underline = true
-        if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
+        if (g.c.bg) p.backgroundColor = lit ? selectedMark(g.c.bg, theme) : hex(g.c.bg, theme)
         return Text(p)
       }),
     })

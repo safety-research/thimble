@@ -7,7 +7,7 @@ type Any = any // eslint-disable-line @typescript-eslint/no-explicit-any
 
 import { paintRegions, regionOfKey } from '../shell/cells'
 import { isAutoTheme, objectWords, themeOf } from '../shell/shell'
-import { hex, setAutoTheme, termColor } from '../draw/palette.js'
+import { hex, selectedMark, setAutoTheme, termColor } from '../draw/palette.js'
 
 const els = {
   Box: (p: Any) => ({ type: 'Box', props: p }),
@@ -41,39 +41,47 @@ test('a row of words and a bar: the ring stands on its words, and a click on the
   expect(pressed).toEqual(['value-1'])
 })
 
-test('a selected or hovered row keeps its bar as drawn: its words are bold, and the pointer over the bar turns the words inverse', () => {
-  const cell = (ch: string, m?: number) => ({ ch, tone: m ? 'accent' : 'ink', ...(m ? { m } : {}) })
-  const row = [...'fetch '].map(c => cell(c)).concat([...'▆▆▆▆'].map(c => cell(c, 1)), [...' 8,998'].map(c => cell(c)))
+test('a selected or hovered row: its words bold, its bar a brighter shade of its own colors, nothing inverse', () => {
+  const cell = (ch: string, m?: number, tone = 'c1') => ({ ch, tone: m ? tone : 'ink', ...(m ? { m } : {}) })
+  const row = [...'fetch '].map(c => cell(c)).concat([...'▆▆▆'].map(c => cell(c, 1)), [...'▆▆'].map(c => cell(c, 1, 'c3')), [...' 8,998'].map(c => cell(c)))
   const grid = { w: row.length, h: 1, rows: [row], regions: [{ id: 'value-1', rects: [{ x: 0, y: 0, w: row.length, h: 1 }] }] }
   const draw = (selected: string | null) => paintRegions(grid as Any, els, { theme: 'dark', key: 'pane', selected, onPress: () => {} })
   const texts = (n: Any, out: Any[] = []): Any[] => {
     if (!n || typeof n !== 'object') return out
     if (Array.isArray(n)) { for (const x of n) texts(x, out); return out }
-    if (n.type === 'Text' && typeof n.props.children === 'string') out.push(n.props)
+    if (n.type === 'Text' && typeof n.props.children === 'string') out.push({ ...n.props, hover: n.hover ?? n.props.hover })
     texts(n.props?.children, out)
     return out
   }
-  const bar = (t: Any) => texts(t).find(p => p.children.includes('▆'))
+  const bars = (t: Any) => texts(t).filter(p => p.children.includes('▆'))
   const words = (t: Any) => texts(t).find(p => p.children.startsWith('fetch'))
-  // the selected bar is drawn exactly as an unselected one, and nothing of the row stands on the selection background
-  expect(bar(draw('value-1'))).toEqual(bar(draw(null)))
+  // selected: each part of the stacked bar turns a shade of its own color, the parts stay apart, and no fill appears
+  const [a0, b0] = bars(draw(null)), [a1, b1] = bars(draw('value-1'))
+  expect(a1.color).toBe(selectedMark('c1', 'dark'))
+  expect(b1.color).toBe(selectedMark('c3', 'dark'))
+  expect(a1.color).not.toBe(a0.color)
+  expect(b1.color).not.toBe(b0.color)
+  expect(a1.color).not.toBe(b1.color)
   expect(texts(draw('value-1')).some(p => p.backgroundColor)).toBe(false)
   expect(words(draw('value-1')).bold).toBe(true)
   expect(words(draw('value-1')).color).toBe(words(draw(null)).color)
-  // Claude Code draws a hovered press inverse: the bar's press opts out, and the row's words turn inverse instead
+  // hovered: every press of the row is one hover group; none turns inverse, the words turn bold, the bar's parts light up
   const btns = (t: Any, out: Any[] = []): Any[] => {
     if (!t || typeof t !== 'object') return out
     if (Array.isArray(t)) { for (const x of t) btns(x, out); return out }
-    if (t.type === 'Button') out.push(t.props)
+    if (t.type === 'Button') out.push({ ...t.props, hover: t.hover ?? t.props.hover })
     btns(t.props?.children, out)
     return out
   }
-  const got = btns(draw('value-1'))
+  const got = btns(draw(null))
   const scope = got[0].hover.scope
   expect(scope.length <= 64).toBe(true)
   expect(got.map(b => [chars(b.children), b.hover])).toEqual([
-    ['fetch ', { scope, inverse: true }], ['▆▆▆▆', { scope, inverse: false }], [' 8,998', { scope, inverse: true }],
+    ['fetch ', { scope, inverse: false, underline: false, bold: true }],
+    ['▆▆▆▆▆', { scope, inverse: false, underline: false }],
+    [' 8,998', { scope, inverse: false, underline: false, bold: true }],
   ])
+  expect(bars(draw(null)).map(p => p.hover)).toEqual([{ scope, color: selectedMark('c1', 'dark') }, { scope, color: selectedMark('c3', 'dark') }])
 })
 
 /** Press the Button that holds `text`. */
