@@ -102,3 +102,21 @@ test('a mark lands where its term stands on its own, not inside another number',
   expect(term.previousSibling?.textContent).toBe('Up to the export on 30 Aug 2026, ')
   expect(el.querySelector<HTMLElement>('.lens-mark[data-lens=explain]')?.previousSibling?.textContent).toMatch(/is un$/)
 })
+
+test('a mark whose term stands on its own only as a citation goes around the citation, and a click opens its card', async () => {
+  vi.stubGlobal('fetch', async () => new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } }))
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  const reply = 'Up to the export on 30 Aug 2026, [26](card:eeeeee#merged/all) of the 36 tickets closed.'
+  const placed: Mark[] = [{ id: 'n3', lens: 'details', term: '26', title: 'One close is a reopen', body: 'One closed ticket was opened again.' }]
+  const el = await mount(
+    <ChipContext.Provider value={{ workspace: 'w', broken: new Set() }}>
+      <ChatMarkdown text={reply} marks={placed} />
+    </ChipContext.Provider>,
+  )
+  await settle()
+  const mark = el.querySelector<HTMLElement>('.lens-mark[data-lens=details]')!
+  expect(mark.querySelector('.refchip-value')?.textContent).toBe('26')
+  expect(mark.previousSibling?.textContent).toBe('Up to the export on 30 Aug 2026, ')
+  await act(async () => mark.querySelector<HTMLElement>('.refchip-value')!.click())
+  expect(el.querySelector('.lens-card-title')?.textContent).toBe('One close is a reopen')
+})

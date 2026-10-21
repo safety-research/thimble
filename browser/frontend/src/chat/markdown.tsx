@@ -163,10 +163,11 @@ function findTerm(s: string, term: string, alone: boolean): number {
   return -1
 }
 
-/** rehype plugin: the first place each term of `terms` stands in the text (outside code and chips) becomes a
+/** rehype plugin: the first place each term of `terms` stands in the text (outside code) becomes a
  * `<span data-mark-at=i>` that renders as its lens's mark. A place where the term stands on its own comes first, so
  * the term "26" marks the 26 of "26 of the 36" and not the one inside "2026"; a term found only inside other words
- * marks its first place. */
+ * marks its first place. A citation whose words hold the term on its own is such a place: the mark goes around the
+ * citation, as when the 26 of "26 of the 36" cites the card that counts it. */
 export function rehypeMarks(terms: readonly string[]) {
   return (tree: Root) => {
     const left = new Set(terms.map((_, i) => i))
@@ -176,6 +177,16 @@ export function rehypeMarks(terms: readonly string[]) {
       const next: (typeof node.children)[number][] = []
       let changed = false
       for (const child of node.children) {
+        if (alone && child.type === 'element' && child.properties?.dataRef != null) {
+          const words = child.properties.dataValue
+          const cited = typeof words === 'string' ? [...left].find((i) => findTerm(words, terms[i], true) >= 0) : undefined
+          if (cited != null) {
+            changed = true
+            left.delete(cited)
+            next.push({ type: 'element', tagName: 'span', properties: { dataMarkAt: String(cited) }, children: [child] })
+            continue
+          }
+        }
         if (child.type !== 'text' || !left.size) {
           if (child.type === 'element') visit(child, alone)
           next.push(child)
