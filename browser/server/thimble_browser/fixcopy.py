@@ -147,7 +147,10 @@ async def fix_test(t: Any, args: dict[str, Any]) -> Result:
 
     root = _copy(str(args.get("slug")))
     target = inside(root, str(args.get("path") or "plugin"))
-    extra = [str(a) for a in (args.get("args") or []) if isinstance(a, str) and a.startswith("-")]
+    extra = [str(a) for a in (args.get("args") or []) if isinstance(a, str)]
+    for a in extra:
+        if not a.startswith("-"):
+            inside(root, a)  # a flag's value or a test path: nothing that names a place outside the copy
     res = await sandbox.run_tests(Path(os.path.realpath(root)), [_rel(root, target), *extra],
                                   unsandboxed=bool(getattr(t, "unsandboxed", False)))
     return Result(res["text"], not res["ok"])

@@ -152,8 +152,10 @@ def test_the_fix_tools_work_in_the_copy_and_refuse_everything_else(kfix):
     assert not run(fixcopy.fix_edit(t, {"slug": slug, "path": "plugin/claims/order.py", "old": "'oldest'", "new": "'newest'"})).is_error
     assert not run(fixcopy.fix_edit(t, {"slug": slug, "path": "plugin/claims/test_order.py",
                                         "new": "from order import ORDER\n\ndef test_newest():\n    assert ORDER == 'newest'\n"})).is_error
-    res = run(fixcopy.fix_test(t, {"slug": slug, "path": "plugin/claims"}))
+    res = run(fixcopy.fix_test(t, {"slug": slug, "path": "plugin/claims", "args": ["-k", "newest or oldest"]}))
     assert not res.is_error and "1 passed" in res.text
+    with pytest.raises(OutsideCopy):
+        run(fixcopy.fix_test(t, {"slug": slug, "args": ["-k", "x", "/etc"]}))
 
 
 def test_a_draft_with_a_change_shows_its_files_and_sends_a_draft_pr_through_the_stubs(kfix, folder):
