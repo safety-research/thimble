@@ -50,10 +50,28 @@ async function rootOf($: Engine): Promise<string> {
   return ((await paneWhere($)).root ?? String(await $.session.cwd())).replace(/\/+$/, '')
 }
 
-async function thimble($: Engine, root: string, args: string[], env?: Record<string, string>): Promise<{ ok: boolean; out: string; err: string }> {
+async function thimble($: Engine, root: string, args: string[], env?: Record<string, string>, timeoutMs = 90000): Promise<{ ok: boolean; out: string; err: string }> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const r = await $.process.run([`${dir}/bin/thimble`, ...args], { cwd: root, env: env ?? (await leanEnv($, root)), timeoutMs: 90000 })
+  const r = await $.process.run([`${dir}/bin/thimble`, ...args], { cwd: root, env: env ?? (await leanEnv($, root)), timeoutMs })
   return { ok: (r.exitCode ?? 1) === 0, out: String(r.stdout || ''), err: String(r.stderr || '') }
+}
+
+/** How long one count of the folder's coverage may run. The first count of a big folder reads every row of its
+ *  tables (about a minute for 18 GB of records); the kernel keeps the row counts, so later counts are quick. A count
+ *  stopped early keeps nothing, so a short limit would stop every count of such a folder. */
+export const COVER_TIMEOUT_MS = 20 * 60 * 1000
+const counting = new Map<string, Promise<{ ok: boolean; out: string; err: string }>>()
+
+/** `thimble coverage --json` of the session's reads in `root`, one count at a time per folder: the bar's count and
+ *  the pane share a count that runs. */
+export function coverageOf($: Engine, root: string, session: string): Promise<{ ok: boolean; out: string; err: string }> {
+  const key = `${root}\n${session}`
+  let p = counting.get(key)
+  if (!p) {
+    p = thimble($, root, ['coverage', '--json'], { THIMBLE_ROOT: root, THIMBLE_SESSION: session }, COVER_TIMEOUT_MS).finally(() => { counting.delete(key) })
+    counting.set(key, p)
+  }
+  return p
 }
 
 /** Whether the side panel shows this pane now. */
@@ -83,7 +101,7 @@ export async function readCoverage($: Engine): Promise<void> {
   try {
     const root = await rootOf($)
     // this session's reads, so the session's own key (as the bar's count reads it)
-    const r = await thimble($, root, ['coverage', '--json'], { THIMBLE_ROOT: root, THIMBLE_SESSION: await sessionKey($) })
+    const r = await coverageOf($, root, await sessionKey($))
     try {
       h.cov = JSON.parse(r.out)
       h.error = null
@@ -250,7 +268,7 @@ export function restPane(k: string, named: { cov: boolean; labels: boolean }): D
 
 // (bare: drawn without its key, which does something else now: shell.tsx)
 type Count = { id: string; text: string; bare?: boolean; bright: boolean }
-type Counts = { cov: number; covFiles?: number; covTouched?: number; labels?: number }
+type Counts = { cov: number; covFiles?: number; covTouched?: number; covState?: 'counting' | 'failed'; labels?: number }
 
 /** The bar's counts of the two panes, as fitBar measures them: `r coverage 1% (13/996 files)` and `l 2 labels`. The
  *  coverage is the files Claude touched of the folder's files, each file once whatever its unit: some of it entered
@@ -258,7 +276,9 @@ type Counts = { cov: number; covFiles?: number; covTouched?: number; labels?: nu
  *  at all); how much of each file, and how it was touched, are the pane's to say. */
 export function dockCounts(c: Counts, percent: (x: number) => string): [string, number, string][] {
   const all = c.covFiles ?? 0
-  const words = all ? `${percent(c.cov)} (${(c.covTouched ?? 0).toLocaleString('en-US')}/${all.toLocaleString('en-US')} ${all === 1 ? 'file' : 'files'})` : percent(c.cov)
+  // before the first count ends (a big folder's first count can take a minute or more), the bar says it counts; a
+  // count that failed says so (its notice says why and what to do)
+  const words = all ? `${percent(c.cov)} (${(c.covTouched ?? 0).toLocaleString('en-US')}/${all.toLocaleString('en-US')} ${all === 1 ? 'file' : 'files'})` : c.covState === 'counting' ? 'counting the files…' : c.covState === 'failed' ? 'not counted' : percent(c.cov)
   return [
     ['cov', c.cov, `${DOCK_KEY.coverage} coverage ${words}`],
     ['labels', c.labels ?? 0, `${DOCK_KEY.labels} ${c.labels === 1 ? '1 label' : `${(c.labels ?? 0).toLocaleString('en-US')} labels`}`],
