@@ -184,8 +184,8 @@ export function ShareReportDialog({ ws, draft: first, onClose }: { ws: string; d
         <header className="share-head">
           <h2>{change ? 'Share this fix' : 'Share this report'}</h2>
           <p>
-            Nothing has been sent. GitHub receives exactly this{' '}
-            {change ? `: a draft pull request with the change below and an issue that links it` : ' text: an issue'}, on {draft.repo}, from{' '}
+            Nothing has been sent. GitHub receives exactly this
+            {change ? ': a draft pull request with the change below and an issue that links it' : ' text: an issue'}, on {draft.repo}, from{' '}
             {login ? `your login @${login}` : 'your GitHub login'}.
           </p>
         </header>

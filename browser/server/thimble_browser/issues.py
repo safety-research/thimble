@@ -415,6 +415,8 @@ def _send_fix(d: Path, slug: str, answer: Any, ask: Any) -> dict[str, Any]:
     except fix.FixError as e:
         raise HTTPException(409, f"{e}. Try again, or Save as file") from None
     meta = fix.load(slug)
+    if meta.get("workspace"):
+        hub.publish(meta["workspace"], {"type": "fix", "slug": slug, "status": meta.get("status")})
     if answer == "file":
         p = Path(meta.get("file") or "")
         return {"status": "saved", "markdown": p.read_text() if p.is_file() else "", "filename": p.name or f"thimble-{slug}.md",

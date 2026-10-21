@@ -120,4 +120,5 @@ test("the top bar's Fix… sends /fix, and the fix line offers what the fix's st
   expect(fixLine({ ...f, status: 'applied' }, 'sort-claims')).toEqual({ words: '✓ fixed: Sort claims newest first', good: true, actions: ['submit', 'undo'] })
   expect(fixLine({ ...f, status: 'ready' }, null)?.actions).toEqual(['try', 'submit'])
   expect(fixLine({ ...f, status: 'sent' }, null)).toBeNull()
+  expect(fixLine({ ...f, status: 'sent' }, 'sort-claims')).toEqual({ words: '✓ fixed: Sort claims newest first · sent', good: true, actions: ['undo'] })
 })

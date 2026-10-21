@@ -76,7 +76,12 @@ async def fix_start(t: Any, args: dict[str, Any]) -> Result:
     from .kernel_fix import fix  # noqa: PLC0415
 
     fx = fix.new(str(args.get("title") or ""), "fix")
+    fx["workspace"] = t.ws  # the page's fix line shows this workspace's fixes (issues.fixes_of)
+    fix.save(fx)
     t.fix_slug = fx["slug"]
+    from .hub import hub  # noqa: PLC0415
+
+    hub.publish(t.ws, {"type": "fix", "slug": fx["slug"], "status": fx["status"]})
     top = sorted(x.name + ("/" if x.is_dir() else "") for x in Path(fx["worktree"]).iterdir() if x.name not in SKIP)
     return Result(f"Fix {fx['slug']}: a copy of thimble {fx.get('version') or ''} on branch {fx['branch']}. Its top "
                   f"folder holds: {', '.join(top)}. Work with fix_files, fix_read and fix_edit; run fix_test; then "

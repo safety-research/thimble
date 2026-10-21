@@ -42,10 +42,12 @@ export function fixMessage(text: string): string {
 
 /** What the line says of a fix and which actions it offers. Pure. */
 export function fixLine(f: FixRow | null, active: string | null): { words: string; good?: boolean; actions: ('try' | 'undo' | 'submit')[] } | null {
-  if (!f || ['sent', 'saved', 'dropped', 'merged'].includes(f.status)) return null
+  if (!f || ['dropped', 'merged'].includes(f.status)) return null
+  const shared = f.status === 'sent' || f.status === 'saved'
   if (f.status === 'working') return { words: `fixing: ${f.title}`, actions: [] }
-  if (active === f.slug || f.status === 'applied') return { words: `✓ fixed: ${f.title}`, good: true, actions: ['submit', 'undo'] }
-  return { words: f.title, actions: ['try', 'submit'] }
+  // a shared fix stays on until a release has it: only Undo is left
+  if (active === f.slug || f.status === 'applied') return { words: `✓ fixed: ${f.title}${shared ? ` · ${f.status}` : ''}`, good: true, actions: shared ? ['undo'] : ['submit', 'undo'] }
+  return shared ? null : { words: f.title, actions: ['try', 'submit'] }
 }
 
 export function FixButton() {
