@@ -315,11 +315,11 @@ export async function fixBar($: Engine): Promise<{ key: string; words: string; s
   const l = await fixLineNow($)
   if (l?.kind === 'failed') out.push({ key: 'f', words: 'fix this' }, { key: 'F', words: 'report only' })
   else if (l?.kind === 'notice') {
-    // the whole line is in the transcript; the bar keeps its point and its command, with the title cut first, and
-    // when even that does not fit, the short words
-    const v = /no longer fits thimble (\S+?);/.exec(l.text)
-    const words = l.text.replace(/'([^']*)'/, (_m, t: string) => `'${cut(t, 24)}'`)
-    out.push({ key: '', words, status: true, ...(v ? { short: `your fix is off: it no longer fits ${v[1]} · /thimble:fix to redo it` } : {}) })
+    // the whole line is in the transcript; the bar keeps its point and its command whole, which a cut at the line's
+    // end would lose: `your fix '<title>' no longer fits 0.12.0 · /thimble:fix to redo it`
+    const v = /^Your fix '([^']*)' no longer fits thimble (\S+?);/.exec(l.text)
+    if (v) out.push({ key: '', words: `your fix '${cut(v[1]!, 16)}' no longer fits ${v[2]} · /thimble:fix to redo it`, short: 'your fix is off · /thimble:fix to redo it', status: true })
+    else out.push({ key: '', words: l.text.replace(/'([^']*)'/, (_m, t: string) => `'${cut(t, 16)}'`), status: true })
   }
   else if (l?.kind === 'applied') out.push({ key: '', words: '✓ fixed', status: true, good: true }, { key: 'p', words: 'submit' }, { key: 'u', words: 'undo' })
   return out
