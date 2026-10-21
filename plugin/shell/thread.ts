@@ -37,6 +37,7 @@ import { claimAgent } from '../telemetry/telemetry'
 import { aboutOf, firstMessage, forkDirective, nameOf, nextMessage, ownReport, samePart, threadKey, turnsOf } from './threads.js'
 import { sessionKey } from '../hooks/conversation'
 import { tellAsked } from './engaged'
+import { busyWhile } from './busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -291,6 +292,8 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
     }
     t = { ...t, asks: [...was.asks, asked(sent)] }
     await keep($, t)
+    // the bar shows the answer on its way until the thread's agent ends its turn (busy.ts)
+    void busyWhile($, 'answering', () => threads.get(key)?.status === 'running')
     if (scope.region) await noteSelection($, key, { region: scope.region, label: aboutOf(scope), refs: ask.refs || [] })
     follow($)
     // the question, not its answer, reaches main's session: what the analyst asks about is what they care about

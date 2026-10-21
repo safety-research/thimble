@@ -33,10 +33,11 @@ const frameOf = args => (args && args.frame && typeof args.frame === 'object' ? 
 export default {
   name: 'mark',
   title: 'Citation',
-  reads: () => [],
+  reads: () => ['busy'],
   stateKey: args => `mark-${threadKey(scopeOf(frameOf(args)) || {})}`.slice(0, 110),
-  data(_stores, args) {
-    return { frame: frameOf(args) }
+  data(stores, args) {
+    // the turning glyph while thimble works (the terminal's shell/busy.ts)
+    return { frame: frameOf(args), busy: typeof stores.busy === 'string' ? stores.busy : null }
   },
   /** The pane's title in Claude Code's chrome: what kind of mark, and its words. */
   titleOf(args) {
@@ -102,7 +103,7 @@ export function program(k, data) {
   // the card always; what a section opened, under the conversation (`side:opened`)
   const part = st.part && typeof st.part === 'object' ? st.part : null
   const parts = cardBody(k, card, part ? { ...top, part: part.id } : top, null)
-  if (st.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text('{dim:writing a longer explanation…}'))
+  if (st.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text(`${data.busy ? `{explain:${data.busy}} ` : ''}{dim:writing a longer explanation…}`))
   const opened = open ? [...(open.problem ? [k.text(`{dim:${k.escape(String(open.problem))}}`)] : []), ...(open.drawings || []).map(d => k.embed(d))] : []
   const kind = heads ? 'heads up' : top.kind === 'gloss' ? 'explainer' : top.kind === 'spark' ? 'series' : 'citation'
   // what it cites, in the card's own words without its kind (`cite · revisions.jsonl` says revisions.jsonl)

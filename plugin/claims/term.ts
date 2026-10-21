@@ -23,6 +23,8 @@ import { openSide } from '../shell/side'
 import { promptFile } from '../prompts/prompts'
 import { sessionKey } from '../hooks/conversation'
 import { applyTurn, clearGap, emptyStore, grownClusters, isFolderCard, mergeFolder, noteFor, noteGap, readStore } from './store.js'
+import { busyWhile } from '../shell/busy'
+import { mainTurnActive } from '../telemetry/telemetry'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -236,6 +238,9 @@ async function askFolder($: Engine): Promise<string | void> {
   await saveClaims($, store)
   // its row reads as the press: `claims of the whole folder (4 files, about 4 min)`
   await ask($, folderRequest({ root, est, guide: guide.file, program }), 'claims', `of the whole folder (${est.what}, about ${est.minutes} min)`)
+  // the bar shows the map on its way: until its card comes in, while the turn that asked for it runs (or is about to)
+  const asked = Number(await $.clock.now())
+  void busyWhile($, 'mapping claims', async () => !!(await claimsStore($)).folderAsked && (mainTurnActive() || Number(await $.clock.now()) - asked < 60000))
 }
 
 /** Saves the kernel's feed showed (main's or a subagent's): a map of the folder's claims comes into the store. */

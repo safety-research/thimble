@@ -66,6 +66,7 @@ import { closeDock, countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, 
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
 import { flushEngaged, resetEngaged, tellOpened } from './engaged'
+import { busy, busyGlyph as workGlyph, busyNow } from './busy'
 import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
@@ -1004,7 +1005,7 @@ async function runHeal($: Engine, row: string, key: string): Promise<void> {
   if (!root || !rec || textKey(shownOf(rec)) !== key) return
   const dir = $.plugin.root.replace(/\/+$/, '')
   const env = { ...(await leanEnv($, root)), THIMBLE_SESSION: await sessionKey($) }
-  const r = await $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healInput(rec), timeoutMs: 60000 })
+  const r = await busy($, 'checking citations', () => $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healInput(rec), timeoutMs: 60000 }))
   let out: Any = null
   try { out = JSON.parse(r.stdout) } catch { out = null }
   const now = await recordNow($, row)
@@ -1058,7 +1059,7 @@ export async function healOfText($: Engine, text: string, o: { settled?: boolean
     run = (async () => {
       const dir = $.plugin.root.replace(/\/+$/, '')
       const env = { ...(await leanEnv($, root)), THIMBLE_SESSION: await sessionKey($) }
-      const r = await $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healMd(t), timeoutMs: 60000 })
+      const r = await busy($, 'checking citations', () => $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healMd(t), timeoutMs: 60000 }))
       let out: Any = null
       try { out = JSON.parse(r.stdout) } catch { out = null }
       if (!out || !Array.isArray(out.changes)) {
@@ -1488,7 +1489,8 @@ async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: 
   const dir = $.plugin.root.replace(/\/+$/, '')
   // with the citation's words, a citation of a whole query opens the row that holds the value it shows
   const words = label && label !== ref ? ['--label', label] : []
-  const r = await $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+  const env = await leanEnv($, root)
+  const r = await busy($, 'reading rows', () => $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env, timeoutMs: 60000 }))
   try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'thimble resolve gave nothing' } }
 }
 
@@ -1776,7 +1778,8 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     if (o.coverage && covRoot && person === 'now' && featureOn('counts')) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
-        const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env: { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
+        const env = { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }
+        const r = await busy($, 'counting coverage', () => $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env, timeoutMs: 60000 }))
         const got = JSON.parse(r.stdout)
         const files = (got.files || []) as Any[]
         // the files touched, each file once whatever its unit, by the rule the kernel's text says: some of it entered
@@ -1980,7 +1983,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 }
 
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
-type BarSeg = { key: string; words: string; short?: string; yields?: boolean; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown; dim?: boolean }
+type BarSeg = { key: string; words: string; short?: string; yields?: boolean; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown; dim?: boolean; busy?: string }
 
 /** The keys each bar named, oldest first, with when it first showed them. A key the line named a moment ago
  *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
@@ -2108,6 +2111,11 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
       }
     }
   }
+  // thimble's own work while it runs (busy.ts): a turning glyph and a word or two first, the seconds from 3 s
+  // (once: a focused surface that already says the work, the chips' `s ⠋ rewriting…`, keeps it alone)
+  const working = o.preview ? null : await busyNow($)
+  // (the glyph is part of its words, so the bar's room counts it; segText draws it in the keys' color)
+  if (working && !focus?.status?.text.includes(working.word)) left.unshift({ key: '', busy: working.glyph, words: `${working.glyph} ${working.word}${working.secs != null ? ` ${working.secs}s` : ''}`, short: `${working.glyph} ${working.word.split(' ')[0]}` })
   const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
   const now = await $.clock.now()
   if (!o.preview) noteBar(now, left)
@@ -2146,7 +2154,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   const label = fit.label ? [where || fit.cut ? labelText : Button({ key: 'bar-label-press', plain: true, label: 'thimble settings', onPress: () => openSettings($), children: [labelText] }), Text({ key: 'bar-gap', children: '  ' })] : []
   const segText = (g: BarSeg, i: number) => [
     ...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []),
-    ...(g.tone ? [Text({ key: `kt${i}`, color: g.tone, children: g.words })] : g.dim ? [Text({ key: `kd${i}`, dimColor: true, children: [g.key, g.words].filter(Boolean).join(' ') })] : [
+    ...(g.busy ? [Text({ key: `kb${i}`, color: FOCUS[theme], children: `${g.busy} ` }), Text({ key: `kw${i}`, dimColor: true, children: g.words.slice(g.busy.length + 1) })] : g.tone ? [Text({ key: `kt${i}`, color: g.tone, children: g.words })] : g.dim ? [Text({ key: `kd${i}`, dimColor: true, children: [g.key, g.words].filter(Boolean).join(' ') })] : [
       ...(g.key ? [Text({ key: `kk${i}`, ...(g.color && g.wordsColor ? { color: g.color } : {}), ...(g.bold ? { bold: true } : {}), children: g.key })] : []),
       ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), ...(g.bold ? { bold: true } : {}), children: `${g.key ? ' ' : ''}${g.words}` })] : []),
     ]),
@@ -2987,6 +2995,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     // whether a pane drawn by heldEl holds the keyboard now (a click gave it them), by its id
     case 'held': return !!arg && (await $.state.get(HELD)).value === arg
+    // the glyph that turns while thimble works (busy.ts): a line that says the work in place draws it
+    case 'busy': return await workGlyph($)
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': {
       // with what the healing pass did to its takeaway's citations (panes/detail.js draws them)

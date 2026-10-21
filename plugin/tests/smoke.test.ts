@@ -39,7 +39,7 @@ function world(on: Any, o: { heal?: () => unknown } = {}) {
     files[e.path] = String(e.content ?? e.text ?? e.data ?? '')
     return { value: undefined }
   })
-  on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
+  on('process.run', async (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     // the feed's new bytes (`tail -c +N <file>`): the test's files are ASCII, so a byte is a character
     if (e.argv[0] === 'tail') return { value: { exitCode: 0, stdout: (files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const prep = e.argv.some(a => a.endsWith('prep.mjs')) ? JSON.parse(String(e.init?.stdin || '{}')) : null
@@ -47,7 +47,7 @@ function world(on: Any, o: { heal?: () => unknown } = {}) {
     if (prep) out = { drawing: DRAWING, ...(prep.check ? { check: { line: null, tried: 1, total: 1, failed: 0, cut: 0, ms: 1 } } : {}) }
     else if (e.argv.includes('resolve')) out = RESOLVED
     else if (e.argv.includes('heal') && o.heal) {
-      out = o.heal()
+      out = await o.heal()
       if (out instanceof Error) return { deny: out.message } as never
     }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -81,6 +81,7 @@ function find(n: Any, ok: (n: Any) => boolean): Any {
   if (ok(n)) return n
   return find(n.props?.children, ok) ?? find(n.children, ok)
 }
+const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 const reply = ($: Any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: ANSWER, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
 test('a session answers a question, saves a card and draws it under the answer, its citation in place', async ($, on) => {
@@ -147,4 +148,31 @@ test('a healing pass Claude Code cut short starts again once at the next drawing
   // kept by the text it read (message.js withHeal)
   const results = Object.values(JSON.parse(kept![1]).heals) as { changes: { state: string }[] }[]
   expect(results.map(h => h.changes[0].state)).toEqual(['linked'])
+})
+
+test('the bar shows thimble\'s own work: nothing for 300 ms, then a spinner and its word, the seconds from 3 s, gone when it ends', async ($, on) => {
+  // the citation check runs until the test lets it end
+  let release: () => void = () => undefined
+  const gate = new Promise<void>(r => { release = r })
+  world(on, { heal: () => gate.then(() => ({ of: 'v1', version: 'v1', changes: [] })) })
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: '' }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: ANSWER }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  // the reply's drawing starts the check
+  await reply($)
+  await clock.advance(200)
+  const bar = async () => textOf(await $.ui.render(BAND))
+  expect(await bar()).not.toContain('checking citations')
+  await clock.advance(200)
+  expect(await bar()).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] checking citations ·/)
+  await clock.advance(3000)
+  expect(await bar()).toContain('checking citations 3s')
+  release()
+  await clock.advance(200)
+  await clock.settle()
+  expect(await bar()).not.toContain('checking citations')
 })

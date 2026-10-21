@@ -53,6 +53,7 @@ from fastapi import Body, HTTPException
 
 from .. import agent, canvas, chats, home, llm, prompts, report, tools
 from ..cards import cite
+from ..busy import working
 from ..hub import hub
 from ..tools import Result
 from . import Feature, is_on
@@ -377,7 +378,9 @@ async def read(ws: str, *, chat: str | None = None, answer: str | None = None, c
     user = (f"The analyst asked:\n{question}\n\n" if question else "") + \
         f"The texts to read:\n\n{places}\n\nWhich lens reads which text:\n{covers}"
     try:
-        got = json.loads(await llm.complete(system, user, schema=_schema(active), effort="low") or "{}")
+        # the busy line above the chat's input box shows the reading while it runs (busy.py)
+        async with working(ws, "marking"):
+            got = json.loads(await llm.complete(system, user, schema=_schema(active), effort="low") or "{}")
     except Exception as e:  # noqa: BLE001 — a failed reading leaves the texts as they are, and says so once
         log.warning("the lenses' reading failed: %s", llm.failure(e))
         if chat:

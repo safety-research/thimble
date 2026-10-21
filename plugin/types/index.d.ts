@@ -153,6 +153,8 @@ declare module 'claude-code' {
       sqztold: Record<string, string>
       /** the healing pass's tick: set when a pass has run long enough to show its spinner (shell.tsx healNow) */
       healtick: string
+      /** thimble's own work while it runs: the glyph's frame and how many jobs run (shell/busy.ts) */
+      busy: { frame: number; n: number }
       /** the bar's counts above the prompt */
       counts: LineCounts | null
       /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */

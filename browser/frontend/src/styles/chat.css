@@ -1126,6 +1126,29 @@ button.model-line-part[aria-expanded='true'] {
   height: 20px;
   color: inherit;
 }
+/* -------- the busy line (chat/ChatBusy): the task strip's glass, riding 4px behind the composer's top edge while
+   Claude or thimble works; a spinner and a word, no chevron -------- */
+.chat-busy-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  height: 30px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.chat-busy .chat-strip-title {
+  font-weight: 400;
+}
+.chat-busy-sep {
+  color: var(--text-tertiary);
+}
+.chat-busy-secs {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
 /* -------- the task strip: glass on the pane's paper, riding 4px behind the composer's top edge while the thread works;
    the spinner, what it does, how many of its steps are done, and a chevron that opens the steps -------- */
 .chat-strip {
