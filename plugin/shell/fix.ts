@@ -236,8 +236,36 @@ const seen = new Map<string, { status: string; used: number; title: string }>()
 let wasActive: string | null = null
 /** The fixes whose draft the person asked for (p) and whose preview has not opened yet. */
 const shareWait = new Set<string>()
+/** Whether this load of the module looked already (its first look starts followFix). */
 let looked = false
+/** Whether the fixes were seen before this look, in this load of the module or in the one before a reload of the
+ *  plugins. Each switch reloads them, and a later round must not look like the session's first look. */
+let known = false
+/** What was seen, kept for the session by the host ($.state outlives a reload of the plugin's code). */
+const SEEN = { plugin: 'thimble', key: 'fixseen' } as const
+let restoring: Promise<void> | null = null
+function restoreSeen($: Engine): Promise<void> {
+  restoring ??= (async () => {
+    const v = (await $.state.get(SEEN).catch(() => ({ value: null }))).value as { fixes?: Record<string, { status: string; used: number; title: string }>; active?: string | null } | null | undefined
+    if (!v) return
+    for (const [slug, f] of Object.entries(v.fixes || {})) if (!seen.has(slug)) seen.set(slug, f)
+    wasActive = v.active ?? null
+    known = true
+  })()
+  return restoring
+}
 let poll: { cancel?: () => void } | null = null
+
+/** For tests: this module's memory gone, as a reload of the plugin's code leaves it (the host's $.state stays). */
+export function forgetFixes(): void {
+  seen.clear()
+  shareWait.clear()
+  wasActive = null
+  looked = false
+  known = false
+  restoring = null
+  poll = null
+}
 
 /** The fixes in $THIMBLE_HOME/fixes, and which is in use. */
 async function listFixes($: Engine): Promise<{ fixes: Fix[]; active: string | null }> {
@@ -258,9 +286,10 @@ async function listFixes($: Engine): Promise<{ fixes: Fix[]; active: string | nu
  *  seen here (a fix on, a new round of it, or the fix that was on gone off), whoever made it (Claude, a subagent, or
  *  the person's u, try or remove), loads the plugins once. */
 export async function refreshFixes($: Engine): Promise<void> {
+  await restoreSeen($)
   const { fixes, active } = await listFixes($)
   // the fix that was on went off (undo, remove), or another took its place: the session loads what is on now
-  let reload = looked && wasActive !== null && wasActive !== active
+  let reload = known && wasActive !== null && wasActive !== active
   wasActive = active
   // 'ready' is a fix that is not in use (after undo, or a send that was cancelled): only 'working' still works
   const working = fixes.filter(f => f.status === 'working')
@@ -275,7 +304,7 @@ export async function refreshFixes($: Engine): Promise<void> {
     await openAskOnce($, f.slug, !looked)
     const was = seen.get(f.slug)
     seen.set(f.slug, { status: f.status, used: f.used, title: f.title })
-    if (!looked || f.status !== 'applied' || active !== f.slug) continue
+    if (!known || f.status !== 'applied' || active !== f.slug) continue
     if (was?.status !== 'applied' || was.used !== f.used) {
       // a fix turned on, or a later round of the same fix: the person tries the newest copy at once
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
@@ -292,6 +321,9 @@ export async function refreshFixes($: Engine): Promise<void> {
     }
   }
   looked = true
+  known = true
+  // kept before the reload, so the module the reload loads goes on from here
+  await $.state.set(SEEN, { fixes: Object.fromEntries(seen), active }).catch(() => undefined)
   if (reload) await reloadPlugins($)
   if ((working.length || shareWait.size) && !poll) {
     try { poll = $.clock.every(3000, () => { void refreshFixes($).catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { poll = null }
@@ -327,6 +359,7 @@ async function followFix($: Engine, f: Fix): Promise<void> {
     await noteForClaude($, `thimble's fix ${f.slug} followed the newest release: ${line}`)
     // this load is the switch's one: refreshFixes does not load it again when it sees the fix off
     wasActive = ((await readText($, `${await home($)}/fixes/active`)) || '').trim() || null
+    await $.state.set(SEEN, { fixes: Object.fromEntries(seen), active: wasActive }).catch(() => undefined)
     await reloadPlugins($)
   }
 }

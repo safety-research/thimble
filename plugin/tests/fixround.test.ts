@@ -3,7 +3,7 @@
 // made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { fixCommand, fixLineNow, refreshFixes } from '../shell/fix'
+import { fixCommand, fixLineNow, forgetFixes, refreshFixes } from '../shell/fix'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -29,6 +29,7 @@ function engine(files: Map<string, string>, toasts: string[], commands: string[]
 }
 
 test('a second round of the same fix loads the plugins again, and its new title reaches the toast and the bar', async () => {
+  forgetFixes()
   const files = new Map<string, string>()
   const fix = { slug: 'round-two', title: 'Draw card titles in violet', kind: 'fix', status: 'applied', created: 1, used: 10 }
   files.set(FIX, JSON.stringify(fix))
@@ -97,31 +98,42 @@ function sessionOnCopy(files: Map<string, string>, toasts: string[], commands: s
 /** The work a command leaves running (refreshFixes, started without waiting), done. */
 const settle = async () => { for (let i = 0; i < 400; i++) await Promise.resolve() }
 
-test('round 2 loads the plugins in a session that already runs the copy, and undo, try and remove each load them once', async () => {
+test('each switch loads the plugins once, also after a reload: round 2 in a session that runs the copy, undo, try and remove', async () => {
+  forgetFixes()
   const files = new Map<string, string>()
-  files.set(TEAL, JSON.stringify({ slug: 'teal-titles', title: 'Titles in teal', kind: 'fix', status: 'applied', created: 1, used: 10 }))
-  files.set(ACTIVE, 'teal-titles\n')
+  files.set(TEAL, JSON.stringify({ slug: 'teal-titles', title: 'Titles in teal', kind: 'fix', status: 'working', created: 1, used: 0 }))
   const toasts: string[] = []
   const commands: string[] = []
   const $ = sessionOnCopy(files, toasts, commands)
-  // the look after round 1's load (an earlier test's fixes may have been seen first)
+  // the session's first look: the fix works
   await refreshFixes($)
-  commands.length = 0
-  // round 2: Claude runs `thimble fix use` again; the session runs the copy since round 1, and loads this round too
-  files.set(TEAL, JSON.stringify({ ...JSON.parse(files.get(TEAL)!), used: 20 }))
+  expect(commands.length).toBe(0)
+  // round 1: Claude runs `thimble fix use`; the plugins load again, which forgets this module's memory, never the host's
+  // state, and fires no session start
+  await $.process.run(['thimble', 'fix', 'use', 'teal-titles'])
   await refreshFixes($)
   expect(commands).toEqual(['reload-plugins'])
+  forgetFixes()
+  // round 2 in the session that now runs the copy: one load
+  await $.process.run(['thimble', 'fix', 'use', 'teal-titles'])
+  await refreshFixes($)
+  expect(commands.length).toBe(2)
+  expect(toasts.filter(t => t.includes('Titles in teal')).length).toBe(2)
+  forgetFixes()
   // undo, try and remove: one load each
   await fixCommand($, 'undo')
   await settle()
-  expect(commands.length).toBe(2)
+  expect(commands.length).toBe(3)
+  forgetFixes()
   await fixCommand($, 'try')
   await settle()
-  expect(commands.length).toBe(3)
+  expect(commands.length).toBe(4)
+  forgetFixes()
   await fixCommand($, 'remove')
   await settle()
-  expect(commands.length).toBe(4)
+  expect(commands.length).toBe(5)
   // nothing new: nothing loads
+  forgetFixes()
   await refreshFixes($)
-  expect(commands.length).toBe(4)
+  expect(commands.length).toBe(5)
 })
