@@ -825,7 +825,24 @@ def _line_of(ref: str) -> int | None:
 
 def type_of(path: str) -> str:
     """A file's type as the coverage pane groups it: its extension (`jsonl`, `py`), else `no extension`."""
-    return Path(path).suffix.lower().lstrip(".") or "no extension"
+    name = path.rsplit("/", 1)[-1]
+    dot = name.rfind(".")
+    return name[dot + 1:].lower() if 0 < dot < len(name) - 1 else "no extension"
+
+
+def folder_of(path: str) -> str:
+    """A file's folder as the coverage pane groups files: `runs/r004/`, or `./` for the top folder."""
+    return path.rsplit("/", 1)[0] + "/" if "/" in path else "./"
+
+
+def shares(o: dict[str, Any]) -> tuple[float, float]:
+    """A file's two measures in its own unit: the share read into Claude's context, and the share counted or computed
+    over (read is part of it): a query, a rule label or a label's model went over it, or Claude read it."""
+    units = max(1, o.get("units") or 0)
+    read = min(1.0, (o.get("seen_units") or 0) / units)
+    if o.get("unit") == "file":
+        return read, 1.0 if read or o.get("computed") or o.get("model") else 0.0
+    return read, min(1.0, ((o.get("seen_units") or 0) + (o.get("model_units") or 0) + (o.get("computed_units") or 0)) / units)
 
 
 def _program(cmd: str) -> str:
@@ -1065,11 +1082,20 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                 x["searched" if how == "searched" else "named"] = True
                 x["searched_by" if how == "searched" else "by"].add(prog)
     out_files = []
-    group = S.group_of(files)
-    pattern = S.pattern_of(files)
     for f in files:
         c, x = cnt.get(f, {}), per[f]
         rows, lines = c.get("rows", 0), c.get("lines", 0)
+        if not (x["computed"] or x["queries"] or x["shown"] or x["lines"] or x["searched"] or x["matched"] or x["named"]
+                or x["hits"] or x["model"] or x["labels"] or x["pages"] or x["whole"]):
+            # a file nothing touched, the most of a large folder: its size and nothing else, quickly
+            unit = unit_of[f]
+            units = 1 if unit == "file" else lines if unit == "lines" else rows
+            out_files.append({"path": f, "kind": c.get("kind"), "unit": unit, "units": units, "seen_units": 0,
+                              "model_units": 0, "computed_units": 0, "rows": rows, "lines": lines, "status": "not read",
+                              "seen": False, "read": False, "touched": False, "share": 0.0, "model": 0, "computed": 0,
+                              "model_rows": 0, "computed_rows": 0, "read_share": 0.0, "counted_share": 0.0,
+                              "type": type_of(f), "folder": folder_of(f), "said": "none"})
+            continue
         unit = unit_of[f]
         seen_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
         pages = _merged(x["pages"]) if unit == "pages" and not x["whole"] else ([[1, max(1, rows)]] if unit == "pages" else [])
@@ -1117,19 +1143,25 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                           "queries": sorted(set(q for q in x["queries"] if q)),
                           "shown": len(x["shown"]), "searched": x["searched"], "matched": x["matched"],
                           "hits": len(x["hits"]), "named": x["named"], "by": sorted(x["by"]),
-                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "group": group.get(f, f),
-                          "pattern": pattern.get(f, f),
+                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "folder": folder_of(f),
                           # which lines entered Claude's context, and which of them a search showed
                           "ranges": _merged(x["lines"]),
                           "hit_lines": sorted({n for n in map(_line_of, x["hits"]) if n})[:HITS_MAX]})
         out_files[-1]["said"] = file_line(out_files[-1])
-    groups: dict[str, dict[str, Any]] = {}
-    patterns: dict[str, dict[str, Any]] = {}
+        out_files[-1]["read_share"], out_files[-1]["counted_share"] = shares(out_files[-1])
+    # the files by folder and by type, each group with the two measures: read and counted, in its files' unit (when
+    # they share one), else the mean of its files' shares
+    folders: dict[str, dict[str, Any]] = {}
     types: dict[str, dict[str, Any]] = {}
     for e in out_files:
-        for key, name, into in ((e["group"], "group", groups), (e["pattern"], "pattern", patterns), (e["type"], "type", types)):
-            G = into.setdefault(key, {name: key, "files": 0, "rows": 0, "seen_rows": 0.0, "model_rows": 0, "computed_rows": 0,
-                                      "touched": 0, "seen_files": 0, "by_status": defaultdict(int), "computed": 0, "units": {}})
+        for key, name, into in ((e["folder"], "folder", folders), (e["type"], "type", types)):
+            G = into.get(key)
+            if G is None:
+                G = into[key] = {name: key, "files": 0, "rows": 0, "seen_rows": 0.0, "model_rows": 0, "computed_rows": 0,
+                                 "touched": 0, "seen_files": 0, "by_status": defaultdict(int), "computed": 0, "units": {},
+                                 "read_sum": 0.0, "counted_sum": 0.0}
+            G["read_sum"] += e["read_share"]
+            G["counted_sum"] += e["counted_share"]
             _add_units(G["units"], e)
             G["files"] += 1
             G["rows"] += e["rows"]
@@ -1140,8 +1172,16 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             G["seen_files"] += int(e["seen"])
             G["by_status"][e["status"]] += 1
             G["computed"] += e["computed"]
-    for G in [*groups.values(), *patterns.values(), *types.values()]:
+    for G in [*folders.values(), *types.values()]:
         G["units"] = _units_list(G["units"])
+        if len(G["units"]) == 1 and G["units"][0]["units"]:
+            u = G["units"][0]
+            G["read_share"] = min(1.0, u["seen"] / u["units"])
+            G["counted_share"] = min(1.0, (u["seen"] + u["model"] + u["computed"]) / u["units"])
+        else:
+            G["read_share"], G["counted_share"] = G["read_sum"] / G["files"], G["counted_sum"] / G["files"]
+        del G["read_sum"], G["counted_sum"]
+        G["group"] = G.get("folder", G.get("type"))
         G["by_status"] = dict(G["by_status"])
         G["seen_rows"] = round(G["seen_rows"])
         G["read_rows"] = G["seen_rows"]
@@ -1175,8 +1215,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     total.update(read_files=total["seen_files"], read_rows=total["seen_rows"], read_share=total["seen_share"],
                  not_read_files=total["not_seen_files"], not_read_rows=total["not_seen_rows"])
     return {"root": str(st.root), "session": st.session if session == "" else session, "files": out_files,
-            "groups": sorted(groups.values(), key=lambda g: -g["rows"]),
-            "patterns": sorted(patterns.values(), key=lambda g: (-g["rows"], g["pattern"])),
+            "groups": sorted(folders.values(), key=lambda g: (-g["touched"], -g["files"], g["folder"])),
             "types": sorted(types.values(), key=lambda g: (-g["rows"], g["type"])),
             "total": total}
 

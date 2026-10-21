@@ -204,3 +204,19 @@ def test_the_entries_behind_a_value_take_their_files_word(tmp_path: Path, monkey
     assert LIN.entries_of(st, ["trials.jsonl#L1-3", "scores.csv#L2"])["unit"] == "records"
     assert LIN.entries_of(st, ["trials.jsonl#L1", "scores.csv#L2"]) == {"unit": "entries", "unit_one": "entry"}
     assert LIN.entries_of(st, ["chart.png"]) == {"unit": None, "unit_one": None}
+
+
+def test_each_file_and_folder_has_two_measures_read_and_counted(code: Path, tmp_path: Path) -> None:
+    # 8 of 40 records read, and a query over all of them: read 20%, counted 100% (read is part of it); a folder of
+    # files of one unit says the same in that unit
+    (code / "logs").mkdir()
+    (code / "logs" / "events.jsonl").write_text("".join(json.dumps({"i": i}) + "\n" for i in range(40)))
+    th = code / "thimble"
+    th.mkdir()
+    (th / "ledger.jsonl").write_text(json.dumps({"session": "s-cov", "kind": "query", "id": "q1", "loaded": {"logs/events.jsonl": 40}}) + "\n")
+    saw(tmp_path, code, [{"tool": "Read", "file": str(code / "logs" / "events.jsonl"), "from": 1, "to": 8}])
+    cov = LIN.coverage(Store(code))
+    f = next(o for o in cov["files"] if o["path"] == "logs/events.jsonl")
+    assert (f["read_share"], f["counted_share"]) == (0.2, 1.0)
+    g = next(g for g in cov["groups"] if g["folder"] == "logs/")
+    assert (g["read_share"], g["counted_share"]) == (0.2, 1.0) and g["touched"] == 1

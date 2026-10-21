@@ -597,7 +597,12 @@ def cmd_coverage(a: argparse.Namespace) -> int:
         return 0
     cov = LIN.coverage(st, None if a.all else "")
     if a.json:
-        out_json(cov)
+        # a file nothing touched is said by its path, unit and size alone, in columns, so the record of a folder of
+        # 100,000 files stays a few megabytes (the coverage pane reads it)
+        rest = [o for o in cov["files"] if o["status"] == "not read" and not o["touched"]]
+        cov["files"] = [o for o in cov["files"] if not (o["status"] == "not read" and not o["touched"])]
+        cov["untouched"] = {"path": [o["path"] for o in rest], "unit": [o["unit"] for o in rest], "units": [o["units"] for o in rest]}
+        print(json.dumps(cov, ensure_ascii=False, separators=(",", ":"), default=str))
         return 0
     print(LIN.coverage_text(cov))
     return 0
