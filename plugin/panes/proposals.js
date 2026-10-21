@@ -6,9 +6,18 @@
 //   reads: record:<row>          its lit verbs: v's proposals, as the post-turn pass named them
 //   keys: 1–9 pick · 0 close     presses: an option picks it
 // With no proposal, v's one option is "another view of this answer": visualize then picks the form itself.
+// The terminal does not draw this line: v there draws the first proposal at once (nextView), and offers the next one in
+// one line under the card it drew.
 
 /** v's one option when the pass proposed none. */
 export const ANOTHER_VIEW = 'another view of this answer'
+
+/** The view v draws next for a message: the first one the pass proposed and v has not drawn yet, or null. */
+export function nextView(rec) {
+  const v = (rec && rec.verbs && rec.verbs.v) || null
+  const p = v && v.lit && Array.isArray(v.proposals) ? v.proposals.find(x => typeof x === 'string' && x.trim()) : null
+  return p ? String(p) : null
+}
 
 /** The options a verb's line offers for a message. */
 export function optionsOf(verb, rec) {
