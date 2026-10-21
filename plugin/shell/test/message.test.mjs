@@ -64,6 +64,16 @@ test('a fenced block keeps its lines: a link in it is no mark, an explainer neve
   assert.ok(!drawn.some(n => n.type === 'Button' && /352/.test(n.props.label)), 'no press on the link in the block')
 })
 
+test('a mark wider than the line breaks at its spaces, each piece still the mark; only a word wider than the line is cut', () => {
+  const heads = 'This affects every multi-line code block in a reply.'
+  const lines = wrapRuns([{ s: heads, mark: 0 }], 21)
+  assert.deepEqual(lines.map(l => runsText(l)), ['This affects every', 'multi-line code block', 'in a reply.'])
+  assert.ok(lines.every(l => l.length === 1 && l[0].mark === 0))
+  // a mark that fits stays whole on the next line; a single word wider than the line is cut by cells
+  assert.deepEqual(wrapRuns([{ s: 'Mostly from ' }, { s: 'the June 18 burst', mark: 1 }], 21).map(l => runsText(l)), ['Mostly from', 'the June 18 burst'])
+  assert.deepEqual(wrapRuns([{ s: 'abcdefghijklmnopqrstuvwxyz', mark: 2 }], 10).map(l => runsText(l)), ['abcdefghij', 'klmnopqrst', 'uvwxyz'])
+})
+
 const draw = (part, w = 90, h = 9) => { const d = runProgram(part, { w, h }); assert.equal(d.error, undefined, JSON.stringify(d.error)); return renderTerm(d, { w }) }
 
 test('a citation whose key holds spaces and brackets is one mark, and its card opens the row behind the value it shows', () => {

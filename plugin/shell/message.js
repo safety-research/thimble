@@ -594,16 +594,16 @@ export function width(str) {
 }
 
 /**
- * The runs cut into lines of at most `w` cells, at spaces. A mark (`mark` set) is never cut, unless it is wider than a
- * line; a word wider than a line is cut where the line ends. Each line is a list of runs; the space a line breaks on
- * is dropped.
+ * The runs cut into lines of at most `w` cells, at spaces. A mark (`mark` set) is kept whole on one line; a mark wider
+ * than a line breaks at its spaces as plain words do, each piece still the mark. Only a word wider than a line is cut
+ * where the line ends. Each line is a list of runs; the space a line breaks on is dropped.
  */
 export function wrapRuns(runs, w) {
   const W = Math.max(8, w)
-  // pieces: words with their spaces, a mark whole
+  // pieces: words with their spaces, a mark whole when it fits on a line
   const pieces = []
   for (const r of runs) {
-    if (r.mark !== undefined) { pieces.push({ ...r, sp: false }); continue }
+    if (r.mark !== undefined && width(r.s) <= W) { pieces.push({ ...r, sp: false }); continue }
     for (const part of r.s.split(/( +)/)) if (part) pieces.push({ ...r, s: part, sp: /^ +$/.test(part) })
   }
   const lines = []
