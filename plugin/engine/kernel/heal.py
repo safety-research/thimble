@@ -48,12 +48,17 @@ PATH = "path"
 # it): the same place, its ref written with the path under the root. It is not a repair
 FOLDER = "folder"
 NO_HOME, SEVERAL, GONE = "no_home", "several", "gone"
+# a quote re-pointed at the one row of the cited file that holds its words, when the cited row does not
+QUOTE = "quote"
 
 WHY_CONTRADICTED = "the cited place shows {source}"
 WHY_NOWHERE = "{where} shows no {value}"
 WHY_GONE = "the cited place is gone ({problem})"
 WHY_SEVERAL = "several places show {value}"
 WHY_NO_HOME = "no place shows {value}"
+WHY_NO_QUOTE = "the cited {unit} does not hold these words"
+WHY_QUOTE_ELSEWHERE = "the cited {unit} does not hold these words; {where} of {path} hold them"
+QUOTE_SCAN = 200000  # rows of the cited file searched for a quote its cited row does not hold
 
 SESSION_MAX = 200  # queries of the session searched, newest first
 _QUOTES = "\"“'‘"
@@ -63,7 +68,8 @@ _QUOTES = "\"“'‘"
 class Change:
     """What the pass did to one citation: `label` and `ref` as written; `state` linked, quiet or contradicted; `how`;
     `to` the ref it points at now (None when unwrapped); `source` what the cited place shows when it contradicts the
-    words; `why` the words a quiet or contradicted citation shows."""
+    words, or when the pass re-pointed the citation away from it; `why` the words a quiet or contradicted citation
+    shows."""
     label: str
     ref: str
     state: str
@@ -439,6 +445,79 @@ def _sibling(st: Store, p: dict[str, Any], label: str) -> str | None:
     return fits[0] if len(fits) == 1 else None
 
 
+_QUOTE_SPAN = re.compile(r'"([^"“”]+)"|“([^“”]+)”')
+
+
+def quotes_of(label: str) -> list[str]:
+    """The words a citation quotes: each passage of its words in quotation marks, of two words or more (`agent-07
+    wrote "yes, that was me"` quotes `yes, that was me`). [] for words that describe or count, which a row may state in
+    other words."""
+    s = " ".join(str(label or "").replace("**", "").split())
+    out = [(m.group(1) or m.group(2) or "").strip() for m in _QUOTE_SPAN.finditer(s)]
+    return [x for x in out if len(re.findall(r"[^\W\d_]{2,}", x)) >= 2]
+
+
+def _unit_words(p: dict[str, Any]) -> str:
+    return {"lines": "line", "csvrows": "row", "dbrows": "row"}.get(p.get("kind", ""), "record")
+
+
+def _place_list(refs: list[str], cited: int | None, unit: str) -> str:
+    """Where rows of one file are, the nearest to the cited one first, in words: `line 23`, `lines 5283, 5284 and 5285`,
+    `lines 12, 40, 41 and 9 more`."""
+    def num(r: str) -> int | None:
+        m = re.search(r"(\d+)$", r)
+        return int(m[1]) if m else None
+    if cited is not None:
+        refs = sorted(refs, key=lambda r: abs((num(r) or 0) - cited))
+    shown = sorted(refs[:3], key=lambda r: num(r) or 0)
+    names = [str(num(r)) if num(r) is not None else r.partition("#")[2] for r in shown]
+    rest = len(refs) - len(shown)
+    if rest:
+        words = f"{', '.join(names)} and {rest} more"
+    else:
+        words = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return f"{unit}{'s' if len(refs) > 1 else ''} {words}"
+
+
+def _quote_change(st: Store, p: dict[str, Any], label: str, ref: str, at_ref: str) -> Change | None:
+    """A citation of a file's rows whose words quote: None when the cited rows hold the quoted words. Else, when one row
+    of the same file holds them, the citation is re-pointed there, a correction as a misplaced number's is; when several
+    rows hold them, or none, the words are contradicted, with where they are when they are in the file."""
+    quotes = quotes_of(label)
+    if not quotes or p.get("kind") in ("file", "table"):
+        return None
+
+    def holds(row: S.Row) -> bool:
+        text = S.text_of(row)
+        return all(S.find_quote(text, q) for q in quotes)
+
+    try:
+        got = S.fetch(st.root, at_ref, limit=50)
+    except (R.RefError, OSError, ValueError):
+        return None
+    if not got or any(holds(r) for r in got):
+        return None
+    rel = (_parse(at_ref) or {}).get("path") or p.get("path", "")
+    hits: list[str] = []
+    try:
+        for n, row in enumerate(S.iter_rows(st.root, rel, p.get("table"))):
+            if n >= QUOTE_SCAN:
+                break
+            if holds(row):
+                hits.append(row.ref)
+    except (OSError, ValueError):
+        hits = []
+    unit = _unit_words(p)
+    if len(hits) == 1:
+        return Change(label, ref, LINKED, QUOTE, to=hits[0])
+    if hits:
+        nums = p.get("nums") or []
+        why = WHY_QUOTE_ELSEWHERE.format(unit=unit, where=_place_list(hits, nums[0] if nums else None, unit), path=rel)
+    else:
+        why = WHY_NO_QUOTE.format(unit=unit)
+    return Change(label, ref, CONTRADICTED, CONTRADICTED, to=ref, why=why)
+
+
 def _pick(hits: list[Place], at: _At) -> Place | None:
     """The one place to re-point at inside the cited query or card: the only place that holds the number; else the only
     one in the cited row, else the only one in the cited column."""
@@ -524,6 +603,9 @@ class _Pass:
             # a citation of a file's place is re-pointed only to a place in a file, never to a query or a card
             at = _at_source(self.st, p, ref)
             if at.exists:
+                quoted = _quote_change(self.st, p, label, ref, at.moved or ref)
+                if quoted:
+                    return quoted
                 return Change(label, ref, LINKED, FOLDER, to=at.moved) if at.moved else Change(label, ref, LINKED, KEPT, to=ref)
             fixed = _sibling(self.st, p, words)
             if fixed:
@@ -540,7 +622,9 @@ class _Pass:
         if found and how == CELL and found.row != at.row and _names_row(self.text, start, end, at.keys):
             found = None
         if found:
-            return Change(label, ref, LINKED, how or CELL, to=found.ref)
+            # what the place as written shows, for the note that says the citation was corrected
+            shown = _show(at.source) if at.exists and at.source is not None else None
+            return Change(label, ref, LINKED, how or CELL, to=found.ref, source=shown)
         if at.exists and at.source is not None and not several:
             return Change(label, ref, CONTRADICTED, CONTRADICTED, to=ref, source=_show(at.source),
                           why=WHY_CONTRADICTED.format(source=_show(at.source)))

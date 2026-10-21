@@ -998,12 +998,34 @@ def shown_rows(v: Any, n: int | None) -> list[int]:
     return list(range(k)) if k <= n else [*range(n // 2), *range(k - n // 2, k)]
 
 
+def numbered(v: Any) -> Any:
+    """The table with its rows numbered from 1 on the left, as a citation counts them (`r2#row=1` is the first row).
+    pandas numbers a plain table from 0, and Claude cites the number it reads. An unnamed whole-number index that is no
+    plain count (where the rows sat before a sort or a filter) shows as a column `index`, as the query's table keeps it.
+    A named index (a group's keys) stays: those rows are cited by their keys."""
+    import pandas as pd
+
+    idx = v.index
+    if idx.nlevels != 1 or idx.name is not None or not pd.api.types.is_integer_dtype(idx):
+        return v
+    out = v.copy(deep=False)
+    if not (isinstance(idx, pd.RangeIndex) and idx.start == 0 and idx.step == 1):
+        if isinstance(out, pd.Series):
+            out = out.to_frame(out.name if out.name is not None else "value")
+        name = "index"
+        while name in out.columns:
+            name += "_"
+        out.insert(0, name, idx)
+    out.index = pd.RangeIndex(1, len(out) + 1)
+    return out
+
+
 def display(v: Any, qid: str | None = None) -> tuple[str, int | None]:
     """show()'s text, and how many of a table's rows it shows at most (None for a value that is no table)."""
     try:
         import pandas as pd
         if isinstance(v, (pd.DataFrame, pd.Series)):
-            vv = v.drop(columns=ref_columns(v)[1]) if isinstance(v, pd.DataFrame) else v
+            vv = numbered(v.drop(columns=ref_columns(v)[1]) if isinstance(v, pd.DataFrame) else v)
 
             def render(n: int) -> str:
                 if isinstance(vv, pd.DataFrame):

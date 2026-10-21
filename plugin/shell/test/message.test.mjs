@@ -416,11 +416,18 @@ test('a code path written from the folder Claude ran cd into opens its place wit
 test('a re-pointed citation\'s card says where it pointed in words, never in the ref\'s own syntax', () => {
   const text = 'Kestrel made [41](r2#user=Kestrel%20B@n) edits.'
   const rec = remark(newRecord({ row: 'x', session: 's', text }))
-  const checked = withHeal(rec, textKey(text), { changes: [{ label: '41', ref: 'r2#user=Kestrel%20B@n', state: 'linked', how: 'cell', to: 'r2#user=Wren@n' }] })
+  const checked = withHeal(rec, textKey(text), { changes: [{ label: '41', ref: 'r2#user=Kestrel%20B@n', state: 'linked', how: 'cell', to: 'r2#user=Wren@n', source: '12' }] })
   const top = frameOf(healedRecord(checked), 0)
   const k = { text: s => s, escape: s => s }
   const body = cardBody(k, { drawings: [] }, top, null)
-  assert.deepEqual(body, ['{dim:moved here from the row with user Kestrel B (column n), which does not show this value}'])
+  // it says the citation was corrected, and what the place as written shows: no wording of an error
+  assert.deepEqual(body, ['{dim:corrected: the citation pointed at the row with user Kestrel B (column n), which shows 12}'])
+  // a quote the pass found on another line of the same file
+  const qt = 'The goal was ["Each agent: do well"](goals.jsonl#L50).'
+  const qrec = withHeal(remark(newRecord({ row: 'y', session: 's', text: qt })), textKey(qt), { changes: [{ label: '"Each agent: do well"', ref: 'goals.jsonl#L50', state: 'linked', how: 'quote', to: 'goals.jsonl#L23' }] })
+  const qtop = frameOf(healedRecord(qrec), 0)
+  assert.equal(qtop.ref, 'goals.jsonl#L23')
+  assert.deepEqual(cardBody(k, { drawings: [] }, qtop, null), ['{dim:corrected: the citation pointed at goals.jsonl:50, which does not hold these words}'])
   assert.ok(!/r2|#|@/.test(body[0]))
   assert.equal(placeWords('r5#team=north&day=mon@edits'), 'the row with team north and day mon (column edits)')
   assert.equal(placeWords('r5#row=3@edits'), "row 3 of a query's result (column edits)")
@@ -450,4 +457,13 @@ test('a citation whose place goes away after its check: its card names the ref o
   assert.equal(withGone(gone, ref, card.gone), null)
   // a text no pass has read is left to its pass
   assert.equal(withGone(rec, ref, card.gone), null)
+})
+
+test('a whole file\'s card counts its lines as the file has them: the newline that ends it starts no line', async () => {
+  const io = { resolve: async () => ({}), read: async () => 'one\ntwo\nthree\n' }
+  const card = await citeCard({ ref: 'notes/plan.md', label: 'the plan', root: '/data', room: 2 }, io)
+  assert.equal(card.parts[0].data.more, 'the first 2 of its 3 lines')
+  const all = await citeCard({ ref: 'notes/plan.md', label: 'the plan', root: '/data', room: 9 }, io)
+  assert.equal(all.parts[0].data.rows.length, 3)
+  assert.equal(all.parts[0].data.more, '')
 })

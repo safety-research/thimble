@@ -132,6 +132,22 @@ def test_a_quote_resolves_to_its_span_the_rows_around_it_and_the_quoted_words_in
     # an ellipsis splits a quote: from its first part to the end of its last
     hot = LIN.resolve(st, "say.jsonl#L7", label="“add SEC … map”")["span"]["rows"][2]
     assert hot["text"][hot["at"][0]:hot["at"][1]] == "add SEC county map"
+    # words that quote inside others: the quoted passage is marked
+    hot = LIN.resolve(st, "say.jsonl#L7", label='kim wrote "county map sources" there')["span"]["rows"][2]
+    assert hot["field"] == "change_summary" and hot["text"][hot["at"][0]:hot["at"][1]] == "county map sources"
+
+
+def test_rows_with_no_known_word_field_are_named_by_their_words_never_by_a_time_stamp(root: Path) -> None:
+    goals = ["Run a shop!", "Follow your leader!", "Holiday: rest, read and walk by the sea", "Organize an event!"]
+    with open(root / "goals.jsonl", "w") as f:
+        for i, g in enumerate(goals):
+            f.write(json.dumps({"id": f"g{i}", "goal": g, "created_at": f"2026-05-0{i + 1} 09:00:00.123456"}) + "\n")
+    st = Store(root)
+    sp = LIN.resolve(st, "goals.jsonl#L3", label='"rest, read and walk"')["span"]
+    # each row reads as its goal, not its created_at; the cited row shows the goal whole, the quoted words marked
+    assert [x["text"] for x in sp["rows"]] == goals
+    hot = sp["rows"][2]
+    assert hot["hot"] and hot["text"][hot["at"][0]:hot["at"][1]] == "rest, read and walk" and "meta" not in hot
 
 
 def test_a_long_message_cited_by_words_that_name_a_passage_opens_on_that_passage_marked(root: Path) -> None:

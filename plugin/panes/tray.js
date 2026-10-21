@@ -61,7 +61,7 @@ export function frameOf(rec, i) {
   const inner = m.kind === 'cite' ? rec.marks.map((x, j) => (x && x.kind === 'gloss' && x.start >= m.start && x.end <= m.end ? frameOf(rec, j) : null)).filter(Boolean) : []
   // what the healing pass found (message.js healedRecord): the card says it above the place
   const heal = m.kind === 'cite' && (m.heal === 'bad' || m.heal === 'quiet' || m.heal === 'gone') ? { heal: m.heal, why: String(m.why || '') }
-    : m.kind === 'cite' && m.heal === 'moved' && m.wrote ? { heal: 'moved', wrote: String(m.wrote) }
+    : m.kind === 'cite' && m.heal === 'moved' && m.wrote ? { heal: 'moved', wrote: String(m.wrote), ...(m.shows != null ? { shows: String(m.shows) } : {}), ...(m.quote ? { quote: true } : {}) }
       : m.kind === 'cite' && m.heal === 'kept' ? { heal: 'kept' } : {}
   return { row: rec.row, i, kind: m.kind === 'spark' ? 'spark' : 'cite', ref: m.ref, label: m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label || m.ref || ''), ...(inner.length ? { inner } : {}), ...heal }
 }
@@ -255,6 +255,14 @@ export function placeWords(ref) {
   return frag ? `${path} ${frag.replace(/^row=/, 'row ')}` : path
 }
 
+/** The note on a citation the healing pass re-pointed, in plain words: `corrected: the citation pointed at row 1 of a
+ *  query's result (column pct), which shows 97`, or for a quote, `… at goals.jsonl:50, which does not hold
+ *  these words`. */
+export function correctedWords(f) {
+  const what = f.shows != null && f.shows !== '' ? `, which shows ${f.shows}` : f.quote ? ', which does not hold these words' : ''
+  return `corrected: the citation pointed at ${placeWords(f.wrote)}${what}`
+}
+
 /** A mark's card as the tray and the side panel draw it (panes/mark.js): a line while it is read, its problem, the
  *  section open in place of it, else its drawings with the part that holds the value marked, and why it was cited. */
 export function cardBody(k, card, top, open) {
@@ -266,8 +274,9 @@ export function cardBody(k, card, top, open) {
   else if (top && top.heal === 'bad') parts.push(k.text(`{bad:× ${k.escape(top.why || 'the cited place contradicts this value')}}`))
   else if (top && top.heal === 'gone') parts.push(k.text(`{dim:? ${k.escape(top.why || 'the cited place is gone')}}`))
   else if (top && top.heal === 'quiet' && top.why) parts.push(k.text(`{dim:${k.escape(top.why)}}`))
-  // one it re-pointed: where it pointed as written, in words, so the fix is not invisible
-  else if (top && top.heal === 'moved' && top.wrote) parts.push(k.text(`{dim:moved here from ${k.escape(placeWords(top.wrote))}, which does not show this value}`))
+  // one it re-pointed: that it was corrected, where it pointed as written and what that place shows, so the fix is
+  // not invisible and does not read as an error
+  else if (top && top.heal === 'moved' && top.wrote) parts.push(k.text(`{dim:${k.escape(correctedWords(top))}}`))
   if (!card) {
     parts.push(k.text(`{dim:${top.kind === 'gloss' ? 'drawing the explainer…' : 'reading it through the kernel…'}}`))
   } else if (card.problem || card.error) {

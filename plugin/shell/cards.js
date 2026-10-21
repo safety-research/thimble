@@ -606,6 +606,10 @@ function headsCard(g, look = null) {
   return { title: g.term || g.title || 'heads up', right: 'heads up', parts: [{ program: WORDS_PROGRAM, data: { text: linkedText(md, links, look), links } }], links }
 }
 
+/** A file's text as its lines: a newline ends a line, so the one that ends the file starts no line after it (a file
+ *  of 284 lines that ends in a newline has 284 lines, not 285). */
+export const fileLines = text => { const t = String(text ?? ''); return (t.endsWith('\n') ? t.slice(0, -1) : t).split('\n') }
+
 /** A citation of a whole file: a path with no `#`, not a query's or a card's value. */
 export const wholeFile = ref => { const r = String(ref || ''); return !!r && !r.includes('#') && !/^([qr]\d+(@|$)|obj:|card:)/.test(r) && /\.[A-Za-z0-9]{1,10}$/.test(r) }
 
@@ -630,7 +634,7 @@ export async function citeCard({ ref, label, root, room = 9 }, io) {
   // a whole file (`plugin/prompts/context.md`): its top, read as it is, as a citation of its lines shows them
   if (wholeFile(ref)) {
     try {
-      const all = String(await io.read(path.startsWith('/') ? path : `${root}/${path}`)).split('\n')
+      const all = fileLines(await io.read(path.startsWith('/') ? path : `${root}/${path}`))
       const top = all.slice(0, room).map((text, i) => ({ n: i + 1, text: String(text).replace(/\t/g, '    ').slice(0, 300), hot: false }))
       const more = all.length > top.length ? `the first ${top.length} of its ${fmtN(all.length)} lines` : ''
       const file = fileLink(ref, root)
@@ -644,7 +648,7 @@ export async function citeCard({ ref, label, root, room = 9 }, io) {
     const a = Number(m?.[1] || 1)
     const b = Number(m?.[2] || a)
     try {
-      const all = String(await io.read(path.startsWith('/') ? path : `${root}/${path}`)).split('\n')
+      const all = fileLines(await io.read(path.startsWith('/') ? path : `${root}/${path}`))
       const from = Math.max(1, a - 2)
       const to = Math.min(all.length, Math.max(b + 2, from + room - 2))
       lines = []

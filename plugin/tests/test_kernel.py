@@ -260,3 +260,20 @@ def test_the_lineage_line_of_a_count_with_no_key(root: Path) -> None:
 
 
 # ------------------------------------------------------------------ run, and the ids from before it was named run
+
+
+def test_a_result_table_numbers_its_rows_from_1_as_a_citation_counts_them() -> None:
+    import pandas as pd
+
+    df = pd.DataFrame({"group": ["a", "b", "c"], "n": [5, 7, 9]})
+    # a plain table: the first row shows as 1, the row `r2#row=1` names
+    assert Q.show(df).splitlines()[1].split()[:3] == ["1", "a", "5"]
+    assert Q.show(df["n"]).splitlines()[0].split() == ["1", "5"]
+    # rows kept from a sort: numbered from 1, where they sat before kept as the column `index`
+    lines = Q.show(df.sort_values("n", ascending=False)).splitlines()
+    assert lines[0].split() == ["index", "group", "n"] and lines[1].split() == ["1", "2", "c", "9"]
+    # rows named by their keys stay named
+    assert Q.show(df.set_index("group")).splitlines()[2].split() == ["a", "5"]
+    # a long table keeps its count line and numbers its last row as its count
+    long = Q.show(pd.DataFrame({"v": range(100)}), "r9").splitlines()
+    assert long[-2].split() == ["100", "99"] and long[-1].startswith("(100 rows")

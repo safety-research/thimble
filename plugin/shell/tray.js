@@ -48,8 +48,12 @@ export function markNow(rec, frame) {
   const marks = rec && Array.isArray(rec.marks) ? rec.marks : []
   if (!frame || frame.i == null) return -1
   const kind = frame.kind === 'gloss' ? 'gloss' : frame.kind === 'spark' ? 'spark' : 'cite'
+  // a citation the healing pass re-pointed opens its new place (`ref`) and keeps the ref as written (`wrote`); the
+  // message's own marks may hold either, so the frame's mark is the one that names either of its refs. By its new ref
+  // alone, it would be found at another citation of that place, and ] would go back there.
+  const refs = new Set([frame.ref, frame.wrote].filter(Boolean))
   const shows = m => !!m && (kind === 'gloss' ? m.kind === 'gloss' && !!frame.gloss && m.gloss === frame.gloss.id
-    : (m.kind === 'spark' ? 'spark' : m.kind === 'gloss' ? 'gloss' : 'cite') === kind && m.ref === frame.ref)
+    : (m.kind === 'spark' ? 'spark' : m.kind === 'gloss' ? 'gloss' : 'cite') === kind && (refs.has(m.ref) || (!!m.wrote && refs.has(m.wrote))))
   if (shows(marks[frame.i])) return frame.i
   let best = -1
   marks.forEach((m, j) => { if (shows(m) && (best < 0 || Math.abs(j - frame.i) < Math.abs(best - frame.i))) best = j })

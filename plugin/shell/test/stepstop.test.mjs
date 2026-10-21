@@ -25,3 +25,20 @@ test('a stop is found by what it shows, so an explainer saved before it does not
   assert.equal(markNow(now, frameOf(now, 1)), 1)
   assert.equal(markNow({ row: 'm1', marks: [] }, frame), 1)
 })
+
+test('a citation the healing pass re-pointed is found by the ref as written, so ] goes on past it', () => {
+  // the third citation was written as row=3 and re-pointed to row=4, the place the second one names
+  const rec = { row: 'm1', marks: [cite('r2#row=1@pct', '97%'), cite('r2#row=4@pct', 'half'), cite('r2#row=1@pct', '37%'), cite('r2#row=3@pct', '16%'), cite('r2#row=6@pct', '14%')], glosses: {} }
+  const healed = { ...rec, marks: rec.marks.map((m, i) => (i === 2 ? { ...m, ref: 'r2#row=2@pct', wrote: m.ref, heal: 'moved' } : i === 3 ? { ...m, ref: 'r2#row=4@pct', wrote: m.ref, heal: 'moved' } : m)) }
+  const list = order([rec])
+  const seen = []
+  let at = 0
+  for (let k = 0; k < 8 && at >= 0; k++) {
+    seen.push(rec.marks[list[at].i].label)
+    const frame = frameOf(healed, list[at].i)
+    const here = list.findIndex(p => p.row === 'm1' && p.i === markNow(rec, frame))
+    const next = stepFrom(list, here, 1)
+    at = next ? list.indexOf(next) : -1
+  }
+  assert.deepEqual(seen, ['97%', 'half', '37%', '16%', '14%'])
+})
