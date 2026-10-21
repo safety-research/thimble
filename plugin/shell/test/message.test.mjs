@@ -124,6 +124,17 @@ test('a citation whose key holds spaces and brackets is one mark, and its card o
   assert.deepEqual(s2.rows.filter(r => r.hot).map(r => [r.cells[0], r.cells[s2.hotCol]]), [['won (clean ep)', '110']])
 })
 
+test('a column of a one-row table cited as a series is drawn as one value, not a chart of one bar', () => {
+  const query = { id: 'r4', about: 'all trips', keys: [], table: [{ group: 'all', n: 640, done: 211, rate: 0.33 }] }
+  const card = sourceCard({ ref: 'r4@n', label: '640', resolved: { ref: 'r4@n', count: 640, rows: [], records: [], chain: [] }, query })
+  assert.equal(card.parts.length, 1)
+  assert.equal(card.parts[0].data.value, '640')
+  assert.equal(card.parts[0].data.rows, undefined)
+  // two rows are still a series
+  const two = { ...query, table: [{ group: 'a', n: 400 }, { group: 'b', n: 240 }] }
+  assert.deepEqual(sourceCard({ ref: 'r4@n', label: 'n', resolved: { ref: 'r4@n', rows: [], records: [], chain: [] }, query: two }).parts[0].data.rows.map(x => x.value), [400, 240])
+})
+
 test("a citation's rows section names the cited files' own entries: records, rows or lines, and none for a whole file", () => {
   const query = { id: 'q4', about: 'survivors by class and sex', keys: ['class', 'sex'], table: [{ class: 3, sex: 'male', n: 347 }, { class: 1, sex: 'female', n: 94 }] }
   const ofRecords = { count: 347, rows: ['revisions.jsonl#L1-347'], records: [], chain: [], unit: 'records', unit_one: 'record' }
