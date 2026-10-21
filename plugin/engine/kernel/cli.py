@@ -676,14 +676,21 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
         scope += f" where {lab['where']}"
     if lab.get("within"):
         scope += f" within {lab['within'][0]}={lab['within'][1]}"
-    out = [head, f"  {s['records']:,} records of {scope}" + (f" (a trial: {s['records']:,} of {lab.get('matched', 0):,} at random)" if lab.get("trial") else "")]
+    parts = LB.units_of(st, lab)
+    unit = parts[0]["unit"] if len(parts) == 1 else "records"
+    out = [head, f"  {LB.unit_count(s['records'], unit)} of {scope}" + (f" (a trial: {s['records']:,} of {lab.get('matched', 0):,} at random)" if lab.get("trial") else "")]
+    if len(parts) > 1:
+        # a file's unit is its own: a count over lines and whole files together is no count of either
+        out.append(f"  the records mix units: {LB.units_said(parts)}; count each unit apart")
     qid = lab.get("query")
     vals = lab["values"] + [v for v in s["counts"] if v not in lab["values"]]
     w = max(len(v) for v in vals) if vals else 4
     for v in (vals if s["valued"] or not s["waiting"] else []):
         n = s["counts"].get(v, 0)
         cite = f"  {LB._cite_value(qid, lab['name'], v)}" if qid and n else ""
-        out.append(f"  {v:<{w}}  {n:>7,}{cite}")
+        each = [f"{u['counts'].get(v, 0):,} of the {LB.unit_count(u['n'], u['unit'])}" for u in parts]
+        by_unit = f"  ({', '.join(each)})" if len(parts) > 1 else ""
+        out.append(f"  {v:<{w}}  {n:>7,}{cite}{by_unit}")
     run = lab.get("run") or {}
     if run.get("state") == "ask" and (run.get("ask") or {}).get("rest"):
         out.append(f"  the other {s['waiting']:,} records wait for the analyst's choice: the model reads them "

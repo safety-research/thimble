@@ -238,3 +238,27 @@ def test_a_regex_reads_a_json_records_decoded_values_and_a_text_or_csv_row_as_th
     assert LB.counts(LB.define(st, "tlink", "regex", r"\bhttps?://", "notes.txt")["label"]) == {"yes": 1, "no": 2}
     # a CSV row as before: its columns' JSON, where the newline in the first row's cell is \n
     assert LB.counts(LB.define(st, "clink", "regex", r"\bhttps?://", "rows.csv")["label"]) == {"yes": 1, "no": 2}
+
+
+def test_a_label_counts_records_in_each_files_unit_and_says_when_it_mixes_units(root: Path):
+    notes = root / "notes"
+    notes.mkdir()
+    (notes / "plan.md").write_text("## Plan\n\nWe cite each source.\n")
+    (notes / "todo.md").write_text("## Todo\n\nNothing here.\n")
+    (notes / "tool.py").write_text("x = 1\n# cite the rows\ny = 2\n")
+    st = Store(root)
+    # one unit: lines of code are lines
+    r = run(root, "label", "cites-code", "--in", "notes/*.py", "--regex", r"\bcite\b")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert LB.load(st, "cites-code") and "3 lines of notes/*.py" in r.stdout
+    card = LB.card_spec(st, LB.load(st, "cites-code"), None)
+    assert card["title"] == "cites-code: 1 of 3 lines are yes"
+    # whole Markdown files and lines of code together: each counted in its unit, and the mix said plainly
+    r = run(root, "label", "cites", "--in", "notes/*", "--regex", r"\bcite\b")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "the records mix units: 3 lines and 2 files" in r.stdout
+    assert "(1 of the 3 lines, 1 of the 2 files)" in r.stdout
+    card = LB.card_spec(st, LB.load(st, "cites"), None)
+    assert card["title"] == "cites: 2 of 5 records are yes (3 lines and 2 files)"
+    assert card["text"].endswith("The records mix units (3 lines and 2 files): 1 of the 3 lines and 1 of the 2 files are yes.")
+    assert card["data"]["label"]["units"] == "3 lines and 2 files"
