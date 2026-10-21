@@ -827,6 +827,18 @@ export function withHeal(rec, key, result) {
   return { ...rest, heals }
 }
 
+/** The record with the citation of `ref` kept as gone in its shown text's result (its card found the place gone after
+ *  the pass checked it: `gone` says what is missing, `no query r21`), or null when nothing changes: no pass has read the
+ *  text yet (its pass finds the place gone itself), no citation opens `ref`, or it is gone already. */
+export function withGone(rec, ref, gone) {
+  const h = healOf(rec)
+  if (!h || !Array.isArray(h.changes)) return null
+  const j = h.changes.findIndex(c => c && (c.to === ref || (!c.to && c.ref === ref)))
+  if (j < 0 || h.changes[j].how === 'gone') return null
+  const why = `the cited place is gone${gone ? ` (${gone})` : ''}`
+  return withHeal(rec, h.key, { ...h, changes: h.changes.map((c, i) => (i === j ? { ...c, state: 'quiet', how: 'gone', why } : c)) })
+}
+
 /** Whether a record's shown text has citations the healing pass reads, and no pass has healed this text yet. */
 export function needsHeal(rec) {
   return citesOf(rec).length > 0 && !healOf(rec)

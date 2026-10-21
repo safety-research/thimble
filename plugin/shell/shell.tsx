@@ -32,7 +32,7 @@ import { paintRegions, selectable } from './cells'
 import { bodyRows, cardFrame, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
-import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withHeal, withObserver } from './message.js'
+import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withGone, withHeal, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, partLines, recordRefs, refsKey, regionMeta, regionRefs, splitsNote } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList, threadOf } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
@@ -967,6 +967,15 @@ async function runHeal($: Engine, row: string, key: string): Promise<void> {
   }
 }
 
+/** A citation whose card found its place gone after the pass checked it (a query deleted, a file moved since): the
+ *  record keeps it as gone in its text's result, so its mark is drawn as one that failed (a grey ?) and its card says
+ *  what is missing. A text no pass has read yet is left to its pass, which finds the place gone itself. */
+async function markGone($: Engine, row: string, ref: string, gone: string): Promise<void> {
+  const rec = await recordNow($, row)
+  const next = rec ? withGone(rec, ref, gone) : null
+  if (next) await saveRecord($, next as MsgRecord)
+}
+
 /** The results of texts no message record keeps (a thread's answer, a card's takeaway, an explainer), by their key,
  *  for this load of the module, and the passes over them that run now. */
 const healTexts = new Map<string, Any>()
@@ -1399,7 +1408,12 @@ async function trayCard($: Engine, req: Any, w: number, h: number): Promise<Any>
     const words = [g.body, g.here, ...(Array.isArray(g.bullets) ? g.bullets : []), g.todo].filter(x => typeof x === 'string' && x).join('\n')
     spec = explainerCard({ gloss: g, heal: (await healOfText($, words, { wait: true })).heal })
   }
-  else if (typeof req?.ref === 'string' && req.ref) spec = await sourceSpec($, req.ref, req.kind === 'spark' ? 'sparkline' : String(req.label || req.ref), h)
+  else if (typeof req?.ref === 'string' && req.ref) {
+    spec = await sourceSpec($, req.ref, req.kind === 'spark' ? 'sparkline' : String(req.label || req.ref), h)
+    if (spec?.unresolved && typeof req.row === 'string' && req.row) {
+      await markGone($, req.row, req.ref, String(spec.gone || '')).catch(err => failed($, 'The citation was not marked as gone in its message', err, 'Open the citation again'))
+    }
+  }
   else return { problem: 'this mark names no ref, so there are no rows to show', drawings: [], links: [] }
   return drawnCard(spec, async (part: Any) => (await drawPart($, part, w, h)).drawing)
 }

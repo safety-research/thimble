@@ -81,7 +81,8 @@ export function scopeOf(f) {
 /** What the host draws for a frame (the want's card). */
 export function cardRequest(f) {
   if (f.kind === 'gloss') return { kind: 'gloss', label: f.label, gloss: f.gloss || {} }
-  return { kind: f.kind || 'cite', ref: f.ref, label: f.label }
+  // the message's row: a citation whose place the card finds gone is drawn gone in its message too
+  return { kind: f.kind || 'cite', ref: f.ref, label: f.label, ...(f.row ? { row: f.row } : {}) }
 }
 
 /** The part of a drawing that carries one of `refs` (its region meta's `ref`), or null: a card's part a citation of
@@ -208,9 +209,11 @@ export function program(k, data) {
  *  section open in place of it, else its drawings with the part that holds the value marked, and why it was cited. */
 export function cardBody(k, card, top, open) {
   const parts = []
-  // a citation the healing pass found wrong: a red × and its reason; one whose place is gone: a grey ? and what is
-  // missing; one it unwrapped: why, in grey
-  if (top && top.heal === 'bad') parts.push(k.text(`{bad:× ${k.escape(top.why || 'the cited place contradicts this value')}}`))
+  // a citation the healing pass found wrong: a red × and its reason; one whose place is gone (when the pass checked
+  // it, or when its card was read later): a grey ? and what is missing; one it unwrapped: why, in grey
+  const unresolved = !!(card && card.unresolved)
+  if (unresolved) parts.push(k.text(`{dim:? ${k.escape(top && top.heal === 'gone' && top.why ? top.why : `the cited place is gone${card.gone ? ` (${card.gone})` : ''}`)}}`))
+  else if (top && top.heal === 'bad') parts.push(k.text(`{bad:× ${k.escape(top.why || 'the cited place contradicts this value')}}`))
   else if (top && top.heal === 'gone') parts.push(k.text(`{dim:? ${k.escape(top.why || 'the cited place is gone')}}`))
   else if (top && top.heal === 'quiet' && top.why) parts.push(k.text(`{dim:${k.escape(top.why)}}`))
   // one it re-pointed: where it pointed as written, so the fix is not invisible
@@ -219,7 +222,7 @@ export function cardBody(k, card, top, open) {
     parts.push(k.text(`{dim:${top.kind === 'gloss' ? 'drawing the explainer…' : 'reading it through the kernel…'}}`))
   } else if (card.problem || card.error) {
     parts.push(k.text(`{dim:${k.escape(String(card.problem || card.error))}}`))
-  } else if (card.unresolved && top && top.heal === 'gone' && top.why) {
+  } else if (unresolved) {
     // a citation whose place is gone: the line above already says what is missing
   } else if (open) {
     if (open.problem) parts.push(k.text(`{dim:${k.escape(String(open.problem))}}`))
