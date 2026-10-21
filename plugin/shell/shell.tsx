@@ -1462,6 +1462,16 @@ async function pickOption($: Engine, row: string, key: string, choice: string): 
   const rec = await recordNow($, row)
   if (!rec || key !== 'v') return false
   await setPick($, null)
+  // the view picked is no longer proposed: v stays lit only for the views still to make, so it is not lit beside the
+  // card it drew (v with none left asks for another view at once)
+  const v = (rec.verbs ?? {}).v
+  if (v && Array.isArray(v.proposals) && v.proposals.includes(choice)) {
+    const verbs = { ...rec.verbs }
+    const left = v.proposals.filter(p => p !== choice)
+    if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} view${left.length === 1 ? '' : 's'} ready` }
+    else delete verbs.v
+    await saveRecord($, { ...rec, verbs })
+  }
   // outside the press, but from its own work (not a timer), so this plugin's hooks hear the calls of the agent it starts
   void askForView($, rec, choice).catch(() => undefined)
   return true
