@@ -22,7 +22,7 @@
     "squeeze": {
       "type": "boolean",
       "title": "Squeeze and catch-up",
-      "description": "s makes an answer shorter or longer, and catches you up on replies you missed. A few words of the call after each reply; then one rewrite each time you ask.",
+      "description": "s makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.",
       "default": true
     },
     "explain": {

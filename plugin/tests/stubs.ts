@@ -5,7 +5,6 @@ const STUBS: Record<string, string> = {
   observer: 'FRAME\n{{LENSES}}',
   'observer-turn': 'NOW {{MESSAGES}} | {{ROW}} | {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}}\n{{DIGEST}}\n{{RULES}}\nREPLY {{SKELETON}}',
   'lens-actions': 'LENS actions',
-  'lens-squeeze': 'LENS squeeze',
   'lens-claims': 'LENS claims\n<!-- digest -->\nCLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}}{{GROWN}}\n<!-- when quiet -->\nGive no claims this time.',
   'lens-explain': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}',
   'lens-heads': 'LENS heads\n<!-- digest -->\n| {{HEADS}}',

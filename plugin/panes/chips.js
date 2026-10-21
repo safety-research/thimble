@@ -37,7 +37,7 @@ export default {
     if (!rec) return { row: args.row, rec: null }
     const s = rec.squeeze || {}
     // (the levels as Length's scale reads them now: a record from before the scale is read as atOf says)
-    const lean = { text: rec.text, shown: rec.shown ?? null, verbs: rec.verbs ? { s: rec.verbs.s || null } : {}, squeeze: { at: atOf(rec), scale: SCALE, own: Array.isArray(s.own) ? s.own : [], want: s.want || null, running: !!s.running, error: s.error || null, problems: s.problems || [] } }
+    const lean = { text: rec.text, shown: rec.shown ?? null, squeeze: { at: atOf(rec), scale: SCALE, own: Array.isArray(s.own) ? s.own : [], want: s.want || null, running: !!s.running, error: s.error || null, problems: s.problems || [] } }
     const catchup = isCatchUp(rec) ? { replies: Number(rec.catchup.replies) || 0 } : null
     return {
       row: args.row, rec: lean, catchup,
@@ -61,7 +61,8 @@ export function program(k, data) {
   // the row in order: the fixed three, then the person's own
   const row = [...chips.filter(c => c.kind !== 'own'), ...chips.filter(c => c.kind === 'own')]
   const focus = row.some(c => c.id === st.focus) ? st.focus : row[0].id
-  const orig = isOriginal(chips)
+  // (a record from before may show a version of a level that now reads as written: it is not the original, so 0 is offered)
+  const orig = isOriginal(chips) && typeof rec.shown !== 'string'
   const pending = !!rec.squeeze.want && !same(rec.squeeze.want, rec.squeeze.at)
   const held = !!data.keys
   const typing = held && typeof st.typing === 'string' ? st.typing : null
@@ -159,9 +160,8 @@ export function program(k, data) {
   row.forEach(c => {
     const picked = c.id === focus && typing == null
     const bg = picked ? 'warn-faint' : null
-    // at the level where the original stands a chip reads `as written`; Interpretation says it only
-    // while picked (`balanced, as written`), so the row keeps its width
-    const word = c.kind === 'fixed' && c.id !== 'length' && !picked && c.level === c.level0 ? c.levels[c.level] : levelWords(c)
+    // at the level where the original stands a chip reads `as written`
+    const word = levelWords(c)
     // the chip's digit first, the key that picks it
     const parts = [[' ', 'dim'], [`${items.length + 1}`, picked ? 'warn' : 'dim'], [' ', 'dim'], [c.name, picked ? 'warn' : 'dim', picked], [' ', 'dim'], ['dots'], [' ', 'dim'], [word, 'ink', picked], [' ', 'dim']]
     const width = parts.reduce((n, p) => n + (p[0] === 'dots' ? c.levels.length : k.len(p[0])), 0)
