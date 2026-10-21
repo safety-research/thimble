@@ -2,6 +2,7 @@
 // A card's takeaway, in the canvas's `[[value|ref]]` form, goes through the healing pass as a reply does (lib/heal): the
 // page sends it as Markdown links, each citation of a card shows a spinner while the check runs, then a re-pointed one
 // opens its new place and a contradicted one carries a red ×.
+import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown, ChipContext } from '../../src/chat/markdown.tsx'
 import { healInput } from '../../src/lib/heal.ts'
@@ -71,4 +72,36 @@ test('a citation whose place is gone turns gray in a reply once the check says s
   expect(chip.textContent).toBe('456')
   expect(chip.classList.contains('refchip-quiet')).toBe(true)
   expect(el.querySelectorAll('.refchip-checking')).toHaveLength(0)
+})
+
+test('a citation whose place is gone when it is opened turns gray with its reason, and so does each chip of its ref', async () => {
+  const reply = 'The run [started here](runs/r1.jsonl#L4) and [it started](runs/r1.jsonl#L4) once.'
+  let status = 404
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('fetch', async () =>
+    status === 404 ? new Response('{"detail":"\'runs/r1.jsonl#L4\'"}', { status: 404, headers: { 'content-type': 'application/json' } }) : json({ ref: 'runs/r1.jsonl#L4', kind: 'record', excerpt: 'a line' }),
+  )
+  const el = await mount(
+    <ChipContext.Provider value={{ workspace: 'w', broken: new Set() }}>
+      <ChatMarkdown text={reply} />
+    </ChipContext.Provider>,
+  )
+  await settle()
+  const chips = () => [...el.querySelectorAll<HTMLElement>('.refchip-value')]
+  expect(chips()).toHaveLength(2)
+  expect(chips().some((c) => c.classList.contains('refchip-quiet'))).toBe(false)
+  const hover = async () => {
+    await act(async () => chips()[0].dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 150))
+    })
+    await settle()
+  }
+  await hover()
+  expect(chips().every((c) => c.classList.contains('refchip-quiet'))).toBe(true)
+  expect(document.body.textContent).toContain('Not linked — the cited place is gone')
+  // the place is back (an undo): the next hover opens it and the chips look as before
+  status = 200
+  await hover()
+  expect(chips().some((c) => c.classList.contains('refchip-quiet'))).toBe(false)
 })

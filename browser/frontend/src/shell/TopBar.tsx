@@ -2,7 +2,8 @@
 // workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
 // the surfaces' tabs over the main area (a click shows the surface, a drag takes it to a pane); at the right Undo and
 // Redo (shell/undo.ts), the links toggle, the theme popover and the settings gear (Report a problem… is in its menu).
-// Before them, Fix… and the line of the fix Claude made (shell/FixEntry).
+// Before them, Fix… and the line of the fix Claude made (shell/FixEntry). After the tabs, a spinner and "working" while
+// main answers (MainWork), so a chat scrolled away or folded still shows that Claude works.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -23,6 +24,7 @@ import { listedLabels, type SideTab } from './LensSidebar'
 import { useConcepts } from '../canvas/concepts'
 import { useLenses } from '../lib/marks'
 import { useFeature } from '../features'
+import { useChatMetas } from '../chat/useChat'
 
 export interface SurfaceTab extends TabOption<Tab> {
   /** `focus`: the focused pane shows it; `shown`: another pane does; `hidden`: no pane does */
@@ -58,6 +60,22 @@ function SideButtons({ ws, side, onSide }: { ws: string; side: SideTab | null; o
     <span className="shell-side-btns">
       {labelsOn && button('labels', 'label', 'Labels', nLabels)}
       {lensesOn && button('checks', 'comment', 'Checks', lenses.length)}
+    </span>
+  )
+}
+
+/** Main's turn while it runs, as the chat list says it (`running`, which the server sets for the open turn). */
+export function mainRunning(metas: readonly { kind?: string; running?: boolean }[]): boolean {
+  return metas.some((m) => m.kind === 'main' && !!m.running)
+}
+
+export function MainWork({ ws }: { ws: string }) {
+  const metas = useChatMetas(ws)
+  if (!mainRunning(metas)) return null
+  return (
+    <span className="shell-main-work" role="status" data-busy="main" title="Claude is answering in main">
+      <Spinner size={10} />
+      working
     </span>
   )
 }
@@ -115,6 +133,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
           </button>
         ))}
       </nav>
+      <MainWork ws={ws} />
       <span className="shell-spacer" />
       <FixState ws={ws} />
       <FixButton />

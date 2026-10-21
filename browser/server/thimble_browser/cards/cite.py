@@ -100,6 +100,66 @@ def find(outputs: Any, col: str, row: str) -> tuple[str, str] | None:
     return None
 
 
+KIT_MIME = "application/vnd.thimble.kit+json"
+# the ids a drawn part can hold (plugin/draw/kit.js ID_RE)
+PART_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
+
+
+def part_id(anchor: str) -> str:
+    """The id the drawing kit gives a part a program names `anchor` (kit.js regionId): the anchor itself when an id can
+    hold it, else its slug, as kit.js slug() writes it. So `page-dse/StartSeite` is drawn as `page-dse-startseite`."""
+    if PART_ID.fullmatch(anchor):
+        return anchor
+    t = re.sub(r"^-+|-+$", "", re.sub(r"[^a-z0-9_.:]+", "-", anchor.lower()))[:48]
+    return t if re.match(r"[a-z0-9]", t) else "r"
+
+
+def _drawings(outputs: Any) -> Iterator[dict]:
+    for o in outputs or []:
+        kit = o.get(KIT_MIME) if isinstance(o, dict) else None
+        if isinstance(kit, dict) and isinstance(kit.get("drawing"), dict):
+            yield kit["drawing"]
+
+
+def region(outputs: Any, anchor: str) -> dict[str, Any] | None:
+    """The part of a program card's drawing that a citation's anchor names, {id, meta}, or None. The anchor is read as
+    written and as the kit renames it (part_id)."""
+    ids = {anchor, part_id(anchor)}
+    for d in _drawings(outputs):
+        for r in d.get("regions") or []:
+            if isinstance(r, dict) and r.get("id") in ids:
+                return r
+    return None
+
+
+def region_words(outputs: Any, rid: str, limit: int = 4000) -> str:
+    """The words a drawn part shows: its label, then the text it draws, as far as `limit`."""
+    out: list[str] = []
+    r = region(outputs, rid)
+    meta = r.get("meta") if r and isinstance(r.get("meta"), dict) else {}
+    if meta.get("label"):
+        out.append(str(meta["label"]))
+
+    def walk(n: Any, inside: bool, d: int = 0) -> None:
+        if d > 40 or sum(len(x) for x in out) > limit:
+            return
+        if isinstance(n, dict):
+            here = inside or (n.get("t") == "region" and r is not None and n.get("id") == r.get("id"))
+            if here and isinstance(n.get("s"), str):
+                out.append(n["s"])
+            for k, v in n.items():
+                if k != "meta":
+                    walk(v, here, d + 1)
+        elif isinstance(n, list):
+            for v in n:
+                walk(v, inside, d + 1)
+
+    if r is not None:
+        for dr in _drawings(outputs):
+            walk(dr.get("root"), False)
+    return " ".join(out)[:limit]
+
+
 def link_spans(text: str) -> list[tuple[str, str, int, int]]:
     """(words, target, start, end) of each Markdown link `[words](target)` of a text, not an image's. A target may hold
     spaces and balanced brackets, so a ref to a row named "(no name)", `[899](card:<id>#edits/(no name))`, is one link

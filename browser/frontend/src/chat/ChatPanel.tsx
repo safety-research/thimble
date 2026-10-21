@@ -155,6 +155,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     const p = pendingSend
     if (!p || p.chatId !== current || chat.loading || chat.meta == null || chat.meta.id !== current) return
     setPendingSend(null)
+    toEnd()
     chat.send(p.text)
   }, [pendingSend, current, chat.loading, chat.meta, chat.send])
 
@@ -178,6 +179,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // follow the newest record while the list is near its end; a thread opens at its end
   const nearEnd = useRef(true)
+  // a message sent: it and the work that answers it are at the end, so the list goes there and follows them
+  const toEnd = () => {
+    nearEnd.current = true
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }
   useEffect(() => {
     nearEnd.current = true
   }, [current])
@@ -327,7 +334,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const mainRows = useMemo(() => withApiErrors(foldRecords(main.records)), [main.records])
   // the API error that ended main's last turn: its Retry sends the analyst's message again
   const failed = useMemo(() => apiRetry(main.records, new Set()), [main.records])
-  const mainRetry = useMemo(() => (failed && !main.running ? { index: failed.index, onRetry: () => main.send(failed.text), note: MAIN_RETRY_NOTE } : undefined), [failed, main.running, main.send])
+  const mainRetry = useMemo(() => (failed && !main.running ? { index: failed.index, onRetry: () => {
+    toEnd()
+    return main.send(failed.text)
+  }, note: MAIN_RETRY_NOTE } : undefined), [failed, main.running, main.send])
   // the threads asked from main, as notes where they branched
   const branches = useMemo(
     () => chats.filter((m) => m.kind === 'thread' && (m.parent ?? 'main') === 'main').map((m) => ({ id: m.id, created_at: m.created_at, anchors: threadAnchors(m) })),
@@ -337,6 +347,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const [sendingView, setSendingView] = useState(false)
   // a send that fails hands its text back to the composer, so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    toEnd()
     if (kind === 'dev' && curMeta?.view) {
       // a view build's thread: the message is a change to the view, which its builder makes in this thread
       const slug = curMeta.view

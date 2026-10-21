@@ -83,6 +83,15 @@ def walk(corpus: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _count(top: str) -> int:
+    """The files under a folder at any depth that walk() lists: hidden files and skipped folders do not count."""
+    n = 0
+    for _, dirs, files in os.walk(top):
+        dirs[:] = [x for x in dirs if not _hidden(x) and x not in SKIP_DIRS]
+        n += sum(1 for name in files if not _hidden(name))
+    return n
+
+
 def stamp(corpus: Path, rel: str) -> str | None:
     """A folder's modification time, which a file added, removed or renamed in it changes; None for no folder. The
     Files tree lists a folder again when its stamp changes."""
@@ -107,7 +116,7 @@ def folder(corpus: Path, rel: str) -> dict[str, Any] | None:
         path = f"{rel}/{e.name}" if rel else e.name
         try:
             if e.is_dir(follow_symlinks=False):
-                n = sum(len(fs) for _, _, fs in os.walk(e.path))
+                n = _count(e.path)
                 folders.append({"path": path, "name": e.name, "is_run": False, "n_files": n, "n_folders": 0})
             elif e.is_file():
                 k = kind_of(path)
@@ -115,7 +124,9 @@ def folder(corpus: Path, rel: str) -> dict[str, Any] | None:
         except OSError:
             continue
     files.sort(key=lambda s: (KIND_ORDER.get(s["kind"], 9), s["path"]))
-    return {"path": rel, "files": files, "folders": folders, "n_files": len(files), "stamp": mark}
+    # n_files is every file under the folder, as the Files tree counts it: a folder that holds only folders is not empty
+    n_all = len(files) + sum(f["n_files"] for f in folders)
+    return {"path": rel, "files": files, "folders": folders, "n_files": n_all, "stamp": mark}
 
 
 def is_binary(p: Path) -> bool:

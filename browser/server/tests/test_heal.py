@@ -93,3 +93,27 @@ def test_a_missing_part_of_a_drawn_card_is_quiet_with_a_plain_reason():
         assert c["state"] == H.QUIET and c["why"] == "the card draws no part page/dse/StartSeite"
     finally:
         del CARDS["dddddd"]
+
+
+def test_a_drawn_part_is_checked_by_its_label_and_a_renamed_id_by_its_slug():
+    """`card:<id>#<part id>` is read against the part's label and text; an id with a slash is found as the kit slugs it."""
+    regions = [{"id": "built", "meta": {"label": "18 builds"}}, {"id": "legal", "meta": {"label": "legal moves 98.39%"}}, {"id": "shelf-a-northwing", "meta": {"label": "NorthWing 2,076"}},
+               {"id": "pair-Robin7-Wren12", "meta": {"label": "Robin7 and Wren12"}}, {"id": "gone-by", "meta": {"label": "deletions"}}]
+    root = {"t": "stack", "kids": [{"t": "region", "id": "gone-by", "meta": {"label": "deletions"},
+                                    "kid": {"t": "text", "runs": [{"s": "■"}, {"s": " deletions 5,217"}]}}]}
+    CARDS["eeeeee"] = {"id": "eeeeee", "kind": "program",
+                       "outputs": [{"application/vnd.thimble.kit+json": {"drawing": {"regions": regions, "root": root}}}]}
+    try:
+        _, c = one("The other [17](card:eeeeee#built) runs build.")
+        assert c["state"] == H.CONTRADICTED and c["source"] == "18" and c["why"] == "the cited part shows 18"
+        assert one("All [18 builds](card:eeeeee#built) pass.")[1]["state"] == H.LINKED
+        _, c = one("The headline [2,076](card:eeeeee#shelf-a/NorthWing) edits.")
+        assert c["state"] == H.LINKED and c["how"] == H.KEPT
+        assert one("Only [2,075](card:eeeeee#shelf-a/NorthWing) edits.")[1]["state"] == H.CONTRADICTED
+        assert one("[Robin7 and Wren12](card:eeeeee#pair-Robin7-Wren12) talk.")[1]["state"] == H.LINKED
+        assert one("[5,217](card:eeeeee#gone-by) deletions.")[1]["state"] == H.LINKED
+        assert one("[98.4% legal](card:eeeeee#legal) moves.")[1]["state"] == H.LINKED
+        _, c = one("[3](card:eeeeee#nothing) runs.")
+        assert c["state"] == H.QUIET and c["why"] == "the card draws no part nothing"
+    finally:
+        del CARDS["eeeeee"]

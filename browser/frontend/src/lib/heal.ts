@@ -2,7 +2,7 @@
 // cites card values: a reply, a card's takeaway, a report's text. A text is checked once it is whole, and each citation
 // chip inside its HealScope (components/RefChip) shows the result in place: a spinner while the check runs, then the
 // place it was re-pointed to, a red × when the cited place shows another value, or grey when its place is gone.
-import { createContext, createElement, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, createElement, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { api, type HealResult } from './api'
 import { bus } from './bus'
 import { splitValueRef } from './refs'
@@ -91,4 +91,42 @@ export function useHealLook(text: string, settled = true, workspace?: string): H
 /** The citations inside `children` as the pass left them for `text` (the words they are part of). */
 export function HealScope({ text, settled = true, workspace, children }: { text: string; settled?: boolean; workspace?: string; children: ReactNode }) {
   return createElement(HealContext.Provider, { value: useHealLook(text, settled, workspace) }, children)
+}
+
+// A citation whose place goes away after its text was checked (a card deleted, a file moved) is found when it is opened:
+// the server answers GET …/ref with 404 (or 400 for a ref it cannot read). Every chip of that ref on the page then draws
+// as a citation that failed, gray with its reason, until the ref opens again (an undo brings the card back).
+const failed = new Map<string, string>()
+const failedSubs = new Set<() => void>()
+let failedVersion = 0
+
+/** Why a ref's place failed, from the error of its fetch (lib/api: "<status> <detail>"); null when the server did not
+ * say the place is gone (no answer, a sign-in, a server error), which says nothing about the citation. */
+export function refFailure(err: unknown): string | null {
+  const m = /^(\d{3}) ?([\s\S]*)$/.exec((err as Error)?.message ?? '')
+  if (!m) return null
+  if (m[1] === '404' || m[1] === '410') return 'the cited place is gone'
+  if (m[1] === '400') return m[2].trim() || 'the cited place cannot be read'
+  return null
+}
+
+/** Record that `ref` failed with `why`, or that it opened again (null). */
+export function markRefFailed(ws: string, ref: string, why: string | null): void {
+  const k = `${ws}\n${norm(ref)}`
+  if (why == null ? !failed.delete(k) : failed.get(k) === why) return
+  if (why != null) failed.set(k, why)
+  failedVersion += 1
+  for (const fn of Array.from(failedSubs)) fn()
+}
+
+/** Why `ref` failed when it was last opened on this page, or null. */
+export function useRefFailure(ws: string, ref: string): string | null {
+  useSyncExternalStore(
+    (fn) => {
+      failedSubs.add(fn)
+      return () => failedSubs.delete(fn)
+    },
+    () => failedVersion,
+  )
+  return failed.get(`${ws}\n${norm(ref)}`) ?? null
 }
