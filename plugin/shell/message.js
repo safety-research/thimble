@@ -806,9 +806,30 @@ export function textKey(text) {
 
 const citesOf = rec => (Array.isArray(rec?.marks) ? rec.marks : []).filter(m => m && m.kind === 'cite' && !m.code)
 
+/** What the healing pass found in the text a record shows now, as {key, of, version, changes}, or null. A record keeps
+ *  the pass of each text it showed (`heals`, by text key), so a squeeze's version and the original each keep their
+ *  own checks as the person moves between them; `heal` is the one pass a record kept before that, for one text. */
+export function healOf(rec) {
+  const key = textKey(shownOf(rec))
+  const kept = rec && rec.heals && typeof rec.heals === 'object' ? rec.heals[key] : null
+  if (kept && typeof kept === 'object') return { ...kept, key }
+  return rec && rec.heal && rec.heal.key === key ? rec.heal : null
+}
+
+/** The record with a pass's result kept for the text it read (`key`), beside the passes of its other texts. */
+export function withHeal(rec, key, result) {
+  const heals = { ...(rec.heals && typeof rec.heals === 'object' ? rec.heals : {}) }
+  // a pass kept as `heal` before `heals` was kept with the rest, so it is not lost
+  if (rec.heal && typeof rec.heal.key === 'string' && !heals[rec.heal.key]) { const { key: k, ...was } = rec.heal; heals[k] = was }
+  const { key: _k, ...r } = result || {}
+  heals[key] = r
+  const { heal: _old, ...rest } = rec
+  return { ...rest, heals }
+}
+
 /** Whether a record's shown text has citations the healing pass reads, and no pass has healed this text yet. */
 export function needsHeal(rec) {
-  return citesOf(rec).length > 0 && !(rec.heal && rec.heal.key === textKey(shownOf(rec)))
+  return citesOf(rec).length > 0 && !healOf(rec)
 }
 
 /** The text the healing pass reads (the kernel's `thimble heal`): the shown text with each citation's target written
@@ -836,8 +857,8 @@ export function healInput(rec) {
 export function healedRecord(rec, { checking = false } = {}) {
   if (!citesOf(rec).length) return rec
   const text = shownOf(rec)
-  const h = rec.heal
-  if (h && h.key === textKey(text) && Array.isArray(h.changes)) {
+  const h = healOf(rec)
+  if (h && Array.isArray(h.changes)) {
     const used = new Set()
     const marks = rec.marks.map(m => {
       if (!m || m.kind !== 'cite' || m.code) return m

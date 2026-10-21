@@ -6,7 +6,8 @@ import test from 'node:test'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, linksIn, placeOf, sourceCard } from '../cards.js'
 import { linkRuns } from '../carddetail.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
-import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withObserver, wrapRuns } from '../message.js'
+import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withHeal, withObserver, wrapRuns } from '../message.js'
+import { applyRewrite, restore } from '../../squeeze/chips.mjs'
 import { back, base, open, order, push, step, stepFrom, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
@@ -104,6 +105,26 @@ test('the healing pass in a drawing: a spinner while it runs, a re-pointed citat
   assert.deepEqual([f.heal, f.why], ['gone', 'the cited place is gone (no query r9)'])
   // a squeeze's new text is a new key: its own pass, the old result left alone
   assert.equal(needsHeal({ ...healed, shown: 'Busiest: [5](r1#day=a@n).' }), true)
+})
+
+test('a squeeze and its revert keep each text\'s citation checks: the original\'s red × comes back with it', () => {
+  const text = 'Wrong: [4](r1#day=b@n), and more words here.'
+  const rec = remark(newRecord({ row: 'x', session: 's', text }))
+  const bad = { label: '4', ref: 'r1#day=b@n', state: 'contradicted', how: 'contradicted', to: 'r1#day=b@n', why: 'the cited place shows 3' }
+  const healed = withHeal(rec, textKey(text), { of: 'v1', version: 'v1', changes: [bad] })
+  // the shorter version, and its own pass (which found the place holds it)
+  const short = applyRewrite(healed, { text: 'Wrong: [4](r1#day=b@n).', at: { length: 0 } }, remark)
+  assert.equal(needsHeal(short), true)
+  const shortHealed = withHeal(short, textKey(shownOf(short)), { changes: [{ ...bad, state: 'linked', how: 'kept' }] })
+  assert.equal(healedRecord(shortHealed).marks.find(m => m.kind === 'cite').heal, undefined)
+  // 0: the original again, with its own result, and no new pass
+  const back = restore(shortHealed, remark)
+  assert.equal(needsHeal(back), false)
+  assert.deepEqual([healedRecord(back).marks.find(m => m.kind === 'cite').heal, healedRecord(back).marks.find(m => m.kind === 'cite').why], ['bad', 'the cited place shows 3'])
+  // a record kept before results were kept by text reads its one result, and keeps it beside the next
+  const old = { ...rec, heal: { key: textKey(text), changes: [bad] } }
+  assert.equal(needsHeal(old), false)
+  assert.equal(healedRecord(restore(withHeal(applyRewrite(old, { text: 'Wrong: [4](r1#day=b@n).', at: { length: 0 } }, remark), textKey('Wrong: [4](r1#day=b@n).'), { changes: [] }), remark)).marks.find(m => m.kind === 'cite').heal, 'bad')
 })
 
 test('an explainer and a re-pointed citation\'s card show what the healing pass did: grey with a ? when its place is gone, ×, the new place, and where it was moved from', async () => {

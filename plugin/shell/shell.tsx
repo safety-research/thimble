@@ -32,7 +32,7 @@ import { paintRegions, selectable } from './cells'
 import { bodyRows, cardFrame, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
-import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withObserver } from './message.js'
+import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withHeal, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, partLines, recordRefs, refsKey, regionMeta, regionRefs, splitsNote } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList, threadOf } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
@@ -890,8 +890,9 @@ async function drawnRecord($: Engine, at: string, text: string): Promise<MsgReco
 //
 // After a text with citations settles, the kernel's healing pass (`thimble heal`, engine/kernel/heal.py) checks each
 // citation against its place, in the background, with no model call. Its result is kept in the record as
-// `heal: {key, of, changes}`, for the text it read (message.js textKey), so a drawing reads it (healedRecord) and the
-// pass never runs twice over one text; a squeeze's new text is a new key. While it runs, each citation shows a small
+// `heals: {key: {of, changes}}`, by the text it read (message.js textKey, withHeal), so a drawing reads it (healedRecord)
+// and the pass never runs twice over one text; a squeeze's new text is a new key, and the original's checks come back
+// with the original. While it runs, each citation shows a small
 // spinner. Claude hears only of the values it stated that the cited place contradicts, as one row it alone reads.
 
 /** The passes running now, by `row|key`, with when each began; and the texts a pass has read in this load (one that
@@ -954,11 +955,11 @@ async function runHeal($: Engine, row: string, key: string): Promise<void> {
   if (!now || textKey(shownOf(now)) !== key) return
   if (!out || !Array.isArray(out.changes)) {
     // kept as checked, so it does not run again at each drawing; the person hears why once
-    await saveRecord($, { ...now, heal: { key, changes: [], error: true } } as MsgRecord)
+    await saveRecord($, withHeal(now, key, { changes: [], error: true }) as MsgRecord)
     failed($, 'The citations were not checked', (r.stderr || r.stdout || `exit ${r.exitCode}`).trim(), 'Open a citation to see its place')
     return
   }
-  await saveRecord($, { ...now, heal: { key, of: out.of, version: out.version, changes: out.changes } } as MsgRecord)
+  await saveRecord($, withHeal(now, key, { of: out.of, version: out.version, changes: out.changes }) as MsgRecord)
   const bad = out.changes.filter((c: Any) => c && c.state === 'contradicted' && !healTold.has(`${row}|${c.label}|${c.ref}`))
   if (bad.length) {
     healTell.push({ row, changes: bad })
