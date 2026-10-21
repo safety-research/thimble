@@ -10,6 +10,7 @@
 //   text   the takeaway, as Claude saved it; its citations show as their words
 // frameLines() is the same frame's text rows, for a test or a plain-text surface.
 import { width } from './message.js'
+import { quiet } from '../draw/hover.js'
 
 /** The frame's outer width for a drawing `gridW` columns wide, as wide as the drawing or its title needs and no wider
  *  than `outer`. */
@@ -104,16 +105,17 @@ export function cardFrame(els, o) {
   })
 }
 
-/** A row of the card's title in bold, a press that opens the card when `open` is given. */
+/** A row of the card's title in bold, a press that opens the card when `open` is given: under the pointer the title is
+ *  underlined (not the spaces after it), never inverse (hover.js). */
 export function titleRow(els, key, s, open, title) {
-  const t = els.Text({ key, bold: true, wrap: 'truncate-end', children: s })
-  return open ? els.Button({ key: `${key}-b`, plain: true, label: `open the card ${String(title || s).replace(/\s+/g, ' ').trim()}`, onPress: open, children: [t] }) : t
+  const t = els.Text({ key, bold: true, wrap: 'truncate-end', children: open ? s.trimEnd() : s })
+  return open ? els.Button({ key: `${key}-b`, plain: true, label: `open the card ${String(title || s).replace(/\s+/g, ' ').trim()}`, onPress: open, hover: quiet(`${key}-b`), children: [t] }) : t
 }
 
 /** The dim line under a cut drawing, a press that opens the card when `open` is given. */
 export function moreRow(els, s, open) {
-  const t = els.Text({ key: 'more', dimColor: true, wrap: 'truncate-end', children: s })
-  return open ? els.Button({ key: 'more-b', plain: true, label: 'open the card to see all its rows', onPress: open, children: [t] }) : t
+  const t = els.Text({ key: 'more', dimColor: true, wrap: 'truncate-end', children: open ? s.trimEnd() : s })
+  return open ? els.Button({ key: 'more-b', plain: true, label: 'open the card to see all its rows', onPress: open, hover: quiet('more-b'), children: [t] }) : t
 }
 
 /** A card in one row, for a column too narrow for its frame (a chat beside a pane): `□ ` and its title, cut to fit,
@@ -132,5 +134,5 @@ export function cardLine(els, o) {
     els.Text({ key: 'o', dimColor: true, children: 'open' }),
   ]
   const row = els.Text({ key: o.key, wrap: 'truncate-end', children: kids })
-  return o.open ? els.Button({ key: `${o.key}-b`, plain: true, label: `open the card ${t}`, onPress: o.open, children: [row] }) : row
+  return o.open ? els.Button({ key: `${o.key}-b`, plain: true, label: `open the card ${t}`, onPress: o.open, hover: quiet(`${o.key}-b`), children: [row] }) : row
 }

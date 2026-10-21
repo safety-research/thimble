@@ -81,14 +81,20 @@ export function selectedHex(tone, theme = 'dark', onFill = false) {
 }
 
 /**
- * The color of a selected mark (a bar's cells, a spark, a plot's dots): its own color halfway to the theme's text, so
- * it lights up (paler on the dark theme, deeper on the light one) and keeps its hue, and the parts of a stacked bar stay
- * apart. A mark is selected by its color alone: its cell's ground stays as it was, so the gap between bars on
- * neighboring rows stays (paint.js). A track (`rule`) keeps its color.
+ * The color of a selected or hovered mark (a bar's cells, a spark, a plot's dots): its own color halfway to the theme's
+ * text, so it lights up (paler on the dark theme, deeper on the light one) and keeps its hue, and the parts of a stacked
+ * bar stay apart. A mark is selected by its color alone: its cell's ground stays as it was, so the gap between bars on
+ * neighboring rows stays (paint.js). A track (`rule`, a faint tone) keeps its color.
  */
 export function selectedMark(tone, theme = 'dark') {
   const t = tone || 'ink'
-  if (t === 'rule') return hex(t, theme)
-  // (under `auto` the ink is not known: a mark deepens toward the middle gray, which reads on either background)
-  return mix(hex(t, theme), autoTheme ? MID : hex('ink', theme), autoTheme ? 0.7 : 0.5)
+  if (isTrack(t)) return hex(t, theme)
+  // (under `auto` the background is not known: a mark deepens to a dark shade of its hue, which reads on a light
+  // terminal and on a dark one and is clearly not its color at rest)
+  return mix(hex(t, theme), autoTheme ? '#202020' : hex('ink', theme), autoTheme ? 0.55 : 0.5)
+}
+
+/** Whether a tone is a track or a ground (`rule`, a faint tone), which a selection or the pointer never recolors. */
+export function isTrack(tone) {
+  return /^rule$|-faint$/.test(String(tone || ''))
 }

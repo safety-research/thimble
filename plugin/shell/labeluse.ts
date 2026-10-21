@@ -16,6 +16,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { termColor } from '../draw/palette.js'
+import { quiet } from '../draw/hover.js'
 import { defLine, howMade, spotsIn, toneBeside, tonesIn } from '../panes/labels.js'
 import { openLabel } from './dock'
 import { currentTheme, leanEnv, rootHere } from './shell'
@@ -69,7 +70,7 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; theme:
   const kids: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: lead })]
   used.forEach((l, i) => {
     if (i) kids.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
-    kids.push(Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ bold: true, children: l.name })] }))
+    kids.push(Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), hover: quiet(`${o.key}-n${i}`), children: [Text({ bold: true, children: l.name })] }))
     const how = howMade(l.kind)
     if (how) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how}` }))
     const shownValues = l.values.slice(0, 8)
@@ -83,7 +84,7 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; theme:
       const color = tone ? termColor(tone, o.theme) : null
       const words = color ? [Text({ color, children: `● ${v}` })] : l.tones ? [Text({ dimColor: true, children: '●' }), Text({ children: ` ${v}` })] : [Text({ children: `● ${v}` })]
       kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
-      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: words }))
+      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), hover: quiet(`${o.key}-v${i}-${j}`), children: words }))
     })
   })
   return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: kids })

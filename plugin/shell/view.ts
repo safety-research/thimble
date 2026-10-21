@@ -13,6 +13,7 @@
 //                       rows; its keys are in the bar under it, and its color says cite or explain
 import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
 import { paintRegions } from './cells'
+import { quiet } from '../draw/hover.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -75,7 +76,7 @@ function runText(els: Any, r: Run, dim = false, ink: string | null = null, wrap?
 }
 
 /** A mark's run as a press: the citation underlined in purple, the gloss on its teal fill, the sparkline in place; the
- *  focused one inverse. A gloss on words inside a citation's words keeps its fill, underlined, and a click on it opens
+ *  focused citation bold. A gloss on words inside a citation's words keeps its fill, underlined, and a click on it opens
  *  the citation (the words are the citation's); the citation's card in the tray offers the gloss. */
 function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const m = o.rec.marks[r.mark as number]
@@ -98,7 +99,9 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
     // a value the pass unwrapped: plain grey words (a press still says why)
     if (on) { p.backgroundColor = 'selectionBg'; p.color = 'text' } else p.color = 'inactive'
   } else if (m.kind === 'cite') {
-    if (on) { p.backgroundColor = c.cite; p.color = c.paper } else { p.color = c.cite; p.underline = true }
+    // (the focused one bold in its own color: never a fill, so it reads like the rest of the reply)
+    p.color = c.cite; p.underline = true
+    if (on) p.bold = true
   } else if (m.kind === 'gloss') {
     const heads = o.rec.glosses?.[m.gloss as string]?.kind === 'heads'
     p.color = heads ? c.headsInk : c.glossInk
@@ -114,7 +117,8 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const own = seen && !seen.has(r.mark as number) ? `mk-${o.rec.row}-${r.mark}` : key
   seen?.add(r.mark as number)
   const opens = inCite ? (r.within as number) : (r.mark as number)
-  return els.Button({ key: own, plain: true, label, children: [els.Text(p)], onPress: () => o.onMark(opens) })
+  // under the pointer a mark turns bold, never inverse, all its runs at once: one hover group per mark (hover.js)
+  return els.Button({ key: own, plain: true, label, hover: quiet(`mk-${o.rec.row}-${opens}`, { underline: false, bold: true }), children: [els.Text(p)], onPress: () => o.onMark(opens) })
 }
 
 /** One laid-out line: its runs, each mark a press. */
@@ -139,8 +143,8 @@ function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'da
   const glyph = els.Text({ children: dot ? '●' : ' ' })
   if (!ask) return els.Box({ width: 2, flexShrink: 0, children: [glyph] })
   const blue = keyColor('?', theme)
-  if (ask.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${ask.key}-asked`, plain: true, label: `open the thread about ${ask.label}`, onPress: ask.press, children: [els.Text({ color: blue, children: '↳' })] })] })
-  const q = els.Button({ key: `${ask.key}-ask`, plain: true, label: `ask about ${ask.label}`, onPress: ask.press, children: [els.Text({ color: blue, bold: true, children: '?' })] })
+  if (ask.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${ask.key}-asked`, plain: true, label: `open the thread about ${ask.label}`, onPress: ask.press, hover: quiet(`${ask.key}-asked`), children: [els.Text({ color: blue, children: '↳' })] })] })
+  const q = els.Button({ key: `${ask.key}-ask`, plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`${ask.key}-ask`), children: [els.Text({ color: blue, bold: true, children: '?' })] })
   return els.Box({ width: 2, flexShrink: 0, children: [glyph, els.Box({ width: 1, display: 'none', hover: { display: 'flex' }, position: 'absolute', top: 0, left: 0, children: [q] })] })
 }
 

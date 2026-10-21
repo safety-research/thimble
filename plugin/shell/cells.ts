@@ -8,8 +8,9 @@
 //   from, rows: the window of rows to draw (default all), so a tall object fits a pane
 //   painted: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
 //   color; in the transcript it is the terminal's own. The selected region's words are bold in their own color (the
-//   gutter's ▸ marks the row too), and its marks (a bar's cells) are drawn exactly as when nothing is selected: a
-//   selection never hides or recolors a bar.
+//   gutter's ▸ marks the row too), and its marks (a bar's cells, every part of a stacked bar) turn a brighter shade of
+//   their own color (palette.js selectedMark) on their own ground, so the bar keeps its height. The pointer over a
+//   row's press does the same: its words bold, its marks the brighter shade, never inverse (hover.js).
 //   frame: a color for the card's own frame (its outer ╭─╮ │ ╰─╯ cells), as the card the keys act on is drawn
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
 //   a knob's dial (`label ◂ value ▸`, k.dial) is two Buttons, its halves: a click on the left half calls onPress(id, -1),
@@ -17,7 +18,8 @@
 //   nothing is drawn as a link that a click does not answer: a link's underline only where there is a press
 //   (`onPress`), and a link to an id nothing defines (no region, cite, examples or knob) is plain words
 import { paintGrid, selectionOf } from '../draw/paint.js'
-import { hex, termColor } from '../draw/palette.js'
+import { hex, isTrack, selectedMark, termColor } from '../draw/palette.js'
+import { quiet, scopeOf } from '../draw/hover.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -89,24 +91,36 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       if (c.cont) return
       const region = owner[y * grid.w + x] || ''
       const edge = framed && (y === 0 || y === grid.h - 1 || x === 0 || x === grid.w - 1) && EDGE.test(c.ch)
-      // the selection marks its words (only where the selection is their own region), never its marks
+      // a mark lights up wherever it lies in the selection (a stacked bar's parts with its row); its words only where
+      // the selection is their own region
       const at = sel ? look(x, y) as 'text' | 'mark' | null : null
-      const on = at === 'text' && region === sel ? at : null
+      const on = at === 'mark' || (at === 'text' && region === sel) ? at : null
       const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${region}|${edge ? 1 : 0}|${on || ''}`
       if (cur && cur.k === k) cur.s += c.ch
       else { cur = { k, s: c.ch, c, region, edge, on }; segs.push(cur) }
     })
-    const text = (g: Seg) => {
+    // a mark's brighter shade, for the selection and the pointer: its own color (and its own ground's, where the cell
+    // has one) a step toward the theme's text; a track keeps its color
+    const lit = (g: Seg) => {
+      const p: Any = {}
+      if (!isTrack(g.c.tone)) p.color = selectedMark(g.c.tone, theme)
+      if (g.c.bg && !isTrack(g.c.bg)) p.backgroundColor = selectedMark(g.c.bg, theme)
+      return p
+    }
+    const text = (g: Seg, scope?: string) => {
       const p: Any = { children: g.s }
       const color = g.edge ? opts.frame : termColor(g.c.tone, theme, { painted: !!opts.painted })
       if (color) p.color = color
-      if (g.c.b || g.on) p.bold = true
+      if (g.c.b || g.on === 'text') p.bold = true
       // a link is underlined only where a click answers it
       if (g.c.ref && opts.onPress && g.region) p.underline = true
       if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
+      if (g.on === 'mark') Object.assign(p, lit(g))
+      // the pointer over the row lights its marks the same way
+      else if (scope && g.c.m && Object.keys(lit(g)).length) p.hover = { scope, ...lit(g) }
       return Text(p)
     }
-    if (!opts.onPress || !segs.some(g => g.region)) return Text({ wrap: 'truncate-end', children: segs.map(text) })
+    if (!opts.onPress || !segs.some(g => g.region)) return Text({ wrap: 'truncate-end', children: segs.map(g => text(g)) })
     // runs of one region are one Button: a click anywhere on it selects the region
     const kids: Any[] = []
     let i = 0
@@ -122,16 +136,17 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       // Claude Code draws a press inverse under the ring and the pointer, which leaves a bar a thin line on a block of
       // the text's color: a run of words and marks is cut where it turns from one to the other, its first words
       // keeping the key the ring stands on. The marks are a press of their own (`|#n`), so a click on a bar still
-      // opens its part, and the pointer over them leaves them as drawn and turns the row's words inverse instead (one
-      // hover scope per row of a region). A run of marks alone stays one press.
+      // opens its part. All the presses of a region's row are one hover group: the pointer over any of them turns the
+      // row's words bold and lights its marks, and none turns inverse (hover.js). A run of marks alone stays one press.
       const parts = run.some(g => !g.c.m) && run.some(g => g.c.m) ? splitMarks(run) : [run]
       const lead = parts.findIndex(p => !p[0]!.c.m)
-      const scope = run.some(g => g.c.m) ? `row-${hash(`${key}|${y}|${id}`)}` : null
+      const scope = scopeOf(`${key}|${y}|${id}`)
       parts.forEach((part, n) => {
         const own = n === lead || (lead < 0 && n === 0)
-        const marks = !!part[0]!.c.m
-        const hover = scope ? { hover: { scope, inverse: !marks } } : {}
-        kids.push(Button({ key: `r|${key}|${y}|${id}${own ? '' : `|#${n}`}`, plain: true, label, ...hover, children: part.map(text), onPress: () => opts.onPress!(id) }))
+        const marks = part.every(g => g.c.m)
+        // (a row's words turn bold rather than underlined, which would run under the spaces between them)
+        const hover = quiet(`${key}|${y}|${id}`, marks ? { underline: false } : { underline: false, bold: true })
+        kids.push(Button({ key: `r|${key}|${y}|${id}${own ? '' : `|#${n}`}`, plain: true, label, hover, children: part.map(g => text(g, scope)), onPress: () => opts.onPress!(id) }))
       })
     }
     return Box({ flexDirection: 'row', children: kids })
@@ -145,8 +160,8 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       const join = (xs: Seg[]) => xs.reduce((acc: Seg[], c) => { const last = acc[acc.length - 1]; if (last && last.k === c.k) last.s += c.s; else acc.push({ ...c }); return acc }, [])
       const parts: [Seg[], number, string][] = [[join(cells.slice(0, half)), -1, 'back'], [join(cells.slice(half)), 1, 'next']]
       return parts.filter(([xs]) => xs.length).map(([xs, turn, what]) => Button({
-        key: `t|${key}|${y}|${id}|${what}`, plain: true, label: `${label}: ${what}`,
-        children: xs.map(text), onPress: () => opts.onPress!(id, turn),
+        key: `t|${key}|${y}|${id}|${what}`, plain: true, label: `${label}: ${what}`, hover: quiet(`t|${key}|${y}|${id}|${what}`),
+        children: xs.map(g => text(g)), onPress: () => opts.onPress!(id, turn),
       }))
     }
   }
@@ -159,13 +174,6 @@ const EDGE = /^[╭╮╰╯─│]+$/
 function isFramed(grid: Grid): boolean {
   const top = grid.rows[0]
   return !!top && top[0]?.ch === '╭' && top[grid.w - 1]?.ch === '╮'
-}
-
-/** A short, stable name for a string (a hover scope is at most 64 characters). */
-function hash(s: string): string {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
-  return h.toString(36)
 }
 
 /** A region's run of a row cut where it turns from words to marks and back: [[words], [marks], [words]…]. */

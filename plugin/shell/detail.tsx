@@ -46,6 +46,7 @@ import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
 import { actionsOf, backOf, belowAt, hostKeys, takes, turnWords } from '../panes/host.js'
 import { paintRegions, regionOfKey } from './cells'
+import { quiet } from '../draw/hover.js'
 import { askMerge, beganWord, editsOf, examplesView, PAGES_DEFAULT, partsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
@@ -819,7 +820,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     const label = String(parts.find((x: Any) => x.id === at)?.label || at)
     // the selected part's cell takes the ring whenever the pane takes the keyboard (an open, a key that gave it back),
     // except while a question is being typed: then the input bar takes it
-    return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), children: [mark], ...(ids.includes(region ?? '') && !isAsk(ringAt) ? { autoFocus: true } : {}) })
+    return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), hover: quiet(GUTTER(y), { underline: false, bold: true }), children: [mark], ...(ids.includes(region ?? '') && !isAsk(ringAt) ? { autoFocus: true } : {}) })
   })
   const kids: Any[] = [...back, Box({ flexDirection: 'row', children: [
     Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: gcells }),
@@ -948,7 +949,7 @@ function actionEls(els: Any, acts: { event: string; words: string; on?: boolean 
   // (the one open now is bold: what it opened stands right above; a press again closes it)
   const kids = acts.flatMap((a, i) => [
     ...(i ? [Text({ key: `act-sep-${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: `side-${a.event.replace(/:on$/, '')}`, plain: true, label: a.on ? `${a.words} (open: press to close)` : a.words, onPress: () => fire(a.event), children: [Text({ color, ...(a.on ? { bold: true, underline: true } : {}), children: a.words })] }),
+    Button({ key: `side-${a.event.replace(/:on$/, '')}`, plain: true, label: a.on ? `${a.words} (open: press to close)` : a.words, onPress: () => fire(a.event), hover: quiet(`side-${a.event}`), children: [Text({ color, ...(a.on ? { bold: true, underline: true } : {}), children: a.words })] }),
   ])
   return [Text({ key: 'act-gap', children: ' ' }), Box({ key: 'side-acts', flexDirection: 'row', flexWrap: 'wrap', marginLeft: 1, children: kids })]
 }
@@ -983,7 +984,7 @@ async function backEls($: Engine, els: Any, pane: { view: PaneView; drawing: Any
     await takeKeys($)
   }
   return [
-    els.Box({ key: 'side-back-row', marginLeft: 1, children: [Button({ key: 'side-back', plain: true, label: `back to ${words}`, onPress: () => { void go() }, children: [Text({ color: IND[currentTheme()], children: `‹ ${words}` })] })] }),
+    els.Box({ key: 'side-back-row', marginLeft: 1, children: [Button({ key: 'side-back', plain: true, label: `back to ${words}`, onPress: () => { void go() }, hover: quiet('side-back'), children: [Text({ color: IND[currentTheme()], children: `‹ ${words}` })] })] }),
     Text({ key: 'side-back-gap', children: ' ' }),
   ]
 }
@@ -1055,7 +1056,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
     if (!ids) return Text({ key: `sg${y}`, children: [mark] })
     const id = ids.includes(region ?? '') ? region! : ids[0]!
     const label = String((grid.regions as Any[]).find(r => r.id === id)?.meta?.label || id)
-    return els.Button({ key: SIDE_GUTTER(y), plain: true, label, onPress: () => onPress(id), children: [mark] })
+    return els.Button({ key: SIDE_GUTTER(y), plain: true, label, onPress: () => onPress(id), hover: quiet(SIDE_GUTTER(y), { underline: false, bold: true }), children: [mark] })
   })
   const kids: Any[] = [...back, ...(above ? [above, els.Text({ key: 'above-gap', children: ' ' })] : []), Box({ flexDirection: 'row', children: [
     Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: gcells }),
