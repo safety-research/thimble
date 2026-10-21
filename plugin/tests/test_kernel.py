@@ -120,6 +120,26 @@ def test_a_groupby_keeps_each_output_rows_source_rows(root: Path) -> None:
     assert q["inputs"][0]["path"] == "saves.jsonl" and q["inputs"][0]["rows_read"] == 10
 
 
+def test_load_gives_a_csvs_numbers_as_numbers_and_keeps_its_row_refs(root: Path) -> None:
+    with open(root / "orders.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["shop", "zip", "items", "price"])
+        w.writerows([["north", "02139", "9", "2.50"], ["south", "10001", "10", ""], ["north", "02139", "2", "1.25"]])
+    st = Store(root)
+    q = Q.run(st, "order sums", 'd = load("orders.csv")\n'
+                                'print(d["items"].sum(), d.price.sum(), list(d.sort_values("items")["items"]), list(d.zip))\n'
+                                'print(list(d._ref))')
+    assert q["error"] is None, q["error"]
+    # 9 + 10 + 2 adds, a sort orders 10 after 9, a blank price is left out, and a code that starts with 0 stays text
+    assert "21 3.75 [2, 9, 10] ['02139', '10001', '02139']" in q["stdout"]
+    # each row's citation is as before, and it opens the row as the file holds it
+    assert "['orders.csv#row=1', 'orders.csv#row=2', 'orders.csv#row=3']" in q["stdout"]
+    assert S.fetch(root, "orders.csv#row=2")[0].value == {"shop": "south", "zip": "10001", "items": "10", "price": ""}
+    # a group of a number column is cited by its value, and the citation opens the rows of that group
+    t = Q.run(st, "by items", 'tally(load("runs.csv"), "passed")')
+    assert t["keys"] == ["passed"] and t["rows"][1] == ["runs.csv#row=1,3"]
+
+
 def test_a_changed_input_makes_a_query_stale(root: Path) -> None:
     st = Store(root)
     q = Q.run(st, "rows", 'len(load("runs.csv"))')

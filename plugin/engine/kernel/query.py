@@ -116,6 +116,7 @@ def get(st: Store, qid: str) -> dict[str, Any] | None:
 CACHE_MIN = 200_000  # bytes: a source file bigger than this keeps its parsed frame in the cache
 PARALLEL_MIN = 64_000_000  # bytes of files not yet in the cache: a load over this parses them in worker processes
 PARALLEL_MAX = 8  # worker processes at most
+FRAME_V = 2  # 2: a CSV's numeric columns are numbers
 
 
 def _frame_cache(st: Store, rel: str):
@@ -123,7 +124,8 @@ def _frame_cache(st: Store, rel: str):
     with an index of where each starts, so a load that names its fields reads only those columns."""
     p = st.root / rel
     s = p.stat()
-    key = hashlib.sha1(f"{rel}:{s.st_size}:{s.st_mtime_ns}".encode()).hexdigest()[:16]
+    # FRAME_V names how a file is parsed: a frame parsed another way is parsed again
+    key = hashlib.sha1(f"{FRAME_V}:{rel}:{s.st_size}:{s.st_mtime_ns}".encode()).hexdigest()[:16]
     return st.cache / "frames2" / f"{key}.cols"
 
 
@@ -192,8 +194,35 @@ def _parse_frame(root: Path, rel: str, table: str | None):
         recs.append(v if isinstance(v, dict) else {"text": v})
         refs.append(row.ref)
     df = pd.DataFrame.from_records(recs) if recs else pd.DataFrame()
+    if recs and S.kind_of_file(root, rel) == "csv":
+        df = _csv_numbers(df)
     df.insert(0, "_ref", refs)
     df.insert(1, "_file", rel)
+    return df
+
+
+_CODE = re.compile(r"^[+-]?0\d")
+
+
+def _csv_numbers(df):
+    """A CSV's columns of numbers as numbers, as a reader of the table expects: a sum adds, a sort orders by size. A
+    column turns only when each of its filled cells is a number; an empty cell is then NaN. A column with a code that
+    starts with 0 (a zip code, "007") stays text, since a number would drop the 0."""
+    import pandas as pd
+
+    for c in df.columns:
+        col = df[c]
+        if not (pd.api.types.is_object_dtype(col) or pd.api.types.is_string_dtype(col)):
+            continue
+        text = col.astype(object).map(lambda v: v.strip() if isinstance(v, str) else v)
+        filled = text[text.map(lambda v: isinstance(v, str) and v != "")]
+        if (filled.empty or not text.dropna().map(lambda v: isinstance(v, str)).all()
+                or filled.map(lambda v: bool(_CODE.match(v))).any()):
+            continue
+        nums = pd.to_numeric(filled, errors="coerce")
+        if nums.isna().any() or pd.api.types.is_object_dtype(nums) or not nums.map(math.isfinite).all():
+            continue
+        df[c] = pd.to_numeric(text.where(text != ""), errors="coerce")
     return df
 
 
@@ -1177,6 +1206,10 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
     if not keys:
         keys = [c for c in df.columns if not c.startswith("_") and c != "index"
                 and (not pd.api.types.is_numeric_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c]))]
+    if not keys and row_refs is not None and len(df) > 1:
+        # rows that keep their own source rows (a tally) with no word column: a number column of the frame they came
+        # from that tells them apart names them (`passed` of a CSV, a bin), so a value is cited by its group's value
+        keys = next(([c] for c in _number_keys(df, [], ns, frames) if _unique(df, [c])), [])
     out["keys"] = keys
     if row_refs is None and aligned is not None:
         row_refs, out["mode"], out["frame"] = aligned
