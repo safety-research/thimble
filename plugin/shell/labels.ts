@@ -147,6 +147,13 @@ export async function askFromFeed($: Engine, ev: Any): Promise<void> {
   await $.state.set(LABELASK, a)
 }
 
+/** Show an ask again, or (null) take it off the bar and the card at once, before its answer runs: a key that answers
+ *  it leaves no stale choices on screen while the kernel and Claude's turn go on. */
+export async function setLabelAsk($: Engine, a: LabelAsk | null): Promise<void> {
+  await $.state.set(LABELASK, a)
+  $.ui.invalidate('ui.render')
+}
+
 /** The ask that waits, if any. */
 export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
   return ((await $.state.get(LABELASK)).value ?? null) as LabelAsk | null
@@ -154,10 +161,10 @@ export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
 
 /** The person's choice for the ask: run all, run on a sample, or cancel, as their own command. The reads start here,
  *  beside the session, and Claude hears the choice with the next prompt. */
-export async function answerAsk($: Engine, choice: 'all' | 'sample' | 'cancel'): Promise<void> {
-  const a = await labelAskNow($)
+export async function answerAsk($: Engine, choice: 'all' | 'sample' | 'cancel', given?: LabelAsk): Promise<void> {
+  const a = given ?? (await labelAskNow($))
   if (!a) return
-  await $.state.set(LABELASK, null)
+  await setLabelAsk($, null)
   const r = await kernel($, a.root, ['label', a.name, '--answer', choice, '--ask', a.ask])
   let got: Any = null
   try { got = JSON.parse(r.out) } catch { got = null }
