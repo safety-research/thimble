@@ -74,9 +74,10 @@ META_KEYS = ("user", "author", "agent", "sender", "name", "label", "page", "run"
 
 
 def _long_words(v: dict[str, Any]) -> list[tuple[str, str]]:
-    """A record's fields whose values read as words: strings of several words, in a field that is no id or path."""
+    """A record's fields whose values read as words: strings of several words, in a field that is no id or path. A
+    time stamp (`2026-06-01 15:19:25.769`) has a space but no words: the rows are never named by it."""
     return [(k, x) for k, x in v.items() if isinstance(x, str) and len(x.strip()) >= 16 and " " in x.strip()
-            and not re.search(r"(id|uuid|ref|hash|key|url|path)$", k, re.I)]
+            and len(re.findall(r"[^\W\d_]{2,}", x)) >= 2 and not re.search(r"(id|uuid|ref|hash|key|url|path)$", k, re.I)]
 
 
 def word_key(rows: list[S.Row]) -> str | None:
@@ -325,7 +326,12 @@ def _quoted(label: str | None) -> list[str]:
     number, or fewer than three letters."""
     if not label:
         return []
-    q = " ".join(str(label).replace("**", "").split()).strip().strip("\"'“”‘’").strip()
+    q = " ".join(str(label).replace("**", "").split()).strip()
+    # words that quote inside others (`agent-07 wrote "yes, that was me"`): the quoted passage
+    inner = [m.group(1) or m.group(2) for m in re.finditer(r'(?<=.)"([^"“”]{3,})"|“([^“”]{3,})”', q)]
+    if inner and not (q[:1] in "\"“" and q[-1:] in "\"”" and len(inner) == 1 and len(inner[0]) >= len(q) - 2):
+        q = max(inner, key=len)
+    q = q.strip("\"'“”‘’").strip()
     if len(re.findall(r"[^\W\d_]", q)) < 3:
         return []
     return [x.strip(" ,;:") for x in re.split(r"\s*(?:\.\.\.|…|\[\.\.\.\]|\[…\])\s*", q) if x.strip(" ,;:")]
