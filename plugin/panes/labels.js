@@ -362,7 +362,8 @@ function labelView(k, data, st, lab, W) {
   const room = Math.max(3, k.h - out.length - 2 - defs.length - detail.length - 2 - chromeOf(k, data.chat))
   const i0 = Math.max(0, recs.findIndex(r => r.i === rec))
   const top = Math.max(0, Math.min(recs.length - room, i0 - Math.floor(room / 2)))
-  const placeW = Math.min(30, Math.max(8, ...recs.map(r => len(place(r.ref)))))
+  // a wide pane shows more of each path; a narrow one keeps room for the record's words
+  const placeW = Math.min(Math.max(30, Math.floor(W / 3)), Math.max(8, ...recs.map(r => len(place(r.ref)))))
   const vW = Math.min(14, Math.max(8, ...values.map(len)))
   for (const r of recs.slice(top, top + room)) {
     const on = r.i === rec
