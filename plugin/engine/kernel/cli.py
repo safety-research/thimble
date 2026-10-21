@@ -605,7 +605,10 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
 
     thimble label                              the labels here, with their counts
     thimble label NAME                         its counts per value, each a citation; what waits; what the analyst checked
-    thimble label NAME --in GLOB --regex RE    the first value where the record's text (as the file holds it) matches
+    thimble label NAME --in GLOB --regex RE    the first value where the record's text matches: a JSON or JSONL
+                                               record's values, decoded, one per line (a newline in a value is a real
+                                               newline), not its keys or quotes; a line of text or a CSV row as the
+                                               file holds it
     thimble label NAME --in GLOB --code FILE   label(unit) in Python returns a value, (value, confidence) or None; a
                                                unit is the record as a dict, with `_ref` and `_text` (or the code on
                                                stdin)
@@ -620,10 +623,11 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     --where EXPR        only records for which this Python expression is true (r is the record, text its raw text)
     --within L=V        only records the label L gave the value V
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
+    --reason            the model also gives a one-line reason per record
 
 A --prompt label over more than 300 records does not start at once: the analyst is asked first, in the terminal, to
-run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks.
-    --reason            the model also gives a one-line reason per record
+run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. The
+choices leave the screen once the analyst answers. After a sample, the same command again asks them to run the rest.
 
 The same definition again keeps the values it has and labels only records it has not seen. The counts are a query,
 so `[38](r12#apology=yes@n)` cites the 38 records. In a query, use("apology") gives each record's `_ref` and value
@@ -667,7 +671,10 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
         cite = f"  {LB._cite_value(qid, lab['name'], v)}" if qid and n else ""
         out.append(f"  {v:<{w}}  {n:>7,}{cite}")
     run = lab.get("run") or {}
-    if run.get("state") == "ask":
+    if run.get("state") == "ask" and (run.get("ask") or {}).get("rest"):
+        out.append(f"  the other {s['waiting']:,} records wait for the analyst's choice: the model reads them "
+                   f"({EST.calls_line((run.get('ask') or {}).get('calls') or 0)}), or none")
+    elif run.get("state") == "ask":
         out.append(f"  {s['waiting']:,} records wait for the analyst's choice: the model reads all of them "
                    f"({EST.calls_line((run.get('ask') or {}).get('calls') or 0)}), a random sample of {EST.SAMPLE}, or none")
     elif s["waiting"]:
@@ -675,6 +682,10 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
                    + (f" (the analyst chose a random sample of {EST.SAMPLE})" if run.get("chose") == "sample" else ""))
     if run.get("state") == "cancelled":
         out.append(f"  the analyst chose not to run it over its {run.get('units') or 0:,} records")
+    rest = int(lab.get("matched") or 0) - s["records"]
+    if lab.get("trial") and lab.get("sampled") == LB.scope_key(lab) and run.get("state") != "ask" and rest > 0:
+        out.append(f"  the analyst chose a random sample; the other {rest:,} records have no value. The same command "
+                   f"without --limit asks the analyst again, to run them or cancel")
     if s["failed"]:
         why = next((u.get("err") for u in (lab.get("units") or {}).values() if u.get("v") is None and u.get("err")), "")
         out.append(f"  {s['failed']:,} records have no value" + (f" ({why})" if why else "")
@@ -867,8 +878,10 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             ask = LB.hold_for_ask(st, name, calls)
             lab = LB.load(st, name) or lab
             card = obj or ({"id": lab["card"], "version": None} if lab.get("card") else None)
+            # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample
             st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
-                     "sample": min(EST.SAMPLE, ask["units"]), "text": f"Read {ask['units']:,} records{_where_of(lab)} with Claude",
+                     "sample": 0 if ask["rest"] else min(EST.SAMPLE, ask["units"]), "rest": ask["rest"],
+                     "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(lab)} with Claude",
                      "meta": EST.calls_line(ask["calls"]), **({"object": card["id"], "version": card["version"]} if card else {})})
         elif kind == "prompt" and s["waiting"] and obj:
             st.emit({"kind": "label", "name": name, "object": obj["id"], "version": obj["version"]})
@@ -882,11 +895,14 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         for e in r["errors"]:
             print(f"  error: {e}")
         if ask:
-            print(f"  Not started: the model would read {ask['units']:,} records in {EST.calls_line(ask['calls'])}, so the "
-                  f"analyst is asked first, in the terminal: run all, run on a random sample of {EST.SAMPLE}, or cancel. "
+            choices = "run them or cancel" if ask["rest"] else f"run all, run on a random sample of {EST.SAMPLE}, or cancel"
+            print(f"  Not started: the model would read {'the other ' if ask['rest'] else ''}{ask['units']:,} records in "
+                  f"{EST.calls_line(ask['calls'])}, so the analyst is asked first, in the terminal: {choices}. "
                   f"Their choice reaches you with their next message, and `thimble label {name}` shows it (then the "
                   f"counts, once the reads end). Answer now from what you have, and say that the label waits for their "
-                  f"choice. A trial (--limit N) never asks.")
+                  f"choice. The choices leave the screen once they answer, so after that do not point them to a key: "
+                  f"to read more records, run this command again, and the terminal asks again. A trial (--limit N) "
+                  f"never asks.")
         elif s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {calls} call{'s' if calls != 1 else ''} of up to {LB.BATCH_ITEMS} records, "

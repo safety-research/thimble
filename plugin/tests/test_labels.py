@@ -173,11 +173,15 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     # the person's key: a sample of 300 of the 420 that wait; the reads are asked for in the feed
     got = json.loads(run(root, "label", "spam", "--answer", "sample", "--ask", ev["ask"]).stdout)
     assert got["reads"] == 300 and got["waiting"] == 300 and got["card"]["id"] == LB.load(st, "spam")["card"]
-    assert "a random sample of 300" in run(root, "label", "spam").stdout
-    # the same label again asks again for the rest (a sample is no yes for all); this time the person runs all
-    run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
+    out = run(root, "label", "spam").stdout
+    assert "a random sample of 300" in out and "the other 120 records have no value" in out
+    # the same label again asks again for the rest (a sample is no yes for all): run them or cancel, no second sample;
+    # this time the person runs them
+    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
+    assert "run them or cancel" in r.stdout and "do not point them to a key" in r.stdout
     ev = feed(root)[-1]
-    assert ev["kind"] == "label_ask"
+    assert ev["kind"] == "label_ask" and ev["rest"] is True and ev["sample"] == 0
+    assert ev["text"] == "Read the other 420 records of chat/big.jsonl with Claude"
     got = json.loads(run(root, "label", "spam", "--answer", "all", "--ask", ev["ask"]).stdout)
     assert got["choice"] == "all" and got["reads"] == got["waiting"] == 420
     # they said yes to this exact label and scope: asking again starts the reads at once
@@ -208,3 +212,23 @@ def test_a_card_counted_where_pandas_is_missing_shows_the_labels_own_counts_and_
     card = LB.save_card(st, "apology")
     assert sorted(card["data"]["counts"], key=lambda r: r["apology"]) == [{"apology": "no", "n": 2}, {"apology": "yes", "n": 4}]
     assert card["title"] == "apology: 4 of 6 records are yes" and old["id"] not in card["text"]
+
+
+def test_a_regex_reads_a_json_records_decoded_values_and_a_text_or_csv_row_as_the_file_holds_it(root: Path):
+    """A newline in a JSON value is \\n in the file, so `\\bhttps?://` after one would miss on the raw line (n is a word
+    character); the regex reads the values a person reads. A line of text and a CSV row keep their raw text."""
+    with open(root / "chat" / "edits.jsonl", "w") as f:
+        f.write(json.dumps({"id": 1, "text": "See the source:\nhttps://example.org/a"}) + "\n")
+        f.write(json.dumps({"id": 2, "text": "no link here"}) + "\n")
+        f.write(json.dumps({"id": 3, "text": "inline https://example.org/b"}) + "\n")
+    (root / "notes.txt").write_text("literal \\nhttps://example.org/c\nplain https://example.org/d\nnothing\n")
+    (root / "rows.csv").write_text('id,body\n1,"line one\nhttps://example.org/e"\n2,"https://example.org/f"\n3,none\n')
+    st = Store(root)
+    got = LB.define(st, "link", "regex", r"\bhttps?://", "chat/edits.jsonl")["label"]
+    assert LB.counts(got) == {"yes": 2, "no": 1}
+    # keys and quotes are not the text: a pattern over them no longer matches
+    assert LB.counts(LB.define(st, "keyed", "regex", r'"text": "See', "chat/edits.jsonl")["label"]) == {"no": 3}
+    # a line of text as the file holds it: the literal backslash-n still blocks \b, as before
+    assert LB.counts(LB.define(st, "tlink", "regex", r"\bhttps?://", "notes.txt")["label"]) == {"yes": 1, "no": 2}
+    # a CSV row as before: its columns' JSON, where the newline in the first row's cell is \n
+    assert LB.counts(LB.define(st, "clink", "regex", r"\bhttps?://", "rows.csv")["label"]) == {"yes": 1, "no": 2}
