@@ -84,6 +84,16 @@
 .shell-spacer {
   flex: 1;
 }
+/* main's turn while it runs (TopBar MainWork): a spinner and a word, quiet */
+.shell-main-work {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  font-size: var(--text-xs, 12px);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
 .shell-tools {
   display: inline-flex;
   align-items: center;
