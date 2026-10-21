@@ -41,6 +41,41 @@ test('a row of words and a bar: the ring stands on its words, and a click on the
   expect(pressed).toEqual(['value-1'])
 })
 
+test('a selected or hovered row keeps its bar as drawn: its words are bold, and the pointer over the bar turns the words inverse', () => {
+  const cell = (ch: string, m?: number) => ({ ch, tone: m ? 'accent' : 'ink', ...(m ? { m } : {}) })
+  const row = [...'fetch '].map(c => cell(c)).concat([...'▆▆▆▆'].map(c => cell(c, 1)), [...' 8,998'].map(c => cell(c)))
+  const grid = { w: row.length, h: 1, rows: [row], regions: [{ id: 'value-1', rects: [{ x: 0, y: 0, w: row.length, h: 1 }] }] }
+  const draw = (selected: string | null) => paintRegions(grid as Any, els, { theme: 'dark', key: 'pane', selected, onPress: () => {} })
+  const texts = (n: Any, out: Any[] = []): Any[] => {
+    if (!n || typeof n !== 'object') return out
+    if (Array.isArray(n)) { for (const x of n) texts(x, out); return out }
+    if (n.type === 'Text' && typeof n.props.children === 'string') out.push(n.props)
+    texts(n.props?.children, out)
+    return out
+  }
+  const bar = (t: Any) => texts(t).find(p => p.children.includes('▆'))
+  const words = (t: Any) => texts(t).find(p => p.children.startsWith('fetch'))
+  // the selected bar is drawn exactly as an unselected one, and nothing of the row stands on the selection background
+  expect(bar(draw('value-1'))).toEqual(bar(draw(null)))
+  expect(texts(draw('value-1')).some(p => p.backgroundColor)).toBe(false)
+  expect(words(draw('value-1')).bold).toBe(true)
+  expect(words(draw('value-1')).color).toBe(words(draw(null)).color)
+  // Claude Code draws a hovered press inverse: the bar's press opts out, and the row's words turn inverse instead
+  const btns = (t: Any, out: Any[] = []): Any[] => {
+    if (!t || typeof t !== 'object') return out
+    if (Array.isArray(t)) { for (const x of t) btns(x, out); return out }
+    if (t.type === 'Button') out.push(t.props)
+    btns(t.props?.children, out)
+    return out
+  }
+  const got = btns(draw('value-1'))
+  const scope = got[0].hover.scope
+  expect(scope.length <= 64).toBe(true)
+  expect(got.map(b => [chars(b.children), b.hover])).toEqual([
+    ['fetch ', { scope, inverse: true }], ['▆▆▆▆', { scope, inverse: false }], [' 8,998', { scope, inverse: true }],
+  ])
+})
+
 /** Press the Button that holds `text`. */
 function pressAll(n: Any, text: string): void {
   if (!n || typeof n !== 'object') return

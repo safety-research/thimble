@@ -7,9 +7,9 @@
 //   paintRegions(grid, els, {theme, selected, key, from, rows, onPress, painted}) -> one Box of rows
 //   from, rows: the window of rows to draw (default all), so a tall object fits a pane
 //   painted: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
-//   color; in the transcript it is the terminal's own. The selected region's text reads in the theme's text color on
-//   the selection background, and its marks (a bar's cells) light up in their own color on their own ground
-//   (paint.js selectionOf), so a selected bar keeps its height.
+//   color; in the transcript it is the terminal's own. The selected region's words are bold in their own color (the
+//   gutter's ▸ marks the row too), and its marks (a bar's cells) are drawn exactly as when nothing is selected: a
+//   selection never hides or recolors a bar.
 //   frame: a color for the card's own frame (its outer ╭─╮ │ ╰─╯ cells), as the card the keys act on is drawn
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
 //   a knob's dial (`label ◂ value ▸`, k.dial) is two Buttons, its halves: a click on the left half calls onPress(id, -1),
@@ -17,7 +17,7 @@
 //   nothing is drawn as a link that a click does not answer: a link's underline only where there is a press
 //   (`onPress`), and a link to an id nothing defines (no region, cite, examples or knob) is plain words
 import { paintGrid, selectionOf } from '../draw/paint.js'
-import { hex, selectedColor, selectedMark, termColor } from '../draw/palette.js'
+import { hex, termColor } from '../draw/palette.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -89,23 +89,21 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       if (c.cont) return
       const region = owner[y * grid.w + x] || ''
       const edge = framed && (y === 0 || y === grid.h - 1 || x === 0 || x === grid.w - 1) && EDGE.test(c.ch)
-      // a mark lights up wherever it lies in the selection (a stacked bar's parts with its row); text only where the
-      // selection is its own region
+      // the selection marks its words (only where the selection is their own region), never its marks
       const at = sel ? look(x, y) as 'text' | 'mark' | null : null
-      const on = at === 'mark' || (at === 'text' && region === sel) ? at : null
+      const on = at === 'text' && region === sel ? at : null
       const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${region}|${edge ? 1 : 0}|${on || ''}`
       if (cur && cur.k === k) cur.s += c.ch
       else { cur = { k, s: c.ch, c, region, edge, on }; segs.push(cur) }
     })
     const text = (g: Seg) => {
       const p: Any = { children: g.s }
-      const color = g.edge ? opts.frame : g.on === 'mark' ? selectedMark(g.c.tone, theme) : g.on ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
+      const color = g.edge ? opts.frame : termColor(g.c.tone, theme, { painted: !!opts.painted })
       if (color) p.color = color
-      if (g.c.b) p.bold = true
+      if (g.c.b || g.on) p.bold = true
       // a link is underlined only where a click answers it
       if (g.c.ref && opts.onPress && g.region) p.underline = true
-      if (g.on === 'text') p.backgroundColor = 'selectionBg'
-      else if (g.c.bg) p.backgroundColor = g.on === 'mark' ? selectedMark(g.c.bg, theme) : hex(g.c.bg, theme)
+      if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
       return Text(p)
     }
     if (!opts.onPress || !segs.some(g => g.region)) return Text({ wrap: 'truncate-end', children: segs.map(text) })
@@ -121,15 +119,19 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       const region = grid.regions.find(r => r.id === id)
       const label = String(region?.meta?.label || id)
       if (region?.meta?.knob) { kids.push(...dial(run, id, label)); continue }
-      // Claude Code draws the ring inverse, which leaves a bar a thin line on a block of the text's color: a run of
-      // words and marks is cut where it turns from one to the other, its first words keeping the key the ring stands
-      // on. The marks are a press of their own (`|#n`), so a click on a bar still opens its part. A run of marks alone
-      // stays one press.
+      // Claude Code draws a press inverse under the ring and the pointer, which leaves a bar a thin line on a block of
+      // the text's color: a run of words and marks is cut where it turns from one to the other, its first words
+      // keeping the key the ring stands on. The marks are a press of their own (`|#n`), so a click on a bar still
+      // opens its part, and the pointer over them leaves them as drawn and turns the row's words inverse instead (one
+      // hover scope per row of a region). A run of marks alone stays one press.
       const parts = run.some(g => !g.c.m) && run.some(g => g.c.m) ? splitMarks(run) : [run]
       const lead = parts.findIndex(p => !p[0]!.c.m)
+      const scope = run.some(g => g.c.m) ? `row-${hash(`${key}|${y}|${id}`)}` : null
       parts.forEach((part, n) => {
         const own = n === lead || (lead < 0 && n === 0)
-        kids.push(Button({ key: `r|${key}|${y}|${id}${own ? '' : `|#${n}`}`, plain: true, label, children: part.map(text), onPress: () => opts.onPress!(id) }))
+        const marks = !!part[0]!.c.m
+        const hover = scope ? { hover: { scope, inverse: !marks } } : {}
+        kids.push(Button({ key: `r|${key}|${y}|${id}${own ? '' : `|#${n}`}`, plain: true, label, ...hover, children: part.map(text), onPress: () => opts.onPress!(id) }))
       })
     }
     return Box({ flexDirection: 'row', children: kids })
@@ -157,6 +159,13 @@ const EDGE = /^[╭╮╰╯─│]+$/
 function isFramed(grid: Grid): boolean {
   const top = grid.rows[0]
   return !!top && top[0]?.ch === '╭' && top[grid.w - 1]?.ch === '╮'
+}
+
+/** A short, stable name for a string (a hover scope is at most 64 characters). */
+function hash(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+  return h.toString(36)
 }
 
 /** A region's run of a row cut where it turns from words to marks and back: [[words], [marks], [words]…]. */
