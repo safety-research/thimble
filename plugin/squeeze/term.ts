@@ -203,7 +203,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   const probe = { ...rec, squeeze: { ...s, at: want.at, scale: SCALE } } as MsgRecord
   const chips = chipsOf(probe)
   const hit = isOriginal(chips) ? restore(probe, remark) : fromVersions(rec, want.at, remark)
-  if (hit) { await settled($, row, hit as MsgRecord); return }
+  if (hit) { await settled($, row, hit as MsgRecord, { written: false }); return }
   await ensure($)
   // a short wait before a call, so keys pressed in a row are written once, at the last level (settings.json settleMs)
   const wait = Number(cfg.settleMs || 0)
@@ -271,24 +271,31 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     }, remark) as MsgRecord
     ticker.stop()
     await setUi($, row, { running: null })
-    await settled($, row, next)
+    await settled($, row, next, { written: true })
     await log($, { row, ok: true, ms, model: req.model, effort: req.effort, chars: { system: req.system.reduce((n, b) => n + b.text.length, 0), prompt: req.prompt.reduce((n, b) => n + b.text.length, 0) }, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}), ...(answer ? { cards: answer.cards.length, outputs: answer.outputs.length, asked: reply.cards.map(c => `${c.op} ${c.id}`), did: (cards?.did ?? []).map(d => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}) })
   } finally {
     ticker.stop()
   }
 }
 
-/** A version shown: the record kept, the new text writing itself in from the top, the tray off this row's moved marks,
- *  and the row marked for Claude to hear of once the person settles on a version (tellSettled). */
-async function settled($: Engine, row: string, rec: MsgRecord): Promise<void> {
+/** A version shown: the record kept, the tray off this row's moved marks, and the row marked for Claude to hear of
+ *  once the person settles on a version (tellSettled). Text a call just `written` writes itself in from the top; a
+ *  version that comes back from the record (the original at 0, or a level seen before) shows whole at once, with its
+ *  marks, since nothing is being written. */
+async function settled($: Engine, row: string, rec: MsgRecord, o: { written: boolean }): Promise<void> {
   const before = await recordNow($, row)
   await saveRecord($, rec)
   await showCards($, rec)
+  // each card's latest version is the one shown; a save that fails says so
+  const stale = await latestAsShown($, rec)
+  if (stale.length) $.ui.toast(`× A card could not be saved at the version shown: ${stale.join('; ')}. Press 0 or pick the level again to try again.`)
   await closeTrayOn($, row)
   await markChanged($, row)
   const was = before ? (typeof before.shown === 'string' ? before.shown : before.text) : ''
   const now = typeof rec.shown === 'string' ? rec.shown : rec.text
-  if (now !== was) await writeIn($, row, now.length)
+  if (now !== was && o.written) { await writeIn($, row, now.length); return }
+  // a write-in still running for the version before stops: this one shows whole
+  if (revealing.has(row) || (await uiOf($, row)).reveal) { revealing.delete(row); await setUi($, row, { reveal: null }) }
 }
 
 /** The new text writes itself in from the top: a few characters more at each tick, at a model's pace, until it is
@@ -432,7 +439,6 @@ async function applyCards($: Engine, answer: Answer, changes: Any[], levels: str
   const done: Any[] = []
   const problems: string[] = []
   const unknown: string[] = []
-  const bin = `${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`
   for (const c of changes) {
     const card = answer.cards.find(x => x.id === c.id) ?? null
     // a card the request never showed: nothing to change, and nothing the person asked for failed (the log keeps it)
@@ -441,21 +447,7 @@ async function applyCards($: Engine, answer: Answer, changes: Any[], levels: str
     const spec = cardSpec(c, card?.source ?? {})
     const name = c.op === 'edit' ? card!.id : await freshName($, answer.root, String(c.id))
     const what = c.op === 'edit' ? `the change to "${card!.title}"` : `the new card "${String(spec.title || c.id).slice(0, 50)}"`
-    let saved: { id: string; v: number } | null = null
-    let out = ''
-    try {
-      // the spec in a file of thimble's own (the kernel reads stdin only when something waits on it)
-      const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
-      const file = `${home.replace(/\/+$/, '')}/lean/squeeze-cards/${name}.json`
-      await $.fs.write(file, JSON.stringify(spec, null, 1))
-      const r = await $.process.run([bin, 'save', name, '--from', file, '--change', `squeeze: ${levels}`], { cwd: answer.root, env: await leanEnv($, answer.root), timeoutMs: 90000 })
-      out = String(r.stdout || '')
-      const m = /^saved (\S+) v(\d+):/m.exec(out)
-      if (r.exitCode === 0 && m) saved = { id: m[1]!, v: Number(m[2]) }
-      else out = (out + String(r.stderr || '')).trim()
-    } catch (err) {
-      out = String((err as Error)?.message || err)
-    }
+    const { saved, out } = await kernelSave($, answer.root, name, spec, `squeeze: ${levels}`)
     if (!saved) { problems.push(`${what} could not be saved (${out.split('\n')[0]!.slice(0, 120) || 'no answer from thimble'}), so ${c.op === 'edit' ? 'the card stays as it was' : 'it was left out'}`); continue }
     const ref = { id: saved.id, v: saved.v, root: answer.root }
     const p = await prepared($, ref, 96).catch(err => ({ error: String((err as Error)?.message || err) }) as Any)
@@ -466,6 +458,53 @@ async function applyCards($: Engine, answer: Answer, changes: Any[], levels: str
     done.push({ op: c.op, id: c.op === 'edit' ? card!.id : saved.id, ref, title: c.op === 'edit' ? card!.title : String(spec.title || saved.id) })
   }
   return { done, problems, unknown }
+}
+
+/** A card saved through the kernel as the squeeze's (`thimble save <name> --from FILE --change <change>`): the version
+ *  it saved, or the kernel's words when it did not. */
+async function kernelSave($: Engine, root: string, name: string, spec: Any, change: string): Promise<{ saved: { id: string; v: number } | null; out: string }> {
+  const bin = `${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`
+  let out = ''
+  try {
+    // the spec in a file of thimble's own (the kernel reads stdin only when something waits on it)
+    const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+    const file = `${home.replace(/\/+$/, '')}/lean/squeeze-cards/${name}.json`
+    await $.fs.write(file, JSON.stringify(spec, null, 1))
+    const r = await $.process.run([bin, 'save', name, '--from', file, '--change', change], { cwd: root, env: await leanEnv($, root), timeoutMs: 90000 })
+    out = String(r.stdout || '')
+    const m = /^saved (\S+) v(\d+):/m.exec(out)
+    if (r.exitCode === 0 && m) return { saved: { id: m[1]!, v: Number(m[2]) }, out }
+    return { saved: null, out: (out + String(r.stderr || '')).trim() }
+  } catch (err) {
+    return { saved: null, out: String((err as Error)?.message || err) }
+  }
+}
+
+/**
+ * The cards a version shows are their cards' latest versions too, so what Claude and the browser read of a card is
+ * what the message shows: a card whose latest version a squeeze saved, while the version shown is another (the
+ * original's at 0, or a level seen before), has the version shown saved again as its latest. A version someone else
+ * saved since (Claude, the analyst) stays the latest. Returns why a save failed, one line each.
+ */
+export async function latestAsShown($: Engine, rec: MsgRecord): Promise<string[]> {
+  const want = cardListsAt(rec) as Record<string, ObjRef[]> | null
+  if (!want) return []
+  const problems: string[] = []
+  const done = new Set<string>()
+  for (const ref of Object.values(want).flat()) {
+    if (!ref || ref.v == null || !ref.root || done.has(`${ref.root}|${ref.id}`)) continue
+    done.add(`${ref.root}|${ref.id}`)
+    const latest = await loadObject($, { id: ref.id, root: ref.root, v: null } as ObjRef).catch(() => null)
+    if (!latest || Number(latest.version) === Number(ref.v)) continue
+    const last = Array.isArray(latest.history) ? latest.history[latest.history.length - 1] : null
+    if (!/^squeeze:/.test(String(last?.change || ''))) continue
+    const shown = await loadObject($, ref).catch(() => null)
+    const spec = shown && shown.source && typeof shown.source === 'object' ? shown.source : null
+    if (!spec || Number(shown.version) !== Number(ref.v)) continue
+    const r = await kernelSave($, ref.root, ref.id, spec, `squeeze: ${setWords(rec) || 'as written'}`)
+    if (!r.saved) problems.push(`"${String(shown.title || ref.id).slice(0, 50)}" still reads as the other version (${r.out.split('\n')[0]!.slice(0, 120) || 'no answer from thimble'})`)
+  }
+  return problems
 }
 
 /** The cards a record's version shows, drawn under their rows: the version's when it changed one, else the

@@ -861,7 +861,8 @@ export function healInput(rec) {
 
 /**
  * The record as its healing pass left it, for a drawing (no write): each citation the pass re-pointed opens its new
- * place (`ref`, with `wrote` the ref as written), one it unwrapped is quiet (`heal: 'quiet'`, drawn grey, `why`), one
+ * place (`ref`, with `wrote` the ref as written, `heal: 'moved'`), one it kept as written is `heal: 'kept'` (drawn as
+ * any citation), one it unwrapped is quiet (`heal: 'quiet'`, drawn grey, `why`), one
  * whose place does not exist is `heal: 'gone'` (a citation that failed, `why` says what is missing), one the cited place
  * contradicts is `heal: 'bad'` with `why`; while a pass runs (`checking`) every citation is
  * `heal: 'checking'`. The changes match the marks in order, by their link as written or their ref.
@@ -882,7 +883,7 @@ export function healedRecord(rec, { checking = false } = {}) {
       if (c.state === 'contradicted') return { ...m, heal: 'bad', why: String(c.why || '') }
       if (c.state === 'quiet') return { ...m, heal: c.how === 'gone' ? 'gone' : 'quiet', why: String(c.why || '') }
       if (c.to && c.to !== c.ref) return { ...m, ref: c.to, wrote: m.ref, heal: 'moved' }
-      return m
+      return c.state === 'linked' ? { ...m, heal: 'kept' } : m
     })
     return { ...rec, marks }
   }

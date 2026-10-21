@@ -16,6 +16,7 @@
 //   keyOf(key, ctx)               what a key does in the detail, or null; keys act only while the composer is empty
 //   exampleSet(drawing, meta)     the examples the program attached to a part, or null
 //   recordWords(rec, o)           a record as the person reads it: {words, meta}, never a dump of field: value
+//   wordKeyOf(records)            the field records of one set read as words, so each is named by the same field
 //   examplesView(records, o)      how a set reads: a table of short rows, or lines of words with their meta
 //   fromLine(facts, o)            the "from" line: sources · rows used · labels · coverage, as segments
 //   programLines(program, id)     the program's lines that drew a part (1-based), for the overlay behind `p`
@@ -196,11 +197,35 @@ function messageWords(v) {
   return ''
 }
 
+/** A record's fields whose values read as words: strings of several words, in a field that is no id or path. */
+const longWords = v => Object.entries(v).filter(([k, x]) => typeof x === 'string' && x.trim().length >= 16 && /\s/.test(x.trim()) && !/(id|uuid|ref|hash|key|url|path)$/i.test(k))
+
+/**
+ * The field a set of records reads as words when no field by a known name holds them: the one their longest words are
+ * in most often (the kernel's lineage.py word_key). Each record is then named by that field like the records beside
+ * it, never by another that happens to be longer in it (a passenger by a ticket number). Null when none.
+ */
+export function wordKeyOf(records) {
+  const count = new Map()
+  for (const rec of records || []) {
+    const v = rec && typeof rec === 'object' ? (rec.value !== undefined && rec.value && typeof rec.value === 'object' ? rec.value : rec) : null
+    if (!v || Array.isArray(v) || WORD_KEYS.some(k => typeof v[k] === 'string' && v[k].trim())) continue
+    const long = longWords(v)
+    if (!long.length) continue
+    const k = long.reduce((a, b) => (b[1].length > a[1].length ? b : a))[0]
+    count.set(k, (count.get(k) || 0) + 1)
+  }
+  let best = null
+  for (const [k, n] of count) if (best == null || n > count.get(best)) best = k
+  return best
+}
+
 /**
  * One record as the person reads it: its meaningful words (the field the card is about when `fields` names it, else its
  * text, title, summary, message and the like, else its longest words) and a short meta line of whose and where it is.
  * A record from `thimble resolve` carries `words` and `meta` from the kernel; one with only `text` reads as that.
- *   o: {fields: the fields the card is about, as a region's meta or an examples set names them}
+ *   o: {fields: the fields the card is about, as a region's meta or an examples set names them; prefer: the field the
+ *       records beside it read as words (wordKeyOf)}
  */
 export function recordWords(rec, o = {}) {
   if (rec == null) return { words: '', meta: '' }
@@ -226,9 +251,11 @@ export function recordWords(rec, o = {}) {
     wordKey = WORD_KEYS.find(k => typeof v[k] === 'string' && v[k].trim()) || null
     if (wordKey) words = oneLine(v[wordKey])
   }
+  // the field the records beside it read as words (wordKeyOf), so each is named by the same field
+  if (!words && o.prefer && typeof v[o.prefer] === 'string' && v[o.prefer].trim()) { wordKey = o.prefer; words = oneLine(v[o.prefer]) }
   if (!words) {
     // no field by those names: the longest words in it, when they read as words
-    const long = Object.entries(v).filter(([k, x]) => typeof x === 'string' && x.trim().length >= 16 && /\s/.test(x.trim()) && !/(id|uuid|ref|hash|key|url|path)$/i.test(k))
+    const long = longWords(v)
     if (long.length) { const [k, x] = long.reduce((a, b) => (b[1].length > a[1].length ? b : a)); wordKey = k; words = oneLine(x) }
   }
   const metaKeys = [...fields.filter(f => f !== wordKey), ...META_KEYS.filter(k => !fields.includes(k))]
@@ -289,10 +316,11 @@ export function examplesView(records, o = {}) {
   const per = 2
   const shown = Math.max(1, Math.floor(fit / per))
   const from = Math.max(0, Math.min(at - 1, total - shown))
+  const prefer = wordKeyOf(recs)
   return {
     kind: 'lines', at,
     rows: recs.slice(from, from + shown).map((rec, j) => {
-      const w = o.fmt && rec && typeof rec === 'object' ? fmtWords(o.fmt, rec) : recordWords(rec, { fields: o.fields })
+      const w = o.fmt && rec && typeof rec === 'object' ? fmtWords(o.fmt, rec) : recordWords(rec, { fields: o.fields, prefer })
       return { ...w, i: from + j, on: from + j === at }
     }),
   }

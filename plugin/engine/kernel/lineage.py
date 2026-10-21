@@ -73,10 +73,45 @@ META_KEYS = ("user", "author", "agent", "sender", "name", "label", "page", "run"
              "event_type", "activity", "day", "date", "time")
 
 
-def words_of(row: S.Row) -> tuple[str, str]:
+def _long_words(v: dict[str, Any]) -> list[tuple[str, str]]:
+    """A record's fields whose values read as words: strings of several words, in a field that is no id or path."""
+    return [(k, x) for k, x in v.items() if isinstance(x, str) and len(x.strip()) >= 16 and " " in x.strip()
+            and not re.search(r"(id|uuid|ref|hash|key|url|path)$", k, re.I)]
+
+
+def word_key(rows: list[S.Row]) -> str | None:
+    """The field rows of one file read as words when no field by a known name holds them: the one their longest words
+    are in most often. A row is then named by that field like the rows beside it, never by another field that happens
+    to be longer in it (a passenger by a ticket number such as "SOTON/O.Q. 3101312")."""
+    count: dict[str, int] = defaultdict(int)
+    for row in rows:
+        v = row.value
+        if not isinstance(v, dict) or any(isinstance(v.get(k), str) and v[k].strip() for k in WORD_KEYS):
+            continue
+        long = _long_words(v)
+        if long:
+            count[max(long, key=lambda kv: len(kv[1]))[0]] += 1
+    return max(count, key=lambda k: count[k]) if count else None
+
+
+def words_by_file(rows: list[S.Row]) -> dict[str, tuple[str, str]]:
+    """words_of for each of several rows, by ref: the rows of each file named by one field (word_key)."""
+    by: dict[str, list[S.Row]] = defaultdict(list)
+    for row in rows:
+        by[row.ref.split("#")[0]].append(row)
+    out: dict[str, tuple[str, str]] = {}
+    for group in by.values():
+        prefer = word_key(group)
+        for row in group:
+            out[row.ref] = words_of(row, prefer)
+    return out
+
+
+def words_of(row: S.Row, prefer: str | None = None) -> tuple[str, str]:
     """A row as a person reads it: its meaningful words (its text, title, summary, message, body and the like; a
     transcript row's first words or tool call) and a short line of whose and where it is. ('', '') when nothing in it
-    reads as words."""
+    reads as words. `prefer`: the field the rows of its file read as words (word_key), taken before the row's own
+    longest words."""
     v = row.value
     one = lambda x: " ".join(str(x).split())  # noqa: E731
     if isinstance(v, str):
@@ -108,9 +143,11 @@ def words_of(row: S.Row) -> tuple[str, str]:
         key = next((k for k in WORD_KEYS if isinstance(v.get(k), str) and v[k].strip()), None)
         if key:
             words = one(v[key])
+    if not words and prefer and isinstance(v.get(prefer), str) and v[prefer].strip():
+        key = prefer
+        words = one(v[prefer])
     if not words:
-        long = [(k, x) for k, x in v.items() if isinstance(x, str) and len(x.strip()) >= 16 and " " in x.strip()
-                and not re.search(r"(id|uuid|ref|hash|key|url|path)$", k, re.I)]
+        long = _long_words(v)
         if long:
             key, x = max(long, key=lambda kv: len(kv[1]))
             words = one(x)
@@ -143,9 +180,9 @@ def words_of(row: S.Row) -> tuple[str, str]:
     return (words if len(words) <= 240 else words[:239] + "…"), " · ".join(meta)
 
 
-def _record(row: S.Row) -> dict[str, Any]:
+def _record(row: S.Row, said: dict[str, tuple[str, str]] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {"ref": row.ref, "hash": S.row_hash(row.raw), "text": excerpt(row)}
-    words, meta = words_of(row)
+    words, meta = (said or {}).get(row.ref) or words_of(row)
     if words:
         out["words"] = words
         if meta:
@@ -204,26 +241,23 @@ def _block_at(p: dict[str, Any], at: int) -> str:
 def records(st: Store, rowsets: list[str], n: int = 5, pick: str = "spread", seed: int = 0) -> list[dict[str, Any]]:
     """Up to n rows of the row sets, each {ref, hash, text, words?, meta?}: spread evenly across them (the default),
     the first ones in file order, or a random sample."""
-    if pick == "spread":
-        out = []
-        for ref in spread_refs(rowsets, n):
-            for row in S.fetch(st.root, ref, limit=1):
-                out.append(_record(row))
-        return out
+    rows: list[S.Row] = []
     singles = R.expand(rowsets) if pick == "random" else None
-    out = []
-    if singles is not None:
+    if pick == "spread":
+        for ref in spread_refs(rowsets, n):
+            rows.extend(S.fetch(st.root, ref, limit=1))
+    elif singles is not None:
         chosen = sorted(random.Random(seed).sample(singles, min(n, len(singles))), key=lambda r: (r.split("#")[0], _num(r)))
         for ref in chosen:
-            for row in S.fetch(st.root, ref, limit=1):
-                out.append(_record(row))
-        return out
-    for rs in rowsets:
-        if len(out) >= n:
-            break
-        for row in S.fetch(st.root, rs, limit=n - len(out)):
-            out.append(_record(row))
-    return out
+            rows.extend(S.fetch(st.root, ref, limit=1))
+    else:
+        for rs in rowsets:
+            if len(rows) >= n:
+                break
+            rows.extend(S.fetch(st.root, rs, limit=n - len(rows)))
+    # the rows of a file named by one field, as the rows beside them
+    said = words_by_file(rows)
+    return [_record(row, said) for row in rows]
 
 
 def _num(ref: str) -> int:
@@ -339,7 +373,7 @@ def _window(text: str, at: tuple[int, int], width: int) -> tuple[str, tuple[int,
     return pre + text[lo:hi] + ("…" if hi < len(text) else ""), (a - lo + len(pre), b - lo + len(pre))
 
 
-def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: int) -> dict[str, Any]:
+def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: int, prefer: str | None = None) -> dict[str, Any]:
     """One row of a span: a line of text as written, or a record as its words (with whose and where). A cited row
     whose words a citation quotes reads as the field that holds them, with the quote's place (`at`)."""
     out: dict[str, Any] = {"ref": row.ref, "hot": hot}
@@ -353,7 +387,7 @@ def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: in
             out["at"] = list(at)
         out["text"] = text if len(text) <= width + 2 else text[: width - 1] + "…"
         return out
-    words, meta = words_of(row)
+    words, meta = words_of(row, prefer)
     at = quote_at(words, label) if hot and words else None
     if at:
         out.update({"text": words, "at": list(at)})
@@ -433,9 +467,11 @@ def span(st: Store, ref: str, label: str | None = None, around: int = SPAN_AROUN
                         after.extend(S.fetch(st.root, f"{rel}#{unit}{i}"))
                     except R.RefError:
                         break
-            rows = [_span_row(r, num(r), False, label, width) for r in before]
-            rows += [_span_row(r, num(r), True, label, width) for r in cited]
-            rows += [_span_row(r, num(r), False, label, width) for r in after]
+            # each row named by the field the rows around it read as words
+            prefer = word_key([*before, *cited, *after])
+            rows = [_span_row(r, num(r), False, label, width, prefer) for r in before]
+            rows += [_span_row(r, num(r), True, label, width, prefer) for r in cited]
+            rows += [_span_row(r, num(r), False, label, width, prefer) for r in after]
             out["unit"] = {"lines": "line", "csvrows": "row", "dbrows": "row"}.get(k, "value")
             # the cited row as the file holds it, for the person who wants it whole
             v = cited[0].value if cited else None

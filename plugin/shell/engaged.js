@@ -4,7 +4,8 @@
 // main's request, reads it in the session too: both learn what this analyst knows and cares about as the session goes
 // on. Pure: no `$`.
 //
-//   openedRow(frame, message)  -> {key, text} for a mark the person opened (a tray frame, panes/tray.js frameOf), or null
+//   openedRow(frame, message)  -> {key, text} for a mark the person opened (a tray frame, panes/tray.js frameOf), or null;
+//                                 a citation's row names its ref as written and what the citation check found there
 //   askedRow(ask)              -> {key, text} for a question asked in a side thread (thread.ts askThread's ask), or null
 //   engagedText(lines)         -> the row: what it is for, then each line
 // `key` names what was engaged with, so the same open is told once.
@@ -29,10 +30,26 @@ export function openedRow(frame, message = '') {
     if (g.kind === 'heads') return { key: `heads|${frame.row ?? ''}|${term}`, text: `opened the important detail "${cut(oneLine(g.title || term), 80)}" on "${term}"${where}` }
     return { key: `gloss|${frame.row ?? ''}|${term}`, text: `opened the explainer of "${term}"${where}` }
   }
-  const ref = String(frame.ref || '')
+  // the ref as Claude wrote it (a re-pointed citation opens its new place), and what the check found there, so an
+  // open reads as what it is: the person looking, not a doubt about the value
+  const ref = String((frame.heal === 'moved' && frame.wrote) || frame.ref || '')
   if (!ref) return null
   const what = frame.kind === 'spark' ? 'the sparkline' : `the citation "${cut(oneLine(frame.label || ref), 80)}"`
-  return { key: `cite|${frame.row ?? ''}|${ref}`, text: `opened ${what} (${ref})${where}` }
+  const found = checkWords(frame)
+  return { key: `cite|${frame.row ?? ''}|${ref}`, text: `opened ${what} (${ref})${where}${found ? `; ${found}` : ''}` }
+}
+
+/** What the citation check found for a citation (its tray frame's `heal`), in words; '' when it has not run. */
+function checkWords(frame) {
+  const why = cut(oneLine(frame.why || ''), 120)
+  switch (frame.heal) {
+    case 'kept': return 'the citation check kept it as written'
+    case 'moved': return `the citation check re-pointed it to ${frame.ref}`
+    case 'bad': return `the citation check found the cited place contradicts it${why ? ` (${why})` : ''}`
+    case 'gone': return `the citation check found the cited place gone${why ? ` (${why})` : ''}`
+    case 'quiet': return `the citation check unlinked it${why ? ` (${why})` : ''}`
+    default: return ''
+  }
 }
 
 export function askedRow(ask) {

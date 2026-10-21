@@ -13,7 +13,8 @@
 // thread.
 //
 //   state: {stack: [frame, ...]}
-//   frame: {row, i, kind, ref, label, gloss, open, heal?, why?, wrote?} for a mark of a message (frameOf), {kind: 'cite', ref, label, open}
+//   frame: {row, i, kind, ref, label, gloss, open, heal?, why?, wrote?} for a mark of a message (frameOf; heal: what the
+//          check found, kept, moved, bad, quiet or gone), {kind: 'cite', ref, label, open}
 //          for a citation inside a card; `open` is the section shown. A frame carries what it shows, so a surface draws
 //          it without the message's record.
 //   reads: the session's side threads (whether the mark has one)
@@ -52,7 +53,8 @@ export function frameOf(rec, i) {
   const inner = m.kind === 'cite' ? rec.marks.map((x, j) => (x && x.kind === 'gloss' && x.start >= m.start && x.end <= m.end ? frameOf(rec, j) : null)).filter(Boolean) : []
   // what the healing pass found (message.js healedRecord): the card says it above the place
   const heal = m.kind === 'cite' && (m.heal === 'bad' || m.heal === 'quiet' || m.heal === 'gone') ? { heal: m.heal, why: String(m.why || '') }
-    : m.kind === 'cite' && m.heal === 'moved' && m.wrote ? { heal: 'moved', wrote: String(m.wrote) } : {}
+    : m.kind === 'cite' && m.heal === 'moved' && m.wrote ? { heal: 'moved', wrote: String(m.wrote) }
+      : m.kind === 'cite' && m.heal === 'kept' ? { heal: 'kept' } : {}
   return { row: rec.row, i, kind: m.kind === 'spark' ? 'spark' : 'cite', ref: m.ref, label: m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label || m.ref || ''), ...(inner.length ? { inner } : {}), ...heal }
 }
 

@@ -144,6 +144,23 @@ test('the healing pass in a drawing: a spinner while it runs, a re-pointed citat
   assert.equal(needsHeal({ ...healed, shown: 'Busiest: [5](r1#day=a@n).' }), true)
 })
 
+test('an opened citation reaches Claude as written, with what the check found there', () => {
+  const text = 'Kept: [5](r1#day=a@n). Moved: [6](r1#day=b@n). Wrong: [4](r1#day=c@n). Not yet: [2](r2@n).'
+  const rec = { ...newRecord({ row: 'x', session: 's', text }), heal: { key: textKey(text), changes: [
+    { label: '5', ref: 'r1#day=a@n', state: 'linked', how: 'kept', to: 'r1#day=a@n' },
+    { label: '6', ref: 'r1#day=b@n', state: 'linked', how: 'cell', to: 'r1#day=d@n' },
+    { label: '4', ref: 'r1#day=c@n', state: 'contradicted', how: 'contradicted', to: 'r1#day=c@n', why: 'the cited place shows 3' },
+  ] } }
+  const healed = healedRecord(rec)
+  const row = i => openedRow(frameOf(healed, i)).text
+  assert.equal(row(0), 'opened the citation "5" (r1#day=a@n); the citation check kept it as written')
+  // the ref Claude wrote, not the place the check moved it to, and the move said
+  assert.equal(row(1), 'opened the citation "6" (r1#day=b@n); the citation check re-pointed it to r1#day=d@n')
+  assert.equal(row(2), 'opened the citation "4" (r1#day=c@n); the citation check found the cited place contradicts it (the cited place shows 3)')
+  // a citation no check has reached yet says nothing of one
+  assert.equal(openedRow(frameOf(newRecord({ row: 'y', session: 's', text: 'Not yet: [2](r2@n).' }), 0)).text, 'opened the citation "2" (r2@n)')
+})
+
 test('a squeeze and its revert keep each text\'s citation checks: the original\'s red × comes back with it', () => {
   const text = 'Wrong: [4](r1#day=b@n), and more words here.'
   const rec = remark(newRecord({ row: 'x', session: 's', text }))
@@ -153,7 +170,7 @@ test('a squeeze and its revert keep each text\'s citation checks: the original\'
   const short = applyRewrite(healed, { text: 'Wrong: [4](r1#day=b@n).', at: { length: 0 } }, remark)
   assert.equal(needsHeal(short), true)
   const shortHealed = withHeal(short, textKey(shownOf(short)), { changes: [{ ...bad, state: 'linked', how: 'kept' }] })
-  assert.equal(healedRecord(shortHealed).marks.find(m => m.kind === 'cite').heal, undefined)
+  assert.equal(healedRecord(shortHealed).marks.find(m => m.kind === 'cite').heal, 'kept')
   // 0: the original again, with its own result, and no new pass
   const back = restore(shortHealed, remark)
   assert.equal(needsHeal(back), false)

@@ -115,3 +115,18 @@ def test_a_quote_resolves_to_its_span_the_rows_around_it_and_the_quoted_words_in
     # an ellipsis splits a quote: from its first part to the end of its last
     hot = LIN.resolve(st, "say.jsonl#L7", label="“add SEC … map”")["span"]["rows"][2]
     assert hot["text"][hot["at"][0]:hot["at"][1]] == "add SEC county map"
+
+
+def test_rows_of_a_file_are_named_by_one_field_not_by_whichever_is_longest(root: Path) -> None:
+    # made-up passengers: row 3's name is short and its ticket long, so row by row its ticket would name it
+    rows = [("Lindqvist, Mr. Osmo Rainer", "A 1234"), ("Varga, Mrs. Ilona Petra", "B 22"),
+            ("Aho, Mr. Tuomo", "QX/R.S. 7700123"), ("Brandt, Miss. Edda Marie", "C 3"), ("Okafor, Mr. Chidi Nnamdi", "D 41")]
+    with open(root / "voyagers.csv", "w") as f:
+        f.write("Id,Name,Ticket\n" + "".join(f'{i},"{n}",{t}\n' for i, (n, t) in enumerate(rows, 1)))
+    st = Store(root)
+    sp = LIN.span(st, "voyagers.csv#row=3")
+    assert sp is not None
+    words = {r["n"]: r["text"] for r in sp["rows"]}
+    assert words[3] == "Aho, Mr. Tuomo" and words[2] == "Varga, Mrs. Ilona Petra"
+    recs = LIN.records(st, ["voyagers.csv#row=1-5"], n=5, pick="first")
+    assert [r["words"] for r in recs][2] == "Aho, Mr. Tuomo"
