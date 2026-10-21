@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from . import refs as R
+from . import regextext as RT
 from . import sources as S
 from .store import Store
 
@@ -225,7 +226,7 @@ def regex_text(row: S.Row, kind: str | None) -> str:
     reads: the file holds a newline in a value as the two characters \\ and n, so `\\bhttps?://` would miss a link
     right after one. Any other record (a line of text, a CSV row, a table's row) as the file holds it."""
     if kind in JSON_KINDS and not isinstance(row.value, str):
-        return S._flat_text(row.value)
+        return RT.json_text(row.value)
     return row.raw
 
 
