@@ -38,11 +38,12 @@ export function viewRequest({ message, choice = '', guide, aside = false }) {
   return lines.join(' ')
 }
 
-/** What main reads once the fork in the background saved the card for v: the answer it is for, and each card, with its
- *  file, so a later turn knows the card exists and where the analyst sees it. */
+/** What main reads once the fork in the background saved the card for v: the answer it is for, and how many cards it
+ *  made. Each card follows in words (shell.tsx cardForClaude), named by its title, so a later turn knows the card
+ *  exists and where the analyst sees it. */
 export function viewMade({ about = '', cards = [] }) {
-  const named = cards.map(c => `${c.id}${c.v != null ? `@${c.v}` : ''} (${String(c.root || '').replace(/\/+$/, '')}/thimble/objects/${c.id}.json)`)
-  if (!named.length) return ''
+  if (!cards.length) return ''
+  const many = cards.length > 1
   const what = about ? `your answer that begins "${firstWords(about)}"` : 'your last answer'
-  return `The analyst pressed v (visualize) on ${what}. A copy of you that worked in the background made the card${named.length > 1 ? 's' : ''} ${named.join(', ')} for it, drawn under that answer, and the analyst sees ${named.length > 1 ? 'them' : 'it'} there. What ${named.length > 1 ? 'each shows' : 'it shows'}, as the analyst sees it:`
+  return `The analyst pressed v (visualize) on ${what}. A copy of you that worked in the background made ${many ? `${cards.length} cards` : 'a card'} for it. The analyst sees ${many ? 'them' : 'it'} under that answer, in color. ${many ? 'Each card follows' : 'It follows'} in words: its title, its takeaway, its drawing as plain text, and its parts. The plain text has no colors, so the colors a key names and the parts of a stacked bar all look the same in it. Where a bar is split, its parts are listed under the drawing, with their values.`
 }
