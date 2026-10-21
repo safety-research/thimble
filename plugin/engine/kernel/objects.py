@@ -234,7 +234,7 @@ def _cite(st: Store, ref: str, where: str, ctx: dict[str, Any], quote: str | Non
                 if col is None:
                     raise R.RefError(f"{q['id']}'s output has no column {p['col']!r}")
                 c["value"] = row[col]
-                if label is not None and not number_matches(label, row[col]):
+                if label is not None and not number_matches(unkeyed(label, p.get("keys")), row[col]):
                     raise R.RefError(f"the citation shows {label!r} but {ref} holds {row[col]!r}")
                 if q.get("rows") and idx[0] < len(q["rows"]):
                     c["rows"] = Q.value_rows(q, idx[0], col)
@@ -269,26 +269,59 @@ def _merge_rows(lists: list[list[str]]) -> list[str]:
 
 
 NUM_RE = re.compile(r"[-−]?\d[\d,]*(?:\.\d+)?")
+# a scale written after a number: 12k, 1.17M, 2.4 billion
+_SCALE_RE = re.compile(r"\s?(k|K|M|B|bn|thousand|million|billion)(?![A-Za-z])")
+_SCALES = {"k": 1e3, "K": 1e3, "thousand": 1e3, "M": 1e6, "million": 1e6, "B": 1e9, "bn": 1e9, "billion": 1e9}
+
+
+def _tight(label: str) -> str:
+    """The words without the thin spaces some numbers hold (8 452)."""
+    return label.replace(" ", "").replace(" ", "")
+
+
+def unkeyed(label: str, keys: dict[str, Any] | None) -> str:
+    """The words of a citation without the numbers that name its row: in `[addresses starting with 20.](r9#first=20@n)`
+    the 20 says which row it is, not the value the row holds."""
+    named = set()
+    for v in (keys or {}).values():
+        try:
+            named.add(float(str(v).replace(",", "")))
+        except ValueError:
+            pass
+    if not named:
+        return label
+
+    def drop(m: re.Match) -> str:
+        try:
+            return " " if float(m[0].replace("−", "-").replace(",", "")) in named else m[0]
+        except ValueError:
+            return m[0]
+
+    return NUM_RE.sub(drop, _tight(label))
 
 
 def number_matches(label: str, value: Any) -> bool:
-    """Whether the number a citation shows is the cited value, as written or rounded to the digits it shows (a share
-    may be shown as a percent). A label with no number matches."""
-    m = NUM_RE.search(label.replace(" ", "").replace(" ", ""))
-    if not m or not isinstance(value, (int, float)) or isinstance(value, bool):
+    """Whether a number a citation shows is the cited value, as written or rounded to the digits it shows. The words
+    may hold several numbers (`8,452 of the 14,591 edits`), and any one of them may be the value. A share may be shown
+    as a percent, and a number may carry a scale (`1.17M` is 1,170,228 rounded). A label with no number matches."""
+    s = _tight(label)
+    found = list(NUM_RE.finditer(s))
+    if not found or not isinstance(value, (int, float)) or isinstance(value, bool):
         return True
-    tok = m[0].replace("−", "-").replace(",", "")
-    try:
-        shown = float(tok)
-    except ValueError:
-        return True
-    digits = len(tok.split(".")[1]) if "." in tok else 0
-    pct = label[m.end():m.end() + 2].strip().startswith("%")
-    for v in ([value * 100, value] if pct else [value]):
-        if round(float(v), digits) == shown or abs(float(v) - shown) <= 0.5 * 10 ** -digits + 1e-9:
-            return True
-    if not pct and digits == 0 and re.search(r"\d\s*[kKmM]\b", label[m.start():m.end() + 2]):
-        return True
+    for m in found:
+        tok = m[0].replace("−", "-").replace(",", "")
+        try:
+            shown = float(tok)
+        except ValueError:
+            continue
+        digits = len(tok.split(".")[1]) if "." in tok else 0
+        after = s[m.end():]
+        pct = after.lstrip().startswith("%")
+        sc = None if pct else _SCALE_RE.match(after)
+        cands = [float(value) * 100] if pct else [float(value) / _SCALES[sc[1]]] if sc else []
+        for v in cands + [float(value)]:
+            if round(v, digits) == shown or abs(v - shown) <= 0.5 * 10 ** -digits + 1e-9:
+                return True
     return False
 
 

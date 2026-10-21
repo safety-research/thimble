@@ -80,6 +80,22 @@ def test_contradicted_when_the_cited_place_holds_another_number(st: Store) -> No
     assert text == "June 1 had [4](r1#day=2026-06-01@n) saves."  # the words and the link stay
 
 
+def test_any_number_in_the_words_and_a_scale(st: Store) -> None:
+    # r3: saves by the first two digits of a made-up address, 20 -> 1,170,232 and 21 -> 501,528
+    Q.run(st, "saves by first", 'df = load("saves.jsonl")\n'
+          '(df.assign(first=(df["id"] >= 7) + 20).groupby("first").size() * 167176).rename("n")')
+    for words in ["addresses starting with 20.", "1.17M saves", "1,170,232 of the 1,671,760 saves",
+                  "1.2 million", "saves from 20. (1,170k)"]:
+        text, c = one(st, f"Most came from [{words}](r3#first=20@n).")
+        assert (c["state"], c["how"]) == (H.LINKED, H.KEPT), words
+    text, c = one(st, "Then [501.5k](r3#first=21@n).")
+    assert c["how"] == H.KEPT
+    # a wrong number is still caught, with or without a scale
+    for words in ["1.18M saves", "9,000 from 20."]:
+        text, c = one(st, f"Most came from [{words}](r3#first=20@n).")
+        assert c["state"] == H.CONTRADICTED and c["source"] == "1,170,232", words
+
+
 def test_versioning(st: Store) -> None:
     text = "The busiest day had [5](r1#day=2026-06-01@n) saves, and [12](r9@n) in all."
     r = H.heal(st, text)
