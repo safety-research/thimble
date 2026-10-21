@@ -82,3 +82,23 @@ test("a mark's card opens above its words when the window has no room for it bel
   expect(card.classList.contains('is-above')).toBe(false)
   expect(card.style.maxHeight).toBe('516px')
 })
+
+test('a mark lands where its term stands on its own, not inside another number', async () => {
+  vi.stubGlobal('fetch', async () => new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } }))
+  const reply = 'Up to the export on 30 Aug 2026, 26 of the 36 tickets closed, and the tool is unmerged-safe.'
+  const placed: Mark[] = [
+    { id: 'n1', lens: 'details', term: '26', title: 'Closed share', body: 'Most tickets closed.' },
+    // a term that only stands inside another word still marks its first place
+    { id: 'n2', lens: 'explain', term: 'merged', body: 'Joined to the main line.' },
+  ]
+  const el = await mount(
+    <ChipContext.Provider value={{ workspace: 'w', broken: new Set() }}>
+      <ChatMarkdown text={reply} marks={placed} />
+    </ChipContext.Provider>,
+  )
+  await settle()
+  const term = el.querySelector<HTMLElement>('.lens-mark[data-lens=details]')!
+  expect(term.textContent).toBe('26')
+  expect(term.previousSibling?.textContent).toBe('Up to the export on 30 Aug 2026, ')
+  expect(el.querySelector<HTMLElement>('.lens-mark[data-lens=explain]')?.previousSibling?.textContent).toMatch(/is un$/)
+})

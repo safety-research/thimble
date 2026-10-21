@@ -141,19 +141,43 @@ export function NoMarks({ children }: { children: ReactNode }) {
   return <MarkContext.Provider value={NO_MARKS}>{children}</MarkContext.Provider>
 }
 
+const WORD_CHAR = /[\p{L}\p{N}]/u
+const DIGIT_CHAR = /\d/
+const NUMBER_JOIN = /[.,]/
+
+/** Whether `term` at `at` in `s` stands on its own: no letter or digit touches it, and no decimal point or thousands
+ * comma joins it to a number. The 26 of "2026", of "1,260" or of "0.265" is part of another number. */
+export function standsAlone(s: string, at: number, term: string): boolean {
+  const end = at + term.length
+  if (WORD_CHAR.test(s[at - 1] ?? '') || WORD_CHAR.test(s[end] ?? '')) return false
+  if (DIGIT_CHAR.test(term[0] ?? '') && NUMBER_JOIN.test(s[at - 1] ?? '') && DIGIT_CHAR.test(s[at - 2] ?? '')) return false
+  if (DIGIT_CHAR.test(term[term.length - 1] ?? '') && NUMBER_JOIN.test(s[end] ?? '') && DIGIT_CHAR.test(s[end + 1] ?? '')) return false
+  return true
+}
+
+/** Where `term` first stands in `s`: on its own when `alone`, else anywhere; -1 when it does not. */
+function findTerm(s: string, term: string, alone: boolean): number {
+  if (!term) return -1
+  if (!alone) return s.indexOf(term)
+  for (let at = s.indexOf(term); at >= 0; at = s.indexOf(term, at + 1)) if (standsAlone(s, at, term)) return at
+  return -1
+}
+
 /** rehype plugin: the first place each term of `terms` stands in the text (outside code and chips) becomes a
- * `<span data-mark-at=i>` that renders as its lens's mark. */
+ * `<span data-mark-at=i>` that renders as its lens's mark. A place where the term stands on its own comes first, so
+ * the term "26" marks the 26 of "26 of the 36" and not the one inside "2026"; a term found only inside other words
+ * marks its first place. */
 export function rehypeMarks(terms: readonly string[]) {
   return (tree: Root) => {
     const left = new Set(terms.map((_, i) => i))
-    const visit = (node: Root | Element): void => {
+    const visit = (node: Root | Element, alone: boolean): void => {
       if (!left.size) return
-      if (node.type === 'element' && (node.tagName === 'code' || node.tagName === 'pre' || node.properties?.dataRef != null)) return
+      if (node.type === 'element' && (node.tagName === 'code' || node.tagName === 'pre' || node.properties?.dataRef != null || node.properties?.dataMarkAt != null)) return
       const next: (typeof node.children)[number][] = []
       let changed = false
       for (const child of node.children) {
         if (child.type !== 'text' || !left.size) {
-          if (child.type === 'element') visit(child)
+          if (child.type === 'element') visit(child, alone)
           next.push(child)
           continue
         }
@@ -161,7 +185,7 @@ export function rehypeMarks(terms: readonly string[]) {
         for (;;) {
           let best: { i: number; at: number } | null = null
           for (const i of left) {
-            const at = rest.indexOf(terms[i])
+            const at = findTerm(rest, terms[i], alone)
             if (at >= 0 && (!best || at < best.at)) best = { i, at }
           }
           if (!best) break
@@ -175,7 +199,8 @@ export function rehypeMarks(terms: readonly string[]) {
       }
       if (changed) node.children = next as typeof node.children
     }
-    visit(tree)
+    visit(tree, true)
+    visit(tree, false)
   }
 }
 
