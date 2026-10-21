@@ -70,6 +70,18 @@ test('a fenced block keeps its lines: a link in it is no mark, an explainer neve
   assert.ok(!drawn.some(n => n.type === 'Button' && /352/.test(n.props.label)), 'no press on the link in the block')
 })
 
+test('a line with a citation cuts its words at the end when its column narrows, never wraps them in narrow columns', { skip: !view && 'this Node runs no TypeScript' }, () => {
+  const t = 'Most saves came from **Quill Bot**: [412](r2#editor=Quill Bot@n) of them, then Fern Helper with a few.'
+  const rec = newRecord({ row: 'r1', session: 's1', text: t })
+  const drawn = nodes(view.messageEl(els, { rec, key: 'm', cols: 60, first: true, theme: 'dark', focus: null, onMark: () => {} }))
+  const kids = n => [n.props.children].flat().filter(k => k && typeof k === 'object')
+  const rows = drawn.filter(n => n.type === 'Box' && n.props.flexDirection === 'row' && kids(n).some(k => k.type === 'Button' && /^mk-/.test(k.props.key)))
+  assert.ok(rows.length >= 1)
+  const words = rows.flatMap(r => kids(r).filter(k => k.type === 'Text'))
+  assert.ok(words.length >= 2)
+  for (const w of words) assert.equal(w.props.wrap, 'truncate-end')
+})
+
 test('a table too wide for its column is drawn as its rows, `header: cell`, each citation in it still a mark that ] stops on', { skip: !view && 'this Node runs no TypeScript' }, () => {
   const t = 'Who saved most:\n\n| Editor | Saves | Last save | What changed |\n|---|---|---|---|\n| Quill Bot | [412](r2#editor=Quill Bot@n) | [this save](wiki/a.jsonl#L88) | Rewrote the intro and removed the [three cited sources](r2#row=4@n) that the talk page asked for |\n| Fern Helper | [97](r2#editor=Fern Helper@n) | [this save](wiki/a.jsonl#L91) | Small fixes |\n'
   const rec = newRecord({ row: 'r1', session: 's1', text: t })
