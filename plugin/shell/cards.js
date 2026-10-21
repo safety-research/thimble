@@ -11,10 +11,11 @@
 //                                      as the file holds it behind c (raw)
 //         a number from a query        the query's output as a table, the cited row and cell marked, with how many
 //                                      rows stand behind that cell (a single value: the value and what it counts);
-//                                      those rows as words behind r, the query's code and the value's lineage behind c
-//         a series (a sparkline)       its values as a small table, or a plot when they are many; r and c as above
+//                                      the query's code behind c, colored as code is (keywords, strings, numbers,
+//                                      comments); the rows behind the cell as words behind r only with `rows: true`
+//         a series (a sparkline)       its values as a small table, or a plot when they are many; c as above
 //         a value of a card            the card itself, the part that holds the value marked (`mark`: the refs that
-//                                      part carries); r and c as above
+//                                      part carries); c as above
 //   citeCard({ref, label, root, room}, io)          -> the source card of a citation, its inputs read through `io`:
 //       {resolve(ref, n, label) -> thimble resolve's JSON, read(path) -> text}. Both surfaces use it (the terminal with
 //       its own reads, the page server with Node's), so a citation's card is the same everywhere
@@ -283,15 +284,13 @@ if (!data.recs.length) parts.push(k.text('{dim:' + k.escape(data.empty) + '}'))
 if (data.more) parts.push(k.text(data.more, { wrap: false }))
 return k.stack(parts)`
 
-// code with its line numbers, then the lineage in a few lines
+// code with its line numbers, each line already colored as markup (codeMarkup)
 const CODE_PROGRAM = `
 const parts = []
 if (data.head) parts.push(k.text(data.head, { wrap: false }))
 const nw = String(data.code.length).length
-data.code.forEach((l, i) => parts.push(k.beside(k.text('{dim:' + String(i + 1).padStart(nw) + '}', { w: nw, wrap: false }), k.text(l || ' ', { raw: true, wrap: false }), { gap: 2 })))
+data.code.forEach((l, i) => parts.push(k.beside(k.text('{dim:' + String(i + 1).padStart(nw) + '}', { w: nw, wrap: false }), k.text(l || ' ', { wrap: false }), { gap: 2 })))
 if (data.more) parts.push(k.text('{dim:' + k.escape(data.more) + '}', { wrap: false }))
-if (data.code.length && data.lines.length) parts.push(k.space(1, 1))
-for (const l of data.lines) parts.push(k.text(l, { max: 2 }))
 return k.stack(parts)`
 
 // a record as the file holds it, the field the citation quotes marked
@@ -401,6 +400,27 @@ export function entryWords(r) {
   return { many: 'rows', one: 'row' }
 }
 
+// a query's code colored as code is, in the kit's tones: keywords, strings, numbers, and comments dim
+const KEYWORDS = new Set('False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield'.split(' '))
+const CODE_TOKEN = /(#.*$)|([rRbBfFuU]{0,2}(?:"(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?))|(\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([A-Za-z_]\w*)/g
+/** One line of a query's code as markup: each keyword, string, number and comment in its tone, the rest as written. */
+export function codeMarkup(line) {
+  const t = String(line ?? '')
+  let out = ''
+  let at = 0
+  for (const m of t.matchAll(CODE_TOKEN)) {
+    const [w, comment, str, num, word] = m
+    const tone = comment ? 'dim' : str ? 'c6' : num ? 'c3' : word && KEYWORDS.has(word) ? 'c2' : null
+    out += esc(t.slice(at, m.index)) + (tone ? `{${tone}:${esc(w)}}` : esc(w))
+    at = m.index + w.length
+  }
+  return out + esc(t.slice(at))
+}
+
+/** The line under a query's code the first time a session's trays show one that calls thimble's own load or tally. */
+export const HELPERS_NOTE = "load reads a file's rows; tally counts them by group"
+const HELPERS = /\b(?:load|tally)\s*\(/
+
 /** Whether a value has a rows section: entries stand behind it. */
 const hasRows = r => r.count > 0 && entryWords(r) !== null
 
@@ -418,27 +438,29 @@ function rowsSection(r, what, room) {
   return { id: 'rows', key: SECTION_KEYS.rows, words: w.many, parts: [{ program: RECORDS_PROGRAM, data: { head, recs, max, empty: r.why || `no ${w.many} stand behind it`, more: '' } }] }
 }
 
-/** The code section: the query that made the value, with its lines numbered, then where the value comes from. */
+/** The code section: the query that made the value, its lines numbered and colored as code is, then the card or the
+ *  binding it comes through and the kernel's notes. The files it reads are in the code itself, so no line repeats them.
+ *  `note`: the line the tray adds under the code the first time a session shows a query that calls load or tally. */
 function codeSection(r, query, ref, room) {
   const q = query || (r.chain || []).find(c => c.step === 'query') || null
   const code = String(q?.code || '').replace(/\t/g, '    ').replace(/\n+$/, '').split('\n')
   const fit = Math.max(3, room - 5)
   const lines = []
-  const chain = (r.chain || []).filter(c => c.step === 'object' || c.step === 'binding' || c.step === 'query')
+  const chain = (r.chain || []).filter(c => c.step === 'object' || c.step === 'binding')
   for (const c of chain) {
     if (c.step === 'object') lines.push(`{dim:card} ${esc(c.title || c.id)}${c.at ? ` {dim:at} ${esc(c.at)}` : ''}`)
     else if (c.step === 'binding') lines.push(`{dim:bound from} ${esc(c.from)}`)
   }
-  const inputs = (q?.inputs || []).map(x => `${esc(x.path)}${x.rows_read != null ? ` {dim:(${fmtN(x.rows_read)} rows)}` : ''}`)
-  if (inputs.length) lines.push(`{dim:reads} ${inputs.slice(0, 3).join('{dim:,} ')}${inputs.length > 3 ? ` {dim:and ${inputs.length - 3} more}` : ''}`)
-  const w = entryWords(r)
-  const count = r.count != null && w ? `${fmtN(r.count)} source ${r.count === 1 ? w.one : w.many}` : 'whole files'
-  lines.push(`{dim:ref} ${esc(r.narrowed || ref)} {dim:←} ${esc(count)}${q?.lineage ? ` {dim:· lineage ${esc(q.lineage)}}` : ''}`)
   for (const n of (r.notes || []).slice(0, 2)) lines.push(`{dim:${esc(short(n, 220))}}`)
   const head = q ? `{dim:${esc(q.id || '')} ·} ${esc(q.about || 'the query')}` : `{dim:no query made this value}`
+  const shown = q?.code ? code.slice(0, fit) : []
   return {
     id: 'code', key: SECTION_KEYS.code, words: 'code',
-    parts: [{ program: CODE_PROGRAM, data: { head, code: q?.code ? code.slice(0, fit) : [], more: code.length > fit ? `… ${plural(code.length - fit, 'more line')}` : '', lines } }],
+    ...(shown.some(l => HELPERS.test(l)) ? { note: HELPERS_NOTE } : {}),
+    parts: [
+      { program: CODE_PROGRAM, data: { head, code: shown.map(codeMarkup), more: code.length > fit ? `… ${plural(code.length - fit, 'more line')}` : '' } },
+      ...(lines.length ? [{ program: LINES_PROGRAM, data: { lines } }] : []),
+    ],
   }
 }
 
@@ -474,9 +496,10 @@ const cellText = v => short(typeof v === 'number' ? fmtN(v) : v == null || v ===
 /**
  * A citation's card. `resolved` is `thimble resolve <ref> --json`; `query` the query's record (thimble/queries/r<n>.json)
  * for a query ref; `object` the object's record for a value of a card; `lines` the file's lines around the cited ones
- * for a code ref the kernel gave no span for ({n, text}); `room` the card's rows.
+ * for a code ref the kernel gave no span for ({n, text}); `room` the card's rows; `rows` adds the rows behind a value as a
+ * section (r), which no surface shows now: the code says what the value reads.
  */
-export function sourceCard({ ref: wrote, label, resolved, query, object, lines, path, room = 9 }) {
+export function sourceCard({ ref: wrote, label, resolved, query, object, lines, path, room = 9, rows: withRows = false }) {
   const r = resolved || {}
   // a citation of a whole query that the kernel narrowed to the row holding its value: the card is about that row
   const ref = typeof r.narrowed === 'string' && r.narrowed ? r.narrowed : wrote
@@ -496,7 +519,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
     const { table, cols, col, hot, keyCols, labelOf } = columnOf(query, ref)
     // a column of one row (a total, `r4@n`) is one value, drawn as one: no chart of one bar
     const series = kind === 'series' && table.length !== 1
-    const sections = [...(hasRows(r) ? [rowsSection(r, series ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
+    const sections = [...(withRows && hasRows(r) ? [rowsSection(r, series ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
     if (series) {
       const labels = distinctCut(table.map(t => short(labelOf(t), 200)), 24)
       const rows = table.map((t, j) => ({ label: labels[j], value: typeof t[col] === 'number' ? t[col] : Number(t[col]) || 0 }))
@@ -531,7 +554,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   }
   if (kind === 'object') {
     const step = (r.chain || []).find(c => c.step === 'object') || {}
-    const sections = [...(hasRows(r) ? [rowsSection(r, 'this value', deep)] : []), codeSection(r, null, ref, deep)]
+    const sections = [...(withRows && hasRows(r) ? [rowsSection(r, 'this value', deep)] : []), codeSection(r, null, ref, deep)]
     const value = 'value' in step ? `{dim:value} **${esc(short(typeof step.value === 'object' ? JSON.stringify(step.value) : step.value, 60))}**${step.at ? ` {dim:at ${esc(step.at)}}` : ''}` : ''
     if (object && typeof object.program === 'string' && object.program.trim()) {
       const parts = [{ program: object.program, data: object.data ?? {}, id: object.id || step.id }]
@@ -663,6 +686,6 @@ export async function drawnCard(spec, draw) {
   if (main.err) return { title: spec.title, right: spec.right, problem: String(main.err.message || main.err), drawings: [], links: [] }
   return {
     ...rest, links: spec.links || [], drawings: main.d,
-    sections: (sections || []).map((s, i) => ({ id: s.id, key: s.key, words: s.words, drawings: more[i].d || [], ...(more[i].err ? { problem: String(more[i].err.message || more[i].err) } : {}) })),
+    sections: (sections || []).map((s, i) => ({ id: s.id, key: s.key, words: s.words, ...(s.note ? { note: s.note } : {}), drawings: more[i].d || [], ...(more[i].err ? { problem: String(more[i].err.message || more[i].err) } : {}) })),
   }
 }
