@@ -55,6 +55,21 @@ export function LensSidebar({ ws, tab, onClose }: { ws: string; tab: SideTab; on
   useEffect(() => bus.on('openLens', (e) => setDetail(e.id ? { kind: e.tab, id: e.id } : null)), [])
   const lens = detail?.kind === 'checks' ? lenses.find((l) => l.id === detail.id) : undefined
   const label = detail?.kind === 'labels' ? concepts.get(detail.id) : undefined
+  // Escape goes back from a check's or a label's detail to the list, then closes the sidebar. It is heard on the
+  // window, after the document's own listeners: a menu or popover open over the page (Menu.tsx stops the key there),
+  // the pointer box (which marks it handled) and a field with words typed in it keep their Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const t = e.target as HTMLElement | null
+      if (t?.isContentEditable || ((t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) && t.value)) return
+      e.preventDefault()
+      if (detail) setDetail(null)
+      else onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [detail, onClose])
   return (
     <aside className="lside" aria-label="Labels and checks" data-tab={tab}>
       <header className="lside-head">
