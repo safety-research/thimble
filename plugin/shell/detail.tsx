@@ -1007,7 +1007,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   const back = await backEls($, els, { view, drawing: d })
   const acts = actionsOf(d)
   // over the program, what its module asks the host to draw: the bar as the settings leave it (`above: 'bar'`)
-  const above = paneOf(view.pane).above === 'bar' ? await barPreviewEl($, els, C - 1) : null
+  const above = paneOf(view.pane).above === 'bar' ? await barPreviewEl($, els, C - 1, e?.props?.placement === 'dock' ? e.viewport?.columns : undefined) : null
   const grid = renderTerm(d, { w: C - 1 })
   const split = belowAt(grid)
   const belowRows = Math.min(grid.h - split, Math.max(4, Math.floor(R * 0.45)))

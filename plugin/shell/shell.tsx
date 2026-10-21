@@ -38,7 +38,7 @@ import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCoun
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteEdit, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
-import { base as trayBase, open as trayOpen, order as markOrder, stepFrom, top as trayTop } from './tray.js'
+import { base as trayBase, markNow, open as trayOpen, order as markOrder, stepFrom, top as trayTop } from './tray.js'
 import { catchUpEl, keyColor, markColors, messageEl } from './view'
 import { markNextTurn, record as recordEvent } from '../telemetry/telemetry'
 import { ownTurn } from '../observer/observer'
@@ -48,7 +48,7 @@ import { heldValues, openSettings, settingsAction, settingsStore } from '../sett
 
 import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, tellSettled, wantLevels as sqWant } from '../squeeze/term'
 import { SCALE, cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, setWords, withOwn } from '../squeeze/chips.mjs'
-import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
+import { barText, fitBar, hostKeys, keyEvent, keysOf, previewBarWidth } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTitle, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf, scopeOf as trayScopeOf } from '../panes/tray.js'
@@ -1368,17 +1368,26 @@ async function stepPlace($: Engine): Promise<{ list: { row: string; i?: number; 
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const base = trayBase(tray) as TrayFrame | null
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
-  const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === base.i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
+  // the tray's mark where its message holds it now (an explainer saved before it since it opened moves it on)
+  const i = base && base.row != null ? markNow(await recordNow($, base.row), base) : -1
+  const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
   return { list, at }
 }
 
 /** Whether ] and [ go anywhere from where they stand: at the newest reply's last stop ] stays where it is, and at the
- *  oldest reply's first [ does, so the bar does not name a key there that does nothing. */
-export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean }> {
+ *  oldest reply's first [ does, so the bar does not name a key there that does nothing. `reply`: where the tray's
+ *  mark is when it is in an earlier reply (`reply 1 of 3, above`), since a key cannot scroll the transcript to it. */
+export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean; reply?: string }> {
   const { list, at } = await stepPlace($)
-  if (at < 0) return { next: true, prev: true }
-  return { next: !!stepFrom(list, at, 1), prev: !!stepFrom(list, at, -1) }
+  const base = trayBase((await $.state.get(TRAY)).value as Tray | null) as TrayFrame | null
+  const place = base && base.row != null ? await answerPlace($, base.row) : null
+  const reply = place && place.at >= 0 && place.at < place.all.length - 1 ? { reply: replyPlace(place.at, place.all.length) } : {}
+  if (at < 0) return { next: true, prev: true, ...reply }
+  return { next: !!stepFrom(list, at, 1), prev: !!stepFrom(list, at, -1), ...reply }
 }
+
+/** Where an earlier reply is, in words: `reply 1 of 3, above`. */
+export const replyPlace = (at: number, of: number): string => `reply ${at + 1} of ${of}, above`
 
 /** The bar's words for ] and [ (the tray's and a focused card's): `] next` while there is a next, else `[ previous`
  *  where there is one before. */
@@ -2183,16 +2192,22 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
 /** The bar as the features Claude Code holds now leave it, at rest: the settings panel's preview, which detail.tsx
  *  draws above the list. It is the bar's own drawing (barEl) for this session, in a frame, with nothing in it a press;
  *  a feature turned off a moment ago is already gone from it, while the plugin loads again with the new value. */
-export async function barPreviewEl($: Engine, els: Any, w: number): Promise<Any> {
+export async function barPreviewEl($: Engine, els: Any, w: number, chatCols?: number): Promise<Any> {
   const { Box, Text } = els
   const on = switchesFrom(await heldValues($))
-  const inner = Math.max(20, w - 4)
+  // drawn at the real bar's width beside the panel (`chatCols`, the conversation's columns there), so it shows what
+  // the bar will show: a narrow bar leaves out coverage first (host.js fitBar); never wider than the panel's room
+  const inner = Math.max(20, Math.min(w - 4, previewBarWidth(chatCols, barOffset) ?? w - 4))
   const line = (await barEl($, els, inner, { on, preview: true })) ?? Text({ key: 'bar-label', color: FOCUS[theme], bold: true, children: 'thimble' })
   return Box({ key: 'bar-preview', flexDirection: 'column', width: w, children: [
     Text({ key: 'bar-preview-title', dimColor: true, children: 'The bar, with these features' }),
-    Box({ key: 'bar-preview-frame', borderStyle: 'round', borderDimColor: true, paddingX: 1, width: w, children: [line] }),
+    Box({ key: 'bar-preview-frame', borderStyle: 'round', borderDimColor: true, paddingX: 1, width: inner + 4, children: [line] }),
   ] })
 }
+
+// the columns the bar gives up of the conversation's (its viewport's columns less the bar's width), as the band last
+// drew it: the bar beside a panel is then the conversation's columns there less this
+let barOffset: number | null = null
 
 /** The items at the right of the bar a module made pressable without a key of their own, by id: each is drawn as a
  *  Button keyed `bar-item-<id>`, and what a click does is that module's ui.press hook. An item with a key (`t N
@@ -2722,7 +2737,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const pages = pk ? pagesRow(els, pk, focus === 'focus', fullscreen ? () => openDetail($, ref, null, { pages: PAGES_DEFAULT }) : null) : null
   const o = p.object || {}
   const fw = frameWidth(outer, p.grid.w, o.title)
-  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: rows, more, onMore: openAll, color: ring })
+  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: rows, more, onMore: openAll, onOpen: openAll, color: ring })
   // the labels its data came through, beside it (labeluse.ts)
   const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id, width: framed ? Math.max(p.grid.w, 40) : fw })
   return Box({
@@ -3566,6 +3581,7 @@ export const registerShell: Register = (on, options) => {
       // draws first when a docked pane closes, so the verb row never counts at the width the pane left
       if (e.viewport?.columns) seeView(e.viewport.columns, e.viewport.rows ?? 48)
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
+      if (e.viewport?.columns && e.props.bodyColumns) barOffset = Math.max(0, e.viewport.columns - bw)
       const line = await barEl($, els, bw)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       const above = trayTop(tray) ? await trayBand($, e, tray!) : null

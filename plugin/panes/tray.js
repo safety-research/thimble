@@ -118,7 +118,8 @@ export default {
     // a thread as the tray reads it: its key, its status, its turns (each question and answer), its error
     return {
       threads: list.map(t => ({ key: t.key || (t.scope ? threadKey(t.scope) : ''), status: t.status || '', error: t.error || '', turns: (t.turns || []).map(x => ({ role: x.role === 'user' ? 'person' : x.role, text: String(x.text || '') })) })),
-      // whether ] and [ go anywhere from this mark ({next, prev}; null where the host does not say)
+      // whether ] and [ go anywhere from this mark ({next, prev}; null where the host does not say), and where its
+      // reply is when that is an earlier one ({reply: 'reply 1 of 3, above'})
       steps: stores.steps && typeof stores.steps === 'object' ? stores.steps : null,
     }
   },
@@ -211,7 +212,9 @@ export function program(k, data) {
   // the frame's right says what the card is from (the card's own words, `cite · revisions.jsonl`), the section open,
   // and how deep the stack is
   const from = card && !card.problem && !card.error && typeof card.right === 'string' && card.right ? card.right : kind
-  const right = [from, open ? open.words : '', stack.length > 1 ? String(stack.length) : ''].filter(Boolean).join(' · ')
+  // a mark of an earlier reply says where that reply is first, since the chat may show a later one
+  const where = data.steps && typeof data.steps.reply === 'string' ? data.steps.reply : ''
+  const right = [where, from, open ? open.words : '', stack.length > 1 ? String(stack.length) : ''].filter(Boolean).join(' · ')
   // the title gets the room the frame leaves it beside the right (draw/term.js), cut here so a place keeps its line
   const avail = k.w - 6
   const rl = right.length

@@ -283,12 +283,43 @@ def _glob_rx(pat: str) -> re.Pattern[str]:
 
 
 _TOKEN = re.compile(r"[\w./*?\[\]{}~+-]+")
+_SHELL_TOKEN = re.compile(r"[\w./*?\[\]{}~+$-]+")
+_VAR = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?])\}?")
 
 
-def named(text: str, known: list[str], root: str, cwd: str | None = None) -> set[str]:
+def variables(cmd: str) -> dict[str, list[str]]:
+    """The values a command gives its shell variables: `R=runs/a` and `for r in a b; do`. A variable set twice keeps
+    each value."""
+    out: dict[str, list[str]] = {}
+    for m in re.finditer(r"(?:^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s;&|)]*)", cmd):
+        out.setdefault(m.group(1), []).append(m.group(2).strip("'\""))
+    for m in re.finditer(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]*?)\s*(?:;|\n)\s*do\b", cmd):
+        words = re.findall(r"\"[^\"]*\"|'[^']*'|\S+", m.group(2))
+        out.setdefault(m.group(1), []).extend(w.strip("'\"") for w in words)
+    return out
+
+
+def _expand(t: str, values: dict[str, list[str]]) -> list[str]:
+    """A word with shell variables as the paths it can stand for: each variable the command set takes its values, and
+    one it did not set stands for any one folder or name (`runs/$r/forge.db` is `runs/*/forge.db`, never every file
+    under runs/). A word that is only variables the command did not set (`$f`) names nothing."""
+    unset = [m.group(1) for m in _VAR.finditer(t) if not values.get(m.group(1))]
+    if unset and not re.search(r"[A-Za-z0-9]", _VAR.sub("", t)):
+        return []
+    outs = [t]
+    for name in dict.fromkeys(m.group(1) for m in _VAR.finditer(t)):
+        vals = [v for v in values.get(name, []) if "$" not in v] or ["*"]
+        rx = re.compile(r"\$\{?" + re.escape(name) + r"(?![A-Za-z0-9_])\}?")
+        outs = [rx.sub(lambda _m, v=v: v, o) for o in outs for v in vals][:64]
+    return [o for o in outs if "$" not in o]
+
+
+def named(text: str, known: list[str], root: str, cwd: str | None = None,
+          values: dict[str, list[str]] | None = None) -> set[str]:
     """The source files a command's words name, by path, folder or glob. A path resolves from the command's folder
     first, so `cat x.csv` names that folder's x.csv and not every x.csv under the root, and `*` stays within one folder;
-    a path that does not resolve matches by its end, as after a `cd`."""
+    a path that does not resolve matches by its end, as after a `cd`. A shell variable takes the values the command
+    gave it (`values`), else stands for one folder or name."""
     root = root.rstrip("/")
     known_set = set(known)
     if not cwd:
@@ -298,7 +329,11 @@ def named(text: str, known: list[str], root: str, cwd: str | None = None) -> set
     else:
         here = "\0"  # a folder beside the root: its paths resolve only by their end
     hit: set[str] = set()
-    for t in set(_TOKEN.findall(text)):
+    tokens: set[str] = set()
+    # a heredoc's body is not shell (no `values`): a `$` in it only ends a word
+    for t in (_TOKEN if values is None else _SHELL_TOKEN).findall(text):
+        tokens.update(_expand(t, values) if values is not None and "$" in t else [t])
+    for t in tokens:
         t = t.strip("'\"")
         if len(t) < 3:
             continue
@@ -340,6 +375,7 @@ def shows(cmd: str, known: list[str], root: str, cwd: str | None,
     being "read" with the lines it printed, "searched" or "named". The `thimble` command keeps its own record, so its
     stages and heredocs are left out here."""
     out: list[tuple[str, str, tuple[int, int] | None, str]] = []
+    values = variables(cmd)
     for pipe in pipelines(cmd):
         sent = not pipe[-1]["out"]
         for k, st in enumerate(pipe):
@@ -351,7 +387,7 @@ def shows(cmd: str, known: list[str], root: str, cwd: str | None,
                 continue
             for body in st["bodies"]:
                 out.extend((f, "named", None, prog or "a heredoc") for f in sorted(named(body, known, root, None)))
-            files = named(" ".join(args), known, root, cwd) if prog else set()
+            files = named(" ".join(args), known, root, cwd, values) if prog else set()
             if not files:
                 continue
             how, rng = stage_shows(prog, args)
