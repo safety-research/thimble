@@ -188,6 +188,8 @@ async function currentFix($: Engine, fixes: Fix[], active: string | null, verb =
  *  command's own text asks for it). */
 export async function fixCommand($: Engine, args: string): Promise<{ text?: string } | null> {
   const v = fixVerb(args) as { verb: string; slug?: string; text?: string }
+  // the person acts on their fixes: a notice that one went off has been seen
+  if ((await fixLineNow($))?.kind === 'notice') await $.state.set(LINE, null)
   if (v.verb === 'change') return null
   const { fixes, active } = await listFixes($)
   if (v.verb === 'status') {
@@ -306,13 +308,19 @@ export async function fixesWorking($: Engine): Promise<{ slug: string; title: st
 }
 
 /** The bar's words for the fixes, at its left: `fixing: <title>` while one works, then the fix line's own keys. */
-export async function fixBar($: Engine): Promise<{ key: string; words: string; tone?: 'error'; status?: boolean; good?: boolean }[]> {
-  const out: { key: string; words: string; tone?: 'error'; status?: boolean; good?: boolean }[] = []
+export async function fixBar($: Engine): Promise<{ key: string; words: string; short?: string; tone?: 'error'; status?: boolean; good?: boolean }[]> {
+  const out: { key: string; words: string; short?: string; tone?: 'error'; status?: boolean; good?: boolean }[] = []
   const w = await fixesWorking($)
   if (w.length) out.push({ key: '', words: w.length === 1 ? `◌ fixing: ${cut(w[0]!.title, 32)}` : `◌ fixing ${w.length}`, status: true })
   const l = await fixLineNow($)
   if (l?.kind === 'failed') out.push({ key: 'f', words: 'fix this' }, { key: 'F', words: 'report only' })
-  else if (l?.kind === 'notice') out.push({ key: '', words: l.text, status: true })
+  else if (l?.kind === 'notice') {
+    // the whole line is in the transcript; the bar keeps its point and its command, with the title cut first, and
+    // when even that does not fit, the short words
+    const v = /no longer fits thimble (\S+?);/.exec(l.text)
+    const words = l.text.replace(/'([^']*)'/, (_m, t: string) => `'${cut(t, 24)}'`)
+    out.push({ key: '', words, status: true, ...(v ? { short: `your fix is off: it no longer fits ${v[1]} · /thimble:fix to redo it` } : {}) })
+  }
   else if (l?.kind === 'applied') out.push({ key: '', words: '✓ fixed', status: true, good: true }, { key: 'p', words: 'submit' }, { key: 'u', words: 'undo' })
   return out
 }
