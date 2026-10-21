@@ -17,6 +17,7 @@ ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
 
 from kernel import lineage as LIN  # noqa: E402
+from kernel import sources as S  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
 NAMES = "abcdefghijkl"
@@ -252,3 +253,38 @@ def test_only_a_model_labels_reads_are_said_as_a_models(code: Path, tmp_path: Pa
     assert "a label's model read 3 of 3 rows (mood)" in o["said"]
     assert "passed_flag" not in o["said"].split("computed over")[0]
     assert "computed over all 3 rows (passed_flag)" in o["said"]
+
+
+def test_a_working_folder_of_links_counts_the_files_they_point_to(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # a made-up dataset, and a working folder of links to each of its top-level files and folders (one link of a
+    # folder holds many images), with a link back up and a broken link that must not count or loop
+    data = tmp_path / "harbor"
+    (data / "shots" / "day1").mkdir(parents=True)
+    (data / "shots" / "day2").mkdir(parents=True)
+    for d in ("day1", "day2"):
+        for i in range(300):
+            (data / "shots" / d / f"{i}.png").write_bytes(b"")
+    (data / "boats.jsonl").write_text('{"boat":"Ada"}\n{"boat":"Bo"}\n{"boat":"Cy"}\n')
+    (data / "README.md").write_text("# Harbor\n\nboats and shots\n")
+    (data / "shots" / "day1" / "up").symlink_to(data / "shots")
+    work = tmp_path / "work"
+    work.mkdir()
+    for x in data.iterdir():
+        (work / x.name).symlink_to(x)
+    (work / "gone.jsonl").symlink_to(tmp_path / "nowhere.jsonl")
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    before = sorted(p.name for p in work.iterdir())
+    saw(tmp_path, work, [{"tool": "Read", "file": str(work / "boats.jsonl"), "from": 1, "to": 2}])
+
+    cov = LIN.coverage(Store(work))
+    by = {o["path"]: o for o in cov["files"]}
+    assert cov["total"]["files"] == 602
+    assert "shots/day2/299.png" in by and "gone.jsonl" not in by
+    assert not any(p.startswith("shots/day1/up/") for p in by)
+    assert by["boats.jsonl"]["touched"] and cov["total"]["touched_files"] == 1
+    # the sources are the linked tables too, and nothing was written into the folder or the dataset
+    assert S.list_sources(work) == ["README.md", "boats.jsonl"]
+    assert sorted(p.name for p in work.iterdir()) == before
+    assert sorted(p.name for p in data.iterdir()) == ["README.md", "boats.jsonl", "shots"]
