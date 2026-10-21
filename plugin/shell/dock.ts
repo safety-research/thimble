@@ -61,17 +61,26 @@ async function thimble($: Engine, root: string, args: string[], env?: Record<str
  *  stopped early keeps nothing, so a short limit would stop every count of such a folder (10 minutes is the most
  *  Claude Code allows). */
 export const COVER_TIMEOUT_MS = 600000
-const counting = new Map<string, Promise<{ ok: boolean; out: string; err: string }>>()
+type Ran = { ok: boolean; out: string; err: string }
+const counting = new Map<string, Promise<Ran>>()
+const queued = new Map<string, Promise<Ran>>()
 
-/** `thimble coverage --json` of the session's reads in `root`, one count at a time per folder: the bar's count and
- *  the pane share a count that runs. */
-export function coverageOf($: Engine, root: string, session: string): Promise<{ ok: boolean; out: string; err: string }> {
+/** `thimble coverage --json` of the session's reads in `root`, one count at a time per folder. A count asked for
+ *  while one runs is one more count after it (that one began before the newest reads), shared by everyone who asks
+ *  meanwhile: so at most one runs and one waits, and the last answer has every read. */
+export function coverageOf($: Engine, root: string, session: string): Promise<Ran> {
   const key = `${root}\n${session}`
-  let p = counting.get(key)
-  if (!p) {
-    p = thimble($, root, ['coverage', '--json'], { THIMBLE_ROOT: root, THIMBLE_SESSION: session }, COVER_TIMEOUT_MS).finally(() => { counting.delete(key) })
-    counting.set(key, p)
+  const cur = counting.get(key)
+  if (cur) {
+    let next = queued.get(key)
+    if (!next) {
+      next = cur.catch(() => undefined).then(() => { queued.delete(key); return coverageOf($, root, session) })
+      queued.set(key, next)
+    }
+    return next
   }
+  const p = thimble($, root, ['coverage', '--json'], { THIMBLE_ROOT: root, THIMBLE_SESSION: session }, COVER_TIMEOUT_MS).finally(() => { counting.delete(key) })
+  counting.set(key, p)
   return p
 }
 
@@ -339,4 +348,6 @@ export function resetDock(): void {
   held.coverage = { cov: null, loading: false, error: null, gen: 0, since: 0 }
   held.labels = { list: null, loading: false, error: null, gen: 0, since: 0 }
   pages.clear()
+  counting.clear()
+  queued.clear()
 }
