@@ -6,17 +6,23 @@
     $THIMBLE_HOME/fixes/<slug>/draft.json    the draft's parts before the scan, kept here so that Keep can put a term
                                              back; never shared
     $THIMBLE_HOME/fixes/<slug>/share/        issue.md, pr.md, diff.patch: the exact text a send uses; scan.json, the
-                                             scan's hits; ask.json while a send waits for the person
+                                             scan's hits; ask.json while a send waits for the person: its time,
+                                             and from the person's key press the sha256 of the key's one secret
     $THIMBLE_HOME/fixes/active               the slug whose plugin Claude Code loads, when one does
     $THIMBLE_HOME/fixes/release.json         the marketplace source to go back to on undo
 
-Nothing leaves the machine without the person's yes: `send` and `keep` need the ask id, which only the person's key
-or button passes (as `thimble label --answer`). The programs it runs can be replaced for tests: THIMBLE_GH (gh),
-THIMBLE_CLAUDE (claude), and THIMBLE_GIT, the git that runs the one push.
+Nothing leaves the machine without the person's yes. `send` and `keep` need a secret that the plugin makes at the
+person's key press in its preview and holds only in its own memory: it writes the secret's sha256 into ask.json and
+gives the secret to `thimble fix send|keep … --ask -` on stdin. The secret is never in a file, an argument or the
+change feed, so Claude's shell cannot read it, and a draft's ask.json holds no secret until that key press. (The
+browser's server, which calls these functions in its own process, keeps an id of its own in ask.json.) The programs it
+runs can be replaced for tests: THIMBLE_GH (gh), THIMBLE_CLAUDE (claude), and THIMBLE_GIT, the git that runs the one
+push.
 """
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import os
 import platform
@@ -383,6 +389,15 @@ def use(slug: str, plugin_dir: bool | None = None) -> str:
     fx = load(slug)
     if not fx.get("worktree"):
         raise FixError(f"{slug} is a request with no change: there is nothing to turn on")
+    # the copy is on an older release: turning it on would put the person back on that release, until the next follow
+    # took it away again
+    if fx.get("status") == "stale":
+        raise FixError(f"your fix '{fx['title']}' no longer fits thimble {fx.get('stale_on') or 'the newest release'}, "
+                       f"so it stays off. To have it again, redo it on the new release: /thimble:fix redo "
+                       f"'{fx['title']}' on {fx.get('stale_on') or 'the new release'}")
+    if fx.get("status") == "merged":
+        raise FixError(f"your fix '{fx['title']}' is in thimble {fx.get('merged_in') or 'the release'}, so you have it "
+                       f"with the release; there is nothing to turn on")
     # plugin_dir: whether the caller is a Claude Code session started with --plugin-dir; None asks this plugin's own
     # place. A caller that is no Claude Code session (the browser's server, which runs from a checkout) passes False.
     if from_plugin_dir() if plugin_dir is None else plugin_dir:
@@ -436,6 +451,45 @@ def undo(plugin_dir: bool | None = None) -> str:
             fx["status"] = "ready"
             save(fx)
     return f"thimble is back to the release from {prev}. {RELOAD}"
+
+
+def _size(d: Path) -> str:
+    n = 0
+    for dp, _dirs, files in os.walk(d):
+        for f in files:
+            try:
+                n += (Path(dp) / f).lstat().st_size
+            except OSError:
+                pass
+    return f"{n / 1e6:.0f} MB" if n >= 1e6 else f"{n // 1000} kB"
+
+
+def remove(slug: str, plugin_dir: bool | None = None) -> str:
+    """Remove a fix: turn it off when it is on, then delete its copy (a worktree of the person's clone with its branch,
+    or Claude Code's clone's copy) and its record. A session started with --plugin-dir on the copy runs it until it
+    quits, so the copy stays until then."""
+    fx = load(slug)
+    if fix_of_plugin() == slug and (from_plugin_dir() if plugin_dir is None else plugin_dir):
+        raise FixError(f"this session runs the fix {slug} from its copy with --plugin-dir, so the copy stays until the "
+                       f"session quits. Quit and run: {_restart(Path(fx.get('source') or '') / 'plugin')}, then remove it")
+    said = ""
+    if active_slug() == slug:
+        said = undo(plugin_dir) + " "
+    d = fix_dir(slug)
+    size = _size(d)
+    wt, src = fx.get("worktree"), fx.get("source")
+    if wt and src and (Path(wt) / ".git").is_file():
+        # a worktree of the person's own clone (a dev install): git forgets it and its branch, in their clone
+        run(["git", "worktree", "remove", "--force", wt], cwd=src, check=False)
+        if fx.get("branch"):
+            run(["git", "branch", "-D", fx["branch"]], cwd=src, check=False)
+    shutil.rmtree(d, ignore_errors=True)
+    if d.exists():
+        raise FixError(f"could not delete {d}; delete that folder by hand")
+    stamps = read_json(fixes_home() / "follow.json") or {}
+    if stamps.pop(slug, None) is not None:
+        write_json(fixes_home() / "follow.json", stamps)
+    return f"{said}Removed the fix '{fx['title']}': its copy and its record ({size})."
 
 
 # ------------------------------------------------------------------ a fix follows releases
@@ -716,6 +770,109 @@ def session_terms(st: Store) -> dict[str, list[str]]:
     return {k: sorted(x for x in v if x) for k, v in t.items()}
 
 
+def _base_files(fx: dict[str, Any]) -> set[str]:
+    """The files of thimble's repository at the fix's base."""
+    repo, base = fx.get("worktree") or fx.get("source"), fx.get("base")
+    if not (repo and base):
+        return set()
+    return set(git("-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", base, cwd=repo, check=False).splitlines())
+
+
+def _repo_paths(fx: dict[str, Any], diff: str) -> set[str]:
+    """thimble's own repository paths: each file at the fix's base, each file the change adds or renames, and their
+    folders (plugin/, plugin/tests)."""
+    files = set(re.findall(r"^diff --git a/(\S+) b/(?:\S+)$", diff, re.M)) | set(re.findall(r"^\+\+\+ b/(\S+)$", diff, re.M))
+    files |= _base_files(fx)
+    out = set(files)
+    for f in files:
+        parts = f.split("/")
+        out |= {"/".join(parts[:i]) for i in range(1, len(parts))}
+    return out
+
+
+_PATHISH = re.compile(r"(?<![\w./~-])[\w.-]+(?:/[\w.-]+)+/?")
+_HELD = re.compile("[\U000F0000-\U000FFFFD]")
+
+
+def _protect(parts: dict[str, str], paths: set[str]) -> tuple[dict[str, str], list[str]]:
+    """The parts with thimble's own text held out of the scan, and what was held (in order). Held: in the diff, each line
+    that is not an added line (file names, hunk headers, and thimble's code at the base, which context and removed lines
+    show); in every part, a path of thimble's repository (scripts/check.sh). Only the analyst's details are scanned:
+    the added lines and the words around the paths. Each held span becomes one private-use character, which no term
+    matches, until _unprotect puts it back."""
+    held: list[str] = []
+
+    def hold(x: str) -> str:
+        held.append(x)
+        return chr(0xF0000 + len(held) - 1)
+
+    def paths_in(text: str) -> str:
+        def one(m: re.Match) -> str:
+            x = m.group(0)
+            core = x.rstrip(".,:;")
+            return hold(core) + x[len(core):] if core.rstrip("/") in paths else x
+        return _PATHISH.sub(one, text)
+
+    out = {}
+    for where, text in parts.items():
+        if where == "diff":
+            lines = []
+            for ln in text.splitlines(keepends=True):
+                body = ln.rstrip("\n")
+                if body.startswith("+") and not body.startswith("+++ "):
+                    lines.append("+" + paths_in(body[1:]) + ln[len(body):])
+                else:
+                    lines.append((hold(body) if body else "") + ln[len(body):])
+            out[where] = "".join(lines)
+        elif where == "branch":
+            out[where] = text
+        else:
+            out[where] = paths_in(text)
+    return out, held
+
+
+def _unprotect(parts: dict[str, str], held: list[str]) -> dict[str, str]:
+    return {w: _HELD.sub(lambda m: held[ord(m.group(0)) - 0xF0000], t) for w, t in parts.items()}
+
+
+_WORD = re.compile(r"[^\W\d_][\w'’-]*")
+
+
+def _widen(terms: dict[str, list[str]], text: str, known, base: set[str]) -> dict[str, list[str]]:
+    """The session's terms as the scan needs them for this draft:
+    - each term in every letter case the draft writes it ("odalys merriweather" as "Odalys Merriweather" is a hit);
+    - each distinctive word of a name or a value of several words, so a first name alone ("Odalys") is a hit too. A word
+      is distinctive when it has 3 letters or more and thimble's own source does not hold it in any case ("Team", "New"
+      and "Score" pass);
+    - never a file or folder name that thimble's repository already has (a data folder's check.sh is not
+      scripts/check.sh)."""
+    names = {x for p in base for x in p.split("/")}
+    out = {k: {x for x in v if not (k in ("file", "folder") and x in names)} for k, v in terms.items()}
+    words: dict[str, str] = {}
+    for kind in ("name", "git", "value"):
+        for t in out.get(kind, ()):
+            ws = [w.strip("'’-") for w in _WORD.findall(t)]
+            if len(ws) < 2:
+                continue
+            for w in ws:
+                if len(w) >= 3 and w not in words:
+                    words[w] = kind
+    if words:
+        variants = sorted({v for w in words for v in (w, w.lower(), w.capitalize(), w.upper())})
+        public = known(variants) if known else set()
+        for w, kind in words.items():
+            if not {w, w.lower(), w.capitalize(), w.upper()} & public:
+                out.setdefault(kind, set()).add(w)
+    low = text.lower()
+    for kind, xs in out.items():
+        if kind == "path":
+            continue
+        for x in list(xs):
+            if x.lower() in low:
+                xs |= {m.group(0) for m in re.finditer(re.escape(x), text, re.I)}
+    return {k: sorted(v) for k, v in out.items()}
+
+
 def _split_draft(text: str, title: str) -> tuple[str, str, str]:
     lines = text.strip().splitlines()
     if lines and lines[0].startswith("# "):
@@ -732,10 +889,12 @@ def _share_slug(title_after_scan: str) -> str:
 
 
 def _write_share(fx: dict[str, Any], parts: dict[str, str], hits: list[dict]) -> dict[str, str]:
-    """Writes share/ from the draft's parts and hits; returns the parts after the scan."""
+    """Writes share/ from the draft's parts and hits; returns the parts after the scan. thimble's own paths and code
+    stay as they are (_protect)."""
     d = fix_dir(fx["slug"]) / "share"
     d.mkdir(parents=True, exist_ok=True)
-    out = P.apply(parts, hits)
+    held_parts, held = _protect(parts, _repo_paths(fx, parts.get("diff", "")))
+    out = _unprotect(P.apply(held_parts, hits), held)
     removed = sum(not h["kept"] for h in hits)
     foot = (f"\n\n---\nthimble {fx.get('version') or '?'} · {platform.system() or 'unknown OS'} · "
             f"{'a change' if 'pr' in out else 'a request'} from a tester\n"
@@ -754,7 +913,7 @@ def _write_share(fx: dict[str, Any], parts: dict[str, str], hits: list[dict]) ->
 
 
 def draft(slug: str, src: str | None, st: Store | None, *, text: str | None = None,
-          terms: dict[str, list[str]] | None = None) -> dict[str, Any]:
+          terms: dict[str, list[str]] | None = None, own_id: bool | None = None) -> dict[str, Any]:
     """Build the share from Claude's draft (the file `src`, or `text`): the issue, and when the copy has a change, the
     pull request and its diff. A fix whose copy has no change goes out as an issue alone: a request. The scan's
     session terms come from the kernel's records of the session (`st`), or from the caller (`terms`, the browser's)."""
@@ -786,34 +945,61 @@ def draft(slug: str, src: str | None, st: Store | None, *, text: str | None = No
     repo_paths = [(str(PLUGIN) + os.sep, "plugin/")]
     if fx.get("worktree"):
         repo_paths.append((fx["worktree"] + os.sep, ""))
-    hits, notes = P.scan(parts, terms if terms is not None else session_terms(st), _known(fx), repo_paths,
-                         allow=[fx.get("base") or ""])
+    known = _known(fx)
+    paths = _repo_paths(fx, diff)
+    held_parts, _held = _protect(parts, paths)
+    base_files = _base_files(fx)
+    terms = _widen(terms if terms is not None else session_terms(st), "\n".join(held_parts.values()), known, base_files)
+    # a file the change adds keeps its name (a placeholder would make the diff create a file named ‹data file›), so a
+    # name that came from the analyst's session stops the draft until the copy gives it a made-up one
+    added = sorted(set(re.findall(r"^\+\+\+ b/(\S+)$", diff, re.M)) - base_files)
+    if added:
+        named, _ = P.scan({"diff": "\n".join(added)}, {k: v for k, v in terms.items() if k != "path"}, known,
+                          use_gitleaks=False)
+        if named:
+            bad = P.apply({"diff": "\n".join(added)}, named)["diff"].splitlines()
+            shown = next((b for b, a in zip(bad, added) if b != a), bad[0])
+            raise FixError(f"the new file {shown} is named after the analyst's data (the part in ‹›); rename it in the "
+                           "copy to a made-up name, then run thimble fix draft again")
+    hits, notes = P.scan(held_parts, terms, known, repo_paths, allow=[fx.get("base") or ""])
     old = {(h["where"], h["found"]): h["kept"] for h in read_json(fix_dir(slug) / "share" / "scan.json") or []}
     for h in hits:
         h["kept"] = bool(old.get((h["where"], h["found"]))) and h["kind"] not in P.NEVER_KEPT
     write_json(fix_dir(slug) / "draft.json", {"parts": parts, "notes": notes})
     _write_share(fx, parts, hits)
-    ask = {"id": "f" + secrets.token_hex(6), "created": time.time()}
+    # no secret yet: the plugin's preview adds the sha256 of one at the person's key press (_check_ask). A caller in
+    # its own process with a page of its own (the browser's server, which passes no store) keeps an id here instead
+    ask: dict[str, Any] = {"created": time.time()}
+    if st is None if own_id is None else own_id:
+        ask["id"] = "f" + secrets.token_hex(6)
     write_json(fix_dir(slug) / "share" / "ask.json", ask)
     fx["status"] = "drafted"
     fx.pop("error", None)
     save(fx)
     removed = sum(not h["kept"] for h in hits)
     if st is not None:
-        st.emit({"kind": "fix_ask", "slug": slug, "ask": ask["id"], "fix_kind": fx["kind"], "title": fx["title"],
+        st.emit({"kind": "fix_ask", "slug": slug, "fix_kind": fx["kind"], "title": fx["title"],
                  "removed": removed, "share": str(fix_dir(slug) / "share")})
     return {"removed": removed, "notes": notes, "hits": hits, "change": bool(diff.strip())}
 
 
-def _check_ask(slug: str, ask_id: str | None) -> dict[str, Any]:
-    ask = read_json(fix_dir(slug) / "share" / "ask.json")
-    if not ask or not ask_id or ask.get("id") != ask_id:
-        raise FixError(f"no draft of {slug} waits for the person with that id; only the person's choice in the preview sends it")
-    return ask
+def key_hash(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
 
 
-def keep(slug: str, hit_id: str, ask_id: str | None, st: Store) -> str:
-    _check_ask(slug, ask_id)
+def _check_ask(slug: str, secret: str | None, own_id: bool = True) -> dict[str, Any]:
+    """The draft's ask, when `secret` is the person's: the secret whose sha256 the plugin wrote at their key press, or
+    (own_id, a caller in its own process such as the browser's server) the id that caller keeps in ask.json."""
+    ask = read_json(fix_dir(slug) / "share" / "ask.json") or {}
+    s = str(secret or "")
+    key, aid = str(ask.get("key") or ""), str(ask.get("id") or "")
+    if s and (key and secrets.compare_digest(key, key_hash(s)) or own_id and aid and secrets.compare_digest(aid, s)):
+        return ask
+    raise FixError(f"no draft of {slug} waits for that key; only the person's key in thimble's preview sends it")
+
+
+def keep(slug: str, hit_id: str, ask_id: str | None, st: Store, own_id: bool = True) -> str:
+    _check_ask(slug, ask_id, own_id)
     fx = load(slug)
     d = fix_dir(slug)
     hits = read_json(d / "share" / "scan.json") or []
@@ -825,7 +1011,7 @@ def keep(slug: str, hit_id: str, ask_id: str | None, st: Store) -> str:
     h["kept"] = True
     _write_share(fx, (read_json(d / "draft.json") or {}).get("parts") or {}, hits)
     save(fx)
-    st.emit({"kind": "fix_ask", "slug": slug, "ask": ask_id, "fix_kind": fx["kind"], "title": fx["title"],
+    st.emit({"kind": "fix_ask", "slug": slug, "fix_kind": fx["kind"], "title": fx["title"],
              "removed": sum(not x["kept"] for x in hits), "share": str(d / "share"), "change": "keep"})
     return f"kept {h['found']!r} in the {h['where']}"
 
@@ -898,8 +1084,8 @@ def _send(fx: dict[str, Any]) -> list[str]:
     return lines
 
 
-def send(slug: str, answer: str, ask_id: str | None) -> list[str]:
-    _check_ask(slug, ask_id)
+def send(slug: str, answer: str, ask_id: str | None, own_id: bool = True) -> list[str]:
+    _check_ask(slug, ask_id, own_id)
     fx = load(slug)
     ask_file = fix_dir(slug) / "share" / "ask.json"
     if answer == "cancel":

@@ -999,6 +999,7 @@ FIX_HELP = """Change thimble itself, or report a problem with it, from the sessi
     thimble fix status [SLUG]      the fixes, or one fix
     thimble fix use SLUG           loads the copy's plugin into the person's thimble
     thimble fix undo               goes back to the release
+    thimble fix remove SLUG        turns the fix off when it is on, and deletes its copy and its record
     thimble fix follow [now]       replays the fix that is on onto the newest release, at most once a day; in the
                                    release already, or no longer fitting, it goes back to the release
     thimble fix draft SLUG --from FILE
@@ -1010,6 +1011,12 @@ Work in the copy, never in the data folder. Show the problem with a new test on 
 example 4 rows with ; between fields), never with the person's rows. Then make the change and run the plugin's tests
 in the copy.
 """
+
+
+def _key(ask: str | None) -> str | None:
+    """The person's key for keep and send: `--ask -` reads it from stdin, where the plugin's preview writes it, so it is
+    in no argument and no file."""
+    return sys.stdin.readline().strip() if ask == "-" else ask
 
 
 def cmd_fix(a: argparse.Namespace) -> int:
@@ -1044,6 +1051,12 @@ def cmd_fix(a: argparse.Namespace) -> int:
         if a.verb == "undo":
             print(FX.undo())
             return 0
+        if a.verb == "remove":
+            if not a.args:
+                print("name the fix: thimble fix remove SLUG (thimble fix status lists them)")
+                return 2
+            print(FX.remove(a.args[0]))
+            return 0
         if a.verb == "follow":
             line = FX.follow(force=bool(a.args and a.args[0] == "now"))
             if line:
@@ -1065,19 +1078,19 @@ def cmd_fix(a: argparse.Namespace) -> int:
             if len(a.args) < 2:
                 print("thimble fix keep SLUG HIT --ask ID")
                 return 2
-            print(FX.keep(a.args[0], a.args[1], a.ask, Store()))
+            print(FX.keep(a.args[0], a.args[1], _key(a.ask), Store(), own_id=False))
             return 0
         if a.verb == "send":
             if not a.args or not a.answer:
                 print("thimble fix send SLUG --answer send|file|cancel --ask ID")
                 return 2
-            for line in FX.send(a.args[0], a.answer, a.ask):
+            for line in FX.send(a.args[0], a.answer, _key(a.ask), own_id=False):
                 print(line)
             return 0
     except FX.FixError as e:
         print(f"thimble fix {a.verb}: {e}")
         return 1
-    print(f"no verb {a.verb!r}: thimble fix new, status, use, undo or draft")
+    print(f"no verb {a.verb!r}: thimble fix new, status, use, undo, remove or draft")
     return 2
 
 
@@ -1180,13 +1193,13 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_label)
     p = sub.add_parser("fix", help="change or report thimble itself", description=FIX_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter,
-                       usage="thimble fix {new,status,use,undo,draft} ...")
-    p.add_argument("verb", metavar="{new,status,use,undo,draft}")
+                       usage="thimble fix {new,status,use,undo,remove,draft} ...")
+    p.add_argument("verb", metavar="{new,status,use,undo,remove,draft}")
     p.add_argument("args", nargs="*", help=argparse.SUPPRESS)
     p.add_argument("--kind", choices=FX.KINDS, default="fix", help="for new: fix (default), feature or report")
     p.add_argument("--from", dest="draft_file", metavar="FILE", help="for draft: the draft in markdown")
     # the person's choices in the preview, which their key or button runs (never Claude's to pass): keep SLUG HIT and
-    # send SLUG, each with the ask id that only the preview knows
+    # send SLUG, each with `--ask -` and the secret of the person's key press on stdin, which only the preview holds
     p.add_argument("--answer", choices=("send", "file", "cancel"), help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_fix)

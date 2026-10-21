@@ -89,7 +89,23 @@ Rows sniffs the separator. A new test uses 4 made-up rows with ; between fields.
 """
 
 
-def test_new_draft_keep_send(env: Path, capsys):
+def press(slug: str) -> str:
+    """What the plugin's preview does at the person's key press: a new secret held in memory, its sha256 in ask.json."""
+    import secrets
+    p = FX.fix_dir(slug) / "share" / "ask.json"
+    secret = secrets.token_urlsafe(32)
+    p.write_text(json.dumps({**json.loads(p.read_text()), "key": FX.key_hash(secret)}))
+    return secret
+
+
+def by_key(monkeypatch, args: list[str], secret: str) -> int:
+    """`thimble fix … --ask -` with the key's secret on stdin, as the plugin runs it."""
+    import io
+    monkeypatch.setattr(sys, "stdin", io.StringIO(secret + "\n"))
+    return cli.main(["fix", *args, "--ask", "-"])
+
+
+def test_new_draft_keep_send(env: Path, capsys, monkeypatch):
     fx = FX.new("Rows for semicolon CSV files")
     wt = Path(fx["worktree"])
     assert fx["branch"] == "fix/rows-for-semicolon-csv-files" and sh("git", "branch", "--show-current", cwd=wt) == fx["branch"]
@@ -102,7 +118,8 @@ def test_new_draft_keep_send(env: Path, capsys):
     printed = capsys.readouterr().out
     share = FX.fix_dir(fx["slug"]) / "share"
     ask = json.loads((share / "ask.json").read_text())
-    assert "the person is reviewing the draft" in printed.lower() and ask["id"] not in printed
+    # nothing Claude's shell can read sends it: the ask holds no secret until the person's key press
+    assert "the person is reviewing the draft" in printed.lower() and set(ask) == {"created"}
     issue, pr, diff = (share / "issue.md").read_text(), (share / "pr.md").read_text(), (share / "diff.patch").read_text()
     for private in ("tickets.csv", "queue_owner", "wren.example@example.org", "ghp_", "/ho" + "me/dana"):
         assert private not in issue + pr + diff, private
@@ -112,15 +129,20 @@ def test_new_draft_keep_send(env: Path, capsys):
     hits = json.loads((share / "scan.json").read_text())
     field = next(h for h in hits if h["found"] == "queue_owner" and h["where"] == "issue")
     token = next(h for h in hits if h["kind"] == "token")
-    with pytest.raises(FX.FixError, match="never kept"):
-        FX.keep(fx["slug"], token["id"], ask["id"], Store())
-    FX.keep(fx["slug"], field["id"], ask["id"], Store())
+    secret = press(fx["slug"])
+    assert by_key(monkeypatch, ["keep", fx["slug"], token["id"]], secret) == 1 and "never kept" in capsys.readouterr().out
+    assert by_key(monkeypatch, ["keep", fx["slug"], field["id"]], secret) == 0
     assert "queue_owner" in (share / "issue.md").read_text()
-    # a wrong id sends nothing
-    with pytest.raises(FX.FixError, match="no draft"):
-        FX.send(fx["slug"], "send", "f000000000000")
+    # what Claude's shell can read or write sends nothing: the key's hash, a made-up secret, or an id it writes itself
+    on_disk = json.loads((share / "ask.json").read_text())["key"]
+    assert by_key(monkeypatch, ["send", fx["slug"], "--answer", "send"], on_disk) == 1
+    assert cli.main(["fix", "send", fx["slug"], "--answer", "send", "--ask", "f000000000000"]) == 1
+    (share / "ask.json").write_text(json.dumps({**json.loads((share / "ask.json").read_text()), "id": "f1"}))
+    assert cli.main(["fix", "send", fx["slug"], "--answer", "send", "--ask", "f1"]) == 1
+    assert "only the person's key" in capsys.readouterr().out
     assert log(env, "gh") == [] and log(env, "git") == []
-    lines = FX.send(fx["slug"], "send", ask["id"])
+    assert by_key(monkeypatch, ["send", fx["slug"], "--answer", "send"], secret) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
     gh = log(env, "gh")
     assert gh[0] == "api user" and gh[1].startswith("repo fork safety-research/thimble")
     assert any(x.startswith("pr create --repo safety-research/thimble --draft --head test-user:fix/") for x in gh)
@@ -147,8 +169,7 @@ def test_report_only_opens_an_issue(env: Path):
     FX.draft(fx["slug"], str(f), Store())
     share = FX.fix_dir(fx["slug"]) / "share"
     assert not (share / "pr.md").exists() and "tickets.csv" not in (share / "issue.md").read_text()
-    ask = json.loads((share / "ask.json").read_text())
-    FX.send(fx["slug"], "send", ask["id"])
+    FX.send(fx["slug"], "send", press(fx["slug"]))
     gh = log(env, "gh")
     assert gh[0] == "api user" and len(gh) == 2 and gh[1].startswith("issue create") and log(env, "git") == []
 
@@ -159,9 +180,8 @@ def test_file_mode_writes_one_markdown_file(env: Path):
     f = env / "d.md"
     f.write_text(DRAFT.format(tok="Cd4" * 12))
     FX.draft(fx["slug"], str(f), Store())
-    ask = json.loads((FX.fix_dir(fx["slug"]) / "share" / "ask.json").read_text())
     (env / "person" / "Downloads").mkdir()
-    out = FX.send(fx["slug"], "file", ask["id"])
+    out = FX.send(fx["slug"], "file", press(fx["slug"]))
     files = list((env / "person" / "Downloads").glob("*.md"))
     assert len(files) == 1 and str(files[0]) in out[0]
     text = files[0].read_text()
@@ -232,7 +252,7 @@ def test_a_copy_with_no_change_is_shared_as_a_request_alone(env: Path):
     share = FX.fix_dir(fx["slug"]) / "share"
     assert not r["change"] and (share / "issue.md").exists() and not (share / "pr.md").exists()
     assert "a request from a tester" in (share / "issue.md").read_text()
-    ask = json.loads((share / "ask.json").read_text())["id"]
+    ask = json.loads((share / "ask.json").read_text())["id"]  # a caller with no store (the browser's server) keeps an id
     assert FX.send(fx["slug"], "send", ask) == ["The person sent the report under their GitHub login: issue https://example.invalid/test-user/issues/2."]
     assert not any(l.startswith(("repo fork", "pr create")) for l in log(env, "gh")) and log(env, "git") == []
 
@@ -352,3 +372,82 @@ def test_a_replay_stopped_part_way_replays_only_the_fix(on):
     release(src, "0.11.1", {"plugin/rows.py": (src / "plugin" / "rows.py").read_text() + "# a note\n", "plugin/more.py": "x = 1\n"})
     assert FX.follow(force=True) == "thimble 0.11.1 + your fix 'Rows reads a semicolon' · u undo"
     assert "split(';')" in (wt / "plugin" / "rows.py").read_text() and (wt / "plugin" / "more.py").exists() and not undone
+
+
+# ---- the scan removes only the analyst's details (made-up names and files)
+
+def scan_case(env: Path, issue: str, files: dict[str, str], terms: dict[str, list[str]], pr: str = "") -> dict:
+    src = env / "src"
+    (src / "scripts").mkdir(exist_ok=True)
+    (src / "scripts" / "check.sh").write_text("#!/bin/sh\npython3 -m pytest plugin -q\n")
+    sh("git", "add", "scripts/check.sh", cwd=src)
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "checks", cwd=src)
+    fx = FX.new("Rows for semicolon files")
+    for rel, text in files.items():
+        (Path(fx["worktree"]) / rel).parent.mkdir(parents=True, exist_ok=True)
+        (Path(fx["worktree"]) / rel).write_text(text)
+    d = env / "d.md"
+    d.write_text(issue + "\n\n## Change\n\n" + (pr or "Rows sniffs the separator.") + "\n")
+    FX.draft(fx["slug"], str(d), None, terms=terms)
+    return fx
+
+
+def test_the_scan_never_changes_thimbles_own_paths_or_code(env: Path):
+    # the data folder holds a check.sh, as thimble's repository does
+    fx = scan_case(env, "# Rows and check.sh\n\nscripts/check.sh fails on plugin/rows.py with the file orbit-ledger.csv.",
+                   {"plugin/rows.py": "def rows(path):\n    return open(path).read().split(';')\n# a label and a card\n",
+                    "plugin/tests/fixtures/semicolons.csv": "a;b\n1;2\n"},
+                   {"file": ["check.sh", "orbit-ledger.csv"], "folder": ["scripts", "plugin"]},
+                   pr="Tested with scripts/check.sh and plugin/tests/fixtures/semicolons.csv.")
+    share = FX.fix_dir(fx["slug"]) / "share"
+    issue, pr, diff = (share / "issue.md").read_text(), (share / "pr.md").read_text(), (share / "diff.patch").read_text()
+    assert "scripts/check.sh fails on plugin/rows.py" in issue and "‹data file›" in issue and "orbit-ledger" not in issue
+    assert "Tested with scripts/check.sh and plugin/tests/fixtures/semicolons.csv." in pr
+    assert "‹" not in diff and "+++ b/plugin/tests/fixtures/semicolons.csv" in diff
+    base = FX.load(fx["slug"])["base"]
+    sh("git", "checkout", "-q", "--detach", base, cwd=env / "src")
+    assert subprocess.run(["git", "apply", "--check", str(share / "diff.patch")], cwd=env / "src").returncode == 0
+
+
+def test_a_new_file_named_after_the_analysts_data_stops_the_draft_with_the_fix(env: Path):
+    with pytest.raises(FX.FixError, match=r"the new file plugin/tests/fixtures/‹data file› is named after the analyst's data.*rename it"):
+        scan_case(env, "# Rows\n\nRows fails.", {"plugin/tests/fixtures/orbit-ledger.csv": "a;b\n"}, {"file": ["orbit-ledger.csv"]})
+
+
+def test_the_scan_finds_a_name_in_any_case_and_its_distinctive_words_alone(env: Path):
+    issue = ("# Rows fails\n\nWhile reading odalys merriweather's rows (account QX-4410-ZZ), Rows failed. Odalys saw it "
+             "too, and so did Merriweather. The label row failed for Quintessa; qx-4410-zz as well.")
+    fx = scan_case(env, issue, {"plugin/tests/fixtures/semicolons.csv": "owner;account\nODALYS MERRIWEATHER;qx-4410-zz\n"},
+                   {"value": ["Odalys Merriweather", "QX-4410-ZZ", "label Quintessa"]})
+    share = FX.fix_dir(fx["slug"]) / "share"
+    text = (share / "issue.md").read_text() + (share / "diff.patch").read_text()
+    for private in ("odalys", "Odalys", "ODALYS", "Merriweather", "MERRIWEATHER", "qx-4410-zz", "Quintessa"):
+        assert private not in text, private
+    # a word thimble's own source holds ("label") is no detail of the analyst's
+    assert "The label row failed for ‹value›" in text
+    # the person still reads each hit and the exact text before anything is sent
+    found = {h["found"] for h in json.loads((share / "scan.json").read_text())}
+    assert {"odalys merriweather", "Odalys", "Merriweather", "qx-4410-zz", "ODALYS MERRIWEATHER"} <= found
+
+
+# ---- try and remove
+
+def test_try_on_a_fix_that_no_longer_fits_says_so_and_keeps_the_release(on):
+    fx, src, undone = on
+    release(src, "0.11.0", {"plugin/rows.py": "def rows(path):\n    return open(path).read().split('|')\n"})
+    FX.follow(force=True)
+    (FX.fixes_home() / "active").unlink()  # what the undo (a stand-in here) does
+    with pytest.raises(FX.FixError, match=r"no longer fits thimble 0\.11\.0, so it stays off\. To have it again, redo it on the new release: /thimble:fix redo"):
+        FX.use(fx["slug"], plugin_dir=False)
+    # the marketplace stays on the release: nothing ran claude, and no fix is on
+    assert FX.active_slug() is None and FX.load(fx["slug"])["status"] == "stale" and log(src.parent, "claude") == []
+
+
+def test_remove_turns_the_fix_off_and_deletes_its_copy_branch_and_record(on, capsys):
+    fx, src, undone = on
+    assert cli.main(["fix", "remove", fx["slug"]]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("back Removed the fix 'Rows reads a semicolon': its copy and its record (") and undone == ["undo"]
+    assert not FX.fix_dir(fx["slug"]).exists() and FX.all_slugs() == []
+    assert fx["worktree"] not in sh("git", "worktree", "list", cwd=src) and fx["branch"] not in sh("git", "branch", cwd=src)
+    assert cli.main(["fix", "remove", fx["slug"]]) == 1 and "no fix rows-reads-a-semicolon" in capsys.readouterr().out

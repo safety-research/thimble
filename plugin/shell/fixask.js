@@ -6,7 +6,7 @@
 //   fixRequest({failure, kind})   f (kind 'fix') or F (kind 'report') on a failure line
 //   shareRequest({slug, title})   p on a fix with no draft yet
 //   lineKey(line, k)              what a key does to the line the bar names: fix, report, share, undo, or null
-//   fixVerb(args)                 what /thimble:fix's words ask for: the fixes, submit, undo, try, or a change
+//   fixVerb(args)                 what /thimble:fix's words ask for: the fixes, submit, undo, try, remove, or a change
 
 /** The keys a failure line carries, and the keys of a fix now in the person's thimble. */
 export const FAIL_KEYS = 'f fix this · F report only'
@@ -43,7 +43,7 @@ export function shareRequest({ slug = '', title = '' } = {}) {
  *  wants, which the command's own text asks Claude for (commands/fix.md). */
 export function fixVerb(args) {
   const w = one(args)
-  const m = /^(status|submit|share|undo|try|use)(?:\s+([a-z0-9][a-z0-9-]{0,79}))?$/i.exec(w)
+  const m = /^(status|submit|share|undo|try|use|remove)(?:\s+([a-z0-9][a-z0-9-]{0,79}))?$/i.exec(w)
   if (!w || /^status$/i.test(w)) return { verb: 'status' }
   if (!m) return { verb: 'change', text: w }
   const v = m[1].toLowerCase()

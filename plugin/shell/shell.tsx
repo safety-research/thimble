@@ -2060,7 +2060,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
     // a fix that works, and the keys of a failure line or of a fix now in use (fix.ts)
     for (const g of await fixBar($)) {
       const fk = g.key
-      left.push({ key: g.key, words: g.words, ...(g.status ? { status: true } : {}), ...(g.good ? { color: 'success', wordsColor: 'success' } : g.status ? { wordsColor: FOCUS[theme] } : {}), ...(fk ? { color: FOCUS[theme], onPress: async () => { const w = await fixKeyOf($, fk); if (w) await pressFix($, w) } } : {}) })
+      left.push({ key: g.key, words: g.words, ...(g.short ? { short: g.short } : {}), ...(g.status ? { status: true } : {}), ...(g.good ? { color: 'success', wordsColor: 'success' } : g.status ? { wordsColor: FOCUS[theme] } : {}), ...(fk ? { color: FOCUS[theme], onPress: async () => { const w = await fixKeyOf($, fk); if (w) await pressFix($, w) } } : {}) })
     }
     // at rest the bar names the three verbs alone (v s c) and the counts: ] still steps through the marks and the cards,
     // { } through the replies, and 1 opens the card the keys are on, unnamed until one of them is in use. c says how many

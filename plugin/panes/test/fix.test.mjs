@@ -81,6 +81,9 @@ test('/thimble:fix: no words lists the fixes, submit undo and try act on a fix, 
   assert.deepEqual(fixVerb('try claims-newest'), { verb: 'try', slug: 'claims-newest' })
   assert.deepEqual(fixVerb('sort the claims newest first'), { verb: 'change', text: 'sort the claims newest first' })
   assert.deepEqual(fixVerb('undo the bold in the bar'), { verb: 'change', text: 'undo the bold in the bar' })
+  assert.deepEqual(fixVerb('remove claims-newest'), { verb: 'remove', slug: 'claims-newest' })
+  assert.deepEqual(fixVerb('redo the claims fix on 0.11.0'), { verb: 'change', text: 'redo the claims fix on 0.11.0' })
+  assert.equal(lineKey({ kind: 'notice', text: 'Your fix went off' }, 'u'), null)
   assert.equal(USE_KEYS, 'p submit · u undo')
 })
 
