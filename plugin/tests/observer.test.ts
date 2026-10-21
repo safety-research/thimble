@@ -56,7 +56,8 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
     }
     let out = '{}'
     if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: DRAWING })
-    else if (e.argv.includes('coverage')) out = 'Coverage of this session · 4 source files\nNot read: 1 file (9 rows): events.jsonl'
+    // (the bar's count reads the JSON; a folder with nothing to count shows no coverage)
+    else if (e.argv.includes('coverage')) out = e.argv.includes('--json') ? JSON.stringify({ files: [], total: { files: 0 } }) : 'Coverage of this session · 4 source files\nNot read: 1 file (9 rows): events.jsonl'
     else if (e.argv.some(a => a.endsWith('objects.mjs'))) out = JSON.stringify(Object.entries(files).filter(([k]) => k.startsWith(DIR + '/')).map(([, v]) => slim(JSON.parse(v))).filter(o => o && o.session === e.argv.at(-1)))
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
