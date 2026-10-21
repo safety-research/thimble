@@ -349,6 +349,53 @@ def quote_at(text: str, label: str | None) -> tuple[int, int] | None:
     return (first, end) if first is not None else None
 
 
+_STOP = frozenset("""about after again also among because been before being between both cited does down during each from
+have here into just like made many more most much only other over same than that their them then there these they this
+those through under until very were what when where which while with would your""".split())
+
+
+def _named(text: str, label: str | None, reach: int = 240) -> tuple[int, tuple[int, int]] | None:
+    """Where `text` holds the passage a citation's words name without quoting them, with how much of the words it holds:
+    the stretch of at most `reach` characters that holds the most of their numbers and longer words, from the first of
+    them to the last. A number matches as the words round it (`89%` finds `89.1%`). The stretch needs a number that
+    stands out (a percent, a decimal, three digits or more), or a number and a word, or, for words with no number, two
+    words. For example `cut over-asking from 35% to 2.8%` names a summary that says `35% over-asking` and, a line later,
+    `over-ask -> 2.8%`; `12 hours` does not name `Step 12`. None when no stretch holds enough."""
+    if not label or not text:
+        return None
+    lab = " ".join(str(label).replace("**", "").split()).translate(_FOLD).lower()
+    num = re.compile(r"(?<![\w.,])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(%?)")
+    nums = [(float(m[1].replace(",", "") + (f".{m[2]}" if m[2] else "")), len(m[2] or ""), bool(m[3]), m[0]) for m in num.finditer(lab)]
+    words = {w for w in re.findall(r"[^\W\d_][\w'-]{3,}", lab) if w not in _STOP}
+    hay = text.translate(_FOLD).lower()
+    hits: list[tuple[int, int, str, int]] = []
+    for m in num.finditer(hay):
+        x = float(m[1].replace(",", "") + (f".{m[2]}" if m[2] else ""))
+        for v, d, pct, tok in nums:
+            # the low end of a range of percents (`35-45%`) is a percent too
+            here = bool(m[3]) or bool(re.match(r"\s?-\s?\d+(?:\.\d+)?%", hay[m.end():m.end() + 14]))
+            if (not pct or here) and abs(x - v) <= 10 ** -d * 1.0001 and len(m[2] or "") >= d:
+                # a number that stands out weighs two
+                hits.append((m.start(), m.end(), tok, 2 if pct or d or v >= 100 else 1))
+    for t in words:
+        # a word by its first letters, so `over-asking` finds `over-ask`
+        stem = t[: max(4, -(-len(t) * 3 // 5))]
+        for m in re.finditer(r"(?<!\w)" + re.escape(stem) + r"[\w'-]*", hay):
+            hits.append((m.start(), m.end(), t, 1))
+    hits.sort()
+    keys = {tok for *_, tok in nums}
+    best: tuple[int, tuple[int, int]] | None = None
+    for i, (a, _, _, _) in enumerate(hits):
+        inside = [h for h in hits[i:] if h[0] - a <= reach]
+        got = {h[2]: h[3] for h in inside}
+        found = [t for t in got if t in keys]
+        enough = any(got[t] == 2 for t in found) or (found and len(got) > len(found)) or (not nums and len(got) >= 2)
+        score = sum(got.values())
+        if enough and (best is None or score > best[0]):
+            best = (score, (a, max(h[1] for h in inside)))
+    return best
+
+
 def _strings(v: Any, key: str = "", depth: int = 0) -> list[tuple[str, str]]:
     """Every string of a value with the field that holds it (`message.content.0.text`), in order."""
     if depth > 6:
@@ -440,6 +487,10 @@ def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: in
     if isinstance(row.value, str):
         text = row.value.replace("\t", "    ")
         at = quote_at(text, label) if hot else None
+        if hot and not at and len(text) > width:
+            # a long line its words name without quoting: the passage they name, marked
+            named = _named(text, label)
+            at = named[1] if named else None
         if at:
             text, at = _window(text, at, width)
             out["at"] = list(at)
@@ -458,6 +509,18 @@ def _span_row(row: S.Row, n: int | None, hot: bool, label: str | None, width: in
                 text, at = _window(flat, at, width)
                 out.update({"text": text, "at": list(at), "field": key})
                 break
+        if "at" not in out:
+            # a long text (a transcript's message) whose passage the words name without quoting it: that passage, a
+            # line of context before it, marked, not the text's first lines
+            best = None
+            for key, s in _strings(row.value):
+                flat = " ".join(s.split())
+                named = _named(flat, label) if len(flat) > 240 else None
+                if named and (best is None or named[0] > best[0]):
+                    best = (named[0], key, flat, named[1])
+            if best:
+                text, at = _window(best[2], best[3], width)
+                out.update({"text": text, "at": list(at), "field": best[1]})
     if "text" not in out:
         out["text"] = words or excerpt(row, width)
     if hot and "at" not in out and isinstance(row.value, dict) and row.value.get("type") not in ("assistant", "user"):

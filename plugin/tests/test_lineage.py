@@ -134,6 +134,31 @@ def test_a_quote_resolves_to_its_span_the_rows_around_it_and_the_quoted_words_in
     assert hot["text"][hot["at"][0]:hot["at"][1]] == "add SEC county map"
 
 
+def test_a_long_message_cited_by_words_that_name_a_passage_opens_on_that_passage_marked(root: Path) -> None:
+    # a made-up transcript: the agent's long final summary names its result deep inside, in other words than the reply's
+    filler = " ".join(f"Step {i} set up the data and checked the loader again." for i in range(1, 30))
+    summary = (f"All done. Here is the whole picture. {filler} Main result: prompting gave 98% recall but **41% over-asking** on "
+               f"complete items, and the short fine-tune fixed it (over-ask -> 3.6%, p=0.001). {filler}")
+    with open(root / "talk.jsonl", "w") as f:
+        f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "go"}}) + "\n")
+        f.write(json.dumps({"type": "assistant", "timestamp": "2026-03-04T10:00:00Z",
+                            "message": {"role": "assistant", "content": [{"type": "text", "text": summary}]}}) + "\n")
+    st = Store(root)
+    hot = next(x for x in LIN.resolve(st, "talk.jsonl#L2", label="cut over-asking from 41% to 3.6%")["span"]["rows"] if x["hot"])
+    # not the message's first lines: the passage that holds the cited numbers, with a line of context before it, marked
+    assert not hot["text"].startswith("All done"), hot["text"][:80]
+    marked = hot["text"][hot["at"][0]:hot["at"][1]]
+    assert marked.startswith("41% over-asking") and marked.endswith("3.6%"), marked
+    assert 40 <= hot["at"][0] <= 200 and hot["text"].startswith("…")
+    # a percent the words write may stand at the low end of a range of percents in the text
+    text = "prompting gave 35–45% over-asking, and after the fine-tune over-ask -> 2.8% on the same items"
+    at = LIN._named(text, "from 35% to 2.8%")[1]
+    assert text[at[0]:at[1]] == "35–45% over-asking, and after the fine-tune over-ask -> 2.8%"
+    # words that name nothing in it leave the message's first words as they were
+    other = next(x for x in LIN.resolve(st, "talk.jsonl#L2", label="trained for 12 hours")["span"]["rows"] if x["hot"])
+    assert "at" not in other and other["text"].startswith("All done")
+
+
 def test_a_cited_event_row_shows_the_time_hashes_and_flag_its_words_name(root: Path) -> None:
     # made-up audit log: a push, then a forced branch move; an event row has no sentence, only an action and fields
     rows = [{"id": 1, "ts": "2026-05-04T09:10:02.100+00:00", "agent": "otter-3", "action": "repo.push", "params": {"branch": "fix/9", "commits": 2}},
