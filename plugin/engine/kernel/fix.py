@@ -287,11 +287,59 @@ def _installed() -> bool:
 RELOAD = "It takes effect after /reload-plugins in the running session, or in a new session."
 
 
+def _is_thimble(folder: str) -> bool:
+    return (read_json(Path(folder).expanduser() / ".claude-plugin" / "plugin.json") or {}).get("name") == "thimble"
+
+
+def _claude_argv() -> list[str] | None:
+    """The command line of the Claude Code session that runs this command: the nearest `claude` among this process's
+    parents (read with ps), or None when there is none (a test, the browser's server) or it cannot be read."""
+    pid = os.getppid()
+    for _ in range(12):
+        if pid <= 1:
+            return None
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=", "-o", "args=", "-p", str(pid)], capture_output=True, text=True,
+                                 timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        ppid, _, args = out.partition(" ")
+        argv = args.split()
+        if argv and Path(argv[0]).name == "claude" and argv[1:2] != ["plugin"]:
+            return argv
+        try:
+            pid = int(ppid)
+        except ValueError:
+            return None
+    return None
+
+
+def plugin_dir_in(argv: list[str] | None, env_dirs: str = "") -> bool | None:
+    """Whether a session with this command line (and CLAUDE_CODE_PLUGIN_DIRS) loads thimble from a folder; None when
+    there is no session to read."""
+    if any(_is_thimble(x) for x in env_dirs.split(os.pathsep) if x):
+        return True
+    if argv is None:
+        return None
+    dirs = [argv[i + 1] for i, x in enumerate(argv[:-1]) if x == "--plugin-dir"]
+    dirs += [x.split("=", 1)[1] for x in argv if x.startswith("--plugin-dir=")]
+    return any(_is_thimble(d) for d in dirs)
+
+
+def _session_plugin_dir() -> bool | None:
+    """Whether the Claude Code session that runs this command loads thimble with --plugin-dir: read from the
+    session's own command line, since a --plugin-dir folder and a folder marketplace can be the same clone."""
+    return plugin_dir_in(_claude_argv(), os.environ.get("CLAUDE_CODE_PLUGIN_DIRS") or "")
+
+
 def from_plugin_dir() -> bool:
     """Whether this thimble runs from a folder given to Claude Code with --plugin-dir, not from an install. Claude Code
     loads such a folder before an installed plugin of the same name, for the whole session. An install runs either
     Claude Code's own copy in its plugins folder (a GitHub marketplace) or the plugin folder of a folder marketplace in
     place (scripts/install.sh --local, or a fix's copy that `use` turned on)."""
+    seen = _session_plugin_dir()
+    if seen is not None:
+        return seen
     here = PLUGIN.resolve()
     try:
         here.relative_to(plugins_dir().resolve())

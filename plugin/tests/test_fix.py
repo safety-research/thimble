@@ -54,6 +54,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                  ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "release")):
         sh("git", *args, cwd=src)
     monkeypatch.setattr(FX, "find_source", lambda: (src, sh("git", "rev-parse", "HEAD", cwd=src), False))
+    # the tests run in no Claude Code session of their own: which kind of session it is comes from the paths
+    monkeypatch.setattr(FX, "_session_plugin_dir", lambda: None)
     data = tmp_path / "support"
     data.mkdir()
     (data / "tickets.csv").write_text("id,queue_owner,state\nT-1,wren.example@example.org,open\nT-2,moss.example@example.org,closed\n")
@@ -312,3 +314,18 @@ def test_a_caller_that_is_no_session_says_so_and_uses_the_marketplace(env: Path,
     fx = FX.new("Coverage opens a group")
     assert "/reload-plugins" in FX.use(fx["slug"], plugin_dir=False) and FX.active_slug() == fx["slug"]
     assert "back to the release" in FX.undo(plugin_dir=False) and FX.active_slug() is None
+
+
+def test_a_session_started_with_plugin_dir_on_thimble_is_told_apart_from_a_folder_marketplace_on_the_same_clone(tmp_path: Path):
+    clone = tmp_path / "clone"
+    (clone / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (clone / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble"}))
+    other = tmp_path / "other"
+    (other / ".claude-plugin").mkdir(parents=True)
+    (other / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "notes"}))
+    assert FX.plugin_dir_in(["claude", "--plugin-dir", str(clone / "plugin"), "--permission-mode", "auto"]) is True
+    assert FX.plugin_dir_in(["claude", f"--plugin-dir={clone / 'plugin'}"]) is True
+    assert FX.plugin_dir_in(["claude", "--plugin-dir", str(other)]) is False
+    assert FX.plugin_dir_in(["claude", "--continue"]) is False
+    assert FX.plugin_dir_in(None) is None
+    assert FX.plugin_dir_in(None, str(clone / "plugin")) is True

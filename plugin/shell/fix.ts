@@ -144,12 +144,13 @@ async function ownFix($: Engine): Promise<string | null> {
 }
 
 /** The fix that /thimble:fix submit, undo and try mean when none is named: the one that is on, else the newest that
- *  was neither sent nor dropped. */
-async function currentFix($: Engine, fixes: Fix[], active: string | null): Promise<Fix | null> {
+ *  is not in a release (for submit, also not sent already). */
+async function currentFix($: Engine, fixes: Fix[], active: string | null, verb = 'submit'): Promise<Fix | null> {
   const on = active || (await ownFix($))
   const f = fixes.find(x => x.slug === on)
   if (f) return f
-  const open = fixes.filter(x => !['sent', 'dropped', 'merged'].includes(x.status)).sort((a, b) => b.created - a.created)
+  const done = verb === 'submit' ? ['sent', 'dropped', 'merged'] : ['dropped', 'merged']
+  const open = fixes.filter(x => !done.includes(x.status)).sort((a, b) => b.created - a.created)
   return open[0] ?? null
 }
 
@@ -164,7 +165,7 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
     const r = await kernel($, ['status'])
     return { text: `${r.out}\n/thimble:fix submit shares the newest · /thimble:fix undo goes back to the release` }
   }
-  const f = v.slug ? fixes.find(x => x.slug === v.slug) ?? null : await currentFix($, fixes, active)
+  const f = v.slug ? fixes.find(x => x.slug === v.slug) ?? null : await currentFix($, fixes, active, v.verb)
   if (!f) return { text: v.slug ? `There is no fix ${v.slug}. /thimble:fix lists them.` : 'No fix yet. Say what you want changed: /thimble:fix <what you want changed>' }
   if (v.verb === 'undo') return { text: await undoFix($, f.slug) }
   if (v.verb === 'try') {
