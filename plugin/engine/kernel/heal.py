@@ -38,6 +38,8 @@ LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
 # how a citation ended: kept as written; re-pointed inside the cited query or card, at another one the text cites, or
 # at a query of the session; no place holds it; several places hold it
 KEPT, CELL, CITED, SESSION = "kept", "cell", "cited", "session"
+# a source path written from a subfolder, re-pointed at the one file under the root whose path ends with it
+PATH = "path"
 NO_HOME, SEVERAL, GONE = "no_home", "several", "gone"
 
 WHY_CONTRADICTED = "the cited place shows {source}"
@@ -92,27 +94,27 @@ class Place:
 # ------------------------------------------------------------------ numbers
 
 
-def _number(label: str) -> str | None:
-    """The number the words state, or None: a quote, or words with no number, state none."""
+def _numbers(label: str) -> list[str]:
+    """The numbers the words state: a quote, or words with no number, state none."""
     s = (label or "").replace("**", "").strip()
     if not s or s[0] in _QUOTES:
-        return None
-    m = NUM_RE.search(s.replace(" ", "").replace(" ", ""))
-    return m[0] if m else None
+        return []
+    return NUM_RE.findall(O._tight(s))
 
 
 def _shows(label: str, v: Any) -> bool:
-    """Whether a value shows the number the words state: a number equal as written or as rounded (objects.number_matches),
+    """Whether a value shows a number the words state: a number equal as written or as rounded (objects.number_matches),
     or a string that holds the number as one of its own."""
     if isinstance(v, bool) or v is None:
         return False
     if isinstance(v, (int, float)):
         return number_matches(label, v)
-    n = _number(label)
-    if n is None:
-        return False
-    tok = n.replace("−", "-").lstrip("-")
-    return bool(re.search(r"(?<![\d.])" + re.escape(tok) + r"(?![\d]|\.\d)", str(v).replace(",", "")))
+    s = str(v).replace(",", "")
+    for n in _numbers(label):
+        tok = n.replace("−", "-").replace(",", "").lstrip("-")
+        if re.search(r"(?<![\d.])" + re.escape(tok) + r"(?![\d]|\.\d)", s):
+            return True
+    return False
 
 
 def _is_number(v: Any) -> bool:
@@ -276,6 +278,7 @@ class _At:
     row: int | None = None
     col: str | None = None
     keys: dict[str, str] | None = None
+    moved: str | None = None  # the ref with the file's path under the root, when the ref names it from a subfolder
 
 
 def _at_query(rd: _Reader, p: dict[str, Any], label: str, ref: str) -> _At:
@@ -361,12 +364,14 @@ def _at_card(rd: _Reader, p: dict[str, Any], label: str) -> _At:
 
 def _at_source(st: Store, p: dict[str, Any], ref: str) -> _At:
     try:
+        rel = S.locate(st.root, p.get("path", ""))
         got = S.fetch(st.root, ref, limit=1 if p["kind"] in ("file", "table") else 50)
     except (R.RefError, OSError, ValueError) as e:
         return _At(False, str(e))
     if p["kind"] not in ("file", "table") and not got:
         return _At(False, f"{ref} names no rows")
-    return _At(holds=True)  # a source row is checked for its place only: its words may count or describe it
+    # a source row is checked for its place only: its words may count or describe it
+    return _At(holds=True, moved=R.format_source({**p, "path": rel}) if rel != p.get("path") else None)
 
 
 def _pick(hits: list[Place], at: _At) -> Place | None:
@@ -428,8 +433,7 @@ class _Pass:
             hits = self._find(owner, label)
             if hits:
                 return (hits[0], CITED, False) if len(hits) == 1 else (None, None, True)
-        n = _number(label)
-        if session_ok and n and _specific(n):
+        if session_ok and any(_specific(n) for n in _numbers(label)):
             for qid in self.rd.session_queries():
                 if qid in self.cited:
                     continue
@@ -442,20 +446,23 @@ class _Pass:
         p = _parse(ref)
         if p is None:
             return Change(label, ref, LINKED, KEPT, to=ref)  # not a ref the kernel reads: left as it is
+        words = O.unkeyed(label, p.get("keys"))  # a number that names the cited row is not the value it holds
         own = _owner(p)
-        num = _number(label)
+        num = bool(_numbers(words))
         if p["kind"] == "query":
-            at = _at_query(self.rd, p, label, ref) if num else (_At() if self.rd.query(p["query"]) else _At(False, f"no query {p['query']}"))
+            at = _at_query(self.rd, p, words, ref) if num else (_At() if self.rd.query(p["query"]) else _At(False, f"no query {p['query']}"))
         elif p["kind"] == "object":
-            at = _at_card(self.rd, p, label) if num else (_At() if self.rd.card(p["object"]) else _At(False, f"no card {p['object']}"))
+            at = _at_card(self.rd, p, words) if num else (_At() if self.rd.card(p["object"]) else _At(False, f"no card {p['object']}"))
         else:
             at = _at_source(self.st, p, ref)
+        if at.exists and at.moved:
+            return Change(label, ref, LINKED, PATH, to=at.moved)
         if at.exists and (at.holds or not num):
             return Change(label, ref, LINKED, KEPT, to=ref)
         if not num:
             # words that name a place, not a number: nothing to look for
             return self._quiet(label, ref, GONE, WHY_GONE.format(problem=at.problem))
-        found, how, several = self._search(label, own if at.exists else None, at, session_ok=at.source is None)
+        found, how, several = self._search(words, own if at.exists else None, at, session_ok=at.source is None)
         if found and how == CELL and found.row != at.row and _names_row(self.text, start, end, at.keys):
             found = None
         if found:

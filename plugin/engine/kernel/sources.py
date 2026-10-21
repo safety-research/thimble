@@ -26,6 +26,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from collections import Counter, defaultdict
 from contextlib import closing
 from dataclasses import dataclass
@@ -628,17 +629,38 @@ def blocks_of(record: Any) -> list[dict[str, str]]:
     return [{"kind": "raw", "text": json.dumps(record, ensure_ascii=False) if not isinstance(record, str) else record}]
 
 
+_FILES: dict[str, tuple[float, list[str]]] = {}  # root -> (when it was listed, its files), for a few seconds
+
+
+def locate(root: Path, rel: str) -> str:
+    """The path under root of the file a ref names. A path may start in a subfolder, where a session ran `cd`: when
+    root/rel is no file, the one file under root whose path ends with /rel is the one meant. Raises RefError when no
+    file ends so, or several do."""
+    if (root / rel).is_file():
+        return rel
+    tail = "/" + rel.removeprefix("./")
+    when, files = _FILES.get(str(root), (0.0, []))
+    if time.monotonic() - when > 5:
+        files = list_files(root)
+        _FILES[str(root)] = (time.monotonic(), files)
+    hits = [f for f in files if f.endswith(tail)]
+    if len(hits) == 1 and (root / hits[0]).is_file():
+        return hits[0]
+    if len(hits) > 1:
+        more = f", and {len(hits) - 3} more" if len(hits) > 3 else ""
+        raise R.RefError(f"no file {rel} under {root}, and {len(hits)} files end with {tail}: {', '.join(hits[:3])}{more}")
+    raise R.RefError(f"no file {rel} under {root}")
+
+
 def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
-    """The rows one source ref or row set names, in file order (at most `limit`). Raises RefError when the file is
-    missing or a row is not there."""
+    """The rows one source ref or row set names, in file order (at most `limit`). The rows name the file by its path
+    under root (`locate`). Raises RefError when the file is missing or a row is not there."""
     p = R.parse(rowset)
     k = p["kind"]
-    rel = p.get("path", "")
-    path = root / rel
     if k in ("query", "object"):
         raise R.RefError(f"{rowset} is not a source ref")
-    if not path.is_file():
-        raise R.RefError(f"no file {rel} under {root}")
+    rel = locate(root, p.get("path", ""))
+    path = root / rel
     if k == "file":
         return [Row(rel, "", {"path": rel})]
     if k == "block":

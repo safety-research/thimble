@@ -235,7 +235,7 @@ def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
     """(the ref of the one value a citation's words show, how it was found), when the citation names a whole query, a
     column or several rows and its words show one value that only one cell of them holds: `[6,543](r1@n)` is
     `r1#day=2026-06-18@n`. None when the ref already names one value, or the words fit no cell or several."""
-    from .objects import NUM_RE, number_matches
+    from .objects import NUM_RE, number_matches, unkeyed
 
     if not label:
         return None
@@ -254,8 +254,9 @@ def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
     if frag and len(idx) == 1 and "col" in p:
         return None
     words = " ".join(str(label).replace("**", "").split()).strip("\"“”'")
+    nums = unkeyed(words, p.get("keys"))  # a number that names the cited rows is not the value
     hits: list[tuple[int, str]] = []
-    has_num = bool(NUM_RE.search(words.replace(" ", "")))
+    has_num = bool(NUM_RE.search(nums))
     keys = set(q.get("keys") or [])
     for i in idx:
         r = table[i]
@@ -265,7 +266,7 @@ def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
                 continue
             v = r.get(c)
             if has_num:
-                if isinstance(v, (int, float)) and not isinstance(v, bool) and c not in keys and number_matches(words, v):
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and c not in keys and number_matches(nums, v):
                     hits.append((i, c))
             elif isinstance(v, str) and v.strip() and v.strip().lower() == words.lower():
                 hits.append((i, c))
