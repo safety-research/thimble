@@ -52,7 +52,8 @@
 .refedit-token .chip-ico {
   stroke-width: 2px;
 }
-/* states: unable to verify, a dashed underline in the negative; not linked and unknown, dotted and quiet */
+/* states: unable to verify, a dashed underline in the negative; not linked (its place is gone) and unknown, gray words
+   with a dotted gray underline, never the accent */
 .refchip.refchip-value.broken,
 .refchip.refchip-value.broken:hover {
   color: inherit;
@@ -63,7 +64,7 @@
 .refchip.refchip-value.refchip-unresolved,
 .refchip.refchip-value.refchip-quiet:hover,
 .refchip.refchip-value.refchip-unresolved:hover {
-  color: inherit;
+  color: var(--text-tertiary);
   text-decoration-style: dotted;
   text-decoration-color: var(--text-tertiary);
 }

@@ -23,6 +23,7 @@ from . import cite, frames
 
 CARD_REF = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#([^/\s]+)/(.+))?$")
 DIGIT = re.compile(r"\d")
+KIT_MIME = "application/vnd.thimble.kit+json"
 
 LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
 KEPT, CELL, CITED, GONE, NO_HOME, SEVERAL = "kept", "cell", "cited", "gone", "no_home", "several"
@@ -38,6 +39,11 @@ def _places(cell: dict | None) -> list[tuple[str, str, str]]:
             if DIGIT.search(str(v)):
                 out.append((str(c), str(r), str(v)))
     return out
+
+
+def _draws(cell: dict | None) -> bool:
+    """Whether a program draws the card (its parts are cited as `card:<id>#<part id>`, never as a column and a row)."""
+    return bool(cell) and (cell.get("kind") == "program" or any(isinstance(o, dict) and KIT_MIME in o for o in cell.get("outputs") or []))
 
 
 def cited_cards(text: str) -> list[str]:
@@ -123,6 +129,7 @@ def heal(text: str, load: Loader) -> dict[str, Any]:
                 else:
                     how = SEVERAL if several else GONE if at is None else NO_HOME
                     why = (f"several places show {label.strip()}" if several else
+                           f"the card draws no part {col}/{row}" if at is None and _draws(own) else
                            f"the card {cid} has no {col} for {row}" if at is None else f"no place shows {label.strip()}")
                     c.update(state=QUIET, how=how, why=why)
         changes.append(c)

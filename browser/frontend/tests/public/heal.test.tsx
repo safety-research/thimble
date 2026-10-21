@@ -53,3 +53,22 @@ test('a takeaway shows a spinner while its citations are checked, then each one 
   expect(chips[0].querySelector('.refchip-x')).toBeNull()
   expect(chips[1].classList.contains('broken') && chips[1].querySelector('.refchip-x')?.textContent).toBe('×')
 })
+
+test('a citation whose place is gone turns gray in a reply once the check says so, its reason on hover', async () => {
+  const reply = 'The next page, dse/StartSeite, has [456](card:aaaaaa#page/dse/StartSeite) edits.'
+  vi.stubGlobal('fetch', async (url: string) => {
+    if (!String(url).endsWith('/heal')) return new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } })
+    return json({ text: reply, of: 'x', version: 'x', changes: [{ label: '456', ref: 'card:aaaaaa#page/dse/StartSeite', state: 'quiet', how: 'gone', why: 'the card draws no part page/dse/StartSeite' }] })
+  })
+  const el = await mount(
+    <ChipContext.Provider value={{ workspace: 'w', broken: new Set() }}>
+      <ChatMarkdown text={reply} />
+    </ChipContext.Provider>,
+  )
+  await settle()
+  await settle()
+  const chip = el.querySelector<HTMLElement>('.refchip-value')!
+  expect(chip.textContent).toBe('456')
+  expect(chip.classList.contains('refchip-quiet')).toBe(true)
+  expect(el.querySelectorAll('.refchip-checking')).toHaveLength(0)
+})

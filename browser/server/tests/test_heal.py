@@ -82,3 +82,14 @@ def test_the_page_asks_the_server_to_heal_an_answer(folder):
     got = r.json()
     assert [(x["state"], x["how"]) for x in got["changes"]] == [("linked", "cell"), ("quiet", "gone")]
     assert f"[2](card:{c['id']}#n/merged)" in got["text"]
+
+
+def test_a_missing_part_of_a_drawn_card_is_quiet_with_a_plain_reason():
+    """A program card's parts are cited by id; a citation written as a column and a row names a part it never drew."""
+    CARDS["dddddd"] = {"id": "dddddd", "kind": "program",
+                       "outputs": [{"application/vnd.thimble.kit+json": {"drawing": {"regions": [{"id": "page-a"}]}}}]}
+    try:
+        _, c = one("[456](card:dddddd#page/dse/StartSeite) edits")
+        assert c["state"] == H.QUIET and c["why"] == "the card draws no part page/dse/StartSeite"
+    finally:
+        del CARDS["dddddd"]
