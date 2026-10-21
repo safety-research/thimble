@@ -160,6 +160,42 @@ def region_words(outputs: Any, rid: str, limit: int = 4000) -> str:
     return " ".join(out)[:limit]
 
 
+def series_values(outputs: Any, rid: str) -> list[float] | None:
+    """The y values of the plot series a program draws as the part `rid` (kit.js plot keeps each series' points `pts`,
+    [x, y] pairs, and its part id `region`), or None when that part is no plot series. A series' name says what it
+    counts, so its digits (`wins vs skill 0`) are no value of it; its points are."""
+    r = region(outputs, rid)
+    if r is None:
+        return None
+    want = r.get("id")
+
+    def walk(n: Any, d: int = 0) -> list[float] | None:
+        if d > 40:
+            return None
+        if isinstance(n, dict):
+            if n.get("t") == "plot" and isinstance(n.get("series"), list):
+                for s in n["series"]:
+                    if isinstance(s, dict) and s.get("region") == want:
+                        return [p[1] for p in s.get("pts") or [] if isinstance(p, (list, tuple)) and len(p) > 1
+                                and isinstance(p[1], (int, float)) and not isinstance(p[1], bool)]
+            kids = n.values()
+        elif isinstance(n, list):
+            kids = n
+        else:
+            return None
+        for v in kids:
+            got = walk(v, d + 1)
+            if got is not None:
+                return got
+        return None
+
+    for dr in _drawings(outputs):
+        got = walk(dr.get("root"))
+        if got is not None:
+            return got
+    return None
+
+
 def link_spans(text: str) -> list[tuple[str, str, int, int]]:
     """(words, target, start, end) of each Markdown link `[words](target)` of a text, not an image's. A target may hold
     spaces and balanced brackets, so a ref to a row named "(no name)", `[899](card:<id>#edits/(no name))`, is one link

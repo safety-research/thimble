@@ -149,3 +149,26 @@ def test_a_number_followed_by_words_is_the_value():
     assert one(f"[31 merged]({merged}) so far")[1]["how"] == H.KEPT
     _, c = one(f"[30 merged]({merged}) so far")
     assert c["state"] == H.CONTRADICTED and c["why"] == "the cited place shows 31"
+
+
+def test_a_date_is_one_value_and_a_series_is_read_by_its_points():
+    """2026-06-22 is a date, not 2026: `22 June` holds at it and another day is contradicted. A plot series shows its
+    points' y values; the digits of its name (`skill 0`) are no value of it."""
+    week = {"t": "region", "id": "week", "kid": {"t": "text", "runs": [{"s": "2026-06-22, 1,587"}]}}
+    plot = {"t": "plot", "series": [{"name": "wins vs level 0", "pts": [[1, 0], [2, 5], [3, 10]], "region": "wins"}]}
+    regions = [{"id": "busy", "meta": {"label": "busiest week: week of 2026-06-15"}}, {"id": "week", "meta": {}},
+               {"id": "wins", "meta": {"label": "wins vs level 0"}}]
+    CARDS["hhhhhh"] = {"id": "hhhhhh", "kind": "program", "outputs": [{"application/vnd.thimble.kit+json": {
+        "drawing": {"regions": regions, "root": {"t": "stack", "kids": [week, plot]}}}}]}
+    try:
+        assert one("in the [week of 22 June](card:hhhhhh#week)")[1]["state"] == H.LINKED
+        assert one("in the [week of 06-22](card:hhhhhh#week)")[1]["state"] == H.LINKED
+        assert one("[1,587](card:hhhhhh#week) deletions")[1]["state"] == H.LINKED
+        _, c = one("on [2026-06-18](card:hhhhhh#busy)")
+        assert c["state"] == H.CONTRADICTED and c["why"] == "the cited part shows 2026-06-15"
+        assert one("[June 23](card:hhhhhh#week)")[1]["state"] == H.CONTRADICTED
+        assert one("[10% in the last check](card:hhhhhh#wins)")[1]["state"] == H.LINKED
+        _, c = one("[12%](card:hhhhhh#wins)")
+        assert c["state"] == H.CONTRADICTED and c["why"] == "the cited part shows 0, 5, 10"
+    finally:
+        del CARDS["hhhhhh"]

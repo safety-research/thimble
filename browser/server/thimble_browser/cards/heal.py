@@ -8,8 +8,11 @@ For each citation whose words state a value its cited cell does not show:
   (c) else it is contradicted when the cited cell shows another number (`why` says which);
   (d) else (the card, the row or the column is gone) it is quiet: the page draws it grey.
 A citation of a part a program draws, `card:<id>#<part id>`, is checked against the part: its numbers are read from
-the part's label and the text it draws, and the citation is contradicted when the part shows numbers and none is the
-one its words state. A part id the kit renamed (one written with a slash) is found by its slug, as kit.js writes it.
+the part's label and the text it draws (a plot series' from its points, not its name), and the citation is
+contradicted when the part shows numbers and none is the one its words state. A date is one value, compared as a date
+(`22 June` states 2026-06-22); a date is never read as its year, so words whose only number is in a date are checked
+only against a part that shows a date. A part id the kit renamed (one written with a slash) is found by its slug, as
+kit.js writes it.
 A citation of a whole card is checked for the card alone; a citation of a file is left as it is. The words of the text
 are never changed. `version` hashes the text and the cited cards' outputs, so a caller heals a text once per version.
 
@@ -31,6 +34,16 @@ DIGIT = re.compile(r"\d")
 # LinkHelper771 or a date's parts
 NUMBER = re.compile(r"(?:(?<![A-Za-z_\d.,:])[-−+]|(?<![\w.\-]))\d[\d,]*(?:\.\d+)?(?![\w])")
 KIT_MIME = cite.KIT_MIME
+# a date as words write it: 2026-06-22 (one value, never its year), 22 June [2026], June 22[, 2026]; and 06-22 when the
+# part it is checked against shows dates (alone, 10-14 is as often a range)
+_MONTH = (r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|"
+          r"Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?(?![A-Za-z])")
+MONTHS = {m: i for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split(), 1)}
+ISO_DATE = re.compile(r"(?<![\d.\-])(\d{4})-(\d{2})-(\d{2})(?!\d)")
+DAY_MONTH = re.compile(rf"(?<![\w.,\-])(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?{_MONTH}(?:,?\s+(\d{{4}})(?!\d))?")
+MONTH_DAY = re.compile(rf"(?<![A-Za-z]){_MONTH}\s+(\d{{1,2}})(?:st|nd|rd|th)?(?![\d,.]\d|\d)(?:,?\s+(\d{{4}})(?!\d))?")
+MONTH_DASH_DAY = re.compile(r"(?<![\w.,\-])(\d{2})-(\d{2})(?![\w\-]|\.\d)")
+Date = tuple  # (year or None, month, day)
 
 LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
 KEPT, CELL, CITED, GONE, NO_HOME, SEVERAL = "kept", "cell", "cited", "gone", "no_home", "several"
@@ -65,22 +78,71 @@ def _rounds_to(shown: str, stated: str) -> bool:
         return a == b
 
 
+def _values(words: str, month_day: bool = False) -> tuple[list[str], list[tuple[Date, str]]]:
+    """(numbers, dates) that words state or a part shows. Each date is ((year or None, month, day), as written), and
+    its digits are no number: 2026-06-22 is one date, not 2026. `month_day` reads 06-22 as a date too."""
+    dates: list[tuple[Date, str]] = []
+    spans: list[tuple[int, int]] = []
+
+    def take(m: re.Match, y: str | None, mo: int, d: str) -> None:
+        a, b = m.span()
+        if 1 <= mo <= 12 and 1 <= int(d) <= 31 and not any(a < e and s < b for s, e in spans):
+            dates.append(((int(y) if y else None, mo, int(d)), m.group(0).strip()))
+            spans.append((a, b))
+
+    for m in ISO_DATE.finditer(words):
+        take(m, m[1], int(m[2]), m[3])
+    for m in DAY_MONTH.finditer(words):
+        take(m, m[3], MONTHS[m[2][:3].lower()], m[1])
+    for m in MONTH_DAY.finditer(words):
+        take(m, m[3], MONTHS[m[1][:3].lower()], m[2])
+    if month_day:
+        for m in MONTH_DASH_DAY.finditer(words):
+            take(m, None, int(m[1]), m[2])
+    rest = list(words)
+    for a, b in spans:
+        rest[a:b] = " " * (b - a)
+    return NUMBER.findall("".join(rest)), dates
+
+
+def _same_day(stated: Date, shown: Date) -> bool:
+    """Whether a stated date is the shown one: the same month and day, and the same year when both name one."""
+    return stated[1:] == shown[1:] and (stated[0] is None or shown[0] is None or stated[0] == shown[0])
+
+
+def _num(v: float) -> str:
+    return f"{int(v):,}" if float(v).is_integer() else repr(float(v))
+
+
 def _part(own: dict | None, anchor: str, label: str) -> dict[str, Any] | None:
     """What the pass says of a citation of a drawn part: None when the card draws no such part, else the fields of its
-    change. The citation holds when a number the part shows is one its words state; it is contradicted when the part
-    shows numbers but not that one."""
-    r = cite.region((own or {}).get("outputs"), anchor)
+    change. The citation holds when a number or a date the part shows is one its words state; it is contradicted when
+    the part shows values of the kind the words state (numbers, or dates) but not one of them."""
+    outputs = (own or {}).get("outputs")
+    r = cite.region(outputs, anchor)
     if r is None:
         return None
-    stated = NUMBER.findall(label)
-    if not stated:
-        return {}
-    shown = NUMBER.findall(cite.region_words(own.get("outputs"), anchor))
-    if not shown or any(_rounds_to(n, s) for s in stated for n in shown):
-        return {}
     meta = r.get("meta") if isinstance(r.get("meta"), dict) else {}
-    at = NUMBER.findall(str(meta.get("label") or "")) or shown
-    source = at[0] if len(set(at)) == 1 else ", ".join(dict.fromkeys(at))
+    series = cite.series_values(outputs, anchor)
+    if series is not None:
+        shown, days, named = [_num(v) for v in series], [], ([], [])
+    else:
+        shown, days = _values(cite.region_words(outputs, anchor))
+        named = _values(str(meta.get("label") or ""))
+    stated, said = _values(label, month_day=bool(days))
+    by_number, by_date = bool(stated and shown), bool(said and days)
+    if not (by_number or by_date):
+        return {}
+    if (by_number and any(_rounds_to(n, s) for s in stated for n in shown)) or \
+            (by_date and any(_same_day(a, b) for a, _ in said for b, _ in days)):
+        return {}
+    at = ([w for _, w in (named[1] or days)] if by_date else []) + ((named[0] or shown) if by_number else [])
+    at = list(dict.fromkeys(at))
+    if series is not None and len(at) > 3:
+        lo, hi = min(series), max(series)
+        source = f"{_num(lo)} to {_num(hi)}"
+    else:
+        source = ", ".join(at)
     return {"state": CONTRADICTED, "how": CONTRADICTED, "source": source, "why": f"the cited part shows {source}"}
 
 
