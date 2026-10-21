@@ -370,7 +370,9 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
       resolved.current = { ref, r }
       markRefFailed(ws, ref, null)
       if (seq !== reqSeq.current) return
-      if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
+      // a part a program draws whose id holds a slash reads like a column and a row; the server says it is a part
+      const drawnPart = r.meta?.region != null
+      if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null && !drawnPart) {
         // a table's cell: the table around it, never its column and row in words
         const table = citedTable(r, parsed.col, parsed.row)
         // a citation the healing pass re-pointed says where it pointed as written, faintly, so the fix is not invisible
@@ -385,7 +387,7 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
         if (lines) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', lines })
         return setPop({ state: 'error', rect, message: 'This line is no longer in the card\'s output' })
       }
-      const cell = wholeCell ? cellOf(r) : null
+      const cell = wholeCell || drawnPart ? cellOf(r) : null
       const where = [hiddenPath(ref), spanWhere(ref), whereOf(r)].filter(Boolean).join(' · ') || undefined
       // a record of a file reads as the record (canvas/quotes), never its JSON or markdown source, with the cited words
       // marked and its facts over it (canvas/facts)
