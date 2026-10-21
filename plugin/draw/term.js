@@ -16,7 +16,8 @@
 //   - the cells of a mark (a bar's width, a spark, a plot's area) carry `m`, and a plot's dots the region of their
 //     series (`sr`): a selection recolors a mark's glyph and leaves its cell's ground alone (paint.js), so a selected
 //     bar keeps its height and the gap to the next row, and a selected series is its own dots, not the plot's area;
-//   - a canvas is replayed as the program placed it.
+//   - a canvas is replayed as the program placed it; a link is a route of ─ │ ╭ ╮ ╰ ╯ through blank cells that joins its
+//     two ends, or is not drawn.
 //
 // renderTerm(drawing, {w}) -> grid {w, h, rows, regions, marks, cut}
 //   rows     h rows of w cells {ch, tone, b?, bg?, ref?, px?, w2?, cont?, m?, sr?}; tone is a palette.js tone
@@ -671,20 +672,33 @@ function paintPlot(n, g, x, y, w, cx, mark) {
 }
 
 // ---------------------------------------------------------------- canvas: the program's own cells
-/** The cells a straight link from (x0, y0) to (x1, y1) passes through, its ends left out, each with its glyph. */
-export function linkCells(x0, y0, x1, y1) {
+// the box-drawing glyph of a cell by the sides its line leaves through: up 1, right 2, down 4, left 8
+const SIDE_GLYPH = { 10: '─', 5: '│', 6: '╭', 12: '╮', 3: '╰', 9: '╯', 7: '├', 13: '┤', 14: '┬', 11: '┴', 15: '┼' }
+const sideTo = (a, b) => (b.x > a.x ? 2 : b.x < a.x ? 8 : b.y > a.y ? 4 : 1)
+/**
+ * The cells of a link from (x0, y0) to (x1, y1), its ends left out, each {x, y, ch, sides}. It is straight when the ends
+ * share a row or a column; else it goes across, then up or down at one column, then across again (`turn` 'v': down,
+ * across at one row, down), so each glyph joins the next: ─ │ and the corners ╭ ╮ ╰ ╯. A diagonal step (╲ next to ─)
+ * leaves a gap the eye reads as a broken line. `at` is the column (or row) of the middle leg; the middle by default.
+ */
+export function linkCells(x0, y0, x1, y1, turn, at) {
+  const across = turn !== 'v'
+  const mid = at != null ? at : across ? Math.round((x0 + x1) / 2) : Math.round((y0 + y1) / 2)
+  const way = across ? [[mid, y0], [mid, y1], [x1, y1]] : [[x0, mid], [x1, mid], [x1, y1]]
+  const P = [{ x: x0, y: y0 }]
+  let guard = 8000
+  for (const [tx, ty] of way) {
+    let { x, y } = P[P.length - 1]
+    while ((x !== tx || y !== ty) && guard--) {
+      if (x !== tx) x += Math.sign(tx - x)
+      else y += Math.sign(ty - y)
+      P.push({ x, y })
+    }
+  }
   const out = []
-  let x = x0, y = y0, guard = 4000
-  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
-  let err = dx - dy
-  while (guard--) {
-    if (x === x1 && y === y1) break
-    const e2 = 2 * err
-    let mx = 0, my = 0
-    if (e2 > -dy) { err -= dy; x += sx; mx = sx }
-    if (e2 < dx) { err += dx; y += sy; my = sy }
-    if (x === x1 && y === y1) break
-    out.push({ x, y, ch: my === 0 ? '─' : mx === 0 ? '│' : mx === my ? '╲' : '╱' })
+  for (let i = 1; i < P.length - 1; i++) {
+    const sides = sideTo(P[i], P[i - 1]) | sideTo(P[i], P[i + 1])
+    out.push({ x: P[i].x, y: P[i].y, ch: SIDE_GLYPH[sides] || '─', sides })
   }
   return out
 }
@@ -693,6 +707,8 @@ function paintCanvas(n, g, x, y, w, cx, mark, cut) {
   const cw = Math.min(n.w, w)
   if (n.w > w) cut({ k: 'canvas', w: n.w, room: w })
   let draws = 0
+  // the cells this canvas's links took, so two links that share a cell join there
+  const lines = new Map()
   g.withClip(x, y, x + cw, y + n.h, () => {
     for (const op of n.ops) {
       switch (op[0]) {
@@ -751,13 +767,30 @@ function paintCanvas(n, g, x, y, w, cx, mark, cut) {
           break
         }
         case 'link': {
-          // glyphs on the blank cells strictly between its ends (what is drawn there already stays), dashed every
-          // other cell
-          if (!g.dry) linkCells(Math.round(op[1]), Math.round(op[2]), Math.round(op[3]), Math.round(op[4])).forEach((p, i) => {
-            if (op[6].dash && i % 2) return
+          // a link joins its two ends or is not drawn: the first route whose cells are all blank, or lines of this
+          // canvas's links (which then meet as ┬ ┤ ┼); across first for a wide link, down first for a tall one, then
+          // the other, then with its middle leg beside either end. Dashed: every other straight cell.
+          if (g.dry) break
+          const [x0, y0, x1, y1] = [op[1], op[2], op[3], op[4]].map(Math.round)
+          const sx = Math.sign(x1 - x0), sy = Math.sign(y1 - y0)
+          const free = p => {
             const gx = x + p.x, gy = y + p.y
-            if (!g.in(gx, gy) || g.rows[gy][gx].ch !== ' ' || g.rows[gy][gx].bg) return
-            g.put(gx, gy, op[6].dash ? (p.ch === '─' ? '╌' : p.ch === '│' ? '╎' : p.ch) : p.ch, op[5])
+            if (!g.in(gx, gy)) return false
+            const c = g.rows[gy][gx]
+            return lines.has(gx + ',' + gy) || (c.ch === ' ' && !c.bg)
+          }
+          const first = Math.abs(x1 - x0) >= Math.abs(y1 - y0) ? 'h' : 'v', other = first === 'h' ? 'v' : 'h'
+          const tries = [[first], [other], ['h', x0 + sx], ['h', x1 - sx], ['v', y0 + sy], ['v', y1 - sy]]
+          const route = tries.map(([t, at]) => linkCells(x0, y0, x1, y1, t, at)).find(cs => cs.every(free))
+          if (!route) break
+          route.forEach((p, i) => {
+            const gx = x + p.x, gy = y + p.y, key = gx + ',' + gy
+            const had = lines.get(key)
+            const sides = (had ? had.sides : 0) | p.sides
+            const tone = had ? had.tone : op[5]
+            lines.set(key, { sides, tone })
+            if (op[6].dash && !had && (sides === 10 || sides === 5) && i % 2) return
+            g.put(gx, gy, op[6].dash && sides === 10 ? '╌' : op[6].dash && sides === 5 ? '╎' : SIDE_GLYPH[sides] || '─', tone)
           })
           draws++
           break

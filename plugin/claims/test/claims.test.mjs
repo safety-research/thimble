@@ -100,3 +100,30 @@ test("a claim's box wraps its whole sentence, braces and all, with no word cut",
   assert.match(said, /returns null when there is no reply yet\./)
   assert.doesNotMatch(said, /…/)
 })
+
+test("the claims graph's lines join their dots: no line in pieces", () => {
+  const data = linkedClaims()
+  // the lines: each side a line glyph leaves through meets a line that comes back, or a dot
+  const SIDES = { '─': 'RL', '│': 'UD', '╭': 'RD', '╮': 'DL', '╰': 'UR', '╯': 'UL', '├': 'URD', '┤': 'UDL', '┬': 'RDL', '┴': 'URL', '┼': 'URDL' }
+  const STEP = { U: [0, -1, 'D'], R: [1, 0, 'L'], D: [0, 1, 'U'], L: [-1, 0, 'R'] }
+  for (const claim of ['c9', 'c14', 'c1']) {
+    const g = draw(data, { w: 110, h: 34, state: { claim } }).text.split('\n').map(l => [...l])
+    const at = (x, y) => (g[y] || [])[x] || ' '
+    // the claim's box is a frame of its own, not a line
+    const top = g.findIndex(r => /╭─{20,}╮/.test(r.join('')))
+    const bottom = g.findIndex(r => /╰─{20,}╯/.test(r.join('')))
+    const left = top >= 0 ? g[top].join('').search(/╭─{20,}╮/) : -1, right = top >= 0 ? g[top].lastIndexOf('╮') : -1
+    const inBox = (x, y) => top >= 0 && y >= top && y <= bottom && x >= left && x <= right
+    let lines = 0
+    g.forEach((row, y) => row.forEach((ch, x) => {
+      if (!SIDES[ch] || y < 2 || inBox(x, y)) return
+      lines++
+      for (const s of SIDES[ch]) {
+        const [dx, dy, back] = STEP[s]
+        const n = at(x + dx, y + dy)
+        assert.ok(/[●◉○]/.test(n) || (SIDES[n] || '').includes(back), `${claim}: ${ch} at ${x},${y} leaves ${s} to "${n}"\n${g.map(r => r.join('')).join('\n')}`)
+      }
+    }))
+    assert.ok(claim === 'c1' || lines > 0, `${claim} draws its lines`)
+  }
+})

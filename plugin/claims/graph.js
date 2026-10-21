@@ -556,13 +556,6 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
     // no-break spaces, so no line drawn after it runs through a name
     c.text(nm.x, nm.y, `{${chosen ? 'dim-faint' : 'dim'}:${e(nm.name).replace(/ /g, ' ')}}`)
   }
-  for (const { e: ed, bright } of linesOf(edges, lay.pos, claims, claim.id)) {
-    // at rest only the short lines inside a cluster, faint, so the clusters read first; once a claim is selected, only
-    // its own
-    if (chosen ? !bright : !short(ed)) continue
-    const a = lay.pos.get(ed.a), b = lay.pos.get(ed.b)
-    c.link(a.x, a.y, b.x, b.y, edgeTone(ed, bright && chosen))
-  }
   for (const x of claims) {
     const p = lay.pos.get(x.id)
     if (!p || under(p)) continue
@@ -577,11 +570,20 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
     })
     c.region('said', frame.x + 1, frame.y + 1, frame.w - 2, frame.said, { label: `where "${cut(claim.text, 60)}" was said`, ref: (claim.sources || []).map(x => x.ref).slice(0, 6) })
   }
+  // the lines last, so each goes around the dots, the names and the box, or is not drawn (term.js): a line in pieces
+  // reads as lines that join nothing
+  for (const { e: ed, bright } of linesOf(edges, lay.pos, claims, claim.id)) {
+    // at rest only the short lines inside a cluster, faint, so the clusters read first; once a claim is selected, only
+    // its own
+    if (chosen ? !bright : !short(ed)) continue
+    const a = lay.pos.get(ed.a), b = lay.pos.get(ed.b)
+    c.link(a.x, a.y, b.x, b.y, edgeTone(ed, bright && chosen))
+  }
   return c
 }
 
 /**
- * The lines a graph draws, in the order drawn (a cell a line took stays its). A line joins two claims related in meaning
+ * The lines a graph draws, in the order drawn (lines that share a cell join there). A line joins two claims related in meaning
  * (supports, the same topic, contradicts) or drawing on the same rows; a correction is no line, since the corrected
  * claim shows it (a hollow dot, its history). Every line of the claim selected, bright; then, faint, each line between
  * two claims of one cluster where it crosses no dot (a line through a dot reads as two). A line to a claim of another
