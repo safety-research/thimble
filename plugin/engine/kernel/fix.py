@@ -387,6 +387,127 @@ def undo() -> str:
     return f"thimble is back to the release from {prev}. {RELOAD}"
 
 
+# ------------------------------------------------------------------ a fix follows releases
+
+FOLLOW_EVERY_S = 24 * 3600
+
+
+def on_slug() -> str | None:
+    """The fix that is on: the one the marketplace points at, or the one this session runs with --plugin-dir."""
+    s = active_slug() or fix_of_plugin()
+    return s if s and fix_dir(s).is_dir() else None
+
+
+def _release_url(fx: dict[str, Any]) -> str:
+    """Where the release comes from: the marketplace's source before the fix was turned on (GitHub, a URL, or a
+    folder: a dev install's clone), else the checkout the copy came from."""
+    src = (read_json(fixes_home() / "release.json") or {}).get("source") or fx.get("source") or upstream()
+    if re.match(r"^[\w.-]+/[\w.-]+$", src) and not Path(src).exists():
+        return f"https://github.com/{src}.git"
+    return src
+
+
+def _fetch_release(fx: dict[str, Any]) -> tuple[str, str]:
+    """(commit, version) of the newest release, fetched into the copy (a read, never a write elsewhere)."""
+    wt = fx["worktree"]
+    git("fetch", "-q", "--no-tags", _release_url(fx), "HEAD", cwd=wt)
+    commit = git("rev-parse", "FETCH_HEAD", cwd=wt)
+    try:
+        version = json.loads(git("show", f"{commit}:plugin/.claude-plugin/plugin.json", cwd=wt)).get("version") or "?"
+    except (FixError, ValueError):
+        version = "?"
+    return commit, version
+
+
+def _newer_known(fx: dict[str, Any]) -> bool:
+    """Whether a newer release is known without the network: a dev install's clone has moved past the fix's base."""
+    url = _release_url(fx)
+    if not Path(url).is_dir():
+        return False
+    head = git("rev-parse", "HEAD", cwd=url, check=False)
+    return bool(head) and head != fx["base"] and run(["git", "merge-base", "--is-ancestor", head, fx["base"]],
+                                                       cwd=fx["worktree"], check=False).returncode != 0
+
+
+def _quick_tests(wt: Path) -> bool:
+    """The plugin's quick tests in the copy: the kernel's tests (THIMBLE_FIX_TESTS, a shell command, replaces them)."""
+    cmd = os.environ.get("THIMBLE_FIX_TESTS")
+    py = os.environ.get("THIMBLE_PYTHON") or "python3"
+    argv = ["sh", "-c", cmd] if cmd else [py, "-m", "pytest", "plugin/tests", "-q", "-x", "-p", "no:cacheprovider"]
+    try:
+        return subprocess.run(argv, cwd=wt, capture_output=True, text=True, timeout=900).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _commit_local(wt: Path, slug: str) -> None:
+    """The copy's change, committed on its own branch so that it can be replayed (a local commit; a send makes its own)."""
+    git("add", "-A", cwd=wt)
+    if run(["git", "diff", "--cached", "--quiet"], cwd=wt, check=False).returncode != 0:
+        git("-c", "user.name=thimble", "-c", "user.email=thimble@localhost", "commit", "-q", "-m", f"thimble fix {slug}", cwd=wt)
+
+
+def _back_to_release(fx: dict[str, Any]) -> str:
+    """Turn the fix off. An install goes back to the release at once; a --plugin-dir session needs the one command."""
+    if fix_of_plugin() == fx["slug"] and from_plugin_dir():
+        return f"; quit and run: {_restart(Path(fx.get('source') or '') / 'plugin')}"
+    undo()
+    return ""
+
+
+def follow(force: bool = False) -> str | None:
+    """Keep the fix that is on with the newest release, in one line for the person, or None when no fix is on.
+
+    At most once a day (or at once with force), thimble fetches the newest release and replays the fix's change on it
+    in the copy. In the release already (the replay is empty): back to the plain release. Replays and the quick tests
+    pass: the newest release plus the fix. Does not replay, or the tests fail: back to the plain release, the copy kept
+    as it was for /thimble:fix to redo it."""
+    slug = on_slug()
+    if not slug:
+        return None
+    fx = load(slug)
+    title, wt = fx["title"], Path(fx.get("worktree") or "")
+    on_line = lambda v: f"thimble {v} + your fix '{title}' · u undo"  # noqa: E731
+    if not fx.get("worktree"):
+        return None
+    stamps = read_json(fixes_home() / "follow.json") or {}
+    if not force and time.time() - float(stamps.get(slug) or 0) < FOLLOW_EVERY_S and not _newer_known(fx):
+        return on_line(fx.get("version") or "?")
+    stamps[slug] = time.time()
+    write_json(fixes_home() / "follow.json", stamps)
+    try:
+        commit, version = _fetch_release(fx)
+    except FixError as e:
+        return f"{on_line(fx.get('version') or '?')} (the newest release could not be fetched: {e})"
+    base = fx["base"]
+    if commit == base or run(["git", "merge-base", "--is-ancestor", commit, base], cwd=wt, check=False).returncode == 0:
+        return on_line(fx.get("version") or version)
+    _commit_local(wt, slug)
+    before = git("rev-parse", "HEAD", cwd=wt)
+    replayed = run(["git", "-c", "user.name=thimble", "-c", "user.email=thimble@localhost", "rebase", "-q", "--onto",
+                    commit, base, fx["branch"]], cwd=wt, check=False).returncode == 0
+    if not replayed:
+        run(["git", "rebase", "--abort"], cwd=wt, check=False)
+    elif run(["git", "diff", "--quiet", commit, "HEAD"], cwd=wt, check=False).returncode == 0:
+        git("reset", "-q", "--hard", before, cwd=wt)
+        how = _back_to_release(fx)
+        fx = load(slug)
+        fx.update(status="merged", merged_in=version)
+        save(fx)
+        return f"Your fix '{title}' is in thimble {version}; you are on the release again{how}."
+    elif _quick_tests(wt):
+        fx.update(base=commit, version=version)
+        save(fx)
+        return on_line(version)
+    else:
+        git("reset", "-q", "--hard", before, cwd=wt)
+    how = _back_to_release(fx)
+    fx = load(slug)
+    fx.update(status="stale", stale_on=version)
+    save(fx)
+    return f"Your fix '{title}' no longer fits thimble {version}; you are on the release{how} · /thimble:fix to redo it"
+
+
 def latest() -> str | None:
     """The fix that `/thimble:fix submit` means: the one turned on, else the newest that was neither sent nor dropped."""
     a = active_slug() or fix_of_plugin()

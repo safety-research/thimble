@@ -233,3 +233,69 @@ def test_a_copy_with_no_change_is_shared_as_a_request_alone(env: Path):
     ask = json.loads((share / "ask.json").read_text())["id"]
     assert FX.send(fx["slug"], "send", ask) == ["The person sent the report under their GitHub login: issue https://example.invalid/test-user/issues/2."]
     assert not any(l.startswith(("repo fork", "pr create")) for l in log(env, "gh")) and log(env, "git") == []
+
+
+# ---- a fix follows releases: a made-up release history in the source checkout
+
+def release(src: Path, version: str, files: dict[str, str]) -> str:
+    """A new release of the made-up thimble: its files and its version, committed in the source checkout."""
+    for rel, text in {**files, "plugin/.claude-plugin/plugin.json": json.dumps({"name": "thimble", "version": version})}.items():
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text(text)
+    sh("git", "add", "-A", cwd=src)
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", f"release {version}", cwd=src)
+    return sh("git", "rev-parse", "HEAD", cwd=src)
+
+
+@pytest.fixture()
+def on(env: Path, monkeypatch: pytest.MonkeyPatch):
+    """A fix that is on (the marketplace points at its copy), whose change is one line of rows.py, left uncommitted."""
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    undone: list[str] = []
+    monkeypatch.setattr(FX, "undo", lambda: undone.append("undo") or "back")
+    fx = FX.new("Rows reads a semicolon")
+    rows = Path(fx["worktree"]) / "plugin" / "rows.py"
+    rows.write_text(rows.read_text().replace("split(',')", "split(';')"))
+    (FX.fixes_home() / "active").write_text(fx["slug"] + "\n")
+    return fx, env / "src", undone
+
+
+def test_follow_replays_the_fix_on_a_newer_release(on):
+    fx, src, undone = on
+    new = release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
+    assert FX.follow() == "thimble 0.11.0 + your fix 'Rows reads a semicolon' · u undo"
+    wt = Path(fx["worktree"])
+    after = FX.load(fx["slug"])
+    assert after["base"] == new and after["version"] == "0.11.0" and not undone
+    assert (wt / "plugin" / "claims.py").exists() and "split(';')" in (wt / "plugin" / "rows.py").read_text()
+    # at most once a day the next session start fetches again, and at once when a newer release is known (here the
+    # dev install's clone moved on)
+    import time
+    stamps = json.loads((FX.fixes_home() / "follow.json").read_text())
+    assert FX.follow() == "thimble 0.11.0 + your fix 'Rows reads a semicolon' · u undo" and json.loads((FX.fixes_home() / "follow.json").read_text()) == stamps
+    release(src, "0.11.1", {"plugin/more.py": "x = 1\n"})
+    assert FX.follow() == "thimble 0.11.1 + your fix 'Rows reads a semicolon' · u undo" and time.time() - json.loads((FX.fixes_home() / "follow.json").read_text())[fx["slug"]] < 60
+
+
+def test_follow_goes_back_to_the_release_when_the_fix_is_in_it(on):
+    fx, src, undone = on
+    release(src, "0.11.0", {"plugin/rows.py": (src / "plugin" / "rows.py").read_text().replace("split(',')", "split(';')")})
+    assert FX.follow() == "Your fix 'Rows reads a semicolon' is in thimble 0.11.0; you are on the release again."
+    assert undone == ["undo"] and FX.load(fx["slug"])["status"] == "merged"
+
+
+def test_follow_goes_back_to_the_release_when_the_fix_no_longer_fits_and_keeps_the_copy(on, monkeypatch):
+    fx, src, undone = on
+    release(src, "0.11.0", {"plugin/rows.py": "def rows(path):\n    return open(path).read().split('|')\n"})
+    assert FX.follow(force=True) == "Your fix 'Rows reads a semicolon' no longer fits thimble 0.11.0; you are on the release · /thimble:fix to redo it"
+    assert undone == ["undo"] and FX.load(fx["slug"])["status"] == "stale" and FX.load(fx["slug"])["base"] == fx["base"]
+    assert "split(';')" in (Path(fx["worktree"]) / "plugin" / "rows.py").read_text()
+
+
+def test_follow_goes_back_when_the_quick_tests_fail_after_the_replay(on, monkeypatch):
+    fx, src, undone = on
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
+    assert "no longer fits thimble 0.11.0" in FX.follow()
+    assert undone == ["undo"] and FX.load(fx["slug"])["base"] == fx["base"]
+    assert not (Path(fx["worktree"]) / "plugin" / "claims.py").exists()

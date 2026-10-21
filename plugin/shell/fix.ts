@@ -30,7 +30,7 @@ const FIXES = { plugin: 'thimble', key: 'fixes' } as const
 const SHARE = { plugin: 'thimble', key: 'fixshare' } as const
 const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/
 
-export type FixLine = { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string }
+export type FixLine = { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string }
 type Fix = { slug: string; title: string; kind: string; status: string; created: number }
 
 const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
@@ -200,12 +200,12 @@ export async function refreshFixes($: Engine): Promise<void> {
   // 'ready' is a fix that is not in use (after undo, or a send that was cancelled): only 'working' still works
   const working = fixes.filter(f => f.status === 'working')
   await $.state.set(FIXES, working.map(f => ({ slug: f.slug, title: f.title, kind: f.kind })))
+  // at session start, a fix that is on follows the newest release and says so in one line (followFix)
+  const on = looked ? null : fixes.find(f => f.slug === (active || null)) ?? null
   const own = looked ? null : await ownFix($)
+  const following = on ?? fixes.find(f => f.slug === own) ?? null
+  if (following) $.clock.after(0, () => { void followFix($, following).catch(() => undefined) })
   for (const f of fixes) {
-    if (own === f.slug) {
-      $.ui.toast(`✓ This session runs your fix: ${f.title}   ${USE_KEYS}`)
-      await $.state.set(LINE, { kind: 'applied', slug: f.slug, title: f.title })
-    }
     // a draft that waits for the person opens its preview, also when it was written outside a turn (a subagent's)
     await openAskOnce($, f.slug, !looked)
     const was = seen.get(f.slug)
@@ -221,6 +221,27 @@ export async function refreshFixes($: Engine): Promise<void> {
   } else if (!working.length && !shareWait.size && poll) {
     poll.cancel?.()
     poll = null
+  }
+}
+
+/** A fix that is on, at session start: the kernel replays it on the newest release (at most once a day) and gives
+ *  one line: still on (`thimble 0.11 + your fix '…' · u undo`), in the release now, or no longer fitting. The line
+ *  shows once per session, also across a reload; a switch loads the plugin again, so the session runs what it says. */
+async function followFix($: Engine, f: Fix): Promise<void> {
+  const before = await readJson($, `${await home($)}/fixes/${f.slug}/fix.json`)
+  const r = await kernel($, ['follow'])
+  const line = lastLine(r.out)
+  if (!line) return
+  const off = /you are on the release/.test(line)
+  const was = await fixLineNow($)
+  const said = was?.kind === 'applied' && was.slug === f.slug ? was.said : undefined
+  await $.state.set(LINE, off ? null : { kind: 'applied', slug: f.slug, title: f.title, said: line })
+  if (said !== line) $.ui.toast(r.ok ? line : `× ${cut(line, 200)}`)
+  const after = await readJson($, `${await home($)}/fixes/${f.slug}/fix.json`)
+  const moved = off || (before?.base && after?.base && before.base !== after.base)
+  if (moved) {
+    await noteForClaude($, `thimble's fix ${f.slug} followed the newest release: ${line}`)
+    await $.command.run({ command: 'reload-plugins' }).catch(() => undefined)
   }
 }
 
