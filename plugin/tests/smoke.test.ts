@@ -125,5 +125,7 @@ test('a healing pass Claude Code cut short starts again once at the next drawing
   expect(heals).toBe(2)
   expect(w.toasts).toEqual([])
   const kept = Object.entries(w.files).find(([f]) => f.includes('/thimble/messages/') && f.endsWith('.json'))
-  expect(JSON.parse(kept![1]).heal.changes[0].state).toBe('linked')
+  // kept by the text it read (message.js withHeal)
+  const results = Object.values(JSON.parse(kept![1]).heals) as { changes: { state: string }[] }[]
+  expect(results.map(h => h.changes[0].state)).toEqual(['linked'])
 })
