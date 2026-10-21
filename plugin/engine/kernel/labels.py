@@ -9,7 +9,9 @@ A label is defined once and applied to every record of the files a glob names (o
              decoded, one per line (a newline in a value is a real newline), the text a person reads; any other
              record's text is as the file holds it (regex_text)
     code     `label(unit)` in Python returns the value, (value, confidence) or None; a unit is the record as a dict
-             (a line of text is {"text": ...}), with `_ref` and `_text` (the line as the file holds it)
+             (a line of text is {"text": ...}), with `_ref` and `_text` (the line as the file holds it). Without
+             --values its values are the ones it returns, the most common first (yes, no when it returns a bool). A
+             None it returns is a record outside the label (`out`): no record, no failure, not in the counts' base
     prompt   a model reads each record against the definition: the records wait in the label (`waiting`) until the
              shell (shell/labels.ts) makes the calls through the session's own model and writes the answers back
     set      values Claude gives records itself, after reading them (`--set REF=VALUE`)
@@ -112,9 +114,14 @@ def value_of(lab: dict[str, Any], ref: str) -> str | None:
     return u.get("v") if u else None
 
 
+def held(lab: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The label's records: its units without those its code left outside it (a None returned with no error)."""
+    return {r: u for r, u in (lab.get("units") or {}).items() if not u.get("out")}
+
+
 def counts(lab: dict[str, Any]) -> Counter:
     out: Counter = Counter()
-    for ref in lab.get("units") or {}:
+    for ref in held(lab):
         v = value_of(lab, ref)
         if v is not None:
             out[v] += 1
@@ -123,7 +130,7 @@ def counts(lab: dict[str, Any]) -> Counter:
 
 def status(lab: dict[str, Any]) -> dict[str, Any]:
     """What the label holds now: how many records, valued, waiting for the model, without a value, checked."""
-    units = lab.get("units") or {}
+    units = held(lab)
     waiting = [r for r, u in units.items() if u.get("wait")]
     failed = [r for r, u in units.items() if u.get("v") is None and not u.get("wait") and r not in (lab.get("checks") or {})]
     checks = lab.get("checks") or {}
@@ -131,6 +138,7 @@ def status(lab: dict[str, Any]) -> dict[str, Any]:
     disagree = sum(1 for r, c in checks.items() if c.get("was") is not None and c.get("v") != c.get("was"))
     cnt = counts(lab)
     return {"records": len(units), "valued": sum(cnt.values()), "waiting": len(waiting), "failed": len(failed),
+            "out": len(lab.get("units") or {}) - len(units),
             "checked": len(checks), "agree": agree, "disagree": disagree, "counts": dict(cnt),
             "run": lab.get("run") or {}}
 
@@ -173,7 +181,7 @@ def units_of(st: Store, lab: dict[str, Any]) -> list[dict[str, Any]]:
     JSON document read as one value. A label over code and Markdown files can so hold lines and files at once."""
     from .lineage import entry_word
 
-    units = lab.get("units") or {}
+    units = held(lab)
     per_file = Counter(ref.split("#")[0] for ref in units)
     narrowed = bool(lab.get("where") or lab.get("within"))
     kinds: dict[str, str | None] = {}
@@ -213,7 +221,7 @@ def units_said(parts: list[dict[str, Any]]) -> str:
 
 def files_of(lab: dict[str, Any]) -> Counter:
     """How many of the label's records each file holds."""
-    return Counter(ref.split("#")[0] for ref in lab.get("units") or {})
+    return Counter(ref.split("#")[0] for ref in held(lab))
 
 
 # ------------------------------------------------------------------ the records a label applies to
@@ -329,7 +337,9 @@ def _as_value(lab: dict[str, Any], got: Any) -> tuple[str | None, float | None]:
     if got is None:
         return None, None
     if isinstance(got, bool):
-        got = lab["values"][0] if got else lab["values"][-1]
+        # the label's first value or its last; a code label with no --values has yes and no
+        vals = lab["values"] if lab.get("given", True) and len(lab["values"]) >= 2 else DEFAULT_VALUES
+        got = vals[0] if got else vals[-1]
     return str(got), (float(conf) if isinstance(conf, (int, float)) else None)
 
 
@@ -348,10 +358,12 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
     """Define a label (or apply the same definition again) and apply it: regex and code at once, prompt as records that
     wait for the model. The same definition again keeps the values it has and applies it only to records it has not
     seen; a changed one is a new version, whose records start again (the person's checks of records that are still in
-    it, with a value still on the list, are kept). Returns {label, added, applied, errors}."""
+    it, with a value still on the list, are kept). Code with no `values` takes the values it returns, the most common
+    first, and a None it returns leaves the record outside the label. Returns {label, added, applied, errors}."""
     if kind not in ("regex", "code", "prompt"):
         raise LabelError(f"a label's predicate is --regex, --code or --prompt, not {kind}")
-    values = [v.strip() for v in (values or DEFAULT_VALUES) if v and v.strip()]
+    given = bool(values) or kind != "code"
+    values = [v.strip() for v in (values or ([] if kind == "code" else DEFAULT_VALUES)) if v and v.strip()]
     if len(values) < 2 and kind != "code":
         raise LabelError("a label needs two values or more, the positive first: --values yes,no")
     if kind == "regex":
@@ -374,9 +386,12 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
                    "checks": {}, "created": time.time(), "rev": int(old.get("rev") or 0) if old else 0,
                    **({"card": old["card"]} if old and old.get("card") else {})}
             if old:
-                keep = {r: c for r, c in (old.get("checks") or {}).items() if c.get("v") in values}
+                # (code with no values: the checks whose value it still returns, once it has run)
+                keep = {r: c for r, c in (old.get("checks") or {}).items() if c.get("v") in values or not given}
                 lab["checks_kept"] = len(keep)
                 lab["checks"] = keep
+        if kind == "code" and (not same or given or "given" not in lab):
+            lab["given"] = given
         lab["reason"] = bool(reason) or bool(lab.get("reason"))
         lab["trial"] = bool(limit)
         lab["matched"] = matched
@@ -385,7 +400,8 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
         kinds = {f: S.kind_of_file(st.root, f) for f in files} if kind == "regex" else {}
         added, errors = 0, []
         for row in rows:
-            if row.ref in units and not units[row.ref].get("wait") and units[row.ref].get("v") is not None:
+            if row.ref in units and not units[row.ref].get("wait") and (units[row.ref].get("v") is not None
+                                                                          or units[row.ref].get("out")):
                 continue
             if row.ref in units and kind == "prompt":
                 continue
@@ -396,7 +412,9 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
             elif kind == "code":
                 try:
                     v, c = _as_value(lab, fn(_unit_of(row)))
-                    units[row.ref] = {"v": v, "c": c if c is not None else 1.0, "by": "code"}
+                    # a None the code returns on purpose: the record is outside the label, not one without a value
+                    units[row.ref] = ({"v": v, "c": c if c is not None else 1.0, "by": "code"} if v is not None
+                                      else {"v": None, "by": "code", "out": True})
                     if v is not None and v not in lab["values"]:
                         lab["values"].append(v)
                 except Exception as e:  # noqa: BLE001 — a record the code cannot label has no value, and says why
@@ -405,12 +423,26 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
                         errors.append(f"{row.ref}: {type(e).__name__}: {e}")
             else:
                 units[row.ref] = {"v": None, "wait": True}
+        if kind == "code" and not lab.get("given"):
+            _values_by_count(lab)
         if kind == "prompt":
             waiting = sum(1 for u in units.values() if u.get("wait"))
             lab["run"] = {"state": "asked" if waiting else "done", "asked": time.time(), "waiting": waiting}
         write(st, lab)
     st.log({"kind": "label", "name": name, "how": kind, "in": glob, "scanned": files, "records": len(rows)})
     return {"label": lab, "added": added, "applied": len(rows), "matched": matched, "errors": errors, "same": same}
+
+
+def _values_by_count(lab: dict[str, Any]) -> None:
+    """A code label's values when none were given: those its records have, the most common first; yes before no."""
+    cnt = counts(lab)
+    vals = sorted(cnt, key=lambda v: -cnt[v])  # (a stable sort: a tie keeps the order the code first returned them)
+    if vals and set(vals) <= set(DEFAULT_VALUES):
+        vals = list(DEFAULT_VALUES)
+    lab["values"] = vals
+    lab["checks"] = {r: c for r, c in (lab.get("checks") or {}).items() if c.get("v") in vals}
+    if "checks_kept" in lab:
+        lab["checks_kept"] = len(lab["checks"])
 
 
 def set_values(st: Store, name: str, given: dict[str, str], values: list[str] | None = None) -> dict[str, Any]:
@@ -756,7 +788,7 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
     lab = load(st, name)
     if lab is None:
         raise LabelError(f"no label {name!r}; labels: {', '.join(names(st)) or 'none'}")
-    units = lab.get("units") or {}
+    units = held(lab)
     checks = lab.get("checks") or {}
     refs = [r for r in units if value is None or (value_of(lab, r) or NO_VALUE) == value]
     total = len(refs)
@@ -816,17 +848,17 @@ def breakdown(st: Store, rowsets: list[str], cap: int = 500_000) -> dict[str, An
     out: dict[str, Any] = {}
     rows = {row_ref(r) for r in refs}
     for lab in labs:
-        units = lab.get("units") or {}
-        held = [r for r in rows if r in units]
-        if not held:
+        units = held(lab)
+        mine = [r for r in rows if r in units]
+        if not mine:
             continue
         c: Counter = Counter()
-        for r in held:
+        for r in mine:
             v = value_of(lab, r)
             c[v if v is not None else ""] += 1
         vals = {v: c[v] for v in lab["values"] if c.get(v)}
         vals.update({v: n for v, n in c.items() if v and v not in vals})
-        out[lab["name"]] = {"values": vals, "of": len(held), "rows": len(rows), "none": c.get("", 0)}
+        out[lab["name"]] = {"values": vals, "of": len(mine), "rows": len(rows), "none": c.get("", 0)}
     return out
 
 
@@ -948,7 +980,8 @@ if (lead && one) parts.push(k.text(`{dim:${lead}} ${k.escape(cut)}`))
 // what made the label, said once: the definition's line names a rule (code, a pattern), so the line under it does not
 // say it again; under a question it says that the model read each record
 const said = lead && one && L.kind !== 'prompt'
-parts.push(k.text(`{dim:${said ? '' : `${k.escape(how)} · `}${L.units ? k.escape(L.units) : k.fmt(total) + ' records'}${L.trial ? ' (a trial sample)' : ''}${checked}}`))
+const out = L.out ? ` · the code returned None for ${k.fmt(L.out)} more` : ''
+parts.push(k.text(`{dim:${said ? '' : `${k.escape(how)} · `}${L.units ? k.escape(L.units) : k.fmt(total) + ' records'}${L.trial ? ' (a trial sample)' : ''}${out}${checked}}`))
 return k.frame(k.stack(...parts), { title: k.title })
 """
 
@@ -956,7 +989,7 @@ return k.frame(k.stack(...parts), { title: k.title })
 def card_spec(st: Store, lab: dict[str, Any], q: dict[str, Any] | None) -> dict[str, Any]:
     s = status(lab)
     qid = q["id"] if q else None
-    top = lab["values"][0]
+    top = lab["values"][0] if lab["values"] else None
     n = s["counts"].get(top, 0)
     scope = lab.get("in") or "the records Claude named"
     if lab.get("where"):
@@ -968,14 +1001,14 @@ def card_spec(st: Store, lab: dict[str, Any], q: dict[str, Any] | None) -> dict[
     parts = units_of(st, lab)
     info = {"name": lab["name"], "kind": lab.get("kind"), "values": lab["values"], "records": s["records"],
             "units": units_said(parts) if parts else "",
-            "waiting": s["waiting"], "failed": s["failed"], "failed_why": (failed_why or "")[:120], "checked": s["checked"],
+            "waiting": s["waiting"], "failed": s["failed"], "out": s["out"], "failed_why": (failed_why or "")[:120], "checked": s["checked"],
             "agree": s["agree"], "disagree": s["disagree"], "trial": bool(lab.get("trial")), "scope": scope,
             "definition": definition[:400], "version": lab.get("version"), "rev": lab.get("rev")}
     cite = f"[{n:,}]({_cite_value(qid, lab['name'], top)})" if qid and n else f"{n:,}"
     # the count in the records' own unit: `5 of 13 files`, `5 of 465 lines`; when the label mixes units it says so
     unit = parts[0]["unit"] if len(parts) == 1 else "records"
     of = f"of {s['records']:,} {ONE_UNIT.get(unit, unit) if s['records'] == 1 else unit}"
-    text = f"{cite} {of} are {top}."
+    text = f"{cite} {of} are {top}." if top is not None else f"None {of} has a value."
     if len(parts) > 1:
         each = [f"{u['counts'].get(top, 0):,} of the {unit_count(u['n'], u['unit'])}" for u in parts]
         text += (f" The records mix units ({units_said(parts)}): "
@@ -984,7 +1017,10 @@ def card_spec(st: Store, lab: dict[str, Any], q: dict[str, Any] | None) -> dict[
         text += f" {s['waiting']:,} still wait for the model."
     if s["failed"]:
         text += f" {s['failed']:,} have no value."
+    if s["out"]:
+        text += f" The code returned None for {s['out']:,} more, which are outside the label."
     title = (f"{lab['name']}: {s['records']:,} records wait for the model" if s["waiting"] and not s["valued"]
+             else f"{lab['name']}: no record has a value" if top is None
              else f"{lab['name']}: {n:,} {of} are {top}" + (f" ({units_said(parts)})" if len(parts) > 1 else ""))
     spec: dict[str, Any] = {
         "title": title,
