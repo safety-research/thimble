@@ -134,6 +134,19 @@ test('a heads-up whose words hold an explainer\'s term keeps its mark, and the e
   assert.ok(at('g1').start > at('h1').end)
 })
 
+test('a heads-up whose words the reader sees across a citation and a code span stands on them, outside the link', () => {
+  const text = 'So [5](r7#n=files@n) of the 13 files in `src/notes` mention citations, and the rest do not.'
+  const glosses = headsOf({ term: '5 of the 13 files in src/notes mention citations', title: 'Few files mention it', bullets: ['Only five do.'] }, text)
+  assert.deepEqual(Object.keys(glosses), ['h1'])
+  const rec = withObserver(newRecord({ row: 'r1', session: 's', text }), { verbs: {}, glosses })
+  const h = rec.marks.find(m => m.gloss === 'h1')
+  const cite = rec.marks.find(m => m.kind === 'cite')
+  assert.equal(text.slice(h.start, h.end), 'of the 13 files in `src/notes` mention citations')
+  assert.ok(h.start >= cite.end)
+  // drawn as the reader reads it: the citation's words, then the heads-up's words without backticks
+  assert.equal(runsText(inline(text, 0, text.length, rec.marks)), 'So 5 of the 13 files in src/notes mention citations, and the rest do not.')
+})
+
 test('] stops at the newest reply\'s last stop and [ at the oldest reply\'s first: neither runs on into the other end', () => {
   const list = [{ row: 'r1', i: 0 }, { row: 'r1', i: 1 }, { row: 'r2', i: 0 }, { row: 'r2', card: { id: 'c1' } }]
   assert.deepEqual(stepFrom(list, 2, 1), { row: 'r2', card: { id: 'c1' } })

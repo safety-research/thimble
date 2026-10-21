@@ -139,6 +139,27 @@ test('a second ↵ while the thread\'s agent starts sends nothing more: the ques
   expect(file.asks.map((a: Any) => a.text)).toEqual(['why so high?'])
 })
 
+const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 14, bodyColumns: 160, scroll: { offset: 0, bodyRows: 14 }, view: {} }, viewport: { columns: 160, rows: 40, isFullscreen: true } } as never
+
+test('the bar names ] only where it goes on: at the newest reply\'s last stop it names [ instead, and at the first ] alone', async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, clock)
+  const bar = async () => { await $.ui.render(BAND); await clock.settle(); return textOf(await $.ui.render(BAND)) }
+  // the reply's first mark: ] goes on to its second, and nothing is before it
+  await press($, clock, edit(']'))
+  let line = await bar()
+  expect(line).toContain('] next')
+  expect(line).not.toContain('[ previous')
+  // its last stop: ] stays there, so the bar names [ instead
+  await press($, clock, edit(']'))
+  line = await bar()
+  expect(line).not.toContain('] next')
+  expect(line).toContain('[ previous')
+  await press($, clock, edit('['))
+  expect(await bar()).toContain('] next')
+})
+
 test('] stops at the newest reply\'s last mark: it never runs on into the first reply, whose marks are off screen', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)

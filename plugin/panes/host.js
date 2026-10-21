@@ -183,11 +183,13 @@ export function hostKeys(mode, surface = 'terminal') {
 
 // ---------------------------------------------------------------- the one bar, in the room it has
 // The bar is one line: `thimble  v visualize · s squeeze · c 9 claims      t 2 threads · r coverage 34%`. With
-// less room it gives up, in this order: the counts other than coverage, then each key's words beyond their first word
-// (`visualize`, `squeeze`, `cite`), then coverage, then the label, then the end of the line (an ellipsis). It never
-// wraps. Coverage stays longest: it is what the session has seen of the folder, which no key shows.
+// less room it gives up, in this order: the words of a key that yields (the reply the keys act on, `{ } reply 2 of 4:
+// The writers…`), cut at their end down to their short form, then the counts other than coverage, then each key's words
+// beyond their first word (`visualize`, `squeeze`, `cite`), then the label to its short form (`Coverage` for
+// `thimble:main/Coverage`), then coverage, then the label, then the end of the line (an ellipsis). It never wraps.
+// Coverage stays longest: it is what the session has seen of the folder, which no key shows.
 //
-//   bar: {label, left: [{key, words, short?, ...}], counts: [{id, text, ...}]}
+//   bar: {label, labelShort?, left: [{key, words, short?, yields?, ...}], counts: [{id, text, ...}]}
 //   barLadder(bar) -> the bar at each step, fullest first
 //   fitBar(bar, width, measure) -> the first step whose line fits `width` (measure: text -> width, default columns)
 
@@ -217,6 +219,11 @@ export function barLadder(bar) {
   const steps = []
   let b = { label: bar.label || '', left: (bar.left || []).slice(), counts: (bar.counts || []).slice() }
   steps.push(b)
+  // the words of a key that yields, to their short form, before any count goes (fitBar cuts them at their end first)
+  if (b.left.some(x => x.yields && x.short && x.short !== x.words)) {
+    b = { ...b, left: b.left.map(x => (x.yields && x.short ? { ...x, words: x.short, shortened: true } : x)) }
+    steps.push(b)
+  }
   // the counts, one at a time, all but coverage
   const order = [...b.counts].sort((x, y) => (COUNT_ORDER.indexOf(x.id) + 1 || 99) - (COUNT_ORDER.indexOf(y.id) + 1 || 99) || 0)
   const cov = order.filter(c => c.id === 'cov')
@@ -235,9 +242,11 @@ export function barLadder(bar) {
     b = { ...b, left: left.slice() }
     steps.push(b)
   }
-  // a long label (the thread the panel shows) to its start, so coverage keeps its place
+  // a long label (the thread the panel shows) to its plain name (`Coverage`), else to its start, so coverage keeps its
+  // place
   if (b.label && Array.from(b.label).length > LABEL_SHORT) {
-    b = { ...b, label: cutEnd(b.label, LABEL_SHORT) }
+    const plain = bar.labelShort && Array.from(bar.labelShort).length < Array.from(b.label).length ? bar.labelShort : b.label
+    b = { ...b, label: cutEnd(plain, LABEL_SHORT) }
     steps.push(b)
   }
   // then coverage
@@ -257,6 +266,14 @@ export function fitBar(bar, width, measure = s => Array.from(String(s)).length) 
   const steps = barLadder(bar)
   for (const s of steps) {
     if (measure(barLine(s)) <= width) return { ...s, cut: false }
+    // a key that yields, cut at its end to the room left (`reply 2 of 4: The wri…`) while it says more than its short
+    // form, so the counts keep their place
+    const y = s.left.findIndex(x => x.yields && x.short && x.words !== x.short)
+    if (y >= 0) {
+      const g = s.left[y]
+      const room = width - measure(barLine({ ...s, left: s.left.map((x, i) => (i === y ? { ...x, words: '' } : x)) })) - (g.key ? 1 : 0)
+      if (room >= measure(g.short) + 4) return { ...s, left: s.left.map((x, i) => (i === y ? { ...x, words: cutEnd(x.words, room) } : x)), cut: false }
+    }
     const at = s.left.findIndex(x => x.status)
     if (at < 0 || s.counts.length) continue
     const room = width - measure(barLine({ ...s, left: s.left.map((x, i) => (i === at ? { ...x, words: '' } : x)) }))

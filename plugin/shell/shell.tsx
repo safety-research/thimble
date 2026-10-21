@@ -50,7 +50,7 @@ import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedO
 import { SCALE, cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, setWords, withOwn } from '../squeeze/chips.mjs'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
-import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
+import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTitle, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf, scopeOf as trayScopeOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { hex as toneHex, mix, setAutoTheme, termColor } from '../draw/palette.js'
@@ -1296,12 +1296,32 @@ async function listThreads($: Engine): Promise<void> {
   await openThreads($)
 }
 
-async function stepMark($: Engine, dir: number): Promise<void> {
+/** Where ] and [ stand now in what they move through: the tray's mark, else the card with the focus (-1: neither). */
+async function stepPlace($: Engine): Promise<{ list: { row: string; i?: number; card?: ObjRef }[]; at: number }> {
   const list = await focusOrder($)
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const base = trayBase(tray) as TrayFrame | null
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === base.i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
+  return { list, at }
+}
+
+/** Whether ] and [ go anywhere from where they stand: at the newest reply's last stop ] stays where it is, and at the
+ *  oldest reply's first [ does, so the bar does not name a key there that does nothing. */
+export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean }> {
+  const { list, at } = await stepPlace($)
+  if (at < 0) return { next: true, prev: true }
+  return { next: !!stepFrom(list, at, 1), prev: !!stepFrom(list, at, -1) }
+}
+
+/** The bar's words for ] and [ (the tray's and a focused card's): `] next` while there is a next, else `[ previous`
+ *  where there is one before. */
+function stepWords(ends: { next: boolean; prev: boolean }): string[] {
+  return ends.next ? ['] next'] : ends.prev ? ['[ previous'] : []
+}
+
+async function stepMark($: Engine, dir: number): Promise<void> {
+  const { list, at } = await stepPlace($)
   let next: { row: string; i?: number; card?: ObjRef } | null = null
   // past the newest reply's last stop (or before the oldest reply's first), the tray stays where it is
   if (at >= 0) { next = stepFrom(list, at, dir); if (!next) return }
@@ -1473,7 +1493,8 @@ async function pickOption($: Engine, row: string, key: string, choice: string): 
   if (v && Array.isArray(v.proposals) && v.proposals.includes(choice)) {
     const verbs = { ...rec.verbs }
     const left = v.proposals.filter(p => p !== choice)
-    if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} view${left.length === 1 ? '' : 's'} ready` }
+    // what is ready is the views not drawn yet, not the card just asked for: `1 more view`
+    if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} more view${left.length === 1 ? '' : 's'}` }
     else delete verbs.v
     await saveRecord($, { ...rec, verbs })
   }
@@ -1680,17 +1701,19 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
   }
 }
 
-/** The thread the side panel shows, as `thimble:main/<it>` (the thread list as `thimble:threads`). Null in main. */
-async function threadInFront($: Engine): Promise<string | null> {
+/** The thread the side panel shows, as `thimble:main/<it>` (the thread list as `thimble:threads`), with the plain name
+ *  the bar says where it has less room: the pane's own (`Coverage`), or the card's. Null in main. */
+async function threadInFront($: Engine): Promise<{ label: string; short: string } | null> {
   if (!detailIsOpen()) return null
   const v = await sideNow($)
   if (v?.kind === 'pane') {
-    if (v.pane === 'threads') return 'thimble:threads'
+    const plain = String(v.title || paneTitle(v.pane, v.args))
+    if (v.pane === 'threads') return { label: 'thimble:threads', short: plain }
     const s = paneSubject(v)
-    return s ? `thimble:${s.name}` : null
+    return s ? { label: `thimble:${s.name}`, short: plain } : null
   }
   const sel = (await $.state.get(SEL)).value as Sel | null
-  return sel && !sel.cite && !sel.cites ? `thimble:main/${objectWords(sel.id)}` : null
+  return sel && !sel.cite && !sel.cites ? { label: `thimble:main/${objectWords(sel.id)}`, short: objectWords(sel.id) } : null
 }
 
 /** An object's id as the person reads it: without the number it was saved under, its dashes spaces (`01-label-kind`:
@@ -1780,7 +1803,9 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   }
   if (kind === 'proposals') {
     if (!pick || pick.verb === 's') return undefined
-    const d = paneDrawing('proposals', { row: pick.row, verb: pick.verb }) ?? (await paneNow($, 'proposals', { row: pick.row, verb: pick.verb }))
+    // run now, as the tray is: the line's last drawing may be from before a pick took its view out of the record (the
+    // line is drawn again only where the transcript shows it), and the bar names the options left
+    const d = await paneNow($, 'proposals', { row: pick.row, verb: pick.verb })
     return { keys: barText([d]) || '0 close' }
   }
   // a card under a reply with the focus (] reached it): its own keys, those that reach it here, then the host's
@@ -1796,7 +1821,7 @@ async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | unde
   const pk = pageKnob(d)
   const ask = `${d && cardTakesKey(d, 'a') ? '1' : 'a'} ask`
   const pages = pk && !(d && cardTakesKey(d, 'o')) ? [PAGES_DEFAULT === 'all' ? `o read all ${pagesWord(pk)}` : `o open ${pagesWord(pk)}`] : []
-  return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), ask, ...pages, '] next', '0 back'].join(' · ') }
+  return { keys: [...own.map(g => `${g.key} ${g.words}`), ...turnKeys(d), ask, ...pages, ...stepWords(await stepEnds($)), '0 back'].join(' · ') }
 }
 
 /** A passage of a reply as a mark of it: its side thread is the passage's, as a citation's is the citation's. */
@@ -1852,7 +1877,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 }
 
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
-type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown; dim?: boolean }
+type BarSeg = { key: string; words: string; short?: string; yields?: boolean; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown; dim?: boolean }
 
 /** The keys each bar named, oldest first, with when it first showed them. A key the line named a moment ago
  *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
@@ -1970,12 +1995,13 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
         // at rest: the newest reply (or the catch-up in its place), named by nothing
       } else if (isCatchUp(rec)) {
         const n = Number(rec.catchup!.replies) || 0
-        left.push({ key: '{ }', words: `catch-up of ${n} replies`, short: 'catch-up', color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
+        left.push({ key: '{ }', words: `catch-up of ${n} replies`, short: 'catch-up', yields: true, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
       } else if (place.all.length > 1 && place.at >= 0 && (place.at < place.all.length - 1 || place.since > 1)) {
         // an earlier reply picked: its first words too, since a key cannot scroll the transcript to it
         const which = `reply ${place.at + 1} of ${place.all.length}`
         const begins = place.at < place.all.length - 1 ? cut(lineOf(shownOf(rec)), 36) : ''
-        left.push({ key: '{ }', words: begins ? `${which}: ${begins}` : which, short: which, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
+        // its words give way before the counts do: cut at their end, down to `reply 2 of 4` (host.js fitBar)
+        left.push({ key: '{ }', words: begins ? `${which}: ${begins}` : which, short: which, yields: true, color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
       }
     }
   }
@@ -2009,7 +2035,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   })
   const where = o.preview ? null : await threadInFront($)
   if (!left.length && !counts.length && !where) return null
-  const fit = fitBar({ label: where ?? 'thimble', left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bare?: boolean; bright: boolean }[]; cut: boolean }
+  const fit = fitBar({ label: where?.label ?? 'thimble', labelShort: where?.short, left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; key?: string; bare?: boolean; bright: boolean }[]; cut: boolean }
   // the label names whose keys these are; it is no link and no press, so it is drawn plain (an underline is a
   // citation's look)
   // in main, a click on it opens thimble's settings in the side panel
@@ -2828,6 +2854,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     }
     // the session's side threads: the tray shows a mark's
     case 'threads': return threadList()
+    // whether ] and [ go anywhere from the tray's mark: the tray names only a key that does
+    case 'steps': return stepEnds($)
     // the session's claims, with the folder's offer (claims/term.ts)
     case 'claims': return claimsPaneStore($)
     // thimble's switches (settings/term.ts)

@@ -11,8 +11,9 @@
 //
 //   linkMarks(text)                  -> the cites and sparks Claude wrote
 //   placeMarks(text, glosses, prev)  -> every mark of the text: its links, then each gloss's term where it first stands
-//                                       outside a link or code, else in a link's words; a spark keeps the values `prev`
-//                                       resolved for its ref
+//                                       outside a link or code, else in a link's words, else in the words as the person
+//                                       reads them (findRead: across a link, on the part outside it); a spark keeps the
+//                                       values `prev` resolved for its ref
 //   anchorTerm(text, term, taken)    -> where a term stands in a text that may say it in another form: its words, then
 //                                       the same words inflected ("claimed" → "claiming"), then its longest word
 //   seriesRef(ref)                   -> {query, col} for a spark's ref (r4@n, r4#n), or null
@@ -223,6 +224,93 @@ export function findInLink(text, term, taken = []) {
 }
 
 
+/**
+ * The markdown as the person reads it, with where each of its characters stands in the markdown: a link as its words, a
+ * code span without its backticks, emphasis markers and escapes dropped. `at[k]` is the markdown offset of `text[k]`.
+ */
+export function readable(md) {
+  const s = String(md || '')
+  const links = linkSpans(s)
+  const code = codeRanges(s)
+  let text = ''
+  const at = []
+  const add = (ch, i) => { text += ch; at.push(i) }
+  const word = c => /[\p{L}\p{N}]/u.test(c || '')
+  let i = 0
+  while (i < s.length) {
+    const l = links.find(m => m.index === i)
+    if (l) {
+      // a link's words, each where it stands inside the brackets
+      for (let k = 0; k < l[1].length; k++) if (!/[`*]/.test(l[1][k])) add(l[1][k], i + 1 + k)
+      i += l[0].length
+      continue
+    }
+    const c = code.find(([a]) => a === i)
+    if (c) {
+      // a code span's text as written, its backticks gone
+      let a = c[0]
+      let b = c[1]
+      while (a < b && s[a] === '`') a++
+      while (b > a && s[b - 1] === '`') b--
+      for (let k = a; k < b; k++) add(s[k], k)
+      i = c[1]
+      continue
+    }
+    const ch = s[i]
+    if (ch === '\\' && /[\\`*_{}[\]()#+\-.!|~>]/.test(s[i + 1] || '')) { add(s[i + 1], i + 1); i += 2; continue }
+    if (ch === '*' || ch === '`' || (ch === '_' && !(word(s[i - 1]) && word(s[i + 1])))) { i++; continue }
+    add(ch, i)
+    i++
+  }
+  return { text, at }
+}
+
+/**
+ * Where a term stands in the words as the person reads them, when the markdown says them with a link in between ("5 of
+ * the 13 files in plugin/prompts" is `[5](r7#n) of the 13 files in \`plugin/prompts\``): the term is found in
+ * readable(text) and mapped back to the markdown. A mark never stands on a link or on another mark, so the mark takes
+ * the longest part of the match outside them, with each code span it touches whole. Null when no such part holds a
+ * word.
+ */
+export function findRead(text, term, taken = []) {
+  const t = termOf(term)
+  if (!t || t.length > 120) return null
+  const s = String(text || '')
+  const r = readable(s)
+  const code = codeRanges(s)
+  const blocked = taken.map(m => [m.start, m.end])
+  for (const m of linkSpans(s)) blocked.push([m.index, m.index + m[0].length])
+  const body = t.split(/\s+/).map(escapeRe).join('\\s+')
+  for (const flags of ['gu', 'giu']) {
+    const re = new RegExp('(?<![\\p{L}\\p{N}_])' + body + '(?![\\p{L}\\p{N}_])', flags)
+    for (const m of r.text.matchAll(re)) {
+      // the match cut into parts at each link or mark it crosses, each part [first, last + 1) in the markdown
+      const parts = []
+      let cur = null
+      for (const i of r.at.slice(m.index, m.index + m[0].length)) {
+        if (inside(blocked, i, i + 1)) { cur = null; continue }
+        if (!cur) { cur = { a: i, b: i + 1, n: 0 }; parts.push(cur) }
+        cur.b = i + 1
+        cur.n++
+      }
+      const spans = parts.map(p => {
+        let a = p.a
+        let b = p.b
+        // each code span it touches, whole
+        for (const [x, y] of code) if (a < y && b > x) { a = Math.min(a, x); b = Math.max(b, y) }
+        while (a < b && /[\s,.;:!?()\-–—]/.test(s[a])) a++
+        while (b > a && /[\s,.;:!?()\-–—]/.test(s[b - 1])) b--
+        return { start: a, end: b, n: p.n }
+      }).filter(p => p.end > p.start && /[\p{L}\p{N}]/u.test(s.slice(p.start, p.end)) && !inside(blocked, p.start, p.end))
+      if (spans.length) {
+        const best = spans.reduce((x, y) => (y.n > x.n ? y : x))
+        return { start: best.start, end: best.end }
+      }
+    }
+  }
+  return null
+}
+
 // words that never carry a term on their own: a term's other words are tried before these
 const STOP = new Set('a an and are as at be by for from in into is it its of on or per than that the their them then this to vs versus via was were with without'.split(' '))
 
@@ -284,7 +372,7 @@ export function anchorTerm(text, term, taken = []) {
 /**
  * Every mark of the text: the links Claude wrote, then each gloss placed by its term. `glosses` is the record's
  * `{id: {term, ...}}`. A term stands where it first stands outside links and code (findTerm), else in a link's words
- * (findInLink), where its explain is drawn inside the link. A rewrite (`original`: the text it was written from) may say
+ * (findInLink), where its explain is drawn inside the link, else in the words as the person reads them (findRead). A rewrite (`original`: the text it was written from) may say
  * a term in another form, so the term is found again in it (anchorTerm). A gloss whose term the text does not hold gets
  * no mark: the record keeps it, and it stands on its words again when a text that holds them shows (the original after
  * a squeeze). `prev` (the marks before a change of the text) gives each spark the values already resolved for its ref.
@@ -304,7 +392,8 @@ export function placeMarks(text, glosses = {}, prev = [], { original = null } = 
     const term = g && g.term
     const at = original == null ? findTerm(text, term, marks) : anchorTerm(text, term, marks)
     if (at) { marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id, ...(at.how && at.how !== 'term' ? { anchor: at.how } : {}) }); continue }
-    const inLink = findInLink(text, term, marks)
+    // in a link's words; else in the words as the person reads them, across a link or a code span (findRead)
+    const inLink = findInLink(text, term, marks) ?? findRead(text, term, marks)
     if (inLink) marks.push({ kind: 'gloss', start: inLink.start, end: inLink.end, gloss: id })
   }
   return marks.sort((a, b) => a.start - b.start)
@@ -679,7 +768,7 @@ export function glossesOf(list, text, skip = []) {
   for (const g of Array.isArray(list) ? list : []) {
     if (!g || typeof g !== 'object') continue
     const term = str(termOf(g.term))
-    if (!term || seen.has(norm(term)) || !(findTerm(text, term) || findInLink(text, term))) continue
+    if (!term || seen.has(norm(term)) || !(findTerm(text, term) || findInLink(text, term) || findRead(text, term))) continue
     seen.add(norm(term))
     const refs = (Array.isArray(g.refs) ? g.refs : []).filter(r => typeof r === 'string' && isRef(r))
     out[`g${++n}`] = { term, title: str(g.title) || term, body: str(g.body), here: str(g.here), program: typeof g.program === 'string' ? g.program : '', refs }
@@ -695,7 +784,7 @@ export function headsOf(item, text) {
   if (!item || typeof item !== 'object') return {}
   const term = str(termOf(item.term))
   const bullets = (Array.isArray(item.bullets) ? item.bullets : []).map(b => str(b)).filter(Boolean)
-  if (!term || !bullets.length || !(findTerm(text, term) || findInLink(text, term))) return {}
+  if (!term || !bullets.length || !(findTerm(text, term) || findInLink(text, term) || findRead(text, term))) return {}
   const refs = [...new Set(bullets.flatMap(b => [...b.matchAll(/\]\(([^)\n]+)\)/g)].map(m => citeRef(m[1])).filter(Boolean)))]
   return { h1: { kind: 'heads', term, title: str(item.title) || term, bullets, todo: str(item.todo), refs } }
 }
