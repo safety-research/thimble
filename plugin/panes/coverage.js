@@ -41,7 +41,8 @@ const SAID = { seen: 'read', model: 'computed', searched: 'searched', computed: 
 const TONE = { seen: 'accent', model: 'dim', searched: 'dim', computed: 'dim', named: 'dim', 'not read': 'unseen' }
 // the three parts of a group's bar and the legend's words for them: read into Claude's context, only counted or
 // computed over (a label's model too), not touched
-export const KEY = [['read', 'accent', "read into Claude's context"], ['counted', 'dim', 'counted or computed over (read is part of it)']]
+// (each with its short words, for a pane too narrow for the long ones)
+export const KEY = [['read', 'accent', "read into Claude's context", "read into Claude's context"], ['counted', 'dim', 'counted or computed over (read is part of it)', 'counted or computed over']]
 // the shades of a file's rows: seen, read by a label's model, computed over, untouched
 export const PARTS = ['seen', 'model', 'computed', 'untouched']
 export const GLYPH = { seen: '█', model: '▓', computed: '▒', untouched: '░' }
@@ -300,9 +301,9 @@ export function program(k, data) {
   if (at) k.select(at)
 
   if (level === 'top') {
-    const sw = sizeW(items)
     const many = items.some(x => x.kind !== 'file')
-    return k.stack(...head, k.text(' '), many ? toggles(k, by) : false, listOf(k, items, idx, room, (it, on) => itemRow(k, it, by, W, sw, on), header(k, many ? by : 'file', W, sw)))
+    const cols = columns(k.w, items, many)
+    return k.stack(...head, k.text(' '), many ? toggles(k, by) : false, listOf(k, items, idx, room, (it, on) => itemRow(k, it, by, cols, on), header(k, many ? by : 'file', cols)))
   }
   // ---- one file, in its own unit: an image or another whole file has only its words, a PDF a strip of its pages
   const unit = unitOf(file)
@@ -311,7 +312,8 @@ export function program(k, data) {
     return k.stack(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${k.escape(what)}}` }), k.text(wordsMarkup(k, file), { wrap: false }))
   }
   const total = unit === 'pages' ? file.units || file.rows : file.lines || file.rows
-  const title = subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${total === 1 ? ONE[unit] : unit} ·} {${TONE[file.status]}:${SAID[file.status]}}` })
+  // (what happened to it is the next line's to say: `read 2 of 3,104 records (0.06%)`)
+  const title = subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${total === 1 ? ONE[unit] : unit}}` })
   if (unit === 'pages') return k.stack(title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, { ...file, lines: total, ranges: file.pages, hit_lines: [] }, W))
   const out = [title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, file, W), k.text(' ')]
   if (!ranges.length && file.status === 'model') {
@@ -372,9 +374,12 @@ export function groupLine(g) {
   return `Claude read ${amounts(units)}, from ${of}.`
 }
 
-/** The legend of the groups' bars, always in view: each part's color and what it means. */
+/** The legend of the groups' bars, always in view: each part's color and what it means, on one row where both fit,
+ *  else one row each, in their short words where the long ones do not fit. */
 function legend(k) {
-  return k.text(KEY.map(([, tone, words]) => `{${tone}:■} {dim:${words}}`).join('   '), { wrap: false })
+  const len = s => Array.from(s).length + 2
+  if (KEY.reduce((s, [, , words]) => s + len(words), 0) + 3 * (KEY.length - 1) <= k.w) return k.text(KEY.map(([, tone, words]) => `{${tone}:■} {dim:${k.escape(words)}}`).join('   '), { wrap: false })
+  return k.stack(...KEY.map(([, tone, words, short]) => k.text(`{${tone}:■} {dim:${k.escape(len(words) <= k.w ? words : short)}}`, { wrap: false })))
 }
 
 /** Plain words in rows of at most `w` characters, broken at spaces. */
@@ -405,36 +410,65 @@ function toggles(k, by) {
   return k.beside(one('by-folder', 'by folder', by === 'folder'), k.text('{dim:·}', { wrap: false }), one('by-type', 'by type', by === 'type'), { gap: 1 })
 }
 
-// each row's two measures: a bar and its share, read into Claude's context and counted or computed over
+// each row's two measures: a bar and its share, read into Claude's context and counted or computed over. A share
+// stands right-aligned in SHARE cells (`<0.01%` is six), so it is never cut
 const BAR = 10
+const SHARE = 7
 
-function nameW(W, sw = 14) {
-  return Math.max(14, W - 3 - 6 - (sw + 1) - 2 * (BAR + 7) - 1)
-}
-
-/** The size column: as wide as the rows' longest size (`14,591 records`), so no one unit sets it. */
-const sizeW = items => Math.min(18, Math.max(4, ...items.map(it => Array.from(itemSize(it)).length)))
 const itemSize = it => (it.kind === 'group' ? sizeText(it.g) : it.kind === 'file' ? fileSize(it.f) : '')
+// a size's number alone (`14,591`), for a pane too narrow for its unit's word
+const itemNum = it => itemSize(it).split(' ')[0] || ''
+const itemName = it => (it.kind === 'group' ? String(it.g.key) : it.kind === 'file' ? (it.depth ? it.f.path.slice(it.f.folder === './' ? 0 : it.f.folder.length) : it.f.path) : '')
 // a group of one unit says its size in it; a group of mixed units has its files' count alone
 const sizeText = g => (g.units ? (g.units.length === 1 ? sizeOf(g.units) : '') : `${n(g.rows)} rows`)
 const fileSize = f => { const u = unitOf(f); const k = f.units ?? (u === 'lines' ? f.lines : f.rows); return u === 'file' ? '' : `${n(k)} ${k === 1 ? ONE[u] || u : u}` }
 
-function header(k, what, W, sw) {
-  // laid out as a row is, so its words stand over their columns
-  return k.text(`{dim:  ${pad(what, nameW(W, sw))} ${pad(what === 'file' ? '' : 'files', 5, true)} ${pad('size', sw, true)}  ${pad('read', BAR + 6)} ${pad('counted', BAR + 6)}}`, { wrap: false })
+/** The list's columns at the pane's width `W`: the name, the files' count (a list with groups), the size, and the two
+ *  measures, each a bar and its share. A number is never cut: where the row does not fit, the bars narrow first, then
+ *  the size says its number alone, then the bars go, then the size (a file's own view says it); the name takes the
+ *  rest, and is cut last. {nw, fw, sw, size: 'full' | 'num' | 'none', bar}. */
+export function columns(W, items, many) {
+  const len = s => Array.from(String(s)).length
+  const fw = many ? Math.max(5, ...items.map(it => (it.kind === 'group' ? len(n(it.g.files)) : 0))) : 0
+  const full = Math.max(4, ...items.map(it => len(itemSize(it))))
+  const num = Math.max(4, ...items.map(it => len(itemNum(it))))
+  // the name wants its whole width, up to 16 characters (a longer one is cut at its start, its end kept)
+  const want = Math.min(16, Math.max(4, ...items.map(it => len(itemName(it)) + 2 * (it.depth || 0))))
+  const tries = [[BAR, 'full'], [6, 'full'], [4, 'full'], [6, 'num'], [4, 'num'], [0, 'num'], [0, 'none']]
+  let out = null
+  for (const [bar, size] of tries) {
+    const sw = size === 'full' ? full : size === 'num' ? num : 0
+    const nw = W - 2 - 1 - (fw ? fw + 1 : 0) - sw - 2 * (1 + bar + SHARE)
+    out = { nw: Math.max(4, nw), fw, sw, size, bar }
+    if (nw >= want) break
+  }
+  return out
 }
 
-/** The two measures as two bars, each with its share: read (the accent) and counted or computed over (dim), each of
- *  the row's whole in its unit. */
-function measures(k, read, counted) {
-  const bar = (v, tone) => k.bar([{ value: v, tone }, { value: 1 - v, tone: 'dim-faint' }], { max: 1, w: BAR })
-  return [bar(read, 'accent'), k.text(` ${pad(pct(read), 5, true)} `, { wrap: false }), bar(counted, 'dim'), k.text(` ${pad(pct(counted), 5, true)}`, { wrap: false })]
+/** A share's column: right-aligned, after its bar when there is one. */
+const shareCol = s => pad(s, SHARE, true)
+
+function header(k, what, c) {
+  // laid out as a row is, so its words stand over their columns: a measure's word over its bar, or over its share
+  // when it has no bar
+  const head = w => ` ${c.bar ? pad(w, c.bar + SHARE) : shareCol(w)}`
+  return k.text(`{dim:  ${pad(what, c.nw)} ${c.fw ? `${pad(what === 'file' ? '' : 'files', c.fw, true)} ` : ''}${c.sw ? pad('size', c.sw, true) : ''}${head('read')}${head('counted')}}`, { wrap: false })
 }
 
-function itemRow(k, it, by, W, sw, on) {
-  const nw = nameW(W, sw)
+/** The two measures, each a space, a bar (while the pane has room for it) and its share: read (the accent) and counted
+ *  or computed over (dim), each of the row's whole in its unit. */
+function measures(k, read, counted, c) {
+  const one = (v, tone) => [k.text(' ', { wrap: false }), ...(c.bar ? [k.bar([{ value: v, tone }, { value: 1 - v, tone: 'dim-faint' }], { max: 1, w: c.bar })] : []), k.text(shareCol(pct(v)), { wrap: false })]
+  return [...one(read, 'accent'), ...one(counted, 'dim')]
+}
+
+/** A row of the list. Its press is its name and size, not its bars: the ring and the pointer mark a press by turning
+ *  it inverse, which would leave a bar a thin line on a block of the text's color. */
+function itemRow(k, it, by, c, on) {
+  const nw = c.nw
   const ind = '  '.repeat(it.depth || 0)
   const mark = on ? '{accent:**▸**} ' : '  '
+  const size = s => (c.size === 'full' ? pad(s, c.sw, true) : c.size === 'num' ? pad(String(s).split(' ')[0] || '', c.sw, true) : '')
   if (it.kind === 'rest') {
     const words = `${n(it.files)} ${it.any ? 'other ' : ''}file${it.files === 1 ? '' : 's'}, none touched`
     return k.region(it.id, { label: `${words} (${n(it.groups)} ${by === 'type' ? 'types' : 'folders'})` }, k.text(`${mark}{dim:${k.escape(words)} · ${n(it.groups)} ${by === 'type' ? (it.groups === 1 ? 'type' : 'types') : it.groups === 1 ? 'folder' : 'folders'}}`, { wrap: false }))
@@ -443,15 +477,15 @@ function itemRow(k, it, by, W, sw, on) {
     const g = it.g
     const key = cut(by === 'type' ? `${g.key} files` : g.key, nw - ind.length)
     const name = on ? `**${k.escape(key)}**` : k.escape(key)
-    const left = `${mark}${ind}${name}${' '.repeat(Math.max(0, nw - ind.length - Array.from(key).length))} ${pad(n(g.files), 5, true)} ${pad(sizeText(g), sw, true)}  `
-    return k.region(it.id, { label: `${g.key}: ${n(g.files)} file${g.files === 1 ? '' : 's'}, ${sizeText(g)}; Claude read ${pct(g.read)} and counted or computed over ${pct(g.counted)} of them`, ...(by === 'folder' && g.key !== './' ? { ref: `${g.key}*` } : {}) },
-      k.beside(k.text(left, { wrap: false }), ...measures(k, g.read, g.counted), { gap: 0 }))
+    const left = `${mark}${ind}${name}${' '.repeat(Math.max(0, nw - ind.length - Array.from(key).length))} ${c.fw ? `${pad(n(g.files), c.fw, true)} ` : ''}${size(sizeText(g))}`
+    return k.beside(k.region(it.id, { label: `${g.key}: ${n(g.files)} file${g.files === 1 ? '' : 's'}, ${sizeText(g)}; Claude read ${pct(g.read)} and counted or computed over ${pct(g.counted)} of them`, ...(by === 'folder' && g.key !== './' ? { ref: `${g.key}*` } : {}) },
+      k.text(left, { wrap: false })), ...measures(k, g.read, g.counted, c), { gap: 0 })
   }
   const f = it.f
-  const shown = leftCut(ind + (it.depth ? f.path.slice(f.folder === './' ? 0 : f.folder.length) : f.path), nw)
+  const shown = leftCut(ind + itemName(it), nw)
   const name = on ? `**${k.escape(shown)}**` : k.escape(shown)
-  const left = `${mark}${name}${' '.repeat(Math.max(0, nw - Array.from(shown).length))} ${pad('', 5)} ${pad(fileSize(f), sw, true)}  `
-  return k.region(it.id, { label: `${f.path}: ${fileWords(f)}`, ref: fileRef(f) }, k.beside(k.text(left, { wrap: false }), ...measures(k, f.read || 0, f.counted || 0), { gap: 0 }))
+  const left = `${mark}${name}${' '.repeat(Math.max(0, nw - Array.from(shown).length))} ${c.fw ? `${pad('', c.fw)} ` : ''}${size(fileSize(f))}`
+  return k.beside(k.region(it.id, { label: `${f.path}: ${fileWords(f)}`, ref: fileRef(f) }, k.text(left, { wrap: false })), ...measures(k, f.read || 0, f.counted || 0, c), { gap: 0 })
 }
 
 const leftCut = (s, k) => (Array.from(s).length <= k ? s : '…' + Array.from(s).slice(-(k - 1)).join(''))
@@ -493,9 +527,11 @@ export function rangeRef(f, r) {
 const rangeWords = r => (r.kind === 'read' ? (r.from === r.to ? `line ${r.from}` : `lines ${r.from}–${r.to}`) : `lines ${r.lines.join(', ')}`)
 
 function rangeRow(k, r, on, id, unit, f) {
+  // in plain words: `line 818`, `lines 816–830 · 15 lines`, `lines 3, 7 · as a search showed them` (the line above
+  // the strip says how much was read)
   const words = r.kind === 'read'
-    ? `{accent:read}  ${unit} ${r.from === r.to ? n(r.from) : `${n(r.from)}–${n(r.to)}`}{dim:  (${n(r.to - r.from + 1)})}`
-    : `{accent:read} {warn:as a search showed them}  ${r.lines.length === 1 ? 'line' : 'lines'} ${r.lines.map(n).join(', ')}`
+    ? (r.from === r.to ? `line ${n(r.from)}` : `lines ${n(r.from)}–${n(r.to)}{dim: · ${n(r.to - r.from + 1)} lines}`)
+    : `${r.lines.length === 1 ? 'line' : 'lines'} ${r.lines.map(n).join(', ')}{dim: ·} {warn:as a search showed them}`
   return k.region(id, { label: r.kind === 'read' ? `${f.path}: seen ${unit} ${r.from} to ${r.to}` : `${f.path}: lines a search showed, ${r.lines.join(', ')}`, ref: rangeRef(f, r) }, k.text(`${on ? '{accent:**▸**} ' : '  '}${words}`, { wrap: false }))
 }
 
