@@ -330,10 +330,21 @@ def unkeyed(label: str, ref: dict[str, Any] | None) -> str:
 _BARE_RE = re.compile(r"[~≈]?\s*[-−]?\d[\d,]*(?:\.\d+)?\s*(?:%|k|K|M|B|bn)?")
 
 
+def _signed(s: str, m: re.Match) -> bool:
+    """Whether the words write a sign of their own for the number NUM_RE found: `-14.2` or `−14.2` (in the token), or
+    `+14.2` (a plus right before it, itself not after a letter, digit or point, as NUM_RE reads a minus)."""
+    if m[0][:1] in "-−":
+        return True
+    at = m.start()
+    return at >= 1 and s[at - 1] == "+" and not (at >= 2 and re.match(r"[A-Za-z_\d.,:]", s[at - 2]))
+
+
 def number_matches(label: str, value: Any) -> bool:
     """Whether a number a citation shows is the cited value, as written or rounded to the digits it shows. The words
     may hold several numbers (`8,452 of the 14,591 edits`), and any one of them may be the value. A share may be shown
-    as a percent, and a number may carry a scale (`1.17M` is 1,170,228 rounded). A label with no number matches."""
+    as a percent, and a number may carry a scale (`1.17M` is 1,170,228 rounded). A number written with no sign of its
+    own states the value's size, either sign (`14.2 points below` is -14.2); one written with a sign (`-14.2`, `+14.2`)
+    states the sign too. A label with no number matches."""
     s = _tight(label)
     found = list(NUM_RE.finditer(s))
     if not found or not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -344,12 +355,13 @@ def number_matches(label: str, value: Any) -> bool:
             shown = float(tok)
         except ValueError:
             continue
+        val = float(value) if _signed(s, m) else abs(float(value))
         digits = len(tok.split(".")[1]) if "." in tok else 0
         after = s[m.end():]
         pct = after.lstrip().startswith("%")
         sc = None if pct else _SCALE_RE.match(after)
-        cands = [float(value) * 100] if pct else [float(value) / _SCALES[sc[1]]] if sc else []
-        for v in cands + [float(value)]:
+        cands = [val * 100] if pct else [val / _SCALES[sc[1]]] if sc else []
+        for v in cands + [val]:
             if round(v, digits) == shown or abs(v - shown) <= 0.5 * 10 ** -digits + 1e-9:
                 return True
     return False

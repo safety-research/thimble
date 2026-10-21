@@ -27,8 +27,9 @@ from . import cite, frames
 CARD_REF = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#(.+))?$")
 COL = re.compile(r"[^/\s]+")
 DIGIT = re.compile(r"\d")
-# a number as words show it, not the digits inside a name such as LinkHelper771 or a date's parts
-NUMBER = re.compile(r"(?<![\w.\-])\d[\d,]*(?:\.\d+)?(?![\w])")
+# a number as words show it, with the sign they write for it (cite.sign_at), not the digits inside a name such as
+# LinkHelper771 or a date's parts
+NUMBER = re.compile(r"(?:(?<![A-Za-z_\d.,:])[-−+]|(?<![\w.\-]))\d[\d,]*(?:\.\d+)?(?![\w])")
 KIT_MIME = cite.KIT_MIME
 
 LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
@@ -53,11 +54,13 @@ def _draws(cell: dict | None) -> bool:
 
 
 def _rounds_to(shown: str, stated: str) -> bool:
-    """Whether a number a part shows is the one the words state, at the words' precision: 98.39 is "98.4"."""
-    a, b = shown.replace(",", ""), stated.replace(",", "")
+    """Whether a number a part shows is the one the words state, at the words' precision: 98.39 is "98.4". A stated
+    number with no sign of its own states the shown one's size, either sign; one with a sign states the sign too."""
+    a, b = (x.replace(",", "").replace(frames.MINUS, "-") for x in (shown, stated))
     try:
         places = len(b.partition(".")[2])
-        return round(float(a), places) == float(b)
+        v = float(a) if b[:1] in ("-", "+") else abs(float(a))
+        return round(v, places) == float(b)
     except ValueError:
         return a == b
 

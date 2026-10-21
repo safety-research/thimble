@@ -213,14 +213,32 @@ def map_links(text: str, fn) -> str:
 _SPACE = re.compile(r"[\s,   ]")
 
 
+def sign_at(text: str, at: int) -> str:
+    """The sign the words write for the number whose digits start at `at`: "-" (or "−"), "+", or "" for none. A sign
+    stands right before the digits and not after a letter, digit or point, as the terminal's kernel/objects.py reads
+    one: the hyphen of COVID-19, 10-14 or 2026-06-01 is no sign."""
+    if at < 1 or text[at - 1] not in "-−+" or (at >= 2 and re.match(r"[A-Za-z_\d.,:]", text[at - 2])):
+        return ""
+    return "+" if text[at - 1] == "+" else "-"
+
+
 def same_value(shown: str, label: str) -> bool:
     """Whether a citation's words (`label`) state the value the card shows: the value as a whole number or word in
-    them, commas, spaces and the minus sign aside."""
+    them, commas and spaces aside. A number the words write with no sign of its own states the value's size, either
+    sign (`14.2 points below` states −14.2); one written with a sign (`-14.2`, `+14.2`) states the sign too."""
     a = _SPACE.sub("", shown).replace(frames.MINUS, "-")
-    b = _SPACE.sub("", label).replace(frames.MINUS, "-")
+    neg = a[:1] == "-" and a[1:2].isdigit()
+    if a[:1] in ("-", "+") and a[1:2].isdigit():
+        a = a[1:]
+    kept = [i for i, ch in enumerate(label) if not _SPACE.match(ch)]
+    b = "".join(label[i] for i in kept).replace(frames.MINUS, "-")
     if not a or not b:
         return False
-    return re.search(rf"(?<![\w.]){re.escape(a)}(?![\w]|\.\d)", b) is not None
+    for m in re.finditer(rf"(?<![\w.]){re.escape(a)}(?![\w]|\.\d)", b):
+        sign = sign_at(label, kept[m.start()]) if a[0].isdigit() else ""
+        if not sign or (sign == "-") == neg:
+            return True
+    return False
 
 
 def chart_text(b: Any, card: str) -> str | None:

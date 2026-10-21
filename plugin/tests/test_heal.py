@@ -202,3 +202,16 @@ def test_a_column_of_several_rows_shows_its_total(st: Store) -> None:
     # a number that is neither the total nor a cell is still contradicted
     text, c = one(st, "There were [11](r1@n) saves in all.")
     assert c["state"] == H.CONTRADICTED and text == "There were [11](r1@n) saves in all."
+
+
+def test_a_number_with_no_sign_states_the_size_and_a_signed_one_the_sign_too(st: Store) -> None:
+    from kernel.objects import number_matches
+    assert number_matches("14.2 points below", -14.2) and number_matches("-14.2", -14.2) and number_matches("−14.2", -14.2)
+    assert not number_matches("+14.2", -14.2) and not number_matches("14.3 points below", -14.2)
+    assert number_matches("+25 points", 25) and not number_matches("-25 points", 25)
+    Q.run(st, "gap per group", 'import pandas as pd\n'
+          'pd.Series([-14.2, 25.0], index=pd.Index(["low", "high"], name="group"), name="vs_all")')  # r3
+    text, c = one(st, "The low group sat [14.2](r3#group=low@vs_all) points below.")
+    assert c["state"] == H.LINKED and c["how"] == H.KEPT
+    text, c = one(st, "The low group sat [+14.2](r3#group=low@vs_all) points.")
+    assert c["state"] == H.CONTRADICTED

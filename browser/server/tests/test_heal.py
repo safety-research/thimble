@@ -117,3 +117,23 @@ def test_a_drawn_part_is_checked_by_its_label_and_a_renamed_id_by_its_slug():
         assert c["state"] == H.QUIET and c["why"] == "the card draws no part nothing"
     finally:
         del CARDS["eeeeee"]
+
+
+def test_a_number_with_no_sign_states_the_size_and_a_signed_one_the_sign_too():
+    from thimble_browser.cards import cite
+    assert cite.same_value("−14.2", "14.2") and cite.same_value("−14.2", "-14.2") and cite.same_value("−14.2", "−14.2")
+    assert not cite.same_value("−14.2", "+14.2") and not cite.same_value("−14.2", "14.3")
+    assert cite.same_value("14", "runs 10-14") and cite.same_value("25", "+25") and not cite.same_value("25", "-25")
+    CARDS["ffffff"] = {"id": "ffffff", "outputs": table([["low", -14.2], ["high", 25]])}
+    regions = [{"id": "low", "meta": {"label": "low −14.2"}}]
+    CARDS["gggggg"] = {"id": "gggggg", "kind": "program",
+                       "outputs": [{"application/vnd.thimble.kit+json": {"drawing": {"regions": regions}}}]}
+    try:
+        low = f"card:ffffff#n/{frames.row_labels(frames.frame_in(CARDS['ffffff']['outputs']))[0]}"
+        assert one(f"[14.2]({low}) points below")[1]["how"] == H.KEPT
+        assert one(f"[-14.2]({low}) points")[1]["how"] == H.KEPT
+        assert one(f"[+14.2]({low}) points")[1]["state"] == H.CONTRADICTED
+        assert one("[14.2](card:gggggg#low) points below")[1]["state"] == H.LINKED
+        assert one("[+14.2](card:gggggg#low) points")[1]["state"] == H.CONTRADICTED
+    finally:
+        del CARDS["ffffff"], CARDS["gggggg"]
