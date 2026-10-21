@@ -385,14 +385,9 @@ def drawing_text(drawing: dict[str, Any]) -> str:
 
 
 def region_in(outputs: Any, rid: str) -> dict[str, Any] | None:
-    """The part `rid` of a program card's drawing in `outputs`, {id, meta}, or None."""
-    for o in outputs or []:
-        kit = o.get(KIT_MIME) if isinstance(o, dict) else None
-        if isinstance(kit, dict):
-            for r in (kit.get("drawing") or {}).get("regions") or []:
-                if isinstance(r, dict) and r.get("id") == rid:
-                    return r
-    return None
+    """The part `rid` of a program card's drawing in `outputs`, {id, meta}, or None; `rid` as written or as the kit
+    renames it (cite.part_id)."""
+    return cite.region(outputs, rid)
 
 
 def outputs_text(cell: dict[str, Any], limit: int = 6000) -> str:
@@ -430,7 +425,7 @@ def resolve_card_ref(ws: str, ref: str, value: str | None = None) -> dict[str, A
     _, _, loc = ref.partition("#")
     out: dict[str, Any] = {"ref": ref, "kind": "cell", "excerpt": f"{cell['title']}\n{cell.get('takeaway') or ''}",
                            "meta": {"card": cell["id"], "notebook": nb["id"], "kind": cell["kind"]}}
-    if loc and "/" not in loc and cell["kind"] == "program":
+    if loc and cell["kind"] == "program" and ("/" not in loc or region_in(cell.get("outputs"), loc) is not None):
         return _region_ref(ws, cell, loc, out, value)
     if not loc or "/" not in loc:
         return out
@@ -501,7 +496,8 @@ def _region_ref(ws: str, cell: dict[str, Any], rid: str, out: dict[str, Any], va
     meta = got.get("meta") if isinstance(got.get("meta"), dict) else {}
     label = str(meta.get("label") or rid)
     out.update(kind="value", excerpt=f"{label}" + (f" (opens {meta['ref']})" if meta.get("ref") else ""))
-    out["meta"].update(value=label, region=rid, part=meta, span={"region": rid})
+    drawn = str(got.get("id") or rid)
+    out["meta"].update(value=label, region=drawn, part=meta, span={"region": drawn})
     if entry is not None:
         out["meta"]["version"] = {"entry": entry.get("id"), "ts": entry.get("ts"), "by": entry.get("by")}
     return out

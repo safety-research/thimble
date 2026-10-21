@@ -7,6 +7,9 @@ For each citation whose words state a value its cited cell does not show:
   (b) else the other cards the text cites, when one cell of one of them shows it;
   (c) else it is contradicted when the cited cell shows another number (`why` says which);
   (d) else (the card, the row or the column is gone) it is quiet: the page draws it grey.
+A citation of a part a program draws, `card:<id>#<part id>`, is checked against the part: its numbers are read from
+the part's label and the text it draws, and the citation is contradicted when the part shows numbers and none is the
+one its words state. A part id the kit renamed (one written with a slash) is found by its slug, as kit.js writes it.
 A citation of a whole card is checked for the card alone; a citation of a file is left as it is. The words of the text
 are never changed. `version` hashes the text and the cited cards' outputs, so a caller heals a text once per version.
 
@@ -21,9 +24,12 @@ from typing import Any, Callable
 
 from . import cite, frames
 
-CARD_REF = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#([^/\s]+)/(.+))?$")
+CARD_REF = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#(.+))?$")
+COL = re.compile(r"[^/\s]+")
 DIGIT = re.compile(r"\d")
-KIT_MIME = "application/vnd.thimble.kit+json"
+# a number as words show it, not the digits inside a name such as LinkHelper771 or a date's parts
+NUMBER = re.compile(r"(?<![\w.\-])\d[\d,]*(?:\.\d+)?(?![\w])")
+KIT_MIME = cite.KIT_MIME
 
 LINKED, QUIET, CONTRADICTED = "linked", "quiet", "contradicted"
 KEPT, CELL, CITED, GONE, NO_HOME, SEVERAL = "kept", "cell", "cited", "gone", "no_home", "several"
@@ -44,6 +50,35 @@ def _places(cell: dict | None) -> list[tuple[str, str, str]]:
 def _draws(cell: dict | None) -> bool:
     """Whether a program draws the card (its parts are cited as `card:<id>#<part id>`, never as a column and a row)."""
     return bool(cell) and (cell.get("kind") == "program" or any(isinstance(o, dict) and KIT_MIME in o for o in cell.get("outputs") or []))
+
+
+def _rounds_to(shown: str, stated: str) -> bool:
+    """Whether a number a part shows is the one the words state, at the words' precision: 98.39 is "98.4"."""
+    a, b = shown.replace(",", ""), stated.replace(",", "")
+    try:
+        places = len(b.partition(".")[2])
+        return round(float(a), places) == float(b)
+    except ValueError:
+        return a == b
+
+
+def _part(own: dict | None, anchor: str, label: str) -> dict[str, Any] | None:
+    """What the pass says of a citation of a drawn part: None when the card draws no such part, else the fields of its
+    change. The citation holds when a number the part shows is one its words state; it is contradicted when the part
+    shows numbers but not that one."""
+    r = cite.region((own or {}).get("outputs"), anchor)
+    if r is None:
+        return None
+    stated = NUMBER.findall(label)
+    if not stated:
+        return {}
+    shown = NUMBER.findall(cite.region_words(own.get("outputs"), anchor))
+    if not shown or any(_rounds_to(n, s) for s in stated for n in shown):
+        return {}
+    meta = r.get("meta") if isinstance(r.get("meta"), dict) else {}
+    at = NUMBER.findall(str(meta.get("label") or "")) or shown
+    source = at[0] if len(set(at)) == 1 else ", ".join(dict.fromkeys(at))
+    return {"state": CONTRADICTED, "how": CONTRADICTED, "source": source, "why": f"the cited part shows {source}"}
 
 
 def cited_cards(text: str) -> list[str]:
@@ -96,10 +131,22 @@ def heal(text: str, load: Loader) -> dict[str, Any]:
         p = CARD_REF.match(ref)
         if not p:
             continue
-        cid, col, row = p[1], p[2], p[3]
+        cid, frag = p[1], p[2]
         c: dict[str, Any] = {"label": label, "ref": ref, "state": LINKED, "how": KEPT, "to": ref}
         own = card(cid)
-        if col is None or not DIGIT.search(label):
+        part = _part(own, frag, label) if frag and _draws(own) else None
+        col, _, row = (frag or "").partition("/")
+        if part is not None:
+            c.update(part)
+        elif frag and not (row and COL.fullmatch(col)):
+            # an anchor that names no column and row: a part, or nothing this pass reads
+            if own is None:
+                c.update(state=QUIET, how=GONE, why=f"the card {cid} is gone")
+            elif not _draws(own):
+                continue
+            else:
+                c.update(state=QUIET, how=GONE, why=f"the card draws no part {frag}")
+        elif not frag or not DIGIT.search(label):
             if own is None:
                 c.update(state=QUIET, how=GONE, why=f"the card {cid} is gone")
         else:
