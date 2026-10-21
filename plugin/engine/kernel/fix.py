@@ -430,10 +430,19 @@ def _newer_known(fx: dict[str, Any]) -> bool:
 
 
 def _quick_tests(wt: Path) -> bool:
-    """The plugin's quick tests in the copy: the kernel's tests (THIMBLE_FIX_TESTS, a shell command, replaces them)."""
+    """The plugin's quick tests in the copy: the kernel's tests where this Python has pytest, else the copy's `thimble`
+    command must start (THIMBLE_FIX_TESTS, a shell command, replaces them)."""
+    import importlib.util  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
-    py = os.environ.get("THIMBLE_PYTHON") or "python3"
-    argv = ["sh", "-c", cmd] if cmd else [py, "-m", "pytest", "plugin/tests", "-q", "-x", "-p", "no:cacheprovider"]
+    py = sys.executable or "python3"
+    if cmd:
+        argv = ["sh", "-c", cmd]
+    elif importlib.util.find_spec("pytest"):
+        argv = [py, "-m", "pytest", "plugin/tests", "-q", "-x", "-p", "no:cacheprovider"]
+    else:
+        argv = [py, "plugin/engine/thimble.py", "--help"]
     try:
         return subprocess.run(argv, cwd=wt, capture_output=True, text=True, timeout=900).returncode == 0
     except (OSError, subprocess.SubprocessError):

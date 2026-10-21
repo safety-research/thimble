@@ -59,6 +59,12 @@ async function kernel($: Engine, args: string[]): Promise<{ ok: boolean; out: st
 
 const lastLine = (s: string) => s.split('\n').map(l => l.trim()).filter(Boolean).slice(-1)[0] || ''
 
+/** Load the plugins again once the session is idle, when a switch of thimble asks for it (the kernel's line names
+ *  /reload-plugins), so the person sees the fix, or the release, without typing it. */
+async function reloadFor($: Engine, said: string): Promise<void> {
+  if (/\/reload-plugins/.test(said)) await $.command.run({ command: 'reload-plugins' }).catch(() => undefined)
+}
+
 // ------------------------------------------------------------------------------------------------ the failure line
 
 /** A failure the person should know of, in one line, with the keys that fix or report it. */
@@ -112,6 +118,7 @@ async function undoFix($: Engine, slug: string): Promise<string> {
   const said = lastLine(r.out) || 'Your thimble is the release again.'
   $.ui.toast(said)
   await noteForClaude($, `The analyst undid the fix ${slug}. ${said}`)
+  await reloadFor($, said)
   return said
 }
 
@@ -163,6 +170,7 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
   if (v.verb === 'try') {
     const r = await kernel($, ['use', f.slug])
     void refreshFixes($).catch(() => undefined)
+    if (r.ok) $.clock.after(0, () => { void reloadFor($, r.out) })
     return { text: r.ok ? lastLine(r.out) : `× ${cut(lastLine(r.out) || 'thimble fix use gave nothing', 240)}` }
   }
   // submit, a moment after the command has answered: the review opens, or Claude writes the draft first
@@ -213,6 +221,8 @@ export async function refreshFixes($: Engine): Promise<void> {
     if (looked && f.status === 'applied' && was !== 'applied' && active === f.slug) {
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
       await $.state.set(LINE, { kind: 'applied', slug: f.slug, title: f.title })
+      // turned on for the person: the plugins load again once the session is idle, so they try it at once
+      if (!(await ownFix($))) await reloadFor($, '/reload-plugins')
     }
   }
   looked = true
