@@ -563,7 +563,6 @@ export function renderSvg(drawing, opts = {}) {
 
   // ------------------------------------------------ plot: axes, lines, a legend for named series
   function paintPlot(n, dry, x, y, w, mark) {
-    const h = n.h * lh
     const S = n.series
     const xs = n.x || {}, ys = n.y || {}
     const xlog = !!xs.log
@@ -582,7 +581,10 @@ export function renderSvg(drawing, opts = {}) {
     // one series that the y axis already names needs no legend
     const named = S.length === 1 && S[0].name && ys.label && String(S[0].name) === String(ys.label)
     const legend = n.legend !== false && (S.length > 1 || (S.some(s => s.name) && !named)) ? 1 : 0
-    const ph = Math.max(lh, h - (ys.label ? lh : 0) - 6 - lh - legend * lh - 4)
+    // at least five rows of plot, as the terminal draws it, so values a few steps apart do not flatten onto one line
+    const around = (ys.label ? lh : 0) + 6 + lh + legend * lh + 4
+    const ph = Math.max(5 * lh, n.h * lh - around)
+    const h = ph + around
     // the y axis at round steps under gridlines, as thimble's charts draw it: the finest step that leaves a gridline at
     // least 24 pixels from the next, and an end the program did not set goes out to the next step
     const most = Math.max(2, Math.floor(ph / 24))
@@ -659,7 +661,9 @@ export function renderSvg(drawing, opts = {}) {
       const nw = 18 + mw(name)
       if (lx + nw > x + w) { if (s.region && !dry) addRect(s.region, s.meta, area); return }
       if (!dry) {
-        L.mark.push(`<rect x="${r1(lx)}" y="${r1(ly + lh / 2 - 1.5)}" width="12" height="3" rx="1" fill="${C(s.tone)}"/>`)
+        // the series' own mark: a dot for a series drawn as dots, else a stroke of its line
+        if (n.dots || s.pts.filter(p => okX(p[0]) && p[1] !== null).length === 1) L.mark.push(`<circle cx="${r1(lx + 6)}" cy="${r1(ly + lh / 2)}" r="2.5" fill="${C(s.tone)}"/>`)
+        else L.mark.push(`<rect x="${r1(lx)}" y="${r1(ly + lh / 2 - 1.5)}" width="12" height="3" rx="1" fill="${C(s.tone)}"/>`)
         L.text.push(textSVG([{ s: name, tone: s.region ? 'accent' : 'ink' }], lx + 18, ly, 'start'))
       }
       if (s.region && !dry) addRect(s.region, s.meta, { x: lx, y: ly, w: nw, h: lh })
