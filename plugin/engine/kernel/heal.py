@@ -134,6 +134,11 @@ def _specific(n: str) -> bool:
     return "." in t or len(t.replace(".", "")) >= 3
 
 
+def _position_col(c: Any) -> bool:
+    """A column pandas names for a row's position when it resets an unnamed index: `index`, `level_0`."""
+    return bool(re.fullmatch(r"index|level_\d+", str(c)))
+
+
 def _show(v: Any) -> str:
     if isinstance(v, float):
         return f"{v:,.4g}" if abs(v) < 1e6 else f"{v:,.0f}"
@@ -201,7 +206,8 @@ class _Reader:
                     if not isinstance(r, dict):
                         continue
                     for c, v in r.items():
-                        if str(c).startswith("_") or c in keys or not _is_number(v):
+                        # an `index` or `level_0` column is where a row sat in a frame, not a value of the output
+                        if str(c).startswith("_") or c in keys or _position_col(c) or not _is_number(v):
                             continue
                         out.append(Place(f"{refs[i]}@{R.ref_value(c)}", v, owner, row=i, col=c))
         self._places[owner] = out
@@ -483,13 +489,15 @@ class _Pass:
             if hits:
                 pick = _pick(hits, at)
                 return (pick, CELL, False) if pick else (None, None, True)
-        for owner in self.cited:
+        # a number moved to another place must be specific enough to find there by itself, as in the session search
+        specific = any(_specific(n) for n in _numbers(label))
+        for owner in self.cited if specific else []:
             if owner == own:
                 continue
             hits = self._find(owner, label)
             if hits:
                 return (hits[0], CITED, False) if len(hits) == 1 else (None, None, True)
-        if session_ok and any(_specific(n) for n in _numbers(label)):
+        if session_ok and specific:
             for qid in self.rd.session_queries():
                 if qid in self.cited:
                     continue

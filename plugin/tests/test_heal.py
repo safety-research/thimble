@@ -233,3 +233,14 @@ def test_a_number_with_no_sign_states_the_size_and_a_signed_one_the_sign_too(st:
     assert c["state"] == H.LINKED and c["how"] == H.KEPT
     text, c = one(st, "The low group sat [+14.2](r3#group=low@vs_all) points.")
     assert c["state"] == H.CONTRADICTED
+
+
+def test_a_wrong_number_is_not_moved_to_an_index_cell_or_by_two_digits_to_another_cited_query(st: Store) -> None:
+    # r3: kestrel's saves where they sat in a frame moved to 120 (the `index` column: 127, 128, 129), scored 19, 20, 21
+    Q.run(st, "kestrel's saves", 'df = load("saves.jsonl")\ndf.index = df.index + 120\n'
+          'df = df.assign(score=df["id"] + 12)\ndf[df.user == "kestrel"][["user", "score"]]')
+    for wrong in ["127", "19"]:
+        r = H.heal(st, f"Kestrel made [{wrong}](r2#user=kestrel@n) saves ([the saves](r3)).")
+        c = next(x.record() for x in r.changes if x.label == wrong)
+        assert c["state"] == H.CONTRADICTED and c["source"] == "3", (wrong, c)
+        assert f"[{wrong}](r2#user=kestrel@n)" in r.text
