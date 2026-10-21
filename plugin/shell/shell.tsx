@@ -29,7 +29,7 @@ import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
 import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
-import { bodyRows, cardFrame, frameWidth, moreRow, moreText } from './cardframe.js'
+import { bodyRows, cardFrame, cardLine, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, noteViewport, noticeOpen, openDetailPane, registerDetail } from './detail'
 import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withGone, withHeal, withObserver } from './message.js'
@@ -2567,11 +2567,14 @@ function asideRowEl(els: Any, line: { text: string; error: boolean }, key: strin
 /** One object inline: a card in its frame (its question in bold, a blank row, the drawing, its takeaway when it has
  *  one), or one red line saying why it cannot be drawn. The card the keys act on (`1` opens it) has its frame in the
  *  keys' color. A program that draws its own frame keeps it, with no second one around it. `squeezed`: what a squeeze
- *  of its answer did to it (edited, added), said in one dim line under it. */
+ *  of its answer did to it (edited, added), said in one dim line under it. In a column too narrow for a frame (the chat
+ *  beside a pane), the card is one row: its title cut to fit and how to open it (cardLine). */
 async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus: 'focus' | 'rest' | boolean | null = null, squeezed: string | null = null): Promise<Any> {
   const els = $.ui.resolve(e)
   const { Box, Text } = els as Any
-  const outer = Math.max(44, Math.min(124, (e.viewport?.columns ?? 100) - 4))
+  // the column's room for a frame; one too narrow for a frame (a chat beside a pane) draws the card as one row
+  const room = (e.viewport?.columns ?? 100) - 4
+  const outer = Math.max(44, Math.min(124, room))
   // the drawing has the frame's inside: a border and a space on each side
   const cols = outer - 4
   inlineCols = cols
@@ -2581,6 +2584,12 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   if (!p) return Box({ marginTop: 1, marginLeft: 2, children: [Text({ dimColor: true, children: `drawing ${refText(ref)}…` })] })
   if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(ref)} cannot be drawn: ${p.error || 'no drawing'}` })
   const fullscreen = e.viewport?.isFullscreen !== false
+  // the card the keys act on: its own frame in the keys' color, or, for a card with no frame, a bar down its left side
+  const ring = focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null
+  if (room < 44) {
+    const title = p.object?.title || p.object?.question || refText(ref)
+    return Box({ key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, children: [cardLine(els, { key: `${key}-${ref.id}-line`, w: room + 2, title, keyed: !!focus, color: ring, open: fullscreen ? () => openDetail($, ref, null) : null })] })
+  }
   const said = ((await $.state.get({ ...SAID, id: ref.id })).value ?? null) as Said | null
   // under a reply a card is drawn whole when it fits on the screen; a taller one is cut, and says how much is below
   const { rows, more } = bodyRows(p.grid.h, e.viewport?.rows ?? 48)
@@ -2601,8 +2610,6 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   // under the card's newest placement only (a card saved again in a later turn is drawn there too)
   const askEl = la && la.card === ref.id && la.root === ref.root && (await $.state.get({ ...WHERE, id: ref.id })).value === at ? askRows(els, $, la) : null
   const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
-  // the card the keys act on: its own frame in the keys' color, or, for a card with no frame, a bar down its left side
-  const ring = focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null
   const framed = p.grid.rows[0]?.[0]?.ch === '╭'
   const cells = paintRegions(grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: ring })
   // a card with pages: how many, and the key that opens them to read (`9 chapters · 1 read all`)
