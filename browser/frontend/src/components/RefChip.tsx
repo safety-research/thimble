@@ -28,7 +28,7 @@ import type { IconName } from './Icon'
 import { chartLabels, Output, isNumericCell, primaryArtifact } from './Outputs'
 import { useConcepts } from '../canvas/concepts'
 import { Spinner } from './Spinner'
-import { CHECKED_REF, HealContext } from '../lib/heal'
+import { CHECKED_REF, HealContext, markRefFailed, refFailure, useRefFailure } from '../lib/heal'
 import { QuoteBox, RecordFacts } from '../canvas/Quote'
 import { FACT_KINDS, markFacts, markValue, recordFacts, type RecordFact } from '../canvas/facts'
 import { quoteParts, type QuotePart } from '../canvas/quotes'
@@ -257,8 +257,13 @@ export function RefChip(props: RefChipProps) {
   )
 }
 
-function RefChipBody({ ref, value, compact, workspace, broken, brokenWhy, quiet, quietWhy, late, anchor, cite, movedFrom }: RefChipProps) {
+function RefChipBody({ ref, value, compact, workspace, broken: contradicted, brokenWhy, quiet: unwrapped, quietWhy: unwrappedWhy, late, anchor, cite, movedFrom }: RefChipProps) {
   const ws = workspace ?? workspaceFromUrl() ?? ''
+  // a place gone since the text was checked (lib/heal useRefFailure) draws as a citation that failed, gray with why
+  const failed = useRefFailure(ws, ref)
+  const quiet = unwrapped || failed != null
+  const quietWhy = failed ?? unwrappedWhy
+  const broken = contradicted && failed == null
   const chipEl = useRef<HTMLElement>(null)
   const popEl = useRef<HTMLDivElement>(null)
   const showTimer = useRef<number | undefined>(undefined)
@@ -343,7 +348,7 @@ function RefChipBody({ ref, value, compact, workspace, broken, brokenWhy, quiet,
     const rect = chipEl.current?.getBoundingClientRect()
     if (!rect) return
     if (broken) return setPop({ state: 'error', rect, message: 'Unable to verify', detail: brokenWhy || undefined })
-    if (quiet) return setPop({ state: 'error', rect, message: `Not linked${quietWhy ? ` — ${quietWhy}` : ''}`, muted: true })
+    if (unwrapped) return setPop({ state: 'error', rect, message: `Not linked${quietWhy ? ` — ${quietWhy}` : ''}`, muted: true })
     if (unresolved || !parsed) return setPop({ state: 'error', rect, message: 'Unknown reference', muted: true })
     if (NAME_ONLY.has(parsed.kind) && !(parsed.kind === 'view' && parsed.key)) {
       // a chip with its name already shows it; an inline citation's label, and a glyph alone's, names what it points to
@@ -363,6 +368,7 @@ function RefChipBody({ ref, value, compact, workspace, broken, brokenWhy, quiet,
     try {
       const r = await api.resolveRef(ws, ref, value)
       resolved.current = { ref, r }
+      markRefFailed(ws, ref, null)
       if (seq !== reqSeq.current) return
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
         // a table's cell: the table around it, never its column and row in words
@@ -388,7 +394,10 @@ function RefChipBody({ ref, value, compact, workspace, broken, brokenWhy, quiet,
       const facts = !cell && FACT_KINDS.has(r.kind) ? markFacts(recordFacts(r), value) : undefined
       setPop(cell ? { state: 'ok', rect, excerpt: r.excerpt ?? '', kind: 'cell', cell } : { state: 'ok', rect, excerpt: r.excerpt ?? '', kind: r.kind, where, parts, facts })
     } catch (err) {
+      const why = refFailure(err)
+      if (why) markRefFailed(ws, ref, why)
       if (seq !== reqSeq.current) return
+      if (why) return setPop({ state: 'error', rect, message: `Not linked — ${why}`, muted: true })
       setPop({ state: 'error', rect, message: 'Could not load this reference', detail: (err as Error).message || undefined })
     }
   }
