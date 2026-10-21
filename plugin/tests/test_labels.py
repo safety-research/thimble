@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -167,6 +168,11 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     assert ev["kind"] == "label_ask" and ev["units"] == 420 and ev["sample"] == 300
     assert ev["text"] == "Read 420 records of chat/big.jsonl with Claude" and ev["meta"] == "9 model calls"
     assert "the analyst's choice" in run(root, "label", "spam").stdout
+    # --wait returns at once while the ask waits, and says nothing runs before the analyst chooses
+    t0 = time.time()
+    r = run(root, "label", "spam", "--wait", "60")
+    assert r.returncode == 0 and time.time() - t0 < 30
+    assert "waiting for the analyst's choice in the bar; nothing runs until then" in r.stdout
     # Claude cannot answer for the person: a made-up ask id is refused and the label still waits
     r = run(root, "label", "spam", "--answer", "all", "--ask", "a000")
     assert r.returncode == 1 and LB.load(st, "spam")["run"]["state"] == "ask"

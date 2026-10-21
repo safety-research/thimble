@@ -939,6 +939,11 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             run = lab.get("run") or {}
             if not s["waiting"] or run.get("state") == "cancelled":
                 break
+            if run.get("state") == "ask":
+                # nothing runs before the analyst chooses, so waiting here would only hold up the reply
+                print(f"{name}: waiting for the analyst's choice in the bar; nothing runs until then. "
+                      f"{s['waiting']:,} records wait. Their choice reaches you with their next message.")
+                return 0
             if time.time() - t0 > a.wait:
                 print(f"{name}: still {s['waiting']:,} records waiting after {a.wait:.0f}s; the calls go on beside the session")
                 break
