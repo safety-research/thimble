@@ -231,3 +231,23 @@ test('the key of stacked bars names only the parts some bar draws', () => {
   assert.deepEqual(JSON.parse(key[0].slice(9)), ['kept', 'reverted'])
   assert.doesNotMatch(gridText(renderTerm(d, { w: 60 })), /none/)
 })
+
+test('a key warns when two of its names share a tone, and a wrap keeps each mark beside its name', () => {
+  // seven parts take the six category tones in turn, so the first and the seventh share c1
+  const parts = ['ash', 'birch', 'cedar', 'elm', 'fir', 'oak', 'pine'].map((label, i) => ({ value: i + 1, label }))
+  const d = runProgram({ program: `return k.bars([{ label: 'grove', parts: ${json(parts)} }])` }, { w: 60, h: 24 })
+  assert.deepEqual(d.warnings, ['"ash" and "pine" share tone c1: there are six category tones, so name six and put the rest in other (dim)'])
+  const cats = runProgram({ program: `return k.legend([0, 1, 6, 7].map(i => ({ label: 'n' + i, tone: k.cat(i) })))` }, { w: 60, h: 24 })
+  assert.equal(cats.warnings.length, 2)
+  assert.match(cats.warnings[1], /^"n1" and "n7" share tone c2/)
+  const dim = runProgram({ program: `return k.legend([['kept', 'c1'], ['rest', 'dim'], ['other', 'gray']])` }, { w: 60, h: 24 })
+  assert.deepEqual(dim.warnings, ['"rest" and "other" share tone dim: give each name in a key a tone of its own'])
+  assert.deepEqual(runProgram({ program: `return k.legend([['kept', 'c1'], ['rest', 'dim']])` }, { w: 60, h: 24 }).warnings, [])
+  // a key too wide for its line wraps between entries, never between a mark and its name
+  for (const w of [14, 20, 26, 33]) {
+    const g = renderTerm(runProgram({ program: `return k.legend(${json(parts.slice(0, 6).map((p, i) => [p.label, 'c' + (i + 1)]))})` }, { w, h: 24 }), { w })
+    const lines = gridText(g).split('\n').map(l => l.replace(/\s+$/, '')).filter(Boolean)
+    assert.ok(lines.length > 1, `the key wraps at ${w}`)
+    for (const l of lines) assert.match(l, /^■ [a-z]/, `at ${w}, each line starts with a mark and its name: ${json(lines)}`)
+  }
+})
