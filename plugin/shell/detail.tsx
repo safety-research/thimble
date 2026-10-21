@@ -101,10 +101,10 @@ const askedRegion = new Map<string, string>()
 let lastKey: { key: string; at: number; undo: Record<string, unknown> | null; card?: Undo; pane?: PaneView; sel?: Detail } | null = null
 const latestSeen = new Map<string, number>()
 // a pane the panel shows (not a card): what it drew last, for the ring (the button of each part) and the keys
-// `walks`: the program walks its parts with ↑↓ (ringStart 'part' and its own up and down); `turns`: it takes ← or →
-// itself (its own left and right); `at`: where each press of the page stands, `row|id` -> [row, column], to tell which
-// way the ring moved
-let paneDrawn: { name: string; args: Record<string, unknown>; selected: string | null; buttons: Map<string, string>; first: string | null; order: string[]; below: number; walks: boolean; turns: { left: boolean; right: boolean }; at: Map<string, [number, number]>; gutter: Map<number, string[]> } | null = null
+// `walks`: the program walks its parts with ↑↓ (ringStart 'part' and its own up and down); `at`: where each press of
+// the page stands, `row|id` -> [row, column], to tell which way the ring moved. (← and → are never the pane's: Claude
+// Code gives them to the prompt while a pane holds the keys, see detailKeys)
+let paneDrawn: { name: string; args: Record<string, unknown>; selected: string | null; buttons: Map<string, string>; first: string | null; order: string[]; below: number; walks: boolean; at: Map<string, [number, number]>; gutter: Map<number, string[]> } | null = null
 // what the panel draws now, as its latest drawing began (a card's drawing still under way when the panel turned to a
 // pane must not take the ring from the pane's parts)
 let showing: 'card' | 'pane' = 'card'
@@ -322,22 +322,6 @@ export function walkDir(drawn: { first: string | null; below: number; at: Map<st
   return b[0] > a[0] || (b[0] === a[0] && b[1] > a[1]) ? 1 : -1
 }
 
-/** Which way the person moved the ring along one row of a pane's page, from the press `from` to `to`: 1 right, -1 left,
- *  0 when the move left the row or the page. The ring stands in the gutter at the row's start, so a move from there onto
- *  a press of the same row is a step right (tab goes on to the next gutter cell instead). */
-export function rowWay(drawn: { below: number; at: Map<string, [number, number]> }, from: string, to: string): number {
-  const place = (key: string): [number, number] | null => {
-    const g = /^g\|[^|]+\|(\d+)$/.exec(key)
-    if (g) return [Number(g[1]), -1]
-    const m = /^r\|[^|]+\|(\d+)\|(.+?)(?:\|#\d+)?$/.exec(key)
-    if (!m || Number(m[1]) >= drawn.below) return null
-    return drawn.at.get(`${m[1]}|${m[2]}`) ?? [Number(m[1]), 0]
-  }
-  const a = place(from), b = place(to)
-  if (!a || !b || a[0] !== b[0] || a[1] === b[1]) return 0
-  return b[1] > a[1] ? 1 : -1
-}
-
 /** Whether the pane's ring starts on the part its program selected, rather than on the input bar (its module's
  *  `ringStart`): a pane whose parts the person walks first, such as the Claims graph, where the first ↑ or ↓ moves on
  *  from the selected dot. A letter typed there still starts a question in the input bar. */
@@ -357,8 +341,10 @@ export function focusEntry($: Engine): void {
 }
 
 // when the panel asks for the keys again after a request, while it does not have them (holdKeys): soon, so an arrow
-// typed straight after the key that opened a pane reaches the pane, and later again for a click that holds the keys
+// typed straight after the key that opened a pane reaches the pane, later again for a click that holds the keys, and
+// then each second until it has them (a terminal busy drawing a large pane answers the opening key late)
 const KEYS_AGAIN_MS = [60, 250, 900, 1600]
+const KEYS_EVERY_MS = 1000
 
 /** The panel takes the keys, whatever it shows (a card, any pane): on its input bar (`ask`, holding what is typed so
  *  far), or on the part selected (`part`). Claude Code gives a pane the keys only while the prompt holds them over an
@@ -372,18 +358,22 @@ function holdKeys($: Engine, to: 'ask' | 'part'): void {
   const gen = moveGen
   if (to === 'ask') toAsk($, draft)
   else grabPart($)
-  const again = () => { void (async () => {
+  const again = (more: boolean) => { void (async () => {
     if (!isOpen || mine !== keysAsked) return
+    let held: boolean
     if (to === 'ask') {
       if (!isAsk(ringAt) || gen !== moveGen) return
       if (!(await panelHasKeys($))) landed = null
-      if (landed !== askKey()) moveSoon($)
-      return
+      held = landed === askKey()
+      if (!held) moveSoon($)
+    } else {
+      if (isAsk(ringAt) || draft) return
+      held = await panelHasKeys($)
+      if (!held) grabPart($)
     }
-    if (isAsk(ringAt) || draft || (await panelHasKeys($))) return
-    grabPart($)
+    if (more && !held) $.clock.after(KEYS_EVERY_MS, () => again(true))
   })().catch(() => undefined) }
-  for (const ms of KEYS_AGAIN_MS) $.clock.after(ms, again)
+  KEYS_AGAIN_MS.forEach((ms, i) => $.clock.after(ms, () => again(i === KEYS_AGAIN_MS.length - 1)))
 }
 
 /** Whether the panel holds the keys, as Claude Code says now (when it cannot say, as the module last knew). */
@@ -1043,8 +1033,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   const at = new Map<string, [number, number]>()
   for (const r of grid.regions as Any[]) for (const q of (r.rects || []) as Any[]) for (let y = q.y; y < q.y + q.h; y++) { const was = at.get(`${y}|${r.id}`); if (!was || q.x < was[1]) at.set(`${y}|${r.id}`, [y, q.x]) }
   const walks = ringOnPart(view) && takes(d, { type: 'key', key: 'up' }) && takes(d, { type: 'key', key: 'down' })
-  const turns = { left: takes(d, { type: 'key', key: 'left' }), right: takes(d, { type: 'key', key: 'right' }) }
-  paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].filter(([, y]) => y < split).sort((a, b) => a[1] - b[1]).map(([id]) => id), below: split, walks, turns, at, gutter }
+  paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].filter(([, y]) => y < split).sort((a, b) => a[1] - b[1]).map(([id]) => id), below: split, walks, at, gutter }
   // (a press is a click: the move of the ring that came with it is no step of the walk)
   const onPress = (id: string, dir?: number) => { walkGen++; void paneFire($, view.pane, view.args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) }
   // (one column in from the panel's edge, as a card's page stands beside its gutter, so every subject lines up)
@@ -1176,7 +1165,9 @@ export async function detailKeys($: Engine): Promise<string | null> {
   // a pane that says its keys itself leaves the bar its own (the settings panel: the person sees the bar change)
   if (keepsBar(await sideNow($))) return null
   if (draft) return 'esc clears the question'
-  return `esc ${await backWord($)}`
+  // (← → reach Claude Code's prompt even while the panel holds the keys, so the panel never uses them, and says so in
+  // few words: beside a wide pane the bar has 24 columns)
+  return `esc ${await backWord($)} · no ← →`
 }
 
 /** What esc does last: back to what the panel showed before, or close it. */
@@ -1363,24 +1354,6 @@ export function registerDetail(on: Parameters<Register>[0]): void {
           if (was !== isAsk(ringAt)) askRedraw($)
           return r
         }
-        // ← → along the row of the part selected: the program's own left and right, when it takes them (Claims goes to
-        // the cluster before or after, Coverage opens or closes the group selected, the list of labels opens a label).
-        // A click comes with its press, which cancels the step
-        const row = (k: string | null) => (k ? Number(k.split('|')[2]) : NaN)
-        const way = person && !draft && chosen && ringAt && el !== chosen && row(ringAt) === row(chosen) ? rowWay(paneDrawn, ringAt, el) : 0
-        if (way && paneDrawn.turns[way > 0 ? 'right' : 'left']) {
-          const gen = ++walkGen
-          const pane = { name: paneDrawn.name, args: paneDrawn.args }
-          $.clock.after(WALK_MS, () => { void (async () => {
-            if (gen !== walkGen || !isOpen || showing !== 'pane') return
-            await paneFire($, pane.name, pane.args, { type: 'key', key: way > 0 ? 'right' : 'left' })
-            // the drawing that shows the part selected now puts the ring on it (panePane)
-            ringAt = null
-            landed = null
-            $.ui.invalidate('ui.render')
-          })() })
-          return {}
-        }
         // a pane whose program walks its parts with ↑↓ (the Claims graph): from the part selected, the person's move is
         // one step of the program's own walk, in its order. Claude Code's arrows take the nearest press that way and its
         // Tab the next one in reading order, which may be a dot of another cluster, the head's press or the actions
@@ -1512,6 +1485,24 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       return next(e)
     }
   }).catch(($, e, next) => next(e))
+
+  // While the panel is open the prompt shows no suggestion: Claude Code gives → to the prompt even while a pane holds
+  // the keys, and → there takes the suggestion into the prompt, which then keeps the keys from the panel
+  on('prompt.suggest', async ($, e, next) => (isOpen ? { isShown: false } : next(e))).catch(($, e, next) => next(e))
+
+  // A key that reached the prompt while the panel is open and put text there with no edit the panel answers (↑ recalled
+  // the history before the panel had the keys, → took a suggestion shown before it opened): the prompt is emptied
+  // again and the panel takes the keys back, so esc, the arrows and the letters after it are the panel's
+  on('prompt.change', ($, e, next) => {
+    if (isOpen && (e.origin as { kind?: string })?.kind !== 'plugin' && String(e.text || '') !== '') {
+      $.clock.after(0, () => { void (async () => {
+        if (!isOpen) return
+        await $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined)
+        await takeKeys($)
+      })().catch(() => undefined) })
+    }
+    return next(e)
+  })
 
   // the wheel over the panel (or its scroll keys) moves the page's window, or the conversation's while a question is
   // being typed: the panel draws its own rows of each, so the engine has none to move

@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { amounts, barCells, fileWords, groupLine, sentence, sizeOf, typeMix } from '../coverage.js'
+import { amounts, barCells, fileWords, groupLine, itemId, sentence, sizeOf, typeMix } from '../coverage.js'
 
 const MIXED = [{ unit: 'records', units: 14591, seen: 3 }, { unit: 'pages', units: 12, seen: 2 }, { unit: 'file', units: 2, seen: 1 }]
 
@@ -57,12 +57,12 @@ test('a folder of a few files lists them all; a large one lists the touched grou
     .sort((a, b) => b.touched - a.touched)
   const data = { files, rest, folder }
   const top = listItems(data, 'folder', [], 20)
-  assert.deepEqual(top.map(x => x.id), ['g:runs/r01/', 'g:runs/r02/', 'rest'])
+  assert.deepEqual(top.map(x => x.id), [itemId('g', 'runs/r01/'), itemId('g', 'runs/r02/'), 'rest'])
   assert.equal(top[2].files, 380)
   assert.equal(top[2].groups, 38)
   // Enter on a group opens its files under it; on the line of the others, their folders
   const open = listItems(data, 'folder', ['runs/r01/', 'rest'], 20)
-  assert.deepEqual(open.slice(0, 3).map(x => x.id), ['g:runs/r01/', 'f:runs/r01/x.jsonl', 'f:runs/r01/f1.txt'])
+  assert.deepEqual(open.slice(0, 3).map(x => x.id), [itemId('g', 'runs/r01/'), itemId('f', 'runs/r01/x.jsonl'), itemId('f', 'runs/r01/f1.txt')])
   assert.equal(open.filter(x => x.kind === 'file').length, 10)
   assert.equal(open.filter(x => x.kind === 'group' && x.depth === 1).length, 38)
 })
