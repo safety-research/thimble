@@ -526,6 +526,14 @@ export function inline(text, from, to, marks = []) {
     if (last && last.mark === undefined && r.mark === undefined && !!last.b === !!r.b && !!last.it === !!r.it && !!last.code === !!r.code && !!last.link === !!r.link) last.s += r.s
     else runs.push(r)
   }
+  const word = ch => /[\p{L}\p{N}]/u.test(ch || '')
+  // the `_` at k stands in a run of `_` with a letter or digit on each side (CommonMark's intraword rule)
+  const intraword = k => { let a = k, e = k; while (s[a - 1] === '_') a--; while (s[e] === '_') e++; return word(s[a - 1]) && word(s[e]) }
+  // where the delimiter `d` next stands after `at`, before `to`, as one that can close: -1 when none does
+  const closer = (d, at) => {
+    for (let k = s.indexOf(d, at); k >= 0 && k < to; k = s.indexOf(d, k + 1)) if (d[0] !== '_' || !intraword(k)) return k
+    return -1
+  }
   // a link's words with the explains that stand inside them: the words before, between and after each one as the link's
   // runs (`own`), each explain a run of its own
   const linkWords = (a, b, own, extra = {}) => {
@@ -563,15 +571,17 @@ export function inline(text, from, to, marks = []) {
       const m = /^(`+)([\s\S]*?[^`])\1(?!`)/.exec(s.slice(i, to))
       if (m) { push(m[2].replace(/\n/g, ' ').trim() || m[2], { code: true }); i += m[0].length; continue }
     }
+    // a run of `_` between two letters or digits is part of the word (`chess-nano__goal`), never emphasis
+    if (c === '_' && intraword(i)) { let e = i; while (s[e] === '_') e++; push(s.slice(i, e)); i = e; continue }
+    // bold and italic close only on the delimiter that opened them, so a `__` never closes a `**`
     if ((c === '*' || c === '_') && s[i + 1] === c) {
-      const close = s.indexOf(c + c, i + 2)
-      if (close > i + 2 && close < to && (style.b || !/\s/.test(s[i + 2]))) { style.b = !style.b; i += 2; continue }
-      if (style.b) { style.b = false; i += 2; continue }
+      if (style.b === c + c) { style.b = false; i += 2; continue }
+      if (!style.b && !/\s/.test(s[i + 2] || ' ') && closer(c + c, i + 2) > i + 2) { style.b = c + c; i += 2; continue }
     }
-    if (c === '*' || (c === '_' && !/[\p{L}\p{N}]/u.test(s[i - 1] || ''))) {
-      const close = s.indexOf(c, i + 1)
-      if (style.it) { style.it = false; i++; continue }
-      if (close > i + 1 && close < to && !/\s/.test(s[i + 1]) && s[close + 1] !== c) { style.it = true; i++; continue }
+    if (c === '*' || c === '_') {
+      if (style.it === c) { style.it = false; i++; continue }
+      const close = closer(c, i + 1)
+      if (!style.it && (c === '*' || !word(s[i - 1])) && close > i + 1 && !/\s/.test(s[i + 1]) && s[close + 1] !== c) { style.it = c; i++; continue }
     }
     if (c === '[') {
       const m = linkSpans(s.slice(i, to))[0]

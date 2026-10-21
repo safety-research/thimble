@@ -85,6 +85,14 @@ test('a table too wide for its column is drawn as its rows, `header: cell`, each
   assert.ok(drawn.some(n => n.type === 'Text' && n.props.bold && n.props.children === 'What changed'))
 })
 
+test('`__` inside a word stays in the word, and bold closes only on the delimiter that opened it', () => {
+  const run = t => inline(t, 0, t.length)
+  assert.deepEqual(run('**task-alpha__goal**. It won'), [{ s: 'task-alpha__goal', b: true }, { s: '. It won' }])
+  assert.deepEqual(run('kitname__specified took 1.0 h and rl-9z__specified.'), [{ s: 'kitname__specified took 1.0 h and rl-9z__specified.' }])
+  assert.deepEqual(run('**a __ b** c'), [{ s: 'a __ b', b: true }, { s: ' c' }])
+  assert.deepEqual(run('__d__ and _e_ f'), [{ s: 'd', b: true }, { s: ' and ' }, { s: 'e', it: true }, { s: ' f' }])
+})
+
 test('a mark wider than the line breaks at its spaces, each piece still the mark; only a word wider than the line is cut', () => {
   const heads = 'This affects every multi-line code block in a reply.'
   const lines = wrapRuns([{ s: heads, mark: 0 }], 21)
