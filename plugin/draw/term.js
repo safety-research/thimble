@@ -65,7 +65,8 @@ function cutLine(line, w) {
   if (w >= 1) out.push({ ch: '…', tone: 'dim', b: false, cw: 1 })
   return { line: out, cut: true }
 }
-// greedy word wrap at spaces; a word longer than the line is broken
+// greedy word wrap at spaces; a word longer than the line is broken. The spaces that open a hard line are kept (a code
+// line's indent), and dropped only when its first word would not fit beside them.
 function wrapLine(line, w) {
   w = Math.max(1, w)
   const lines = []
@@ -80,15 +81,16 @@ function wrapLine(line, w) {
     while (e < line.length && line[e].ch !== ' ') e++
     const spaces = line.slice(i, j), word = line.slice(j, e)
     const sw = spaces.length, ww = widthOf(word)
-    if (curW + (cur.length ? sw : 0) + ww <= w) {
-      if (cur.length) { cur.push(...spaces); curW += sw }
+    const keep = cur.length > 0 || i === 0
+    if (curW + (keep ? sw : 0) + ww <= w) {
+      if (keep) { cur.push(...spaces); curW += sw }
       cur.push(...word); curW += ww
     } else if (ww <= w) {
       if (cur.length) flush()
       cur.push(...word); curW = ww
     } else {
       // break the long word
-      if (cur.length && curW + sw < w - 3) { cur.push(...spaces); curW += sw } else if (cur.length) flush()
+      if (keep && curW + sw < w - 3) { cur.push(...spaces); curW += sw } else if (cur.length) flush()
       for (const c of word) { if (curW + c.cw > w) flush(); cur.push(c); curW += c.cw }
     }
     i = e

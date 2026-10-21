@@ -212,3 +212,22 @@ test('dots apply per series, and each legend entry shows its series as it is dra
   assert.deepEqual(d.root.series.map(s => !!s.dots), [true, false])
   assert.match(gridText(renderTerm(d, { w: 60 })), /⠶ a\s+━ b/)
 })
+
+test("a code line's indent stays when its text wraps", () => {
+  const d = runProgram({ program: `return k.stack(k.text('    x = 1', { max: 2 }), k.text('        if a:\\n            go(b, c)', { max: 4 }))` }, { w: 40, h: 24 })
+  const t = gridText(renderTerm(d, { w: 40 })).split('\n')
+  assert.equal(t[0], '    x = 1')
+  assert.equal(t[1], '        if a:')
+  assert.equal(t[2], '            go(b, c)')
+})
+
+test('the key of stacked bars names only the parts some bar draws', () => {
+  const d = runProgram({ program: `return k.bars([
+    { label: 'week 1', parts: [{ value: 3, label: 'kept' }, { value: 2, label: 'reverted' }] },
+    { label: 'week 2', parts: [{ value: 0, tone: 'dim', label: 'none' }] },
+    { label: 'week 3', parts: [{ value: 4, label: 'kept' }, { value: 0, label: 'reverted' }] }])` }, { w: 60, h: 24 })
+  const key = JSON.stringify(d.root).match(/"legend":\[[^\]]*\]/)
+  assert.ok(key, 'the bars draw a key')
+  assert.deepEqual(JSON.parse(key[0].slice(9)), ['kept', 'reverted'])
+  assert.doesNotMatch(gridText(renderTerm(d, { w: 60 })), /none/)
+})

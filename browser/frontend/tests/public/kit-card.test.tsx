@@ -5,6 +5,7 @@ import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
 import KIT from '../../../../plugin/draw/kit.js?raw'
 import { KitBody, kitRunOf, partRef } from '../../src/kit/KitBody.tsx'
+import { renderSvg } from '../../src/kit/svg.js'
 import { KIT_MIME, type Drawing } from '../../src/kit/types.ts'
 import { bus } from '../../src/lib/bus.ts'
 import type { Cell } from '../../src/lib/types.ts'
@@ -90,4 +91,10 @@ test('a plot draws [x, y] pairs in values, dots per series as its legend shows t
   const narrow = plot(label, 24)
   expect(narrow.texts.some((t) => t.s.startsWith('minutes') && t.s.endsWith('…'))).toBe(true)
   expect(narrow.out.cut.filter((c) => c.k === 'axis').length).toBe(1)
+})
+
+test("a code line's indent stays when its text wraps", () => {
+  const drawing = DrawKit.run("return k.text('        if a:', { max: 2 })", {}, { w: 60, h: 10, surface: 'browser' }) as Drawing
+  const texts = renderSvg(drawing, { w: 60 }).svg.match(/<text[^>]*>.*?<\/text>/g) || []
+  expect(texts.map((t) => t.replace(/<[^>]+>/g, ''))).toContain('        if a:')
 })
