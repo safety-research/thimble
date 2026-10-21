@@ -33,6 +33,7 @@ from typing import Any, Iterable
 from . import objects as O
 from . import query as Q
 from . import refs as R
+from . import shown as SW
 from . import sources as S
 from .objects import NUM_RE, number_matches
 from .store import Store
@@ -58,6 +59,7 @@ WHY_SEVERAL = "several places show {value}"
 WHY_NO_HOME = "no place shows {value}"
 WHY_NO_QUOTE = "the cited {unit} does not hold these words"
 WHY_QUOTE_ELSEWHERE = "the cited {unit} does not hold these words; {where} of {path} hold them"
+WHY_NOT_SHOWN = "{owner} does not show {dates}"
 QUOTE_SCAN = 200000  # rows of the cited file searched for a quote its cited row does not hold
 
 SESSION_MAX = 200  # queries of the session searched, newest first
@@ -334,6 +336,10 @@ def _at_query(rd: _Reader, p: dict[str, Any], label: str, ref: str) -> _At:
         at.holds = _shows(label, q.get("stdout") or "")
         at.nowhere = not at.holds
         return at
+    if not frag and "col" not in p and _shows(label, q.get("stdout") or ""):
+        # a whole query: a number it printed is a value it shows too
+        at.holds = True
+        return at
     if not frag and "col" not in p:
         # a whole query: its row count, or a column's total, is a value it shows too
         nums = [r for r in table if isinstance(r, dict)]
@@ -594,6 +600,18 @@ class _Pass:
             return Change(label, ref, LINKED, KEPT, to=ref)  # not a ref the kernel reads: left as it is
         words = O.unkeyed(label, p)  # a number the ref names (a key, a column) is not the value the place holds
         own = _owner(p)
+        if p["kind"] == "query" and SW.dates(words):
+            # dates in the words: the query shows each of them in its output or its printed text, or the citation is
+            # wrong; their digits are no numbers of their own
+            q = self.rd.query(p["query"])
+            if q:
+                missing = SW.find(q, words)["missing"]
+                if missing:
+                    return Change(label, ref, CONTRADICTED, CONTRADICTED, to=ref,
+                                  why=WHY_NOT_SHOWN.format(owner=p["query"], dates=" or ".join(missing)))
+                words = SW.without_dates(words)
+                if not _numbers(words):
+                    return Change(label, ref, LINKED, KEPT, to=ref)
         num = bool(_numbers(words))
         if p["kind"] == "query":
             at = _at_query(self.rd, p, words, ref) if num else (_At() if self.rd.query(p["query"]) else _At(False, f"no query {p['query']}"))
