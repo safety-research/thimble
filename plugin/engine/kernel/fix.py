@@ -525,6 +525,19 @@ def follow(force: bool = False, plugin_dir: bool | None = None) -> str | None:
     slug = active_slug() if plugin_dir is False else on_slug()
     if not slug or not fix_dir(slug).is_dir():
         return None
+    import fcntl  # noqa: PLC0415
+
+    # one follow at a time: a session that reloads while the copy changes under it starts another
+    with open(fixes_home() / "follow.lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fx = load(slug)
+            return f"thimble {fx.get('version') or '?'} + your fix '{fx['title']}' · u undo"
+        return _follow(slug, force, plugin_dir)
+
+
+def _follow(slug: str, force: bool, plugin_dir: bool | None) -> str | None:
     fx = load(slug)
     title, wt = fx["title"], Path(fx.get("worktree") or "")
     on_line = lambda v: f"thimble {v} + your fix '{title}' · u undo"  # noqa: E731
