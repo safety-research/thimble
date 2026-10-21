@@ -185,6 +185,20 @@ def test_a_full_count_with_no_line_read_touches_the_file_and_a_listing_does_not(
     assert LIN.coverage_sentence(LIN.coverage(Store(code))).startswith("Touched 0 of 13 files: Claude has not looked at any of them.")
 
 
+def test_a_shell_variable_in_a_path_names_only_the_files_it_can_stand_for(code: Path, tmp_path: Path) -> None:
+    """`src/$n.py` in a loop over a and b names those two files, not every file under src/; a variable the command did
+    not set stands for one name (`src/$1.py` is `src/*.py`), and a word that is only such a variable names nothing."""
+    saw(tmp_path, code, [bash("for n in a b; do wc -l src/$n.py; done", 2), bash("head -3 $f", 3),
+                         bash("D=src; wc -l $D/c.py", 1)])
+    cov = LIN.coverage(Store(code))
+    touched = sorted(o["path"] for o in cov["files"] if o["touched"])
+    assert touched == ["src/a.py", "src/b.py", "src/c.py"] and cov["total"]["touched_files"] == 3
+    saw(tmp_path, code, [bash("sqlite3 src/$1/forge.db 'select 1'", 1)])
+    assert LIN.coverage(Store(code))["total"]["touched_files"] == 0
+    saw(tmp_path, code, [bash("set -- $spec; wc -l src/$1.py", 12)])
+    assert LIN.coverage(Store(code))["total"]["touched_files"] == 12
+
+
 def test_the_entries_behind_a_value_take_their_files_word(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Records of a JSONL file, rows of a table, lines of text; the word of the kind most of them come from, `entries`
     when no kind holds most, and none for whole files with no entries."""
