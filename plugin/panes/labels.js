@@ -51,9 +51,12 @@ const SWATCH = /^[■●▪◼█▆▇▌◆▲]$/u
 
 /** The tones a drawn card gives a label's values ({value: tone}): where a value first stands as a word of its own in
  *  a color (a legend, a bar's name), or in plain words after a mark in a color (`■ agent`), never on a fill. Empty when
- *  the card colors none of them. */
-export function tonesIn(grid, values) {
+ *  the card colors none of them. With the label's `name`, also the colors the card's program gave the label's values on
+ *  its parts (a bar named `child`), which the drawing keeps (draw/kit.js labelTone, the grid's `labelTones`). */
+export function tonesIn(grid, values, name) {
   const out = {}
+  const given = name && grid && grid.labelTones && typeof grid.labelTones === 'object' ? grid.labelTones[name] : null
+  if (given && typeof given === 'object') for (const v of values || []) if (typeof given[v] === 'string' && given[v]) out[v] = given[v]
   for (const [v, at] of Object.entries(spotsIn(grid, values))) out[v] = at.tone
   return out
 }

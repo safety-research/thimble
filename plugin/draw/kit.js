@@ -222,19 +222,31 @@
     }
     const T = t => toneOf(t, ctx)
     // a part made from a row that holds a label's value takes the label's color for that value (opts.labels: {query,
-    // key, tones} from the host), so the value reads the same on every card, beside it, and in the label's panel
+    // key, label, tones} from the host), so the value reads the same on every card, beside it, and in the label's
+    // panel. A part the program made itself (`{label: 'child', value: 54}`) has no row: one named by a value of a label
+    // the card's queries read takes that value's color the same way. Each color given is kept (ctx.labelTones), so the
+    // row under the card can name the values in the card's colors.
     const labelTone = x => {
       if (!Array.isArray(opts.labels) || !opts.labels.length || !isObj(x)) return null
+      const ls = opts.labels.filter(l => isObj(l) && isObj(l.tones))
+      const keep = (l, v, t) => { const name = String(l.label || l.key || ''); if (name) (ctx.labelTones[name] || (ctx.labelTones[name] = {}))[v] = t; return t }
       const ref = lineageOf(ctx, x)
-      if (!ref) return null
-      const q = String(ref).split('#')[0]
-      for (const l of opts.labels) {
-        if (!isObj(l) || l.query !== q || !isObj(l.tones)) continue
-        const row = [x, x.row, x.from].find(r => isObj(r) && r[l.key] != null)
-        const t = row ? l.tones[String(row[l.key])] : null
-        if (t) return t
+      if (ref) {
+        const q = String(ref).split('#')[0]
+        for (const l of ls) {
+          if (l.query !== q) continue
+          const row = [x, x.row, x.from].find(r => isObj(r) && r[l.key] != null)
+          const t = row ? l.tones[String(row[l.key])] : null
+          if (t) return keep(l, String(row[l.key]), t)
+        }
       }
-      return null
+      // by its name: one color only, so a value two labels color apart is left as the program colored it
+      const name = typeof x.label === 'string' ? x.label : typeof x.name === 'string' ? x.name : null
+      if (name == null || !name.trim()) return null
+      const hits = ls.filter(l => Object.prototype.hasOwnProperty.call(l.tones, name) && l.tones[name])
+      if (!hits.length || hits.some(l => l.tones[name] !== hits[0].tones[name])) return null
+      hits.forEach(l => keep(l, name, l.tones[name]))
+      return hits[0].tones[name]
     }
     const node = (t, props) => { tick(1); return Object.assign({ t: t }, props) }
     const isNode = v => isObj(v) && typeof v.t === 'string' && !(v instanceof Canvas)
@@ -509,7 +521,8 @@
       // its name at the start of the next. Two names in one tone cannot be told apart, so that warns.
       legend(items, o) {
         o = o || {}
-        const its = (Array.isArray(items) ? items : []).map(it => Array.isArray(it) ? { label: it[0], tone: it[1] } : it).filter(isObj)
+        // an entry named by a label's value takes the label's color for it, as the parts it names do (labelTone)
+        const its = (Array.isArray(items) ? items : []).map(it => Array.isArray(it) ? { label: it[0], tone: it[1] } : it).filter(isObj).map(it => { const t = labelTone(it); return t ? Object.assign({}, it, { tone: t }) : it })
         const named = {}
         its.forEach(it => { const t = T(it.tone), l = String(it.label); if (!(named[t] || (named[t] = [])).includes(l)) named[t].push(l) })
         Object.keys(named).forEach(t => { if (named[t].length > 1) warn(ctx, sharedTone(named[t], t)) })
@@ -547,7 +560,7 @@
       plot(series, o) {
         o = o || {}
         const S = normSeries(series, ctx).map((s, i, all) => {
-          const q = { name: s.name != null ? clean(s.name) : (all.length > 1 ? `series ${i + 1}` : ''), pts: s.pts, tone: T(s.tone || (i === 0 ? 'accent' : CATS[(i - 1) % 6])) }
+          const q = { name: s.name != null ? clean(s.name) : (all.length > 1 ? `series ${i + 1}` : ''), pts: s.pts, tone: T(labelTone(s) || s.tone || (i === 0 ? 'accent' : CATS[(i - 1) % 6])) }
           // dots, not a line: the series' own `dots`, else the plot's
           if (s.dots != null ? s.dots : o.dots) q.dots = true
           if (s.id != null || s.cite || s.examples || s.meta) {
@@ -2687,7 +2700,7 @@
     return 'fix the program and save the card again'
   }
   function newCtx(state, event, limit, got) {
-    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [], after: [], effects: [], status: null, wants: [], selected: null, local: [], got: isObj(got) ? got : null }
+    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [], labelTones: {}, after: [], effects: [], status: null, wants: [], selected: null, local: [], got: isObj(got) ? got : null }
   }
   // the keys a host keeps where a program is drawn: opts.keys = {taken: {key: why}} (or a list of keys). A key's name
   // as handlers name it ('space', 'return', 'esc', 'up', '0')
@@ -2821,6 +2834,8 @@
       const cites = error ? {} : pages ? pages.cites : ctx.cites
       const examples = error ? {} : pages ? pages.examples : ctx.examples
       const out = { kit: KIT, w: W, h: H, mode: opts.mode || 'inline', title: title, root: rootNode, cites: cites, examples: examples, regions: error ? [] : regions, warnings: ctx.warnings, ms: ms }
+      // the colors the card gave labels' values (labelTone), for the row under it
+      if (!error && Object.keys(ctx.labelTones).length) out.labelTones = ctx.labelTones
       const controls = Object.keys(ctx.controls).map(id => pages && id === pages.knob ? Object.assign({}, ctx.controls[id], { all: true }) : ctx.controls[id])
         .concat(pages ? Object.keys(pages.controls).map(id => pages.controls[id]) : [])
       if (controls.length && !error) out.controls = controls

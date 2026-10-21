@@ -23,8 +23,9 @@ import { currentTheme, leanEnv, rootHere } from './shell'
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-/** A label the row names. `tones`, set only under a card (withTones): the tones the card's cells give its values. */
-export type UsedLabel = { name: string; values: string[]; tones?: Record<string, string>; kind?: string; rule?: string; card?: string | null }
+/** A label the row names. `tones`, set only under a card (withTones): the tones the card gives its values; `named`:
+ *  how many of them the card names as words in their colors (a legend). */
+export type UsedLabel = { name: string; values: string[]; tones?: Record<string, string>; named?: number; kind?: string; rule?: string; card?: string | null }
 
 const USE = { plugin: 'thimble', key: 'labeluse' } as const
 /** The keys being read now, so a drawing asks once. */
@@ -118,7 +119,7 @@ export async function cardLabels($: Engine, id: string, v: number | null | undef
 
 /** Whether a card names a label's values in their own colors, as a legend does (two of them at least, or its one). */
 function inLegend(l: UsedLabel): boolean {
-  return Object.keys(l.tones || {}).length >= Math.min(2, l.values.length)
+  return (l.named ?? Object.keys(l.tones || {}).length) >= Math.min(2, l.values.length)
 }
 
 /** The labels the cards under an answer rest on (each read once per card, as cardsRow reads them), or null while one
@@ -148,9 +149,10 @@ export async function cardLegend($: Engine, key: string, id: string, root: strin
   return out
 }
 
-/** Each label with the tones the card's cells give its values. */
+/** Each label with the tones the card gives its values: the colors its cells name them in, and the colors its program
+ *  gave them on its parts (a bar named by a value); `named` counts the first, which a legend shows. */
 function withTones(used: UsedLabel[], grid: Any): UsedLabel[] {
-  return used.map(l => ({ ...l, tones: tonesIn(grid, l.values) as Record<string, string> }))
+  return used.map(l => ({ ...l, tones: tonesIn(grid, l.values, l.name) as Record<string, string>, named: Object.keys(spotsIn(grid, l.values)).length }))
 }
 
 /** A short hash of a text (djb2), for a state key. */

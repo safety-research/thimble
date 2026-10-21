@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { answersOf, failedCall, readLabel, summary } from '../labelreads.mjs'
 import { prep } from '../node/prep.mjs'
 import { renderTerm } from '../../draw/term.js'
-import { defLine, howMade, place, program as labelPanel, toneBeside, valueTone } from '../../panes/labels.js'
+import { defLine, howMade, place, program as labelPanel, toneBeside, tonesIn, valueTone } from '../../panes/labels.js'
 import { gridText } from '../../draw/term.js'
 import '../../draw/kit.js'
 
@@ -105,6 +105,31 @@ test('a label\'s values have one color: on a chart made from its rows, in the ro
   const bars = new Set(grid.rows.flat().filter(c => c.ch === '█' || c.ch === '▆' || c.ch === '▇').map(c => c.tone))
   assert.deepEqual([...bars].sort(), Object.values(panel).sort())
   assert.deepEqual(label.values.map(v => toneBeside({ ...label, tones: { no: 'dim' } }, v)), label.values.map(v => panel[v]))
+})
+
+test('a bar the program made itself, named by a label\'s value, has the label\'s color for it, and the row under the card names it in that color', async () => {
+  const label = { name: 'size', values: ['small', 'large', 'unknown'] }
+  const rows = [['small', 61], ['large', 32], ['unknown', 20]].map(([size, rate]) => ({ size, rate, _ref: `r3#size=${size}` }))
+  // new objects with no row behind them, in colors of the program's own, as a card often builds its rows
+  const object = { id: '05-size', title: 'Share kept, by size', lineage: { queries: { r3: { labels: ['size'] } } }, data: { rows }, program: `
+    const tone = s => s === 'small' ? 'c1' : s === 'large' ? 'c2' : 'dim'
+    return k.stack(k.legend(data.rows.map(r => ({ label: r.size, tone: tone(r.size) }))), k.bars(data.rows.map(r => ({ id: 'all-' + r.size, label: r.size, value: r.rate, tone: tone(r.size) })), { max: 100 }))` }
+  const { drawing } = await prep({ object, w: 60, labels: [{ ...label, queries: ['r3'] }] })
+  assert.equal(drawing.error, undefined)
+  const grid = renderTerm(drawing, { w: 60 })
+  const panel = Object.fromEntries(label.values.map(v => [v, valueTone(label.values, v)]))
+  // each bar, in the order of its rows, and each name in the key
+  const bars = grid.rows.slice(1).map(r => r.find(c => c.ch === '█' || c.ch === '▆' || c.ch === '▇')).filter(Boolean).map(c => c.tone)
+  assert.deepEqual(bars, label.values.map(v => panel[v]))
+  const key = grid.rows[0].filter(c => c.ch === '■').map(c => c.tone)
+  assert.deepEqual(key, label.values.map(v => panel[v]))
+  // the drawing keeps the colors it gave, so the row under the card has them too
+  assert.deepEqual(tonesIn({ rows: [], labelTones: drawing.labelTones }, label.values, 'size'), panel)
+  assert.deepEqual(grid.labelTones, { size: panel })
+  // a value two labels color apart keeps the program's own color
+  const two = await prep({ object, w: 60, labels: [{ ...label, queries: ['r3'] }, { name: 'other', values: ['large', 'small', 'unknown'], queries: ['r3'] }] })
+  const grid2 = renderTerm(two.drawing, { w: 60 })
+  assert.deepEqual(grid2.rows.slice(1).map(r => r.find(c => c.ch === '█' || c.ch === '▆' || c.ch === '▇')).filter(Boolean).map(c => c.tone), ['c1', 'c2', panel.unknown])
 })
 
 test('a label says what made it in plain names, and its panel shows the definition under its head until it is folded', () => {
