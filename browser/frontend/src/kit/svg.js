@@ -585,6 +585,27 @@ export function renderSvg(drawing, opts = {}) {
     // one series that the y axis already names needs no legend
     const named = S.length === 1 && S[0].name && ys.label && String(S[0].name) === String(ys.label)
     const legend = n.legend !== false && (S.length > 1 || (S.some(s => s.name) && !named)) ? 1 : 0
+    // the legend's lines under the axis, in `room` pixels from the plot's left edge: each entry {s, name, at}, as many
+    // lines as the series need, as the terminal wraps it, so no series goes unnamed; a name wider than a line is cut
+    let keyLines = legend
+    const keyRows = room => {
+      const rows = [[]]
+      let end = 0
+      S.forEach(s => {
+        let name = s.name || ''
+        if (18 + mw(name) > room) {
+          const fit = room - 18 - mw('…')
+          let used = 0, t = ''
+          for (const ch of Array.from(name)) { const c = mw(ch); if (used + c > fit) break; t += ch; used += c }
+          name = t + '…'
+        }
+        const at = end ? end + 2 * cw : 0
+        if (end && at + 18 + mw(name) > room) { rows.push([{ s, name, at: 0 }]); end = 18 + mw(name); return }
+        rows[rows.length - 1].push({ s, name, at })
+        end = at + 18 + mw(name)
+      })
+      return rows
+    }
     const tick = { size: ns, mono: true }
     // x ticks: round values, a label under each that has room
     let xTickList = []
@@ -616,7 +637,7 @@ export function renderSvg(drawing, opts = {}) {
     const layoutY = xrow => {
       let ymin = ymin0, ymax = ymax0
       // at least five rows of plot, as the terminal draws it, so values a few steps apart do not flatten onto one line
-      const around = (ys.label ? lh : 0) + 6 + lh + xrow * lh + legend * lh + 4
+      const around = (ys.label ? lh : 0) + 6 + lh + xrow * lh + keyLines * lh + 4
       const ph = Math.max(5 * lh, n.h * lh - around)
       // the y axis at round steps under gridlines, as thimble's charts draw it: the finest step that leaves a gridline at
       // least 24 pixels from the next, and an end the program did not set goes out to the next step
@@ -638,6 +659,8 @@ export function renderSvg(drawing, opts = {}) {
     let Y = layoutY(0)
     const xrow = xlab && x + Y.yw + Y.pw - xlabW <= placeX(x + Y.yw, Y.pw).lastEnd + 10 ? 1 : 0
     if (xrow) Y = layoutY(1)
+    let rows = legend ? keyRows(w - Y.yw) : []
+    if (rows.length > 1) { keyLines = rows.length; Y = layoutY(xrow); rows = keyRows(w - Y.yw); keyLines = rows.length; Y = layoutY(xrow) }
     const { ph, yticks, yw, pw } = Y
     ymin = Y.ymin; ymax = Y.ymax
     const h = ph + Y.around
@@ -685,24 +708,24 @@ export function renderSvg(drawing, opts = {}) {
         flush()
       })
     }
-    let lx = ox
-    const ly = y + h - lh
+    const keyAt = new Map()
+    rows.forEach((row, r) => row.forEach(e => keyAt.set(e.s, { x: ox + e.at, y: y + h - (rows.length - r) * lh, name: e.name })))
     S.forEach(s => {
       if (s.region) mark({ k: 'region', id: s.region })
       mark({ k: 'series', name: s.name, n: s.pts.length })
       const area = { x: ox, y: oy, w: pw, h: ph }
-      if (!legend) { if (s.region && !dry) addRect(s.region, s.meta, area); return }
-      const name = s.name || ''
+      const at = keyAt.get(s)
+      if (!at) { if (s.region && !dry) addRect(s.region, s.meta, area); return }
+      const { x: lx, y: ly, name } = at
       const nw = 18 + mw(name)
-      if (lx + nw > x + w) { if (s.region && !dry) addRect(s.region, s.meta, area); return }
       if (!dry) {
+        if (name !== (s.name || '')) cx.cut.push({ k: 'key', s: s.name })
         // the series' own mark: a dot for a series drawn as dots, else a stroke of its line
         if (s.dots || s.pts.filter(p => okX(p[0]) && p[1] !== null).length === 1) L.mark.push(`<circle cx="${r1(lx + 6)}" cy="${r1(ly + lh / 2)}" r="2.5" fill="${C(s.tone)}"/>`)
         else L.mark.push(`<rect x="${r1(lx)}" y="${r1(ly + lh / 2 - 1.5)}" width="12" height="3" rx="1" fill="${C(s.tone)}"/>`)
         L.text.push(textSVG([{ s: name, tone: s.region ? 'accent' : 'ink' }], lx + 18, ly, 'start'))
       }
       if (s.region && !dry) addRect(s.region, s.meta, { x: lx, y: ly, w: nw, h: lh })
-      lx += nw + 2 * cw
     })
     return h
   }
