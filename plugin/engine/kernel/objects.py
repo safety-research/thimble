@@ -273,11 +273,12 @@ def _merge_rows(lists: list[list[str]]) -> list[str]:
         return flat
 
 
-# a number in words: never the digits of a name such as r5, R3 or ip16 (a letter, an underscore or a digit before them),
-# nor a time's minutes (the 00 of 23:00); and the words one to ten, which state a count as digits do ("one edit at
-# 23:00"), but not the "one" of "the one" or "no one", which states none
+# a number in words: never the digits of a name such as r5, R3, ip16 or agent-04 (a letter, an underscore or a digit
+# before them, or a letter and a hyphen), nor any part of a time (16:00 and 14:35 state when, not a value); and the
+# words one to ten, which state a count as digits do ("one edit at 23:00"), but not the "one" of "the one" or "no
+# one", which states none
 _NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
-NUM_RE = re.compile(r"(?<![A-Za-z_\d.,:])[-−]?\d[\d,]*(?:\.\d+)?"
+NUM_RE = re.compile(r"(?<![A-Za-z_\d.,:])(?<![A-Za-z_]-)[-−]?\d[\d,]*(?:\.\d+)?(?![\d,]|:\d)"
                     r"|(?<![A-Za-z])(?<!the )(?<!no )(?<!any )(?<!each )(?<!every )(?<!this )(?<!that )(?<!which )"
                     r"(?:" + "|".join(_NUM_WORDS) + r")(?![A-Za-z])", re.I)
 
