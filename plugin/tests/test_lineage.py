@@ -130,3 +130,34 @@ def test_rows_of_a_file_are_named_by_one_field_not_by_whichever_is_longest(root:
     assert words[3] == "Aho, Mr. Tuomo" and words[2] == "Varga, Mrs. Ilona Petra"
     recs = LIN.records(st, ["voyagers.csv#row=1-5"], n=5, pick="first")
     assert [r["words"] for r in recs][2] == "Aho, Mr. Tuomo"
+
+
+def test_a_count_named_like_a_0_1_column_opens_the_rows_of_its_group_where_that_column_is_1(tmp_path: Path) -> None:
+    d = tmp_path / "data"
+    d.mkdir()
+    (d / "crew.csv").write_text("name,band,Rescued\nkai,hi,1\nlou,hi,1\nmo,hi,0\nned,lo,0\nola,lo,1\n")
+    st = Store(d)
+
+    def opens(q: dict, col: str) -> tuple[int, list[str]]:
+        r = LIN.resolve(st, f"{q['id']}#band=hi@{col}", n=10)
+        checks = [c["check"] for c in r["chain"] if c.get("check")]
+        assert checks == ["the value equals the number of rows"], checks
+        return r["count"], [x["ref"] for x in r["records"]]
+
+    hi = (2, ["crew.csv#row=1", "crew.csv#row=2"])
+    # a count added beside a tally's groups, named differently from the 0/1 column (`rescued`, `Rescued`)
+    q = Q.run(st, "rescued per band", "df = load('crew.csv')\ndf['Rescued'] = df.Rescued.astype(int)\n"
+              "t = tally(df, 'band')\nt['rescued'] = df.groupby('band').Rescued.sum().reindex(t.band).values\nt")
+    assert opens(q, "rescued") == hi
+    # ... and named the same as a 0/1 column the query made
+    q = Q.run(st, "rescued per band", "df = load('crew.csv')\ndf['rescued'] = df.Rescued.astype(int)\n"
+              "t = tally(df, 'band')\nt['rescued'] = df.groupby('band').rescued.sum().reindex(t.band).values\nt")
+    assert opens(q, "rescued") == hi
+    # a group found by key: the same
+    q = Q.run(st, "rescued per band", "df = load('crew.csv')\ndf['Rescued'] = df.Rescued.astype(int)\n"
+              "df.groupby('band').agg(n=('name', 'size'), Rescued=('Rescued', 'sum')).reset_index()")
+    assert opens(q, "Rescued") == hi
+    # a count that is not the number of its group's rows marked 1 keeps none of its own
+    q = Q.run(st, "rescued per band", "df = load('crew.csv')\ndf['Rescued'] = df.Rescued.astype(int)\n"
+              "t = tally(df, 'band')\nt['rescued'] = [3, 2]\nt")
+    assert not q.get("cells")

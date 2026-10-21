@@ -1237,14 +1237,91 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
             named = None
         if named:
             out["cells"], out["cells_by"] = named
+    elif not out.get("cells") and row_refs is not None and out.get("mode") == "exact" and len(df) <= TABLE_MAX:
+        # a count added beside a tally's groups (`t['survived'] = g.Survived.sum()`) keeps no rows of its own: named
+        # like a 0/1 column of the rows it groups, it rests on the rows of its group where that column is 1
+        try:
+            flagged = _flag_cells(df, row_refs, ns, frames)
+        except Exception:  # noqa: BLE001
+            flagged = None
+        if flagged:
+            out["cells"], out["cells_by"] = flagged
     return out
+
+
+def _same_name(a: Any, b: Any) -> bool:
+    """Two column names that name one thing: as written, or with the same slug (`survived`, `Survived`)."""
+    return str(a) == str(b) or bool(R.value_slug(a)) and R.value_slug(a) == R.value_slug(b)
+
+
+def _flag_on(col: Any) -> Any:
+    """The value that marks a row of a 0/1 or true/false column (1, True or "1"), or None for any other column."""
+    import pandas as pd
+
+    if pd.api.types.is_bool_dtype(col):
+        return True
+    try:
+        vals = set(col.dropna().unique().tolist())
+    except TypeError:
+        return None
+    if not vals or len(vals) > 2:
+        return None
+    if pd.api.types.is_numeric_dtype(col) or all(isinstance(v, bool) for v in vals):
+        return 1 if vals <= {0, 1} else None
+    return "1" if vals <= {"0", "1"} else None
+
+
+def _flag_cells(df: Any, row_refs: list[list[str]], ns: dict[str, Any], frames: list[Any]):
+    """(cells, the frame columns that name them) for an output whose rows keep their own source rows (a tally): each
+    count column named like a 0/1 or true/false column of a frame of source rows (`survived` for `Survived`), per output
+    row the row's own rows where that column is 1, kept where the count equals them. None when no count column is
+    named so."""
+    import numpy as np
+
+    counts = [c for c in df.columns if isinstance(c, str) and not c.startswith("_") and _is_count_col(df[c])]
+    if not counts:
+        return None
+    # for each count column, the frames (in order) whose 0/1 column it is named like: {source row: marked}
+    marks: dict[str, list[tuple[str, dict[str, bool]]]] = {}
+    for _, f in _named_frames(ns, frames, lambda f: ref_columns(f) == (["_ref"], [])):
+        for x in f.columns:
+            if not isinstance(x, str) or x.startswith("_"):
+                continue
+            hit = [c for c in counts if _same_name(c, x)]
+            on = _flag_on(f[x]) if hit else None
+            if on is None:
+                continue
+            marked = dict(zip(f["_ref"].tolist(), np.asarray(f[x].to_numpy() == on, dtype=bool).tolist()))
+            for c in hit:
+                marks.setdefault(c, []).append((x, marked))
+    if not marks:
+        return None
+    cells: list[dict[str, list[str]]] = []
+    used: set[str] = set()
+    cols = {c: df[c].tolist() for c in marks}
+    for i in range(min(len(df), len(row_refs))):
+        cell: dict[str, list[str]] = {}
+        for c, cands in marks.items():
+            v = _count_of(cols[c][i])
+            if v is None:
+                continue
+            for x, marked in cands:
+                sel = [r for r in row_refs[i] if marked.get(r)]
+                if len(sel) == v:
+                    cell[c] = R.compress(sel)
+                    used.add(x)
+                    break
+        cells.append(cell)
+    if not any(cells):
+        return None
+    return cells, ", ".join(sorted(used))
 
 
 def _named_cells(df: Any, out: dict[str, Any], ns: dict[str, Any], frames: list[Any]):
     """(cells, the frame column whose values name them) for an output whose rows were found by key in a frame of source
     rows: each count column named by a value of one of the frame's few-valued columns (`write/run` for kind ==
-    "write/run"), per output row the rows of its group that hold that value, kept where the count equals them. None
-    when no count column is named so."""
+    "write/run"), or named like a 0/1 column (`survived` for `Survived` == 1), per output row the rows of its group that
+    hold that value, kept where the count equals them. None when no count column is named so."""
     import numpy as np
     import pandas as pd
 
@@ -1261,6 +1338,12 @@ def _named_cells(df: Any, out: dict[str, Any], ns: dict[str, Any], frames: list[
         if not isinstance(x, str) or x.startswith("_") or x in keys:
             continue
         col = f[x]
+        # a count named like a 0/1 column (`survived` beside `Survived`) counts the rows of its group where it is 1
+        on = _flag_on(col) if any(c not in named and _same_name(c, x) for c in counts) else None
+        if on is not None:
+            for c in counts:
+                if c not in named and _same_name(c, x):
+                    named[c] = (x, on)
         if not (pd.api.types.is_object_dtype(col) or pd.api.types.is_string_dtype(col) or isinstance(col.dtype, pd.CategoricalDtype)):
             continue
         try:
