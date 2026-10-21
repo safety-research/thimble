@@ -14,7 +14,10 @@ name: checks
 
 on:
   push:
+    branches: [main]
+  # a draft pull request runs nothing; marking it ready for review runs the checks, and so does each push after that
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -26,6 +29,7 @@ concurrency:
 
 jobs:
   scan:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -46,6 +50,7 @@ jobs:
           fi
 
   plugin:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -60,6 +65,8 @@ jobs:
           node-version: 22
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.1"  # the uv that wrote browser/server/uv.lock; a newer one rewrites the lockfile
 
       - name: Install Claude Code
         run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
@@ -83,6 +90,7 @@ jobs:
         run: scripts/check.sh python
 
   parity:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -95,11 +103,14 @@ jobs:
           node-version: 22  # the test also reads the plugin's prompt registry with Node
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.1"  # the uv that wrote browser/server/uv.lock; a newer one rewrites the lockfile
 
       - name: Shared prompts
         run: scripts/check.sh parity
 
   browser-server:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -112,6 +123,8 @@ jobs:
           node-version: 22
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.1"  # the uv that wrote browser/server/uv.lock; a newer one rewrites the lockfile
 
       - name: Install bubblewrap, and let it make its namespaces (the runner's AppArmor keeps it from them)
         run: |
@@ -125,6 +138,7 @@ jobs:
         run: scripts/check.sh server
 
   browser-page:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
