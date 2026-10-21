@@ -356,8 +356,9 @@ export function focusEntry($: Engine): void {
   holdKeys($, 'ask')
 }
 
-// when the panel asks for the keys again after a request, while it does not have them (holdKeys)
-const KEYS_AGAIN_MS = [250, 900, 1600]
+// when the panel asks for the keys again after a request, while it does not have them (holdKeys): soon, so an arrow
+// typed straight after the key that opened a pane reaches the pane, and later again for a click that holds the keys
+const KEYS_AGAIN_MS = [60, 250, 900, 1600]
 
 /** The panel takes the keys, whatever it shows (a card, any pane): on its input bar (`ask`, holding what is typed so
  *  far), or on the part selected (`part`). Claude Code gives a pane the keys only while the prompt holds them over an
