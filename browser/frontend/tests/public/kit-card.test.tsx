@@ -94,6 +94,7 @@ test('a plot draws [x, y] pairs in values, dots per series as its legend shows t
 })
 
 test("a plot's x ticks can name dates: the browser draws each tick's own label, as the terminal does", async () => {
+  // @ts-expect-error -- the plugin's terminal renderer is plain JavaScript with no declarations
   const { renderTerm, gridText } = await import('../../../../plugin/draw/term.js')
   // made-up daily counts over 31 days, a tick each week labeled with its date
   const days = ['Mar 3', 'Mar 10', 'Mar 17', 'Mar 24', 'Mar 31']
