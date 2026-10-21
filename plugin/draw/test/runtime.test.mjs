@@ -203,3 +203,20 @@ test('a flow\'s boxes widen to show their notes whole when the frame has room', 
   const narrow = draw({ dir: 'down' }, 26)
   assert.ok(narrow.t.split('\n').every(l => l.length <= 26) && !narrow.d.warnings.some(w => /cut at the right/.test(w)))
 })
+
+test('a plot key with more series than its row holds wraps onto more rows, so every series is named', () => {
+  const names = ['north depot', 'south depot', 'harbor', 'airport', 'rail yard', 'east market', 'old town']
+  const program = `return k.plot(data.names.map((name, i) => ({ name, points: [1, 2, 3].map(x => [x, x * (i + 1)]) })), { h: 10 })`
+  for (const w of [30, 60]) {
+    const d = runProgram({ id: 'key', program, data: { names } }, { w, h: 30 })
+    const g = renderTerm(d, { w })
+    const t = gridText(g)
+    for (const n of names) assert.match(t, new RegExp('━ ' + n), `${n} at ${w}`)
+    assert.ok(t.split('\n').every(l => l.trimEnd().length <= w))
+  }
+  // a name wider than the row is cut with …, and said in cut
+  const long = runProgram({ id: 'key', program, data: { names: ['a depot whose name runs past the row', 'b'] } }, { w: 24, h: 30 })
+  const g = renderTerm(long, { w: 24 })
+  assert.match(gridText(g), /━ a depot.*…/)
+  assert.deepEqual(g.cut.filter(c => c.k === 'key').map(c => c.s), ['a depot whose name runs past the row'])
+})
