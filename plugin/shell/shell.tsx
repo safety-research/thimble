@@ -2765,7 +2765,9 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const linkBar = (id: string) => { const m = (p.grid.regions || []).find((r: Any) => r.id === id && r.link)?.meta; return m?.examples ? 'examples' as const : m?.cite ? 'details' as const : undefined }
   // a legend that names a label's values opens the label on the value pressed (labeluse.ts), in place of a row under it
   const labelKey = `card-${ref.id}-${p.object?.version ?? ref.v ?? ''}`
-  const spots = await cardLegend($, labelKey, ref.id, ref.root, p.grid)
+  // (a label's own card: the label's name in its title opens the label, as the name in a row beside a card does)
+  const named = typeof p.object?.label === 'string' ? titleSpot(p.grid, p.object.label) : null
+  const spots: Spot[] = [...(await cardLegend($, labelKey, ref.id, ref.root, p.grid)), ...(named ? [named] : [])]
   const grid = spots.length ? legendPresses(p.grid, spots) : p.grid
   const spotOf = (id: string) => spots.find(x => legendRegion(x) === id)
   const onPress = fullscreen ? (id: string, dir?: number) => (spotOf(id) ? openLabel($, spotOf(id)!.name, spotOf(id)!.value) : dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id, { bar: linkBar(id) })) : undefined
@@ -2790,19 +2792,34 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   })
 }
 
-/** The region a legend's value is drawn as, a press that opens its label on it. */
-const legendRegion = (s: { name: string; value: string }) => `label:${s.name}=${s.value}`
+/** A press that opens a label: a value a legend names (the label on that value), or a label's name (`value` null). */
+type Spot = { name: string; value: string | null; kind?: string; rect: { x: number; y: number; w: number; h: number } }
+
+/** The region a legend's value is drawn as, a press that opens its label on it; a label's name opens it whole. */
+const legendRegion = (s: { name: string; value: string | null }) => (s.value == null ? `label:${s.name}` : `label:${s.name}=${s.value}`)
+
+/** Where a label's own card names the label in its title (the frame's top row): its cells, or null. */
+function titleSpot(grid: Any, name: string): Spot | null {
+  const row = grid?.rows?.[0] as Any[] | undefined
+  if (!row || !name) return null
+  let text = ''
+  const at: number[] = []
+  row.forEach((c, i) => { if (c && !c.cont) for (const ch of String(c.ch || ' ')) { text += ch; at.push(i) } })
+  const i = text.indexOf(name)
+  if (i < 0) return null
+  return { name, value: null, rect: { x: at[i], y: 0, w: at[i + name.length - 1] + 1 - at[i], h: 1 } }
+}
 
 /** A card's cells with each legend value that names a label's value a press of its own, its words underlined as a link
  *  is, its name saying what it opens and how the label was made. */
-function legendPresses(grid: Any, spots: { name: string; value: string; kind?: string; rect: { x: number; y: number; w: number; h: number } }[]): Any {
+function legendPresses(grid: Any, spots: Spot[]): Any {
   const rows = grid.rows.map((r: Any[]) => r.slice())
   const regions = [...grid.regions]
   for (const s of spots) {
     const id = legendRegion(s)
     for (let x = s.rect.x; x < s.rect.x + s.rect.w; x++) { const c = rows[s.rect.y]?.[x]; if (c && String(c.ch).trim() && !/^[■●▪◼█▆▇▌◆▲]$/u.test(c.ch)) rows[s.rect.y][x] = { ...c, ref: id } }
     const how = howMade(s.kind)
-    regions.push({ id, meta: { label: `open the label ${s.name}${how ? ` (${how})` : ''}: ${s.value}` }, rects: [s.rect] })
+    regions.push({ id, meta: { label: `open the label ${s.name}${how ? ` (${how})` : ''}${s.value == null ? '' : `: ${s.value}`}` }, rects: [s.rect] })
   }
   return { ...grid, rows, regions }
 }

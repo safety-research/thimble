@@ -4,25 +4,25 @@
 // label alone opens on itself), and the row beside a card or an answer that counts by a label opens that label
 // (shell/labeluse.ts), with a value's records when the value was clicked.
 //
-// It opens on what the label is: its name, what made it (regex, code, or read by Claude) and its definition under the
-// head (the pattern, the code's first lines, or the model's question, wrapped). Then what the label tells: its values
-// over its records (each a bar and a count, a press filters the records to it), then the records themselves with their
-// values in color, the one selected whole, and a row of the values to check it with. The actions above the input bar
-// fold the definition (Definition) and show where Claude made the label (Where Claude made it). The colors are the
-// label card's (labels.py CARD_PROGRAM), so a value reads the same on the card and here.
+// It opens on how the label is defined: its name, its kind (regex, code, or a prompt the model read each record
+// against) and the whole definition under the head (the pattern, the code in color, or the prompt, wrapped). Then what
+// it ran over (`14,591 records in revisions.jsonl`), its values over its records (each a bar and a count), and the
+// examples of the value picked, one record at a time: the part the label matched marked (a regex's match on its line,
+// the fields the code read), a long record cut to the stretch around the match, and a row of the values to check it
+// with. The action above the input bar folds the definition (Definition). The colors are the label card's (labels.py
+// CARD_PROGRAM), so a value reads the same on the card and here.
 //
-//   state: {open: the label open, from: 'list' when the list opened it (esc goes back there), filter: the value its
-//          records are filtered to ('-': no value yet), rec: the record selected (its place among the filtered ones),
-//          at: the part selected, fold: the definition folded, whole: the whole definition shown, past its first lines}
-//   presses: a label in the list opens it · a value filters the records to it (again: every record) · a record opens
-//            it as a citation, over this pane · a value of the check row is the person's check of the record selected
-//            · the definition's `… more lines` shows it whole (again: its first lines)
-//   actions: Definition (the definition shown or folded: `act:def:on` while shown) · Where Claude made it (the
-//            label's card in the conversation)
-//   keys: none of its own. The side panel's ring walks the parts (↑ ↓, tab), ↵ presses the one it is on, esc goes back
+//   state: {open: the label open, from: 'list' when the list opened it (esc goes back there), filter: the value picked
+//          ('-': the records with no value yet), rec: the example shown (its place among the value's records), at: the
+//          part selected, fold: the definition folded}
+//   presses: a label in the list opens it · a value picks it · the example opens as a citation, over this pane · a
+//            value of the check row is the person's check of the example
+//   actions: Definition (the definition shown or folded: `act:def:on` while shown)
+//   keys: ↑ ↓ pick the value (the side panel walks the pane's own parts with them), [ ] flip its examples. ← and →
+//         never reach a pane: Claude Code keeps them
 //   wants: {records: name, value, at, n, gen} (a page of the records, read by the host)
 //   asks of the host: check {label, ref, value} (the person's check), open {mark: {kind: 'cite', ref, label}} (a record
-//          as a citation, over this pane), reveal {card} (the label's card in the conversation)
+//          as a citation, over this pane)
 import { subjectBlock } from './subject.js'
 
 const PAGE = 20
@@ -267,79 +267,87 @@ function labelView(k, data, st, lab, W) {
   const values = lab.values || []
   const counts = lab.counts || {}
   const none = (lab.waiting || 0) + (lab.failed || 0)
-  const filter = st.filter === NO_VALUE ? (none ? NO_VALUE : null) : values.includes(st.filter) ? st.filter : null
-  const total = filter == null ? lab.records || 0 : filter === NO_VALUE ? none : counts[filter] || 0
+  // the values to pick from (↑ ↓): each of the label's, then the records with no value yet when there are some
+  const picks = [...values, ...(none ? [NO_VALUE] : [])]
+  const first = values.find(v => counts[v] > 0) ?? picks[0] ?? null
+  const filter = picks.includes(st.filter) ? st.filter : first
+  const total = filter == null ? 0 : filter === NO_VALUE ? none : counts[filter] || 0
   const rec = Math.max(0, Math.min(total - 1, Number(st.rec) || 0))
   const pageAt = Math.floor(rec / PAGE) * PAGE
-  const got = total ? k.want({ records: lab.name, value: filter == null ? '*' : filter, at: pageAt, n: PAGE, gen: data.gen }) : null
+  const got = total ? k.want({ records: lab.name, value: filter, at: pageAt, n: PAGE, gen: data.gen }) : null
   const recs = got && Array.isArray(got.records) ? got.records : []
   const cur = recs.find(r => r.i === rec) || null
+  const idOf = v => (v === NO_VALUE ? 'filter-none' : `val-${values.indexOf(v)}`)
 
-  // ---- what the person does: every part is a press, and the ring on a part selects it
-  const setFilter = v => ({ filter: filter === v ? null : v, rec: 0, at: v === NO_VALUE ? 'filter-none' : `val-${values.indexOf(v)}` })
+  // ---- what the person does: ↑ ↓ pick the value, [ ] flip its examples, a press on a value picks it, on the example
+  // opens it as a citation, on a value of the check row checks it
+  const pick = v => ({ filter: v, rec: 0, at: idOf(v) })
+  const step = d => {
+    const i = picks.indexOf(filter)
+    const j = Math.max(0, Math.min(picks.length - 1, i + d))
+    return j === i ? { at: idOf(filter) } : pick(picks[j])
+  }
+  const flip = d => (total ? { rec: (rec + d + total) % total, at: idOf(filter) } : null)
+  k.on('up', () => step(-1))
+  k.on('down', () => step(1))
+  k.on('[', () => flip(-1), 'previous / next example')
+  k.on(']', () => flip(1))
   const citeOf = r => ({ kind: 'cite', ref: r.ref, label: `${lab.name} = ${r.value ?? 'no value'}: ${place(r.ref)}` })
   k.on('focus', e => {
-    const m = /^rec-(\d+)$/.exec(String(e.region || ''))
-    if (m) return { rec: Number(m[1]), at: e.region }
-    return e.region ? { at: e.region } : null
+    const r = String(e.region || '')
+    if (r === 'filter-none') return filter === NO_VALUE ? { at: r } : pick(NO_VALUE)
+    const v = /^val-(\d+)$/.exec(r)
+    if (v) return values[Number(v[1])] === filter ? { at: r } : pick(values[Number(v[1])])
+    return r ? { at: r } : null
   })
   k.on('press', e => {
     const r = String(e.region || '')
-    // (show all goes once pressed: the first record takes the selection, so a question is never about the press)
-    if (r === 'filter-all') return { filter: null, rec: 0, at: null }
-    if (r === 'filter-none') return setFilter(NO_VALUE)
-    if (r === 'def-more') return { whole: !st.whole, at: r }
+    if (r === 'filter-none') return pick(NO_VALUE)
     const v = /^val-(\d+)$/.exec(r)
-    if (v) return setFilter(values[Number(v[1])])
+    if (v) return pick(values[Number(v[1])])
     const c = /^chk-(\d+)$/.exec(r)
     if (c && cur && !cur.missing) {
       const value = values[Number(c[1])]
       k.do('check', { label: lab.name, ref: cur.ref, value })
-      // the next record is selected, unless the check moved this one out of the filter (the next takes its place)
-      const next = filter != null && filter !== value ? rec : Math.min(Math.max(0, total - 1), rec + 1)
-      return { rec: next, at: `rec-${next}` }
+      // the next example, unless the check moved this one out of the value (the next takes its place)
+      const next = filter !== value ? rec : Math.min(Math.max(0, total - 1), rec + 1)
+      return { rec: next, at: r }
     }
-    // a record opens as a citation, over this pane: its row in its file
-    const m = /^rec-(\d+)$/.exec(r)
-    if (m) {
-      const one = recs.find(x => x.i === Number(m[1]))
-      if (one && !one.missing) k.do('open', { mark: citeOf(one) })
-      return { rec: Number(m[1]), at: r }
-    }
+    if (r === 'example' && cur && !cur.missing) { k.do('open', { mark: citeOf(cur) }); return { at: r } }
     return null
   })
-  // the actions above the input bar: the definition shown or folded, and where Claude made the label
+  // the action above the input bar: the definition shown or folded
   const hasDef = !!String(lab.rule || '').trim()
   const shown = hasDef && !st.fold
-  if (hasDef) k.on(shown ? 'act:def:on' : 'act:def', () => ({ fold: shown, ...(shown && st.at === 'def-more' ? { at: null } : {}) }), 'Definition')
-  if (lab.card) k.on('act:made', () => { k.do('reveal', { card: lab.card }); return null }, 'Where Claude made it')
+  if (hasDef) k.on(shown ? 'act:def:on' : 'act:def', () => ({ fold: shown }), 'Definition')
   // esc goes back to the list when the list opened this label; else the panel's esc (back, or close)
-  // (← does the same)
+  // (← does the same where it reaches the pane, as in the browser)
   if (st.from === 'list' && (data.list || []).length > 1) {
     const back = () => ({ open: null, from: null, filter: null, rec: 0, at: null })
     k.on('esc', back, 'labels')
     k.on('left', back)
   }
-  const at = st.at === 'def-more' && !shown ? `rec-${rec}` : st.at || `rec-${rec}`
-  k.select(at)
+  const keep = /^(chk-\d+|example)$/.test(String(st.at || ''))
+  k.select(keep ? st.at : idOf(filter))
 
   const out = []
-  // ---- the subject: the label, what made it and how far it is in plain words, and its definition under them
-  const defs = shown ? defRows(k, lab, W, !!st.whole) : []
+  // ---- the subject: the label, how it is defined (its kind, then the whole pattern, code or prompt), and what it ran
+  // over
+  const defs = shown ? defRows(k, lab, W) : []
   out.push(subjectBlock(k, {
     glyph: `{${valueTone(values, values[0])}:●}`,
     title: k.escape(lab.name),
-    line: `label over ${k.escape(scopeOf(lab))}${howMade(lab.kind) ? ` · ${howMade(lab.kind)}` : ''} · ${k.escape(stateWords(lab))}${data.refreshing ? ' · ◌' : ''}`,
-    rows: defs,
+    line: `${k.escape(kindWords(lab.kind))}${data.refreshing ? ' · ◌' : ''}`,
+    rows: [...defs, ...(defs.length ? [k.text(' ')] : []), k.text(k.escape(ranOver(lab)), { wrap: false })],
   }))
 
-  // ---- the values: each its color, bar, count and share; a press filters the records to it
+  // ---- the values: each its color, bar, count and share; ↑ ↓ or a press picks one, and its examples show below
   const vw = Math.min(24, Math.max(4, ...values.map(len), none ? 15 : 0))
   const bw = Math.max(6, Math.min(30, W - 4 - vw - 2 - 14 - 12))
   const max = Math.max(1, ...values.map(v => counts[v] || 0), none)
   const valueRow = (id, label, tone, mark, c, on) => {
     const cells = c ? Math.max(1, Math.round((c / max) * bw)) : 0
-    const row = `{${tone}:${mark}} ${on ? `**${k.escape(pad(label, vw))}**` : k.escape(pad(label, vw))}  {${tone}:${'█'.repeat(cells)}}${' '.repeat(bw - cells)}  ${pad(n(c), 7, true)} {dim:${pad(lab.records ? pctOf(c / lab.records) : '', 4, true)}}${on ? '  {accent:the records below}' : ''}`
+    const row = `{${tone}:${mark}} ${on ? `**${k.escape(pad(label, vw))}**` : k.escape(pad(label, vw))}  {${tone}:${'█'.repeat(cells)}}${' '.repeat(bw - cells)}  ${pad(n(c), 7, true)} {dim:${pad(lab.records ? pctOf(c / lab.records) : '', 4, true)}}`
     const value = id.startsWith('val-') ? values[Number(id.slice(4))] : null
     // a value carries the citation of its count (the label's count query), so a question about it names its records
     const ref = value != null && lab.query && /^[\w.-]+$/.test(lab.name) && /^[\w.-]+$/.test(value) ? `${lab.query}#${lab.name}=${value}@n` : null
@@ -349,37 +357,38 @@ function labelView(k, data, st, lab, W) {
   if (none) out.push(valueRow('filter-none', lab.waiting ? 'not labeled yet' : 'no value', 'unseen', '░', none, filter === NO_VALUE))
   out.push(k.text(' '))
 
-  // ---- the records: which ones, the list around the one selected, and that one whole
-  const which = filter == null ? `{dim:records ·} all ${n(total)}` : `{dim:records ·} {${valueTone(values, filter)}:${k.escape(filter === NO_VALUE ? (lab.waiting ? 'not labeled yet' : 'no value') : filter)}} ${n(total)}`
+  // ---- the examples of the value picked: one record at a time, its matched part marked
+  if (filter == null) return k.stack(out)
+  const vname = filter === NO_VALUE ? (lab.waiting ? 'not labeled yet' : 'no value') : filter
   out.push(k.beside(
-    k.text(which, { wrap: false }),
-    filter != null ? k.region('filter-all', { label: 'every record' }, k.text('{dim:·} {accent:show all}', { wrap: false })) : false,
-    k.text(total ? `{dim:${n(rec + 1)} of ${n(total)}}` : ' ', { grow: 1, wrap: false, align: 'right' }),
+    k.text(`{dim:examples ·} {${filter === NO_VALUE ? 'unseen' : valueTone(values, filter)}:● ${k.escape(vname)}}`, { wrap: false }),
+    k.text(total ? `${n(rec + 1)} {dim:of} ${n(total)}  {dim:[ ] flip · ↑ ↓ value}` : ' ', { grow: 1, wrap: false, align: 'right' }),
     { gap: 1 },
   ))
   if (!total) { out.push(k.text('{dim:  no record has this value}')); return k.stack(out) }
   if (!got) { out.push(k.text('{dim:  reading the records…}')); return k.stack(out) }
   if (got.error) { out.push(k.text(`{bad:  × ${k.escape(got.error)}}`)); return k.stack(out) }
-  const detail = cur ? recordDetail(k, lab, cur, W) : []
-  // (the subject is one part of `out` and three rows, with the definition's under them)
-  const room = Math.max(3, k.h - out.length - 2 - defs.length - detail.length - 2 - chromeOf(k, data.chat))
-  const i0 = Math.max(0, recs.findIndex(r => r.i === rec))
-  const top = Math.max(0, Math.min(recs.length - room, i0 - Math.floor(room / 2)))
-  // a wide pane shows more of each path; a narrow one keeps room for the record's words
-  const placeW = Math.min(Math.max(30, Math.floor(W / 3)), Math.max(8, ...recs.map(r => len(place(r.ref)))))
-  const vW = Math.min(14, Math.max(8, ...values.map(len)))
-  for (const r of recs.slice(top, top + room)) {
-    const on = r.i === rec
-    const v = r.value == null ? (r.waiting ? 'not yet' : 'no value') : r.value
-    const tone = r.value == null ? (r.waiting ? 'unseen' : 'dim') : valueTone(values, r.value)
-    const words = String(r.words || r.missing || '').replace(/\s+/g, ' ')
-    const wroom = Math.max(10, W - 3 - placeW - 2 - (vW + 2) - 2 - 16 - 2)
-    const line = `{dim:${k.escape(pad(place(r.ref, placeW), placeW))}}  {${tone}:● ${k.escape(pad(v, vW))}}  {dim:${k.escape(pad(byWords(r), 16))}}  ${on ? `**${k.escape(cut(words, wroom))}**` : k.escape(cut(words, wroom))}`
-    out.push(k.region(`rec-${r.i}`, { label: `${place(r.ref)}, a record of ${lab.name}: ${v} (${byWords(r) || 'no source'})`, ref: r.ref }, k.text(line, { wrap: false })))
-  }
-  out.push(k.text(' '))
-  out.push(...detail)
+  if (cur) out.push(...exampleView(k, lab, cur, W, chromeOf(k, data.chat)))
   return k.stack(out)
+}
+
+/** A label's kind in a word or two, for the panel's head. */
+function kindWords(kind) {
+  if (kind === 'regex') return 'regex'
+  if (kind === 'code') return 'code (Python)'
+  if (kind === 'prompt') return 'prompt: the model read each record'
+  if (kind === 'set') return 'set by Claude, after reading'
+  return String(kind || '')
+}
+
+/** What a label ran over: `14,591 records in revisions.jsonl`, with how far it is when it is not done. */
+function ranOver(lab) {
+  const parts = [`${n(lab.records || 0)} record${lab.records === 1 ? '' : 's'} in ${scopeOf(lab)}`]
+  if (lab.trial) parts.push(`a trial sample of ${n(lab.matched || lab.records || 0)}`)
+  if (lab.waiting) parts.push(`${n(lab.waiting)} waiting for the model`)
+  if (lab.failed) parts.push(`${n(lab.failed)} got no value`)
+  if (lab.disagree) parts.push(`${n(lab.disagree)} corrected by you`)
+  return parts.join(' · ')
 }
 
 /** The records a label is over, in words: its glob, and where it keeps only some of them. */
@@ -387,28 +396,19 @@ function scopeOf(lab) {
   return [lab.in || 'the records Claude named', lab.where ? `where ${lab.where}` : '', lab.within ? `within ${lab.within[0]} = ${lab.within[1]}` : ''].filter(Boolean).join(' ')
 }
 
-// the rows of a definition shown before `… more lines`: the code's first lines, a pattern or a question whole while it
-// is short; and the most shown whole, past which `thimble label NAME` prints it
-const DEF_SHORT = { code: 4, other: 6 }
+// the most rows of a definition the panel shows, past which `thimble label NAME` prints it
 const DEF_WHOLE = 40
 
-/** A label's definition under the panel's head, wrapped at the panel's width: the pattern, the code (its first lines,
- *  and a press that shows the rest), or the model's question. `whole`: every line, up to DEF_WHOLE. */
-function defRows(k, lab, W, whole) {
+/** A label's definition under the panel's head, whole, wrapped at the panel's width: the pattern, the code (its
+ *  Python in color), or the model's question. */
+function defRows(k, lab, W) {
   const def = String(lab.rule || '').replace(/\s+$/, '')
   if (!def.trim()) return []
   const w = Math.max(20, W - 2)
   const rows = lab.kind === 'prompt' ? wrap(def.replace(/\s+/g, ' ').trim(), w) : wrap(def, w)
   const tone = lab.kind === 'prompt' ? 'ink' : 'c1'
-  const short = lab.kind === 'code' ? DEF_SHORT.code : DEF_SHORT.other
-  const most = whole ? DEF_WHOLE : short
-  const out = rows.slice(0, most).map(r => k.text(`{${tone}:${k.escape(r)}}`, { wrap: false }))
-  if (rows.length > short) {
-    const left = rows.length - most
-    const words = !whole ? `{dim:… ${n(left)} more line${left === 1 ? '' : 's'} ·} {accent:show all}`
-      : left > 0 ? `{dim:… ${n(left)} more lines: thimble label ${k.escape(lab.name)} ·} {accent:show less}` : '{accent:show less}'
-    out.push(k.region('def-more', { label: whole ? 'the first lines of the definition' : 'the whole definition' }, k.text(words, { wrap: false })))
-  }
+  const out = rows.slice(0, DEF_WHOLE).map(r => k.text(lab.kind === 'code' ? pyLine(k, r) || ' ' : `{${tone}:${k.escape(r)}}`, { wrap: false }))
+  if (rows.length > DEF_WHOLE) out.push(k.text(`{dim:… ${n(rows.length - DEF_WHOLE)} more lines: thimble label ${k.escape(lab.name)}}`, { wrap: false }))
   return out
 }
 
@@ -437,19 +437,34 @@ export function byWords(r) {
   return String(r.by || '')
 }
 
-/** The record selected, whole: its place, its value and where it came from, the model's reason, its words, and the
- *  values to check it with (each a press). */
-function recordDetail(k, lab, r, W) {
+/** The example shown: its place, its value and where the value came from, the part the label matched (a regex's
+ *  match with the words around it, the fields the code read; or the record's start, for a model's label, with its
+ *  reason), and the values to check it with (each a press). A long record shows only the stretch around the match,
+ *  cut with …. */
+function exampleView(k, lab, r, W, chrome) {
   const tone = r.value == null ? 'dim' : valueTone(lab.values, r.value)
-  const head = `{dim:${k.escape(r.ref)}} · {${tone}:● ${k.escape(r.value == null ? (r.waiting ? 'not labeled yet' : 'no value') : r.value)}} {dim:· ${k.escape(byLong(r))}}`
-  const out = [k.text(head, { wrap: false })]
+  const mark = r.value == null ? 'accent' : tone
+  const head = `{dim:${k.escape(place(r.ref, Math.max(20, W - 40)))}} · {${tone}:● ${k.escape(r.value == null ? (r.waiting ? 'not labeled yet' : 'no value') : r.value)}} {dim:· ${k.escape(byLong(r))}}`
+  const rows = []
+  const w = Math.max(20, W - 4)
+  // at most this many rows of the record, so the check row stays on the screen
+  const most = Math.max(3, Math.min(10, k.h - chrome - 22))
+  if (r.hit) {
+    rows.push(...markedRows(k, [[r.hit.before, false], [r.hit.match, true], [r.hit.after, false]], w, most, mark))
+  } else if (Array.isArray(r.fields) && r.fields.length) {
+    for (const [name, value] of r.fields) rows.push(...markedRows(k, [[name, true], [`: ${value}`, false]], w, 2, mark))
+  } else {
+    const text = String(r.text || r.words || r.missing || '').replace(/\r/g, '').replace(/\n{2,}/g, '\n')
+    rows.push(...markedRows(k, [[text, false]], w, Math.min(most, 5), mark))
+  }
+  const out = [k.region('example', { label: `${place(r.ref)}, an example of ${lab.name} = ${r.value ?? 'no value'}`, ref: r.ref },
+    k.stack(k.text(head, { wrap: false }), ...rows.map(x => k.beside(k.text('{dim:│} ', { wrap: false }), x, { gap: 0 }))))]
   if (r.reason) out.push(k.text(`{dim:why: ${k.escape(cut(String(r.reason).replace(/\s+/g, ' '), W - 6))}}`, { wrap: false }))
   if (r.error) out.push(k.text(`{bad:× ${k.escape(cut(r.error, W - 4))}}`, { wrap: false }))
-  const text = String(r.text || r.words || r.missing || '').replace(/\r/g, '')
-  for (const l of wrap(text.replace(/\n{2,}/g, '\n'), W - 2).slice(0, 5)) out.push(k.text(`  ${k.escape(l)}`, { wrap: false }))
   if (!r.missing) {
     // the person's check: the value they say it has (the one it has now reads as agreeing)
     const vs = (lab.values || []).slice(0, 9)
+    out.push(k.text(' '))
     out.push(k.beside(
       k.text('{dim:your check:}', { wrap: false }),
       ...vs.map((v, i) => k.region(`chk-${i}`, { label: `check: ${v}` }, k.text(`{${valueTone(lab.values, v)}:●} ${v === r.value ? `**${k.escape(v)}**` : k.escape(v)}`, { wrap: false }))),
@@ -457,6 +472,83 @@ function recordDetail(k, lab, r, W) {
     ))
   }
   return out
+}
+
+/** Pieces of text ([[words, marked]]) wrapped at `w` columns into at most `most` rows (the last cut with …), the
+ *  marked ones bold in `tone`. Words break at a space where they can; a newline starts a row. */
+function markedRows(k, pieces, w, most, tone) {
+  const chars = []
+  for (const [s, on] of pieces) for (const ch of Array.from(String(s ?? ''))) chars.push([ch === '\t' ? ' ' : ch, on])
+  const spans = []
+  let i = 0
+  while (i < chars.length) {
+    let j = Math.min(chars.length, i + w)
+    const nl = chars.slice(i, j).findIndex(c => c[0] === '\n')
+    if (nl >= 0) { spans.push([i, i + nl]); i += nl + 1; continue }
+    if (j < chars.length) { let b = j; while (b > i && chars[b][0] !== ' ') b--; if (b > i) j = b }
+    spans.push([i, j])
+    i = j
+    while (i < chars.length && chars[i][0] === ' ') i++
+  }
+  // the rows from the one before the first marked row, where it would be past the last row shown
+  const hit = spans.findIndex(([a, b]) => chars.slice(a, b).some(c => c[1]))
+  const from = hit >= most ? hit - 1 : 0
+  const shown = spans.slice(from, from + most)
+  const more = from + most < spans.length
+  return shown.map(([a, b], y) => {
+    const row = chars.slice(a, b)
+    if (from && !y && row[0] && row[0][0] !== '…') { row.unshift(['…', false]); while (row.length > w) row.splice(1, 1) }
+    if (more && y === shown.length - 1) { while (row.length >= w) row.pop(); row.push(['…', false]) }
+    let s = ''
+    let run = ''
+    let on = null
+    const flush = () => { if (run) s += on ? `{${tone}:**${k.escape(run)}**}` : k.escape(run); run = '' }
+    for (const [ch, m] of row) { if (m !== on) { flush(); on = m } run += ch }
+    flush()
+    return k.text(s || ' ', { wrap: false })
+  })
+}
+
+// Python's words that the code's definition draws in the accent, its strings and numbers in their own tones, and its
+// comments dim
+const PY_WORDS = new Set('and as assert break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield'.split(' '))
+
+/** A line of Python as markup: its keywords, strings, numbers and comments in their tones. */
+function pyLine(k, line) {
+  let s = ''
+  let i = 0
+  const a = Array.from(line)
+  while (i < a.length) {
+    const ch = a[i]
+    if (ch === '#') { s += `{dim:${k.escape(a.slice(i).join(''))}}`; break }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1
+      while (j < a.length && a[j] !== ch) j += a[j] === '\\' ? 2 : 1
+      s += `{c3:${k.escape(a.slice(i, j + 1).join(''))}}`
+      i = j + 1
+      continue
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      let j = i
+      while (j < a.length && /\w/.test(a[j])) j++
+      const word = a.slice(i, j).join('')
+      // (a string's prefix, such as r'…' or f"…", goes with the string)
+      if (/^[rbfuRBFU]{1,2}$/.test(word) && (a[j] === '"' || a[j] === "'")) { s += `{c3:${k.escape(word)}}`; i = j; continue }
+      s += PY_WORDS.has(word) ? `{accent:${word}}` : k.escape(word)
+      i = j
+      continue
+    }
+    if (/\d/.test(ch)) {
+      let j = i
+      while (j < a.length && /[\d.]/.test(a[j])) j++
+      s += `{c5:${a.slice(i, j).join('')}}`
+      i = j
+      continue
+    }
+    s += k.escape(ch)
+    i++
+  }
+  return s
 }
 
 function byLong(r) {
