@@ -46,6 +46,8 @@ export type MsgRecord = {
   caughtUp?: string
   /** the catch-up this message is one of: while its version shows, this message draws no text of its own */
   inCatchUp?: string
+  /** the version of the check that placed its marks (shell.tsx checkVersion); each result in `heals` names its own */
+  marked?: string
 }
 
 /** A catch-up: one message the squeeze chips write of Claude's messages since the person's last prompt (`rows`, in

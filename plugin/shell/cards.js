@@ -253,9 +253,11 @@ return k.text(data.text)`
 function spanText(r) {
   const t = String(r.text ?? '')
   const field = r.field ? `{dim:${esc(r.field.replace(/^.*\./, ''))}:} ` : ''
-  if (!Array.isArray(r.at) || !r.hot) return field + esc(t)
+  // a tab drawn as four spaces, as the rows around it are
+  const out = s => esc(s.replace(/\t/g, '    '))
+  if (!Array.isArray(r.at) || !r.hot) return field + out(t)
   const [a, b] = r.at
-  return `${field}${esc(t.slice(0, a))}{accent:**${esc(t.slice(a, b))}**}${esc(t.slice(b))}`
+  return `${field}${out(t.slice(0, a))}{accent:**${out(t.slice(a, b))}**}${out(t.slice(b))}`
 }
 
 /** The line, row or value a ref names in a few words: `revisions.jsonl:41`, `runs.csv row 3`, `forge.db prs/12`. */
@@ -312,9 +314,13 @@ export function drawsHyperlinks(env = {}) {
   return e.TERM === 'alacritty'
 }
 
+/** A row around the cited ones, on one line: its own spaces kept (a code line's indent), a tab as four spaces, a break
+ *  inside it as one space, and at most n characters. */
+const rowLine = (s, n) => { const t = String(s ?? '').replace(/\t/g, '    ').replace(/\s*[\r\n]+\s*/g, ' ').trimEnd(); return t.length <= n ? t : t.slice(0, n - 1) + '…' }
+
 /** The span part of a source citation: the kernel's span (resolve's `span`), or the code file's lines read here. */
 function spanPart(sp, room) {
-  const rows = (sp.rows || []).map(r => ({ ...r, n: r.n != null ? String(r.n) : '', text: r.hot ? spanText(r) : esc(short(r.text, 300)) }))
+  const rows = (sp.rows || []).map(r => ({ ...r, n: r.n != null ? String(r.n) : '', text: r.hot ? spanText(r) : esc(rowLine(r.text, 300)) }))
   const hot = rows.filter(r => r.hot).length || 1
   const metas = rows.filter(r => r.hot && r.meta).length
   const hotMax = Math.max(1, Math.min(8, Math.floor((room - (rows.length - hot) - metas) / hot)))

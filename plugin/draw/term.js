@@ -899,7 +899,7 @@ export function renderTerm(drawing, opts = {}) {
     e.rects.push({ x: l.x, y: l.y, w: l.w, h: 1 })
   }
   if (g.clipped) cx.cut.push({ k: 'clip' })
-  return { w, h, rows: g.rows, regions, marks: cx.marks, cut: cx.cut, warnings: drawing.warnings || [], error: drawing.error }
+  return { w, h, rows: g.rows, regions, marks: cx.marks, cut: cx.cut, warnings: drawing.warnings || [], error: drawing.error, ...(drawing.labelTones ? { labelTones: drawing.labelTones } : {}) }
 }
 
 /** The grid as plain text, one line per row, trailing spaces trimmed. */

@@ -7,7 +7,7 @@ import { register } from 'node:module'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, linksIn, placeOf, sourceCard } from '../cards.js'
 import { linkRuns } from '../carddetail.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
-import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withGone, withHeal, withObserver, wrapRuns } from '../message.js'
+import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withCheck, withGone, withHeal, withObserver, wrapRuns } from '../message.js'
 import { applyRewrite, restore } from '../../squeeze/chips.mjs'
 import { back, base, open, order, push, step, stepFrom, top } from '../tray.js'
 import { citeRef } from '../object.js'
@@ -135,6 +135,32 @@ test('a column of a one-row table cited as a series is drawn as one value, not a
   assert.deepEqual(sourceCard({ ref: 'r4@n', label: 'n', resolved: { ref: 'r4@n', rows: [], records: [], chain: [] }, query: two }).parts[0].data.rows.map(x => x.value), [400, 240])
 })
 
+test("a code citation's preview keeps every line's indent: the cited lines and the lines around them", () => {
+  const lines = [
+    { n: 10, text: 'def walk(node):' },
+    { n: 11, text: '    if node is None:' },
+    { n: 12, text: '        return 0' },
+    { n: 13, text: '\tfor kid in node.kids:' },
+    { n: 14, text: '        total += walk(kid)' },
+    { n: 15, text: '    return total' },
+  ]
+  // the kernel's span of a quote, and the code file's lines read by the card: both keep the spaces
+  for (const card of [
+    sourceCard({ ref: 'pkg/tree.py#L12-13', label: 'the base case', resolved: { span: { rows: lines.map(l => ({ ...l, hot: l.n === 12 || l.n === 13 })), cited: 2 } } }),
+    sourceCard({ ref: 'pkg/tree.py#L12-13', label: 'the base case', resolved: {}, lines }),
+  ]) {
+    const t = gridText(draw(card.parts[0], 60, 12)).split('\n').map(l => l.trimEnd())
+    assert.deepEqual(t.slice(0, 6), [
+      '10   def walk(node):',
+      '11       if node is None:',
+      '12 ▌         return 0',
+      '13 ▌     for kid in node.kids:',
+      '14           total += walk(kid)',
+      '15       return total',
+    ])
+  }
+})
+
 test("a citation's rows section names the cited files' own entries: records, rows or lines, and none for a whole file", () => {
   const query = { id: 'q4', about: 'survivors by class and sex', keys: ['class', 'sex'], table: [{ class: 3, sex: 'male', n: 347 }, { class: 1, sex: 'female', n: 94 }] }
   const ofRecords = { count: 347, rows: ['revisions.jsonl#L1-347'], records: [], chain: [], unit: 'records', unit_one: 'record' }
@@ -182,6 +208,28 @@ test('the healing pass in a drawing: a spinner while it runs, a re-pointed citat
   assert.deepEqual([f.heal, f.why], ['gone', 'the cited place is gone (no query r9)'])
   // a squeeze's new text is a new key: its own pass, the old result left alone
   assert.equal(needsHeal({ ...healed, shown: 'Busiest: [5](r1#day=a@n).' }), true)
+})
+
+test('a result an older version of the check kept is checked again, and the marks it placed are placed again', () => {
+  const text = 'Busiest: [5](r1#day=a@n). Many: [7](r1@n).'
+  const moved = { label: '5', ref: 'r1#day=a@n', state: 'linked', how: 'cell', to: 'r5#day=a@n' }
+  // kept by a version that wrote no `check`, its marks one short and placed by that version
+  const old = withHeal({ ...newRecord({ row: 'x', session: 's', text }), marks: newRecord({ row: 'x', session: 's', text }).marks.slice(0, 1) }, textKey(text), { changes: [moved] })
+  assert.equal(healedRecord(old).marks[0].heal, 'moved')
+  const now = withCheck(old, 'c2')
+  // the old result is gone, so the text is checked again and the old re-pointing is not drawn
+  assert.equal(needsHeal(now), true)
+  assert.equal(healedRecord(now).marks[0].heal, undefined)
+  assert.equal(healedRecord(now).marks[0].ref, 'r1#day=a@n')
+  assert.equal(now.marked, 'c2')
+  assert.equal(now.marks.filter(m => m.kind === 'cite').length, 2)
+  // the new pass's result names its version: it stands, and the record is the same one
+  const again = withHeal(now, textKey(text), { changes: [{ ...moved, to: 'r1#day=a@n', how: 'kept' }], check: 'c2' })
+  assert.equal(withCheck(again, 'c2'), again)
+  assert.equal(needsHeal(withCheck(again, 'c2')), false)
+  // a newer version checks it again; with no version known, the kept result stands
+  assert.equal(needsHeal(withCheck(again, 'c3')), true)
+  assert.equal(withCheck(old, null), old)
 })
 
 test('an opened citation reaches Claude as written, with what the check found there', () => {

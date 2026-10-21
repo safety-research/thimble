@@ -32,7 +32,7 @@ import { paintRegions, selectable } from './cells'
 import { bodyRows, cardFrame, cardLine, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, noteViewport, noticeOpen, openDetailPane, registerDetail } from './detail'
-import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withGone, withHeal, withObserver } from './message.js'
+import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withCheck, withGone, withHeal, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, partLines, recordRefs, refsKey, regionMeta, regionRefs, splitsNote } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList, threadOf } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
@@ -852,8 +852,29 @@ async function indexRow($: Engine, line: Record<string, unknown>): Promise<void>
   f.pending.add('index')
 }
 
-/** A record kept: in $.state for the drawing, and on disk for the browser and a resumed session. */
+/** The files whose code makes a citation check's result and places a message's marks: the healing pass and what it
+ *  reads with (engine/kernel), and the marks (message.js). */
+const CHECK_FILES = ['engine/kernel/heal.py', 'engine/kernel/refs.py', 'engine/kernel/objects.py', 'engine/kernel/query.py', 'engine/kernel/sources.py', 'engine/kernel/store.py', 'shell/message.js']
+let checkRead: Promise<string | null> | null = null
+
+/** The version of the check that runs now: a key over its files' code, read once per load. A record keeps it with each
+ *  result and with its marks (message.js withCheck), so after an update a resumed session checks its messages again.
+ *  Null when a file cannot be read: the kept results stand, as before. */
+export function checkVersion($: Engine): Promise<string | null> {
+  if (!checkRead) {
+    const dir = $.plugin.root.replace(/\/+$/, '')
+    checkRead = (async () => {
+      try { return textKey((await Promise.all(CHECK_FILES.map(async f => String(await $.fs.read(`${dir}/${f}`))))).join('\u0000')) } catch { return null }
+    })()
+  }
+  return checkRead
+}
+
+/** A record kept: in $.state for the drawing, and on disk for the browser and a resumed session. Its marks are this
+ *  version's (each record is read through withCheck, or made new). */
 export async function saveRecord($: Engine, rec: MsgRecord): Promise<void> {
+  const check = await checkVersion($)
+  if (check && !rec.marked) rec = { ...rec, marked: check }
   await $.state.set({ ...MSG, id: rec.row }, rec)
   const f = await msgFilesNow($)
   f.pending.add(rec.row)
@@ -864,7 +885,10 @@ export async function saveRecord($: Engine, rec: MsgRecord): Promise<void> {
 export async function recordNow($: Engine, row: string): Promise<MsgRecord | null> {
   // a record an earlier version kept with an explain after its text: its marks placed again, so a press, ] and the
   // drawing count the same marks
-  const placed = (r: MsgRecord) => ((r.marks || []).some(m => (m as Any).loose) ? (remark(r) as MsgRecord) : r)
+  // and a record another version of the check kept: its results dropped, so its texts are checked again, and its
+  // marks placed again (withCheck)
+  const check = await checkVersion($)
+  const placed = (r: MsgRecord) => { const c = withCheck(r, check) as MsgRecord; return (c.marks || []).some(m => (m as Any).loose) ? (remark(c) as MsgRecord) : c }
   const held = (await $.state.get({ ...MSG, id: row })).value as MsgRecord | null | undefined
   if (held) return placed(held)
   const f = await msgFilesNow($)
@@ -905,7 +929,10 @@ async function withSparkValues($: Engine, rec: MsgRecord): Promise<MsgRecord> {
 /** The message's record at this row, as a drawing reads it: kept, else made from its words (no write here). */
 async function drawnRecord($: Engine, at: string, text: string): Promise<MsgRecord> {
   const kept = await recordNow($, at)
-  return recordFor(kept, { row: at, session: await sessionKey($), text }) as MsgRecord
+  const rec = recordFor(kept, { row: at, session: await sessionKey($), text }) as MsgRecord
+  // a record made here has its marks from this version
+  const check = await checkVersion($)
+  return check && !rec.marked ? { ...rec, marked: check } : rec
 }
 
 // ------------------------------------------------------------------------------------------------ healing citations
@@ -984,11 +1011,11 @@ async function runHeal($: Engine, row: string, key: string): Promise<void> {
   if (!now || textKey(shownOf(now)) !== key) return
   if (!out || !Array.isArray(out.changes)) {
     // kept as checked, so it does not run again at each drawing; the person hears why once
-    await saveRecord($, withHeal(now, key, { changes: [], error: true }) as MsgRecord)
+    await saveRecord($, withHeal(now, key, { changes: [], error: true, check: await checkVersion($) }) as MsgRecord)
     failed($, 'The citations were not checked', (r.stderr || r.stdout || `exit ${r.exitCode}`).trim(), 'Open a citation to see its place')
     return
   }
-  await saveRecord($, withHeal(now, key, { of: out.of, version: out.version, changes: out.changes }) as MsgRecord)
+  await saveRecord($, withHeal(now, key, { of: out.of, version: out.version, check: await checkVersion($), changes: out.changes }) as MsgRecord)
   const bad = out.changes.filter((c: Any) => c && c.state === 'contradicted' && !healTold.has(`${row}|${c.label}|${c.ref}`))
   if (bad.length) {
     healTell.push({ row, changes: bad })
