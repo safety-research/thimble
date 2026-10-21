@@ -76,22 +76,34 @@ export const FEW = 12
  *  with its files under it when open, then one line for the groups nothing touched (`8,412 other files, none touched`),
  *  which opens to them. `open`: the keys of the groups open (`rest` for that line). Each item {id, kind: 'file' |
  *  'group' | 'rest', f | g, depth, files}. */
+/** The id of a file's (`f`) or a group's (`g`) row. A region's id holds letters, digits and `_.:-`, at most 64 of
+ *  them (draw/kit.js), and the kit renames any other: then the part the program selects and the part the person moves
+ *  to are two names, and a press or a move finds no row. A path with other characters (`runs/r01/x.txt`) is spelled
+ *  with them as `-` and made unique by a short hash of the whole path: `f:runs-r01-x.txt.k3x9a`. */
+export function itemId(kind, path) {
+  const raw = `${kind}:${path}`
+  if (/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(raw)) return raw
+  let h = 0
+  for (const ch of String(path)) h = (Math.imul(h, 31) + ch.codePointAt(0)) >>> 0
+  return `${kind}:${String(path).replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 40)}.${h.toString(36)}`
+}
+
 export function listItems(data, by, open, room = FEW) {
   const files = data.files || []
   const rest = data.rest || { path: [] }
   const order = (a, b) => STATUS.indexOf(a.status) - STATUS.indexOf(b.status) || a.path.localeCompare(b.path, 'en', { numeric: true })
   const all = () => [...files, ...rest.path.map((_, i) => restFile(rest, i))]
-  if (files.length + rest.path.length <= Math.max(FEW, room)) return all().sort(order).map(f => ({ id: `f:${f.path}`, kind: 'file', f, depth: 0 }))
+  if (files.length + rest.path.length <= Math.max(FEW, room)) return all().sort(order).map(f => ({ id: itemId('f', f.path), kind: 'file', f, depth: 0 }))
   const isOpen = new Set(open || [])
   const keyOf = by === 'type' ? f => f.type : f => f.folder
   const out = []
   const group = (g, depth) => {
-    out.push({ id: `g:${g.key}`, kind: 'group', g, depth })
+    out.push({ id: itemId('g', g.key), kind: 'group', g, depth })
     if (!isOpen.has(g.key)) return
     // its files, read once a group is open
     const mine = files.filter(f => keyOf(f) === g.key)
     for (let i = 0; i < rest.path.length; i++) if ((by === 'type' ? typeOfPath(rest.path[i]) : folderOf(rest.path[i])) === g.key) mine.push(restFile(rest, i))
-    for (const f of mine.sort(order)) out.push({ id: `f:${f.path}`, kind: 'file', f, depth: depth + 1 })
+    for (const f of mine.sort(order)) out.push({ id: itemId('f', f.path), kind: 'file', f, depth: depth + 1 })
   }
   const list = data[by] || []
   const touched = list.filter(g => g.touched > 0)
@@ -297,7 +309,7 @@ export function program(k, data) {
   k.on('press', e => (e.region ? press(e.region) : null))
   k.on('return', () => (at ? press(at) : null))
   // esc goes back from a file to the list, on the file
-  const back = () => ({ file: null, at: st.from || `f:${file.path}` })
+  const back = () => ({ file: null, at: st.from || itemId('f', file.path) })
   if (level === 'file') k.on('esc', back, 'Coverage')
   // ← → as in a tree: → opens the group or the file selected; ← closes the group, goes up to the group a file is in, or
   // back from a file to the list

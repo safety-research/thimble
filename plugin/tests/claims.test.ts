@@ -5,6 +5,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { press, promptStub } from './stubs'
+import { itemId } from '../panes/coverage.js'
 
 const ROOT = '/data'
 const USAGE = { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 100 }
@@ -348,4 +349,33 @@ test('a key of a pane\'s program typed while the prompt had the keys (e in Claim
   expect(w.keys.panel).toBe(true)
   // e opened the claim's evidence
   expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/evidence/)
+})
+
+// ↓ in a pane is Claude Code's step to the next press in its order (the next gutter cell): the selection follows the
+// ring, and the input bar names the part selected. Files in folders have ids the kit keeps (panes/coverage.js itemId)
+test('Coverage: ↓ moves the selection with the ring, and the input bar names the file', async ($, on) => {
+  const nested = { ...COV, files: COV.files.map((f, i) => ({ ...f, path: `runs/r0${i + 1}/${f.path}` })) }
+  const w = world(on, [FORK1], { cov: nested })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  await press($, w.clock, key('r'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('Ask about runs/r01/revisions.jsonl')
+  const g1 = `g|side|${(await rowKey($, itemId('f', 'runs/r01/revisions.jsonl').replace(/\./g, '\\.'))).split('|')[2]}`
+  const g2 = `g|side|${(await rowKey($, itemId('f', 'runs/r02/pages.jsonl').replace(/\./g, '\\.'))).split('|')[2]}`
+  w.focused.length = 0
+  await $.ui.focus({ requestId: 'object', element: g2, origin: { kind: 'person' } } as never)
+  await w.clock.advance(200)
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.advance(100); await w.clock.settle() }
+  const drawn = JSON.stringify(await $.ui.render(PANE))
+  expect(drawn).toContain('Ask about runs/r02/pages.jsonl')
+  expect(w.focused).not.toContain(g1)
+  // ↵ on it (Claude Code's press on the ring's cell) opens its lines
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
+  await ui.press({ key: g2 })
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(PANE))).toContain('runs/r02/pages.jsonl')
+  expect(textOf(await $.ui.render(PANE))).toContain('file ·')
 })

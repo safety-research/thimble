@@ -6,7 +6,7 @@ import '../../test-home.mjs'
 import '../../draw/kit.js'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import coverage from '../coverage.js'
+import coverage, { itemId } from '../coverage.js'
 import labels from '../labels.js'
 import claims from '../../claims/graph.js'
 import { applyTurn, emptyStore } from '../../claims/store.js'
@@ -27,23 +27,47 @@ test('Coverage: → opens the group or the file selected, ← closes the group, 
   const groups = Array.from({ length: 30 }, (_, r) => ({ folder: `runs/r${String(r).padStart(2, '0')}/`, files: 4, touched: r === 1 ? 1 : 0 }))
   const cov = { session: 's', total: { files: 120, touched_files: 1, seen_files: 1 }, files, untouched: rest, groups, types: [] }
   const data = coverage.data({ coverage: { cov } }, {}, { w: 100, h: 40 })
-  let st = { at: 'g:runs/r01/' }
+  let st = { at: itemId('g', 'runs/r01/') }
   st = after(coverage, data, st, 'right')
   assert.deepEqual(st.open, ['runs/r01/'])
   // → again on an open group does nothing; ↓ to its file, then ← goes up to the group, and ← again closes it
   assert.deepEqual(after(coverage, data, st, 'right').open, ['runs/r01/'])
-  st = { ...st, at: 'f:runs/r01/x.txt' }
+  st = { ...st, at: itemId('f', 'runs/r01/x.txt') }
   st = after(coverage, data, st, 'left')
-  assert.equal(st.at, 'g:runs/r01/')
+  assert.equal(st.at, itemId('g', 'runs/r01/'))
   st = after(coverage, data, st, 'left')
   assert.deepEqual(st.open, [])
   // → on a file opens its lines; ← goes back to the list, on the file
   const few = coverage.data({ coverage: { cov: { ...cov, untouched: { path: ['b.txt'], unit: ['lines'], units: [3] }, files: [file('a.txt', { status: 'seen', touched: true })], groups: [] } } }, {}, { w: 100, h: 40 })
-  st = after(coverage, few, { at: 'f:a.txt' }, 'right')
+  st = after(coverage, few, { at: itemId('f', 'a.txt') }, 'right')
   assert.equal(st.file, 'a.txt')
   st = after(coverage, few, st, 'left')
   assert.equal(st.file, null)
-  assert.equal(st.at, 'f:a.txt')
+  assert.equal(st.at, itemId('f', 'a.txt'))
+})
+
+test('Coverage: a row\'s id is one the kit keeps, so the part selected is the part drawn, and a move or ↵ on a folder finds it', () => {
+  const file = (path, o = {}) => ({ path, type: 'txt', unit: 'lines', units: 3, status: 'not read', touched: false, ...o })
+  const groups = Array.from({ length: 30 }, (_, r) => ({ folder: `runs/r${String(r).padStart(2, '0')}/`, files: 1, touched: r < 2 ? 1 : 0 }))
+  const files = groups.map((g, r) => file(`${g.folder}x.txt`, r < 2 ? { status: 'seen', touched: true } : {}))
+  const cov = { session: 's', total: { files: 30, touched_files: 2 }, files, untouched: { path: [], unit: [], units: [] }, groups, types: [] }
+  const data = coverage.data({ coverage: { cov } }, {}, { w: 100, h: 40 })
+  const run = (state, event) => DK.run(coverage.program, data, { w: 100, h: 40, mode: 'pane', state, ...(event ? { event } : {}) })
+  const d = run({})
+  const ids = d.regions.map(r => r.id)
+  // every row's id is drawn as the program names it: no id renamed, and the part selected is a part drawn
+  assert.ok(!(d.warnings || []).some(w => /characters ids cannot hold/.test(String(w.message || w))), JSON.stringify(d.warnings))
+  assert.ok(ids.includes(d.selected), `${d.selected} not in ${ids.join(' ')}`)
+  const second = itemId('g', 'runs/r01/')
+  assert.ok(ids.includes(second))
+  // the ring moved to the second folder: the program selects it, and its label names the folder
+  const moved = run({}, { type: 'focus', region: second })
+  assert.equal(moved.state.at, second)
+  assert.match(moved.regions.find(r => r.id === second).meta.label, /^runs\/r01\/: /)
+  // ↵ (a press) on it opens it, with its file under it
+  const opened = run({ at: second }, { type: 'press', region: second })
+  assert.deepEqual(opened.state.open, ['runs/r01/'])
+  assert.ok(run(opened.state).regions.some(r => r.id === itemId('f', 'runs/r01/x.txt')))
 })
 
 test('Labels: → opens the label selected, as ↵ does; ← goes back to the list', () => {
