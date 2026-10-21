@@ -11,7 +11,9 @@
 //                                       row refs the output named (`revisions.jsonl#L4111`), a row's identity and not
 //                                       its content (the `thimble` command keeps its own record)
 //
-// It also sets THIMBLE_SESSION for the session's commands, so `thimble` files its records under the same session.
+// It also sets THIMBLE_SESSION for the session's commands, so `thimble` files its records under the same session, and
+// THIMBLE_START, the folder the session started in ($.session.root(), which a shell `cd` does not move), so a command
+// run after `cd src` keeps its records in the start folder's thimble/ (kernel/store.py find_root).
 import type { EngineInterface, Register } from 'claude-code'
 
 import { sessionKey } from './conversation'
@@ -119,6 +121,18 @@ function resultText(r: { text?: unknown; result?: unknown }): string {
   return typeof r.result === 'string' ? r.result : ''
 }
 
+/** Sets THIMBLE_START to the folder the session started in: its project root, else the cwd it started with. */
+async function anchor($: Engine, cwd: unknown): Promise<void> {
+  let root = ''
+  try {
+    root = String((await $.session.root()) || '')
+  } catch {
+    // an engine with no project root: the folder the session started in
+  }
+  if (!root && typeof cwd === 'string') root = cwd
+  if (root.startsWith('/')) await $.env.set('THIMBLE_START', root)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
@@ -126,6 +140,11 @@ export const register: Register = on => {
       await bind($)
     } catch {
       // the module only watches; a session it cannot bind is left as it is
+    }
+    try {
+      await anchor($, (e as { cwd?: unknown }).cwd)
+    } catch {
+      // the records then follow the working folder, as outside a session
     }
     return r
   })

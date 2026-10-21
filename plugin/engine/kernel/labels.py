@@ -162,6 +162,55 @@ def frame(st: Store, name: str):
     return pd.DataFrame(rows, columns=cols)
 
 
+ONE_UNIT = {"records": "record", "rows": "row", "lines": "line", "sections": "section", "hunks": "hunk", "files": "file",
+            "pages": "page"}
+
+
+def units_of(st: Store, lab: dict[str, Any]) -> list[dict[str, Any]]:
+    """The label's records in each file's own unit, the largest first: [{unit, n, counts}], where `counts` holds each
+    value's records of that unit. A line of code is a line, a row of a table a row, a record of a JSONL file a record. A
+    Markdown file or a diff the label takes whole (one section or hunk, with no --where or --within) is a file, as is a
+    JSON document read as one value. A label over code and Markdown files can so hold lines and files at once."""
+    from .lineage import entry_word
+
+    units = lab.get("units") or {}
+    per_file = Counter(ref.split("#")[0] for ref in units)
+    narrowed = bool(lab.get("where") or lab.get("within"))
+    kinds: dict[str, str | None] = {}
+    by: dict[str, dict[str, Any]] = {}
+    for ref in units:
+        rel, _, frag = ref.partition("#")
+        if rel not in kinds:
+            try:
+                kinds[rel] = S.kind_of_file(st.root, rel)
+            except OSError:
+                kinds[rel] = None
+        kind = kinds[rel]
+        if frag in ("", "/") or (kind in ("markdown", "diff") and per_file[rel] == 1 and not narrowed):
+            unit = "files"
+        elif kind is None and frag.startswith("page"):
+            unit = "pages"
+        else:
+            unit = entry_word(kind) or "records"
+        u = by.setdefault(unit, {"unit": unit, "n": 0, "counts": Counter()})
+        u["n"] += 1
+        v = value_of(lab, ref)
+        if v is not None:
+            u["counts"][v] += 1
+    return sorted(by.values(), key=lambda u: -u["n"])
+
+
+def unit_count(n: int, unit: str) -> str:
+    """`465 lines`, `1 file`."""
+    return f"{n:,} {ONE_UNIT.get(unit, unit) if n == 1 else unit}"
+
+
+def units_said(parts: list[dict[str, Any]]) -> str:
+    """The records in their units, in words: `465 lines`, or `8 files and 457 lines`."""
+    said = [unit_count(u["n"], u["unit"]) for u in parts]
+    return said[0] if len(said) == 1 else ", ".join(said[:-1]) + " and " + said[-1]
+
+
 def files_of(lab: dict[str, Any]) -> Counter:
     """How many of the label's records each file holds."""
     return Counter(ref.split("#")[0] for ref in lab.get("units") or {})
@@ -899,7 +948,7 @@ if (lead && one) parts.push(k.text(`{dim:${lead}} ${k.escape(cut)}`))
 // what made the label, said once: the definition's line names a rule (code, a pattern), so the line under it does not
 // say it again; under a question it says that the model read each record
 const said = lead && one && L.kind !== 'prompt'
-parts.push(k.text(`{dim:${said ? '' : `${k.escape(how)} · `}${k.fmt(total)} records${L.trial ? ' (a trial sample)' : ''}${checked}}`))
+parts.push(k.text(`{dim:${said ? '' : `${k.escape(how)} · `}${L.units ? k.escape(L.units) : k.fmt(total) + ' records'}${L.trial ? ' (a trial sample)' : ''}${checked}}`))
 return k.frame(k.stack(...parts), { title: k.title })
 """
 
@@ -916,18 +965,27 @@ def card_spec(st: Store, lab: dict[str, Any], q: dict[str, Any] | None) -> dict[
         scope += f" within {lab['within'][0]} = {lab['within'][1]}"
     definition = str(lab.get("rule") or "")
     failed_why = next((u.get("err") for u in (lab.get("units") or {}).values() if u.get("v") is None and u.get("err")), None)
+    parts = units_of(st, lab)
     info = {"name": lab["name"], "kind": lab.get("kind"), "values": lab["values"], "records": s["records"],
+            "units": units_said(parts) if parts else "",
             "waiting": s["waiting"], "failed": s["failed"], "failed_why": (failed_why or "")[:120], "checked": s["checked"],
             "agree": s["agree"], "disagree": s["disagree"], "trial": bool(lab.get("trial")), "scope": scope,
             "definition": definition[:400], "version": lab.get("version"), "rev": lab.get("rev")}
     cite = f"[{n:,}]({_cite_value(qid, lab['name'], top)})" if qid and n else f"{n:,}"
-    text = f"{cite} of {s['records']:,} records are {top}."
+    # the count in the records' own unit: `5 of 13 files`, `5 of 465 lines`; when the label mixes units it says so
+    unit = parts[0]["unit"] if len(parts) == 1 else "records"
+    of = f"of {s['records']:,} {ONE_UNIT.get(unit, unit) if s['records'] == 1 else unit}"
+    text = f"{cite} {of} are {top}."
+    if len(parts) > 1:
+        each = [f"{u['counts'].get(top, 0):,} of the {unit_count(u['n'], u['unit'])}" for u in parts]
+        text += (f" The records mix units ({units_said(parts)}): "
+                 f"{', '.join(each[:-1])} and {each[-1]} are {top}.")
     if s["waiting"]:
         text += f" {s['waiting']:,} still wait for the model."
     if s["failed"]:
         text += f" {s['failed']:,} have no value."
     title = (f"{lab['name']}: {s['records']:,} records wait for the model" if s["waiting"] and not s["valued"]
-             else f"{lab['name']}: {n:,} of {s['records']:,} records are {top}")
+             else f"{lab['name']}: {n:,} {of} are {top}" + (f" ({units_said(parts)})" if len(parts) > 1 else ""))
     spec: dict[str, Any] = {
         "title": title,
         "question": definition if lab.get("kind") == "prompt" else f"{lab.get('kind')}: {definition}"[:400],

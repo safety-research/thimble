@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { answersOf, failedCall, readLabel, summary } from '../labelreads.mjs'
 import { prep } from '../node/prep.mjs'
 import { renderTerm } from '../../draw/term.js'
-import { defLine, howMade, program as labelPanel, toneBeside, valueTone } from '../../panes/labels.js'
+import { defLine, howMade, place, program as labelPanel, toneBeside, valueTone } from '../../panes/labels.js'
 import { gridText } from '../../draw/term.js'
 import '../../draw/kit.js'
 
@@ -134,4 +134,15 @@ test('a label says what made it in plain names, and its panel shows the definiti
   const folded = draw({ open: 'has-link', fold: true })
   assert.doesNotMatch(folded.text, /def label/)
   assert.ok(folded.on.includes('act:def'))
+})
+
+test('a record in the Labels pane is named by its path in the folder, cut from the left when long', () => {
+  // files of one name in different folders stay apart
+  assert.equal(place('prompts/labels/v2.md#L1-27'), 'prompts/labels/v2.md:1')
+  assert.equal(place('prompts/notes/v2.md#L1-9'), 'prompts/notes/v2.md:1')
+  assert.equal(place('db/forge.db#prs/12'), 'db/forge.db#prs/12')
+  // a long place keeps its file's name and line, cut at a folder
+  const long = place('plugin/prompts/observer-turn/v2.md#L1-40', 24)
+  assert.equal(long, '…/observer-turn/v2.md:1')
+  assert.ok(Array.from(long).length <= 24)
 })

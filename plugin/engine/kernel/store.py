@@ -44,21 +44,37 @@ def thimble_home() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or os.path.expanduser("~/.thimble"))
 
 
-def find_root(start: str | Path | None = None) -> Path:
-    """The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above `start` (the working folder) that
-    holds a thimble/ record folder, else `start` itself."""
-    env = os.environ.get("THIMBLE_ROOT")
-    if env:
-        return Path(env).resolve()
-    here = Path(start or os.getcwd()).resolve()
-    d = here
+def _holding(start: Path) -> Path | None:
+    """The nearest folder at or above `start` that holds a thimble/ record folder, or None."""
+    d = start
     while True:
         t = d / DIR
         if (t / "queries").is_dir() or (t / "objects").is_dir() or (t / "ledger.jsonl").is_file():
             return d
         if d.parent == d:
-            return here
+            return None
         d = d.parent
+
+
+def find_root(start: str | Path | None = None) -> Path:
+    """The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above `start` (the working folder) that
+    holds a thimble/ record folder, else `start` itself.
+
+    In a Claude Code session the hooks set THIMBLE_START to the folder the session started in. A `cd` inside that folder
+    does not move the records: they stay in the start folder's thimble/ (or one above it), so a session whose first
+    command is `cd src` keeps one record folder, not a second one inside the source tree. When no folder at or above
+    the start folder holds records, a folder between it and the working folder that holds them is used. A working
+    folder outside the start folder is found as before, and so is any folder outside a session."""
+    env = os.environ.get("THIMBLE_ROOT")
+    if env:
+        return Path(env).resolve()
+    here = Path(start or os.getcwd()).resolve()
+    anchor = os.environ.get("THIMBLE_START")
+    if anchor:
+        a = Path(anchor).resolve()
+        if here == a or a in here.parents:
+            return _holding(a) or _holding(here) or a
+    return _holding(here) or here
 
 
 def session_id() -> str:
