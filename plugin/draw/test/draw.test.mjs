@@ -191,6 +191,18 @@ test('a plot reads an [x, y] pair in values as a point, and says so when a serie
   assert.match(bad.warnings.join('\n'), /"win %" has no point to draw; give it values \(numbers\) or points \(\[x, y\] pairs\)/)
 })
 
+test("a frame's title or bottom line takes a k.text as its words, and any other node warns instead of drawing '[object Object]'", () => {
+  const d = runProgram({ program: `return k.frame(k.text('a line of rows'), { title: k.text('Rows'), bottom: k.text('{good:a} b') })` }, { w: 60, h: 24 })
+  assert.deepEqual(d.warnings, [])
+  assert.deepEqual(d.root.bottom, [{ s: 'a', tone: 'good' }, { s: ' b', tone: 'dim' }])
+  assert.deepEqual(d.root.title, [{ s: 'Rows', tone: 'ink', b: true }])
+  assert.match(gridText(renderTerm(d, { w: 60 })), /╰─ a b ─/)
+  const bad = runProgram({ program: `return k.frame('x', { bottom: k.bars([{ label: 'q', value: 2 }]) })` }, { w: 60, h: 24 })
+  assert.equal(bad.root.bottom, undefined)
+  assert.doesNotMatch(json(bad) + gridText(renderTerm(bad, { w: 60 })), /object Object/)
+  assert.match(bad.warnings.join('\n'), /k\.frame bottom takes words or k\.text, not a stack node/)
+})
+
 test('dots apply per series, and each legend entry shows its series as it is drawn', () => {
   const steps = [[500, 60], [1000, 68], [1500, 84], [2000, 87]]
   const { t } = plotRows(`return k.plot([{ name: 'legal %', points: ${json(steps)}, dots: true }, { name: 'goal 99%', points: [[500, 99], [2000, 99]], tone: 'dim' }], { h: 8 })`)

@@ -140,8 +140,26 @@
   // ---------------------------------------------------------------- inline markup -> runs
   // **bold**   {tone:words} (nests; known tone names only)   [words](#id) a link to a cite, examples or region id
   // \* \{ \} \[ \] \\ escape.  A newline is a hard break.  Runs: {s, tone, b?, ref?} and {br: true}.
+  // A place that takes words (a frame's title, right or bottom line, a box title, a canvas text) also takes a k.text:
+  // it gives its runs, and a run in the default tone (the k.text had no tone of its own) takes the place's tone. Any
+  // other node or object has no words to give: it draws nothing and warns, so no '[object Object]' reaches the card.
   function inline(str, o, ctx) {
     o = o || {}
+    if (str != null && typeof str === 'object') {
+      if (isObj(str) && str.t === 'text' && Array.isArray(str.runs)) {
+        const tone = o.tone != null && ctx.untoned && ctx.untoned.has(str) ? toneOf(o.tone, ctx) : null
+        return str.runs.map(r => {
+          if (r.br) return { br: true }
+          const x = Object.assign({}, r)
+          if (tone && x.tone === 'ink') x.tone = tone
+          if (o.bold) x.b = true
+          return x
+        })
+      }
+      const what = str instanceof Canvas ? 'a canvas' : isObj(str) && typeof str.t === 'string' ? `a ${str.t} node` : Array.isArray(str) ? 'a list' : 'an object'
+      warn(ctx, `${o.what || 'this place'} takes words or k.text, not ${what}; it is left out`)
+      return []
+    }
     const a = Array.from(clean(typeof str === 'number' ? fmt(str) : str))
     const runs = []
     let bold = !!o.bold
@@ -353,7 +371,9 @@
       // ---------------- text
       text(str, o) {
         o = o || {}
-        const n = node('text', { runs: inline(str, { tone: o.tone, bold: o.bold, raw: o.raw }, ctx) })
+        const n = node('text', { runs: inline(str, { tone: o.tone, bold: o.bold, raw: o.raw, what: 'k.text' }, ctx) })
+        // a k.text with no tone of its own takes the tone of a place that takes words, such as a frame's bottom line
+        if (o.tone == null) (ctx.untoned || (ctx.untoned = new WeakSet())).add(n)
         if (o.align === 'right' || o.align === 'center') n.align = o.align
         if (o.wrap === false) n.wrap = false
         if (o.max != null) n.max = Math.max(1, int(o.max, 1))
@@ -377,9 +397,11 @@
       frame(kid, o) {
         o = o || {}
         const n = node('frame', { kid: asNode(kid) || k.space(1, 1) })
-        if (o.title != null) n.title = inline(o.title, { bold: true }, ctx)
-        if (o.right != null) n.right = inline(o.right, { tone: 'dim' }, ctx)
-        if (o.bottom != null) n.bottom = inline(o.bottom, { tone: 'dim' }, ctx)
+        // a line with no words (a node that has none) is left out, so no renderer makes room for it
+        const line = (key, v, place) => { if (v == null) return; const r = inline(v, place, ctx); if (r.length) n[key] = r }
+        line('title', o.title, { bold: true, what: 'k.frame title' })
+        line('right', o.right, { tone: 'dim', what: 'k.frame right' })
+        line('bottom', o.bottom, { tone: 'dim', what: 'k.frame bottom' })
         if (o.tone) n.tone = T(o.tone)
         return sizing(n, o)
       },
@@ -439,15 +461,17 @@
         const labelW = Math.max(1, Math.min(labelAsked, width - valW - 2 - Math.max(4, Math.floor(width / 3))))
         // a note that only says the row's value again (a total beside the total) is not drawn a second time
         const bare = t => String(t).replace(/[,\s]/g, '')
-        const noteOf = (it, i) => it.note == null || bare(plain(inline(it.note, {}, ctx))) === bare(texts[i]) ? null : it.note
+        const noteOf = (it, i) => { if (it.note == null) return null; const t = plain(inline(it.note, { what: 'a k.bars note' }, ctx)); return t === '' || bare(t) === bare(texts[i]) ? null : it.note }
         const noteW = Math.max(0, ...items.map((it, i) => noteOf(it, i) != null ? k.len(plain(inline(noteOf(it, i), {}, ctx))) : 0))
         const notes = noteW > 0 && width - labelW - valW - noteW - 4 >= 12
+        // a note may be words or a k.text; it stands one space after the value
+        const noteText = (note, w) => { const n = k.text(note == null ? '' : note, { w: w, tone: 'dim', wrap: false }); n.runs.unshift({ s: ' ', tone: 'dim' }); return n }
         const rows = items.map((it, i) => {
           const row = k.beside(
             k.text(it.label == null ? '' : it.label, { w: labelW, tone: it.labelTone || o.labelTone || 'ink', raw: !o.markup, wrap: false }),
             Array.isArray(it.parts) ? k.bar(it.parts, { max: max }) : isFinite(vals[i]) ? k.bar(vals[i], { max: max, tone: labelTone(it) || it.tone || o.tone }) : k.unseen(),
             k.text(texts[i], { w: valW, align: 'right', bold: !!(it.bold || o.bold), tone: isFinite(vals[i]) ? 'ink' : 'unseen', raw: true }),
-            notes && k.text(' ' + (noteOf(it, i) == null ? '' : noteOf(it, i)), { w: noteW + 1, tone: 'dim', wrap: false }),
+            notes && noteText(noteOf(it, i), noteW + 1),
             { gap: 1 })
           // an item made from a row of the card's data (the row itself, a spread of it, or {row}) is a part by itself:
           // its rows open with no ref written
@@ -1003,7 +1027,7 @@
   Canvas.prototype.text = function (x, y, str, o) {
     if (typeof o === 'string') o = { tone: o }
     o = o || {}
-    const op = ['text', fl(x), fl(y), inline(str, { tone: o.tone, bold: o.bold, raw: o.raw }, this._ctx).filter(r => !r.br), o.align === 'right' || o.align === 'center' ? o.align : 'left']
+    const op = ['text', fl(x), fl(y), inline(str, { tone: o.tone, bold: o.bold, raw: o.raw, what: 'canvas text' }, this._ctx).filter(r => !r.br), o.align === 'right' || o.align === 'center' ? o.align : 'left']
     if (o.max != null) op.push(Math.max(0, int(o.max, 0)))
     return this._op(op)
   }
@@ -1017,7 +1041,7 @@
     if (typeof o === 'string') o = { title: o }
     o = o || {}
     const op = ['box', fl(x), fl(y), Math.max(0, fl(w)), Math.max(0, fl(h)), cT(this, o.tone, 'dim')]
-    if (o.title != null) op.push(inline(o.title, { bold: true }, this._ctx).filter(r => !r.br))
+    if (o.title != null) op.push(inline(o.title, { bold: true, what: 'canvas box title' }, this._ctx).filter(r => !r.br))
     // fill: an opaque box (a callout over what was drawn before it): its inside is cleared on both surfaces
     if (o.fill) { if (op.length < 7) op.push(null); op.push({ fill: true }) }
     return this._op(op)
