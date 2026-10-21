@@ -166,7 +166,7 @@ export function FixState({ ws }: { ws: string }) {
       </span>
       {line.actions.map((a) => (
         <button key={a} type="button" className="shell-fix-act" disabled={!!busy} onClick={() => void act(a)} data-fix-action={a}>
-          {label[a]}
+          {busy === a && a !== 'submit' ? 'Restarting…' : label[a]}
         </button>
       ))}
     </span>
