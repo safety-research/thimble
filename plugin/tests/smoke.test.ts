@@ -23,7 +23,7 @@ const EVENTS = '/home/t/.thimble/lean/events/s-1.jsonl'
 const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const ANSWER = 'June 18 had the most saves: [6,543](q1#day=2026-06-18@n).'
 
-function world(on: Any, o: { heal?: () => unknown } = {}) {
+function world(on: Any, o: { heal?: () => unknown; coverage?: () => unknown } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', HOME: '/home/t', PATH: '/usr/bin:/bin' })
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('env.set', () => ({ value: {} }))
@@ -46,6 +46,7 @@ function world(on: Any, o: { heal?: () => unknown } = {}) {
     let out: unknown = {}
     if (prep) out = { drawing: DRAWING, ...(prep.check ? { check: { line: null, tried: 1, total: 1, failed: 0, cut: 0, ms: 1 } } : {}) }
     else if (e.argv.includes('resolve')) out = RESOLVED
+    else if (e.argv.includes('coverage') && o.coverage) out = await o.coverage()
     else if (e.argv.includes('heal') && o.heal) {
       out = await o.heal()
       if (out instanceof Error) return { deny: out.message } as never
@@ -175,4 +176,37 @@ test('the bar shows thimble\'s own work: nothing for 300 ms, then a spinner and 
   await clock.advance(200)
   await clock.settle()
   expect(await bar()).not.toContain('checking citations')
+})
+
+test('after an answer the bar names each step as it runs, the newest first with +1 for another, until the last ends', async ($, on) => {
+  // the coverage count and the citation check run until the test lets each end
+  let endCov: () => void = () => undefined
+  let endHeal: () => void = () => undefined
+  const cov = new Promise<void>(r => { endCov = r })
+  const heal = new Promise<void>(r => { endHeal = r })
+  world(on, { coverage: () => cov.then(() => ({ files: [], groups: [], types: [] })), heal: () => heal.then(() => ({ of: 'v1', version: 'v1', changes: [] })) })
+  const clock = mock.clock(on)
+  on('tool.call', () => ({ result: '' }))
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: ANSWER }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  await reply($)
+  const bar = async () => textOf(await $.ui.render(BAND))
+  const step = async () => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] ([a-z][a-z ]*[a-z](?: \+\d)?)/.exec(await bar())?.[1] ?? null
+  await clock.advance(200)
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  // the reply's drawing started the check, the turn's end the count a moment later: the count shows, +1 for the check
+  expect(await step()).toBe('counting coverage +1')
+  endCov()
+  await clock.advance(200)
+  await clock.settle()
+  expect(await step()).toBe('checking citations')
+  endHeal()
+  await clock.advance(200)
+  await clock.settle()
+  expect(await step()).toBeNull()
 })

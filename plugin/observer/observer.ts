@@ -53,6 +53,7 @@ import { sessionKey } from '../hooks/conversation'
 import { modelWhy, signInFailed } from '../shell/why.js'
 import { claimsDigest, claimsGap, turnClaims } from '../claims/term'
 import { featureOn, lensOn } from '../settings/features.mjs'
+import { busy } from '../shell/busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,7 +207,7 @@ async function objectsNow($: Engine, root: string, since: number): Promise<Seen[
 async function coverageNow($: Engine, root: string): Promise<string> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   try {
-    const r = await $.process.run([`${dir}/bin/thimble`, 'coverage'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: S.session }, timeoutMs: 90000 })
+    const r = await busy($, 'counting coverage', () => $.process.run([`${dir}/bin/thimble`, 'coverage'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: S.session }, timeoutMs: 90000 }))
     return r.exitCode === 0 ? cut(r.stdout.trim(), 2400) : `(thimble coverage failed: ${cut((r.stderr || r.stdout).trim(), 200)})`
   } catch (err) {
     return `(thimble coverage failed: ${cut(String((err as Error)?.message || err), 200)})`
@@ -303,6 +304,15 @@ async function lensParts($: Engine): Promise<Part[]> {
 
 type Pass = { f: Any; out: Answer | null; ms: number; fork: Record<string, unknown> }
 
+// what each lens adds that the person sees, as the bar's busy line names the look (the others light keys)
+const LENS_NOUNS: Record<string, string> = { explain: 'explainers', heads: 'details', claims: 'claims' }
+
+/** The look's step on the bar's busy line (shell/busy.ts), by the lenses it asks: `adding explainers, details, claims`. */
+export function lookWord(lenses: string[]): string {
+  const nouns = lenses.map(x => LENS_NOUNS[x]).filter((x): x is string => !!x)
+  return nouns.length ? `adding ${nouns.join(', ')}` : 'reading the answer'
+}
+
 /** One pass over the messages: one fork of the session, its prompt the frame with the lenses, then the turn template. */
 async function pass($: Engine, o: { frame: { text: string; id: string }; parts: Part[]; msgs: Msg[]; evidence: { objects: string; coverage: string }; st: Any; shown: string }): Promise<Pass> {
   const tmpl = await promptText($, 'observer-turn')
@@ -318,7 +328,7 @@ async function pass($: Engine, o: { frame: { text: string; id: string }; parts: 
   fork.lens_chars = Object.fromEntries(o.parts.map(x => [x.lens.name, (system.chars[x.lens.name] || 0) + (turn.chars[x.lens.name] || 0)]))
   const model = S.model || 'opus'
   const t0 = Date.now()
-  const f: Any = await tracked($, { feature: 'observer', prompt: o.frame.id, model, extra }, async () => {
+  const f: Any = await tracked($, { feature: 'observer', prompt: o.frame.id, model, extra, doing: lookWord(o.parts.map(x => x.lens.name)) }, async () => {
     const r: Any = await $.model.fork({ prompt })
     if (r && r.isAnswered) {
       const shares = sharesOf({ system, turn, lenses: o.parts.map(x => x.lens), raw: jsonIn(r.text), rawText: r.text }) as Any

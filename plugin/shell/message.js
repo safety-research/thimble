@@ -925,6 +925,6 @@ export function healedRecord(rec, { checking = false } = {}) {
   return { ...rec, marks: rec.marks.map(m => (m && m.kind === 'cite' && !m.code ? { ...m, heal: 'checking' } : m)) }
 }
 
-/** The glyph after a citation's words: a small spinner while it is checked, a red × when the cited place contradicts it,
- *  a grey ? when the cited place does not exist (its card says why). */
-export const HEAL_TAG = { checking: ' ◌', bad: ' ×', gone: ' ?' }
+/** The glyph after a citation's words: a red × when the cited place contradicts it, a grey ? when the cited place does
+ *  not exist (its card says why). While it is checked it has none: the bar says `checking citations` (busy.ts). */
+export const HEAL_TAG = { bad: ' ×', gone: ' ?' }

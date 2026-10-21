@@ -29,7 +29,7 @@ const WAYS = { length: 'shorter / longer', interpret: 'facts / interpretation' }
 export default {
   name: 'chips',
   title: 'Squeeze',
-  reads: args => [`record:${args.row}`, `sqz:${args.row}`, `held:chips-${args.row}`, 'busy'],
+  reads: args => [`record:${args.row}`, `sqz:${args.row}`, `held:chips-${args.row}`],
   stateKey: args => `chips-${String(args.row || '').replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 64)}`,
   data(stores, args) {
     const rec = stores[`record:${args.row}`] || null
@@ -45,8 +45,6 @@ export default {
       keys: !!stores[`held:chips-${args.row}`],
       // the terminal's own: a call running, a call that failed
       running: !!(ui && ui.running) || !!s.running,
-      // the glyph that turns while thimble works (the terminal's shell/busy.ts), in place of the still dot
-      busy: typeof stores.busy === 'string' ? stores.busy : null,
       error: (ui && ui.error) || s.error || null,
     }
   },
@@ -150,8 +148,7 @@ export function program(k, data) {
   const edge = row.find(c => c.id === st.edge) || null
   if (typing != null) k.status(`+ ${typing}▏ ↵ adds it · tab lets it go`, 'warn')
   else if (data.error) k.status(`× ${data.error}`, 'bad')
-  else if (data.catchup && typeof rec.shown !== 'string') k.status(`s ● writing the catch-up of ${data.catchup.replies} replies…`, 'warn')
-  else if (pending || data.running) k.status(`s ${data.busy || '●'} rewriting…`, 'warn')
+  // a rewrite or a catch-up on its way: the bar's one busy line says it (`⠋ rewriting`, the terminal's shell/busy.ts)
   else if (edge) k.status(`${edge.name} goes no further than ${edge.levels[edge.level]}`, 'warn')
   else if (problem && typeof rec.shown === 'string') k.status(`! ${problem}`, 'warn')
 

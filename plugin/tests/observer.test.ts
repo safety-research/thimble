@@ -196,7 +196,7 @@ test('v draws the first proposed view at once: the bar says it works, nothing as
   // while the fork works: the bar says so with its seconds, and the transcript has no progress line of its own
   await clock.advance(3500)
   await clock.settle()
-  expect(await bar()).toMatch(/visualizing \d+s/)
+  expect(await bar()).toMatch(/drawing a card \d+s/)
   expect(await bar()).not.toContain('pick')
   const working = textOf(await reply($))
   expect(working).not.toContain('visualize…')
@@ -207,7 +207,7 @@ test('v draws the first proposed view at once: the bar says it works, nothing as
   await $.turn.complete({ turnId: 'f1', agentId: 'agent-1', answer: 'Saves per day.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.advance(300)
   await clock.settle()
-  expect(await bar()).not.toContain('visualizing')
+  expect(await bar()).not.toContain('drawing a card')
   expect(await bar()).not.toContain('more view')
   await reply($)
   await clock.settle()

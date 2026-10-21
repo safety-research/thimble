@@ -32,7 +32,6 @@ import { answerRow, cardsUnder, closeTray, drawnTextOf, leanEnv, loadObject, pre
 import { noteEdit } from '../shell/runtime'
 import { sessionKey } from '../hooks/conversation'
 import { ARRIVE, SCALE, answerText, applyRewrite, cardListsAt, cardSpec, cardsAfter, cardsKnown, catchUpText, checkRewrite, chipsOf, drawnOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, queryIdsOf, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, toolkitOf, unplacedMoves, withLater } from './chips.mjs'
-import { spinFrame } from '../shell/busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,10 +97,9 @@ export function sLit(rec: MsgRecord, _ui: SqzUi | null): { lit: boolean; note: s
   return own?.lit && own.note && !/\blines?\b/.test(String(own.note)) ? { lit: true, note: String(own.note) } : null
 }
 
-/** Whether the message is drawn dim with a turning glyph: a rewrite of it is running. */
-export function busyGlyph(ui: SqzUi | null): string | null {
-  // the frame of thimble's one spinner timer (shell/busy.ts), so the message's glyph turns with the bar's
-  return ui?.running ? spinFrame() : null
+/** Whether the message is drawn dim: a rewrite of it is running (the bar's busy line says `rewriting`, shell/busy.ts). */
+export function busyGlyph(ui: SqzUi | null): boolean {
+  return !!ui?.running
 }
 
 /** How much of the shown text is drawn now: all of it (null), or the first `n` characters while it writes itself in. */
@@ -236,7 +234,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
       maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
     })
     const t0 = await $.clock.now()
-    const r = await tracked($, { feature: 'squeeze', prompt: sp.id, model: req.model, extra: { row, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), ...(answer ? { cards: answer.cards.length } : {}) } }, () => $.model.complete(req as Any))
+    const r = await tracked($, { feature: 'squeeze', prompt: sp.id, model: req.model, ...(isCatchUp(rec) ? { doing: 'writing a catch-up' } : {}), extra: { row, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), ...(answer ? { cards: answer.cards.length } : {}) } }, () => $.model.complete(req as Any))
     const ms = (await $.clock.now()) - t0
     if (!r.isAnswered) {
       const why = modelWhy(r)

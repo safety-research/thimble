@@ -208,7 +208,7 @@ export default {
   data(stores, _args, size) {
     const s = stores.labels || {}
     // gen: how many checks the person made, so a page of records is read again after one
-    return { list: Array.isArray(s.list) ? s.list : null, error: s.error || null, gen: Number(s.checks) || 0, refreshing: !!s.loading, chat: !!s.chat, w: size.w, h: size.h }
+    return { list: Array.isArray(s.list) ? s.list : null, error: s.error || null, gen: Number(s.checks) || 0, chat: !!s.chat, w: size.w, h: size.h }
   },
   program,
 }
@@ -216,7 +216,7 @@ export default {
 export function program(k, data) {
   if (!data.list) {
     if (data.error) return k.text(`{bad:×} the labels could not be read: ${k.escape(data.error)}`)
-    return k.text('{dim:◌ reading the labels…}')
+    return k.text('{dim:reading the labels…}')
   }
   const st = k.state || {}
   const W = Math.max(40, k.w)
@@ -238,7 +238,7 @@ function listView(k, data, st, W) {
   // → opens the label selected, as ↵ does
   k.on('right', () => (idx >= 0 ? open(idx) : null))
   if (at) k.select(at)
-  const head = subjectBlock(k, { title: 'Labels', line: `${n(list.length)} label${list.length === 1 ? '' : 's'} in this folder${data.refreshing ? ' · ◌' : ''}` })
+  const head = subjectBlock(k, { title: 'Labels', line: `${n(list.length)} label${list.length === 1 ? '' : 's'} in this folder` })
   if (!list.length) return k.stack(head, k.text('{dim:No labels here yet. When Claude sorts records into categories, it makes a label, and the label shows here.}'))
   const longest = Math.min(28, Math.max(...list.map(l => len(l.name))))
   const tw = Math.max(...list.map(l => n(l.records || 0).length))
@@ -337,7 +337,7 @@ function labelView(k, data, st, lab, W) {
   out.push(subjectBlock(k, {
     glyph: `{${valueTone(values, values[0])}:●}`,
     title: k.escape(lab.name),
-    line: `${k.escape(kindWords(lab.kind))}${data.refreshing ? ' · ◌' : ''}`,
+    line: k.escape(kindWords(lab.kind)),
     rows: [...defs, ...(defs.length ? [k.text(' ')] : []), k.text(k.escape(ranOver(lab)), { wrap: false })],
   }))
 

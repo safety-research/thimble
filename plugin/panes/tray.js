@@ -17,7 +17,7 @@
 //          what the check found, kept, moved, bad, quiet or gone), {kind: 'cite', ref, label, open}
 //          for a citation inside a card; `open` is the section shown, `note` whether it shows the section's note. A
 //          frame carries what it shows, so a surface draws it without the message's record.
-//   reads: the session's side threads (whether the mark has one); busy, the glyph that turns while thimble works
+//   reads: the session's side threads (whether the mark has one)
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host, each in its sandbox, as
 //          {title, right, drawings: [drawing], sections: [{id, key, words, drawings}], mark: [refs], links: [{id, ref,
 //          label}], problem} (cards.js drawnCard)
@@ -110,14 +110,12 @@ export const sameFrame = (a, b) => !!a && !!b && (a.row != null || b.row != null
 export default {
   name: 'tray',
   title: 'cite & explain',
-  reads: () => ['threads', 'steps', 'busy'],
+  reads: () => ['threads', 'steps'],
   stateKey: () => 'tray',
   data(stores) {
     const list = Array.isArray(stores.threads) ? stores.threads : []
     // a thread as the tray reads it: its key, its status, its turns (each question and answer), its error
     return {
-      // the turning glyph while thimble works (the terminal's shell/busy.ts), so a line that says the work never looks frozen
-      busy: typeof stores.busy === 'string' ? stores.busy : null,
       threads: list.map(t => ({ key: t.key || (t.scope ? threadKey(t.scope) : ''), status: t.status || '', error: t.error || '', turns: (t.turns || []).map(x => ({ role: x.role === 'user' ? 'person' : x.role, text: String(x.text || '') })) })),
       // whether ] and [ go anywhere from this mark ({next, prev}; null where the host does not say), what each goes to
       // ({nextWhat: 'citation', prevWhat: 'explainer'}), and where its reply is when that is an earlier one ({reply:
@@ -212,7 +210,7 @@ export function program(k, data) {
     const words = wordsHeads ? String((onWords.gloss && onWords.gloss.title) || onWords.label) : onWords.label
     parts.push(k.region('inner', { label: `${wordsHeads ? 'heads up' : 'explain'} ${onWords.label}` }, k.text(`{${wordsHeads ? 'heads' : 'explain'}:${wordsHeads ? '▲ heads up' : 'explain'}} ${k.escape(words.length > 70 ? words.slice(0, 69) + '…' : words)}`, { wrap: false })))
   }
-  if (top.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text(`${data.busy ? `{explain:${data.busy}} ` : ''}{dim:writing a longer explanation…}`))
+  // a longer explainer on its way: the bar's one busy line says it (`⠋ writing a longer explainer`)
   if (thread && thread.turns.length && !open && card && !card.problem && !card.error) {
     const q = (thread.turns.find(t => t.role === 'person') || {}).text || ''
     parts.push(k.region('thread', { label: 'the thread about this mark' }, k.text(`{dim:↳ thread:} ${k.escape(q.length > 60 ? q.slice(0, 59) + '…' : q)} {dim:· a opens it}`, { wrap: false })))

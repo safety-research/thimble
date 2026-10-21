@@ -1,6 +1,6 @@
 // aside.ts: work a key asks of Claude, done beside the conversation. v asks for another view of an answer; the card
 // is drawn under that answer, and the chat shows no prompt and no reply of Claude's. While the work runs, the bar says
-// so with thimble's other work (busy.ts: `⠋ visualizing 24s`); only a failure leaves a line under the answer.
+// so with thimble's other work (busy.ts: `⠋ drawing a card 24s`); only a failure leaves a line under the answer.
 //
 // The mechanism: a fork of main ($.agent.spawn with subagentType 'fork'), started in the background. A fork has the
 // conversation as its context (the answer, the queries behind it, the thimble guidance), its model and its tools, so

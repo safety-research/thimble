@@ -24,7 +24,7 @@ import { ask, leanEnv, noteForClaude, rootHere } from './shell'
 import { openSide, sideBack, sideNow } from './side'
 import { PANE as PANEL } from './detail'
 import { FAIL_KEYS, fixRequest, fixVerb, lineKey, shareRequest, USE_KEYS } from './fixask.js'
-import { busy } from './busy'
+import { busy, busySteps, busyWhile } from './busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,12 +54,18 @@ async function readJson($: Engine, path: string): Promise<Any> {
   try { return JSON.parse(t) } catch { return null }
 }
 
+// what each `thimble fix` verb does, as the bar's busy line says it while it runs (busy.ts)
+const FIX_STEPS: Record<string, string> = {
+  undo: 'undoing the fix', remove: 'removing the fix', status: 'reading the fixes', use: 'turning the fix on',
+  follow: 'updating the fix', keep: 'keeping the fix', send: 'sending the fix',
+}
+
 /** `thimble fix …` as the person's own command: its exit code and its words. `stdin`: the secret of a key press. */
 async function kernel($: Engine, args: string[], stdin?: string): Promise<{ ok: boolean; out: string }> {
   const root = (await rootHere($)) || (await home($))
   const dir = $.plugin.root.replace(/\/+$/, '')
   const env = await leanEnv($, root)
-  const r = await busy($, 'fixing', () => $.process.run([`${dir}/bin/thimble`, 'fix', ...args], { cwd: root, env, timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) }))
+  const r = await busy($, FIX_STEPS[args[0] ?? ''] ?? 'fixing', () => $.process.run([`${dir}/bin/thimble`, 'fix', ...args], { cwd: root, env, timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) }))
   return { ok: (r.exitCode ?? 1) === 0, out: `${String(r.stdout || '')}${r.stderr ? `\n${String(r.stderr)}` : ''}`.trim() }
 }
 
@@ -234,6 +240,8 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
 const seen = new Map<string, { status: string; used: number; title: string }>()
 /** The fixes whose draft the person asked for (p) and whose preview has not opened yet. */
 const shareWait = new Set<string>()
+// the fixes whose work the bar's busy line shows now, by slug
+const fixJobs = new Set<string>()
 let looked = false
 let poll: { cancel?: () => void } | null = null
 
@@ -258,6 +266,18 @@ export async function refreshFixes($: Engine): Promise<void> {
   // 'ready' is a fix that is not in use (after undo, or a send that was cancelled): only 'working' still works
   const working = fixes.filter(f => f.status === 'working')
   await $.state.set(FIXES, working.map(f => ({ slug: f.slug, title: f.title, kind: f.kind })))
+  // a fix Claude works on is a step of the bar's busy line (busy.ts) until its record stops saying `working`
+  for (const f of working) {
+    const word = `fixing: ${cut(f.title, 32)}`
+    if (fixJobs.has(f.slug) && busySteps().includes(word)) continue
+    fixJobs.add(f.slug)
+    void busyWhile($, word, async () => {
+      // (a new title is a new step)
+      const on = (await fixesWorking($)).some(x => x.slug === f.slug && x.title === f.title)
+      if (!on && !(await fixesWorking($)).some(x => x.slug === f.slug)) fixJobs.delete(f.slug)
+      return on
+    })
+  }
   // at session start, a fix that is on follows the newest release and says so in one line (followFix)
   const on = looked ? null : fixes.find(f => f.slug === (active || null)) ?? null
   const own = looked ? null : await ownFix($)
@@ -324,11 +344,10 @@ export async function fixesWorking($: Engine): Promise<{ slug: string; title: st
   return ((await $.state.get(FIXES)).value ?? []) as { slug: string; title: string; kind: string }[]
 }
 
-/** The bar's words for the fixes, at its left: `fixing: <title>` while one works, then the fix line's own keys. */
+/** The bar's words for the fixes, at its left: the fix line's own keys. (A fix that works is a step of the bar's busy
+ *  line, `⠋ fixing: <title>`: refreshFixes.) */
 export async function fixBar($: Engine): Promise<{ key: string; words: string; short?: string; tone?: 'error'; status?: boolean; good?: boolean }[]> {
   const out: { key: string; words: string; short?: string; tone?: 'error'; status?: boolean; good?: boolean }[] = []
-  const w = await fixesWorking($)
-  if (w.length) out.push({ key: '', words: w.length === 1 ? `◌ fixing: ${cut(w[0]!.title, 32)}` : `◌ fixing ${w.length}`, status: true })
   const l = await fixLineNow($)
   if (l?.kind === 'failed') out.push({ key: 'f', words: 'fix this' }, { key: 'F', words: 'report only' })
   else if (l?.kind === 'notice') {
