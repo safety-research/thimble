@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { loadExamples } from '../examples/load.mjs'
 import { fromArgs, fromHash, objectRef, toCommand, toHash } from '../handoff.js'
 import { runProgram } from '../sandbox-node.mjs'
-import { len, renderTerm } from '../term.js'
+import { gridText, len, renderTerm } from '../term.js'
 
 const DRAW = fileURLToPath(new URL('..', import.meta.url))
 const examples = loadExamples()
@@ -126,4 +126,37 @@ test('every form of the card guide, and of earlier guides, draws under a reply a
       if (w >= 96) assert.deepEqual(g.cut.filter(c => c.k === 'clip'), [], `${name} fits ${w} columns`)
     }
   }
+})
+
+const plotRows = (program, w = 80) => {
+  const d = runProgram({ program }, { w, h: 24 })
+  assert.equal(d.error, undefined, d.error && d.error.message)
+  const t = gridText(renderTerm(d, { w })).split('\n')
+  return { t, area: t.slice(0, t.findIndex(l => l.includes('└'))).filter(l => /[┤│]/.test(l)) }
+}
+const PTS = [[1, 0], [2, 2.5], [3, 5], [4, 7.5], [5, 10], [6, 5]]
+
+test('a plot asked for fewer rows still draws five, so its values do not flatten onto one line', () => {
+  for (const h of [3, 4, 5]) {
+    const { area } = plotRows(`return k.plot([{ name: 'win %', points: ${JSON.stringify(PTS)} }], { h: ${h}, dots: true, y: { min: 0 } })`)
+    assert.ok(area.length >= 5, `h ${h}: ${area.length} rows of plot`)
+    assert.ok(area.filter(l => /[⠀-⣿]/.test(l)).length >= 3, area.join('\n'))
+  }
+})
+
+test("a plot's y ticks spread over its rows, points sit on their tick's row, and the legend draws dots as dots", () => {
+  const { t, area } = plotRows(`return k.plot([{ name: 'win %', points: ${JSON.stringify(PTS)} }], { h: 4, dots: true, y: { min: 0 } })`)
+  // the labels: no two on neighboring rows; 0 sits on the last row of plot, beside the dots at 0; 10 beside the dot at 10
+  const labelled = area.map((l, i) => [i, (/^\s*([\d,.]+)┤/.exec(l) || [])[1]]).filter(r => r[1])
+  assert.ok(labelled.length >= 2 && labelled.every((r, i) => i === 0 || r[0] - labelled[i - 1][0] >= 2), JSON.stringify(labelled))
+  assert.deepEqual(labelled.at(-1), [area.length - 1, '0'])
+  assert.match(area.at(-1), /0┤[⠀-⣿]/)
+  assert.match(area[0], /10┤.*[⠀-⣿]/)
+  // the legend draws the series as the plot does: a dot for dots, a stroke for a line
+  assert.match(t.join('\n'), /⠶ win %/)
+  assert.match(plotRows(`return k.plot([{ name: 'saves', points: ${JSON.stringify(PTS)} }], { h: 8 })`).t.join('\n'), /━ saves/)
+  // a peak above the top tick plots above that tick's row, not level with it
+  const big = plotRows(`return k.plot([{ name: 'actions', points: [[0, 180], [10, 1238], [20, 404], [30, 30]] }], { h: 8, dots: true, y: { min: 0 } })`).t
+  const top = big.findIndex(l => /1,000┤/.test(l))
+  assert.ok(top > 0 && big.slice(0, top).some(l => /[⠀-⣿]/.test(l)), big.join('\n'))
 })

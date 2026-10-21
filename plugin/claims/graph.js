@@ -46,16 +46,18 @@ const sentenceOf = s => one(s).replace(/([\p{L}\p{N}%)"'”’])$/u, '$1.')
 const MAX_EVIDENCE = 4
 const MAX_SENTENCE = 4
 
-/** Words wrapped to lines of at most n characters (a word longer than n is cut). */
+/** Words wrapped to lines of at most n characters; a word longer than n goes on over the next lines, so no letter is
+ *  lost. */
 export function wrap(text, n) {
   const out = []
   let cur = ''
   for (const w of one(text).split(' ')) {
     if (!w) continue
-    const word = w.length > n ? w.slice(0, n - 1) + '…' : w
-    if (!cur) cur = word
-    else if (cur.length + 1 + word.length <= n) cur += ' ' + word
-    else { out.push(cur); cur = word }
+    let word = Array.from(w)
+    if (cur && Array.from(cur).length + 1 + word.length <= n) { cur += ' ' + word.join(''); continue }
+    if (cur) out.push(cur)
+    while (word.length > n) { out.push(word.slice(0, n).join('')); word = word.slice(n) }
+    cur = word.join('')
   }
   if (cur) out.push(cur)
   return out
@@ -526,7 +528,10 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
   if (box) {
     const inner = Math.max(20, Math.min(W - 6, 92))
     const who = saidWords(claim)
-    const words = wrap(`${sentenceOf(claim.text)}${who ? ` · ${who}` : ''}`, inner - 2).slice(0, MAX_SENTENCE)
+    const all = wrap(`${sentenceOf(claim.text)}${who ? ` · ${who}` : ''}`, inner - 2)
+    const words = all.slice(0, MAX_SENTENCE)
+    // a sentence longer than the box's lines says so where it stops
+    if (all.length > MAX_SENTENCE) words[MAX_SENTENCE - 1] = cut(words[MAX_SENTENCE - 1] + ' ' + all[MAX_SENTENCE], inner - 2)
     const said = words.map((l, i) => {
       // the words of who said it stay dim
       const at = who && i === words.length - 1 ? l.lastIndexOf(` · ${who}`) : -1
@@ -536,7 +541,9 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
     const more = box.open === 'ev' ? (box.evidence.length ? evidenceRows(k, box.evidence) : [{ text: '{dim:It cites no rows.}', part: null }])
       : box.open === 'hist' ? historyRows(k, box.history, claim, tone) : []
     const lines = [...said, ...more].slice(0, Math.max(1, lay.h - 2))
-    const vis = t => k.len(String(t).replace(/\\(.)/g, '$1').replace(/\{[A-Za-z0-9-]+:/g, '').replace(/[{}]/g, '').replace(/\*\*/g, ''))
+    // the cells a line of markup takes: an escaped character is one cell (the braces of "{ }" in a claim's words
+    // count), a tone's "{name:", its closing brace and ** take none
+    const vis = t => k.len(String(t).replace(/\\(.)|\{[A-Za-z][\w-]*:|\*\*|[{}]/g, (m, esc) => esc ?? ''))
     const bw = Math.min(W, Math.max(30, ...lines.map(l => Math.min(inner, vis(l.text)))) + 4)
     const bh = lines.length + 2
     const p = lay.pos.get(claim.id)
@@ -548,13 +555,6 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
   for (const nm of lay.names) {
     // no-break spaces, so no line drawn after it runs through a name
     c.text(nm.x, nm.y, `{${chosen ? 'dim-faint' : 'dim'}:${e(nm.name).replace(/ /g, ' ')}}`)
-  }
-  for (const { e: ed, bright } of linesOf(edges, lay.pos, claims, claim.id)) {
-    // at rest only the short lines inside a cluster, faint, so the clusters read first; once a claim is selected, only
-    // its own
-    if (chosen ? !bright : !short(ed)) continue
-    const a = lay.pos.get(ed.a), b = lay.pos.get(ed.b)
-    c.link(a.x, a.y, b.x, b.y, edgeTone(ed, bright && chosen))
   }
   for (const x of claims) {
     const p = lay.pos.get(x.id)
@@ -570,11 +570,20 @@ function graphOf(k, { claims, groups, edges, W, h, claim, near, tone, num, chose
     })
     c.region('said', frame.x + 1, frame.y + 1, frame.w - 2, frame.said, { label: `where "${cut(claim.text, 60)}" was said`, ref: (claim.sources || []).map(x => x.ref).slice(0, 6) })
   }
+  // the lines last, so each goes around the dots, the names and the box, or is not drawn (term.js): a line in pieces
+  // reads as lines that join nothing
+  for (const { e: ed, bright } of linesOf(edges, lay.pos, claims, claim.id)) {
+    // at rest only the short lines inside a cluster, faint, so the clusters read first; once a claim is selected, only
+    // its own
+    if (chosen ? !bright : !short(ed)) continue
+    const a = lay.pos.get(ed.a), b = lay.pos.get(ed.b)
+    c.link(a.x, a.y, b.x, b.y, edgeTone(ed, bright && chosen))
+  }
   return c
 }
 
 /**
- * The lines a graph draws, in the order drawn (a cell a line took stays its). A line joins two claims related in meaning
+ * The lines a graph draws, in the order drawn (lines that share a cell join there). A line joins two claims related in meaning
  * (supports, the same topic, contradicts) or drawing on the same rows; a correction is no line, since the corrected
  * claim shows it (a hollow dot, its history). Every line of the claim selected, bright; then, faint, each line between
  * two claims of one cluster where it crosses no dot (a line through a dot reads as two). A line to a claim of another

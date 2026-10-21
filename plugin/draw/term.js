@@ -8,13 +8,16 @@
 //   - a spark is one cell per value (averaged when there are more values than cells), on eight levels ▁..█;
 //   - a plot's lines are braille dots, two across and four down per cell, so a line stays thin; where two series
 //     share a cell it takes the color of the one listed first; a dot is four braille dots. The axis is ┤ └ ┴ with
-//     round values, and the y label and the legend share the top row;
+//     round values, a free row between two y labels, and a value on the same row as its label; a plot keeps at least
+//     five rows however short the program asked for. The y label and the legend share the top row, and the legend
+//     shows each series' mark as the plot draws it (━ for a line, ⠶ for dots);
 //   - a table is padded columns, numbers right-aligned, the widest text column shrinking first;
 //   - unseen data is ▒ (a medium shade), never blank, so a gap reads as a gap;
 //   - the cells of a mark (a bar's width, a spark, a plot's area) carry `m`, and a plot's dots the region of their
 //     series (`sr`): a selection recolors a mark's glyph and leaves its cell's ground alone (paint.js), so a selected
 //     bar keeps its height and the gap to the next row, and a selected series is its own dots, not the plot's area;
-//   - a canvas is replayed as the program placed it.
+//   - a canvas is replayed as the program placed it; a link is a route of ─ │ ╭ ╮ ╰ ╯ through blank cells that joins its
+//     two ends, or is not drawn.
 //
 // renderTerm(drawing, {w}) -> grid {w, h, rows, regions, marks, cut}
 //   rows     h rows of w cells {ch, tone, b?, bg?, ref?, px?, w2?, cont?, m?, sr?}; tone is a palette.js tone
@@ -536,8 +539,11 @@ export function niceTicks(lo, hi, n) {
   return { step, ticks }
 }
 
+// the fewest data rows a plot draws, whatever height the program asked for: on fewer, values a few steps apart share a
+// row, and a series from 2.5 to 10 on a 0–10 scale reads as flat on the zero line
+const MIN_PLOT_ROWS = 5
+
 function paintPlot(n, g, x, y, w, cx, mark) {
-  const h = n.h
   const S = n.series
   const xs = n.x || {}, ys = n.y || {}
   const xlog = !!xs.log
@@ -561,9 +567,29 @@ function paintPlot(n, g, x, y, w, cx, mark) {
   const top = ylab || legend ? 1 : 0
   const legendTop = legend && (ylab ? len(ylab) + 3 : 0) + legendW <= w
   const bottom = legend && !legendTop ? 1 : 0
-  const ph = Math.max(1, h - 2 - top - bottom)
-  // round values on y, inside the data's own range (or the one the program set)
-  const yticks = niceTicks(ymin, ymax, clamp(Math.floor(ph / 2), 2, 4)).ticks.filter(t => t >= ymin - 1e-9 && t <= ymax + 1e-9)
+  const ph = Math.max(MIN_PLOT_ROWS, n.h - 2 - top - bottom)
+  const h = ph + 2 + top + bottom
+  // y in rows from the top of the plot area: the top value at the middle of the first row, the bottom value at the
+  // middle of the last row, so a tick's label and the points at its value share a row, and points at the bottom
+  // value sit beside its label, above the axis line
+  const yAt = (v, lo, hi) => 0.5 + (hi - clamp(v, lo, hi)) / ((hi - lo) || 1) * (ph - 1)
+  // round values on y: the most ticks that leave a row free between two labels, so the labels spread over the plot's
+  // rows; inside the data's own range when two or more fit there, else with an end the program did not set out to
+  // the next round value, as the browser draws it
+  const fit = (extend, least) => {
+    for (let k = Math.ceil(ph / 2); k >= 1; k--) {
+      const step = niceTicks(ymin, ymax, k).step
+      const lo = extend && !isFinite(ys.min) ? Math.floor(ymin / step + 1e-9) * step : ymin
+      const hi = extend && !isFinite(ys.max) ? Math.ceil(ymax / step - 1e-9) * step : ymax
+      const ts = niceTicks(lo, hi, (hi - lo) / step).ticks.filter(t => t >= lo - 1e-9 && t <= hi + 1e-9)
+      if (ts.length >= least && ts.every((t, i) => i === 0 || Math.floor(yAt(ts[i - 1], lo, hi)) - Math.floor(yAt(t, lo, hi)) >= 2)) return { lo, hi, ts }
+    }
+    return null
+  }
+  const fitted = fit(false, 2) || fit(true, 2) || fit(false, 1) || { lo: ymin, hi: ymax, ts: [] }
+  ymin = fitted.lo; ymax = fitted.hi
+  const yticks = fitted.ts
+  const yu = v => yAt(v, ymin, ymax)
   const ylabels = yticks.map(fmtTick)
   const yw = Math.max(1, ...ylabels.map(len))
   const ox = yw + 1
@@ -572,11 +598,13 @@ function paintPlot(n, g, x, y, w, cx, mark) {
   // braille: two dots across and four down per cell
   const col = v => Math.round((tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * (pw - 1))
   const col2 = v => Math.round((tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * (pw * 2 - 1))
-  const row4 = v => Math.round((ymax - clamp(v, ymin, ymax)) / ((ymax - ymin) || 1) * (ph * 4 - 1))
+  const row4 = v => clamp(Math.floor(yu(v) * 4), 0, ph * 4 - 1)
+  // a series drawn as dots (the program asked for dots, or it has one point) shows a dot in the legend too
+  const asDots = s => !!n.dots || s.pts.filter(p => okX(p[0]) && p[1] !== null).length === 1
   if (!g.dry) {
     if (ylab) g.str(x, y, ylab.slice(0, w), 'dim')
     const tickRow = new Map()
-    yticks.forEach((t, i) => { const r = Math.floor(row4(t) / 4); if (!tickRow.has(r)) tickRow.set(r, ylabels[i]) })
+    yticks.forEach((t, i) => { const r = Math.floor(yu(t)); if (!tickRow.has(r)) tickRow.set(r, ylabels[i]) })
     for (let r = 0; r < ph; r++) {
       const lab = tickRow.get(r)
       if (lab) g.str(x + yw - len(lab), y + oy + r, lab, 'dim')
@@ -611,13 +639,13 @@ function paintPlot(n, g, x, y, w, cx, mark) {
     g.withClip(x + ox, y + oy, x + ox + pw, y + oy + ph, () => {
       S.slice().reverse().forEach(s => {
         const P = s.pts.filter(p => okX(p[0])).sort((a, b) => a[0] - b[0])
-        const lone = P.filter(p => p[1] !== null).length === 1
+        const dots = asDots(s)
         let prev = null
         for (const p of P) {
           if (p[1] === null) { prev = null; continue }
           const X = (x + ox) * 2 + col2(p[0]), Y = (y + oy) * 4 + row4(p[1])
-          // a dot is four braille dots, both across its cell and two down from its own quarter row
-          if (n.dots || lone) { const X0 = X - (X % 2), Y0 = Math.min(Y, (y + oy + ph) * 4 - 2); [0, 1].forEach(i => [0, 1].forEach(j => g.dot4(X0 + i, Y0 + j, s.tone, s.region))) }
+          // a dot is four braille dots, both across its cell and two down, centered on its value
+          if (dots) { const X0 = X - (X % 2), Y0 = (y + oy) * 4 + clamp(Math.round(yu(p[1]) * 4 - 1), 0, ph * 4 - 2); [0, 1].forEach(i => [0, 1].forEach(j => g.dot4(X0 + i, Y0 + j, s.tone, s.region))) }
           else if (prev) g.line4(prev[0], prev[1], X, Y, s.tone, s.region)
           else g.dot4(X, Y, s.tone, s.region)
           prev = [X, Y]
@@ -636,7 +664,7 @@ function paintPlot(n, g, x, y, w, cx, mark) {
     if (!legend) { area(); return }
     const name = s.name || ''
     if (lx + 2 + len(name) > x + w) { area(); return }
-    if (!g.dry) { g.put(lx, ly, '━', s.tone); g.str(lx + 2, ly, name, s.tone) }
+    if (!g.dry) { g.put(lx, ly, asDots(s) ? '⠶' : '━', s.tone); g.str(lx + 2, ly, name, s.tone) }
     if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: lx, y: ly, w: 2 + len(name), h: 1 })
     lx += 2 + len(name) + 3
   })
@@ -644,20 +672,33 @@ function paintPlot(n, g, x, y, w, cx, mark) {
 }
 
 // ---------------------------------------------------------------- canvas: the program's own cells
-/** The cells a straight link from (x0, y0) to (x1, y1) passes through, its ends left out, each with its glyph. */
-export function linkCells(x0, y0, x1, y1) {
+// the box-drawing glyph of a cell by the sides its line leaves through: up 1, right 2, down 4, left 8
+const SIDE_GLYPH = { 10: '─', 5: '│', 6: '╭', 12: '╮', 3: '╰', 9: '╯', 7: '├', 13: '┤', 14: '┬', 11: '┴', 15: '┼' }
+const sideTo = (a, b) => (b.x > a.x ? 2 : b.x < a.x ? 8 : b.y > a.y ? 4 : 1)
+/**
+ * The cells of a link from (x0, y0) to (x1, y1), its ends left out, each {x, y, ch, sides}. It is straight when the ends
+ * share a row or a column; else it goes across, then up or down at one column, then across again (`turn` 'v': down,
+ * across at one row, down), so each glyph joins the next: ─ │ and the corners ╭ ╮ ╰ ╯. A diagonal step (╲ next to ─)
+ * leaves a gap the eye reads as a broken line. `at` is the column (or row) of the middle leg; the middle by default.
+ */
+export function linkCells(x0, y0, x1, y1, turn, at) {
+  const across = turn !== 'v'
+  const mid = at != null ? at : across ? Math.round((x0 + x1) / 2) : Math.round((y0 + y1) / 2)
+  const way = across ? [[mid, y0], [mid, y1], [x1, y1]] : [[x0, mid], [x1, mid], [x1, y1]]
+  const P = [{ x: x0, y: y0 }]
+  let guard = 8000
+  for (const [tx, ty] of way) {
+    let { x, y } = P[P.length - 1]
+    while ((x !== tx || y !== ty) && guard--) {
+      if (x !== tx) x += Math.sign(tx - x)
+      else y += Math.sign(ty - y)
+      P.push({ x, y })
+    }
+  }
   const out = []
-  let x = x0, y = y0, guard = 4000
-  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
-  let err = dx - dy
-  while (guard--) {
-    if (x === x1 && y === y1) break
-    const e2 = 2 * err
-    let mx = 0, my = 0
-    if (e2 > -dy) { err -= dy; x += sx; mx = sx }
-    if (e2 < dx) { err += dx; y += sy; my = sy }
-    if (x === x1 && y === y1) break
-    out.push({ x, y, ch: my === 0 ? '─' : mx === 0 ? '│' : mx === my ? '╲' : '╱' })
+  for (let i = 1; i < P.length - 1; i++) {
+    const sides = sideTo(P[i], P[i - 1]) | sideTo(P[i], P[i + 1])
+    out.push({ x: P[i].x, y: P[i].y, ch: SIDE_GLYPH[sides] || '─', sides })
   }
   return out
 }
@@ -666,6 +707,8 @@ function paintCanvas(n, g, x, y, w, cx, mark, cut) {
   const cw = Math.min(n.w, w)
   if (n.w > w) cut({ k: 'canvas', w: n.w, room: w })
   let draws = 0
+  // the cells this canvas's links took, so two links that share a cell join there
+  const lines = new Map()
   g.withClip(x, y, x + cw, y + n.h, () => {
     for (const op of n.ops) {
       switch (op[0]) {
@@ -724,13 +767,30 @@ function paintCanvas(n, g, x, y, w, cx, mark, cut) {
           break
         }
         case 'link': {
-          // glyphs on the blank cells strictly between its ends (what is drawn there already stays), dashed every
-          // other cell
-          if (!g.dry) linkCells(Math.round(op[1]), Math.round(op[2]), Math.round(op[3]), Math.round(op[4])).forEach((p, i) => {
-            if (op[6].dash && i % 2) return
+          // a link joins its two ends or is not drawn: the first route whose cells are all blank, or lines of this
+          // canvas's links (which then meet as ┬ ┤ ┼); across first for a wide link, down first for a tall one, then
+          // the other, then with its middle leg beside either end. Dashed: every other straight cell.
+          if (g.dry) break
+          const [x0, y0, x1, y1] = [op[1], op[2], op[3], op[4]].map(Math.round)
+          const sx = Math.sign(x1 - x0), sy = Math.sign(y1 - y0)
+          const free = p => {
             const gx = x + p.x, gy = y + p.y
-            if (!g.in(gx, gy) || g.rows[gy][gx].ch !== ' ' || g.rows[gy][gx].bg) return
-            g.put(gx, gy, op[6].dash ? (p.ch === '─' ? '╌' : p.ch === '│' ? '╎' : p.ch) : p.ch, op[5])
+            if (!g.in(gx, gy)) return false
+            const c = g.rows[gy][gx]
+            return lines.has(gx + ',' + gy) || (c.ch === ' ' && !c.bg)
+          }
+          const first = Math.abs(x1 - x0) >= Math.abs(y1 - y0) ? 'h' : 'v', other = first === 'h' ? 'v' : 'h'
+          const tries = [[first], [other], ['h', x0 + sx], ['h', x1 - sx], ['v', y0 + sy], ['v', y1 - sy]]
+          const route = tries.map(([t, at]) => linkCells(x0, y0, x1, y1, t, at)).find(cs => cs.every(free))
+          if (!route) break
+          route.forEach((p, i) => {
+            const gx = x + p.x, gy = y + p.y, key = gx + ',' + gy
+            const had = lines.get(key)
+            const sides = (had ? had.sides : 0) | p.sides
+            const tone = had ? had.tone : op[5]
+            lines.set(key, { sides, tone })
+            if (op[6].dash && !had && (sides === 10 || sides === 5) && i % 2) return
+            g.put(gx, gy, op[6].dash && sides === 10 ? '╌' : op[6].dash && sides === 5 ? '╎' : SIDE_GLYPH[sides] || '─', tone)
           })
           draws++
           break
