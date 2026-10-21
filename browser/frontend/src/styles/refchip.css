@@ -285,6 +285,23 @@ body[data-cmd] .refchip-pop {
     background: transparent;
   }
 }
+/* a cited part a card's program draws (lib/tableCell revealPart): its hit box takes the accent's wash with an accent
+   edge, then fades, as a cited cell does */
+[data-region].cite-cell-flash {
+  animation: cite-part-flash 2.4s var(--ease-out) forwards;
+}
+@keyframes cite-part-flash {
+  0%,
+  60% {
+    fill: var(--accent-wash);
+    stroke: var(--accent);
+    stroke-width: 1.5px;
+  }
+  100% {
+    fill: transparent;
+    stroke: transparent;
+  }
+}
 /* a cited line of a card's printed output, after a click opened it (lib/tableCell revealLines): marked as a cited cell
    is, then fading */
 span[data-line].cite-cell-flash {
