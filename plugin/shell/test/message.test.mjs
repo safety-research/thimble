@@ -449,3 +449,12 @@ test('a citation whose place goes away after its check: its card names the ref o
   // a text no pass has read is left to its pass
   assert.equal(withGone(rec, ref, card.gone), null)
 })
+
+test('a whole file\'s card counts its lines as the file has them: the newline that ends it starts no line', async () => {
+  const io = { resolve: async () => ({}), read: async () => 'one\ntwo\nthree\n' }
+  const card = await citeCard({ ref: 'notes/plan.md', label: 'the plan', root: '/data', room: 2 }, io)
+  assert.equal(card.parts[0].data.more, 'the first 2 of its 3 lines')
+  const all = await citeCard({ ref: 'notes/plan.md', label: 'the plan', root: '/data', room: 9 }, io)
+  assert.equal(all.parts[0].data.rows.length, 3)
+  assert.equal(all.parts[0].data.more, '')
+})
