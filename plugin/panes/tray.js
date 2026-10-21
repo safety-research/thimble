@@ -256,7 +256,7 @@ export function placeWords(ref) {
 }
 
 /** The note on a citation the healing pass re-pointed, in plain words: `corrected: the citation pointed at row 1 of a
- *  query's result (column pct), which shows 97`, or for a quote, `… at village_goals.jsonl:50, which does not hold
+ *  query's result (column pct), which shows 97`, or for a quote, `… at goals.jsonl:50, which does not hold
  *  these words`. */
 export function correctedWords(f) {
   const what = f.shows != null && f.shows !== '' ? `, which shows ${f.shows}` : f.quote ? ', which does not hold these words' : ''
