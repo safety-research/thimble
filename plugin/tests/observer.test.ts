@@ -200,25 +200,18 @@ test('v draws the first proposed view at once: the bar says it works, nothing as
   const working = textOf(await reply($))
   expect(working).not.toContain('visualize…')
   expect(working).not.toContain('another view:')
-  // the fork saves its card and ends: the bar is quiet again, and one line under the card offers the next view
+  // the fork saves its card and ends: the bar is quiet again, v goes out, and nothing offers another view
   await $.tool.call({ tool: 'Bash', command: 'thimble save saves-by-day --from card.json', agentId: 'agent-1' } as never)
   ended.add('agent-1')
   await $.turn.complete({ turnId: 'f1', agentId: 'agent-1', answer: 'Saves per day.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.advance(300)
   await clock.settle()
   expect(await bar()).not.toContain('visualizing')
-  expect(await bar()).toContain('1 more view')
+  expect(await bar()).not.toContain('more view')
   await reply($)
   await clock.settle()
   const done = textOf(await reply($))
-  expect(done).toContain('v another view: saves by wiki')
-  expect(done.indexOf('another view:')).toBeGreaterThan(done.indexOf('Jun 18'))
-  // v again draws that one, with no pick either; with none left, no line offers more
-  await press($, clock, key('v'))
-  await clock.advance(800)
-  await clock.settle()
-  expect(spawns.length).toBe(2)
-  expect(spawns[1]).toContain('as "saves by wiki"')
+  expect(done).not.toContain('another view:')
   expect(await bar()).not.toContain('pick')
 })
 

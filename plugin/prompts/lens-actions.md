@@ -11,4 +11,4 @@ Bad       "verbs": {"v": {"note": "2 views ready", "proposals": ["a chart of the
 
 The bad note and proposal fit any answer, so they do not tell the analyst what they would see.
 
-In the reply, "verbs" holds "v" when you light it: {"note": "<the view, in 2–4 of the answer's own words>", "proposals": ["<one or two cards, each named in a few words>"]}.
+In the reply, "verbs" holds "v" when you light it: {"note": "<the view, in 2–4 of the answer's own words>", "proposals": ["<one card, named in a few words>"]}.

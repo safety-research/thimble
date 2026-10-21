@@ -1623,10 +1623,8 @@ async function takeProposal($: Engine, rec: MsgRecord, choice: string): Promise<
   const v = (rec.verbs ?? {}).v
   if (!(v && Array.isArray(v.proposals) && v.proposals.includes(choice))) return rec
   const verbs = { ...rec.verbs }
-  const left = v.proposals.filter(p => p !== choice)
-  // what is ready is the views not drawn yet, not the card just asked for: `1 more view`
-  if (left.length) verbs.v = { ...v, proposals: left, note: `${left.length} more view${left.length === 1 ? '' : 's'}` }
-  else delete verbs.v
+  // v holds one idea: once it is asked for, v goes out
+  delete verbs.v
   const next = { ...rec, verbs }
   await saveRecord($, next)
   return next
@@ -2718,9 +2716,8 @@ function asideRowEl(els: Any, line: { text: string; error: boolean }, key: strin
 /** The view v draws next, offered in one line under the card v drew for the message (`v another view: saves by wiki`):
  *  only once v drew here, while the observer's proposals are not all drawn, and while v acts on this message. */
 async function nextViewOffer($: Engine, rec: MsgRecord, made: Aside | null, row: string): Promise<string | null> {
-  if (made?.status !== 'done' || !featureOn('cards')) return null
-  const view = nextView(rec)
-  return view && (await actingRow($)) === row ? view : null
+  // v holds one idea, so nothing is offered after its card
+  return null
 }
 
 function nextViewEl($: Engine, els: Any, row: string, next: string): Any {
