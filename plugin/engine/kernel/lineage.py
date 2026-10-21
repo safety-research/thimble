@@ -945,7 +945,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     unit_of = {f: UNIT_OF_KIND.get(cnt.get(f, {}).get("kind") or "", "file") for f in files}
     per: dict[str, dict[str, Any]] = {f: {"computed": 0, "queries": [], "shown": set(), "lines": [], "searched": False,
                                           "matched": 0, "named": False, "hits": set(), "by": set(), "searched_by": set(),
-                                          "model": 0, "labels": set(), "pages": [], "whole": False}
+                                          "model": 0, "labels": set(), "model_labels": set(), "pages": [], "whole": False}
            for f in files}
 
     def seen_ref(ref: str) -> None:
@@ -1005,6 +1005,8 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
         for f, n in model.items():
             per[f]["model"] += n
             per[f]["labels"].add(name)
+            # (only a model's labels read rows: a code or regex label over the same file computed over it)
+            per[f]["model_labels"].add(name)
         for f, n in ruled.items():
             per[f]["computed"] = max(per[f]["computed"], n)
             per[f]["labels"].add(name)
@@ -1141,6 +1143,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                           "seen_lines": seen_lines, "read_lines": seen_lines, "seen_rows": round(seen_rows),
                           "model": model, "model_rows": round(model_part), "computed": computed,
                           "computed_rows": round(computed_part), "labels": sorted(x["labels"]),
+                          "model_labels": sorted(x["model_labels"]),
                           "queries": sorted(set(q for q in x["queries"] if q)),
                           "shown": len(x["shown"]), "searched": x["searched"], "matched": x["matched"],
                           "hits": len(x["hits"]), "named": x["named"], "by": sorted(x["by"]),
@@ -1241,10 +1244,11 @@ def file_line(o: dict[str, Any]) -> str:
     if s == "seen":
         bits.append("seen" if unit == "file" else "read " + amount(unit, o.get("seen_units", 0), o.get("units", 0)))
     if o.get("model"):
-        bits.append(f"a label's model read {o['model']:,} of {rows:,} {rw}" + (f" ({', '.join(o['labels'][:3])})" if o.get("labels") else ""))
+        by_model = o.get("model_labels") or []
+        bits.append(f"a label's model read {o['model']:,} of {rows:,} {rw}" + (f" ({', '.join(by_model[:3])})" if by_model else ""))
     if o["computed"]:
         whole = o["computed"] >= rows > 0
-        what = [*o["queries"][:4], *(lb for lb in o.get("labels") or [] if not o.get("model"))][:4]
+        what = [*o["queries"][:4], *(lb for lb in o.get("labels") or [] if lb not in (o.get("model_labels") or []))][:4]
         bits.append(f"computed over {'all ' + format(rows, ',') if whole else format(o['computed'], ',') + ' of ' + format(rows, ',')} {rw}"
                     + (f" ({', '.join(what)})" if what else ""))
     if s == "searched":
