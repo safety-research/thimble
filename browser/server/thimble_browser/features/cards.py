@@ -71,11 +71,25 @@ def _open_canvas(t: Any, cell: dict[str, Any]) -> None:
     hub.publish(t.ws, {"type": "open-card", "card": cell["id"], "chat": t.chat})
 
 
+def _turn_group(t: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """`args` with a group when they name none: the group of the card this turn added before, else a new group named
+    after the card's question, as Claude names the groups it makes. Without it the card went to a group titled Canvas."""
+    if str(args.get("group") or "").strip():
+        return args
+    s = t.session
+    if s is not None and getattr(s, "group", None) and any(nb["id"] == s.group for nb in canvas.notebooks(t.ws)):
+        return {**args, "group": s.group}
+    title = str(args.get("question") or "").strip()
+    return {**args, "group": title} if title else args
+
+
 async def add_card(t: Any, args: dict[str, Any]) -> Result:
     try:
-        cell = canvas.new_card(t.ws, args, by=t.maker(), chat=t.chat)
+        cell = canvas.new_card(t.ws, _turn_group(t, args), by=t.maker(), chat=t.chat)
     except ValueError as e:
         return Result(str(e), True)
+    if t.session is not None and not str(args.get("group") or "").strip():
+        t.session.group = cell["notebook"]
     _open_canvas(t, cell)
     return await _run_and_describe(t, cell)
 
