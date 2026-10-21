@@ -116,3 +116,13 @@ test('an explainer and a re-pointed citation\'s card show what the healing pass 
   const f = frameOf(healed, 0)
   assert.deepEqual([f.ref, f.heal, f.wrote], ['r1#day=c@n', 'moved', 'r1#day=a@n'])
 })
+
+test('a heads-up whose words hold an explainer\'s term keeps its mark, and the explainer stands where its term is said again', () => {
+  const text = 'Each surge came from more than a hundred different network ranges. Later, the network ranges are the better clue.'
+  const glosses = { ...glossesOf([{ term: 'network ranges', body: 'An address cut to its first two numbers.' }], text), ...headsOf({ term: 'more than a hundred different network ranges', title: 'Most ranges may be one provider', bullets: ['Addresses that start with 20. made most edits.'] }, text) }
+  const rec = withObserver(newRecord({ row: 'r1', session: 's', text }), { verbs: {}, glosses })
+  const at = id => rec.marks.find(m => m.gloss === id)
+  assert.equal(text.slice(at('h1').start, at('h1').end), 'more than a hundred different network ranges')
+  assert.equal(text.slice(at('g1').start, at('g1').end), 'network ranges')
+  assert.ok(at('g1').start > at('h1').end)
+})

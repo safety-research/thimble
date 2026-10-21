@@ -296,7 +296,11 @@ export function placeMarks(text, glosses = {}, prev = [], { original = null } = 
     const old = (prev || []).find(p => p.kind === 'spark' && p.ref === m.ref && Array.isArray(p.values))
     if (old) m.values = old.values
   }
-  for (const [id, g] of Object.entries(glosses || {})) {
+  // the heads-up first: its words are often a longer phrase that holds an explainer's term ("more than a hundred
+  // different network ranges" holds "network ranges"), and a mark never stands on another's words, so the explainer
+  // then stands where its term is said again, and both show
+  const order = Object.entries(glosses || {}).sort(([, x], [, y]) => (y?.kind === 'heads') - (x?.kind === 'heads'))
+  for (const [id, g] of order) {
     const term = g && g.term
     const at = original == null ? findTerm(text, term, marks) : anchorTerm(text, term, marks)
     if (at) { marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id, ...(at.how && at.how !== 'term' ? { anchor: at.how } : {}) }); continue }
