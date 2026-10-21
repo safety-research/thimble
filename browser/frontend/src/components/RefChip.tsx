@@ -32,6 +32,7 @@ import { CHECKED_REF, HealContext } from '../lib/heal'
 import { QuoteBox, RecordFacts } from '../canvas/Quote'
 import { FACT_KINDS, markFacts, markValue, recordFacts, type RecordFact } from '../canvas/facts'
 import { quoteParts, type QuotePart } from '../canvas/quotes'
+import { KIT_MIME } from '../kit/types'
 
 /** The seven things a chip can point to, by the ref's kind; a record (a row of a file) is its file. */
 const KIND_ICON: Record<string, IconName> = { cell: 'cell', group: 'group', concept: 'label', chat: 'thread', call: 'terminal', row: 'file', table: 'file', report: 'report', view: 'view' }
@@ -570,15 +571,34 @@ function LinesPreview({ lines, from, to, value }: CitedLines & { value?: string 
   )
 }
 
-/** The cell's question over its primary artifact. */
+/** A card's takeaway as one short plain line for a hover: its citations as their words, no Markdown, the first
+ * sentence, cut at `max` characters. Pure. */
+export function plainLine(text: string | undefined, max = 140): string {
+  const t = (text ?? '')
+    .replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')
+    .replace(/\[\[[^\]]*\]\]/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const first = /^(.+?[.!?])(\s|$)/.exec(t)?.[1] ?? t
+  return first.length > max ? first.slice(0, max - 1).trimEnd() + '…' : first
+}
+
+/** The cell's question over its primary artifact. A card a program draws shows its question and, at most, its
+ * takeaway's first sentence: the text its drawing carries is the list of parts Claude cites, written for Claude. */
 function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?: number }) {
   const concepts = useConcepts(ws)
   const pick = primaryArtifact(cell.outputs)
   const title = (cell.title ?? '').trim() || cellLabel(cell.id) || 'card'
+  const drawn = cell.kind === 'program' || (cell.outputs ?? []).some((o) => !!o && typeof o === 'object' && KIT_MIME in o)
+  const line = drawn ? plainLine(cell.takeaway) : ''
   return (
     <div className="refchip-cell">
       <div className="refchip-cell-title">{title}</div>
-      {pick ? (
+      {drawn ? (
+        line ? <div className="refchip-pop-note">{line}</div> : null
+      ) : pick ? (
         <div className={`refchip-cell-artifact${pick.kind !== 'chart' ? ' refchip-cell-clip' : ''}`}>
           <Output bundle={pick.bundle} maxLines={40} fitWidth={fitWidth} labels={chartLabels(cell.labels, concepts)} />
         </div>

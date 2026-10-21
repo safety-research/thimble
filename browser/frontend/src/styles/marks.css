@@ -50,6 +50,12 @@
   color: var(--text-primary);
   white-space: normal;
   text-align: left;
+  overflow-y: auto;
+}
+/* no room under the words: the card opens above them (LensMark placeLensCard) */
+.lens-card.is-above {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 .lens-card-kind { display: flex; align-items: center; gap: 6px; font: var(--type-label); color: var(--text-tertiary); }
 .lens-card-swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--mark-ink); }

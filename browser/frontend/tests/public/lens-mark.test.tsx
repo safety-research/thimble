@@ -5,6 +5,7 @@
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown, ChipContext } from '../../src/chat/markdown.tsx'
+import { placeLensCard } from '../../src/components/LensMark.tsx'
 import type { Mark } from '../../src/lib/marks.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -55,4 +56,29 @@ test("a mark's card has the title as its heading, a quiet lens name, and no mark
   const gloss = el.querySelector<HTMLElement>('.lens-card')!
   expect(gloss.querySelector('.lens-card-kind')?.textContent).toBe('Explainers')
   expect(gloss.querySelector('.lens-card-title')?.textContent).toBe('qux')
+})
+
+test("a mark's card opens above its words when the window has no room for it below", () => {
+  const rect = (top: number, height: number, left = 0, width = 300) => ({ top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
+  const term = document.createElement('span')
+  const card = document.createElement('span')
+  document.body.append(term, card)
+  vi.stubGlobal('innerHeight', 800)
+  vi.stubGlobal('innerWidth', 1200)
+  card.getBoundingClientRect = () => rect(card.classList.contains('is-above') ? 380 : 726, 300)
+  // words near the bottom of the window: 300 px do not fit under them, so the card opens above
+  term.getBoundingClientRect = () => rect(700, 20)
+  placeLensCard(card, term)
+  expect(card.classList.contains('is-above')).toBe(true)
+  expect(card.style.maxHeight).toBe('')
+  // words near the top: it opens under them
+  term.getBoundingClientRect = () => rect(100, 20)
+  placeLensCard(card, term)
+  expect(card.classList.contains('is-above')).toBe(false)
+  // no room on either side: the larger side, its height cut to what shows
+  term.getBoundingClientRect = () => rect(250, 20)
+  card.getBoundingClientRect = () => rect(276, 600)
+  placeLensCard(card, term)
+  expect(card.classList.contains('is-above')).toBe(false)
+  expect(card.style.maxHeight).toBe('516px')
 })
