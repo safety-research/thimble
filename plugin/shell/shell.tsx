@@ -1582,7 +1582,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-//   thimble  v visualize · s squeeze · c 11 claims                                     t 2 threads · r coverage 12% ▆▆▃▁
+//   thimble  v visualize · s squeeze · c 11 claims                                     t 2 threads · r coverage 3/7 files ▆▆▃▁
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
 // keys act on (a lit one with its note in place of its name; c with how many claims the session holds, bright for a
@@ -1617,6 +1617,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     // Before Claude's first thimble command the folder is the session's own (as the Coverage pane reads it), never the
     // home folder; the kernel's count writes nothing there
     let covFiles = old?.covFiles ?? 0
+    let covTouched = old?.covTouched ?? 0
     const cwd = String(await $.session.cwd()).replace(/\/+$/, '')
     const covRoot = root ?? (cwd && cwd !== String((await $.env.get('HOME')) || '').replace(/\/+$/, '') ? cwd : null)
     if (o.coverage && covRoot && person === 'now' && featureOn('counts')) {
@@ -1625,12 +1626,12 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env: { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
         const got = JSON.parse(r.stdout)
         const files = (got.files || []) as Any[]
-        // the share of files read, each file once whatever its unit, by the rule the kernel's text says: a file is read
-        // when some of it entered Claude's context (seen); a query or a rule that only computed over it, a search, a
-        // listing or a count is not a read
+        // the files touched, each file once whatever its unit, by the rule the kernel's text says: some of it entered
+        // Claude's context, or a query, a rule, a search, a count or a program went over it; a file only listed by name
+        // is not touched, so 0 means Claude looked at no file at all
         covFiles = Number(got.total?.files) || files.length
-        const seen = Number(got.total?.seen_files ?? files.filter(f => f?.seen).length) || 0
-        cov = covFiles ? seen / covFiles : 0
+        covTouched = Number(got.total?.touched_files ?? files.filter(f => f?.touched).length) || 0
+        cov = covFiles ? covTouched / covFiles : 0
         // the Coverage pane shows it, and the bar's small type bar is made from it (dock.ts)
         mix = noteCoverage(got)
       } catch {
@@ -1638,7 +1639,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
       }
     }
     const claims = await claimCount($).catch(() => old?.claims ?? 0)
-    const next: LineCounts = { claims, threads: threadCount(), cov, covFiles, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
+    const next: LineCounts = { claims, threads: threadCount(), cov, covFiles, covTouched, labels: await countLabels($, root), mix, at: now, changed: { ...(old?.changed || {}) } }
     const keys = ['claims', 'threads', 'cov', 'labels'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : (next[k] ?? 0) > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
@@ -1952,7 +1953,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   const items: [string, number, string, string?][] = c ? [
     // t: the list of them in the side panel
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`, 't'],
-    // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 12% ▆▆▃▁`, `l 2 labels` (their
+    // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 3/7 files ▆▆▃▁`, `l 2 labels` (their
     // key in their words)
     ...dockCounts(c, percent),
   ] : []
@@ -2290,7 +2291,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // with no letter after them (a letter makes them the start of a word, as after t)
   if (!pick && (k === DOCK_KEY.coverage || k === DOCK_KEY.labels)) {
     const counts = (await $.state.get(COUNTS)).value as LineCounts | null
-    const pane = restPane(k, { cov: featureOn('counts') && (counts?.cov ?? 0) > 0, labels: featureOn('counts') && (counts?.labels ?? 0) > 0 })
+    const pane = restPane(k, { cov: featureOn('counts') && ((counts?.cov ?? 0) > 0 || (counts?.covFiles ?? 0) > 0), labels: featureOn('counts') && (counts?.labels ?? 0) > 0 })
     if (pane) {
       const wait = { cancelled: false }
       const undo = () => { wait.cancelled = true; if (pendingT === wait) pendingT = null; keyOpened = null }

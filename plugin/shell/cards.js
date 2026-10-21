@@ -322,16 +322,30 @@ function spanPart(sp, room) {
   return { program: SPAN_PROGRAM, data: { rows, hotMax, more } }
 }
 
-/** The rows section: the rows behind a value as a person reads them, a few spread across them. */
+/** What the files behind a value call their entries, as the kernel says it (resolve's `unit`, the one mapping that
+ *  coverage counts by): records of JSON and JSONL, rows of a table, lines of text, `entries` when no kind holds most of
+ *  them. null for files with no entries (an image, a PDF), which have no rows section. */
+export function entryWords(r) {
+  if (r && r.unit === null) return null
+  if (r && typeof r.unit === 'string') return { many: r.unit, one: r.unit_one || r.unit }
+  return { many: 'rows', one: 'row' }
+}
+
+/** Whether a value has a rows section: entries stand behind it. */
+const hasRows = r => r.count > 0 && entryWords(r) !== null
+
+/** The rows section: the entries behind a value as a person reads them, a few spread across them, named in the files'
+ *  own word (`347 records of revisions.jsonl behind it`, `r records`). */
 function rowsSection(r, what, room) {
+  const w = entryWords(r) || { many: 'rows', one: 'row' }
   const recs = (r.records || []).map(x => ({ ref: short(String(x.ref).replace(/^.*\//, ''), 30), text: short(String(x.words || x.text || ''), 400), meta: short(String(x.meta || ''), 60) }))
   const total = r.count != null ? r.count : recs.length
   const files = filesOf(r, null)
   const head = r.count != null
-    ? `**${fmtN(total)}** ${total === 1 ? 'row' : 'rows'} ${files ? `of ${esc(files)} ` : ''}behind ${esc(what)}${recs.length < total ? ` {dim:· ${recs.length} spread across them}` : ''}`
-    : `{dim:behind ${esc(what)}:} ${esc(files ? `all of ${files}` : 'no rows')}`
+    ? `**${fmtN(total)}** ${total === 1 ? w.one : w.many} ${files ? `of ${esc(files)} ` : ''}behind ${esc(what)}${recs.length < total ? ` {dim:· ${recs.length} spread across them}` : ''}`
+    : `{dim:behind ${esc(what)}:} ${esc(files ? `all of ${files}` : `no ${w.many}`)}`
   const max = Math.max(1, Math.min(3, Math.floor((room - 1) / Math.max(1, recs.length))))
-  return { id: 'rows', key: SECTION_KEYS.rows, words: 'rows', parts: [{ program: RECORDS_PROGRAM, data: { head, recs, max, empty: r.why || 'no rows stand behind it', more: '' } }] }
+  return { id: 'rows', key: SECTION_KEYS.rows, words: w.many, parts: [{ program: RECORDS_PROGRAM, data: { head, recs, max, empty: r.why || `no ${w.many} stand behind it`, more: '' } }] }
 }
 
 /** The code section: the query that made the value, with its lines numbered, then where the value comes from. */
@@ -347,7 +361,8 @@ function codeSection(r, query, ref, room) {
   }
   const inputs = (q?.inputs || []).map(x => `${esc(x.path)}${x.rows_read != null ? ` {dim:(${fmtN(x.rows_read)} rows)}` : ''}`)
   if (inputs.length) lines.push(`{dim:reads} ${inputs.slice(0, 3).join('{dim:,} ')}${inputs.length > 3 ? ` {dim:and ${inputs.length - 3} more}` : ''}`)
-  const count = r.count != null ? plural(r.count, 'source row') : 'whole files'
+  const w = entryWords(r)
+  const count = r.count != null && w ? `${fmtN(r.count)} source ${r.count === 1 ? w.one : w.many}` : 'whole files'
   lines.push(`{dim:ref} ${esc(r.narrowed || ref)} {dim:←} ${esc(count)}${q?.lineage ? ` {dim:· lineage ${esc(q.lineage)}}` : ''}`)
   for (const n of (r.notes || []).slice(0, 2)) lines.push(`{dim:${esc(short(n, 220))}}`)
   const head = q ? `{dim:${esc(q.id || '')} ·} ${esc(q.about || 'the query')}` : `{dim:no query made this value}`
@@ -404,7 +419,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   const about = query?.about ? esc(short(query.about, 80)) : ''
   if (kind === 'query' || kind === 'series') {
     const { table, cols, col, hot, keyCols, labelOf } = columnOf(query, ref)
-    const sections = [...(r.count > 0 ? [rowsSection(r, kind === 'series' ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
+    const sections = [...(hasRows(r) ? [rowsSection(r, kind === 'series' ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
     if (kind === 'series') {
       const rows = table.map(t => ({ label: short(labelOf(t), 24), value: typeof t[col] === 'number' ? t[col] : Number(t[col]) || 0 }))
       const labelW = Math.max(4, ...rows.map(x => x.label.length))
@@ -434,7 +449,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   }
   if (kind === 'object') {
     const step = (r.chain || []).find(c => c.step === 'object') || {}
-    const sections = [...(r.count > 0 ? [rowsSection(r, 'this value', deep)] : []), codeSection(r, null, ref, deep)]
+    const sections = [...(hasRows(r) ? [rowsSection(r, 'this value', deep)] : []), codeSection(r, null, ref, deep)]
     const value = 'value' in step ? `{dim:value} **${esc(short(typeof step.value === 'object' ? JSON.stringify(step.value) : step.value, 60))}**${step.at ? ` {dim:at ${esc(step.at)}}` : ''}` : ''
     if (object && typeof object.program === 'string' && object.program.trim()) {
       const parts = [{ program: object.program, data: object.data ?? {}, id: object.id || step.id }]
