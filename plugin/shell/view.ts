@@ -11,7 +11,7 @@
 //                       catch-up's), so a side thread's answer can be cut to the rows its panel has
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
 //                       rows; its keys are in the bar under it, and its color says cite or explain
-import { blocks, inline, mapLinks, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
+import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
 import { paintRegions } from './cells'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -178,17 +178,39 @@ function blockLines(els: Any, o: MessageOpts, text: string, b: Any, key: string,
 }
 
 /** A table that holds marks, drawn as Claude Code draws a table: a box of light rules, its header bold. One too wide to
- *  draw whole is Claude Code's Markdown, or (`lines`) its rows as written, each cut at the width. */
-function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number, lines = false): Any[] {
+ *  draw whole is a list of its rows instead, each row a block of `header: cell` lines (a blank line between rows): the
+ *  header bold, the cell's words wrapped at spaces beside it, each mark a press as in a paragraph. A header wider than
+ *  half the column stands on a line of its own, its cell under it, indented. */
+function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number): Any[] {
   const rows: Run[][][] = tableOf(text, b, o.rec.marks)
   const n = Math.max(...rows.map(r => r.length))
   const widths = Array.from({ length: n }, (_, c) => Math.max(1, ...rows.map(r => width(runsText(r[c] || [])))))
   const total = widths.reduce((s, x) => s + x + 3, 1)
   if (total > w) {
-    // too wide to draw whole: Claude Code's Markdown, with each mark as its words
-    const plain = mapLinks(text.slice(b.start, b.end), (all, words) => words)
-    if (lines) return plain.split('\n').map((l, k) => els.Text({ key: `${key}-r${k}`, wrap: 'truncate-end', children: l }))
-    return [els.Markdown({ text: plain })]
+    const heads: Run[][] = rows.length > 1 ? rows[0]!.map(h => (runsText(h).trim() ? [...h.map(r => ({ ...r, b: true })), { s: ':', b: true }] : [])) : []
+    const body = rows.length > 1 ? rows.slice(1) : rows
+    const hw = Math.max(0, ...heads.map(h => (h.length ? width(runsText(h)) + 1 : 0)))
+    const beside = hw <= Math.floor(w / 2)
+    const out: Any[] = []
+    body.forEach((cells, k) => {
+      if (k) out.push(els.Text({ key: `${key}-g${k}`, children: ' ' }))
+      for (let c = 0; c < n; c++) {
+        const runs = cells[c] || []
+        if (!runsText(runs).trim()) continue
+        const head = heads[c] || []
+        const id = `${key}-r${k}-${c}`
+        if (beside) {
+          // the header and its padding on the cell's first line, the cell's other lines indented as far
+          const pad = head.length ? hw : 0
+          const fill = { s: ' '.repeat(Math.max(0, pad - width(runsText(head)))) }
+          wrapRuns(runs, w - pad).forEach((l: Run[], j: number) => out.push(lineEl(els, o, j === 0 ? [...head, ...(pad ? [fill] : []), ...l] : [{ s: ' '.repeat(pad) }, ...l], `${id}-${j}`)))
+        } else {
+          wrapRuns(head, w).forEach((l: Run[], j: number) => out.push(lineEl(els, o, l, `${id}-h${j}`)))
+          wrapRuns(runs, w - 2).forEach((l: Run[], j: number) => out.push(lineEl(els, o, [{ s: '  ' }, ...l], `${id}-${j}`)))
+        }
+      }
+    })
+    return out
   }
   const rule = (l: string, m: string, r: string) => els.Text({ children: l + widths.map(x => '─'.repeat(x + 2)).join(m) + r })
   const out: Any[] = [rule('┌', '┬', '┐')]
@@ -267,7 +289,7 @@ function blockRows(els: Any, o: MessageOpts, text: string, b: Any, key: string, 
   const cutRow = (s: string, k: number, p: Any = {}) => els.Text({ key: `${key}-${k}`, wrap: 'truncate-end', ...p, children: s || ' ' })
   if (b.type === 'code') return text.slice(b.start, b.end).split('\n').slice(1, -1).map((l, k) => cutRow(l, k, { color: 'permission', ...(o.dim ? { dimColor: true } : {}) }))
   if (b.type === 'rule') return [cutRow('─'.repeat(Math.min(w, 40)), 0, { dimColor: true })]
-  if (b.type === 'table') return tableLines(els, o, text, b, key, w, true)
+  if (b.type === 'table') return tableLines(els, o, text, b, key, w)
   return blockLines(els, o, text, b, key, w)
 }
 

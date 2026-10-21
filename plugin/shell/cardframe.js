@@ -108,3 +108,22 @@ export function moreRow(els, s, open) {
   const t = els.Text({ key: 'more', dimColor: true, wrap: 'truncate-end', children: s })
   return open ? els.Button({ key: 'more-b', plain: true, label: 'open the card to see all its rows', onPress: open, children: [t] }) : t
 }
+
+/** A card in one row, for a column too narrow for its frame (a chat beside a pane): `□ ` and its title, cut to fit,
+ *  then `· 1 open` on the card the keys act on (`keyed`, the key in `color`), else `· open`. The row is a press that
+ *  opens the card when `open` is given. No wider than `w`. */
+export function cardLine(els, o) {
+  const tail = o.keyed ? ' · 1 open' : ' · open'
+  const room = Math.max(1, o.w - 2 - width(tail))
+  const t = String(o.title || 'card').replace(/\s+/g, ' ').trim()
+  const title = width(t) <= room ? t : [...t].slice(0, Math.max(0, room - 1)).join('') + '…'
+  const kids = [
+    els.Text({ key: 'g', ...(o.color ? { color: o.color } : { dimColor: true }), children: '□ ' }),
+    els.Text({ key: 't', bold: true, children: title }),
+    els.Text({ key: 'd', dimColor: true, children: ' · ' }),
+    ...(o.keyed ? [els.Text({ key: 'k', color: o.color, children: '1 ' })] : []),
+    els.Text({ key: 'o', dimColor: true, children: 'open' }),
+  ]
+  const row = els.Text({ key: o.key, wrap: 'truncate-end', children: kids })
+  return o.open ? els.Button({ key: `${o.key}-b`, plain: true, label: `open the card ${t}`, onPress: o.open, children: [row] }) : row
+}

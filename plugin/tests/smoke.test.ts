@@ -75,6 +75,12 @@ function labels(n: Any, out: string[] = []): string[] {
   labels(n.children, out)
   return out
 }
+function find(n: Any, ok: (n: Any) => boolean): Any {
+  if (n == null || typeof n !== 'object') return null
+  if (Array.isArray(n)) { for (const x of n) { const f = find(x, ok); if (f) return f } return null }
+  if (ok(n)) return n
+  return find(n.props?.children, ok) ?? find(n.children, ok)
+}
 const reply = ($: Any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: ANSWER, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
 test('a session answers a question, saves a card and draws it under the answer, its citation in place', async ($, on) => {
@@ -105,6 +111,19 @@ test('a session answers a question, saves a card and draws it under the answer, 
   // the citation is drawn as its words, a press that opens what it cites, and its ref never shows
   expect(labels(tree)).toContain('cite 6,543')
   expect(drawn).not.toContain('q1#day')
+  // in a column too narrow for the card's frame (the chat beside a pane), the card is one row that fits it
+  const atCols = (columns: number) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: ANSWER, isFirstOfReply: true }, viewport: { columns, rows: 40, isFullscreen: true } } as never)
+  await atCols(24)
+  await clock.settle()
+  const narrow = await atCols(24)
+  const card = find(narrow, n => String(n.props?.key ?? '').startsWith('card-'))
+  expect(card).toBeTruthy()
+  const line = textOf(card)
+  expect(line).not.toContain('\n')
+  expect(line).toContain('Saves per')
+  expect(line).toContain('open')
+  expect(2 + [...line].length).toBeLessThanOrEqual(24)
+  expect(labels(card)).toContain('open the card Saves per day')
   // a call that saved nothing draws nothing, however its output reads
   const echo = await $.tool.call({ tool: 'Bash', command: 'echo "saved 09-other v1"' } as never)
   expect((echo as { context?: string[] }).context ?? []).toEqual([])

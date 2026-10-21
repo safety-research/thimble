@@ -38,6 +38,12 @@ test('links inside code, and links to the web, are not marks', () => {
   assert.equal(marks[0].label, 'c')
 })
 
+test('a citation after a fenced block and inline code spans is a mark: the fence\'s backticks never pair with a span\'s', () => {
+  const t = '```bash\npkill -f x\n```\n\nThe `pkill -f` ran; the `pkill` calls ended at [step 8,000](a.jsonl#L5) and no `x` ran.'
+  const marks = linkMarks(t)
+  assert.deepEqual(marks.map(m => [m.kind, m.label]), [['cite', 'step 8,000']])
+})
+
 // the message's drawing (view.ts), loaded as TypeScript: its imports name modules without their extension, as the plugin's
 // bundler reads them, so a resolve hook adds `.ts`. Skipped on a Node that cannot run TypeScript
 register('data:text/javascript,' + encodeURIComponent('export async function resolve(s, c, next) { try { return await next(s, c) } catch (e) { if (/^\\.\\.?\\//.test(s) && !/\\.[cm]?[jt]sx?$/.test(s)) return next(s + ".ts", c); throw e } }'))
@@ -62,6 +68,21 @@ test('a fenced block keeps its lines: a link in it is no mark, an explainer neve
   const md = drawn.filter(n => n.type === 'Markdown').map(n => n.props.text).join('\n')
   assert.match(md, /```\n┌ claim ┐ ──▶ ┌ query ┐\n│ \[352\]\(r3#outcome=approved@n\) row sets │\n└───────┘     └───────┘\n```/)
   assert.ok(!drawn.some(n => n.type === 'Button' && /352/.test(n.props.label)), 'no press on the link in the block')
+})
+
+test('a table too wide for its column is drawn as its rows, `header: cell`, each citation in it still a mark that ] stops on', { skip: !view && 'this Node runs no TypeScript' }, () => {
+  const t = 'Who saved most:\n\n| Editor | Saves | Last save | What changed |\n|---|---|---|---|\n| Quill Bot | [412](r2#editor=Quill Bot@n) | [this save](wiki/a.jsonl#L88) | Rewrote the intro and removed the [three cited sources](r2#row=4@n) that the talk page asked for |\n| Fern Helper | [97](r2#editor=Fern Helper@n) | [this save](wiki/a.jsonl#L91) | Small fixes |\n'
+  const rec = newRecord({ row: 'r1', session: 's1', text: t })
+  assert.equal(rec.marks.length, 5)
+  const drawn = nodes(view.messageEl(els, { rec, key: 'm', cols: 60, first: true, theme: 'dark', focus: null, onMark: () => {} }))
+  assert.ok(!drawn.some(n => n.type === 'Markdown' && /\|/.test(n.props.text)), 'no table left to Claude Code')
+  // every citation is a press, and its first run has the key ] scrolls to
+  const stops = drawn.filter(n => n.type === 'Button' && /^mk-r1-/.test(n.props.key)).map(n => n.props.label)
+  assert.deepEqual(stops, ['cite 412', 'cite this save', 'cite three cited sources', 'cite 97', 'cite this save'])
+  const cite = drawn.find(n => n.type === 'Button' && n.props.label === 'cite three cited sources')
+  assert.equal(nodes(cite).find(n => n.type === 'Text').props.underline, true)
+  // the header beside its cell, bold
+  assert.ok(drawn.some(n => n.type === 'Text' && n.props.bold && n.props.children === 'What changed'))
 })
 
 test('a mark wider than the line breaks at its spaces, each piece still the mark; only a word wider than the line is cut', () => {
