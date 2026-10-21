@@ -40,7 +40,7 @@ function fanOut(ev: WsEvent): void {
       if (typeof rest.chat === 'string') bus.emit('chat', { chat: rest.chat, deleted: rest.deleted === true })
       return
     case 'cell':
-      if (typeof rest.cell === 'string') bus.emit('cell', { notebook: String(rest.notebook ?? ''), cell: rest.cell, kind: String(rest.kind ?? 'ran') })
+      if (typeof rest.cell === 'string') bus.emit('cell', { notebook: String(rest.notebook ?? ''), cell: rest.cell, kind: String(rest.kind ?? 'ran'), slug: typeof rest.slug === 'string' ? rest.slug : undefined })
       return
     case 'report':
       if (typeof rest.slug === 'string') bus.emit('report', { slug: rest.slug, status: String(rest.status ?? ''), span: typeof rest.span === 'string' ? rest.span : undefined })

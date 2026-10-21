@@ -49,9 +49,80 @@ function lookOf(r: HealResult | null): HealLook {
 
 const CHECKING: HealLook = { checking: true, get: () => null }
 
-/** The pass's results for this page load, by workspace and text: a text is checked once. */
+const CITED_CARD = /\]\((?:card|cell):([A-Za-z0-9_-]+)/g
+const REF_CARD = /^(?:card|cell):([A-Za-z0-9_-]+)/
+
+/** The cards a text in the pass's form cites, by the id or name each citation gives. */
+export function citedCards(input: string): string[] {
+  return [...new Set(Array.from(input.matchAll(CITED_CARD), (m) => m[1]))]
+}
+
+/** The pass's results by workspace and text. A text is checked once for each state of the cards it cites: when one of
+ * them runs, changes, is deleted or comes back (a `cell` event), the text's result is dropped and its round goes up,
+ * so every text on the page that cites the card is checked again. A takeaway checked before its card drew, or a reply
+ * that cites a card rerun since, then shows what the card shows now. */
 const results = new Map<string, HealResult | null>()
+const rounds = new Map<string, number>()
+const pending = new Map<string, { round: number; answer: Promise<HealResult | null> }>()
+const roundSubs = new Set<() => void>()
 let toldFailure = false
+
+const roundOf = (key: string): number => rounds.get(key) ?? 0
+const textOf = (key: string): string => key.slice(key.indexOf('\n') + 1)
+
+function cardChanged(e: { cell: string; slug?: string; kind: string }): void {
+  const names = [e.cell, e.slug].filter((n): n is string => !!n)
+  const cites = (cards: readonly string[]) => cards.some((c) => names.includes(c))
+  let again = false
+  for (const key of new Set([...results.keys(), ...pending.keys()])) {
+    if (!cites(citedCards(textOf(key)))) continue
+    results.delete(key)
+    pending.delete(key)
+    rounds.set(key, roundOf(key) + 1)
+    again = true
+  }
+  if (again) for (const fn of Array.from(roundSubs)) fn()
+  // a card that runs or comes back is there: a citation of it that failed when it was opened looks as the check says
+  if (e.kind !== 'deleted') {
+    for (const k of Array.from(failed.keys())) {
+      const card = REF_CARD.exec(textOf(k))
+      if (card && names.includes(card[1])) markRefFailed(k.slice(0, k.indexOf('\n')), textOf(k), null)
+    }
+  }
+}
+bus.on('cell', cardChanged)
+
+/** The pass's answer for `input` in this round: one request for every text on the page that shows it. The answer
+ * becomes the text's result only while no card it cites has changed since it was asked. */
+function check(ws: string, input: string, key: string): Promise<HealResult | null> {
+  const round = roundOf(key)
+  const asked = pending.get(key)
+  if (asked && asked.round === round) return asked.answer
+  const answer = api.heal(ws, input).then(
+    (r) => r,
+    (err: unknown) => {
+      if (!toldFailure) {
+        toldFailure = true
+        bus.emit('toast', { kind: 'error', text: `The citations were not checked (${(err as Error)?.message || 'no answer'}). Hover a citation to see its place.` })
+      }
+      return null
+    },
+  )
+  pending.set(key, { round, answer })
+  void answer.then((r) => {
+    if (roundOf(key) !== round) return
+    results.set(key, r)
+    pending.delete(key)
+  })
+  return answer
+}
+
+const onRound = (fn: () => void) => {
+  roundSubs.add(fn)
+  return () => {
+    roundSubs.delete(fn)
+  }
+}
 
 /** What the pass did to a text's citations, once the text is `settled`; null while there is nothing to check. */
 export function useHealLook(text: string, settled = true, workspace?: string): HealLook | null {
@@ -59,33 +130,23 @@ export function useHealLook(text: string, settled = true, workspace?: string): H
   const input = useMemo(() => healInput(text || ''), [text])
   const want = settled && !!ws && CHECKED_LINK.test(input)
   const key = `${ws}\n${input}`
-  const [got, setGot] = useState<{ key: string; r: HealResult | null } | null>(null)
+  const round = useSyncExternalStore(onRound, () => roundOf(key), () => roundOf(key))
+  const [got, setGot] = useState<{ key: string; round: number; r: HealResult | null } | null>(null)
   useEffect(() => {
     if (!want || results.has(key)) return
     let live = true
-    api.heal(ws, input).then(
-      (r) => {
-        results.set(key, r)
-        if (live) setGot({ key, r })
-      },
-      (err: unknown) => {
-        results.set(key, null)
-        if (live) setGot({ key, r: null })
-        if (!toldFailure) {
-          toldFailure = true
-          bus.emit('toast', { kind: 'error', text: `The citations were not checked (${(err as Error)?.message || 'no answer'}). Hover a citation to see its place.` })
-        }
-      },
-    )
+    void check(ws, input, key).then((r) => {
+      if (live) setGot({ key, round, r })
+    })
     return () => {
       live = false
     }
-  }, [want, ws, key, input])
+  }, [want, ws, key, input, round])
   return useMemo(() => {
     if (!want) return null
-    if (got?.key === key) return lookOf(got.r)
+    if (got?.key === key && got.round === round) return lookOf(got.r)
     return results.has(key) ? lookOf(results.get(key) ?? null) : CHECKING
-  }, [want, key, got])
+  }, [want, key, round, got])
 }
 
 /** The citations inside `children` as the pass left them for `text` (the words they are part of). */
