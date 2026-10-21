@@ -207,6 +207,29 @@ export function program(k, data) {
   return k.frame(k.size(k.stack(parts), { w: inner }), { title: k.escape(title), right: k.escape(right), tone })
 }
 
+const unquote = s => { try { return decodeURIComponent(s) } catch (e) { return s } }
+
+/** The place a ref names, in words a person reads, never the ref's own syntax: a query's row by its key (`the row with
+ *  user Wren (column n)`), a card's value, or a file's line or row (`revisions.jsonl:41`, `runs.csv row 3`). */
+export function placeWords(ref) {
+  const r = String(ref || '').trim()
+  const q = /^[qr]\d+(?:#([^@]*))?(?:@(.*))?$/.exec(r)
+  if (q) {
+    const col = q[2] ? ` (column ${unquote(q[2])})` : ''
+    const frag = q[1] || ''
+    const row = /^row=(\d+)$/.exec(frag)
+    if (row) return `row ${row[1]} of a query's result${col}`
+    const keys = frag.split('&').filter(x => x.indexOf('=') > 0).map(x => [x.slice(0, x.indexOf('=')), x.slice(x.indexOf('=') + 1)])
+    if (keys.length) return `the row with ${keys.map(([key, v]) => `${unquote(key)} ${unquote(v)}`).join(' and ')}${col}`
+    return q[2] ? `column ${unquote(q[2])} of a query's result` : "a query's whole result"
+  }
+  if (/^(?:obj|card):/.test(r)) return 'a value of another card'
+  const [path, frag = ''] = r.split(/#(.*)/s)
+  const lines = /^L(\d+)(?:-L?(\d+))?(?:\.b\d+)?$/.exec(frag)
+  if (lines) return `${path}:${lines[1]}${lines[2] && lines[2] !== lines[1] ? `-${lines[2]}` : ''}`
+  return frag ? `${path} ${frag.replace(/^row=/, 'row ')}` : path
+}
+
 /** A mark's card as the tray and the side panel draw it (panes/mark.js): a line while it is read, its problem, the
  *  section open in place of it, else its drawings with the part that holds the value marked, and why it was cited. */
 export function cardBody(k, card, top, open) {
@@ -218,8 +241,8 @@ export function cardBody(k, card, top, open) {
   else if (top && top.heal === 'bad') parts.push(k.text(`{bad:× ${k.escape(top.why || 'the cited place contradicts this value')}}`))
   else if (top && top.heal === 'gone') parts.push(k.text(`{dim:? ${k.escape(top.why || 'the cited place is gone')}}`))
   else if (top && top.heal === 'quiet' && top.why) parts.push(k.text(`{dim:${k.escape(top.why)}}`))
-  // one it re-pointed: where it pointed as written, so the fix is not invisible
-  else if (top && top.heal === 'moved' && top.wrote) parts.push(k.text(`{dim:moved here from ${k.escape(top.wrote)}, which does not show this value}`))
+  // one it re-pointed: where it pointed as written, in words, so the fix is not invisible
+  else if (top && top.heal === 'moved' && top.wrote) parts.push(k.text(`{dim:moved here from ${k.escape(placeWords(top.wrote))}, which does not show this value}`))
   if (!card) {
     parts.push(k.text(`{dim:${top.kind === 'gloss' ? 'drawing the explainer…' : 'reading it through the kernel…'}}`))
   } else if (card.problem || card.error) {
