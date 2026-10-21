@@ -26,6 +26,7 @@ from typing import Any
 import anthropic
 
 from .. import settings, home, llm
+from ..busy import working
 from ..cards import sandbox
 from . import classify, regextext, store, units as units_mod
 
@@ -126,7 +127,7 @@ async def start(ws: str, folder: Path, concept: dict[str, Any], *, paths: list[s
     same = last is not None and last.get("version") == concept["version"]
     await asyncio.to_thread(store.clear_model_rows, ws, concept["id"], {u.ref for u in found} if same else None)
     RUNS[key] = rec
-    TASKS[key] = asyncio.create_task(_run(ws, folder, concept, found, rec))
+    TASKS[key] = asyncio.create_task(_shown(ws, _run(ws, folder, concept, found, rec)))
     store.notify(ws, concept["id"], "applying")
     return rec
 
@@ -163,6 +164,12 @@ def _note(rec: dict[str, Any], why: str) -> None:
     msgs = rec.setdefault("_messages", [])
     if why and why not in msgs and len(msgs) < MESSAGES_KEPT:
         msgs.append(why)
+
+
+async def _shown(ws: str, run: Any) -> None:
+    """The run, shown in the top bar while it goes (busy.py)."""
+    async with working(ws, "labeling"):
+        await run
 
 
 async def _run(ws: str, folder: Path, concept: dict[str, Any], found: list[Any], rec: dict[str, Any]) -> None:

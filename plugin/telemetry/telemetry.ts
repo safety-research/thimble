@@ -17,6 +17,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { callLine, eventsFile, turnLine } from './events.mjs'
 import { sessionKey } from '../hooks/conversation'
+import { busy, busyWord } from '../shell/busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,14 +100,16 @@ async function flush($: Engine): Promise<void> {
 
 /**
  * A model call, timed and recorded: its feature, the prompt, the model, the usage, the seconds, and whether
- * the main turn waited for it. Returns the call's result as it came.
+ * the main turn waited for it. Returns the call's result as it came. While it runs the bar shows it, by `doing` (a
+ * word or two) or by its feature's word (shell/busy.ts).
  */
-export async function tracked<R>($: Engine, o: { feature: string; prompt?: string | null; model?: string | null; blocked?: boolean; extra?: Record<string, unknown> }, call: () => Promise<R>): Promise<R> {
+export async function tracked<R>($: Engine, o: { feature: string; prompt?: string | null; model?: string | null; blocked?: boolean; doing?: string; extra?: Record<string, unknown> }, call: () => Promise<R>): Promise<R> {
   // wall time (the session's clock is the person's; a call's seconds are real ones)
   const t0 = Date.now()
   let r: Any
   try {
-    r = await call()
+    // the bar shows the call while it runs (shell/busy.ts)
+    r = await busy($, o.doing ?? busyWord(o.feature), call)
     return r
   } finally {
     const ms = Date.now() - t0
