@@ -505,8 +505,11 @@ function codeSection(r, query, ref, room) {
   const q = query || (r.chain || []).find(c => c.step === 'query') || null
   const code = String(q?.code || '').replace(/\t/g, '    ').replace(/\n+$/, '').split('\n')
   const outN = q?.stdout ? String(q.stdout).replace(/\n+$/, '').split('\n').length : 0
-  const outFit = Math.min(outN, Math.max(3, Math.floor((room - 3) / 2)))
-  const cut = Math.max(3, room - 3 - (outFit ? outFit + 2 : 0))
+  // the rows the section takes: its head, the code, the line saying it was cut, the note under it, a blank row, the
+  // output's head, its lines and the line saying how many more, within the band's rows (`room` less two, as the band
+  // stands in Claude Code with its bar under it)
+  const outFit = outN ? Math.min(outN, Math.max(3, Math.floor((room - 7) / 2))) : 0
+  const cut = Math.max(3, outFit ? room - 8 - outFit : room - 5)
   // one line past the room shows whole: the line saying it was cut would take its row
   const fit = code.length === cut + 1 ? code.length : cut
   const lines = []
@@ -518,13 +521,18 @@ function codeSection(r, query, ref, room) {
   const stale = staleLine(r, q)
   if (stale) lines.push(stale)
   const head = q ? `{dim:${esc(q.id || '')} ·} ${esc(q.about || 'the query')}` : `{dim:no query made this value}`
-  const shown = q?.code ? code.slice(0, fit) : []
+  // a value it printed: the code up to its last print, so the line that printed the value is in view
+  let from = 0
+  const last = r.shown?.lines?.length ? code.reduce((at, l, j) => (/\bprint\s*\(/.test(l) ? j : at), -1) : -1
+  if (last >= fit) from = Math.min(code.length - fit + 1, last + 2 - fit)
+  const shown = q?.code ? code.slice(from, from + fit - (from ? 1 : 0)) : []
+  const rest = code.length - from - shown.length
   const out = q?.code ? outputPart(q, r.shown, outFit, '{dim:output}') : null
   return {
     id: 'code', key: SECTION_KEYS.code, words: 'code',
     ...(shown.some(l => HELPERS.test(l)) ? { note: HELPERS_NOTE } : {}),
     parts: [
-      { program: CODE_PROGRAM, data: { head, code: shown.map(codeMarkup), more: code.length > fit ? `… ${plural(code.length - fit, 'more line')}` : '' } },
+      { program: CODE_PROGRAM, data: { head, from, above: from ? `… ${plural(from, 'line')} above` : '', code: shown.map(codeMarkup), more: rest > 0 ? `… ${plural(rest, 'more line')}` : '' } },
       ...(out ? [out] : []),
       ...(lines.length ? [{ program: LINES_PROGRAM, data: { lines } }] : []),
     ],
