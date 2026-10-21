@@ -210,10 +210,15 @@ def test_a_folder_marketplace_install_turns_the_copy_on_and_off_like_a_github_on
     assert "/reload-plugins" in FX.use(fx["slug"]) and FX.active_slug() == fx["slug"] and FX.latest() == fx["slug"]
     now = json.loads((cc / "settings.json").read_text())
     assert now["theme"] == "dark" and now["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(Path(fx["worktree"]).resolve())}
+    # the session reloaded on the copy, then undid it: it still runs the copy until it reloads, and try turns it on again
+    monkeypatch.setattr(FX, "PLUGIN", Path(fx["worktree"]) / "plugin")
+    assert not FX.from_plugin_dir()
+    assert FX.undo().startswith(f"thimble is back to the release from {clone}")
+    assert not FX.from_plugin_dir() and "/reload-plugins" in FX.use(fx["slug"])
     assert FX.undo().startswith(f"thimble is back to the release from {clone}")
     assert json.loads((cc / "settings.json").read_text())["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
-    assert log(env, "claude") == [f"plugin marketplace add {fx['worktree']}", f"plugin marketplace add {clone}",
-                                  "plugin marketplace update thimble", "plugin update thimble@thimble"]
+    back = [f"plugin marketplace add {clone}", "plugin marketplace update thimble", "plugin update thimble@thimble"]
+    assert log(env, "claude") == [f"plugin marketplace add {fx['worktree']}", *back, f"plugin marketplace add {fx['worktree']}", *back]
     assert FX.active_slug() is None
 
 

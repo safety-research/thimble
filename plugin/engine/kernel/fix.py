@@ -298,6 +298,10 @@ def from_plugin_dir() -> bool:
         return False
     except ValueError:
         pass
+    # a fix's copy that `use` turned on through the marketplace: the session still runs it after an undo, until it reloads
+    own = fix_of_plugin()
+    if own and (read_json(fix_dir(own) / "fix.json") or {}).get("via") == "marketplace":
+        return False
     src = _marketplace_source()
     if src and not re.match(r"^[a-z]+://|^[\w.-]+/[\w.-]+$", str(src)):
         try:
@@ -333,6 +337,7 @@ def use(slug: str) -> str:
         raise FixError(f"{slug} is a request with no change: there is nothing to turn on")
     if from_plugin_dir():
         fx["status"] = "applied" if fix_of_plugin() == slug else "ready"
+        fx["via"] = "plugin-dir"
         save(fx)
         if fix_of_plugin() == slug:
             return f"This session already runs the fix {slug}."
@@ -347,6 +352,7 @@ def use(slug: str) -> str:
         run([claude(), "plugin", "install", "thimble@thimble"])
     (fixes_home() / "active").write_text(slug + "\n")
     fx["status"] = "applied" if fx["status"] in ("working", "ready", "applied") else fx["status"]
+    fx["via"] = "marketplace"
     save(fx)
     return f"thimble now runs the fix {slug} from {fx['worktree']}/plugin. {RELOAD} `thimble fix undo` goes back to the release."
 
