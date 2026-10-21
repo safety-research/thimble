@@ -259,6 +259,13 @@ export function barLadder(bar) {
   return steps
 }
 
+/** The real bar's width beside a panel, for the settings panel's preview of it: the conversation's columns there
+ *  (`chatCols`) less the columns the band gives up of them (`offset`, as the band last drew the bar); null when either
+ *  is not known yet. */
+export function previewBarWidth(chatCols, offset) {
+  return chatCols > 0 && offset != null ? Math.max(20, chatCols - offset) : null
+}
+
 /** The bar as it fits `width`: the fullest step that fits, else the last, cut at the end with an ellipsis (`cut`). Once
  *  the counts are gone, a status that does not fit is cut at its end (`! "55" is not in the …`) before the keys lose
  *  their words, so it always reads as the start of its sentence. */

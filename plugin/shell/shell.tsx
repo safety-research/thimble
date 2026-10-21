@@ -48,7 +48,7 @@ import { heldValues, openSettings, settingsAction, settingsStore } from '../sett
 
 import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, tellSettled, wantLevels as sqWant } from '../squeeze/term'
 import { SCALE, cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, setWords, withOwn } from '../squeeze/chips.mjs'
-import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
+import { barText, fitBar, hostKeys, keyEvent, keysOf, previewBarWidth } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTitle, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf, scopeOf as trayScopeOf } from '../panes/tray.js'
@@ -2192,16 +2192,22 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
 /** The bar as the features Claude Code holds now leave it, at rest: the settings panel's preview, which detail.tsx
  *  draws above the list. It is the bar's own drawing (barEl) for this session, in a frame, with nothing in it a press;
  *  a feature turned off a moment ago is already gone from it, while the plugin loads again with the new value. */
-export async function barPreviewEl($: Engine, els: Any, w: number): Promise<Any> {
+export async function barPreviewEl($: Engine, els: Any, w: number, chatCols?: number): Promise<Any> {
   const { Box, Text } = els
   const on = switchesFrom(await heldValues($))
-  const inner = Math.max(20, w - 4)
+  // drawn at the real bar's width beside the panel (`chatCols`, the conversation's columns there), so it shows what
+  // the bar will show: a narrow bar leaves out coverage first (host.js fitBar); never wider than the panel's room
+  const inner = Math.max(20, Math.min(w - 4, previewBarWidth(chatCols, barOffset) ?? w - 4))
   const line = (await barEl($, els, inner, { on, preview: true })) ?? Text({ key: 'bar-label', color: FOCUS[theme], bold: true, children: 'thimble' })
   return Box({ key: 'bar-preview', flexDirection: 'column', width: w, children: [
     Text({ key: 'bar-preview-title', dimColor: true, children: 'The bar, with these features' }),
-    Box({ key: 'bar-preview-frame', borderStyle: 'round', borderDimColor: true, paddingX: 1, width: w, children: [line] }),
+    Box({ key: 'bar-preview-frame', borderStyle: 'round', borderDimColor: true, paddingX: 1, width: inner + 4, children: [line] }),
   ] })
 }
+
+// the columns the bar gives up of the conversation's (its viewport's columns less the bar's width), as the band last
+// drew it: the bar beside a panel is then the conversation's columns there less this
+let barOffset: number | null = null
 
 /** The items at the right of the bar a module made pressable without a key of their own, by id: each is drawn as a
  *  Button keyed `bar-item-<id>`, and what a click does is that module's ui.press hook. An item with a key (`t N
@@ -3575,6 +3581,7 @@ export const registerShell: Register = (on, options) => {
       // draws first when a docked pane closes, so the verb row never counts at the width the pane left
       if (e.viewport?.columns) seeView(e.viewport.columns, e.viewport.rows ?? 48)
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
+      if (e.viewport?.columns && e.props.bodyColumns) barOffset = Math.max(0, e.viewport.columns - bw)
       const line = await barEl($, els, bw)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       const above = trayTop(tray) ? await trayBand($, e, tray!) : null
