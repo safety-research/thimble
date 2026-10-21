@@ -212,3 +212,11 @@ test('dots apply per series, and each legend entry shows its series as it is dra
   assert.deepEqual(d.root.series.map(s => !!s.dots), [true, false])
   assert.match(gridText(renderTerm(d, { w: 60 })), /⠶ a\s+━ b/)
 })
+
+test("a code line's indent stays when its text wraps", () => {
+  const d = runProgram({ program: `return k.stack(k.text('    x = 1', { max: 2 }), k.text('        if a:\\n            go(b, c)', { max: 4 }))` }, { w: 40, h: 24 })
+  const t = gridText(renderTerm(d, { w: 40 })).split('\n')
+  assert.equal(t[0], '    x = 1')
+  assert.equal(t[1], '        if a:')
+  assert.equal(t[2], '            go(b, c)')
+})

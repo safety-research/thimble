@@ -154,9 +154,12 @@ export function renderSvg(drawing, opts = {}) {
       }
       let cur = [], curW = 0
       const flush = () => { while (cur.length && cur[cur.length - 1].sp) { curW -= cur[cur.length - 1].w; cur.pop() } lines.push(cur.map(t => t.pieces).flat()); cur = []; curW = 0 }
+      // the spaces that open a hard line are kept (a code line's indent), unless its first word would not fit beside them
+      let lead = true
       for (const t of hl) {
         t.w = piecesW(t.pieces)
-        if (t.sp) { if (cur.length) { cur.push(t); curW += t.w } continue }
+        if (t.sp) { if (cur.length || lead) { cur.push(t); curW += t.w } continue }
+        if (lead) { lead = false; if (curW + t.w > w + 0.5) { cur = []; curW = 0 } }
         if (curW + t.w <= w + 0.5 || !cur.length) {
           if (t.w > w && !cur.length) {
             // a word longer than the line: break it by characters
