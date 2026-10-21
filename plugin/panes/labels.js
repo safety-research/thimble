@@ -372,7 +372,7 @@ function labelView(k, data, st, lab, W) {
     const words = String(r.words || r.missing || '').replace(/\s+/g, ' ')
     const wroom = Math.max(10, W - 3 - placeW - 2 - (vW + 2) - 2 - 16 - 2)
     const line = `{dim:${k.escape(pad(place(r.ref, placeW), placeW))}}  {${tone}:● ${k.escape(pad(v, vW))}}  {dim:${k.escape(pad(byWords(r), 16))}}  ${on ? `**${k.escape(cut(words, wroom))}**` : k.escape(cut(words, wroom))}`
-    out.push(k.region(`rec-${r.i}`, { label: `a record of ${lab.name}, ${place(r.ref)}: ${v} (${byWords(r) || 'no source'})`, ref: r.ref }, k.text(line, { wrap: false })))
+    out.push(k.region(`rec-${r.i}`, { label: `${place(r.ref)}, a record of ${lab.name}: ${v} (${byWords(r) || 'no source'})`, ref: r.ref }, k.text(line, { wrap: false })))
   }
   out.push(k.text(' '))
   out.push(...detail)

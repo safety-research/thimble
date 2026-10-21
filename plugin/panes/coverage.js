@@ -254,7 +254,7 @@ export default {
     const s = stores.coverage || {}
     const cov = s.cov
     if (!cov) return { loading: s.error ? null : 'reading what this session saw…', error: s.error || null, w: size.w, h: size.h }
-    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || typeOfPath(f.path), folder: f.folder || folderOf(f.path), kind: f.kind || '', unit: f.unit || null, units: f.units ?? null, seen_units: f.seen_units ?? null, said: f.said || null, pages: f.pages || [], rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [], touched: f.touched ?? f.status !== 'not read', read: f.read_share ?? (f.status === 'seen' ? f.share || 0 : 0), counted: f.counted_share ?? Math.max(f.read_share ?? 0, f.status === 'seen' ? f.share || 0 : 0) }))
+    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || typeOfPath(f.path), folder: f.folder || folderOf(f.path), kind: f.kind || '', unit: f.unit || null, units: f.units ?? null, seen_units: f.seen_units ?? null, said: f.said || null, pages: f.pages || [], rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], model_labels: f.model_labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [], touched: f.touched ?? f.status !== 'not read', read: f.read_share ?? (f.status === 'seen' ? f.share || 0 : 0), counted: f.counted_share ?? Math.max(f.read_share ?? 0, f.status === 'seen' ? f.share || 0 : 0) }))
     // the files nothing touched stay in columns (cli.py cmd_coverage: their path, unit and size), made into rows only
     // when a list shows them (restFile), so a folder of 100,000 files draws quickly
     const rest = cov.untouched && Array.isArray(cov.untouched.path) ? cov.untouched : { path: [], unit: [], units: [] }
@@ -268,6 +268,9 @@ export default {
   },
   program,
 }
+
+/** The part a file's own view names the file by: its title. */
+const WHOLE = 'file'
 
 export function program(k, data) {
   if (!data.files) {
@@ -288,7 +291,9 @@ export function program(k, data) {
   const ranges = file ? rangesOf(file) : []
   const items = level === 'top' ? listItems(data, by, open, room) : ranges.map((r, i) => ({ id: `rg-${i}`, r }))
   const ids = items.map(x => x.id)
-  const at = ids.includes(st.at) ? st.at : st.at === 'by-folder' || st.at === 'by-type' ? st.at : ids[0] || null
+  // a file open is a part itself (its title): what the ring stands on and a question is about when none of its lines
+  // was read, or when the ring goes up to it from its ranges
+  const at = ids.includes(st.at) ? st.at : st.at === 'by-folder' || st.at === 'by-type' ? st.at : file && (st.at === WHOLE || !ids.length) ? WHOLE : ids[0] || null
   const idx = ids.indexOf(at)
 
   // ---- what the person does: a group or the line of the others opens under itself (and closes again), a file opens
@@ -335,21 +340,22 @@ export function program(k, data) {
   }
   // ---- one file, in its own unit: an image or another whole file has only its words, a PDF a strip of its pages
   const unit = unitOf(file)
+  const named = block => k.region(WHOLE, { label: `${file.path}: ${fileWords(file)}`, ref: fileRef(file) }, block)
   if (unit === 'file') {
     const what = file.kind && file.kind !== 'file' ? file.kind : file.type
-    return k.stack(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${k.escape(what)}}` }), k.text(wordsMarkup(k, file), { wrap: false }))
+    return k.stack(named(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${k.escape(what)}}` })), k.text(wordsMarkup(k, file), { wrap: false }))
   }
   const total = unit === 'pages' ? file.units || file.rows : file.lines || file.rows
   // (what happened to it is the next line's to say: `read 2 of 3,104 records (0.06%)`)
-  const title = subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${total === 1 ? ONE[unit] : unit}}` })
+  const title = named(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${total === 1 ? ONE[unit] : unit}}` }))
   if (unit === 'pages') return k.stack(title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, { ...file, lines: total, ranges: file.pages, hit_lines: [] }, W))
   const out = [title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, file, W), k.text(' ')]
   if (!ranges.length && file.status === 'model') {
-    out.push(k.text(`{dim:A label's model read ${n(file.model)} of its rows (${k.escape(file.labels.join(', ') || 'a label')}); none of its lines entered Claude's context.}`))
+    out.push(k.text(`{dim:A label's model read ${n(file.model)} of its rows (${k.escape(file.model_labels.join(', ') || 'a label')}); none of its lines entered Claude's context.}`))
     return k.stack(out)
   }
   if (!ranges.length && file.status === 'computed') {
-    out.push(k.text(`{dim:Computed over: ${k.escape([...file.queries, ...file.labels].slice(0, 4).join(', ') || 'a query')} went over its rows, and none of them entered a context. Claude saw what came out, not the rows.}`))
+    out.push(k.text(`{dim:Computed over: ${k.escape([...file.queries, ...file.labels.filter(l => !file.model_labels.includes(l))].slice(0, 4).join(', ') || 'a query')} went over its rows, and none of them entered a context. Claude saw what came out, not the rows.}`))
     return k.stack(out)
   }
   if (!ranges.length) {
@@ -507,7 +513,7 @@ function itemRow(k, it, by, c, on) {
     const key = cut(by === 'type' ? `${g.key} files` : g.key, nw - ind.length)
     const name = on ? `**${k.escape(key)}**` : k.escape(key)
     const left = `${mark}${ind}${name}${' '.repeat(Math.max(0, nw - ind.length - Array.from(key).length))} ${c.fw ? `${pad(n(g.files), c.fw, true)} ` : ''}${size(sizeText(g))}`
-    return k.beside(k.region(it.id, { label: `${g.key}: ${n(g.files)} file${g.files === 1 ? '' : 's'}, ${sizeText(g)}; Claude read ${pct(g.read)} and counted or computed over ${pct(g.counted)} of them`, ...(by === 'folder' && g.key !== './' ? { ref: `${g.key}*` } : {}) },
+    return k.beside(k.region(it.id, { label: `${g.key}: ${[`${n(g.files)} file${g.files === 1 ? '' : 's'}`, sizeText(g)].filter(Boolean).join(', ')}; Claude read ${pct(g.read)} and counted or computed over ${pct(g.counted)} of them`, ...(by === 'folder' && g.key !== './' ? { ref: `${g.key}*` } : {}) },
       k.text(left, { wrap: false })), ...measures(k, g.read, g.counted, c), { gap: 0 })
   }
   const f = it.f

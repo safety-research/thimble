@@ -106,3 +106,24 @@ test('in a narrow pane no number is cut: the bars narrow and go, then the size s
     assert.ok(!/[▆▇█]/.test(line.slice(0, end)), `the press holds a bar at ${w}: ${line}`)
   }
 })
+
+test('a folder\'s subject leaves out a size its files do not share; an open file is the part a question is about', async () => {
+  await import('../../draw/kit.js')
+  const coverage = (await import('../coverage.js')).default
+  const DK = globalThis.DrawKit
+  // a folder of a Makefile and a log: no one unit, so no size, and no empty field in its words
+  const groups = Array.from({ length: 30 }, (_, r) => ({ folder: `runs/r${String(r).padStart(2, '0')}/`, files: 2, touched: r === 0 ? 1 : 0, units: [{ unit: 'lines', units: 40 }, { unit: 'records', units: 9 }] }))
+  const files = groups.map(g => ({ path: `${g.folder}Makefile`, type: 'txt', unit: 'lines', units: 40, status: 'not read', touched: false }))
+  const cov = { session: 's', total: { files: 60, touched_files: 1 }, files, untouched: { path: [], unit: [], units: [] }, groups, types: [] }
+  const data = coverage.data({ coverage: { cov } }, {}, { w: 100, h: 40 })
+  const run = state => DK.run(coverage.program, data, { w: 100, h: 40, mode: 'pane', state })
+  const top = run({})
+  const label = top.regions.find(r => r.id === top.selected).meta.label
+  assert.match(label, /^runs\/r00\/: 2 files; Claude read/)
+  // ↵ on a file nothing touched opens it with no line to walk: the file itself is selected, named by its path
+  const few = coverage.data({ coverage: { cov: { session: 's', total: { files: 1, touched_files: 0 }, files: [], untouched: { path: ['passengers.csv'], unit: ['rows'], units: [891] }, groups: [], types: [] } } }, {}, { w: 100, h: 40 })
+  const opened = DK.run(coverage.program, few, { w: 100, h: 40, mode: 'pane', state: {}, event: { type: 'key', key: 'return' } })
+  const d = DK.run(coverage.program, few, { w: 100, h: 40, mode: 'pane', state: opened.state })
+  assert.equal(d.state?.file ?? opened.state.file, 'passengers.csv')
+  assert.equal(d.regions.find(r => r.id === d.selected)?.meta.label, 'passengers.csv: none')
+})

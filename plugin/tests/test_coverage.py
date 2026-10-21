@@ -220,3 +220,21 @@ def test_each_file_and_folder_has_two_measures_read_and_counted(code: Path, tmp_
     assert (f["read_share"], f["counted_share"]) == (0.2, 1.0)
     g = next(g for g in cov["groups"] if g["folder"] == "logs/")
     assert (g["read_share"], g["counted_share"]) == (0.2, 1.0) and g["touched"] == 1
+
+
+def test_only_a_model_labels_reads_are_said_as_a_models(code: Path, tmp_path: Path) -> None:
+    """Two labels over the same table: a prompt label whose model read its rows, and a code label that only went over
+    them. The model read is said with the prompt label's name alone; the code label computed over the rows."""
+    st = Store(code)
+    rows = ["runs.csv#row=1", "runs.csv#row=2", "runs.csv#row=3"]
+    (st.dir / "labels").mkdir(parents=True, exist_ok=True)
+    for name, by in (("mood", "model"), ("passed_flag", "code")):
+        units = {ref: {"v": "yes", "c": 1.0, "by": by} for ref in rows}
+        (st.dir / "labels" / f"{name}.json").write_text(json.dumps({"name": name, "kind": "prompt" if by == "model" else "code", "in": "runs.csv", "units": units}))
+        st.log({"kind": "label", "name": name})
+    saw(tmp_path, code, [])
+    o = {f["path"]: f for f in LIN.coverage(Store(code))["files"]}["runs.csv"]
+    assert o["model_labels"] == ["mood"]
+    assert "a label's model read 3 of 3 rows (mood)" in o["said"]
+    assert "passed_flag" not in o["said"].split("computed over")[0]
+    assert "computed over all 3 rows (passed_flag)" in o["said"]

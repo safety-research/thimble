@@ -94,3 +94,17 @@ test('Claims: ← → go to the cluster before or after, on its first claim', ()
   st = after(claims, data, st, 'left')
   assert.equal(st.claim, first.id)
 })
+
+test('Labels: a record names its place first, so the input bar\'s subject keeps its line however long the label\'s name', () => {
+  const lab = { name: 'reports_problem', values: ['yes', 'no'], counts: { yes: 1, no: 0 }, records: 1, kind: 'prompt', rule: 'x', in: 'runs/*/transcript.jsonl' }
+  const data = labels.data({ labels: { list: [lab] } }, {}, { w: 100, h: 40 })
+  const state = { open: 'reports_problem', from: 'list', rec: 0 }
+  const first = DK.run(labels.program, data, { w: 100, h: 40, mode: 'pane', state })
+  const want = (first.wants || []).find(w => w.request.records === 'reports_problem')
+  assert.ok(want, JSON.stringify(first.wants))
+  const records = [{ i: 0, ref: 'game-07/transcript.jsonl#L1234', value: 'yes', by: 'model', c: 0.9, words: 'the tool failed' }]
+  const d = DK.run(labels.program, data, { w: 100, h: 40, mode: 'pane', state, got: { [want.key]: { records } } })
+  const rec = d.regions.find(r => r.id === 'rec-0')
+  assert.ok(rec, d.regions.map(r => r.id).join(' '))
+  assert.match(rec.meta.label, /^game-07\/transcript\.jsonl:1234, a record of reports_problem: yes/)
+})

@@ -913,7 +913,8 @@ function entryEls($: Engine, els: Any, about: string, C: number, keys: boolean, 
   let base = fields.get(key)
   if (!base) { base = { seen: draft }; fields.set(key, base); if (fields.size > 8) fields.delete(fields.keys().next().value!) }
   else if (!(keys && landed === key)) base.seen = draft
-  const what = cut(about, 40)
+  // (cut to the room the field has beside `Ask about ` and `⏎ ask`, so a record's place or line stays in it)
+  const what = cut(about, Math.max(40, C - 24))
   const b = base
   const bar = entry(els, {
     key, w: C - 1, value: draft,
@@ -1170,8 +1171,11 @@ export async function detailKeys($: Engine): Promise<string | null> {
   return `esc ${await backWord($)} · no ← →`
 }
 
-/** What esc does last: back to what the panel showed before, or close it. */
+/** What esc does: back a level of the pane's own (its esc handler: a file open in Coverage, a label open in Labels),
+ *  back to what the panel showed before, or close it. The esc hook asks in the same order. */
 async function backWord($: Engine): Promise<string> {
+  const view = await sideNow($)
+  if (view?.kind === 'pane' && (await paneTakes($, view.pane, view.args, { type: 'key', key: 'esc' }))) return 'back'
   return (await sideDepth($)) ? 'back' : 'close'
 }
 
