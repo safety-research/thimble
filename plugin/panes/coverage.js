@@ -345,9 +345,11 @@ export function program(k, data) {
     const what = file.kind && file.kind !== 'file' ? file.kind : file.type
     return k.stack(named(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${k.escape(what)}}` })), k.text(wordsMarkup(k, file), { wrap: false }))
   }
+  // the file's own lines, where its ranges and the lines shown stand (a CSV's header is line 1); its size is in its unit,
+  // as the list says it (a CSV of 891 rows has 892 lines)
   const total = unit === 'pages' ? file.units || file.rows : file.lines || file.rows
   // (what happened to it is the next line's to say: `read 2 of 3,104 records (0.06%)`)
-  const title = named(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${total === 1 ? ONE[unit] : unit}}` }))
+  const title = named(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${fileSize(file)}}` }))
   if (unit === 'pages') return k.stack(title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, { ...file, lines: total, ranges: file.pages, hit_lines: [] }, W))
   const out = [title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, file, W), k.text(' ')]
   if (!ranges.length && file.status === 'model') {

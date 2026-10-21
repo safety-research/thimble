@@ -127,3 +127,16 @@ test('a folder\'s subject leaves out a size its files do not share; an open file
   assert.equal(d.state?.file ?? opened.state.file, 'passengers.csv')
   assert.equal(d.regions.find(r => r.id === d.selected)?.meta.label, 'passengers.csv: none')
 })
+
+test("a CSV's file view counts its rows, not its header line", async () => {
+  await import('../../draw/kit.js')
+  const coverage = (await import('../coverage.js')).default
+  const DK = globalThis.DrawKit
+  const f = { path: 'passengers.csv', type: 'csv', unit: 'rows', units: 891, rows: 891, lines: 892, seen_units: 2, status: 'seen', touched: true, ranges: [[2, 3]], read_share: 0.002, counted_share: 1 }
+  const cov = { session: 's', total: { files: 1, touched_files: 1, seen_files: 1, units: [{ unit: 'rows', units: 891, seen: 2 }] }, files: [f], untouched: { path: [], unit: [], units: [] }, groups: [], types: [] }
+  const data = coverage.data({ coverage: { cov } }, {}, { w: 100, h: 40 })
+  const { gridText, renderTerm } = await import('../../draw/term.js')
+  const text = gridText(renderTerm(DK.run(coverage.program, data, { w: 100, h: 40, mode: 'pane', state: { file: 'passengers.csv' } }), { w: 100 }))
+  assert.match(text, /file · 891 rows/)
+  assert.doesNotMatch(text, /892 rows/)
+})
