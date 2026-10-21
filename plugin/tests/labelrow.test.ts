@@ -30,3 +30,11 @@ test('under a card, a value has the color the card gives it, or a plain dim dot;
   const answer = labelRowEl(els, [label], { key: 'k', theme: 'dark', onOpen: open })
   expect(dots(answer).map(d => d.color)).toEqual(label.values.map(v => termColor(valueTone(label.values, v), 'dark')))
 })
+
+test('a regex label\'s row under a card is one line, as its own card\'s foot: how it was made and over how many records, never the pattern', () => {
+  const label = { name: 'coord', kind: 'regex', rule: '(?i)coordinat|collab|cohort|\\bpeers?\\b|relay|please (append|post)', values: ['yes', 'no'], records: 13403 }
+  const row = labelRowEl(els, [label], { key: 'k', theme: 'dark', onOpen: () => undefined })
+  const words = (k: Any): string => (typeof k.children === 'string' ? k.children : Array.isArray(k.children) ? k.children.map(words).join('') : '')
+  const text = row.children.map(words).join('')
+  expect(text).toBe('label coord · regex · 13,403 records  ● yes  ● no')
+})
