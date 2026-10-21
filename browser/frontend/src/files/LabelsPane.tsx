@@ -12,7 +12,6 @@ import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Menu } from '../components/Menu'
-import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
@@ -153,7 +152,7 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
             <span className="files-label-name">{k.name}</span>
           </button>
         )}
-        {running && <Spinner size={10} label="Running" />}
+        {/* while it runs, the busy line above the chat's input box says `labeling: <label>` (lib/busy.ts) */}
         {files && (
           <Button ref={paletteAt} variant="icon" size="sm" icon="palette" title="Change color" aria-label={`Change the colors of ${k.name}`} className="files-label-colour" active={picking} onClick={() => setPicking(!picking)} />
         )}

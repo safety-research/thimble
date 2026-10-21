@@ -47,7 +47,7 @@ import { heldValues, openSettings, settingsAction, settingsStore } from '../sett
 
 
 import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, tellSettled, wantLevels as sqWant } from '../squeeze/term'
-import { SCALE, cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, setWords, withOwn } from '../squeeze/chips.mjs'
+import { cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, withOwn } from '../squeeze/chips.mjs'
 import { barText, fitBar, hostKeys, keyEvent, keysOf, previewBarWidth } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTitle, paneTry, patchPaneState, setTheme } from './panes'
@@ -66,7 +66,7 @@ import { closeDock, countLabels, coverageOf, DOCK_KEY, dockAction, dockCountEl, 
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
 import { flushEngaged, resetEngaged, tellOpened } from './engaged'
-import { busy, busyGlyph as workGlyph, busyNow } from './busy'
+import { busy, busyNow } from './busy'
 import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
@@ -1510,7 +1510,7 @@ async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: 
   // with the citation's words, a citation of a whole query opens the row that holds the value it shows
   const words = label && label !== ref ? ['--label', label] : []
   const env = await leanEnv($, root)
-  const r = await busy($, 'reading rows', () => $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env, timeoutMs: 60000 }))
+  const r = await busy($, 'opening the citation', () => $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env, timeoutMs: 60000 }))
   try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'thimble resolve gave nothing' } }
 }
 
@@ -1642,7 +1642,7 @@ async function askForView($: Engine, rec: MsgRecord, choice: string): Promise<vo
     // a fork of the conversation makes the card in the background, drawn under the message (aside.ts); only where no
     // fork can start does v ask main, as a turn of its own
     const what = picked || 'another view of this answer'
-    if (await askAside($, { row: rec.row, verb: 'visualize', doing: 'visualizing', what, about: shownOf(rec), request: viewRequest({ message: rec, choice: picked, guide, aside: true }) })) return
+    if (await askAside($, { row: rec.row, verb: 'visualize', doing: 'drawing a card', what, about: shownOf(rec), request: viewRequest({ message: rec, choice: picked, guide, aside: true }) })) return
     const request = viewRequest({ message: rec, choice: picked, guide })
     placeNext = isCatchUp(rec) ? rec.row : null
     await ask($, request, 'visualize', choice || 'another view of this answer')
@@ -2153,10 +2153,10 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
     }
   }
   // thimble's own work while it runs (busy.ts): a turning glyph and a word or two first, the seconds from 3 s
-  // (once: a focused surface that already says the work, the chips' `s ⠋ rewriting…`, keeps it alone)
+  // (once: a focused surface whose own line already says the work keeps it alone)
   const working = o.preview ? null : await busyNow($)
   // (the glyph is part of its words, so the bar's room counts it; segText draws it in the keys' color)
-  if (working && !focus?.status?.text.includes(working.word)) left.unshift({ key: '', busy: working.glyph, words: `${working.glyph} ${working.word}${working.secs != null ? ` ${working.secs}s` : ''}`, short: `${working.glyph} ${working.word.split(' ')[0]}` })
+  if (working && !focus?.status?.text.includes(working.word)) left.unshift({ key: '', busy: working.glyph, words: `${working.glyph} ${working.word}${working.secs != null ? ` ${working.secs}s` : ''}`, short: `${working.glyph} ${working.short}` })
   const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
   const now = await $.clock.now()
   if (!o.preview) noteBar(now, left)
@@ -2891,8 +2891,8 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
   // its first version on its way, or why it failed: one line on the reply, which stays as written under it
   const why = sqUi?.error || ((cu.squeeze ?? {}) as Any).error || null
   const written = typeof cu.shown === 'string'
-  const secs = Math.max(0, Math.round(((await $.clock.now()) - (sqUi?.asked ?? sqUi?.running?.since ?? (await $.clock.now()))) / 1000))
-  const note = written ? null : why ? rewritingEl(els, { glyph: '×', text: why, error: true, key: `cu-note-${row}`, theme }) : rewritingEl(els, { glyph: busy ?? '◌', text: `writing one message of these ${replies} replies… ${secs}s`, key: `cu-note-${row}`, theme })
+  // (while it is written, the bar says so: busy.ts `writing a catch-up`)
+  const note = written || !why ? null : rewritingEl(els, { glyph: '×', text: why, error: true, key: `cu-note-${row}`, theme })
   // its citations healed as an answer's are, once its text is written whole
   const shown = n == null || !written ? (written ? healedRecord(cu, { checking: await healNow($, cu, !busy) }) as MsgRecord : cu) : (() => {
     const part = revealCut(cu.shown, n) as string
@@ -2918,12 +2918,10 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
   return { main, note, tail }
 }
 
-/** One line on a message while a rewrite of it is on its way (`⠋ rewriting: short · 4s`), or why it failed: drawn at
- *  once on the key, in the keys' color, until the new text writes itself in. */
-function rewritingEl(els: Any, o: { glyph: string; levels?: string; text?: string; secs?: number; error?: boolean; key: string; theme: 'dark' | 'light' }): Any {
+/** Why a rewrite of a message failed: one line on it, in the error color. */
+function rewritingEl(els: Any, o: { glyph: string; text: string; error?: boolean; key: string; theme: 'dark' | 'light' }): Any {
   const { Text } = els
-  const words = o.text ?? `rewriting${o.levels ? `: ${o.levels}` : ' as written'} · ${o.secs ?? 0}s`
-  return Text({ key: o.key, wrap: 'truncate-end', children: [Text({ color: o.error ? 'error' : keyColor('s', o.theme), children: `${o.glyph} ` }), Text({ ...(o.error ? { color: 'error' } : { color: keyColor('s', o.theme) }), children: words })] })
+  return Text({ key: o.key, wrap: 'truncate-end', children: [Text({ color: 'error', children: `${o.glyph} ` }), Text({ color: 'error', children: o.text })] })
 }
 
 /** The width cards under a reply were drawn at last: the bar reads a focused card's keys from the same drawing, and a
@@ -3067,8 +3065,6 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     // whether a pane drawn by heldEl holds the keyboard now (a click gave it them), by its id
     case 'held': return !!arg && (await $.state.get(HELD)).value === arg
-    // the glyph that turns while thimble works (busy.ts): a line that says the work in place draws it
-    case 'busy': return await workGlyph($)
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': {
       // with what the healing pass did to its takeaway's citations (panes/detail.js draws them)
@@ -3583,8 +3579,8 @@ export const registerShell: Register = (on, options) => {
       const caught = await catchUpParts($, e, at, cols)
       const folded = !caught && rec.inCatchUp ? await recordNow($, rec.inCatchUp) : null
       const hidden = !!folded && catchUpStands(folded) && typeof folded.shown === 'string'
-      // a rewrite asked for and on its way: one line on the message at once, until the new text writes itself in
-      const rewriting = n == null && (sqUi?.want || sqUi?.running) && !isCatchUp(rec) ? rewritingEl(els, { glyph: busy ?? '◌', levels: setWords({ ...rec, squeeze: { ...(rec.squeeze ?? {}), at: sqUi?.want ?? (rec.squeeze as Any)?.at ?? {}, scale: SCALE } } as Any), secs: Math.max(0, Math.round(((await $.clock.now()) - (sqUi?.asked ?? sqUi?.running?.since ?? (await $.clock.now()))) / 1000)), key: `rw-${at}`, theme }) : null
+      // a rewrite on its way shows on the bar (busy.ts `rewriting`), the message as it was until the new text writes
+      // itself in
       // work a key asked of Claude on this message (v's card, aside.ts): one line while it runs, or why it made none
       // the fullscreen transcript says which rows are on screen (and draws only those)
       if (e.props.onScreen !== undefined || e.viewport?.isFullscreen) fullscreenSeen = true
@@ -3599,17 +3595,16 @@ export const registerShell: Register = (on, options) => {
         const off = os === null || (os === undefined && fullscreenSeen && (await messageRows($)).at(-1) !== at)
         $.clock.after(0, () => { void cardLanded($, at, off).catch(() => undefined) })
       }
-      if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null && !caught && !aside && !hidden && !rewriting) return next(e)
+      if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null && !caught && !aside && !hidden) return next(e)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       await $.state.get(CARDFOCUS)
       const base = trayBase(tray) as TrayFrame | null
       const parts: Any[] = []
-      if (rewriting) parts.push(rewriting)
       if (caught?.main) parts.push(caught.main)
       if (caught?.note) parts.push(caught.note)
       if (!hidden && !caught?.main) {
         parts.push(rec.marks.length || rec.shown != null || busy || n != null || picked || caught
-          ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy || !!caught, lead: busy ?? (picked ? '▸' : null), leadColor: busy ? null : FOCUS[theme], passages: busy || caught ? null : passagesOf($, at) })
+          ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy || !!caught, lead: picked ? '▸' : null, leadColor: FOCUS[theme], passages: busy || caught ? null : passagesOf($, at) })
           : await next(e))
       }
       // the labels its citations rest on, beside it (labeluse.ts)

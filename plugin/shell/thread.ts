@@ -34,7 +34,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { recount } from './shell'
 import { promptText } from '../prompts/prompts'
 import { claimAgent } from '../telemetry/telemetry'
-import { aboutOf, firstMessage, forkDirective, nameOf, nextMessage, ownReport, samePart, threadKey, turnsOf } from './threads.js'
+import { aboutOf, firstMessage, forkDirective, nameOf, nextMessage, ownReport, samePart, subjectOf, threadKey, turnsOf } from './threads.js'
 import { sessionKey } from '../hooks/conversation'
 import { tellAsked } from './engaged'
 import { busyWhile } from './busy'
@@ -292,8 +292,10 @@ export async function askThread($: Engine, ask: Ask): Promise<{ thread: Thread |
     }
     t = { ...t, asks: [...was.asks, asked(sent)] }
     await keep($, t)
-    // the bar shows the answer on its way until the thread's agent ends its turn (busy.ts)
-    void busyWhile($, 'answering', () => threads.get(key)?.status === 'running')
+    // the bar shows the answer on its way until the thread's agent ends its turn (busy.ts), by what the thread is on,
+    // so two threads at once say which is which
+    const on = subjectOf(t).replace(/\s+/g, ' ').trim()
+    void busyWhile($, `answering: ${[...on].length > 24 ? `${[...on].slice(0, 23).join('')}…` : on}`, () => threads.get(key)?.status === 'running')
     if (scope.region) await noteSelection($, key, { region: scope.region, label: aboutOf(scope), refs: ask.refs || [] })
     follow($)
     // the question, not its answer, reaches main's session: what the analyst asks about is what they care about

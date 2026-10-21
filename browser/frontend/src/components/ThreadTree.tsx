@@ -324,7 +324,6 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
         <span className="tt-end">
           {n.progress && <span className="tt-meta">{n.progress}</span>}
           {n.time && n.ended && <span className="tt-meta">{n.time}</span>}
-          {(n.running || hidden?.running) && <Spinner size={10} label="running" />}
           {!n.running && n.ended === 'done' && <Mark kind="verified" label="done" className="tt-mark" />}
           {!n.running && n.ended === 'failed' && <Mark kind="failed" label="failed" className="tt-mark" />}
           {(n.waiting || hidden?.waiting) && (

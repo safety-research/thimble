@@ -335,7 +335,6 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
                 <button type="button" role="tab" aria-selected={s === slug} className="reader-tab-pick" onClick={() => setSlug(s)}>
                   {!writing && types?.[s]?.status === 'failed' ? <Mark kind="failed" label="Not finished" className="reader-tab-glyph" /> : <Icon name="doc" size={13} className="reader-tab-glyph" />}
                   <span className="reader-tab-name">{docLabel(s, types)}</span>
-                  {writing && <Spinner size={10} label="Writing" />}
                 </button>
                 {tabs.length > 1 && (
                   <button type="button" className="reader-tab-x" aria-label={`Close ${docLabel(s, types)}`} title="Close the tab; the report stays" onClick={() => close(s)}>

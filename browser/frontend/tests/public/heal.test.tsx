@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // A card's takeaway, in the canvas's `[[value|ref]]` form, goes through the healing pass as a reply does (lib/heal): the
-// page sends it as Markdown links, each citation of a card shows a spinner while the check runs, then a re-pointed one
-// opens its new place and a contradicted one carries a red ×.
+// page sends it as Markdown links, the busy line says `checking citations` while the check runs (no citation draws a
+// spinner of its own), then a re-pointed one opens its new place and a contradicted one carries a red ×.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown, ChipContext } from '../../src/chat/markdown.tsx'
 import { bus } from '../../src/lib/bus.ts'
+import { busySteps } from '../../src/lib/busy.ts'
 import { healInput } from '../../src/lib/heal.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -17,7 +18,7 @@ afterEach(() => {
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
 
-test('a takeaway shows a spinner while its citations are checked, then each one healed in place', async () => {
+test('a takeaway is a busy step while its citations are checked, then each one is healed in place', async () => {
   const take = 'Of all runs, [[31|card:aaaaaa#n/closed]] merged and [[30|card:aaaaaa#n/open]] stayed open, see [[runs/r1.jsonl#L4]].'
   expect(healInput(take)).toBe('Of all runs, [31](card:aaaaaa#n/closed) merged and [30](card:aaaaaa#n/open) stayed open, see [[runs/r1.jsonl#L4]].')
   let answer: (r: Response) => void = () => undefined
@@ -34,7 +35,8 @@ test('a takeaway shows a spinner while its citations are checked, then each one 
   )
   await settle()
   expect(sent).toEqual([healInput(take)])
-  expect(el.querySelectorAll('.refchip-checking')).toHaveLength(2)
+  expect(busySteps()).toContain('checking citations')
+  expect(el.querySelectorAll('.refchip-checking')).toHaveLength(0)
 
   answer(
     json({
@@ -49,7 +51,7 @@ test('a takeaway shows a spinner while its citations are checked, then each one 
   )
   await settle()
   await settle()
-  expect(el.querySelectorAll('.refchip-checking')).toHaveLength(0)
+  expect(busySteps()).not.toContain('checking citations')
   const chips = [...el.querySelectorAll<HTMLElement>('.refchip-value')]
   expect(chips.map((c) => c.dataset.ref)).toEqual(['card:aaaaaa#n/merged', 'card:aaaaaa#n/open'])
   expect(chips[0].querySelector('.refchip-x')).toBeNull()

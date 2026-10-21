@@ -1,29 +1,58 @@
-// The one sign that Claude or thimble works, just above the chat's input box, where the orientation's strip used to
-// sit: a spinner and a word. "working" while main's turn runs (the chat list's `running`), and thimble's own job
-// (lib/busy.ts: "marking", "labeling", "writing") with its seconds from 3 s on. When both run, one line says both.
+// The one sign that Claude or thimble works, just above the chat's input box: a spinner, the step's words and its
+// seconds (lib/busy.ts). Main's turn is the step "answering" and a side thread's "answering: <thread>", as the chat list
+// says them (`running`, which the server sets for an open turn); thimble's own steps come from lib/busy.ts. No chat
+// row, tab or thread draws a spinner of its own.
+import { useEffect, useRef } from 'react'
 import { Spinner } from '../components/Spinner'
-import { useBusy } from '../lib/busy'
+import { pageJob, useBusy } from '../lib/busy'
 import { useChatMetas } from './useChat'
 
+type Meta = { id?: string; kind?: string; title?: string; name?: string | null; running?: boolean }
+
 /** Main's turn while it runs, as the chat list says it (`running`, which the server sets for the open turn). */
-export function mainRunning(metas: readonly { kind?: string; running?: boolean }[]): boolean {
+export function mainRunning(metas: readonly Meta[]): boolean {
   return metas.some((m) => m.kind === 'main' && !!m.running)
 }
 
+/** The chats whose turn runs now, each as its step: main's "answering", a thread's "answering: <its name>". Pure. */
+export function answering(metas: readonly Meta[]): { id: string; word: string }[] {
+  return metas
+    .filter((m) => m.running && m.id)
+    .map((m) => {
+      if (m.kind === 'main') return { id: 'chat:main', word: 'answering' }
+      const name = String(m.name || m.title || 'a thread').replace(/\s+/g, ' ').trim()
+      return { id: `chat:${m.id}`, word: `answering: ${name.length > 24 ? `${name.slice(0, 23)}…` : name}` }
+    })
+}
+
 export function ChatBusy({ ws }: { ws: string }) {
-  const main = mainRunning(useChatMetas(ws))
+  const metas = useChatMetas(ws)
+  const now = answering(metas)
+  const key = now.map((x) => `${x.id}=${x.word}`).join('|')
+  // the turns that run, as the page's own steps: one that ended goes, one that runs on keeps its time
+  const was = useRef<string[]>([])
+  useEffect(() => {
+    for (const x of now) pageJob(x.id, x.word)
+    for (const id of was.current) if (!now.some((x) => x.id === id)) pageJob(id, null)
+    was.current = now.map((x) => x.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  useEffect(
+    () => () => {
+      for (const id of was.current) pageJob(id, null)
+    },
+    [],
+  )
   const job = useBusy()
-  if (!main && !job) return null
+  if (!job) return null
   return (
-    <div className="chat-strip chat-busy" role="status" data-busy={job?.word ?? 'main'} data-main={main || undefined}>
+    <div className="chat-strip chat-busy" role="status" data-busy={job.word}>
       <div className="chat-strip-bar">
         <span className="chat-busy-head">
-          <Spinner label="working" />
+          <Spinner label={job.word} />
           <span className="chat-strip-title">
-            {main && 'working'}
-            {main && job && <span className="chat-busy-sep"> · </span>}
-            {job && job.word}
-            {job?.secs != null && <span className="chat-busy-secs"> {job.secs}s</span>}
+            {job.word}
+            {job.secs != null && <span className="chat-busy-secs"> {job.secs}s</span>}
           </span>
         </span>
       </div>

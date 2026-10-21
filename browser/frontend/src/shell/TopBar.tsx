@@ -112,7 +112,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
             onClick={() => onTab(t.value)}
           >
             <span className="tab-label">{t.label}</span>
-            {t.busy ? <Spinner size={10} className="tab-dot tab-spinner" label="Writing" /> : t.dot && <span className="dot tab-dot" role="img" aria-label="Unread" />}
+            {t.dot && <span className="dot tab-dot" role="img" aria-label="Unread" />}
           </button>
         ))}
       </nav>

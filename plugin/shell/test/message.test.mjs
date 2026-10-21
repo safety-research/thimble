@@ -244,13 +244,13 @@ test('a card detail reads a takeaway citation whose ref holds brackets as one li
   assert.deepEqual(runs, [{ s: 'Girls: ' }, { s: '19', link: 'r4#age=child%20(0-12)&group=b@kept' }, { s: ' of 32, ' }, { s: 'most', bold: true }, { s: ' of them.' }])
 })
 
-test('the healing pass in a drawing: a spinner while it runs, a re-pointed citation opens its new place, one whose place is gone has a grey ?, an unwrapped one is grey, a contradicted one has a red ×', () => {
+test('the healing pass in a drawing: no glyph while it runs (the bar says it), a re-pointed citation opens its new place, one whose place is gone has a grey ?, an unwrapped one is grey, a contradicted one has a red ×', () => {
   const text = 'Busiest: [5](r1#day=a@n). Gone: [12](r9@n). Wrong: [4](r1#day=b@n). Many: [7](r1@n).'
   const rec = { ...newRecord({ row: 'x', session: 's', text }) }
   assert.equal(needsHeal(rec), true)
   const checking = healedRecord(rec, { checking: true })
   const runs = inline(text, 0, text.length, checking.marks)
-  assert.equal(runs.filter(r => r.tag === 'checking').length, 4)
+  assert.equal(runs.filter(r => r.tag === 'checking').length, 0)
   assert.equal(healInput(rec), text)
   const healed = { ...rec, heal: { key: textKey(text), changes: [
     { label: '5', ref: 'r1#day=a@n', state: 'linked', how: 'cell', to: 'r1#day=c@n' },

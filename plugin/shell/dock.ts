@@ -27,6 +27,7 @@ import { threadList } from './thread'
 import { openSide, sideBack, sideNow } from './side'
 import { sessionKey } from '../hooks/conversation'
 import { keyColor } from './view'
+import { busy } from './busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,7 +112,8 @@ export async function readCoverage($: Engine): Promise<void> {
   try {
     const root = await rootOf($)
     // this session's reads, so the session's own key (as the bar's count reads it)
-    const r = await coverageOf($, root, await sessionKey($))
+    const key = await sessionKey($)
+    const r = await busy($, 'counting coverage', () => coverageOf($, root, key))
     try {
       h.cov = JSON.parse(r.out)
       h.error = null
@@ -141,7 +143,8 @@ export async function readLabels($: Engine): Promise<void> {
   h.since = now
   await again($, 'labels')
   try {
-    const r = await thimble($, await rootOf($), ['label', '--json'])
+    const root = await rootOf($)
+    const r = await busy($, 'reading labels', () => thimble($, root, ['label', '--json']))
     try {
       const v = JSON.parse(r.out)
       h.list = Array.isArray(v) ? v : []

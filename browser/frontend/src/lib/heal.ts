@@ -6,6 +6,7 @@ import { createContext, createElement, useEffect, useMemo, useState, useSyncExte
 import { api, type HealResult } from './api'
 import type { ResolvedRef } from './types'
 import { bus } from './bus'
+import { pageJob } from './busy'
 import { splitValueRef } from './refs'
 import { workspaceFromUrl } from './workspace'
 
@@ -93,12 +94,17 @@ function cardChanged(e: { cell: string; slug?: string; kind: string }): void {
 }
 bus.on('cell', cardChanged)
 
+let asks = 0
+
 /** The pass's answer for `input` in this round: one request for every text on the page that shows it. The answer
  * becomes the text's result only while no card it cites has changed since it was asked. */
 function check(ws: string, input: string, key: string): Promise<HealResult | null> {
   const round = roundOf(key)
   const asked = pending.get(key)
   if (asked && asked.round === round) return asked.answer
+  // the busy line says `checking citations` while it runs (lib/busy.ts); no citation draws a spinner of its own
+  const job = `heal:${++asks}`
+  pageJob(job, 'checking citations')
   const answer = api.heal(ws, input).then(
     (r) => r,
     (err: unknown) => {
@@ -111,6 +117,7 @@ function check(ws: string, input: string, key: string): Promise<HealResult | nul
   )
   pending.set(key, { round, answer })
   void answer.then((r) => {
+    pageJob(job, null)
     if (roundOf(key) !== round) return
     results.set(key, r)
     pending.delete(key)

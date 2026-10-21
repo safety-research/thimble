@@ -11,7 +11,7 @@
 //   ● Links peaked that day: 2,994 of …       the answer after ●, its citations underlined presses (view.ts)
 //
 //     [a card it saved, drawn as under a reply]
-//   ● ◌ starting · 4s                         a question at work, until its first step; then its steps so far
+//                                             a question at work: the bar says `⠋ answering: <thread>` (busy.ts)
 //
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
 //   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them
@@ -62,12 +62,6 @@ function wrapWords(s: string, w: number): string[] {
   return out.length ? out : ['']
 }
 
-/** How long, in a few characters: `4s`, `1m 05s`. */
-function secs(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
-}
-
 /** The conversation's rows, oldest first: nothing before its first question. */
 export function conversation(els: Any, o: ConvOpts): Item[] {
   const { Box, Text } = els
@@ -80,7 +74,6 @@ export function conversation(els: Any, o: ConvOpts): Item[] {
   const head = ` ${cut(o.name, w - 8)} `
   row(Text({ key: `${o.key}-head`, dimColor: true, wrap: 'truncate-end', children: `──${head}${'─'.repeat(Math.max(2, w - [...head].length - 2))}` }))
   const status = String(o.thread?.status || '')
-  const lastPerson = turns.map((t: Any) => t.role).lastIndexOf('person')
   // a blank row between blocks, as Claude Code spaces main's messages
   const gap = (k: string) => row(Text({ key: k, children: ' ' }))
   turns.forEach((t: Any, i: number) => {
@@ -96,21 +89,15 @@ export function conversation(els: Any, o: ConvOpts): Item[] {
         ...(fits && j === lines.length - 1 ? [Text({ dimColor: true, children: `   ${about}` })] : []),
       ] })))
       if (about && !fits) row(Text({ key: `${k}-about`, dimColor: true, wrap: 'truncate-end', children: `  ${about}` }))
-      // a question still at work, before any step of it is read: how long it has been
-      if (i === lastPerson && i === turns.length - 1 && status === 'running') {
-        const since = Date.parse(String(t.at || ''))
-        gap(`${k}-start-gap`)
-        row(Text({ key: `${k}-start`, color: 'warning', children: `● ◌ starting${isFinite(since) ? ` · ${secs(o.now - since)}` : ''}` }))
-      }
+      // a question still at work: the bar's one busy line says so (`⠋ answering: <thread>`, busy.ts)
       return
     }
-    const working = status === 'running' && i === turns.length - 1
     const calls: string[] = t.calls || []
     if (calls.length) {
       const words = `${calls.length} step${calls.length === 1 ? '' : 's'} · ${calls[calls.length - 1]}`
       gap(`${k}-steps-gap`)
-      row(Text({ key: `${k}-steps`, wrap: 'truncate-end', ...(working ? { color: 'warning' } : { dimColor: true }), children: `● ${working ? '◌ ' : ''}${cut(words, w - 4)}` }))
-    } else if (working && !t.text) { gap(`${k}-steps-gap`); row(Text({ key: `${k}-steps`, color: 'warning', children: '● ◌ starting' })) }
+      row(Text({ key: `${k}-steps`, wrap: 'truncate-end', dimColor: true, children: `● ${cut(words, w - 4)}` }))
+    }
     if (t.text) {
       gap(`${k}-a-gap`)
       // its citations as the healing pass left them (o.heal: the host's, shell.tsx healOfText)

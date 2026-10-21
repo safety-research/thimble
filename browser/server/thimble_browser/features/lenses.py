@@ -358,6 +358,17 @@ def outside_links(text: str) -> str:
     return cite.map_links(TOKENS.sub(" ", text), lambda *_: " ")
 
 
+# what each built-in lens adds, as the busy line names a reading (the terminal's words, plugin/observer lookWord)
+_NOUNS = {"explain": "explainers", "details": "details", "unverifiable": "unverifiable claims"}
+
+
+def step(active: list[dict[str, Any]]) -> str:
+    """A reading as the busy line above the chat's input box says it (busy.py), by the lenses it asks:
+    `adding explainers, details`; an analyst's own check by its name."""
+    nouns = [_NOUNS.get(x["id"]) or str(x.get("name") or "a check").lower() for x in active]
+    return "adding " + ", ".join(nouns) if nouns else "reading the answer"
+
+
 def _surface_of(place: str) -> str:
     return "chat" if place == "answer" else "cards" if place.startswith("card:") else "report"
 
@@ -379,7 +390,7 @@ async def read(ws: str, *, chat: str | None = None, answer: str | None = None, c
         f"The texts to read:\n\n{places}\n\nWhich lens reads which text:\n{covers}"
     try:
         # the busy line above the chat's input box shows the reading while it runs (busy.py)
-        async with working(ws, "adding explainers and details"):
+        async with working(ws, step(active)):
             got = json.loads(await llm.complete(system, user, schema=_schema(active), effort="low") or "{}")
     except Exception as e:  # noqa: BLE001 — a failed reading leaves the texts as they are, and says so once
         log.warning("the lenses' reading failed: %s", llm.failure(e))

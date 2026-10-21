@@ -127,7 +127,7 @@ async def start(ws: str, folder: Path, concept: dict[str, Any], *, paths: list[s
     same = last is not None and last.get("version") == concept["version"]
     await asyncio.to_thread(store.clear_model_rows, ws, concept["id"], {u.ref for u in found} if same else None)
     RUNS[key] = rec
-    TASKS[key] = asyncio.create_task(_shown(ws, _run(ws, folder, concept, found, rec)))
+    TASKS[key] = asyncio.create_task(_shown(ws, str(concept.get("name") or ""), _run(ws, folder, concept, found, rec)))
     store.notify(ws, concept["id"], "applying")
     return rec
 
@@ -166,9 +166,9 @@ def _note(rec: dict[str, Any], why: str) -> None:
         msgs.append(why)
 
 
-async def _shown(ws: str, run: Any) -> None:
-    """The run, shown above the chat's input box while it goes (busy.py)."""
-    async with working(ws, "labeling"):
+async def _shown(ws: str, name: str, run: Any) -> None:
+    """The run, shown above the chat's input box while it goes (busy.py): `labeling: <label>`."""
+    async with working(ws, f"labeling: {name[:24]}" if name else "labeling"):
         await run
 
 
