@@ -2192,7 +2192,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // a big label's ask waits (labels.ts): 1 runs all, 2 a sample, 0 cancels, once WORD_MS has passed with no letter after
   // the key (a letter makes it the start of a word, and nothing runs)
   const la = !pick && !tray ? await labelAskNow($) : null
-  if (la && ASK_KEYS[k] && !(k === '2' && la.units <= la.sample)) {
+  if (la && ASK_KEYS[k] && !(k === '2' && !sampleOffered(la))) {
     const wait = { key: k, cancelled: false }
     return { box: consume, work: () => {
       askWait = wait
@@ -2293,9 +2293,14 @@ function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
 }
 
+/** Whether an ask offers a sample: not after the person chose one (an ask for the rest), nor when all fit in one. */
+const sampleOffered = (a: LabelAsk) => !a.rest && a.sample > 0 && a.units > a.sample
+/** An ask's first choice in words: "run all", or "run the rest" after a sample. */
+const allWords = (a: LabelAsk) => (a.rest ? 'run the rest' : 'run all')
+
 /** An ask's keys, as the bar and its row say them. */
 function askKeys(a: LabelAsk): string {
-  return [`1 run all`, ...(a.units > a.sample ? [`2 run on a sample of ${a.sample.toLocaleString('en-US')}`] : []), '0 cancel'].join(' · ')
+  return [`1 ${allWords(a)}`, ...(sampleOffered(a) ? [`2 run on a sample of ${a.sample.toLocaleString('en-US')}`] : []), '0 cancel'].join(' · ')
 }
 
 /** A big label's ask under its card: what the run reads (certain), the three choices, each a press, and under them the
@@ -2307,7 +2312,7 @@ function askRows(els: Any, $: Engine, a: LabelAsk): Any {
     Box({ key: `ask-${c}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: words, onPress: () => { void answerAsk($, c) }, children: [Text({ key: 'k', color, bold: true, children: key }), Text({ key: 'w', children: ` ${words}` })] })] })
   return Box({ key: 'label-ask', flexDirection: 'column', marginTop: 1, children: [
     Text({ key: 'ask-text', children: `${a.text}?` }),
-    Box({ key: 'ask-keys', flexDirection: 'row', children: [choice('1', 'run all', 'all'), ...(a.units > a.sample ? [choice('2', `run on a sample of ${a.sample.toLocaleString('en-US')}`, 'sample')] : []), choice('0', 'cancel', 'cancel')] }),
+    Box({ key: 'ask-keys', flexDirection: 'row', children: [choice('1', allWords(a), 'all'), ...(sampleOffered(a) ? [choice('2', `run on a sample of ${a.sample.toLocaleString('en-US')}`, 'sample')] : []), choice('0', 'cancel', 'cancel')] }),
     ...(a.meta ? [Text({ key: 'ask-meta', dimColor: true, children: a.meta })] : []),
   ] })
 }
