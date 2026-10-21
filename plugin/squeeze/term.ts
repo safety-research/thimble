@@ -203,7 +203,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   const probe = { ...rec, squeeze: { ...s, at: want.at, scale: SCALE } } as MsgRecord
   const chips = chipsOf(probe)
   const hit = isOriginal(chips) ? restore(probe, remark) : fromVersions(rec, want.at, remark)
-  if (hit) { await settled($, row, hit as MsgRecord); return }
+  if (hit) { await settled($, row, hit as MsgRecord, { written: false }); return }
   await ensure($)
   // a short wait before a call, so keys pressed in a row are written once, at the last level (settings.json settleMs)
   const wait = Number(cfg.settleMs || 0)
@@ -271,16 +271,18 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     }, remark) as MsgRecord
     ticker.stop()
     await setUi($, row, { running: null })
-    await settled($, row, next)
+    await settled($, row, next, { written: true })
     await log($, { row, ok: true, ms, model: req.model, effort: req.effort, chars: { system: req.system.reduce((n, b) => n + b.text.length, 0), prompt: req.prompt.reduce((n, b) => n + b.text.length, 0) }, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}), ...(answer ? { cards: answer.cards.length, outputs: answer.outputs.length, asked: reply.cards.map(c => `${c.op} ${c.id}`), did: (cards?.did ?? []).map(d => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}) })
   } finally {
     ticker.stop()
   }
 }
 
-/** A version shown: the record kept, the new text writing itself in from the top, the tray off this row's moved marks,
- *  and the row marked for Claude to hear of once the person settles on a version (tellSettled). */
-async function settled($: Engine, row: string, rec: MsgRecord): Promise<void> {
+/** A version shown: the record kept, the tray off this row's moved marks, and the row marked for Claude to hear of
+ *  once the person settles on a version (tellSettled). Text a call just `written` writes itself in from the top; a
+ *  version that comes back from the record (the original at 0, or a level seen before) shows whole at once, with its
+ *  marks, since nothing is being written. */
+async function settled($: Engine, row: string, rec: MsgRecord, o: { written: boolean }): Promise<void> {
   const before = await recordNow($, row)
   await saveRecord($, rec)
   await showCards($, rec)
@@ -288,7 +290,9 @@ async function settled($: Engine, row: string, rec: MsgRecord): Promise<void> {
   await markChanged($, row)
   const was = before ? (typeof before.shown === 'string' ? before.shown : before.text) : ''
   const now = typeof rec.shown === 'string' ? rec.shown : rec.text
-  if (now !== was) await writeIn($, row, now.length)
+  if (now !== was && o.written) { await writeIn($, row, now.length); return }
+  // a write-in still running for the version before stops: this one shows whole
+  if (revealing.has(row) || (await uiOf($, row)).reveal) { revealing.delete(row); await setUi($, row, { reveal: null }) }
 }
 
 /** The new text writes itself in from the top: a few characters more at each tick, at a model's pace, until it is
