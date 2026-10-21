@@ -74,7 +74,7 @@ const SPARK_LABEL = /^\s*~\s*$/
 export function codeRanges(text) {
   const s = String(text || '')
   const out = []
-  const fence = /^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1\2[`~]*[ \t]*(?=\n|$)|$)/gm
+  const fence = /^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1\2[`~]*[ \t]*(?=\n|$)|(?![\s\S]))/gm
   for (const m of s.matchAll(fence)) out.push([m.index, m.index + m[0].length])
   const inFence = i => out.some(([a, b]) => i >= a && i < b)
   const span = /(`+)([^`\n]|[^`\n][\s\S]*?[^`\n])\1(?!`)/g
@@ -113,7 +113,7 @@ export function linkMarks(text) {
     if (ref) out.push({ kind: 'cite', start, end, ref, label: labelOf(m[1], ref) })
   }
   // a code span that names a file's line, outside a fenced block and outside a link's words
-  const fences = [...s.matchAll(/^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1\2[`~]*[ \t]*(?=\n|$)|$)/gm)].map(m => [m.index, m.index + m[0].length])
+  const fences = [...s.matchAll(/^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1\2[`~]*[ \t]*(?=\n|$)|(?![\s\S]))/gm)].map(m => [m.index, m.index + m[0].length])
   const linked = links.map(m => [m.index, m.index + m[0].length])
   for (const [a, b] of code) {
     if (inside(fences, a, b) || inside(linked, a, b)) continue
