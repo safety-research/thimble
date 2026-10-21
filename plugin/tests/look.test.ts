@@ -1,5 +1,5 @@
-// How thimble's drawings look under Claude Code's own drawing of a press: a press is drawn inverse under the pointer
-// and the ring, so a bar is never inside one; the `auto` theme's neutrals are Claude Code's own colors; the bar names a
+// How thimble's drawings look under Claude Code's own drawing of a press: a press is drawn inverse under the ring, so
+// the ring never stands on a bar; the `auto` theme's neutrals are Claude Code's own colors; the bar names a
 // card as the person reads it. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
@@ -24,17 +24,30 @@ function buttons(n: Any, out: { key: string; text: string }[] = []): { key: stri
 }
 const chars = (n: Any): string => (typeof n === 'string' ? n : Array.isArray(n) ? n.map(chars).join('') : n?.props ? chars(n.props.children) : '')
 
-test('a row of words and a bar is a press on its words: the bar is drawn beside them, never inside a press', () => {
+test('a row of words and a bar: the ring stands on its words, and a click on the bar opens the part too', () => {
   const cell = (ch: string, m?: number) => ({ ch, tone: m ? 'accent' : 'ink', ...(m ? { m } : {}) })
   const row = [...'fetch '].map(c => cell(c)).concat([...'▆▆▆▆'].map(c => cell(c, 1)), [...' 8,998'].map(c => cell(c)))
   const grid = { w: row.length, h: 1, rows: [row], regions: [{ id: 'value-1', rects: [{ x: 0, y: 0, w: row.length, h: 1 }] }] }
-  const got = buttons(paintRegions(grid as Any, els, { theme: 'light', key: 'pane', onPress: () => {} }))
-  expect(got.map(b => b.text)).toEqual(['fetch ', ' 8,998'])
-  expect(got.some(b => b.text.includes('▆'))).toBe(false)
-  // the first keeps the key the ring stands on; each names the part
+  const pressed: string[] = []
+  const tree = paintRegions(grid as Any, els, { theme: 'light', key: 'pane', onPress: (id: string) => { pressed.push(id) } })
+  const got = buttons(tree)
+  expect(got.map(b => b.text)).toEqual(['fetch ', '▆▆▆▆', ' 8,998'])
+  // the words keep the key the ring stands on, so the ring never draws the bar inverse; each press names the part
   expect(got[0]!.key).toBe('r|pane|0|value-1')
-  expect(got.map(b => regionOfKey(b.key))).toEqual(['value-1', 'value-1'])
+  expect(got.filter(b => b.text.includes('▆')).every(b => /\|#\d+$/.test(b.key))).toBe(true)
+  expect(got.map(b => regionOfKey(b.key))).toEqual(['value-1', 'value-1', 'value-1'])
+  // a click on the bar itself opens the part
+  pressAll(tree, '▆▆▆▆')
+  expect(pressed).toEqual(['value-1'])
 })
+
+/** Press the Button that holds `text`. */
+function pressAll(n: Any, text: string): void {
+  if (!n || typeof n !== 'object') return
+  if (Array.isArray(n)) { for (const x of n) pressAll(x, text); return }
+  if (n.type === 'Button' && chars(n.props.children) === text) n.props.onPress()
+  pressAll(n.props?.children, text)
+}
 
 test("Claude Code's auto theme: the light palette only for a light theme, and a bar's track in Claude Code's own pale gray", () => {
   expect([themeOf('light'), themeOf('light-ansi'), themeOf('dark'), themeOf('auto')]).toEqual(['light', 'light', 'dark', 'dark'])

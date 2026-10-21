@@ -121,16 +121,16 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       const region = grid.regions.find(r => r.id === id)
       const label = String(region?.meta?.label || id)
       if (region?.meta?.knob) { kids.push(...dial(run, id, label)); continue }
-      // Claude Code draws a press inverse under the pointer and the ring, which leaves a bar a thin line on a block of
-      // the text's color: a run of words and marks is a press on its words alone (its first words keep the key the
-      // ring stands on), and its marks are drawn beside them. A run of marks alone stays one press.
+      // Claude Code draws the ring inverse, which leaves a bar a thin line on a block of the text's color: a run of
+      // words and marks is cut where it turns from one to the other, its first words keeping the key the ring stands
+      // on. The marks are a press of their own (`|#n`), so a click on a bar still opens its part. A run of marks alone
+      // stays one press.
       const parts = run.some(g => !g.c.m) && run.some(g => g.c.m) ? splitMarks(run) : [run]
-      let n = 0
-      for (const part of parts) {
-        if (part[0]!.c.m) { kids.push(Text({ wrap: 'truncate-end', children: part.map(text) })); continue }
-        kids.push(Button({ key: `r|${key}|${y}|${id}${n ? `|#${n}` : ''}`, plain: true, label, children: part.map(text), onPress: () => opts.onPress!(id) }))
-        n++
-      }
+      const lead = parts.findIndex(p => !p[0]!.c.m)
+      parts.forEach((part, n) => {
+        const own = n === lead || (lead < 0 && n === 0)
+        kids.push(Button({ key: `r|${key}|${y}|${id}${own ? '' : `|#${n}`}`, plain: true, label, children: part.map(text), onPress: () => opts.onPress!(id) }))
+      })
     }
     return Box({ flexDirection: 'row', children: kids })
 
