@@ -414,7 +414,11 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   const right = `cite · ${short(files || ref, 40)}`
   const deep = Math.max(room + 6, 14)
   if (r.error && kind !== 'code') {
-    return { title: label, right, parts: [{ program: RECORDS_PROGRAM, data: { head: '', recs: [], empty: `${ref} does not resolve: ${short(r.error, 200)}`, max: 1, more: '' } }], sections: [], links: [], unresolved: true }
+    // a place that is gone (a query deleted, a file moved): the frame names the ref, the card says what is missing
+    // (`no query r21`), as the healing pass says it of a place gone when it checked (tray.js cardBody)
+    const e = String(r.error).trim()
+    const gone = [wrote, ref].reduce((s, x) => (s.startsWith(`${x}: `) ? s.slice(x.length + 2) : s), e)
+    return { title: label, right, parts: [], sections: [], links: [], unresolved: true, gone: short(gone, 200) }
   }
   const about = query?.about ? esc(short(query.about, 80)) : ''
   if (kind === 'query' || kind === 'series') {

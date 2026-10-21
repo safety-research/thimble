@@ -176,3 +176,17 @@ def test_a_mistyped_file_path_is_moved_only_to_a_file(st: Store) -> None:
     # a line that does not exist in the right file: gone too, never a query cell
     _, c = one(st, "It took [20 minutes](notes.md#L40).")
     assert (c["state"], c["how"]) == (H.QUIET, H.GONE) and "to" not in c
+
+
+def test_a_time_is_no_value_and_a_number_word_is_one(st: Store) -> None:
+    # an hourly count: no saves in most hours, one in the hour from 23:00
+    Q.run(st, "saves per hour", 'import pandas as pd\n'
+          'pd.Series([0] * 23 + [1], index=pd.Index([f"2026-06-01T{h:02d}" for h in range(24)], name="hour"), name="n")')  # r3
+    text, c = one(st, "Then [one save at 23:00](r3#hour=2026-06-01T23@n), and nothing else.")
+    assert c["state"] == H.LINKED and c["how"] == H.KEPT
+    # a number word the place contradicts is checked as its digits are
+    text, c = one(st, "Then [two saves at 23:00](r3#hour=2026-06-01T23@n).")
+    assert c["state"] == H.CONTRADICTED and c["source"] == "1"
+    # "the one" names a row, not a count
+    text, c = one(st, "Then [the one at 23:00](r3#hour=2026-06-01T23@n).")
+    assert c["how"] == H.KEPT

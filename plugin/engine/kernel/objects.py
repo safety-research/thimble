@@ -273,8 +273,19 @@ def _merge_rows(lists: list[list[str]]) -> list[str]:
         return flat
 
 
-# a number in words: never the digits of a name such as r5, R3 or ip16 (a letter, an underscore or a digit before them)
-NUM_RE = re.compile(r"(?<![A-Za-z_\d.,])[-−]?\d[\d,]*(?:\.\d+)?")
+# a number in words: never the digits of a name such as r5, R3 or ip16 (a letter, an underscore or a digit before them),
+# nor a time's minutes (the 00 of 23:00); and the words one to ten, which state a count as digits do ("one edit at
+# 23:00"), but not the "one" of "the one" or "no one", which states none
+_NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+NUM_RE = re.compile(r"(?<![A-Za-z_\d.,:])[-−]?\d[\d,]*(?:\.\d+)?"
+                    r"|(?<![A-Za-z])(?<!the )(?<!no )(?<!any )(?<!each )(?<!every )(?<!this )(?<!that )(?<!which )"
+                    r"(?:" + "|".join(_NUM_WORDS) + r")(?![A-Za-z])", re.I)
+
+
+def num_text(tok: str) -> str:
+    """A number NUM_RE found, as digits: `one` is 1, `−3` is -3, `8,452` is 8452."""
+    w = _NUM_WORDS.get(tok.lower())
+    return str(w) if w is not None else tok.replace("−", "-").replace(",", "")
 # a scale written after a number: 12k, 1.17M, 2.4 billion
 _SCALE_RE = re.compile(r"\s?(k|K|M|B|bn|thousand|million|billion)(?![A-Za-z])")
 _SCALES = {"k": 1e3, "K": 1e3, "thousand": 1e3, "M": 1e6, "million": 1e6, "B": 1e9, "bn": 1e9, "billion": 1e9}
@@ -308,7 +319,7 @@ def unkeyed(label: str, ref: dict[str, Any] | None) -> str:
 
     def drop(m: re.Match) -> str:
         try:
-            return " " if abs(float(m[0].replace("−", "-").replace(",", ""))) in named else m[0]
+            return " " if abs(float(num_text(m[0]))) in named else m[0]
         except ValueError:
             return m[0]
 
@@ -328,7 +339,7 @@ def number_matches(label: str, value: Any) -> bool:
     if not found or not isinstance(value, (int, float)) or isinstance(value, bool):
         return True
     for m in found:
-        tok = m[0].replace("−", "-").replace(",", "")
+        tok = num_text(m[0])
         try:
             shown = float(tok)
         except ValueError:

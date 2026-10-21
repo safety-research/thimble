@@ -103,7 +103,7 @@ def _numbers(label: str) -> list[str]:
     s = (label or "").replace("**", "").strip()
     if not s or s[0] in _QUOTES:
         return []
-    return NUM_RE.findall(O._tight(s))
+    return [O.num_text(n) for n in NUM_RE.findall(O._tight(s))]
 
 
 def _shows(label: str, v: Any) -> bool:
