@@ -1373,12 +1373,19 @@ async function stepPlace($: Engine): Promise<{ list: { row: string; i?: number; 
 }
 
 /** Whether ] and [ go anywhere from where they stand: at the newest reply's last stop ] stays where it is, and at the
- *  oldest reply's first [ does, so the bar does not name a key there that does nothing. */
-export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean }> {
+ *  oldest reply's first [ does, so the bar does not name a key there that does nothing. `reply`: where the tray's
+ *  mark is when it is in an earlier reply (`reply 1 of 3, above`), since a key cannot scroll the transcript to it. */
+export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean; reply?: string }> {
   const { list, at } = await stepPlace($)
-  if (at < 0) return { next: true, prev: true }
-  return { next: !!stepFrom(list, at, 1), prev: !!stepFrom(list, at, -1) }
+  const base = trayBase((await $.state.get(TRAY)).value as Tray | null) as TrayFrame | null
+  const place = base && base.row != null ? await answerPlace($, base.row) : null
+  const reply = place && place.at >= 0 && place.at < place.all.length - 1 ? { reply: replyPlace(place.at, place.all.length) } : {}
+  if (at < 0) return { next: true, prev: true, ...reply }
+  return { next: !!stepFrom(list, at, 1), prev: !!stepFrom(list, at, -1), ...reply }
 }
+
+/** Where an earlier reply is, in words: `reply 1 of 3, above`. */
+export const replyPlace = (at: number, of: number): string => `reply ${at + 1} of ${of}, above`
 
 /** The bar's words for ] and [ (the tray's and a focused card's): `] next` while there is a next, else `[ previous`
  *  where there is one before. */
