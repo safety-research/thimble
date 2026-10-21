@@ -107,6 +107,8 @@ let paneDrawn: { name: string; args: Record<string, unknown>; selected: string |
 let showing: 'card' | 'pane' = 'card'
 // a step of a pane's walk waits this long for the press a click brings with its move of the ring (which cancels it)
 const WALK_MS = 40
+// the ring is put on the selected part once more this long after a drawing changed the presses before it
+const REFOCUS_MS = 80
 let walkGen = 0
 // the conversation's window: rows up from its end (the wheel moves it while the input bar holds the keys, or while
 // the thing above it fits its rows), and whether the thing above it is cut to a window of its rows
@@ -126,6 +128,9 @@ let drawnSig = ''
 let drawnPart: string | null = null
 // the presses drawn before the input bar's field, in order, as the last drawing had them (pressesBefore)
 let drawnAbove = ''
+// the presses a pane's last drawing put before the selected part's press: when they change, Claude Code may keep the
+// ring at its place in the order, on another press, so the ring is put on the part again
+let drawnBefore = ''
 let paneFocused = false
 // the page's window when the page is taller than the pane: what it follows (the selected part, or the bar under the
 // card once the person opened it), the bar and part it last saw, and the rows the wheel moved it by since
@@ -989,6 +994,16 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   // on the selected part
   if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null; else if (landed) { landed = null; moveSoon($) } }
   if (region !== drawnPart) { drawnPart = region; if (!isAsk(ringAt)) ringAt = null }
+  // (a focus asked for now may land on the drawing before this one, the part's press being there too, and this one then
+  // keeps the ring at its place in the order: the ring is put on the part once more after this drawing is shown)
+  const before = want ? pressesBefore(kids, want) : ''
+  if (before !== drawnBefore) {
+    drawnBefore = before
+    if (want && !isAsk(ringAt)) {
+      ringAt = null
+      $.clock.after(REFOCUS_MS, () => { if (!isAsk(ringAt) && selectedGutter() === want) { ringAt = null; void focusPart($) } })
+    }
+  }
   ringAbove($, kids)
   if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
   paneFocused = !!e.props.isFocused
