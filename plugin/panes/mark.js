@@ -68,7 +68,9 @@ export function saidOf(g) {
 }
 
 // what each section's action says
-const ACTION = { rows: 'Rows', code: 'Code', raw: 'As in the file' }
+// (the rows section's name is its files' own word for their entries: Records, Rows, Lines; cards.js entryWords)
+const ACTION = { code: 'Code', raw: 'As in the file' }
+const actionOf = s => ACTION[s.id] || String(s.words || '').replace(/^./, c => c.toUpperCase())
 
 export function program(k, data) {
   const top = data.frame
@@ -85,7 +87,7 @@ export function program(k, data) {
   const open = sections.find(s => s.id === st.open) || null
   const openLink = l => { k.do('open', { mark: { kind: 'cite', ref: l.ref, label: l.label } }) }
   // each section an action above the input bar: shown in place of the card, hidden again
-  sections.forEach(s => k.on(open && open.id === s.id ? `act:${s.id}:on` : `act:${s.id}`, () => ({ open: open && open.id === s.id ? null : s.id }), ACTION[s.id] || s.words))
+  sections.forEach(s => k.on(open && open.id === s.id ? `act:${s.id}:on` : `act:${s.id}`, () => ({ open: open && open.id === s.id ? null : s.id }), actionOf(s)))
   // an explainer written again at more length, in its place
   if (top.kind === 'gloss' && !heads && !(top.gloss && top.gloss.expanded) && top.row != null) k.on('act:expand', () => { k.do('expand', { frame: top }); return { expanding: true } }, 'Longer')
   // esc hides the section open first; then the panel's host goes back
@@ -108,5 +110,5 @@ export function program(k, data) {
   const label = String(top.label || top.ref || '')
   const title = label.length > inner - 4 ? label.slice(0, Math.max(8, inner - 5)) + '…' : label
   const line = [kind, from].filter(Boolean).join(' · ')
-  return k.stack(subjectBlock(k, { title: k.escape(title), line: k.escape(line) }), k.size(k.stack(parts), { w: inner }), opened.length ? k.region('side:opened', { label: String(ACTION[open.id] || open.words) }, k.size(k.stack(opened), { w: inner })) : false)
+  return k.stack(subjectBlock(k, { title: k.escape(title), line: k.escape(line) }), k.size(k.stack(parts), { w: inner }), opened.length ? k.region('side:opened', { label: actionOf(open) }, k.size(k.stack(opened), { w: inner })) : false)
 }

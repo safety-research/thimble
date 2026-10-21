@@ -57,6 +57,21 @@ test('a citation whose key holds spaces and brackets is one mark, and its card o
   assert.deepEqual(s2.rows.filter(r => r.hot).map(r => [r.cells[0], r.cells[s2.hotCol]]), [['won (clean ep)', '110']])
 })
 
+test("a citation's rows section names the cited files' own entries: records, rows or lines, and none for a whole file", () => {
+  const query = { id: 'q4', about: 'survivors by class and sex', keys: ['class', 'sex'], table: [{ class: 3, sex: 'male', n: 347 }, { class: 1, sex: 'female', n: 94 }] }
+  const ofRecords = { count: 347, rows: ['revisions.jsonl#L1-347'], records: [], chain: [], unit: 'records', unit_one: 'record' }
+  const card = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: ofRecords, query })
+  const rows = card.sections.find(x => x.id === 'rows')
+  assert.equal(rows.key, 'r')
+  assert.equal(rows.words, 'records')
+  assert.match(rows.parts[0].data.head, /^\*\*347\*\* records of revisions\.jsonl behind /)
+  const csv = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: { ...ofRecords, rows: ['titanic.csv#L2-348'], unit: 'rows', unit_one: 'row' }, query })
+  assert.equal(csv.sections.find(x => x.id === 'rows').words, 'rows')
+  // whole files with no entries (an image, a PDF): no rows section, the code section still there
+  const img = sourceCard({ ref: 'q4#class=3,sex=male@n', label: 'class 3 male', resolved: { ...ofRecords, rows: ['chart.png'], unit: null, unit_one: null }, query })
+  assert.deepEqual(img.sections.map(x => x.id), ['code'])
+})
+
 test('a card detail reads a takeaway citation whose ref holds brackets as one link, nothing of it left as words', () => {
   const runs = linkRuns('Girls: [19](r4#age=child%20(0-12)&group=b@kept) of 32, **most** of them.')
   assert.deepEqual(runs, [{ s: 'Girls: ' }, { s: '19', link: 'r4#age=child%20(0-12)&group=b@kept' }, { s: ' of 32, ' }, { s: 'most', bold: true }, { s: ' of them.' }])

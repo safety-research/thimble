@@ -22,8 +22,8 @@
 //          label}], problem} (cards.js drawnCard)
 //   keys: a ask (the side panel on the mark, its whole source and its thread, the input bar holding the keys; a
 //         citation's ↵ and 1 too, unnamed) · h the heads up (or explainer) on a citation's words, over it (a click on
-//         its line too) · ↵ or e expand an explainer (a longer one in its place) · the sections' keys (r rows, when
-//         rows stand behind it; c code)
+//         its line too) · ↵ or e expand an explainer (a longer one in its place) · the sections' keys (r records, rows or lines, in
+//         the cited files' own word, when entries stand behind it; c code)
 //         · o open the first citation inside the card (the rest by a click; 2–9 still open them, unnamed) · 0 back (or
 //         close; esc too): esc at the prompt never reaches a plugin, so 0 stays named · ] [ the next and the one before
 //         (the host's order of marks and cards: k.do('step')). Letters for what the person does, so the line reads as
