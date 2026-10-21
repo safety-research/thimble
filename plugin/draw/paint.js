@@ -5,14 +5,15 @@
 // Rows of text are Text lines, one nested Text per run of one style, so bold, links and theme colors work and the
 // text follows the theme a person picked. A band of rows that holds pixels (a plot, a canvas's px and lines) and
 // no bold or link is one Raster: the cells packed as Claude Code's cell-grid leaf wants them, each cell's glyph
-// with its own foreground and background. A selection marks text one way and marks another (selectionOf): the selected
-// region's text gets the selection background, in the theme's text color (palette.js selectedColor); its marks (a
-// bar's cells, a spark, a plot's dots, term.js `m`) keep their ground and light up in their own color (palette.js
-// selectedMark), so a selected bar is exactly as high as the others, and a selected series is its own dots alone.
+// with its own foreground and background. A selection marks text one way and marks another (selectionOf): in a Text
+// line the selected region's words are bold in their own color and its marks (a bar's cells, a spark, term.js `m`) are
+// drawn as they are, so a selection never hides or recolors a bar; in a Raster, which has no bold, the words get the
+// palette's `select` background and the marks light up in their own color (palette.js selectedMark), so a selected
+// series is its own dots alone.
 // `painted`: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
 // color rather than the terminal's own.
 // No `$`: the caller resolves the elements and hands them in.
-import { hex, selectedColor, selectedHex, selectedMark, termColor } from './palette.js'
+import { hex, selectedHex, selectedMark, termColor } from './palette.js'
 
 const DEFAULT = 0x01000000
 const rgb = h => parseInt(String(h).slice(1, 7), 16)
@@ -78,12 +79,12 @@ export function paintGrid(grid, els, opts = {}) {
       wrap: 'truncate-end',
       children: segs.map(g => {
         const p = { children: g.s }
-        const color = g.sel === 'mark' ? selectedMark(g.c.tone, theme) : g.sel ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
+        // a selection marks its words, bold in their own color, and never hides or recolors a mark (a bar's cells)
+        const color = termColor(g.c.tone, theme, { painted: !!opts.painted })
         if (color) p.color = color
-        if (g.c.b) p.bold = true
+        if (g.c.b || g.sel === 'text') p.bold = true
         if (g.c.ref) p.underline = true
-        if (g.sel === 'text') p.backgroundColor = 'selectionBg'
-        else if (g.c.bg) p.backgroundColor = g.sel === 'mark' ? selectedMark(g.c.bg, theme) : hex(g.c.bg, theme)
+        if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
         return Text(p)
       }),
     })
