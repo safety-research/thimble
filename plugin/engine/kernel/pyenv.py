@@ -1,9 +1,10 @@
 """thimble's own Python: a virtual environment with pandas in $THIMBLE_HOME/python (default ~/.thimble/python), which
 `thimble run` needs and bin/thimble picks when THIMBLE_PYTHON is not set.
 
-Most commands run on any python3. The first `thimble run` on a Python without pandas makes the environment, once
-(uv when it is on PATH, else `python3 -m venv` and pip), and runs the query again on it. `thimble setup` (and
-scripts/install.sh) makes it ahead of time. When THIMBLE_PYTHON names a Python, thimble installs nothing into it."""
+Most commands run on any python3. The installation makes thimble's own Python with `thimble setup`: scripts/install.sh
+up front, and for a plugin installed without it, the plugin's session-start hook, once per machine (hooks/python.ts).
+`thimble run` never installs anything: on a Python without pandas it waits for a setup that runs now, else says in one
+line what the person runs. When THIMBLE_PYTHON names a Python, thimble installs nothing into it."""
 from __future__ import annotations
 
 import fcntl
@@ -12,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ENTRY = Path(__file__).resolve().parents[1] / "thimble.py"
@@ -64,16 +66,23 @@ def make(dest: Path) -> str | None:
     return None
 
 
+def _ready(py: Path) -> bool:
+    return py.exists() and subprocess.run([str(py), "-c", "import pandas"], stdin=subprocess.DEVNULL,
+                                          capture_output=True).returncode == 0
+
+
 def ensure() -> tuple[Path | None, str]:
     """thimble's own Python with pandas, made when it is missing: (its python, "") or (None, why it could not be made)."""
     dest = venv()
     py = dest / "bin" / "python"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest.parent / "python.lock", "w") as lock:
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        lock = open(dest.parent / "python.lock", "w")
+    except OSError as e:
+        return None, f"{e.strerror or e}: {dest.parent}"
+    with lock:
         fcntl.flock(lock, fcntl.LOCK_EX)  # another session may be making it now: wait for that one
-        ok = py.exists() and subprocess.run([str(py), "-c", "import pandas"], stdin=subprocess.DEVNULL,
-                                            capture_output=True).returncode == 0
-        if not ok:
+        if not _ready(py):
             print(f"thimble: installing pandas into its own Python ({dest}), once; this takes up to a minute.",
                   file=sys.stderr, flush=True)
             why = make(dest)
@@ -82,36 +91,53 @@ def ensure() -> tuple[Path | None, str]:
     return py, ""
 
 
-def run_with_pandas(argv: list[str]) -> int:
-    """For a command that needs pandas on a Python without it: make thimble's own Python and run the same command on
-    it (this process ends there), or print one line with the fix and return 2."""
+def without_pandas(argv: list[str], wait: float = 100.0) -> int:
+    """`thimble run` on a Python without pandas. It installs nothing: when a setup is making thimble's own Python now
+    (the session-start hook, or another session), it waits for it, up to `wait` seconds, and runs the same command on
+    it (this process ends there); else it prints one line with the fix and returns 2."""
     pinned = os.environ.get("THIMBLE_PYTHON")
     if pinned:
         print(f"thimble run needs pandas, and THIMBLE_PYTHON ({pinned}) has none. Ask the person to install it there "
               f"({pinned} -m pip install pandas), or to unset THIMBLE_PYTHON so that thimble installs its own.")
         return 2
-    py, why = ensure()
-    if py is None:
-        print(f"thimble run needs pandas, and thimble could not install it ({why}). Ask the person to run this in a "
-              f"terminal, which installs it once: {SETUP}")
-        return 2
-    sys.stdout.flush()
-    os.execv(str(py), [str(py), str(ENTRY), *argv])
-    return 2  # not reached
+    py = venv() / "bin" / "python"
+    try:
+        with open(home() / "python.lock") as lock:
+            end = time.monotonic() + wait
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() > end:
+                        break
+                    time.sleep(0.5)
+    except OSError:
+        pass  # no setup ever ran here
+    if _ready(py):
+        sys.stdout.flush()
+        os.execv(str(py), [str(py), str(ENTRY), *argv])
+    print(f"thimble run needs pandas, and thimble's own Python with pandas is not installed. Ask the person to run "
+          f"this in a terminal, which installs it once: {SETUP}")
+    return 2
 
 
-def setup() -> int:
-    """`thimble setup`: make thimble's own Python now, unless the Python this runs on has pandas already."""
+def setup(check: bool = False) -> int:
+    """`thimble setup`: make thimble's own Python now, unless the Python this runs on has pandas already.
+    `--check` only says, by its exit code, whether it has (0) or not (1)."""
     if has_pandas():
-        print(f"thimble: {sys.executable} has pandas; nothing to install.")
+        if not check:
+            print(f"thimble: {sys.executable} has pandas; nothing to install.")
         return 0
+    if check:
+        return 1
     if os.environ.get("THIMBLE_PYTHON"):
         print(f"thimble: THIMBLE_PYTHON ({os.environ['THIMBLE_PYTHON']}) has no pandas. Install it there, or unset "
               "THIMBLE_PYTHON so that thimble installs its own.")
         return 1
     py, why = ensure()
     if py is None:
-        print(f"thimble: could not install pandas into its own Python ({why}). Fix that, then run this again.")
+        print(f"thimble: could not install pandas, which its queries need, into its own Python ({why}).")
         return 1
     print(f"thimble: its Python is {py}, with pandas.")
     return 0
