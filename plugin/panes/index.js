@@ -15,7 +15,8 @@
 //     keys, not on the input bar (a pane whose parts are walked first, the Claims graph); a letter still asks. When
 //     its program also takes up and down, the ring's moves from the selected part are those keys (shell/detail.tsx
 //     walkDir), so ↑↓ and tab walk the parts in the program's order rather than where Claude Code's ring would land.
-//     A program that takes `left` or `right` gets ← and → along the selected part's row (shell/detail.tsx rowWay)
+//     A program's `left` and `right` are for a surface that gives it ← and →; the terminal does not, since Claude Code
+//     gives them to its prompt even while a pane holds the keys (shell/detail.tsx detailKeys)
 import chips from './chips.js'
 import claims from '../claims/graph.js'
 import coverage from './coverage.js'

@@ -62,9 +62,12 @@ function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown; la
   })
   // the side panel as Claude Code keeps it: whether it is open, whether it holds the keys, and whether Claude Code gives
   // them when the panel asks (`grant`: false while a key is still in the prompt, which refuses an open's focus)
-  const keys = { open: false, panel: false, grant: true }
+  // `prompt`: the text in the prompt (Claude Code refuses the panel the keys while it holds any); `fills`: each text a
+  // fill put there
+  const keys = { open: false, panel: false, grant: true, prompt: '' }
+  const fills: string[] = []
   const opened: Record<string, unknown>[] = []
-  on('ui.open', (_$: unknown, e: Record<string, unknown>) => { opened.push(e); keys.open = true; if (e.focus && keys.grant) keys.panel = true; return { value: { isPlaced: true } } })
+  on('ui.open', (_$: unknown, e: Record<string, unknown>) => { opened.push(e); keys.open = true; if (e.focus && keys.grant && keys.prompt === '') keys.panel = true; return { value: { isPlaced: true } } })
   const focused: string[] = []
   on('ui.focus', (_$: unknown, e: Any) => { focused.push(String(e.key ?? e.element)); return { value: {} } })
   const closed: string[] = []
@@ -88,7 +91,8 @@ function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown; la
     submitted.push({ text: e.text, context: e.context ?? [] })
     return { text: e.text }
   })
-  on('prompt.fill', () => ({ isFilled: true }))
+  on('prompt.fill', (_$: unknown, e: Any) => { fills.push(String(e.text)); if (e.mode === 'replace') keys.prompt = String(e.text); return { isFilled: true } })
+  on('prompt.suggest', () => ({ isShown: true }))
   const appended: string[] = []
   on('session.append', async (_$: unknown, e: Any, next: Any) => {
     const c = e.message?.content
@@ -111,7 +115,7 @@ function world(on: Any, forks: Record<string, unknown>[], o: { cov?: unknown; la
   on('session.send', (_$: unknown, e: Any) => { sent.push(e); return { isDelivered: true } })
   on('turn.step', async function* (_$: unknown, e: Any) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [{ id: 'u1', name: 'Bash', input: {} }] } })
   const clock = mock.clock(on, { now: NOW })
-  return { files, runs, prompts, submitted, clock, opened, focused, closed, toasts, spawns, sent, appended, keys, started: false }
+  return { files, runs, prompts, submitted, clock, opened, focused, closed, toasts, spawns, sent, appended, keys, fills, started: false }
 }
 
 function textOf(n: Any): string {
@@ -301,7 +305,7 @@ test('Coverage takes the keys again when its open is refused, the ring on the se
   expect(drawn).toContain(`g|side|${(await rowKey($, 'f:revisions.jsonl')).split('|')[2]}`)
 })
 
-test('the labels hold the keys on the label selected: ↵ opens it, the way back goes to the list, and → opens it too', async ($, on) => {
+test('the labels hold the keys on the label selected: ↵ opens it, and the way back goes to the list', async ($, on) => {
   const w = world(on, [FORK1], { labels: LABELS })
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   const drawn = await opensHoldingKeys($, w, 'l')
@@ -319,15 +323,6 @@ test('the labels hold the keys on the label selected: ↵ opens it, the way back
   for (let i = 0; i < 2; i++) { await $.ui.render(PANE); await w.clock.settle() }
   const list = JSON.stringify(await $.ui.render(PANE))
   expect(list).toContain('2 labels in this folder')
-  // → from the ring in the gutter onto the selected label's own row (Claude Code's nearest press to the right) opens it
-  const row = await rowKey($, 'lb-0')
-  const g = `g|side|${row.split('|')[2]}`
-  await $.ui.focus({ requestId: 'object', element: g, origin: { kind: 'person' } } as never)
-  await $.ui.focus({ requestId: 'object', element: row, origin: { kind: 'person' } } as never)
-  await w.clock.advance(50)
-  await w.clock.settle()
-  for (let i = 0; i < 2; i++) { await $.ui.render(PANE); await w.clock.settle() }
-  expect(textOf(await $.ui.render(PANE))).toContain('label over revisions.jsonl')
 })
 
 test('a key of a pane\'s program typed while the prompt had the keys (e in Claims) gives them back to the panel, again until it holds them', async ($, on) => {
@@ -378,4 +373,57 @@ test('Coverage: ↓ moves the selection with the ring, and the input bar names t
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).toContain('runs/r02/pages.jsonl')
   expect(textOf(await $.ui.render(PANE))).toContain('file ·')
+})
+
+// Claude Code gives ← and → to the prompt even while a pane holds the keys (its panes bind ↑ ↓ tab ↵ esc, never ← →),
+// and ↑ reaches the prompt in the moment before the panel holds them. A suggestion → takes, or a history entry ↑
+// recalls, fills the prompt, and Claude Code then refuses the panel the keys: esc, ↑ and the letters all went to the
+// prompt. So the panel shows no suggestion while it is open, and a text that reaches the prompt is taken out again
+test('while a pane is open the prompt shows no suggestion', async ($, on) => {
+  const w = world(on, [FORK1], { cov: COV })
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  expect((await $.prompt.suggest({ text: 'now check the other folder' } as never)).isShown).toBe(true)
+  await press($, w.clock, key('r'))
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  expect(w.keys.open).toBe(true)
+  expect((await $.prompt.suggest({ text: 'now check the other folder' } as never)).isShown).toBe(false)
+})
+
+for (const [what, origin] of [['→ took a suggestion', 'engine'], ['↑ recalled the history', 'history']] as const) {
+  test(`a text that reached the prompt while a pane is open (${what}) is taken out, and the pane holds the keys again`, async ($, on) => {
+    const w = await twoTurns($, on)
+    await press($, w.clock, key('c'))
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+    expect(w.keys.panel).toBe(true)
+    // the key went to the prompt: Claude Code put the text there and gave the prompt the keys
+    w.keys.panel = false
+    w.keys.prompt = 'how many edits were reverted?'
+    // (the test's host has no prompt.change of its own beneath the plugin's, which observes it and passes it on)
+    await $.prompt.change({ text: w.keys.prompt, cursor: w.keys.prompt.length, origin: { kind: origin } } as never).catch(() => undefined)
+    await w.clock.advance(100)
+    await w.clock.settle()
+    expect(w.fills).toContain('')
+    expect(w.keys.prompt).toBe('')
+    await w.clock.advance(1000)
+    await w.clock.settle()
+    expect(w.keys.panel).toBe(true)
+  })
+}
+
+test('a pane asks for the keys until it has them, however long the key that opened it stays in the prompt', async ($, on) => {
+  const w = await twoTurns($, on)
+  // a busy terminal: the c that opened Claims stays in the prompt for seconds, so each request is refused
+  w.keys.prompt = 'c'
+  await press($, w.clock, key('c'))
+  for (let i = 0; i < 5; i++) { await w.clock.advance(1000); await w.clock.settle(); await $.ui.render(PANE); await w.clock.settle() }
+  expect(w.keys.open).toBe(true)
+  expect(w.keys.panel).toBe(false)
+  w.keys.prompt = ''
+  await w.clock.advance(1500)
+  await w.clock.settle()
+  expect(w.keys.panel).toBe(true)
 })

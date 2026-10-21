@@ -1,6 +1,6 @@
-// ← and → in the side panel's panes (panes/coverage.js, panes/labels.js, claims/graph.js): each program takes them
-// where they mean something, and the host turns a move of the ring along the selected part's row into them
-// (shell/detail.tsx rowWay).
+// ← and → in the programs of the side panel's panes (panes/coverage.js, panes/labels.js, claims/graph.js): each
+// program takes them where they mean something, for a surface that gives them to it. The terminal never does: Claude
+// Code gives ← and → to its prompt even while a pane holds the keys (shell/detail.tsx detailKeys).
 //   node --test plugin/panes/test
 import '../../test-home.mjs'
 import '../../draw/kit.js'
