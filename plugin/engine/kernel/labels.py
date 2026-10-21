@@ -751,7 +751,7 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
     value, or those with none (NO_VALUE). Each record has its value, where the value came from (regex, code, model,
     claude, or the analyst's check), the model's confidence and reason, and its words as the card's examples show them.
     Reading them is the person's, never counted as what Claude read."""
-    from .lineage import words_of
+    from .lineage import words_by_file
 
     lab = load(st, name)
     if lab is None:
@@ -776,6 +776,8 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
                         break
         except OSError:
             continue
+    # the rows of a file named by one field, as the rows beside them
+    said = words_by_file(list(rows.values()))
     out = []
     for i, r in enumerate(want):
         u, c = units.get(r) or {}, checks.get(r)
@@ -793,7 +795,7 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
             e["was"] = c.get("was")
         row = rows.get(r)
         if row is not None:
-            words, meta = words_of(row)
+            words, meta = said[r]
             e.update(words=words or unit_text(row, 240), meta=meta, text=unit_text(row, 1200))
         else:
             e["missing"] = "the record is no longer in its file"
@@ -876,7 +878,7 @@ def _cite_value(qid: str, col: str, v: str) -> str:
 def samples(st: Store, lab: dict[str, Any], n: int = SAMPLES, seed: int = 0) -> dict[str, list[dict[str, Any]]]:
     """Up to n records of each value, chosen at random, the unchecked first, each {ref, words, meta, text}: what the
     person checks."""
-    from .lineage import words_of
+    from .lineage import words_by_file
 
     checks = lab.get("checks") or {}
     by: dict[str, list[str]] = {}
@@ -900,6 +902,8 @@ def samples(st: Store, lab: dict[str, Any], n: int = SAMPLES, seed: int = 0) -> 
                     rows[row.ref] = row
         except OSError:
             continue
+    # the rows of a file named by one field, as the rows beside them
+    said = words_by_file(list(rows.values()))
     out: dict[str, list[dict[str, Any]]] = {}
     for v, refs in picked.items():
         recs = []
@@ -907,7 +911,7 @@ def samples(st: Store, lab: dict[str, Any], n: int = SAMPLES, seed: int = 0) -> 
             row = rows.get(r)
             if row is None:
                 continue
-            words, meta = words_of(row)
+            words, meta = said[r]
             # the label's value, its source and reason are the detail's to show, from the label as it is now
             recs.append({"ref": r, "words": words or unit_text(row, 240), "meta": meta, "text": unit_text(row, 600)})
         out[v] = recs

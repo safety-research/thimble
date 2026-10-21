@@ -109,3 +109,17 @@ test('the plain text of a stacked bar card names each part and its value, and v 
   assert.match(made, /made a card for it/)
   assert.match(made, /no colors/)
 })
+
+test('records of one set are named by one field, never by whichever field is longest in one of them', async () => {
+  const { examplesView, wordKeyOf } = await import('../carddetail.js')
+  // made-up passengers: the third one's ticket is longer than its name
+  const recs = [
+    { Name: 'Lindqvist, Mr. Osmo Rainer', Ticket: 'A 1234', Fare: '7.25', Cabin: '', Embarked: 'S', Pclass: '3', Sex: 'male' },
+    { Name: 'Varga, Mrs. Ilona Petra', Ticket: 'B 22', Fare: '71.3', Cabin: 'C85', Embarked: 'C', Pclass: '1', Sex: 'female' },
+    { Name: 'Aho, Mr. Tuomo K', Ticket: 'QX/R.S. 7700123 ZZ', Fare: '8.05', Cabin: '', Embarked: 'S', Pclass: '3', Sex: 'male' },
+  ]
+  assert.equal(wordKeyOf(recs), 'Name')
+  const view = examplesView(recs, { at: 2, fit: 6 })
+  assert.equal(view.kind, 'lines')
+  assert.deepEqual(view.rows.map(r => r.words), ['Lindqvist, Mr. Osmo Rainer', 'Varga, Mrs. Ilona Petra', 'Aho, Mr. Tuomo K'])
+})
