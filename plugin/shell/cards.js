@@ -165,7 +165,7 @@ const parts = []
 for (const r of data.rows) {
   const gutter = k.text((r.hot ? '{accent:' : '{dim:') + k.escape(r.n.padStart(nw)) + '}' + (r.hot ? ' {accent:▌}' : '  '), { w: nw + 2, wrap: false })
   const body = r.hot
-    ? k.stack(k.text(r.text || ' ', { max: data.hotMax }), r.meta ? k.text('{dim:' + k.escape(r.meta) + '}', { wrap: false }) : false)
+    ? k.stack(k.text(r.text || ' ', { max: data.hotMax }), r.meta ? k.text('{dim:' + k.escape(r.meta) + '}', { max: 2 }) : false)
     : k.text((data.plain ? (r.text || ' ') : '{dim:' + (r.text || ' ') + '}') + (r.meta ? '  {dim:' + k.escape(r.meta) + '}' : ''), { wrap: false })
   parts.push(k.beside(gutter, body, { gap: 1 }))
 }
