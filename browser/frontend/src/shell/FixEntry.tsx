@@ -3,14 +3,17 @@
 // review (ShareReport) -> Send or Save as file.
 //
 // FixButton is the top bar's Fix…: a small sheet asks what thimble should do differently and sends `/fix <text>` to
-// main, as typing it in the chat does. FixState is the line beside it for this workspace's newest fix: `fixing` while
-// Claude works, then Try it and Submit. Try it restarts thimble browser from the fix's copy and reloads the page; then
-// the line says `✓ fixed` with Submit and Undo, and Undo restarts it from the release (backend restart.py).
+// main, as typing it in the chat does. FixState is the line beside it for this workspace's newest fix: Try it and
+// Submit once Claude made it. Try it restarts thimble browser from the fix's copy and reloads the page; then the line
+// says `✓ fixed` with Submit and Undo, and Undo restarts it from the release (backend restart.py). While Claude works on
+// the fix, and while a restart runs, the busy line above the chat's input box says so (`fixing: <title>`, `restarting
+// with the fix`, lib/busy.ts); the top bar shows no word of its own then.
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Popover } from '../components/Menu'
 import { apiBase, apiUrl } from '../lib/browserKey'
 import { bus } from '../lib/bus'
+import { pageJob } from '../lib/busy'
 
 export interface FixRow {
   slug: string
@@ -41,11 +44,15 @@ export function fixMessage(text: string): string {
   return `/fix ${text.replace(/\s+/g, ' ').trim()}`
 }
 
-/** What the line says of a fix and which actions it offers. Pure. */
+/** The busy line's step for a fix Claude works on, or null. Pure. */
+export function fixStep(f: FixRow | null): string | null {
+  return f?.status === 'working' ? `fixing: ${f.title.length > 32 ? `${f.title.slice(0, 31)}…` : f.title}` : null
+}
+
+/** What the line says of a fix and which actions it offers (none while Claude works on it: the busy line says so). Pure. */
 export function fixLine(f: FixRow | null, active: string | null): { words: string; good?: boolean; actions: ('try' | 'undo' | 'submit')[] } | null {
-  if (!f || ['dropped', 'merged'].includes(f.status)) return null
+  if (!f || ['dropped', 'merged', 'working'].includes(f.status)) return null
   const shared = f.status === 'sent' || f.status === 'saved'
-  if (f.status === 'working') return { words: `fixing: ${f.title}`, actions: [] }
   // `active` is the fix this browser runs (Try it restarts the server from its copy); a shared fix keeps only Undo
   if (active === f.slug) return { words: `✓ fixed: ${f.title}${shared ? ` · ${f.status}` : ''}`, good: true, actions: shared ? ['undo'] : ['submit', 'undo'] }
   return shared ? null : { words: f.title, actions: ['try', 'submit'] }
@@ -132,6 +139,11 @@ export function FixState({ ws }: { ws: string }) {
   }, [load])
   const f = state?.fixes.at(-1) ?? null
   const line = fixLine(f, state?.active ?? null)
+  const step = fixStep(f)
+  useEffect(() => {
+    pageJob('fix:working', step)
+    return () => pageJob('fix:working', null)
+  }, [step])
   if (!f || !line) return null
   const act = async (what: 'try' | 'undo' | 'submit') => {
     if (what === 'submit') {
@@ -146,7 +158,9 @@ export function FixState({ ws }: { ws: string }) {
       const r = await call<{ fixes: FixRow[]; active: string | null; said: string; restarting?: boolean }>(ws, what === 'try' ? `/fixes/${enc(f.slug)}/use` : '/fixes/undo', 'POST')
       bus.emit('toast', { text: r.said })
       if (r.restarting) {
-        // the server restarts from the fix's copy (or the release): reload the page once the new one answers
+        // the server restarts from the fix's copy (or the release): reload the page once the new one answers. The
+        // busy line says so meanwhile, a step of the page's own, which the dropped stream does not clear
+        pageJob('fix:restart', what === 'try' ? 'restarting with the fix' : 'restarting without the fix')
         await waitForRestart(boot)
         window.location.reload()
         return
@@ -166,7 +180,7 @@ export function FixState({ ws }: { ws: string }) {
       </span>
       {line.actions.map((a) => (
         <button key={a} type="button" className="shell-fix-act" disabled={!!busy} onClick={() => void act(a)} data-fix-action={a}>
-          {busy === a && a !== 'submit' ? 'Restarting…' : label[a]}
+          {label[a]}
         </button>
       ))}
     </span>

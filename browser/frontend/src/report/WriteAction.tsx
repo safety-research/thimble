@@ -63,7 +63,8 @@ export function WriteAction({ name, written, busy, disabled, onWrite }: {
   return (
     <span className="wu-write">
       <TextInput className="wu-write-field" value={text} onChange={setText} onKeyDown={onKey} placeholder={WRITE_PLACEHOLDER} aria-label={`Instructions for Claude about ${name}`} disabled={busy || sending} spellCheck={false} />
-      <Button variant="primary" className="wu-write-go" busy={busy || sending} disabled={disabled} onClick={() => void send()}>
+      {/* while Claude writes, the busy line above the chat's input box says so (lib/busy.ts): the button only waits */}
+      <Button variant="primary" className="wu-write-go" disabled={disabled || busy || sending} onClick={() => void send()}>
         {busy ? 'Writing' : written ? 'Revise' : 'Write'}
       </Button>
     </span>

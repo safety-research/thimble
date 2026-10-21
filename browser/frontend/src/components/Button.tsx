@@ -4,7 +4,6 @@
 // no aria-label.
 import type { ButtonHTMLAttributes, FocusEvent, PointerEvent, ReactNode, Ref } from 'react'
 import { Icon, type IconName } from './Icon'
-import { Spinner } from './Spinner'
 import { useTooltip, type TipAlign } from './Tooltip'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'icon'
@@ -201,7 +200,7 @@ export function Tabs<V extends string>({ options, value, onChange, label, classN
           }}
         >
           <span className="tab-label">{o.label}</span>
-          {o.busy ? <Spinner size={10} className="tab-dot tab-spinner" label="Writing" /> : o.dot && <span className="dot tab-dot" role="img" aria-label="Unread" />}
+          {o.dot && <span className="dot tab-dot" role="img" aria-label="Unread" />}
         </button>
       ))}
     </nav>

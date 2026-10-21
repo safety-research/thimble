@@ -31,26 +31,6 @@ import { LabelRunRow } from './LabelRun'
 import { DocChip, GroupChip, LabelChip, openLabel } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 
-const QUIET_S = 8 // after this long with no new step, the working mark says how long Claude has been thinking
-
-/** The working mark while a reply runs and no tool is pending: the spinner, the one thing that loops; after QUIET_S with
- * no new step, how long Claude has been thinking, so a long wait never looks like a stall. */
-export function Working() {
-  const [since] = useState(() => Date.now())
-  const [now, setNow] = useState(since)
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(t)
-  }, [])
-  const s = Math.floor((now - since) / 1000)
-  return (
-    <div className="chat-msg chat-working-row" aria-label="working">
-      <Spinner label="working" />
-      {s >= QUIET_S && <span className="chat-working-time">{`Thinking · ${s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`}`}</span>}
-    </div>
-  )
-}
-
 export type RecordState = ToolState
 
 
@@ -122,8 +102,6 @@ const EMPTY_SET: ReadonlySet<number> = new Set()
 
 export function Rows({ rows, ws, chat, streaming = false, nested = false, live = false, retry }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; nested?: boolean; live?: boolean; retry?: ErrorRetry }) {
   const lastText = streaming ? [...rows].reverse().find((r): r is Extract<Row, { kind: 'text' }> => r.kind === 'text') : undefined
-  const lastRow = rows[rows.length - 1]
-  const toolPending = lastRow?.kind === 'tool' && !lastRow.result
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows)
   // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them,
@@ -188,7 +166,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
             return <LabelRunRow key={r.index} item={r} ws={ws} />
         }
       })}
-      {streaming && !toolPending && <Working />}
+      {/* while the reply runs, the busy line above the input box says `answering` with its seconds (ChatBusy) */}
     </ChipContext.Provider>
   )
 }

@@ -5,7 +5,8 @@
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { diffLines, markPieces, reportMessage, ReportThis, ShareReportDialog, type IssueDraft } from '../../src/shell/ShareReport.tsx'
-import { FixState, fixLine, fixMessage } from '../../src/shell/FixEntry.tsx'
+import { FixState, fixLine, fixMessage, fixStep } from '../../src/shell/FixEntry.tsx'
+import { busySteps, pageJob } from '../../src/lib/busy.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -116,7 +117,10 @@ test('a fix with a change shows its pull request: the files it changes and the d
 test("the top bar's Fix… sends /fix, and the fix line offers what the fix's state allows", () => {
   expect(fixMessage('  sort claims\n newest first ')).toBe('/fix sort claims newest first')
   const f = { slug: 'sort-claims', title: 'Sort claims newest first', status: 'working' }
-  expect(fixLine(f, null)).toEqual({ words: 'fixing: Sort claims newest first', actions: [] })
+  // while Claude works on it the busy line says so, and the top bar's line shows nothing
+  expect(fixLine(f, null)).toBeNull()
+  expect(fixStep(f)).toBe('fixing: Sort claims newest first')
+  expect(fixStep({ ...f, status: 'ready' })).toBeNull()
   expect(fixLine({ ...f, status: 'applied' }, 'sort-claims')).toEqual({ words: '✓ fixed: Sort claims newest first', good: true, actions: ['submit', 'undo'] })
   expect(fixLine({ ...f, status: 'ready' }, null)?.actions).toEqual(['try', 'submit'])
   // the terminal plugin's marketplace may run the fix (applied), but the browser does not: Try it is offered
@@ -154,5 +158,9 @@ test('Undo restarts the browser on the release: one toast in browser words, then
   expect(toasts).toEqual(['Restarting thimble browser without your fix. The page reloads when it is back.'])
   expect(toasts.join(' ')).not.toContain('reload-plugins')
   expect(reload).toHaveBeenCalledTimes(1)
+  // the busy line said the restart while it ran, and the button kept its own word
+  expect(busySteps()).toContain('restarting without the fix')
+  expect(el.textContent).not.toContain('Restarting…')
+  pageJob('fix:restart', null)
   off()
 })

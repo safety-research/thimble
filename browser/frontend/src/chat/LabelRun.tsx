@@ -8,7 +8,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
-import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { LabelAskShown, LabelRunLive } from '../lib/types'
@@ -125,9 +124,8 @@ export function LabelRunRow({ item, ws }: { item: LabelRunRowT; ws: string }) {
   const state = item.state
   const failed = state === 'failed'
   const glyph =
-    state === 'running' || state === 'answering' ? (
-      <Spinner size={10} label="running" />
-    ) : failed ? (
+    // while it runs, the busy line above the chat's input box says `labeling: <label>` (lib/busy.ts)
+    failed ? (
       <Icon name="warning" size={13} className="chat-labelrun-warn" />
     ) : state === 'asked' ? (
       <Icon name="label" size={13} />

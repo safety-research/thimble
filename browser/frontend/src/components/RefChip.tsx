@@ -250,13 +250,8 @@ export function RefChip(props: RefChipProps) {
     : c?.state === 'quiet' ? { quiet: true, quietWhy: c.why }
     : c?.to && c.to !== c.ref ? { ref: c.to, movedFrom: c.ref }
     : {}
-  const checking = !!heal?.checking && !!props.cite && CHECKED_REF.test(props.ref)
-  return (
-    <>
-      <RefChipBody {...props} {...fix} />
-      {checking && <Spinner size={8} className="refchip-checking" label="Checking the citation" />}
-    </>
-  )
+  // while the check runs, the busy line above the chat's input box says `checking citations` (lib/busy.ts)
+  return <RefChipBody {...props} {...fix} />
 }
 
 function RefChipBody({ ref, value, compact, workspace, broken: contradicted, brokenWhy, quiet: unwrapped, quietWhy: unwrappedWhy, late, anchor, cite, movedFrom }: RefChipProps) {
