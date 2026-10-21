@@ -6,7 +6,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { isRef, objectRefs, recordRefs, regionRefs, rowByName } from '../object.js'
+import { barParts, isRef, objectRefs, partLines, recordRefs, regionRefs, rowByName, splitsNote } from '../object.js'
+import { viewMade } from '../visualize.js'
 import { prep } from '../node/prep.mjs'
 import { bodyRows, frameLines } from '../cardframe.js'
 import { gridText, renderTerm } from '../../draw/term.js'
@@ -82,4 +83,29 @@ test('a diagram under a reply is drawn whole when it fits on the screen; a talle
   assert.deepEqual(tall, { rows: 31, more: 49 })
   const cut = frameLines({ w: 60, title: 'A long list', text: '', more: tall.more }, Array.from({ length: tall.rows }, (_, i) => `row ${i}`))
   assert.match(cut.at(-2), /↓ 49 more rows · open the card to see all/)
+})
+
+test('the plain text of a stacked bar card names each part and its value, and v names the card by its title', async () => {
+  // three stages that split each measure: every bar fills to 100, so its text alone shows only full rows of one glyph
+  const stages = [{ stage: 'early', time: 10, done: 30 }, { stage: 'middle', time: 20, done: 15 }, { stage: 'late', time: 70, done: 5 }]
+  const object = { id: '05-stage-share', title: 'Where the time went', data: { stages }, program: `
+    const M = [['time', 'time'], ['done', 'tasks done']]
+    return k.bars(M.map(([key, label]) => { const tot = data.stages.reduce((s, r) => s + r[key], 0)
+      return { id: 'm-' + key, label, parts: data.stages.map(r => ({ value: r[key] / tot * 100, label: r.stage })) } }), { max: 100 })` }
+  const { drawing } = await prep({ object, w: 96 })
+  const grid = renderTerm(drawing, { w: 96 })
+  assert.match(gridText(grid), /time +▆+ +100/)
+  assert.deepEqual(barParts(drawing), ['time: early 10, middle 20, late 70', 'tasks done: early 60, middle 30, late 10'])
+  const note = splitsNote(drawing)
+  assert.match(note, /no colors/)
+  assert.match(note, /- tasks done: early 60, middle 30, late 10/)
+  assert.deepEqual(partLines(object, drawing, ['m-time', 'm-done']), ['- time 100', '- tasks done 100'])
+  // a card with no stacked bar adds nothing to its text
+  const plain = await prep({ object: { id: 'x', title: 'x', data: {}, program: "return k.bars([['a', 2], ['b', 3]])" }, w: 96 })
+  assert.equal(splitsNote(plain.drawing), '')
+  // what main reads once v's card is saved names no card id
+  const made = viewMade({ about: 'The runs went in three stages.', cards: [{ id: '05-stage-share', v: 2, root: '/data' }] })
+  assert.doesNotMatch(made, /05-stage-share/)
+  assert.match(made, /made a card for it/)
+  assert.match(made, /no colors/)
 })

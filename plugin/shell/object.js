@@ -17,6 +17,9 @@
 //   recordRefs(drawing, regionId) -> the rows its examples name themselves (`ref` on a record), which need no resolve.
 //   fromFacts(object, coverage) -> where an object's values come from, as the detail's "from" line reads it: its
 //     sources, rows, labels and coverage (`thimble coverage <id> --json`).
+//   barParts(drawing) -> each stacked bar's parts in words, `time: fast start 11.1, after the report 74.1`, since the
+//     drawing as plain text shows every part as the same ▆ with no colors; splitsNote(drawing) puts them under it.
+//   partLines(object, drawing, ids) -> each part a person can select, in words: its label and the refs it carries.
 
 const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|[qr]\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
 
@@ -103,6 +106,52 @@ export function rowByName(object, id) {
   }
   visit(object?.data, '', 0)
   return best && !tie ? best : null
+}
+
+// a part's value in words: a whole number as it is, a fraction to three significant digits
+const partValue = v => (typeof v !== 'number' || !isFinite(v) ? String(v) : Math.abs(v) >= 100 || Number.isInteger(v) ? Math.round(v).toLocaleString('en-US') : String(Number(v.toPrecision(3))))
+const nodeWords = n => (n && n.t === 'text' ? (n.runs || []).map(r => r.s || '').join('').trim() : '')
+
+/** Each stacked bar's parts in words, in reading order. A bar is named by the words before it in its row (a k.bars
+ *  label), else by the label of the part of the card it is in. */
+export function barParts(drawing) {
+  const out = []
+  const say = (name, bar) => out.push(`${name || 'a bar'}: ${bar.parts.map((p, i) => `${p.label != null && String(p.label).trim() ? String(p.label).trim() : `part ${i + 1}`} ${partValue(p.value)}`).join(', ')}`)
+  const stacked = n => n && n.t === 'bar' && Array.isArray(n.parts) && n.parts.length > 1
+  const walk = (n, name) => {
+    if (!n || typeof n !== 'object') return
+    if (n.t === 'region' && n.meta?.label) name = String(n.meta.label)
+    if (stacked(n)) { say(name, n); return }
+    const kids = Array.isArray(n.kids) ? n.kids : []
+    kids.forEach((k, i) => {
+      // in a row, the nearest words before the bar name it
+      const before = n.t === 'beside' && stacked(k) ? kids.slice(0, i).reverse().map(nodeWords).find(Boolean) : ''
+      walk(k, before || name)
+    })
+    if (n.kid) walk(n.kid, name)
+  }
+  walk(drawing?.root, '')
+  return out
+}
+
+/** What the plain text of a drawing loses, said under it: the colors, and so the splits of its stacked bars, with each
+ *  bar's parts listed in words. '' when the drawing has no stacked bar. */
+export function splitsNote(drawing) {
+  const bars = barParts(drawing)
+  if (!bars.length) return ''
+  return `\n\nThis plain text has no colors, so the parts of a stacked bar above are all the same ▆ and do not show where one part ends. Each stacked bar's parts, with their values:\n${bars.map(b => `- ${b}`).join('\n')}`
+}
+
+/** Each part a person can select (`ids`, in reading order), in words: its label, then the refs it carries. */
+export function partLines(object, drawing, ids, { max = 40, refsEach = 6 } = {}) {
+  const out = []
+  for (const id of ids.slice(0, max)) {
+    const label = String(regionMeta(drawing, id)?.label || id).trim()
+    const refs = regionRefs(object, drawing, id).refs
+    out.push(`- ${label}${refs.length ? `: ${refs.slice(0, refsEach).join(', ')}${refs.length > refsEach ? ', …' : ''}` : ''}`)
+  }
+  if (ids.length > max) out.push(`- and ${ids.length - max} more parts`)
+  return out
 }
 
 /** The refs the object's words cite, as the kernel checked them at save. */

@@ -33,7 +33,7 @@ import { bodyRows, cardFrame, frameWidth, moreRow, moreText } from './cardframe.
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withObserver } from './message.js'
-import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
+import { fromFacts, isRef, objectRefs, partLines, recordRefs, refsKey, regionMeta, regionRefs, splitsNote } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList, threadOf } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, noteEdit, pressTaken, readCardState, writeCardState } from './runtime'
@@ -264,12 +264,13 @@ async function withVersion($: Engine, ref: ObjRef): Promise<ObjRef> {
   return { ...ref, v: o?.version != null ? Number(o.version) : null }
 }
 
-/** The object as the person sees it under a reply, as plain text at 96 columns (what the observer reads). */
+/** The object as the person sees it under a reply, as plain text at 96 columns (what the observer reads). Plain text
+ *  has no colors, so the parts of a stacked bar are all one glyph: their labels and values follow the text (splitsNote). */
 export async function drawnTextOf($: Engine, ref: ObjRef): Promise<string> {
   const p = await prepared($, ref, 96)
   if (p.error || !p.grid) return `(it cannot be drawn: ${p.error || 'no drawing'})`
   const err = p.drawing?.error ? `\n(its program failed: ${p.drawing.error.name}: ${p.drawing.error.message})` : ''
-  return gridText(p.grid) + err
+  return gridText(p.grid) + err + splitsNote(p.drawing)
 }
 
 // ------------------------------------------------------------------------------------------------ where objects are drawn
@@ -650,19 +651,23 @@ export async function tellMain($: Engine, text: string): Promise<void> {
 /** How much of a card's drawing, as text, a row for Claude carries. */
 const CARD_TEXT_MAX = 3000
 
-/** A card in words for Claude, from what the person sees: its name and title, its takeaway, what it draws as text (at
- *  most CARD_TEXT_MAX characters) and the refs its parts carry, so Claude can discuss it and cite its values. */
+/** A card in words for Claude, from what the person sees: its title (never its id, which Claude would copy into its
+ *  words), its takeaway, what it draws as plain text (at most CARD_TEXT_MAX characters, with the parts of its stacked
+ *  bars in words, as the text has no colors), and each part's label with the refs it carries, so Claude can discuss it
+ *  and cite its values. */
 export async function cardForClaude($: Engine, ref: ObjRef): Promise<string> {
   const o = await loadObject($, ref).catch(() => null)
-  const lines = [`The card ${refText(ref)}${o?.title ? ` "${String(o.title)}"` : ''} (${ref.root.replace(/\/+$/, '')}/thimble/objects/${ref.id}.json).`]
+  const file = `${ref.root.replace(/\/+$/, '')}/thimble/objects/${ref.id}.json`
+  const lines = [o?.title ? `The card "${String(o.title)}" (${file}).` : `A card with no title (${file}).`]
   if (typeof o?.text === 'string' && o.text.trim()) lines.push(`Its takeaway: ${o.text.trim()}`)
   const drawn = await drawnTextOf($, ref).catch(() => '')
-  if (drawn.trim()) lines.push(`What it draws, as text:\n${drawn.length > CARD_TEXT_MAX ? `${drawn.slice(0, CARD_TEXT_MAX)}\n…` : drawn}`)
+  if (drawn.trim()) lines.push(`What it draws, as plain text:\n${drawn.length > CARD_TEXT_MAX ? `${drawn.slice(0, CARD_TEXT_MAX)}\n…` : drawn}`)
   const p = await prepared($, ref, 96).catch(() => null)
-  const refs: string[] = []
-  if (p?.grid && p.drawing) for (const r of selectable(p.grid)) for (const x of regionRefs(p.object, p.drawing, r.id).refs) if (!refs.includes(x)) refs.push(x)
-  for (const c of objectRefs(o)) if (!refs.includes(c.ref)) refs.push(c.ref)
-  if (refs.length) lines.push(`Its refs: ${refs.slice(0, 40).join(', ')}${refs.length > 40 ? ', …' : ''}`)
+  const ids = p?.grid && p.drawing ? selectable(p.grid).map(r => r.id) : []
+  if (ids.length) lines.push(`Its parts, each with its label and the refs it carries:\n${partLines(p!.object, p!.drawing, ids).join('\n')}`)
+  const seen = new Set(ids.flatMap(id => regionRefs(p!.object, p!.drawing, id).refs))
+  const other = objectRefs(o).map((c: Any) => c.ref).filter((x: string) => !seen.has(x))
+  if (other.length) lines.push(`${ids.length ? 'The other refs its words cite' : 'The refs its words cite'}: ${other.slice(0, 40).join(', ')}${other.length > 40 ? ', …' : ''}`)
   return lines.join('\n')
 }
 

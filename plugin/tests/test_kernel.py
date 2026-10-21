@@ -209,4 +209,20 @@ def test_the_command_runs_a_query_from_a_heredoc(root: Path) -> None:
     assert "2 source rows: runs.csv#row=1,3" in res.stdout
 
 
+def test_the_lineage_line_says_no_rows_stand_behind_values_when_none_were_read(root: Path) -> None:
+    from kernel import cli as CLI
+
+    st = Store(root)
+    # a database read in code: the query read no rows with load(), so nothing stands behind its values
+    q = Q.run(st, "prs by state", 'import sqlite3\nc = sqlite3.connect("forge.db")\n'
+              'pd.DataFrame(c.execute("select state, count(*) n from prs group by state").fetchall(), columns=["state", "n"])')
+    assert q["error"] is None and not q.get("read")
+    line = CLI._lineage_line(q)
+    assert line.startswith("No rows stand behind these values") and "rests on all the rows read" not in line
+    # the same values read with load(): each rests on the rows read, as before
+    q2 = Q.run(st, "prs", 'df = load("forge.db#prs")\npd.DataFrame([{"merged": int((df.state == "merged").sum()), "all": len(df)}]).T')
+    assert q2.get("rows") is not None or q2.get("read")
+    assert "No rows stand behind" not in CLI._lineage_line(q2)
+
+
 # ------------------------------------------------------------------ run, and the ids from before it was named run

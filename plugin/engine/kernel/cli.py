@@ -330,6 +330,11 @@ def _lineage_line(q: dict[str, Any]) -> str:
     if q.get("lineage_error"):
         say = (f"No rows per output row: thimble could not find them ({q['lineage_error']}), so each value rests on all the "
                "rows read (tally() keeps them per row).")
+    if (mode or "query") == "query" and q.get("rows") is None and not q.get("read"):
+        # no rows per output row and none read through load() or use(): nothing stands behind a value, and the line
+        # says so, with how a query keeps them (a database or a JSON file read in code keeps none)
+        return ("No rows stand behind these values: the query read no rows with load() or use(), so a citation of a "
+                "value opens no records. To keep the rows, read the file with load(), as in `load(\"forge.db#prs\")`.")
     how = Q.loop_source(q) if mode == "loop" else None
     if how == "opened":
         # the records rest on the files each pass opened, not on frames it loaded
