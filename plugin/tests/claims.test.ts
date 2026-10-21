@@ -155,25 +155,68 @@ test('the Claims pane opens with the ring on the selected dot, not on the input 
   // the input bar is there, without the ring
   expect(drawn).toContain('Ask about claim: The tilt is two editors')
   expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
-  // the ring stands on the selected dot (the newest claim's): the first ↑ moves it to the dot before, which is selected
+  // the ring stands on the selected dot (the newest claim's): the first ↑ (Claude Code's ring onto the dot above) walks
+  // to the claim before it in the pane's order, which is selected
   const dots = [...drawn.matchAll(/"key":"(r\|side\|\d+\|n-c\d+)"/g)].map(m => m[1]!)
   const sel = await rowKey($, 'n-c4')
   const before = dots[dots.indexOf(sel) - 1]!
   w.focused.length = 0
   await $.ui.focus({ requestId: 'object', element: before, origin: { kind: 'person' } } as never)
+  await w.clock.advance(50)
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).not.toContain('The tilt is two editors, Kestrel and Wren, not one.')
   await w.clock.settle()
-  // the drawings that select that dot (its box adds presses and covers others) leave the ring on it, never on the dot
-  // it left
+  // the drawings that select that claim (its box adds presses and covers others) leave the ring on its dot, never on the
+  // dot it left
   await $.ui.render(PANE)
   await w.clock.settle()
-  expect(w.focused.at(-1)).toBe(await rowKey($, before.split('|')[3]!))
+  const now = JSON.stringify(await $.ui.render(PANE))
+  expect(now).toContain('Ask about claim:')
+  expect(now).not.toContain('Ask about claim: The tilt is two editors')
   expect(w.focused).not.toContain(sel)
   // a letter starts a question in the input bar
   expect(await press($, w.clock, key('w'))).toEqual({ text: '', cursor: 0 })
   await w.clock.settle()
   expect(JSON.stringify(await $.ui.render(PANE))).toMatch(/"key":"ask-\d+"[^}]*"value":"w"|"value":"w"[^}]*"key":"ask-\d+"/)
+})
+
+test('↑↓ walk the claims in the pane\'s order, wherever Claude Code\'s ring would land: on another dot, on the head\'s press, under the page; a click selects the dot it presses', async ($, on) => {
+  const w = await twoTurns($, on)
+  await press($, w.clock, key('c'))
+  await w.clock.settle()
+  for (let i = 0; i < 3; i++) { await $.ui.render(PANE); await w.clock.settle() }
+  // the claim selected, as the input bar names it
+  const selected = async () => { await w.clock.settle(); const t = JSON.stringify(await $.ui.render(PANE)); await w.clock.settle(); return (/Ask about claim: ([^…"]{1,40})/.exec(t) || [])[1] ?? '' }
+  // the ring as Claude Code's arrows move it: onto the head's press (the folder's), under the page (the input bar), or
+  // onto a dot drawn near
+  const move = async (to: string) => { await $.ui.focus({ requestId: 'object', element: to, origin: { kind: 'person' } } as never); await w.clock.advance(50); return selected() }
+  const head = await rowKey($, 'folder')
+  const bar = /"key":"(ask-\d+)"/.exec(JSON.stringify(await $.ui.render(PANE)))![1]!
+  const order = [await selected()]
+  expect(order[0]).toMatch(/^The tilt is two editors/)
+  // ↓ four times (the ring onto the input bar under the page, then from nowhere onto the first press, the head's):
+  // each step selects the next claim, and four steps come back round
+  for (const to of [bar, head, bar, bar]) order.push(await move(to))
+  expect(new Set(order.slice(0, 4)).size).toBe(4)
+  expect(order[4]).toBe(order[0])
+  // the claim's box is open
+  expect(textOf(await $.ui.render(PANE))).toContain('The tilt is two editors, Kestrel and Wren, not one.')
+  // ↑ (the ring onto a dot drawn above it, of whichever claim) goes back one claim in the same order
+  const drawn = JSON.stringify(await $.ui.render(PANE))
+  const dots = [...drawn.matchAll(/"key":"(r\|side\|(\d+)\|n-c\d+)"/g)].map(m => [m[1]!, Number(m[2])] as const)
+  const sel = await rowKey($, 'n-c4')
+  const above = dots.filter(([, y]) => y < Number(sel.split('|')[2])).at(-1)
+  if (above) expect(await move(above[0])).toBe(order[3])
+  // a click on another dot selects that dot: its press cancels the step its move of the ring would be
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
+  const now = await selected()
+  const other = dots.map(([k]) => k).find(k => !k.endsWith('|n-c4') && !now.startsWith('x'))!
+  await $.ui.focus({ requestId: 'object', element: other, origin: { kind: 'person' } } as never)
+  await ui.press({ key: other })
+  await w.clock.advance(50)
+  const clicked = await selected()
+  expect(clicked).not.toBe(now)
+  expect(textOf(await $.ui.render(PANE))).toContain(clicked)
 })
 
 // a folder of two jsonl files, three rows of one read
