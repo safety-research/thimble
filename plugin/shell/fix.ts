@@ -59,6 +59,15 @@ async function kernel($: Engine, args: string[]): Promise<{ ok: boolean; out: st
 
 const lastLine = (s: string) => s.split('\n').map(l => l.trim()).filter(Boolean).slice(-1)[0] || ''
 
+/** One line for the person: a toast, and when it holds a command to run (a --plugin-dir session's `quit and run: …`),
+ *  also a row of the transcript, which keeps the whole command where the toast cuts it. */
+function sayLine($: Engine, said: string): void {
+  if (/quit and run: /.test(said)) {
+    $.ui.log(said)
+    $.ui.toast(said.replace(/: claude .*$/, ': the command in the transcript'))
+  } else $.ui.toast(said)
+}
+
 /** Load the plugins again once the session is idle, when a switch of thimble asks for it (the kernel's line names
  *  /reload-plugins), so the person sees the fix, or the release, without typing it. */
 async function reloadFor($: Engine, said: string): Promise<void> {
@@ -116,7 +125,7 @@ async function undoFix($: Engine, slug: string): Promise<string> {
   }
   await $.state.set(LINE, null)
   const said = lastLine(r.out) || 'Your thimble is the release again.'
-  $.ui.toast(said)
+  sayLine($, said)
   await noteForClaude($, `The analyst undid the fix ${slug}. ${said}`)
   await reloadFor($, said)
   return said
@@ -250,7 +259,7 @@ async function followFix($: Engine, f: Fix): Promise<void> {
   const was = await fixLineNow($)
   const said = was?.kind === 'applied' && was.slug === f.slug ? was.said : undefined
   await $.state.set(LINE, off ? null : { kind: 'applied', slug: f.slug, title: f.title, said: line })
-  if (said !== line) $.ui.toast(r.ok ? line : `× ${cut(line, 200)}`)
+  if (said !== line) sayLine($, r.ok ? line : `× ${cut(line, 200)}`)
   const after = await readJson($, `${await home($)}/fixes/${f.slug}/fix.json`)
   const moved = off || (before?.base && after?.base && before.base !== after.base)
   if (moved) {

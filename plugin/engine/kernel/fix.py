@@ -386,7 +386,8 @@ def use(slug: str, plugin_dir: bool | None = None) -> str:
     # plugin_dir: whether the caller is a Claude Code session started with --plugin-dir; None asks this plugin's own
     # place. A caller that is no Claude Code session (the browser's server, which runs from a checkout) passes False.
     if from_plugin_dir() if plugin_dir is None else plugin_dir:
-        fx["status"] = "applied" if fix_of_plugin() == slug else "ready"
+        if fx["status"] in ("working", "ready", "applied"):
+            fx["status"] = "applied" if fix_of_plugin() == slug else "ready"
         fx["via"] = "plugin-dir"
         save(fx)
         if fix_of_plugin() == slug:
