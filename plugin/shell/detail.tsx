@@ -43,7 +43,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
-import { actionsOf, backOf, belowAt, hostKeys, turnWords } from '../panes/host.js'
+import { actionsOf, backOf, belowAt, hostKeys, takes, turnWords } from '../panes/host.js'
 import { paintRegions, regionOfKey } from './cells'
 import { askMerge, beganWord, editsOf, examplesView, PAGES_DEFAULT, partsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
@@ -99,10 +99,15 @@ const askedRegion = new Map<string, string>()
 let lastKey: { key: string; at: number; undo: Record<string, unknown> | null; card?: Undo; pane?: PaneView; sel?: Detail } | null = null
 const latestSeen = new Map<string, number>()
 // a pane the panel shows (not a card): what it drew last, for the ring (the button of each part) and the keys
-let paneDrawn: { name: string; args: Record<string, unknown>; selected: string | null; buttons: Map<string, string>; first: string | null; order: string[]; below: number } | null = null
+// `walks`: the program walks its parts with ↑↓ (ringStart 'part' and its own up and down); `at`: where each press of
+// the page stands, `row|id` -> [row, column], to tell which way the ring moved
+let paneDrawn: { name: string; args: Record<string, unknown>; selected: string | null; buttons: Map<string, string>; first: string | null; order: string[]; below: number; walks: boolean; at: Map<string, [number, number]> } | null = null
 // what the panel draws now, as its latest drawing began (a card's drawing still under way when the panel turned to a
 // pane must not take the ring from the pane's parts)
 let showing: 'card' | 'pane' = 'card'
+// a step of a pane's walk waits this long for the press a click brings with its move of the ring (which cancels it)
+const WALK_MS = 40
+let walkGen = 0
 // the conversation's window: rows up from its end (the wheel moves it while the input bar holds the keys, or while
 // the thing above it fits its rows), and whether the thing above it is cut to a window of its rows
 let convBy = 0
@@ -264,6 +269,25 @@ async function takeKeys($: Engine): Promise<void> {
     if (isAsk(ringAt) && !draft) { ringAt = null; landed = null }
     regrab($)
   } else focusEntry($)
+}
+
+/** Which way the person moved the ring in a pane, from the press `from` to `to`: 1 on (lower, or further right on the
+ *  row), -1 back. A press under the page (the actions, the input bar) is after every part; one of Claude Code's own
+ *  stops (the close mark, top right) before them. With the ring on no press (`from` null: a drawing took its element
+ *  away), Claude Code's arrows and Tab take the first press, a step on; any other press is measured from the part
+ *  selected (`selected`), where the ring is going. */
+export function walkDir(drawn: { first: string | null; below: number; at: Map<string, [number, number]> }, from: string | null, to: string, selected: string | null = null): number {
+  if (!from && to === drawn.first) return 1
+  from = from || selected
+  if (!from) return 1
+  const where = (key: string): [number, number] => {
+    if (!key) return [-1, 0]
+    const m = /^r\|[^|]+\|(\d+)\|(.+)$/.exec(key)
+    if (!m || Number(m[1]) >= drawn.below) return [Infinity, 0]
+    return drawn.at.get(`${m[1]}|${m[2]}`) ?? [Number(m[1]), 0]
+  }
+  const a = where(from), b = where(to)
+  return b[0] > a[0] || (b[0] === a[0] && b[1] > a[1]) ? 1 : -1
 }
 
 /** Whether the pane's ring starts on the part its program selected, rather than on the input bar (its module's
@@ -943,8 +967,12 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
     buttons.set(id, `r|side|${y}|${id}`)
     first = first ?? `r|side|${y}|${id}`
   }
-  paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].filter(([, y]) => y < split).sort((a, b) => a[1] - b[1]).map(([id]) => id), below: split }
-  const onPress = (id: string, dir?: number) => { void paneFire($, view.pane, view.args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) }
+  const at = new Map<string, [number, number]>()
+  for (const r of grid.regions as Any[]) for (const q of (r.rects || []) as Any[]) for (let y = q.y; y < q.y + q.h; y++) { const was = at.get(`${y}|${r.id}`); if (!was || q.x < was[1]) at.set(`${y}|${r.id}`, [y, q.x]) }
+  const walks = ringOnPart(view) && takes(d, { type: 'key', key: 'up' }) && takes(d, { type: 'key', key: 'down' })
+  paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].filter(([, y]) => y < split).sort((a, b) => a[1] - b[1]).map(([id]) => id), below: split, walks, at }
+  // (a press is a click: the move of the ring that came with it is no step of the walk)
+  const onPress = (id: string, dir?: number) => { walkGen++; void paneFire($, view.pane, view.args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) }
   // (one column in from the panel's edge, as a card's page stands beside its gutter, so every subject lines up)
   const kids: Any[] = [...back, ...(above ? [above, els.Text({ key: 'above-gap', children: ' ' })] : []), Box({ marginLeft: 1, children: [paintRegions(grid, els, { theme, selected: region, key: 'side', from, rows, onPress, painted: true })] })]
   kids.push(...convEls(els, conv, T))
@@ -1237,6 +1265,30 @@ export function registerDetail(on: Parameters<Register>[0]): void {
           if (!r.deny) { ringAt = chosen; ringY = Number(chosen.split('|')[2]); landed = null }
           if (was !== isAsk(ringAt)) askRedraw($)
           return r
+        }
+        // a pane whose program walks its parts with ↑↓ (the Claims graph): from the part selected, the person's move is
+        // one step of the program's own walk, in its order. Claude Code's arrows take the nearest press that way and its
+        // Tab the next one in reading order, which may be a dot of another cluster, the head's press or the actions
+        // under the page, so where the ring would land says only which way it moved. A click comes with its press,
+        // which cancels the step; and back from the input bar or the actions the ring goes to the part selected
+        if (person && paneDrawn.walks && !draft && chosen && el !== chosen) {
+          // (from the input bar, the actions or the rows under the page, onto the page)
+          const back = !!ringAt && !onPage(ringAt) && !!part && onPage(el)
+          if (ringAt === chosen || !ringAt || back) {
+            const step = !back
+            const dir = walkDir(paneDrawn, ringAt, el, chosen)
+            const gen = ++walkGen
+            const pane = { name: paneDrawn.name, args: paneDrawn.args }
+            $.clock.after(WALK_MS, () => { void (async () => {
+              if (gen !== walkGen || !isOpen || showing !== 'pane') return
+              if (step) await paneFire($, pane.name, pane.args, { type: 'key', key: dir > 0 ? 'down' : 'up' })
+              // the drawing that shows the part selected now puts the ring on it (panePane)
+              ringAt = null
+              landed = null
+              $.ui.invalidate('ui.render')
+            })() })
+            return {}
+          }
         }
         // a press in what an action opened (drawn under the conversation): the ring stands there, the selection stays
         if (person && part && Number(el.split('|')[2]) >= paneDrawn.below) { const r = await next(e); if (!r.deny) { ringAt = el; landed = null } return r }

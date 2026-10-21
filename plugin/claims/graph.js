@@ -22,8 +22,10 @@
 //                   the other places it was said
 //
 // What can be pressed looks like it can (a color, the ring), so the pane prints no captions, legends or turn numbers.
-// The side panel holds the keys: ↑↓ walk the claims, the ring (tab) walks the claim's rows and selects what it lands on
-// (k.select), and the panel's input bar asks its thread about that.
+// The side panel holds the keys: ↑↓ (and tab) walk the claims in the order they are listed, cluster by cluster (this
+// program's up and down: the host turns each move of Claude Code's ring from the selected dot into one of them, so the
+// walk never depends on where the dots stand), and the panel's input bar asks its thread about the claim. The other
+// presses (the head's, the rows in the box) are a click away; ↵ on the dot opens where it was said.
 //
 //   state: {claim, part: the dot or row selected, at: the last turn when it was selected, open: 'ev' | 'hist' | null}
 //   reads: claims (the store with the folder's offer), threads (whether the panel's thread has a conversation, which
