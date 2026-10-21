@@ -261,6 +261,14 @@ def _pointer_get(v: Any, pointer: str) -> Any:
     return v
 
 
+def table_names(root: Path, rel: str) -> list[str]:
+    """The tables of a database, by name; none for a file that is not one."""
+    if kind_of_file(root, rel) != "sqlite":
+        return []
+    with closing(sqlite3.connect(f"file:{root / rel}?mode=ro", uri=True)) as con:
+        return [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
+
+
 def iter_rows(root: Path, rel: str, table: str | None = None) -> Iterator[Row]:
     """Every row of one source file, in file order."""
     p = root / rel

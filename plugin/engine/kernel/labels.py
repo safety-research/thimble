@@ -239,9 +239,16 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
             limit: int | None = None, seed: int = 0) -> tuple[list[S.Row], int, list[str]]:
     """(the records, how many matched, the files) of a glob, narrowed by --where and --within; with a limit, that many
     of them at random (a trial)."""
-    files = S.expand_glob(st.root, glob)
+    # `x.db#prs` names one table of a database, as load() reads it
+    pattern, _, table = glob.partition("#")
+    files = S.expand_glob(st.root, pattern)
     if not files:
-        raise LabelError(f"no source file matches {glob!r} under {st.root}")
+        raise LabelError(f"no source file matches {pattern!r} under {st.root}")
+    if table:
+        for rel in files:
+            tables = S.table_names(st.root, rel)
+            if table not in tables:
+                raise LabelError(f"{rel} has no table {table!r}; its tables: {', '.join(tables) or 'none'}")
     cond = compile(where, "<where>", "eval") if where else None
     inside = None
     if within:
@@ -253,7 +260,7 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
     kept: list[S.Row] = []
     matched = 0
     for rel in files:
-        for row in S.iter_rows(st.root, rel):
+        for row in S.iter_rows(st.root, rel, table=table or None):
             if inside is not None and row.ref not in inside:
                 continue
             if cond is not None:

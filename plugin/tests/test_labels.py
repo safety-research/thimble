@@ -303,3 +303,22 @@ def test_a_label_counts_records_in_each_files_unit_and_says_when_it_mixes_units(
     assert card["title"] == "cites: 2 of 5 records are yes (3 lines and 2 files)"
     assert card["text"].endswith("The records mix units (3 lines and 2 files): 1 of the 3 lines and 1 of the 2 files are yes.")
     assert card["data"]["label"]["units"] == "3 lines and 2 files"
+
+
+def test_a_label_in_one_table_of_a_database_labels_only_that_tables_rows(root: Path):
+    import sqlite3
+    con = sqlite3.connect(root / "forge.db")
+    con.execute("create table prs (title text)")
+    con.execute("create table issues (title text)")
+    con.executemany("insert into prs values (?)", [("fix the parser",), ("add a test",)])
+    con.executemany("insert into issues values (?)", [("the parser fails",), ("docs typo",), ("slow build",)])
+    con.commit()
+    con.close()
+    r = run(root, "label", "parser", "--in", "forge.db#prs", "--regex", "parser")
+    assert r.returncode == 0, r.stdout + r.stderr
+    lab = LB.load(Store(root), "parser")
+    assert sorted(lab["units"]) == ["forge.db#prs/1", "forge.db#prs/2"]
+    assert LB.status(lab)["counts"] == {"yes": 1, "no": 1}
+    # a table the database does not have says which it has
+    r = run(root, "label", "nope", "--in", "forge.db#pulls", "--regex", "parser")
+    assert r.returncode != 0 and "no table 'pulls'" in r.stdout + r.stderr and "issues, prs" in r.stdout + r.stderr
