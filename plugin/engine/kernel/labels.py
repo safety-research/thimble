@@ -817,6 +817,8 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
             continue
     # the rows of a file named by one field, as the rows beside them
     said = words_by_file(list(rows.values()))
+    kinds = {f: S.kind_of_file(st.root, f) for f in dict.fromkeys(r.split("#")[0] for r in rows)} \
+        if lab.get("kind") == "regex" else {}
     out = []
     for i, r in enumerate(want):
         u, c = units.get(r) or {}, checks.get(r)
@@ -836,10 +838,56 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
         if row is not None:
             words, meta = said[r]
             e.update(words=words or unit_text(row, 240), meta=meta, text=unit_text(row, 1200))
+            e.update(matched_part(lab, row, kinds))
         else:
             e["missing"] = "the record is no longer in its file"
         out.append(e)
     return {"label": head(lab), "value": value, "at": at, "total": total, "records": out}
+
+
+HIT_ROOM = 320  # characters of a record the label viewer shows around the part its label matched
+CODE_READS = re.compile(r"""\bunit\s*(?:\[\s*['"]([^'"\]]+)['"]\s*\]|\.get\(\s*['"]([^'"]+)['"])""")
+
+
+def matched_part(lab: dict[str, Any], row: S.Row, kinds: dict[str, str | None]) -> dict[str, Any]:
+    """The part of a record its label matched, for the viewer's example: a regex's match on the line it is on, with
+    the words around it up to HIT_ROOM characters, cut with … ({hit: {before, match, after}}); or the fields the code
+    read, each value cut ({fields: [[name, value]]}). Empty for a model's label, or a regex that does not match."""
+    rule = str(lab.get("rule") or "")
+    if lab.get("kind") == "regex" and rule:
+        text = regex_text(row, _kind_of_ref(kinds, row.ref))
+        try:
+            m = re.search(rule, text)
+        except re.error:
+            return {}
+        if not m:
+            return {}
+        a, b = m.span()
+        start = text.rfind("\n", 0, a) + 1
+        end = text.find("\n", b)
+        end = len(text) if end < 0 else end
+        before, match, after = text[start:a], text[a:b], text[b:end]
+        if len(match) > HIT_ROOM:
+            match, after = match[:HIT_ROOM - 1] + "…", ""
+        side = max(12, (HIT_ROOM - len(match)) // 2)
+        if len(before) > side:
+            before, start = before[-side:], 1
+        if len(after) > side:
+            after, end = after[:side], -1
+        return {"hit": {"before": ("…" if start > 0 else "") + before, "match": match,
+                        "after": after + ("…" if end < 0 or end < len(text) else "")}}
+    if lab.get("kind") == "code" and rule:
+        unit = _unit_of(row)
+        names = list(dict.fromkeys(a or b for a, b in CODE_READS.findall(rule)))
+        fields = []
+        for name in names[:6]:
+            if name in unit:
+                v = unit[name]
+                said = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
+                said = " ".join(said.split())
+                fields.append([name, said if len(said) <= HIT_ROOM else said[:HIT_ROOM - 1] + "…"])
+        return {"fields": fields} if fields else {}
+    return {}
 
 
 def breakdown(st: Store, rowsets: list[str], cap: int = 500_000) -> dict[str, Any]:
@@ -976,23 +1024,12 @@ const items = values.map((v, i) => {
 const parts = [k.bars(items, { max })]
 if (L.waiting) parts.push(k.beside(k.text('{dim:waiting}', { w: 10 }), k.unseen({ label: `${k.fmt(L.waiting)} records wait for the model`, w: Math.max(12, Math.min(48, k.w - 16)) })))
 if (L.failed) parts.push(k.text(`{warn:${k.fmt(L.failed)} records have no value}{dim: · ${k.escape(L.failed_why || 'thimble label ' + col + ' --again asks again')}}`))
-const how = L.kind === 'prompt' ? 'the model read each record' : L.kind === 'regex' ? 'a regex' : L.kind === 'code' ? 'code' : 'Claude, after reading'
-const checked = L.checked ? ` · checked ${k.fmt(L.checked)}: ${k.fmt(L.agree)} agree, ${k.fmt(L.disagree)} disagree` : ' · none checked yet'
-// the definition in one line, cut with … where it does not fit: panes/labels.js defLine, which the row beside a card
-// uses (this program runs in the drawing sandbox, which imports nothing, so it keeps the same steps here)
-const lead = { prompt: 'question', regex: 'pattern', code: 'code' }[L.kind]
-const def = String(L.definition || '').trim()
-const one = L.kind === 'code'
-  ? def.split('\n').map(x => x.trim()).filter(x => x && !/^def\s+label\s*\(/.test(x)).reduce((s, x) => (!s ? x : s.endsWith(':') ? `${s} ${x}` : `${s}; ${x}`), '')
-  : def.replace(/\s+/g, ' ')
-const room = Math.max(8, k.w - 4 - Array.from(lead || '').length - 2)
-const cut = Array.from(one).length <= room ? one : Array.from(one).slice(0, room - 1).join('') + '…'
-if (lead && one) parts.push(k.text(`{dim:${lead}} ${k.escape(cut)}`))
-// what made the label, said once: the definition's line names a rule (code, a pattern), so the line under it does not
-// say it again; under a question it says that the model read each record
-const said = lead && one && L.kind !== 'prompt'
+// the foot, one line: how the label was made and over how many records; the person's corrections only when there are
+// some. The definition itself is the label panel's to show (a click on the label's name opens it)
+const how = { prompt: 'prompt', regex: 'regex', code: 'code', set: 'set by Claude' }[L.kind] || String(L.kind || '')
 const out = L.out ? ` · the code returned None for ${k.fmt(L.out)} more` : ''
-parts.push(k.text(`{dim:${said ? '' : `${k.escape(how)} · `}${L.units ? k.escape(L.units) : k.fmt(total) + ' records'}${L.trial ? ' (a trial sample)' : ''}${out}${checked}}`))
+const fixed = L.disagree ? ` · ${k.fmt(L.disagree)} corrected by you` : ''
+parts.push(k.text(`{dim:${how ? `${k.escape(how)} · ` : ''}${L.units ? k.escape(L.units) : k.fmt(total) + ' records'}${L.trial ? ' (a trial sample)' : ''}${out}${fixed}}`))
 return k.frame(k.stack(...parts), { title: k.title })
 """
 

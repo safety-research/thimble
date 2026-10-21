@@ -83,6 +83,21 @@ def test_a_regex_label_gives_each_record_a_value_and_its_counts_are_citations(ro
     assert [e["kind"] for e in feed(root)] == ["save"]
 
 
+def test_the_viewer_marks_the_part_a_label_matched(root: Path):
+    # a regex: its match on its line, the words around it; code: the fields it read; the card names no definition
+    assert run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry").returncode == 0
+    st = Store(root)
+    yes = LB.page(st, "sorry", "yes")["records"]
+    assert yes and all(r["hit"]["match"].lower() == "sorry" for r in yes)
+    assert LB.page(st, "sorry", "no")["records"][0].get("hit") is None
+    code = "def label(unit):\n    return 'long' if len(unit.get('text', '')) > 30 else 'short'\n"
+    assert run(root, "label", "size", "--in", "chat/*.jsonl", "--code", stdin=code).returncode == 0
+    r = LB.page(st, "size")["records"][0]
+    assert [f[0] for f in r["fields"]] == ["text"]
+    card = LB.card_spec(st, LB.load(st, "size"), None)
+    assert "none checked yet" not in card["program"] and "corrected by you" in card["program"]
+
+
 def test_code_labels_take_a_value_a_confidence_or_none_and_say_what_failed(root: Path):
     code = ("def label(unit):\n"
             "    if unit['n'] == 5:\n"
