@@ -449,14 +449,11 @@ async def read_all(ws: str, lid: str | None = None, surfaces: list[str] | None =
     surfaces = surfaces or list(SURFACES)
     answer = None
     if "chat" in surfaces:
-        parts: list[str] = []
-        for r in reversed(chats.records(ws, "main")):
-            # the answer is the text after the turn's last call: words before a call are a note on the way there
-            if r.get("type") in ("user", "tool_use", "tool_result"):
-                break
-            if r.get("type") == "text":
-                parts.insert(0, r.get("delta") or "")
-        answer = "".join(parts).strip() or None
+        recs = chats.records(ws, "main")
+        start = next((i + 1 for i in range(len(recs) - 1, -1, -1) if recs[i].get("type") == "user"), 0)
+        # the answer of the last turn as agent.reply_of reads it: the text after its last call, else the last before it
+        answer = agent.reply_of((r.get("type") == "tool_use", r.get("delta") or "") for r in recs[start:]
+                                if r.get("type") in ("text", "tool_use")) or None
     cards = [c["id"] for nb in canvas.notebooks(ws) for c in nb["cells"]] if "cards" in surfaces else []
     return await read(ws, chat="main" if answer else None, answer=answer, cards=cards[-40:],
                       with_report="report" in surfaces, only=lid)

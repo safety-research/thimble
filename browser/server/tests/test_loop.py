@@ -245,3 +245,53 @@ async def test_the_reply_after_a_turn_is_the_text_after_its_last_call(ws, monkey
     assert heard == ["2 runs [2](results.csv#row=1)."]
     # the note stays in the log, where the steps show it
     assert any(r.get("delta") == "Let me count the runs first." for r in chats.records(ws, "main"))
+
+
+def turn_steps(*steps):
+    """A made-up turn's replies, each a list of blocks; the last ends the turn."""
+    out = [NS(content=list(b), stop_reason="tool_use", usage=usage(), stop_details=None) for b in steps[:-1]]
+    return out + [NS(content=list(steps[-1]), stop_reason="end_turn", usage=usage(), stop_details=None)]
+
+
+async def heard_and_read(ws, monkeypatch, client):
+    """What the after-turn checks hear as the turn's answer, and what a check added later reads as main's answer."""
+    from thimble_browser.features import lenses
+    heard, read = [], []
+    monkeypatch.setattr(agent, "AFTER_TURN", [lambda s, answer, result: heard.append(answer)])
+    s = await run_turn(ws, client, monkeypatch)
+    await s.task
+
+    async def fake_read(ws, **kw):
+        read.append(kw.get("answer"))
+        return 0
+    monkeypatch.setattr(lenses, "read", fake_read)
+    await lenses.read_all(ws, surfaces=["chat"])
+    return heard, read
+
+
+async def test_an_answer_and_then_a_card_with_nothing_after_keeps_the_answer_as_the_reply(ws, monkeypatch):
+    answer = "Three of the five runs merged [3](results.csv#row=1)."
+    client = FakeClient(turn_steps([text(answer), call("t1", "add_card", {"question": "How many merged?"})], []))
+    assert await heard_and_read(ws, monkeypatch, client) == ([answer], [answer])
+
+
+async def test_a_note_a_call_and_then_the_answer_reads_only_the_answer(ws, monkeypatch):
+    client = FakeClient(turn_steps([text("Let me count the runs first."), call("t1", "Read", {"file_path": "results.csv"})],
+                                   [text("Three of the five runs merged.")]))
+    assert await heard_and_read(ws, monkeypatch, client) == (["Three of the five runs merged."],) * 2
+
+
+async def test_a_note_the_answer_and_then_a_card_reads_the_answer_not_the_note(ws, monkeypatch):
+    client = FakeClient(turn_steps(
+        [text("Let me count the runs first."), call("t1", "Read", {"file_path": "results.csv"})],
+        [text("Three of the five runs merged."), call("t2", "add_card", {"question": "How many merged?"})],
+        [call("t3", "edit_card", {"card": "card:x"})],
+        [text("\n\n")]))
+    assert await heard_and_read(ws, monkeypatch, client) == (["Three of the five runs merged."],) * 2
+
+
+def test_reply_of_is_the_text_after_the_last_call_else_the_last_text_before_it():
+    assert agent.reply_of([(False, "Note."), (True, ""), (False, "Answer.")]) == "Answer."
+    assert agent.reply_of([(False, "Note."), (True, ""), (False, "Answer."), (True, ""), (True, "")]) == "Answer."
+    assert agent.reply_of([(False, "Just words.")]) == "Just words."
+    assert agent.reply_of([(True, "")]) == ""
