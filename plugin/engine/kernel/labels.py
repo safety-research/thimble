@@ -850,8 +850,8 @@ CODE_READS = re.compile(r"""\bunit\s*(?:\[\s*['"]([^'"\]]+)['"]\s*\]|\.get\(\s*[
 
 
 def matched_part(lab: dict[str, Any], row: S.Row, kinds: dict[str, str | None]) -> dict[str, Any]:
-    """The part of a record its label matched, for the viewer's example: a regex's match on the line it is on, with
-    the words around it up to HIT_ROOM characters, cut with … ({hit: {before, match, after}}); or the fields the code
+    """The part of a record its label matched, for the viewer's example: a regex's match with its line and a line of
+    context on each side, up to HIT_ROOM characters, cut with … ({hit: {before, match, after}}); or the fields the code
     read, each value cut ({fields: [[name, value]]}). Empty for a model's label, or a regex that does not match."""
     rule = str(lab.get("rule") or "")
     if lab.get("kind") == "regex" and rule:
@@ -863,9 +863,14 @@ def matched_part(lab: dict[str, Any], row: S.Row, kinds: dict[str, str | None]) 
         if not m:
             return {}
         a, b = m.span()
-        start = text.rfind("\n", 0, a) + 1
+        # the match's line and a line of context on each side (a JSON record's values are one a line)
+        start = text.rfind("\n", 0, a)
+        start = 0 if start <= 0 else text.rfind("\n", 0, start) + 1
         end = text.find("\n", b)
-        end = len(text) if end < 0 else end
+        if end >= 0:
+            end = text.find("\n", end + 1)
+        if end < 0:
+            end = len(text)
         before, match, after = text[start:a], text[a:b], text[b:end]
         if len(match) > HIT_ROOM:
             match, after = match[:HIT_ROOM - 1] + "…", ""

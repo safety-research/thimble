@@ -132,7 +132,7 @@ test('a bar the program made itself, named by a label\'s value, has the label\'s
   assert.deepEqual(grid2.rows.slice(1).map(r => r.find(c => c.ch === '█' || c.ch === '▆' || c.ch === '▇')).filter(Boolean).map(c => c.tone), ['c1', 'c2', panel.unknown])
 })
 
-test('a label says what made it in plain names, and its panel shows the definition under its head until it is folded', () => {
+test('a label says what made it in plain names, and its panel shows the whole definition under its head until it is folded', () => {
   assert.deepEqual(['regex', 'code', 'prompt'].map(howMade), ['regex', 'code', 'read by Claude'])
   const code = "def label(unit):\n    t = unit['text']\n    if 'http' in t:\n        return ('yes', 1.0)\n    return ('no', 1.0)\n"
   // beside a card: one line, cut with … where it does not fit
@@ -145,20 +145,47 @@ test('a label says what made it in plain names, and its panel shows the definiti
     assert.equal(d.error, undefined, JSON.stringify(d.error))
     return { text: gridText(renderTerm(d, { w: 80 })), on: (d.on || []).map(h => h.name) }
   }
-  // open by default: the code's first lines under the head, the rest a press away
+  // open by default: its kind, then the whole code under the head, then what it ran over
   const open = draw({ open: 'has-link' })
   const lines = open.text.split('\n')
-  const head = lines.findIndex(l => l.includes('label over chat/*.jsonl · code ·'))
+  const head = lines.findIndex(l => l.includes('code (Python)'))
   assert.ok(head > 0, open.text)
   assert.match(lines[head + 1], /def label\(unit\):/)
-  assert.match(lines[head + 4], /return \('yes', 1\.0\)/)
-  assert.match(lines[head + 5], /… 1 more line · show all/)
-  assert.ok(open.on.includes('act:def:on'))
-  // whole, and folded by the Definition action
-  assert.match(draw({ open: 'has-link', whole: true }).text, /return \('no', 1\.0\)[\s\S]*show less/)
+  assert.match(lines[head + 5], /return \('no', 1\.0\)/)
+  assert.match(open.text, /0 records in chat\/\*\.jsonl/)
+  assert.doesNotMatch(open.text, /show all|Where Claude made it/)
+  assert.ok(open.on.includes('act:def:on') && !open.on.includes('act:made'))
+  // folded by the Definition action
   const folded = draw({ open: 'has-link', fold: true })
   assert.doesNotMatch(folded.text, /def label/)
   assert.ok(folded.on.includes('act:def'))
+})
+
+test('the label panel shows one example at a time for the value picked, its match marked: up and down pick the value, [ and ] flip', () => {
+  const lab = { name: 'proxy', kind: 'regex', rule: '(?i)proxy', in: 'revisions.jsonl', values: ['yes', 'no'], counts: { yes: 2, no: 1 }, records: 3 }
+  const data = { list: [lab], gen: 0, w: 80, h: 40 }
+  const run = (state, extra = {}) => globalThis.DrawKit.run(labelPanel, data, { w: 80, h: 40, state, mode: 'pane', surface: 'terminal', ...extra })
+  const first = run({ open: 'proxy' })
+  const want = (first.wants || []).find(w => w.request.records === 'proxy')
+  // the first value with records is picked, and its examples are asked for
+  assert.equal(want.request.value, 'yes')
+  const records = [{ i: 0, ref: 'revisions.jsonl#L7', value: 'yes', by: 'regex', hit: { before: '…the page set up a ', match: 'Proxy', after: ' for the agents…' } }]
+  const d = run({ open: 'proxy' }, { got: { [want.key]: { records } } })
+  const text = gridText(renderTerm(d, { w: 80 }))
+  assert.match(text, /3 records in revisions\.jsonl/)
+  assert.match(text, /examples · ● yes +1 of 2/)
+  assert.match(text, /│ …the page set up a Proxy for the agents…/)
+  // the match is bold in the value's color
+  const runs = JSON.stringify(d.root)
+  assert.match(runs, /"s":"Proxy","tone":"accent","b":true/)
+  assert.ok(!(d.on || []).some(h => h.name === 'act:made'))
+  // ] flips to the next example, [ back (round), ↓ picks the next value
+  const key = (state, k) => ({ ...state, ...(run(state, { event: { type: 'key', key: k } }).state || {}) })
+  assert.equal(key({ open: 'proxy' }, ']').rec, 1)
+  assert.equal(key({ open: 'proxy' }, '[').rec, 1)
+  const down = key({ open: 'proxy' }, 'down')
+  assert.equal(down.filter, 'no')
+  assert.equal(key(down, 'up').filter, 'yes')
 })
 
 test('a record in the Labels pane is named by its path in the folder, cut from the left when long', () => {

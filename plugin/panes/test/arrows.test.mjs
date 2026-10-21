@@ -104,7 +104,7 @@ test('Labels: a record names its place first, so the input bar\'s subject keeps 
   assert.ok(want, JSON.stringify(first.wants))
   const records = [{ i: 0, ref: 'game-07/transcript.jsonl#L1234', value: 'yes', by: 'model', c: 0.9, words: 'the tool failed' }]
   const d = DK.run(labels.program, data, { w: 100, h: 40, mode: 'pane', state, got: { [want.key]: { records } } })
-  const rec = d.regions.find(r => r.id === 'rec-0')
+  const rec = d.regions.find(r => r.id === 'example')
   assert.ok(rec, d.regions.map(r => r.id).join(' '))
-  assert.match(rec.meta.label, /^game-07\/transcript\.jsonl:1234, a record of reports_problem: yes/)
+  assert.match(rec.meta.label, /^game-07\/transcript\.jsonl:1234, an example of reports_problem = yes/)
 })

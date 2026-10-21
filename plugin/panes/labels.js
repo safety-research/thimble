@@ -321,7 +321,12 @@ function labelView(k, data, st, lab, W) {
   const shown = hasDef && !st.fold
   if (hasDef) k.on(shown ? 'act:def:on' : 'act:def', () => ({ fold: shown }), 'Definition')
   // esc goes back to the list when the list opened this label; else the panel's esc (back, or close)
-  if (st.from === 'list' && (data.list || []).length > 1) k.on('esc', () => ({ open: null, from: null, filter: null, rec: 0, at: null }), 'labels')
+  // (← does the same where it reaches the pane, as in the browser)
+  if (st.from === 'list' && (data.list || []).length > 1) {
+    const back = () => ({ open: null, from: null, filter: null, rec: 0, at: null })
+    k.on('esc', back, 'labels')
+    k.on('left', back)
+  }
   const keep = /^(chk-\d+|example)$/.test(String(st.at || ''))
   k.select(keep ? st.at : idOf(filter))
 
@@ -333,10 +338,8 @@ function labelView(k, data, st, lab, W) {
     glyph: `{${valueTone(values, values[0])}:●}`,
     title: k.escape(lab.name),
     line: `${k.escape(kindWords(lab.kind))}${data.refreshing ? ' · ◌' : ''}`,
-    rows: defs,
+    rows: [...defs, ...(defs.length ? [k.text(' ')] : []), k.text(k.escape(ranOver(lab)), { wrap: false })],
   }))
-  out.push(k.text(k.escape(ranOver(lab)), { wrap: false }))
-  out.push(k.text(' '))
 
   // ---- the values: each its color, bar, count and share; ↑ ↓ or a press picks one, and its examples show below
   const vw = Math.min(24, Math.max(4, ...values.map(len), none ? 15 : 0))
@@ -478,7 +481,7 @@ function markedRows(k, pieces, w, most, tone) {
   for (const [s, on] of pieces) for (const ch of Array.from(String(s ?? ''))) chars.push([ch === '\t' ? ' ' : ch, on])
   const spans = []
   let i = 0
-  while (i < chars.length && spans.length <= most) {
+  while (i < chars.length) {
     let j = Math.min(chars.length, i + w)
     const nl = chars.slice(i, j).findIndex(c => c[0] === '\n')
     if (nl >= 0) { spans.push([i, i + nl]); i += nl + 1; continue }
@@ -487,10 +490,15 @@ function markedRows(k, pieces, w, most, tone) {
     i = j
     while (i < chars.length && chars[i][0] === ' ') i++
   }
-  const more = spans.length > most || i < chars.length
-  return spans.slice(0, most).map(([a, b], y) => {
+  // the rows from the one before the first marked row, where it would be past the last row shown
+  const hit = spans.findIndex(([a, b]) => chars.slice(a, b).some(c => c[1]))
+  const from = hit >= most ? hit - 1 : 0
+  const shown = spans.slice(from, from + most)
+  const more = from + most < spans.length
+  return shown.map(([a, b], y) => {
     const row = chars.slice(a, b)
-    if (more && y === Math.min(most, spans.length) - 1) { while (row.length >= w) row.pop(); row.push(['…', false]) }
+    if (from && !y && row[0] && row[0][0] !== '…') { row.unshift(['…', false]); while (row.length > w) row.splice(1, 1) }
+    if (more && y === shown.length - 1) { while (row.length >= w) row.pop(); row.push(['…', false]) }
     let s = ''
     let run = ''
     let on = null

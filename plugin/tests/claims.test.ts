@@ -319,7 +319,7 @@ test('the labels hold the keys on the label selected: ↵ opens it, and the way 
   await w.ui.press({ key: gutter })
   await w.clock.settle()
   for (let i = 0; i < 2; i++) { await $.ui.render(PANE); await w.clock.settle() }
-  expect(textOf(await $.ui.render(PANE))).toContain('label over revisions.jsonl')
+  expect(textOf(await $.ui.render(PANE))).toMatch(/records in revisions\.jsonl/)
   // back to the list (the press at the top does what esc does), and the keys stay with the panel
   await w.ui.press({ key: 'side-back' })
   await w.clock.settle()
