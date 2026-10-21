@@ -242,6 +242,8 @@ test('Coverage opens with the ring on the selected file, not on the input bar: â
   const drawn = JSON.stringify(await $.ui.render(PANE))
   expect(drawn).toContain('Ask about revisions.jsonl')
   expect(drawn).not.toMatch(/"key":"ask-\d+"[^}]*"autoFocus":true/)
+  // the ring stands in the gutter beside the selected row (a cell of one color), so the row is shaded, never inverse
+  expect(drawn).toMatch(/"key":"g\|side\|\d+"/)
   // a folder of two files lists them, with no group to open; the ring stands on the first, so â†µ opens its lines
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await ui.press({ key: await rowKey($, 'f:revisions.jsonl') })

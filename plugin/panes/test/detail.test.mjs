@@ -27,6 +27,15 @@ test("the selected part's action names its entries in the cited files' own word,
   // a picture cited whole, and a table cited as a whole file: no entries to show
   assert.equal(action({ rows: ['plot.png'], count: null, unit: null, unit_one: null }), null)
   assert.equal(action({ rows: ['people.csv'], count: null, unit: 'rows', unit_one: 'row' }), null)
-  // until resolve answers, the action keeps its plain word
-  assert.equal(action(null), 'Rows')
+  // until resolve answers there is no action: its word is not known yet (`Rows` would turn into `Records`)
+  assert.equal(action(null), null)
+})
+
+test("the detail's actions name a part's entries only once their unit is known, and a takeaway that says the title again is left out", async () => {
+  const { partWords, sameWords } = await import('../detail.js')
+  const data = { refs: { 'value-1': ['q1#kind=fetch links'] }, examples: {} }
+  // the rows not read yet: no word, rather than `rows` that turns into `records`
+  assert.equal(partWords({ want: () => null }, data, { id: 'value-1' }), null)
+  assert.ok(sameWords('[4,174](q1#kind=answer) of 14,591 records are answer coordination.', 'kind: 4,174 of 14,591 records are answer coordination'))
+  assert.ok(!sameWords('Most saves are links to a data API.', 'kind: 4,174 of 14,591 records are answer coordination'))
 })

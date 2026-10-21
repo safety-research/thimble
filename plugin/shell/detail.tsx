@@ -102,7 +102,7 @@ const latestSeen = new Map<string, number>()
 // a pane the panel shows (not a card): what it drew last, for the ring (the button of each part) and the keys
 // `walks`: the program walks its parts with ↑↓ (ringStart 'part' and its own up and down); `at`: where each press of
 // the page stands, `row|id` -> [row, column], to tell which way the ring moved
-let paneDrawn: { name: string; args: Record<string, unknown>; selected: string | null; buttons: Map<string, string>; first: string | null; order: string[]; below: number; walks: boolean; at: Map<string, [number, number]> } | null = null
+let paneDrawn: { name: string; args: Record<string, unknown>; selected: string | null; buttons: Map<string, string>; first: string | null; order: string[]; below: number; walks: boolean; at: Map<string, [number, number]>; gutter: Map<number, string[]> } | null = null
 // what the panel draws now, as its latest drawing began (a card's drawing still under way when the panel turned to a
 // pane must not take the ring from the pane's parts)
 let showing: 'card' | 'pane' = 'card'
@@ -187,6 +187,21 @@ function wantsRoom(v: SideView | null): boolean {
 }
 
 const GUTTER = (y: number) => `g|pane|${y}`
+// a pane's gutter cell in the side panel, where the ring stands on the part whose first row it is
+const SIDE_GUTTER = (y: number) => `g|side|${y}`
+/** A gutter cell: on the selected part's first row a cell of the ring's color, the same with the ring on it or not
+ *  (Claude Code draws the ring inverse, and a cell of one color reads the same inverse), else a blank. */
+function gutterMark(Text: Any, color: string, on: boolean): Any {
+  return on ? Text({ color, backgroundColor: color, children: '▸' }) : Text({ children: ' ' })
+}
+
+/** The part a pane's gutter cell stands for: the selected one where it is on that row, else the row's first. */
+function gutterPart(key: string): string | null {
+  const m = /^g\|side\|(\d+)$/.exec(key)
+  const ids = m && paneDrawn ? paneDrawn.gutter.get(Number(m[1])) : null
+  if (!ids || !ids.length) return null
+  return ids.includes(paneDrawn!.selected ?? '') ? paneDrawn!.selected! : ids[0]!
+}
 // the input bar's key: a new one each time text is put in it from outside (a letter typed before it had the keys), so
 // the field is drawn afresh holding that text (a field already drawn keeps what it holds), and the ring waits for
 // that drawing
@@ -282,13 +297,22 @@ async function takeKeys($: Engine): Promise<void> {
  *  stops (the close mark, top right) before them. With the ring on no press (`from` null: a drawing took its element
  *  away), Claude Code's arrows and Tab take the first press, a step on; any other press is measured from the part
  *  selected (`selected`), where the ring is going. */
-export function walkDir(drawn: { first: string | null; below: number; at: Map<string, [number, number]> }, from: string | null, to: string, selected: string | null = null): number {
-  if (!from && to === drawn.first) return 1
+export function walkDir(drawn: { first: string | null; below: number; at: Map<string, [number, number]>; selected?: string | null; gutter?: Map<number, string[]> }, from: string | null, to: string, selected: string | null = null): number {
+  // (from nowhere onto the first part: its gutter cell, or a press on that row)
+  const rowOf = (k: string | null) => (k ? Number(k.split('|')[2]) : NaN)
+  if (!from && (to === drawn.first || rowOf(to) === rowOf(drawn.first))) return 1
   from = from || selected
   if (!from) return 1
   const where = (key: string): [number, number] => {
     if (!key) return [-1, 0]
-    const m = /^r\|[^|]+\|(\d+)\|(.+)$/.exec(key)
+    // a gutter cell stands where its part is: the selected one on its row, else the row's first
+    const g = /^g\|[^|]+\|(\d+)$/.exec(key)
+    if (g) {
+      const ids = drawn.gutter?.get(Number(g[1])) ?? []
+      const id = ids.includes(drawn.selected ?? '') ? drawn.selected! : ids[0]
+      return (id && drawn.at.get(`${g[1]}|${id}`)) || [Number(g[1]), -1]
+    }
+    const m = /^r\|[^|]+\|(\d+)\|(.+?)(?:\|#\d+)?$/.exec(key)
     if (!m || Number(m[1]) >= drawn.below) return [Infinity, 0]
     return drawn.at.get(`${m[1]}|${m[2]}`) ?? [Number(m[1]), 0]
   }
@@ -750,13 +774,13 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const gcells = Array.from({ length: rows }, (_, i) => {
     const y = from + i
     const ids = gutter.get(y)
-    const mark = top && top.y === y ? '▸' : ' '
-    if (!ids) return Text({ key: `gt${y}`, color: ind, bold: true, children: mark })
+    const mark = gutterMark(Text, ind, !!top && top.y === y)
+    if (!ids) return Text({ key: `gt${y}`, children: [mark] })
     const at = ids.includes(region ?? '') ? region! : ids[0]!
     const label = String(parts.find((x: Any) => x.id === at)?.label || at)
     // the selected part's cell takes the ring whenever the pane takes the keyboard (an open, a key that gave it back),
     // except while a question is being typed: then the input bar takes it
-    return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), children: mark, ...(ids.includes(region ?? '') && !isAsk(ringAt) ? { autoFocus: true } : {}) })
+    return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), children: [mark], ...(ids.includes(region ?? '') && !isAsk(ringAt) ? { autoFocus: true } : {}) })
   })
   const kids: Any[] = [...back, Box({ flexDirection: 'row', children: [
     Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: gcells }),
@@ -965,22 +989,38 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   } else win.by = 0
   rows = Math.min(rows, split - from)
   pageCut = split > rows0
-  // the press each part's first row in the window holds, where the ring stands on it
+  // where the ring stands on each part: the gutter cell of its first row in the window, as on a card, so the part is
+  // shaded and marked ▸ rather than drawn inverse (which would turn its bars into blocks)
   const buttons = new Map<string, string>()
+  const gutter = new Map<number, string[]>()
   let first: string | null = null
   for (const [id, y] of [...tops].sort((a, b) => a[1] - b[1])) {
-    if (y < from || y >= from + rows) continue
-    buttons.set(id, `r|side|${y}|${id}`)
-    first = first ?? `r|side|${y}|${id}`
+    if (y < from || y >= from + rows || y >= split) continue
+    buttons.set(id, SIDE_GUTTER(y))
+    gutter.set(y, [...(gutter.get(y) ?? []), id])
+    first = first ?? SIDE_GUTTER(y)
   }
   const at = new Map<string, [number, number]>()
   for (const r of grid.regions as Any[]) for (const q of (r.rects || []) as Any[]) for (let y = q.y; y < q.y + q.h; y++) { const was = at.get(`${y}|${r.id}`); if (!was || q.x < was[1]) at.set(`${y}|${r.id}`, [y, q.x]) }
   const walks = ringOnPart(view) && takes(d, { type: 'key', key: 'up' }) && takes(d, { type: 'key', key: 'down' })
-  paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].filter(([, y]) => y < split).sort((a, b) => a[1] - b[1]).map(([id]) => id), below: split, walks, at }
+  paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].filter(([, y]) => y < split).sort((a, b) => a[1] - b[1]).map(([id]) => id), below: split, walks, at, gutter }
   // (a press is a click: the move of the ring that came with it is no step of the walk)
   const onPress = (id: string, dir?: number) => { walkGen++; void paneFire($, view.pane, view.args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) }
   // (one column in from the panel's edge, as a card's page stands beside its gutter, so every subject lines up)
-  const kids: Any[] = [...back, ...(above ? [above, els.Text({ key: 'above-gap', children: ' ' })] : []), Box({ marginLeft: 1, children: [paintRegions(grid, els, { theme, selected: region, key: 'side', from, rows, onPress, painted: true })] })]
+  const top = region ? tops.get(region) : undefined
+  const gcells = Array.from({ length: rows }, (_, i) => {
+    const y = from + i
+    const ids = gutter.get(y)
+    const mark = gutterMark(Text, IND[theme], top === y)
+    if (!ids) return Text({ key: `sg${y}`, children: [mark] })
+    const id = ids.includes(region ?? '') ? region! : ids[0]!
+    const label = String((grid.regions as Any[]).find(r => r.id === id)?.meta?.label || id)
+    return els.Button({ key: SIDE_GUTTER(y), plain: true, label, onPress: () => onPress(id), children: [mark] })
+  })
+  const kids: Any[] = [...back, ...(above ? [above, els.Text({ key: 'above-gap', children: ' ' })] : []), Box({ flexDirection: 'row', children: [
+    Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: gcells }),
+    paintRegions(grid, els, { theme, selected: region, key: 'side', from, rows, onPress, painted: true }),
+  ] })]
   kids.push(...convEls(els, conv, T))
   // what an action opened, right above the actions and the input bar
   if (belowRows) kids.push(Text({ key: 'below-gap', children: ' ' }), Box({ key: 'below', marginLeft: 1, children: [paintRegions(openedOnly(grid), els, { theme, selected: region, key: 'side', from: split, rows: belowRows, onPress, painted: true })] }))
@@ -1257,7 +1297,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       // input bar keeps the ring while a question is typed, as on a card
       if (showing === 'pane') {
         if (!paneDrawn) return next(e)
-        if (!person && isAsk(ringAt) && (el.startsWith('r|side|') || (isAsk(el) && el !== askKey()))) {
+        if (!person && isAsk(ringAt) && (el.startsWith('r|side|') || el.startsWith('g|side|') || (isAsk(el) && el !== askKey()))) {
           const r = await next({ ...e, element: askKey() })
           if (!r.deny) landed = askKey()
           return r
@@ -1270,8 +1310,8 @@ export function registerDetail(on: Parameters<Register>[0]): void {
             return r
           }
         }
-        const part = el.startsWith('r|side|') ? regionOfKey(el) : null
-        const onPage = (key: string | null) => !!key && key.startsWith('r|side|') && Number(key.split('|')[2]) < paneDrawn!.below
+        const part = el.startsWith('r|side|') ? regionOfKey(el) : el.startsWith('g|side|') ? gutterPart(el) : null
+        const onPage = (key: string | null) => !!key && (key.startsWith('r|side|') || key.startsWith('g|side|')) && Number(key.split('|')[2]) < paneDrawn!.below
         const chosen = paneDrawn.selected ? paneDrawn.buttons.get(paneDrawn.selected) ?? null : null
         // the ring put on the page by anything but the person (the pane taking the keys as it opens, a drawing's
         // autoFocus, a focus asked for before the pane drew) starts on the part selected, never on another
@@ -1313,7 +1353,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
           // that way, and the ring stands on the first row of the part it selects
           const y = Number(el.split('|')[2])
           let to = part
-          if (part === paneDrawn.selected && !!ringAt && ringAt.startsWith('r|side|') && y !== ringY) {
+          if (part === paneDrawn.selected && !!ringAt && (ringAt.startsWith('r|side|') || ringAt.startsWith('g|side|')) && y !== ringY) {
             const i = paneDrawn.order.indexOf(part)
             to = paneDrawn.order[i + (y > ringY ? 1 : -1)] ?? part
           }
@@ -1333,7 +1373,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
         }
         const was = isAsk(ringAt)
         const r = await next(e)
-        if (!r.deny) { ringAt = el || null; landed = el === askKey() ? el : null; if (el.startsWith('r|')) ringY = Number(el.split('|')[2]) }
+        if (!r.deny) { ringAt = el || null; landed = el === askKey() ? el : null; if (el.startsWith('r|') || el.startsWith('g|')) ringY = Number(el.split('|')[2]) }
         if (isAsk(ringAt) !== was) askRedraw($)
         return r
       }
@@ -1365,7 +1405,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
         return r
       }
       const g = /^g\|pane\|(\d+)$/.exec(el)
-      const m = /^[rt]\|pane\|(\d+)\|([^|]+)(?:\|(?:down|at|up))?$/.exec(el)
+      const m = /^[rt]\|pane\|(\d+)\|([^|]+)(?:\|(?:down|at|up|#\d+))?$/.exec(el)
       // a record or a line of what an action opened (drawn under the conversation): the ring stands there, as on any
       // press, and the selection stays
       if (m && Number(m[1]) >= drawn.below) { const r = await next(e); if (!r.deny) { ringAt = el; landed = null } return r }

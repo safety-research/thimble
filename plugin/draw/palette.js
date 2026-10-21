@@ -17,12 +17,24 @@ export const DARK = {
   select: '#26384f', hover: '#2a2a2a', cite: '#b36bff', explain: '#62d2c6', heads: '#f2a24b',
 }
 
+// Claude Code's `auto` theme follows the terminal's background, which a plugin cannot read: the terminal shell says
+// so (setAutoTheme) and draws as on the dark theme, whose colors read on a light background too, but for its
+// neutrals. Those it draws in Claude Code's own theme colors (termColor), which Claude Code resolves for the background
+// it found; and a faint tone steps back toward a middle gray rather than toward a paper, so a bar's track is pale on
+// a light page and on a dark one.
+let autoTheme = false
+const MID = '#8c8c8c'
+/** Whether the theme is Claude Code's `auto` (the terminal's own background, light or dark). */
+export function setAutoTheme(on) {
+  autoTheme = !!on
+}
+
 /** The color of `tone` in `theme` ('light' | 'dark'); unknown tones read as ink. A tone with `-faint` is its color a
  *  third of the way from the paper: it keeps its hue and steps back. */
 export function hex(tone, theme = 'dark') {
   const p = theme === 'light' ? LIGHT : DARK
   const f = /^(.+)-faint$/.exec(String(tone || ''))
-  if (f) return mix(p[f[1]] || p.ink, p.paper, 0.34)
+  if (f) return autoTheme ? mix(p[f[1]] || p.ink, MID, 0.45) : mix(p[f[1]] || p.ink, p.paper, 0.34)
   return p[tone] || p.ink
 }
 
@@ -42,6 +54,8 @@ export function mix(a, b, share) {
 export function termColor(tone, theme = 'dark', { painted = false } = {}) {
   if (tone === 'ink' || !tone) return painted ? 'text' : undefined
   if (tone === 'dim' || tone === 'unseen') return 'inactive'
+  // (under `auto`, a neutral's faint tone, such as a bar's track, is Claude Code's own pale gray for the theme it found)
+  if (autoTheme && /^(ink|dim|unseen|rule)-faint$/.test(tone)) return 'subtle'
   if (/-faint$/.test(tone)) return hex(tone, theme)
   if (tone === 'rule') return 'subtle'
   return hex(tone, theme)
@@ -75,5 +89,6 @@ export function selectedHex(tone, theme = 'dark', onFill = false) {
 export function selectedMark(tone, theme = 'dark') {
   const t = tone || 'ink'
   if (t === 'rule') return hex(t, theme)
-  return mix(hex(t, theme), hex('ink', theme), 0.5)
+  // (under `auto` the ink is not known: a mark deepens toward the middle gray, which reads on either background)
+  return mix(hex(t, theme), autoTheme ? MID : hex('ink', theme), autoTheme ? 0.7 : 0.5)
 }

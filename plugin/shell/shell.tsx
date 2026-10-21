@@ -53,7 +53,7 @@ import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } 
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf, scopeOf as trayScopeOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
-import { hex as toneHex, mix, termColor } from '../draw/palette.js'
+import { hex as toneHex, mix, setAutoTheme, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
@@ -742,6 +742,19 @@ async function quietly(p: Promise<unknown>): Promise<void> {
 /** The theme the person picked (dark or light): the cards' palette follows it. */
 export function currentTheme(): 'dark' | 'light' {
   return theme
+}
+
+/** The palette for Claude Code's `theme` setting: its light themes the light one, every other the dark one, whose
+ *  colors also read on a light background. `auto` (the terminal's own background, which a plugin cannot read) draws
+ *  its neutrals in Claude Code's own theme colors (draw/palette.js setAutoTheme). */
+export function themeOf(value: unknown): 'dark' | 'light' {
+  return String(value ?? 'dark').startsWith('light') ? 'light' : 'dark'
+}
+
+/** Whether Claude Code's `theme` setting leaves light or dark to the terminal: `auto`, or any value that names neither. */
+export function isAutoTheme(value: unknown): boolean {
+  const v = String(value ?? 'dark')
+  return !v.startsWith('light') && !v.startsWith('dark')
 }
 
 // ------------------------------------------------------------------------------------------------ the message layer
@@ -1661,7 +1674,13 @@ async function threadInFront($: Engine): Promise<string | null> {
     return s ? `thimble:${s.name}` : null
   }
   const sel = (await $.state.get(SEL)).value as Sel | null
-  return sel && !sel.cite && !sel.cites ? `thimble:main/${sel.id}` : null
+  return sel && !sel.cite && !sel.cites ? `thimble:main/${objectWords(sel.id)}` : null
+}
+
+/** An object's id as the person reads it: without the number it was saved under, its dashes spaces (`01-label-kind`:
+ *  `label kind`). */
+export function objectWords(id: string): string {
+  return String(id).replace(/^\d+-/, '').replace(/[-_]+/g, ' ').trim() || String(id)
 }
 
 // ------------------------------------------------------------------------------------------------ the focus stack
@@ -3012,7 +3031,8 @@ export const registerShell: Register = (on, options) => {
       await $.command.register({ name: 'threads', description: "List this session's side threads in the side panel, or open the one a key could not open", immediate: true })
       await $.command.register({ name: 'squeeze', description: 'Squeeze the message the keys act on along a chip in your own words: /squeeze for my manager', argumentHint: '[what to squeeze for]', immediate: true })
       const row = (await $.config.list()).find(x => x.key === 'theme')
-      theme = String(row?.value ?? 'dark').startsWith('light') ? 'light' : 'dark'
+      theme = themeOf(row?.value)
+      setAutoTheme(isAutoTheme(row?.value))
     } catch {
       // the shell draws nothing it cannot; the session goes on
     }

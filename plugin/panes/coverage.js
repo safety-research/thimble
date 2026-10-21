@@ -438,7 +438,7 @@ export function columns(W, items, many) {
   let out = null
   for (const [bar, size] of tries) {
     const sw = size === 'full' ? full : size === 'num' ? num : 0
-    const nw = W - 2 - 1 - (fw ? fw + 1 : 0) - sw - 2 * (1 + bar + SHARE)
+    const nw = W - 1 - (fw ? fw + 1 : 0) - sw - 2 * (1 + bar + SHARE)
     out = { nw: Math.max(4, nw), fw, sw, size, bar }
     if (nw >= want) break
   }
@@ -452,7 +452,7 @@ function header(k, what, c) {
   // laid out as a row is, so its words stand over their columns: a measure's word over its bar, or over its share
   // when it has no bar
   const head = w => ` ${c.bar ? pad(w, c.bar + SHARE) : shareCol(w)}`
-  return k.text(`{dim:  ${pad(what, c.nw)} ${c.fw ? `${pad(what === 'file' ? '' : 'files', c.fw, true)} ` : ''}${c.sw ? pad('size', c.sw, true) : ''}${head('read')}${head('counted')}}`, { wrap: false })
+  return k.text(`{dim:${pad(what, c.nw)} ${c.fw ? `${pad(what === 'file' ? '' : 'files', c.fw, true)} ` : ''}${c.sw ? pad('size', c.sw, true) : ''}${head('read')}${head('counted')}}`, { wrap: false })
 }
 
 /** The two measures, each a space, a bar (while the pane has room for it) and its share: read (the accent) and counted
@@ -467,7 +467,8 @@ function measures(k, read, counted, c) {
 function itemRow(k, it, by, c, on) {
   const nw = c.nw
   const ind = '  '.repeat(it.depth || 0)
-  const mark = on ? '{accent:**▸**} ' : '  '
+  // (the side panel's gutter marks the row selected, ▸, where the ring stands on it)
+  const mark = ''
   const size = s => (c.size === 'full' ? pad(s, c.sw, true) : c.size === 'num' ? pad(String(s).split(' ')[0] || '', c.sw, true) : '')
   if (it.kind === 'rest') {
     const words = `${n(it.files)} ${it.any ? 'other ' : ''}file${it.files === 1 ? '' : 's'}, none touched`
@@ -532,7 +533,7 @@ function rangeRow(k, r, on, id, unit, f) {
   const words = r.kind === 'read'
     ? (r.from === r.to ? `line ${n(r.from)}` : `lines ${n(r.from)}–${n(r.to)}{dim: · ${n(r.to - r.from + 1)} lines}`)
     : `${r.lines.length === 1 ? 'line' : 'lines'} ${r.lines.map(n).join(', ')}{dim: ·} {warn:as a search showed them}`
-  return k.region(id, { label: r.kind === 'read' ? `${f.path}: seen ${unit} ${r.from} to ${r.to}` : `${f.path}: lines a search showed, ${r.lines.join(', ')}`, ref: rangeRef(f, r) }, k.text(`${on ? '{accent:**▸**} ' : '  '}${words}`, { wrap: false }))
+  return k.region(id, { label: r.kind === 'read' ? `${f.path}: seen ${unit} ${r.from} to ${r.to}` : `${f.path}: lines a search showed, ${r.lines.join(', ')}`, ref: rangeRef(f, r) }, k.text(words, { wrap: false }))
 }
 
 /** The whole file in one row: each cell a stretch of its lines, lit where a seen range falls (in a search's color where
