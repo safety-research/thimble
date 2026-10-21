@@ -1,5 +1,5 @@
 // thimble's own work while it runs (backend busy.py): the stream's `busy` records, each a job's start or end with a
-// word or two ("marking", "labeling"). The top bar shows the newest job that has run 300 ms or more, with its seconds
+// word or two ("marking", "labeling"), and a document Claude writes (the `report` records, "writing"). The top bar shows the newest job that has run 300 ms or more, with its seconds
 // from 3 s on (shell/TopBar.tsx BusyMark). A dropped stream clears them: a page that reconnects hears the next ones.
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { bus } from './bus'
@@ -18,10 +18,18 @@ function changed(): void {
 
 bus.on('wsEvent', (ev) => {
   const r = ev as Record<string, unknown>
-  if (r.type !== 'busy' || typeof r.id !== 'string') return
-  if (r.on === true) jobs.set(r.id, { word: String(r.word ?? 'working'), t0: Date.now() })
-  else jobs.delete(r.id)
-  changed()
+  if (r.type === 'busy' && typeof r.id === 'string') {
+    if (r.on === true) jobs.set(r.id, { word: String(r.word ?? 'working'), t0: Date.now() })
+    else jobs.delete(r.id)
+    changed()
+  } else if (r.type === 'report' && typeof r.slug === 'string') {
+    // a document Claude writes: from `generating` until its next status (backend report.set_status)
+    const id = `report:${r.slug}`
+    if (r.status === 'generating') {
+      if (!jobs.has(id)) jobs.set(id, { word: 'writing', t0: Date.now() })
+    } else if (!jobs.delete(id)) return
+    changed()
+  }
 })
 bus.on('wsStream', (e) => {
   if (!e.connected && jobs.size) {

@@ -19,6 +19,13 @@ describe('busy', () => {
     expect(busyNow(Date.now() + 5000)).toBeNull()
   })
 
+  it('shows a document Claude writes from generating until its next status', () => {
+    bus.emit('wsEvent', { type: 'report', slug: 'report', status: 'generating' } as never)
+    expect(busyNow(Date.now() + 500)?.word).toBe('writing')
+    bus.emit('wsEvent', { type: 'report', slug: 'report', status: 'generated' } as never)
+    expect(busyNow(Date.now() + 500)).toBeNull()
+  })
+
   it('clears its jobs when the stream drops', () => {
     busyRecord('c', 'marking', true)
     bus.emit('wsStream', { connected: false })

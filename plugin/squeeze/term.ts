@@ -32,6 +32,7 @@ import { answerRow, cardsUnder, closeTray, drawnTextOf, leanEnv, loadObject, pre
 import { noteEdit } from '../shell/runtime'
 import { sessionKey } from '../hooks/conversation'
 import { ARRIVE, SCALE, answerText, applyRewrite, cardListsAt, cardSpec, cardsAfter, cardsKnown, catchUpText, checkRewrite, chipsOf, drawnOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, queryIdsOf, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, toolkitOf, unplacedMoves, withLater } from './chips.mjs'
+import { spinFrame } from '../shell/busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,7 +48,6 @@ const SQZ = { plugin: 'thimble', key: 'sqz' } as const
 const SQZNOTE = { plugin: 'thimble', key: 'sqznote' } as const
 const SQZTOLD = { plugin: 'thimble', key: 'sqztold' } as const
 const remark = (rec: MsgRecord) => remarkAny(rec) as MsgRecord
-const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }
 const TICK = 50
 // the longest a step on Interpretation waits for the observer's look to say where the original stands
@@ -100,7 +100,8 @@ export function sLit(rec: MsgRecord, _ui: SqzUi | null): { lit: boolean; note: s
 
 /** Whether the message is drawn dim with a turning glyph: a rewrite of it is running. */
 export function busyGlyph(ui: SqzUi | null): string | null {
-  return ui?.running ? SPIN[(ui.tick || 0) % SPIN.length]! : null
+  // the frame of thimble's one spinner timer (shell/busy.ts), so the message's glyph turns with the bar's
+  return ui?.running ? spinFrame() : null
 }
 
 /** How much of the shown text is drawn now: all of it (null), or the first `n` characters while it writes itself in. */

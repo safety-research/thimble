@@ -54,6 +54,11 @@ export function turnFeature(): string {
   return T.feature
 }
 
+/** Whether main's turn runs now. */
+export function mainTurnActive(): boolean {
+  return T.active
+}
+
 /** A subagent thimble started (a side thread): its turns are filed under `feature`. */
 export function claimAgent(agentId: string, feature: string, prompt?: string | null): void {
   if (agentId) T.agents.set(agentId, { feature, prompt: prompt ?? null })

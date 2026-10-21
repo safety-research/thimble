@@ -66,7 +66,7 @@ import { closeDock, countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, 
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
 import { flushEngaged, resetEngaged, tellOpened } from './engaged'
-import { busyGlyph as workGlyph, busyNow } from './busy'
+import { busy, busyGlyph as workGlyph, busyNow } from './busy'
 import { asideFor, asideLine, asideMade, asideOn, asideRowOf, asideSaved, askAside, clearAside, markTold, onAsideMade, registerAside, resetAside } from './aside'
 
 type Engine = EngineInterface
@@ -1005,7 +1005,7 @@ async function runHeal($: Engine, row: string, key: string): Promise<void> {
   if (!root || !rec || textKey(shownOf(rec)) !== key) return
   const dir = $.plugin.root.replace(/\/+$/, '')
   const env = { ...(await leanEnv($, root)), THIMBLE_SESSION: await sessionKey($) }
-  const r = await $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healInput(rec), timeoutMs: 60000 })
+  const r = await busy($, 'checking citations', () => $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healInput(rec), timeoutMs: 60000 }))
   let out: Any = null
   try { out = JSON.parse(r.stdout) } catch { out = null }
   const now = await recordNow($, row)
@@ -1059,7 +1059,7 @@ export async function healOfText($: Engine, text: string, o: { settled?: boolean
     run = (async () => {
       const dir = $.plugin.root.replace(/\/+$/, '')
       const env = { ...(await leanEnv($, root)), THIMBLE_SESSION: await sessionKey($) }
-      const r = await $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healMd(t), timeoutMs: 60000 })
+      const r = await busy($, 'checking citations', () => $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healMd(t), timeoutMs: 60000 }))
       let out: Any = null
       try { out = JSON.parse(r.stdout) } catch { out = null }
       if (!out || !Array.isArray(out.changes)) {
@@ -1489,7 +1489,8 @@ async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: 
   const dir = $.plugin.root.replace(/\/+$/, '')
   // with the citation's words, a citation of a whole query opens the row that holds the value it shows
   const words = label && label !== ref ? ['--label', label] : []
-  const r = await $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+  const env = await leanEnv($, root)
+  const r = await busy($, 'reading rows', () => $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env, timeoutMs: 60000 }))
   try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'thimble resolve gave nothing' } }
 }
 
@@ -1777,7 +1778,8 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     if (o.coverage && covRoot && person === 'now' && featureOn('counts')) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
-        const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env: { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }, timeoutMs: 60000 })
+        const env = { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }
+        const r = await busy($, 'counting coverage', () => $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env, timeoutMs: 60000 }))
         const got = JSON.parse(r.stdout)
         const files = (got.files || []) as Any[]
         // the files touched, each file once whatever its unit, by the rule the kernel's text says: some of it entered

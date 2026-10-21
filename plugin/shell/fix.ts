@@ -24,6 +24,7 @@ import { ask, leanEnv, noteForClaude, rootHere } from './shell'
 import { openSide, sideBack, sideNow } from './side'
 import { PANE as PANEL } from './detail'
 import { FAIL_KEYS, fixRequest, fixVerb, lineKey, shareRequest, USE_KEYS } from './fixask.js'
+import { busy } from './busy'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,7 +58,8 @@ async function readJson($: Engine, path: string): Promise<Any> {
 async function kernel($: Engine, args: string[], stdin?: string): Promise<{ ok: boolean; out: string }> {
   const root = (await rootHere($)) || (await home($))
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const r = await $.process.run([`${dir}/bin/thimble`, 'fix', ...args], { cwd: root, env: await leanEnv($, root), timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) })
+  const env = await leanEnv($, root)
+  const r = await busy($, 'fixing', () => $.process.run([`${dir}/bin/thimble`, 'fix', ...args], { cwd: root, env, timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) }))
   return { ok: (r.exitCode ?? 1) === 0, out: `${String(r.stdout || '')}${r.stderr ? `\n${String(r.stderr)}` : ''}`.trim() }
 }
 
