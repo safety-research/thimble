@@ -370,7 +370,7 @@ function labelView(k, data, st, lab, W) {
     const tone = r.value == null ? (r.waiting ? 'unseen' : 'dim') : valueTone(values, r.value)
     const words = String(r.words || r.missing || '').replace(/\s+/g, ' ')
     const wroom = Math.max(10, W - 3 - placeW - 2 - (vW + 2) - 2 - 16 - 2)
-    const line = `{dim:${k.escape(pad(place(r.ref), placeW))}}  {${tone}:● ${k.escape(pad(v, vW))}}  {dim:${k.escape(pad(byWords(r), 16))}}  ${on ? `**${k.escape(cut(words, wroom))}**` : k.escape(cut(words, wroom))}`
+    const line = `{dim:${k.escape(pad(place(r.ref, placeW), placeW))}}  {${tone}:● ${k.escape(pad(v, vW))}}  {dim:${k.escape(pad(byWords(r), 16))}}  ${on ? `**${k.escape(cut(words, wroom))}**` : k.escape(cut(words, wroom))}`
     out.push(k.region(`rec-${r.i}`, { label: `a record of ${lab.name}, ${place(r.ref)}: ${v} (${byWords(r) || 'no source'})`, ref: r.ref }, k.text(line, { wrap: false })))
   }
   out.push(k.text(' '))
@@ -408,12 +408,21 @@ function defRows(k, lab, W, whole) {
   return out
 }
 
-/** A record's ref as its place: the file's name and its line, `room.jsonl:44`. */
-export function place(ref) {
-  const [path, frag = ''] = String(ref).split('#')
-  const name = path.slice(path.lastIndexOf('/') + 1)
+/** A record's ref as its place: its file's path in the folder and its line, `chat/room.jsonl:44`. Files of the same
+ *  name in different folders (`labels/v2.md`, `notes/v2.md`) stay apart. Given `w`, a longer place is cut from the
+ *  left, at a folder where it can be, so the file's name and line stay: `…/labels/v2.md:1`. */
+export function place(ref, w = 0) {
+  const s = String(ref)
+  const at = s.indexOf('#')
+  const path = at < 0 ? s : s.slice(0, at)
+  const frag = at < 0 ? '' : s.slice(at + 1)
   const m = /^L(\d+)/.exec(frag)
-  return m ? `${name}:${m[1]}` : frag ? `${name}#${frag}` : name
+  const whole = m ? `${path}:${m[1]}` : frag ? `${path}#${frag}` : path
+  if (!w || len(whole) <= w) return whole
+  const chars = Array.from(whole)
+  const tail = chars.slice(chars.length - (w - 1)).join('')
+  const slash = tail.indexOf('/')
+  return '…' + (slash >= 0 && slash < tail.length - 1 ? tail.slice(slash) : tail)
 }
 
 /** Where a record's value comes from, in a word or two: `model 0.92`, `regex`, `you ✓`, `you (was no)`. */
