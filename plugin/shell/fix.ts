@@ -123,8 +123,9 @@ async function undoFix($: Engine, slug: string): Promise<string> {
     $.ui.toast(t)
     return t
   }
-  await $.state.set(LINE, null)
   const said = lastLine(r.out) || 'Your thimble is the release again.'
+  // a --plugin-dir session runs the fix until it quits: its line stays until then
+  if (!/quit and run: /.test(said)) await $.state.set(LINE, null)
   sayLine($, said)
   await noteForClaude($, `The analyst undid the fix ${slug}. ${said}`)
   await reloadFor($, said)
