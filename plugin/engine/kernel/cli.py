@@ -585,6 +585,11 @@ def cmd_heal(a: argparse.Namespace) -> int:
     return 0
 
 
+COVER_FILES_MAX = 5000  # touched files listed one by one in --json
+COVER_UNTOUCHED_MAX = 20000  # untouched files listed in --json, at most COVER_PER_FOLDER of each folder
+COVER_PER_FOLDER = 200
+
+
 def cmd_coverage(a: argparse.Namespace) -> int:
     st = Store()
     if a.name:
@@ -613,6 +618,25 @@ def cmd_coverage(a: argparse.Namespace) -> int:
         # 100,000 files stays a few megabytes (the coverage pane reads it)
         rest = [o for o in cov["files"] if o["status"] == "not read" and not o["touched"]]
         cov["files"] = [o for o in cov["files"] if not (o["status"] == "not read" and not o["touched"])]
+        # a folder of a million files (a dataset of screenshots) would print about 100 MB, more than the shell reads of
+        # a command's output (4 MB), so its count would fail: each folder lists its first files, the touched files the
+        # first few thousand, and `cut` says how many more there are. The totals, groups and types count every file.
+        cut = {"files": 0, "untouched": 0}
+        if len(cov["files"]) > COVER_FILES_MAX:
+            cut["files"] = len(cov["files"]) - COVER_FILES_MAX
+            cov["files"] = sorted(cov["files"], key=lambda o: LIN.ORDER.index(o["status"]) if o["status"] in LIN.ORDER else 9)[:COVER_FILES_MAX]
+        if len(rest) > COVER_UNTOUCHED_MAX:
+            per: dict[str, int] = {}
+            kept = []
+            for o in rest:
+                d = o["path"].rpartition("/")[0]
+                per[d] = per.get(d, 0) + 1
+                if per[d] <= COVER_PER_FOLDER and len(kept) < COVER_UNTOUCHED_MAX:
+                    kept.append(o)
+            cut["untouched"] = len(rest) - len(kept)
+            rest = kept
+        if cut["files"] or cut["untouched"]:
+            cov["cut"] = cut
         cov["untouched"] = {"path": [o["path"] for o in rest], "unit": [o["unit"] for o in rest], "units": [o["units"] for o in rest]}
         print(json.dumps(cov, ensure_ascii=False, separators=(",", ":"), default=str))
         return 0

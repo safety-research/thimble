@@ -62,7 +62,7 @@ import { answerAsk, askFromFeed, checksDone, checksPending, labelAskNow, labelFr
 import type { LabelAsk } from './labels'
 import { cardLegend, cardsLabels, labelsRow } from './labeluse'
 import { howMade } from '../panes/labels.js'
-import { closeDock, countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockShown, dockStore, dockWant, noteCoverage, openDock, openLabel, registerDock, resetDock, restPane, toggleDock } from './dock'
+import { closeDock, countLabels, coverageOf, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockShown, dockStore, dockWant, noteCoverage, openDock, openLabel, registerDock, resetDock, restPane, toggleDock } from './dock'
 import { viewMade, viewRequest } from './visualize.js'
 import { expandGloss } from './expand'
 import { flushEngaged, resetEngaged, tellOpened } from './engaged'
@@ -1797,14 +1797,26 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     // home folder; the kernel's count writes nothing there
     let covFiles = old?.covFiles ?? 0
     let covTouched = old?.covTouched ?? 0
+    let covState = old?.covState
+    let marked = false
     const start = await startDir($)
     const covRoot = root ?? (start && start !== String((await $.env.get('HOME')) || '').replace(/\/+$/, '') ? start : null)
     if (o.coverage && covRoot && person === 'now' && featureOn('counts')) {
-      const dir = $.plugin.root.replace(/\/+$/, '')
       try {
-        const env = { THIMBLE_ROOT: covRoot, THIMBLE_SESSION: await sessionKey($) }
-        const r = await busy($, 'counting coverage', () => $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: covRoot, env, timeoutMs: 60000 }))
-        const got = JSON.parse(r.stdout)
+        // one count at a time, shared with the Coverage pane (dock.ts coverageOf). The first count of a big folder
+        // (a million files, many GB of records) takes a while: the bar says it counts until it ends
+        const run = coverageOf($, covRoot, await sessionKey($))
+        if (!covFiles && covState !== 'counting') {
+          marked = true
+          await $.state.set(COUNTS, { ...(old ?? { threads: threadCount(), cov: 0, at: now, changed: {} }), covState: 'counting' })
+        }
+        const r = await busy($, 'counting coverage', () => run)
+        let got: Any
+        try {
+          got = JSON.parse(r.out)
+        } catch {
+          throw new Error((r.err || r.out).trim().split('\n').slice(-1)[0]?.slice(0, 200) || 'thimble coverage gave nothing')
+        }
         const files = (got.files || []) as Any[]
         // the files touched, each file once whatever its unit, by the rule the kernel's text says: some of it entered
         // Claude's context, or a query, a rule, a search, a count or a program went over it; a file only listed by name
@@ -1812,17 +1824,22 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
         covFiles = Number(got.total?.files) || files.length
         covTouched = Number(got.total?.touched_files ?? files.filter(f => f?.touched).length) || 0
         cov = covFiles ? covTouched / covFiles : 0
+        covState = undefined
         // the Coverage pane shows it (dock.ts)
         noteCoverage(got)
-      } catch {
-        // the line keeps the last share it had
+      } catch (err) {
+        // the line keeps the last share it had; a first count that failed says so once, with what to do
+        if (!covFiles) {
+          if (covState !== 'failed') failNotice($, `× Coverage could not be counted: ${String((err as Error)?.message || err).slice(0, 200)}. r opens Coverage, which counts again.`)
+          covState = 'failed'
+        }
       }
     }
     const claims = await claimCount($).catch(() => old?.claims ?? 0)
-    const next: LineCounts = { claims, threads: threadCount(), cov, covFiles, covTouched, labels: await countLabels($, root), at: now, changed: { ...(old?.changed || {}) } }
+    const next: LineCounts = { claims, threads: threadCount(), cov, covFiles, covTouched, ...(covState ? { covState } : {}), labels: await countLabels($, root), at: now, changed: { ...(old?.changed || {}) } }
     const keys = ['claims', 'threads', 'cov', 'labels'] as const
     for (const k of keys) if (old ? next[k] !== old[k] : (next[k] ?? 0) > 0) next.changed[k] = now
-    if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
+    if (!marked && old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
     await $.state.set(COUNTS, next)
     // the brightened counts dim again
     $.clock.after(BRIGHT_MS + 50, () => { void (async () => { const cur = (await $.state.get(COUNTS)).value as LineCounts | null; if (cur) await $.state.set(COUNTS, { ...cur, at: await $.clock.now() }) })() })
@@ -2161,7 +2178,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   // a count whose feature is off is not shown: coverage and the labels with theirs. Coverage shows at 0% too, once
   // the folder has rows: what Claude has seen of it so far
   const shown = (id: string) => (id === 'cov' || id === 'labels' ? on('counts') : true)
-  const counts = items.filter(([id, n]) => (n > 0 || (id === 'cov' && (c?.covFiles ?? 0) > 0)) && shown(id)).map(([id, , words, key]) => {
+  const counts = items.filter(([id, n]) => (n > 0 || (id === 'cov' && ((c?.covFiles ?? 0) > 0 || !!c?.covState))) && shown(id)).map(([id, , words, key]) => {
     const bright = now - (c!.changed[id] ?? 0) < BRIGHT_MS
     // (coverage's and the labels' words begin with their key: dock.ts)
     const dk = id === 'cov' ? DOCK_KEY.coverage : id === 'labels' ? DOCK_KEY.labels : null
@@ -2503,7 +2520,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // with no letter after them (a letter makes them the start of a word, as after t)
   if (!pick && (k === DOCK_KEY.coverage || k === DOCK_KEY.labels)) {
     const counts = (await $.state.get(COUNTS)).value as LineCounts | null
-    const pane = restPane(k, { cov: featureOn('counts') && ((counts?.cov ?? 0) > 0 || (counts?.covFiles ?? 0) > 0), labels: featureOn('counts') && (counts?.labels ?? 0) > 0 })
+    const pane = restPane(k, { cov: featureOn('counts') && ((counts?.cov ?? 0) > 0 || (counts?.covFiles ?? 0) > 0 || !!counts?.covState), labels: featureOn('counts') && (counts?.labels ?? 0) > 0 })
     if (pane) {
       // the pane shown already: the key closes it once the wait has passed. Else it shows early, without the keys, and
       // takes them once the wait has passed; a letter in the wait closes it again, and esc closes it (EARLY_MS)

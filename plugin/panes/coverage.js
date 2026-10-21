@@ -258,7 +258,7 @@ export default {
       read: g.read_share ?? (g.rows ? (g.seen_rows ?? 0) / g.rows : 0), counted: g.counted_share ?? (g.rows ? Math.min(1, ((g.seen_rows ?? 0) + (g.model_rows || 0) + (g.computed_rows || 0)) / g.rows) : 0) }))
       .sort((a, b) => (b.touched > 0) - (a.touched > 0) || b.read - a.read || b.counted - a.counted || b.touched - a.touched || String(a.key).localeCompare(String(b.key), 'en', { numeric: true }))
     return {
-      total: cov.total || {}, session: cov.session, files, rest, tree: folderTree(files, rest), chat: !!s.chat,
+      total: cov.total || {}, session: cov.session, files, rest, tree: folderTree(files, rest), chat: !!s.chat, cut: cov.cut || null,
       folder: groups('folder', cov.groups || cov.patterns || []), type: groups('type', cov.types || []), refreshing: !!s.loading, w: size.w, h: size.h,
     }
   },
@@ -457,7 +457,10 @@ export function wrapWords(s, w) {
 
 /** The overview: the two bars, then the legend of the rows' bars. */
 function overview(k, data) {
-  return [subjectBlock(k, { title: `Coverage${data.refreshing ? ' {dim:◌}' : ''}`, line: '', rows: topBars(k, data.total || {}) }), legend(k)]
+  const cut = data.cut ? (data.cut.files || 0) + (data.cut.untouched || 0) : 0
+  // a folder of very many files lists a few of each folder (cli.py cmd_coverage); the bars count them all
+  const more = cut ? [k.text(`{dim:The lists show the first files of each folder; ${cut.toLocaleString('en-US')} more are counted in the bars.}`)] : []
+  return [subjectBlock(k, { title: `Coverage${data.refreshing ? ' {dim:◌}' : ''}`, line: '', rows: topBars(k, data.total || {}) }), legend(k), ...more]
 }
 
 function toggles(k, by) {

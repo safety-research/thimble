@@ -77,15 +77,8 @@ def kind_of(path: Path) -> str | None:
 
 
 def list_sources(root: Path) -> list[str]:
-    """Every source file under root, relative, sorted."""
-    out = []
-    for d, dirs, files in os.walk(root):
-        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not x.startswith("."))
-        for f in files:
-            p = Path(d) / f
-            if kind_of(p) and not p.is_symlink():
-                out.append(os.path.relpath(p, root))
-    return sorted(out)
+    """Every source file under root, relative, sorted (list_files' files that have rows)."""
+    return [f for f in list_files(root) if kind_of(Path(f))]
 
 
 def file_kind(path: Path) -> str:
@@ -95,23 +88,28 @@ def file_kind(path: Path) -> str:
 
 def list_files(root: Path) -> list[str]:
     """Every file under root that coverage counts, relative, sorted: the sources, and the other files that are not
-    hidden (a PDF, an image, a binary), under the same folders list_sources walks."""
+    hidden (a PDF, an image, a binary). A link counts as what it points to, so a working folder of links to a
+    dataset's files and folders is the dataset; each folder is walked once (a link back up is not followed again),
+    and a broken link is no file. Nothing is written anywhere."""
     out: list[str] = []
+    walked: set[tuple[int, int]] = set()
 
     # by os.scandir and plain strings: a folder of 100,000 files is walked in well under a second
     def walk(d: str, rel: str) -> None:
         try:
+            s = os.stat(d)
+            if (s.st_dev, s.st_ino) in walked:
+                return
+            walked.add((s.st_dev, s.st_ino))
             entries = list(os.scandir(d))
         except OSError:
             return
         dirs = []
         for e in entries:
             try:
-                if e.is_symlink():
-                    continue
-                if e.is_dir(follow_symlinks=False):
+                if e.is_dir():
                     dirs.append(e.name)
-                elif not (e.name.startswith(".") and not kind_of(Path(e.name))):
+                elif not (e.name.startswith(".") and not kind_of(Path(e.name))) and (not e.is_symlink() or e.is_file()):
                     out.append(rel + e.name)
             except OSError:
                 continue
@@ -436,7 +434,12 @@ def _count_one(args: tuple[str, str]) -> int:
 
 
 def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str, int]:
-    """Rows of many files: in up to 8 worker processes when they are big together (Linux), else one after another."""
+    """Rows of many files: in up to 8 worker processes when they are big together (Linux), else one after another. A
+    file that is no source and no PDF (an image, a binary) is 1 without being opened, so a million images count fast."""
+    whole = {r: 1 for r in rels if kind_of(Path(r)) is None and MEDIA_KIND.get(os.path.splitext(r)[1].lower()) != "pdf"}
+    if whole:
+        rest = [r for r in rels if r not in whole]
+        return {**whole, **(_count_many(root, rest, sizes) if rest else {})}
     if len(rels) > 1 and sum(sizes.get(r, 0) for r in rels) >= PARALLEL_MIN and sys.platform.startswith("linux"):
         n = max(1, min(8, (os.cpu_count() or 2) - 1, len(rels)))
         if n > 1:
@@ -446,7 +449,7 @@ def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str,
 
                 order = sorted(rels, key=lambda r: -sizes.get(r, 0))
                 with ProcessPoolExecutor(max_workers=n, mp_context=mp.get_context("fork")) as ex:
-                    return dict(zip(order, ex.map(_count_one, [(str(root), r) for r in order], chunksize=4)))
+                    return dict(zip(order, ex.map(_count_one, [(str(root), r) for r in order], chunksize=1)))
             except Exception:  # noqa: BLE001 — counted one after another below
                 pass
     return {r: count_rows(root, r) for r in rels}
