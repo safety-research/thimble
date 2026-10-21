@@ -150,13 +150,28 @@ let placeNext: string | null = null
 
 // ------------------------------------------------------------------------------------------------ objects
 
-/** The folder under analysis that holds object `id`: THIMBLE_ROOT, a `cd` the command made, the session's folder or a
- *  folder above it. */
+/** The folder the session started in, which a shell `cd` does not move: THIMBLE_START, which hooks/kernel.ts sets from
+ *  $.session.root(); that root when the variable is not set here; the working folder only when neither is known. */
+export async function startDir($: Engine): Promise<string> {
+  let start = String((await $.env.get('THIMBLE_START')) || '')
+  if (!start) {
+    try {
+      start = String((await $.session.root()) || '')
+    } catch {
+      // an engine with no project root: the working folder
+    }
+  }
+  if (!start.startsWith('/')) start = String(await $.session.cwd())
+  return start.replace(/\/+$/, '')
+}
+
+/** The folder under analysis that holds object `id`: THIMBLE_ROOT, a `cd` the command made, the session's start folder
+ *  or a folder above it, else the working folder or one above it. */
 async function findRoot($: Engine, id: string, hints: string[] = []): Promise<string | null> {
   const env = await $.env.get('THIMBLE_ROOT')
   const cwd = String(await $.session.cwd())
   const tries: string[] = []
-  for (const h of [env, ...hints, cwd]) {
+  for (const h of [env, ...hints, await startDir($), cwd]) {
     if (!h) continue
     const abs = h.startsWith('/') ? h : `${cwd.replace(/\/+$/, '')}/${h}`
     let d = abs.replace(/\/+$/, '')
@@ -558,19 +573,26 @@ export async function openDetail($: Engine, at: ObjRef, region: string | null = 
   await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
 }
 
-/** The folder under analysis for a ref that names no object: the latest object's, else the nearest folder at or above
- *  the session's that holds a thimble/ record folder. */
+/** The folder under analysis for a ref that names no object: the latest object's, else the folder that keeps the
+ *  records as the kernel finds it (kernel/store.py find_root): the nearest folder at or above the session's start folder
+ *  that holds a thimble/ record folder, so a `cd` does not move it; with none there, the nearest at or above a working
+ *  folder inside the start folder, or at or above a working folder outside it. */
 export async function rootHere($: Engine): Promise<string | null> {
   const last = (await $.state.get(LAST)).value
   if (last) return last.root
   const env = await $.env.get('THIMBLE_ROOT')
   if (env) return env
-  let d = String(await $.session.cwd()).replace(/\/+$/, '')
-  while (d) {
-    if ((await $.fs.exists(`${d}/thimble/objects`)) || (await $.fs.exists(`${d}/thimble/queries`))) return d
-    d = d.slice(0, d.lastIndexOf('/'))
+  const holding = async (from: string): Promise<string | null> => {
+    for (let d = from; d; d = d.slice(0, d.lastIndexOf('/'))) {
+      if ((await $.fs.exists(`${d}/thimble/objects`)) || (await $.fs.exists(`${d}/thimble/queries`))) return d
+    }
+    return null
   }
-  return null
+  const start = await startDir($)
+  const cwd = String(await $.session.cwd()).replace(/\/+$/, '')
+  const inside = cwd === start || cwd.startsWith(`${start}/`)
+  if (!inside) return holding(cwd)
+  return (await holding(start)) || (cwd !== start ? holding(cwd) : null)
 }
 
 /** A new version of an object: drawn where the object is drawn now, in its place; one the turn has not placed yet is
@@ -906,7 +928,8 @@ const healTold = new Set<string>()
 let healTell: { row: string; changes: Any[] }[] = []
 
 /** Whether a pass runs for this record now: one starts (after this drawing) when its shown text has settled, has
- *  citations, and no pass has healed it; a folder with no thimble/ has nothing to check them against. */
+ *  citations, and no pass has healed it. With no thimble/ folder yet, the pass checks the file citations from the
+ *  session's start folder. */
 async function healNow($: Engine, rec: MsgRecord, settled: boolean): Promise<boolean> {
   if (!needsHeal(rec)) return false
   const key = textKey(shownOf(rec))
@@ -914,12 +937,18 @@ async function healNow($: Engine, rec: MsgRecord, settled: boolean): Promise<boo
   await $.state.get(HEALTICK)
   const began = healing.get(id)
   if (began !== undefined) return (await $.clock.now()) - began >= SPIN_AFTER
-  if (!settled || healRead.has(id) || !(await rootHere($))) return false
+  if (!settled || healRead.has(id) || !(await checkRoot($))) return false
   healRead.add(id)
   healing.set(id, await $.clock.now())
   $.clock.after(0, () => { void runHeal($, rec.row, key).then(() => { healing.delete(id) }, err => healLost($, id, err, 'Open the citation to see its place')) })
   $.clock.after(SPIN_AFTER, () => { if (healing.has(id)) void $.state.set(HEALTICK, id) })
   return false
+}
+
+/** The folder a pass checks citations from: the folder that keeps the records, else, before Claude's first thimble
+ *  command made one, the session's start folder, where file citations are read. */
+export async function checkRoot($: Engine): Promise<string | null> {
+  return (await rootHere($)) || (await startDir($)) || null
 }
 
 /** The passes that started again after Claude Code cut them short. */
@@ -943,7 +972,7 @@ function healLost($: Engine, id: string, err: unknown, fix: string): void {
 /** One pass over a record's shown text, its result kept in the record (a text that changed meanwhile waits for its own
  *  pass). */
 async function runHeal($: Engine, row: string, key: string): Promise<void> {
-  const root = await rootHere($)
+  const root = await checkRoot($)
   const rec = await recordNow($, row)
   if (!root || !rec || textKey(shownOf(rec)) !== key) return
   const dir = $.plugin.root.replace(/\/+$/, '')
@@ -1441,8 +1470,9 @@ async function drawPart($: Engine, part: { program: string; data: unknown; id?: 
  *  the person's own reads. */
 async function sourceSpec($: Engine, ref: string, label: string, room: number): Promise<Any> {
   // a file's rows or lines need no thimble/ folder: with none yet (a codebase Claude only read), they are read from the
-  // folder the session works in; a query's or a card's value needs the folder that keeps it
-  const root = (await rootHere($)) || (/^(?:[qr]\d+(?:[#@]|$)|obj:|card:)/.test(ref) ? null : String(await $.session.cwd()).replace(/\/+$/, '') || null)
+  // folder the session started in, where a `cd` does not move them; a query's or a card's value needs the folder that
+  // keeps it
+  const root = (await rootHere($)) || (/^(?:[qr]\d+(?:[#@]|$)|obj:|card:)/.test(ref) ? null : (await startDir($)) || null)
   if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run thimble in the data folder first` }
   return citeCard({ ref, label, root, room }, { resolve: (r: string, n: number, l?: string) => resolveJson($, root, r, n, l), read: (p: string) => $.fs.read(p) })
 }
@@ -1585,8 +1615,8 @@ async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
  *  frame, or a file not there. */
 async function trayFileLink($: Engine, e: Any, top: TrayFrame | null): Promise<Any | null> {
   if (!top || top.kind === 'gloss' || typeof top.ref !== 'string') return null
-  // a file's place opens from the session's folder when there is no thimble/ folder yet (a codebase Claude only read)
-  const link = fileLink(top.ref, (await rootHere($)) || String(await $.session.cwd()).replace(/\/+$/, ''))
+  // a file's place opens from the session's start folder when there is no thimble/ folder yet (a codebase Claude only read)
+  const link = fileLink(top.ref, (await rootHere($)) || (await startDir($)))
   if (!link || !(await $.fs.exists(link.path).catch(() => false))) return null
   const { Markdown, Button, Text } = $.ui.resolve(e) as Any
   const open = () => {
@@ -1683,8 +1713,8 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     // home folder; the kernel's count writes nothing there
     let covFiles = old?.covFiles ?? 0
     let covTouched = old?.covTouched ?? 0
-    const cwd = String(await $.session.cwd()).replace(/\/+$/, '')
-    const covRoot = root ?? (cwd && cwd !== String((await $.env.get('HOME')) || '').replace(/\/+$/, '') ? cwd : null)
+    const start = await startDir($)
+    const covRoot = root ?? (start && start !== String((await $.env.get('HOME')) || '').replace(/\/+$/, '') ? start : null)
     if (o.coverage && covRoot && person === 'now' && featureOn('counts')) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {

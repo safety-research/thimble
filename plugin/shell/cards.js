@@ -423,17 +423,20 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
   const about = query?.about ? esc(short(query.about, 80)) : ''
   if (kind === 'query' || kind === 'series') {
     const { table, cols, col, hot, keyCols, labelOf } = columnOf(query, ref)
-    const sections = [...(hasRows(r) ? [rowsSection(r, kind === 'series' ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
-    if (kind === 'series') {
+    // a column of one row (a total, `r4@n`) is one value, drawn as one: no chart of one bar
+    const series = kind === 'series' && table.length !== 1
+    const sections = [...(hasRows(r) ? [rowsSection(r, series ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
+    if (series) {
       const rows = table.map(t => ({ label: short(labelOf(t), 24), value: typeof t[col] === 'number' ? t[col] : Number(t[col]) || 0 }))
       const labelW = Math.max(4, ...rows.map(x => x.label.length))
       const first = `${fmtN(rows.length)} values of ${col}`
       return { title: label || `${query?.id || ''} ${col}`, right, parts: [{ program: SERIES_PROGRAM, data: { about, rows, room: room - 2, labelW, col: col || 'value', first, behind: behindLine(r, files) } }], sections, links: [] }
     }
     const values = cols.filter(c => !keyCols.includes(c))
-    const value = hot >= 0 && table[hot] ? table[hot][col] : (r.chain || []).find(c => c.step === 'query' && 'value' in c)?.value
+    const at = hot >= 0 && table[hot] ? hot : kind === 'series' ? 0 : -1
+    const value = at >= 0 && table[at] ? table[at][col] : (r.chain || []).find(c => c.step === 'query' && 'value' in c)?.value
     // one value: the value and what it counts
-    if (table.length <= 1 && values.length <= 1) {
+    if (table.length <= 1 && (values.length <= 1 || kind === 'series')) {
       const what = `{dim:${esc(query?.id || '')}${query?.about ? ' ·' : ''}} ${esc(query?.about || 'the query')}${col && !['value', 'n', 'count'].includes(col) ? ` {dim:· ${esc(col)}}` : ''}`
       return { title: label, right, parts: [{ program: VALUE_PROGRAM, data: { value: value == null ? label : fmtN(value), what, behind: behindLine(r, files) } }], sections, links: [] }
     }

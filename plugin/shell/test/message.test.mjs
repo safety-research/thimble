@@ -85,6 +85,14 @@ test('a table too wide for its column is drawn as its rows, `header: cell`, each
   assert.ok(drawn.some(n => n.type === 'Text' && n.props.bold && n.props.children === 'What changed'))
 })
 
+test('`__` inside a word stays in the word, and bold closes only on the delimiter that opened it', () => {
+  const run = t => inline(t, 0, t.length)
+  assert.deepEqual(run('**task-alpha__goal**. It won'), [{ s: 'task-alpha__goal', b: true }, { s: '. It won' }])
+  assert.deepEqual(run('kitname__specified took 1.0 h and rl-9z__specified.'), [{ s: 'kitname__specified took 1.0 h and rl-9z__specified.' }])
+  assert.deepEqual(run('**a __ b** c'), [{ s: 'a __ b', b: true }, { s: ' c' }])
+  assert.deepEqual(run('__d__ and _e_ f'), [{ s: 'd', b: true }, { s: ' and ' }, { s: 'e', it: true }, { s: ' f' }])
+})
+
 test('a mark wider than the line breaks at its spaces, each piece still the mark; only a word wider than the line is cut', () => {
   const heads = 'This affects every multi-line code block in a reply.'
   const lines = wrapRuns([{ s: heads, mark: 0 }], 21)
@@ -114,6 +122,17 @@ test('a citation whose key holds spaces and brackets is one mark, and its card o
   const slugged = sourceCard({ ref: 'q11#outcome=won-clean-ep@median', label: '110', resolved: { count: 3, rows: [], records: [], chain: [] }, query })
   const s2 = slugged.parts[0].data
   assert.deepEqual(s2.rows.filter(r => r.hot).map(r => [r.cells[0], r.cells[s2.hotCol]]), [['won (clean ep)', '110']])
+})
+
+test('a column of a one-row table cited as a series is drawn as one value, not a chart of one bar', () => {
+  const query = { id: 'r4', about: 'all trips', keys: [], table: [{ group: 'all', n: 640, done: 211, rate: 0.33 }] }
+  const card = sourceCard({ ref: 'r4@n', label: '640', resolved: { ref: 'r4@n', count: 640, rows: [], records: [], chain: [] }, query })
+  assert.equal(card.parts.length, 1)
+  assert.equal(card.parts[0].data.value, '640')
+  assert.equal(card.parts[0].data.rows, undefined)
+  // two rows are still a series
+  const two = { ...query, table: [{ group: 'a', n: 400 }, { group: 'b', n: 240 }] }
+  assert.deepEqual(sourceCard({ ref: 'r4@n', label: 'n', resolved: { ref: 'r4@n', rows: [], records: [], chain: [] }, query: two }).parts[0].data.rows.map(x => x.value), [400, 240])
 })
 
 test("a citation's rows section names the cited files' own entries: records, rows or lines, and none for a whole file", () => {
