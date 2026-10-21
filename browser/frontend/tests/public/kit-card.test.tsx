@@ -65,3 +65,29 @@ test('a card drawn again in a narrow place cuts its labels, never its numbers', 
     expect(out.cut.map((c) => c.s)).toContain('a-rather-long-name-of-a-run')
   }
 })
+
+test('a plot draws [x, y] pairs in values, dots per series as its legend shows them, and a long x label on a line of its own', async () => {
+  const { renderSvg } = await import('../../src/kit/svg.js')
+  const plot = (label: string, w: number) => {
+    const program = `return k.plot([{ name: 'legal %', values: [[500, 60], [1000, 68], [1500, 84]], dots: true }, { name: 'goal', points: [[500, 99], [1500, 99]] }], { h: 8, x: { label: ${JSON.stringify(label)} } })`
+    const drawing = DrawKit.run(program, {}, { w, h: 30, surface: 'browser', id: 'c3' }) as Drawing
+    expect(drawing.warnings).toEqual([])
+    const out = renderSvg(drawing, { cw: 7.8 })
+    const texts = [...out.svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)"[^>]*>(.*?)<\/text>/g)].map((m) => ({ y: +m[2], s: m[3].replace(/<[^>]+>/g, '') }))
+    return { out, texts }
+  }
+  const label = 'minutes after 14:00 (pushed at 54, merged at 122)'
+  const { out, texts } = plot(label, 60)
+  // the pairs are points: three dots for the first series and one in its legend; the second a line, a stroke in its legend
+  expect(out.svg.match(/<circle [^>]*r="2.5"/g)?.length).toBe(4)
+  expect(out.svg.match(/<polyline /g)?.length).toBe(1)
+  expect(out.svg.match(/<rect [^>]*width="12" height="3"/g)?.length).toBe(1)
+  // the label is whole, below the tick values
+  const at = texts.find((t) => t.s === label)
+  const tick = texts.find((t) => t.s === '1,000')
+  expect(at && tick && at.y > tick.y).toBe(true)
+  // wider than the plot: cut with …, and said in `cut`
+  const narrow = plot(label, 24)
+  expect(narrow.texts.some((t) => t.s.startsWith('minutes') && t.s.endsWith('…'))).toBe(true)
+  expect(narrow.out.cut.filter((c) => c.k === 'axis').length).toBe(1)
+})

@@ -10,7 +10,8 @@
 //     share a cell it takes the color of the one listed first; a dot is four braille dots. The axis is ┤ └ ┴ with
 //     round values, a free row between two y labels, and a value on the same row as its label; a plot keeps at least
 //     five rows however short the program asked for. The y label and the legend share the top row, and the legend
-//     shows each series' mark as the plot draws it (━ for a line, ⠶ for dots);
+//     shows each series' mark as the plot draws it (━ for a line, ⠶ for dots). The x label follows the last tick's
+//     value, or has a row of its own when it does not fit there, cut with … only when it is wider than the plot;
 //   - a table is padded columns, numbers right-aligned, the widest text column shrinking first;
 //   - unseen data is ▒ (a medium shade), never blank, so a gap reads as a gap;
 //   - the cells of a mark (a bar's width, a spark, a plot's area) carry `m`, and a plot's dots the region of their
@@ -567,40 +568,77 @@ function paintPlot(n, g, x, y, w, cx, mark) {
   const top = ylab || legend ? 1 : 0
   const legendTop = legend && (ylab ? len(ylab) + 3 : 0) + legendW <= w
   const bottom = legend && !legendTop ? 1 : 0
-  const ph = Math.max(MIN_PLOT_ROWS, n.h - 2 - top - bottom)
-  const h = ph + 2 + top + bottom
-  // y in rows from the top of the plot area: the top value at the middle of the first row, the bottom value at the
-  // middle of the last row, so a tick's label and the points at its value share a row, and points at the bottom
-  // value sit beside its label, above the axis line
-  const yAt = (v, lo, hi) => 0.5 + (hi - clamp(v, lo, hi)) / ((hi - lo) || 1) * (ph - 1)
-  // round values on y: the most ticks that leave a row free between two labels, so the labels spread over the plot's
-  // rows; inside the data's own range when two or more fit there, else with an end the program did not set out to
-  // the next round value, as the browser draws it
-  const fit = (extend, least) => {
-    for (let k = Math.ceil(ph / 2); k >= 1; k--) {
-      const step = niceTicks(ymin, ymax, k).step
-      const lo = extend && !isFinite(ys.min) ? Math.floor(ymin / step + 1e-9) * step : ymin
-      const hi = extend && !isFinite(ys.max) ? Math.ceil(ymax / step - 1e-9) * step : ymax
-      const ts = niceTicks(lo, hi, (hi - lo) / step).ticks.filter(t => t >= lo - 1e-9 && t <= hi + 1e-9)
-      if (ts.length >= least && ts.every((t, i) => i === 0 || Math.floor(yAt(ts[i - 1], lo, hi)) - Math.floor(yAt(t, lo, hi)) >= 2)) return { lo, hi, ts }
+  // the rows of plot and the y axis's round values, for `xrow` rows given to the x label
+  const ymin0 = ymin, ymax0 = ymax
+  const layoutY = xrow => {
+    const ph = Math.max(MIN_PLOT_ROWS, n.h - 2 - top - bottom - xrow)
+    // y in rows from the top of the plot area: the top value at the middle of the first row, the bottom value at the
+    // middle of the last row, so a tick's label and the points at its value share a row, and points at the bottom
+    // value sit beside its label, above the axis line
+    const yAt = (v, lo, hi) => 0.5 + (hi - clamp(v, lo, hi)) / ((hi - lo) || 1) * (ph - 1)
+    // round values on y: the most ticks that leave a row free between two labels, so the labels spread over the plot's
+    // rows; inside the data's own range when two or more fit there, else with an end the program did not set out to
+    // the next round value, as the browser draws it
+    const fit = (extend, least) => {
+      for (let k = Math.ceil(ph / 2); k >= 1; k--) {
+        const step = niceTicks(ymin0, ymax0, k).step
+        const lo = extend && !isFinite(ys.min) ? Math.floor(ymin0 / step + 1e-9) * step : ymin0
+        const hi = extend && !isFinite(ys.max) ? Math.ceil(ymax0 / step - 1e-9) * step : ymax0
+        const ts = niceTicks(lo, hi, (hi - lo) / step).ticks.filter(t => t >= lo - 1e-9 && t <= hi + 1e-9)
+        if (ts.length >= least && ts.every((t, i) => i === 0 || Math.floor(yAt(ts[i - 1], lo, hi)) - Math.floor(yAt(t, lo, hi)) >= 2)) return { lo, hi, ts }
+      }
+      return null
     }
-    return null
+    const fitted = fit(false, 2) || fit(true, 2) || fit(false, 1) || { lo: ymin0, hi: ymax0, ts: [] }
+    const ylabels = fitted.ts.map(fmtTick)
+    const yw = Math.max(1, ...ylabels.map(len))
+    return { ph, yAt, fitted, ylabels, yw, pw: Math.max(2, w - yw - 1) }
   }
-  const fitted = fit(false, 2) || fit(true, 2) || fit(false, 1) || { lo: ymin, hi: ymax, ts: [] }
-  ymin = fitted.lo; ymax = fitted.hi
-  const yticks = fitted.ts
+  // x ticks: round values, a label under each that has room
+  let xTickList = []
+  if (Array.isArray(xs.ticks)) xTickList = xs.ticks
+  else if (xlog) { for (let e = Math.ceil(Math.log10(xmin) - 1e-9); e <= Math.floor(Math.log10(xmax) + 1e-9); e++) xTickList.push({ at: Math.pow(10, e) }) }
+  else {
+    const span = xmax - xmin, step0 = Math.pow(10, Math.floor(Math.log10(span / 5 || 1)))
+    let step = [1, 2, 5, 10].map(q => q * step0).find(q => span / q <= 6) || step0 * 10
+    if (xv.length && xv.every(Number.isInteger)) step = Math.max(1, Math.round(step))
+    for (let v = Math.ceil(xmin / step) * step; v <= xmax + 1e-9; v += step) xTickList.push({ at: +v.toPrecision(10) })
+  }
+  const placeX = (ox, pw) => {
+    const col = v => Math.round((tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * (pw - 1))
+    const out = []
+    let lastEnd = -1
+    xTickList.forEach(t => {
+      if (!okX(t.at)) return
+      const c = col(t.at)
+      if (c < 0 || c >= pw) return
+      const s = t.label != null ? t.label : fmtTick(t.at)
+      const start = clamp(ox + c - Math.floor((len(s) - 1) / 2), 0, w - len(s))
+      const show = start > lastEnd + 1
+      out.push({ c, s, start, show })
+      if (show) lastEnd = start + len(s) - 1
+    })
+    return { ticks: out, lastEnd }
+  }
+  // the x label: on the tick row after the last tick's label when it fits there, else on a row of its own, cut with …
+  // only when it is wider than the plot
+  const xlab = xs.label || ''
+  let L = layoutY(0)
+  const xrow = xlab && w - len(xlab) <= placeX(L.yw + 1, L.pw).lastEnd + 2 ? 1 : 0
+  if (xrow) L = layoutY(1)
+  const { ph, yAt, ylabels, yw, pw } = L
+  ymin = L.fitted.lo; ymax = L.fitted.hi
+  const yticks = L.fitted.ts
+  const h = ph + 2 + top + bottom + xrow
   const yu = v => yAt(v, ymin, ymax)
-  const ylabels = yticks.map(fmtTick)
-  const yw = Math.max(1, ...ylabels.map(len))
   const ox = yw + 1
-  const pw = Math.max(2, w - ox)
   const oy = top
+  const xt = placeX(ox, pw)
   // braille: two dots across and four down per cell
-  const col = v => Math.round((tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * (pw - 1))
   const col2 = v => Math.round((tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * (pw * 2 - 1))
   const row4 = v => clamp(Math.floor(yu(v) * 4), 0, ph * 4 - 1)
-  // a series drawn as dots (the program asked for dots, or it has one point) shows a dot in the legend too
-  const asDots = s => !!n.dots || s.pts.filter(p => okX(p[0]) && p[1] !== null).length === 1
+  // a series drawn as dots (the program asked for dots for it, or it has one point) shows a dot in the legend too
+  const asDots = s => !!s.dots || s.pts.filter(p => okX(p[0]) && p[1] !== null).length === 1
   if (!g.dry) {
     if (ylab) g.str(x, y, ylab.slice(0, w), 'dim')
     const tickRow = new Map()
@@ -613,28 +651,16 @@ function paintPlot(n, g, x, y, w, cx, mark) {
     const ay = y + oy + ph
     g.put(x + yw, ay, '└', 'rule')
     g.fill(x + yw + 1, ay, pw - 1, 1, '─', 'rule')
-    let ticks = []
-    if (Array.isArray(xs.ticks)) ticks = xs.ticks
-    else if (xlog) { for (let e = Math.ceil(Math.log10(xmin) - 1e-9); e <= Math.floor(Math.log10(xmax) + 1e-9); e++) ticks.push({ at: Math.pow(10, e) }) }
-    else {
-      const span = xmax - xmin, step0 = Math.pow(10, Math.floor(Math.log10(span / 5 || 1)))
-      let step = [1, 2, 5, 10].map(q => q * step0).find(q => span / q <= 6) || step0 * 10
-      if (xv.length && xv.every(Number.isInteger)) step = Math.max(1, Math.round(step))
-      for (let v = Math.ceil(xmin / step) * step; v <= xmax + 1e-9; v += step) ticks.push({ at: +v.toPrecision(10) })
-    }
-    let lastEnd = -1
-    ticks.forEach(t => {
-      if (!okX(t.at)) return
-      const c = col(t.at)
-      if (c < 0 || c >= pw) return
-      g.put(x + ox + c, ay, '┴', 'rule')
-      const s = t.label != null ? t.label : fmtTick(t.at)
-      const start = clamp(ox + c - Math.floor((len(s) - 1) / 2), 0, w - len(s))
-      if (start <= lastEnd + 1) return
-      g.str(x + start, ay + 1, s, 'dim')
-      lastEnd = start + len(s) - 1
+    xt.ticks.forEach(t => {
+      g.put(x + ox + t.c, ay, '┴', 'rule')
+      if (t.show) g.str(x + t.start, ay + 1, t.s, 'dim')
     })
-    if (xs.label && w - len(xs.label) > lastEnd + 2) g.str(x + w - len(xs.label), ay + 1, xs.label, 'dim')
+    if (xlab && !xrow) g.str(x + w - len(xlab), ay + 1, xlab, 'dim')
+    else if (xlab) {
+      const r = cutLine(items([{ s: xlab, tone: 'dim' }]), w)
+      if (r.cut) cx.cut.push({ k: 'axis', s: xlab })
+      g.line(x + w - widthOf(r.line), ay + 2, r.line)
+    }
     // later series first, so the first series is on top: a cell two series share takes its color
     g.withClip(x + ox, y + oy, x + ox + pw, y + oy + ph, () => {
       S.slice().reverse().forEach(s => {

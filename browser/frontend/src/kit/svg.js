@@ -581,24 +581,63 @@ export function renderSvg(drawing, opts = {}) {
     // one series that the y axis already names needs no legend
     const named = S.length === 1 && S[0].name && ys.label && String(S[0].name) === String(ys.label)
     const legend = n.legend !== false && (S.length > 1 || (S.some(s => s.name) && !named)) ? 1 : 0
-    // at least five rows of plot, as the terminal draws it, so values a few steps apart do not flatten onto one line
-    const around = (ys.label ? lh : 0) + 6 + lh + legend * lh + 4
-    const ph = Math.max(5 * lh, n.h * lh - around)
-    const h = ph + around
-    // the y axis at round steps under gridlines, as thimble's charts draw it: the finest step that leaves a gridline at
-    // least 24 pixels from the next, and an end the program did not set goes out to the next step
-    const most = Math.max(2, Math.floor(ph / 24))
-    let ystep = niceStep((ymax - ymin) / most)
-    const span = st => (isFinite(ys.max) ? ymax : Math.ceil(ymax / st - 1e-9) * st) - (isFinite(ys.min) ? ymin : Math.floor(ymin / st + 1e-9) * st)
-    if (span(ystep) / ystep > most) ystep = niceStep(ystep * 1.01)
-    if (!isFinite(ys.max)) ymax = Math.ceil(ymax / ystep - 1e-9) * ystep
-    if (!isFinite(ys.min)) ymin = Math.floor(ymin / ystep + 1e-9) * ystep
-    const yticks = []
-    for (let v = Math.ceil(ymin / ystep - 1e-9) * ystep; v <= ymax + ystep * 1e-6; v += ystep) yticks.push(+v.toPrecision(10))
     const tick = { size: ns, mono: true }
-    const yw = Math.max(0, ...yticks.map(v => mw(fmtTick(v), tick))) + 8
+    // x ticks: round values, a label under each that has room
+    let xTickList = []
+    if (Array.isArray(xs.ticks)) xTickList = xs.ticks
+    else if (xlog) { for (let e = Math.ceil(Math.log10(xmin) - 1e-9); e <= Math.floor(Math.log10(xmax) + 1e-9); e++) xTickList.push({ at: Math.pow(10, e) }) }
+    else {
+      const span = xmax - xmin, step0 = Math.pow(10, Math.floor(Math.log10(span / 5 || 1)))
+      let step = [1, 2, 5, 10].map(q => q * step0).find(q => span / q <= 6) || step0 * 10
+      if (xv.length && xv.every(Number.isInteger)) step = Math.max(1, Math.round(step))
+      for (let v = Math.ceil(xmin / step) * step; v <= xmax + 1e-9; v += step) xTickList.push({ at: +v.toPrecision(10) })
+    }
+    const placeX = (ox, pw) => {
+      const out = []
+      let lastEnd = -Infinity
+      xTickList.forEach(t => {
+        if (!okX(t.at)) return
+        const tx0 = ox + (tx(t.at) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * pw
+        if (tx0 < ox - 0.5 || tx0 > ox + pw + 0.5) return
+        const s = t.label != null ? t.label : fmtTick(t.at)
+        const sw = mw(s, tick)
+        const show = tx0 - sw / 2 > lastEnd + 6
+        out.push({ tx0, s, show })
+        if (show) lastEnd = tx0 + sw / 2
+      })
+      return { ticks: out, lastEnd }
+    }
+    // the rows of plot and the y axis's round values, for `xrow` lines given to the x label
+    const ymin0 = ymin, ymax0 = ymax
+    const layoutY = xrow => {
+      let ymin = ymin0, ymax = ymax0
+      // at least five rows of plot, as the terminal draws it, so values a few steps apart do not flatten onto one line
+      const around = (ys.label ? lh : 0) + 6 + lh + xrow * lh + legend * lh + 4
+      const ph = Math.max(5 * lh, n.h * lh - around)
+      // the y axis at round steps under gridlines, as thimble's charts draw it: the finest step that leaves a gridline at
+      // least 24 pixels from the next, and an end the program did not set goes out to the next step
+      const most = Math.max(2, Math.floor(ph / 24))
+      let ystep = niceStep((ymax - ymin) / most)
+      const span = st => (isFinite(ys.max) ? ymax : Math.ceil(ymax / st - 1e-9) * st) - (isFinite(ys.min) ? ymin : Math.floor(ymin / st + 1e-9) * st)
+      if (span(ystep) / ystep > most) ystep = niceStep(ystep * 1.01)
+      if (!isFinite(ys.max)) ymax = Math.ceil(ymax / ystep - 1e-9) * ystep
+      if (!isFinite(ys.min)) ymin = Math.floor(ymin / ystep + 1e-9) * ystep
+      const yticks = []
+      for (let v = Math.ceil(ymin / ystep - 1e-9) * ystep; v <= ymax + ystep * 1e-6; v += ystep) yticks.push(+v.toPrecision(10))
+      const yw = Math.max(0, ...yticks.map(v => mw(fmtTick(v), tick))) + 8
+      return { ymin, ymax, around, ph, yticks, yw, pw: Math.max(2 * cw, w - yw - 4) }
+    }
+    // the x label: on the tick row after the last tick's label when it fits there, else on a line of its own, cut with …
+    // only when it is wider than the plot
+    const xlab = xs.label || ''
+    const xlabW = xlab ? mw(xlab, { size: ns }) : 0
+    let Y = layoutY(0)
+    const xrow = xlab && x + Y.yw + Y.pw - xlabW <= placeX(x + Y.yw, Y.pw).lastEnd + 10 ? 1 : 0
+    if (xrow) Y = layoutY(1)
+    const { ph, yticks, yw, pw } = Y
+    ymin = Y.ymin; ymax = Y.ymax
+    const h = ph + Y.around
     const ox = x + yw, oy = y + (ys.label ? lh : 0) + 6
-    const pw = Math.max(2 * cw, w - yw - 4)
     const col = v => ox + (tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * pw
     const row = v => oy + (ymax - clamp(v, ymin, ymax)) / ((ymax - ymin) || 1) * ph
     if (!dry && n.brush) brushes.push({ id: n.brush.id, x: ox, y: oy, w: pw, h: ph, min: xmin, max: xmax, log: xlog })
@@ -610,35 +649,27 @@ export function renderSvg(drawing, opts = {}) {
         L.text.push(textSVG([{ s: fmtTick(v), tone: 'dim' }], ox - 6, yy - lh / 2, 'end', tick))
       })
       L.mark.push(hl(ox, ox + pw, oy + ph, 'axis', '─'))
-      let ticks = []
-      if (Array.isArray(xs.ticks)) ticks = xs.ticks
-      else if (xlog) { for (let e = Math.ceil(Math.log10(xmin) - 1e-9); e <= Math.floor(Math.log10(xmax) + 1e-9); e++) ticks.push({ at: Math.pow(10, e) }) }
-      else {
-        const span = xmax - xmin, step0 = Math.pow(10, Math.floor(Math.log10(span / 5 || 1)))
-        let step = [1, 2, 5, 10].map(q => q * step0).find(q => span / q <= 6) || step0 * 10
-        if (xv.length && xv.every(Number.isInteger)) step = Math.max(1, Math.round(step))
-        for (let v = Math.ceil(xmin / step) * step; v <= xmax + 1e-9; v += step) ticks.push({ at: +v.toPrecision(10) })
-      }
-      let lastEnd = -Infinity
-      ticks.forEach(t => {
-        if (!okX(t.at)) return
-        const tx0 = col(t.at)
-        if (tx0 < ox - 0.5 || tx0 > ox + pw + 0.5) return
-        L.mark.push(vl(tx0 - 0.5, oy + ph, oy + ph + 4, 'axis', '│'))
-        const s = t.label != null ? t.label : fmtTick(t.at)
-        const sw = mw(s, tick)
-        if (tx0 - sw / 2 <= lastEnd + 6) return
-        L.text.push(textSVG([{ s, tone: 'dim' }], tx0, oy + ph + 2, 'middle', tick))
-        lastEnd = tx0 + sw / 2
+      placeX(ox, pw).ticks.forEach(t => {
+        L.mark.push(vl(t.tx0 - 0.5, oy + ph, oy + ph + 4, 'axis', '│'))
+        if (t.show) L.text.push(textSVG([{ s: t.s, tone: 'dim' }], t.tx0, oy + ph + 2, 'middle', tick))
       })
-      if (xs.label) {
-        const sw = mw(xs.label, { size: ns })
-        if (ox + pw - sw > lastEnd + 10) L.text.push(textSVG([{ s: xs.label, tone: 'dim' }], ox + pw, oy + ph + 2, 'end', { size: ns }))
+      if (xlab && !xrow) L.text.push(textSVG([{ s: xlab, tone: 'dim' }], ox + pw, oy + ph + 2, 'end', { size: ns }))
+      else if (xlab) {
+        let s = xlab
+        if (xlabW > w + 0.5) {
+          const room = w - mw('…', { size: ns })
+          let used = 0
+          s = ''
+          for (const ch of Array.from(xlab)) { const c = mw(ch, { size: ns }); if (used + c > room) break; s += ch; used += c }
+          s += '…'
+          cx.cut.push({ k: 'axis', s: xlab })
+        }
+        L.text.push(textSVG([{ s, tone: 'dim' }], ox + pw, oy + ph + 2 + lh, 'end', { size: ns }))
       }
       S.slice().reverse().forEach(s => {
         const P = s.pts.filter(p => okX(p[0])).sort((a, b) => a[0] - b[0])
         const c = C(s.tone)
-        if (n.dots) { P.forEach(p => { if (p[1] !== null) L.mark.push(`<circle cx="${r1(col(p[0]))}" cy="${r1(row(p[1]))}" r="2.5" fill="${c}"/>`) }); return }
+        if (s.dots) { P.forEach(p => { if (p[1] !== null) L.mark.push(`<circle cx="${r1(col(p[0]))}" cy="${r1(row(p[1]))}" r="2.5" fill="${c}"/>`) }); return }
         let seg = []
         const flush = () => {
           if (seg.length > 1) L.mark.push(`<polyline points="${seg.join(' ')}" fill="none" stroke="${c}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`)
@@ -662,7 +693,7 @@ export function renderSvg(drawing, opts = {}) {
       if (lx + nw > x + w) { if (s.region && !dry) addRect(s.region, s.meta, area); return }
       if (!dry) {
         // the series' own mark: a dot for a series drawn as dots, else a stroke of its line
-        if (n.dots || s.pts.filter(p => okX(p[0]) && p[1] !== null).length === 1) L.mark.push(`<circle cx="${r1(lx + 6)}" cy="${r1(ly + lh / 2)}" r="2.5" fill="${C(s.tone)}"/>`)
+        if (s.dots || s.pts.filter(p => okX(p[0]) && p[1] !== null).length === 1) L.mark.push(`<circle cx="${r1(lx + 6)}" cy="${r1(ly + lh / 2)}" r="2.5" fill="${C(s.tone)}"/>`)
         else L.mark.push(`<rect x="${r1(lx)}" y="${r1(ly + lh / 2 - 1.5)}" width="12" height="3" rx="1" fill="${C(s.tone)}"/>`)
         L.text.push(textSVG([{ s: name, tone: s.region ? 'accent' : 'ink' }], lx + 18, ly, 'start'))
       }

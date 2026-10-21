@@ -160,3 +160,43 @@ test("a plot's y ticks spread over its rows, points sit on their tick's row, and
   const top = big.findIndex(l => /1,000┤/.test(l))
   assert.ok(top > 0 && big.slice(0, top).some(l => /[⠀-⣿]/.test(l)), big.join('\n'))
 })
+
+test("a plot's x label too long for the tick row has a row of its own, cut with … only when wider than the plot", () => {
+  const under = label => {
+    const d = runProgram({ program: `return k.plot([{ name: 'n', points: [[0, 1], [230, 5]] }], { h: 8, x: { label: ${json(label)} } })` }, { w: 60, h: 24 })
+    const g = renderTerm(d, { w: 60 })
+    const t = gridText(g).split('\n')
+    return { below: t.slice(t.findIndex(l => l.includes('└')) + 1, t.findIndex(l => l.includes('└')) + 3), cut: g.cut }
+  }
+  // a short label sits on the tick row, after the last tick's value
+  assert.match(under('min').below[0], /200\s+min$/)
+  // a long one: whole, on the next row
+  const long = 'minutes after 14:00 (pushed at 54, merged at 122)'
+  assert.equal(under(long).below[1].trim(), long)
+  // wider than the plot: cut with …, and said in `cut`
+  const wide = under(long + ', reverted at 161, and the end of the run')
+  assert.match(wide.below[1], /^minutes after .*…$/)
+  assert.deepEqual(wide.cut.filter(c => c.k === 'axis').length, 1)
+})
+
+test('a plot reads an [x, y] pair in values as a point, and says so when a series has nothing to draw', () => {
+  // the round-3 shape: values made of [step, value] pairs
+  const pairs = [[500, 0], [1000, 2.5], [1500, 5], [2000, 2.5]]
+  const d = runProgram({ program: `return k.plot([{ name: 'win %', values: ${json(pairs)} }, { name: 'n', values: [3, '4', null, 6] }], { h: 6 })` }, { w: 60, h: 24 })
+  assert.deepEqual(d.root.series.map(s => s.pts), [pairs, [[0, 3], [1, 4], [2, null], [3, 6]]])
+  assert.deepEqual(d.warnings, [])
+  assert.match(gridText(renderTerm(d, { w: 60 })), /2,000/)
+  // a series with no point: a warning that names it and the fix, not an empty plot
+  const bad = runProgram({ program: `return k.plot([{ name: 'win %', values: data.rows }])`, data: { rows: [{ step: 1, win: 2 }] } }, { w: 60, h: 24 })
+  assert.match(bad.warnings.join('\n'), /"win %" has no point to draw; give it values \(numbers\) or points \(\[x, y\] pairs\)/)
+})
+
+test('dots apply per series, and each legend entry shows its series as it is drawn', () => {
+  const steps = [[500, 60], [1000, 68], [1500, 84], [2000, 87]]
+  const { t } = plotRows(`return k.plot([{ name: 'legal %', points: ${json(steps)}, dots: true }, { name: 'goal 99%', points: [[500, 99], [2000, 99]], tone: 'dim' }], { h: 8 })`)
+  assert.match(t.join('\n'), /⠶ legal %\s+━ goal 99%/)
+  // the plot's own dots is the default; a series' dots: false keeps its line
+  const d = runProgram({ program: `return k.plot([{ name: 'a', points: ${json(steps)} }, { name: 'b', points: [[500, 99], [2000, 99]], dots: false }], { dots: true })` }, { w: 60, h: 24 })
+  assert.deepEqual(d.root.series.map(s => !!s.dots), [true, false])
+  assert.match(gridText(renderTerm(d, { w: 60 })), /⠶ a\s+━ b/)
+})
