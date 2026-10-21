@@ -111,7 +111,55 @@ export function linkedText(md, links, look = null) {
   return out + esc(s.slice(i)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
 }
 
-const fmtN = v => (typeof v === 'number' ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : String(v ?? ''))
+// a number as words: a whole one with its thousands, one of 1 or more with at most two decimals, a smaller one with two
+// significant digits, so 0.0037 never reads as 0
+const fmtN = v => (typeof v !== 'number' ? String(v ?? '')
+  : v.toLocaleString('en-US', Number.isInteger(v) || Math.abs(v) >= 1 ? { maximumFractionDigits: 2 } : { maximumSignificantDigits: 2 }))
+
+/** The numbers a citation's words write, each with its decimals and whether it is a percent: `5.5%` is
+ *  {x: 5.5, d: 1, pct: true}, `1,268 files` {x: 1268, d: 0, pct: false}. */
+export function writtenNumbers(words) {
+  const out = []
+  for (const m of String(words ?? '').matchAll(/(?<![\w.])(-?\d{1,3}(?:,\d{3})+|-?\d+)(?:\.(\d+))?(\s?%|\s?percent\b)?/g)) {
+    out.push({ x: Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`), d: m[2] ? m[2].length : 0, pct: !!m[3] })
+  }
+  return out
+}
+
+/** How the reply wrote a cited value, so its card shows it the same way: {scale, d, pct} when the citation's words write
+ *  a number the value rounds to (within one unit of its last written digit), a share as a percent when they write a
+ *  percent (`0.4%` for 0.0037: scale 100); null when they write none. */
+export function citedForm(v, words) {
+  if (typeof v !== 'number' || !isFinite(v)) return null
+  const near = (x, w) => Math.abs(x - w.x) <= 10 ** -w.d * 1.0001
+  for (const w of writtenNumbers(words)) {
+    if (w.pct && Math.abs(v) <= 1.5 && near(v * 100, w)) return { scale: 100, d: w.d, pct: true }
+    if (near(v, w)) return { scale: 1, d: w.d, pct: w.pct }
+  }
+  return null
+}
+
+/** A number in a cited form (citedForm): at least the decimals the reply wrote and two significant digits, so 0.0037
+ *  written as `0.4%` shows 0.37%, and 0.055 written as `5.5%` shows 5.5%. */
+export function inForm(v, f) {
+  if (typeof v !== 'number' || !isFinite(v)) return fmtN(v)
+  const x = v * f.scale
+  const sig = x === 0 ? 0 : Math.max(0, 1 - Math.floor(Math.log10(Math.abs(x))))
+  return `${x.toLocaleString('en-US', { minimumFractionDigits: f.d, maximumFractionDigits: Math.min(8, Math.max(f.d, sig)) })}${f.pct ? '%' : ''}`
+}
+
+/** Values cut to `n` characters so that values that differ still differ: at the end when that keeps them apart, else in
+ *  the middle, their start and end kept (`AgentMass…LinkHelper771` and `AgentMass…AgentRelent`). Self-contained: the
+ *  query card's program holds its source, to cut a column to the room the card has. */
+export function distinctCut(vals, n) {
+  const w = Math.max(3, n)
+  const apart = list => new Set(list).size === new Set(vals).size
+  const end = vals.map(s => (s.length <= w ? s : s.slice(0, w - 1) + '…'))
+  if (apart(end)) return end
+  const head = Math.max(1, Math.floor((w - 1) * 0.4))
+  const tail = w - 1 - head
+  return vals.map(s => (s.length <= w ? s : s.slice(0, head) + '…' + s.slice(s.length - tail)))
+}
 const short = (s, n) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length <= n ? t : t.slice(0, n - 1) + '…' }
 /** Words safe to put in the toolkit's markup. */
 const esc = s => String(s ?? '').replace(/[\\{}[\]*]/g, c => '\\' + c)
@@ -176,8 +224,21 @@ return k.stack(parts)`
 const QUERY_PROGRAM = `
 const parts = []
 if (data.about) parts.push(k.text(data.about, { wrap: false }))
+// a column of words wider than the room is cut so that its rows still differ (distinctCut), the widest first
+${distinctCut.toString()}
+const nat = data.cols.map((c, i) => Math.max(k.len(c.label), ...data.rows.map(r => k.len(r.cells[i]))))
+const wd = nat.slice()
+const room = k.w - 1 - 2 * data.cols.length
+for (let guard = 0; guard < 400 && wd.reduce((s, x) => s + x, 0) > room; guard++) {
+  let j = -1
+  wd.forEach((x, i) => { if (data.cols[i].align !== 'right' && x > 8 && (j < 0 || x > wd[j])) j = i })
+  if (j < 0) break
+  wd[j]--
+}
+const cells = data.rows.map(r => r.cells.slice())
+wd.forEach((w, i) => { if (w < nat[i]) distinctCut(cells.map(c => c[i]), w).forEach((s, j) => { cells[j][i] = s }) })
 const cols = [{ key: 0, label: '' }].concat(data.cols.map((c, i) => ({ key: i + 1, label: c.label, align: c.align })))
-const rows = data.rows.map(r => [r.hot ? { text: '▌', tone: 'accent' } : ' '].concat(r.cells.map((s, i) =>
+const rows = data.rows.map((r, ri) => [r.hot ? { text: '▌', tone: 'accent' } : ' '].concat(cells[ri].map((s, i) =>
   ({ text: s, tone: r.hot && i === data.hotCol ? 'accent' : r.hot || i === data.hotCol ? 'ink' : 'dim', bold: !!r.hot }))))
 parts.push(k.table(rows, { cols, raw: true }))
 if (data.more) parts.push(k.text('{dim:' + k.escape(data.more) + '}', { wrap: false }))
@@ -407,7 +468,8 @@ function behindLine() {
 }
 
 /** A cell as the table shows it. */
-const cellText = v => short(typeof v === 'number' ? fmtN(v) : v == null || v === '' ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v), 28)
+// words are cut to the room the card has when it is drawn (QUERY_PROGRAM), not here, so rows that differ stay apart
+const cellText = v => short(typeof v === 'number' ? fmtN(v) : v == null || v === '' ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v), 120)
 
 /**
  * A citation's card. `resolved` is `thimble resolve <ref> --json`; `query` the query's record (thimble/queries/r<n>.json)
@@ -436,7 +498,8 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
     const series = kind === 'series' && table.length !== 1
     const sections = [...(hasRows(r) ? [rowsSection(r, series ? 'the series' : 'this value', deep)] : []), codeSection(r, query, ref, deep)]
     if (series) {
-      const rows = table.map(t => ({ label: short(labelOf(t), 24), value: typeof t[col] === 'number' ? t[col] : Number(t[col]) || 0 }))
+      const labels = distinctCut(table.map(t => short(labelOf(t), 200)), 24)
+      const rows = table.map((t, j) => ({ label: labels[j], value: typeof t[col] === 'number' ? t[col] : Number(t[col]) || 0 }))
       const labelW = Math.max(4, ...rows.map(x => x.label.length))
       const first = `${fmtN(rows.length)} values of ${col}`
       return { title: label || `${query?.id || ''} ${col}`, right, parts: [{ program: SERIES_PROGRAM, data: { about, rows, room: room - 2, labelW, col: col || 'value', first, behind: behindLine(r, files) } }], sections, links: [] }
@@ -444,10 +507,13 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
     const values = cols.filter(c => !keyCols.includes(c))
     const at = hot >= 0 && table[hot] ? hot : kind === 'series' ? 0 : -1
     const value = at >= 0 && table[at] ? table[at][col] : (r.chain || []).find(c => c.step === 'query' && 'value' in c)?.value
+    // the cited value as the reply wrote it (a share as a percent when the words write a percent), its column alike
+    const form = citedForm(value, label)
+    const show = (c, v) => (form && c === col && typeof v === 'number' ? inForm(v, form) : cellText(v))
     // one value: the value and what it counts
     if (table.length <= 1 && (values.length <= 1 || kind === 'series')) {
       const what = `{dim:${esc(query?.id || '')}${query?.about ? ' ·' : ''}} ${esc(query?.about || 'the query')}${col && !['value', 'n', 'count'].includes(col) ? ` {dim:· ${esc(col)}}` : ''}`
-      return { title: label, right, parts: [{ program: VALUE_PROGRAM, data: { value: value == null ? label : fmtN(value), what, behind: behindLine(r, files) } }], sections, links: [] }
+      return { title: label, right, parts: [{ program: VALUE_PROGRAM, data: { value: value == null ? label : form ? inForm(value, form) : fmtN(value), what, behind: behindLine(r, files) } }], sections, links: [] }
     }
     // the columns that fit: the key's first, then the cited one, then the others
     const order = [...keyCols, ...(col && !keyCols.includes(col) ? [col] : []), ...values.filter(c => c !== col)].slice(0, 5)
@@ -455,7 +521,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
     let start = 0
     if (table.length > fit) start = Math.max(0, Math.min(table.length - fit, hot - Math.floor(fit / 2)))
     const win = table.slice(start, start + fit)
-    const rows = win.map((t, j) => ({ cells: order.map(c => cellText(t[c])), hot: start + j === hot }))
+    const rows = win.map((t, j) => ({ cells: order.map(c => show(c, t[c])), hot: start + j === hot }))
     // the rows around the cited one; the whole output is one key away (expand)
     const more = ''
     return {

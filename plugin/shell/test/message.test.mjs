@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { register } from 'node:module'
-import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, linksIn, placeOf, sourceCard } from '../cards.js'
+import { citeCard, citedForm, citeWords, distinctCut, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd, inForm, linksIn, placeOf, sourceCard } from '../cards.js'
 import { linkRuns } from '../carddetail.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
 import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withCheck, withGone, withHeal, withObserver, wrapRuns } from '../message.js'
@@ -116,6 +116,46 @@ test('a mark wider than the line breaks at its spaces, each piece still the mark
 })
 
 const draw = (part, w = 90, h = 9) => { const d = runProgram(part, { w, h }); assert.equal(d.error, undefined, JSON.stringify(d.error)); return renderTerm(d, { w }) }
+
+test('a cited value shows as the reply wrote it: a share as a percent with its digits, never rounded away', () => {
+  // made-up eval files: a share column, cited as percents
+  const query = { id: 'r7', about: 'win rate per eval file', keys: ['system'], table: [
+    { system: 'base_eval', win_rate: 0.0037, games: 272 }, { system: 'base_train', win_rate: 0, games: 320 },
+    { system: 'tuned_eval', win_rate: 0.055, games: 200 }, { system: 'tuned_train', win_rate: 0.97753, games: 320 }] }
+  const cell = (ref, label) => {
+    const { rows, hotCol } = sourceCard({ ref, label, resolved: { ref, count: 0, rows: [], records: [], chain: [] }, query }).parts[0].data
+    return { hot: rows.find(r => r.hot).cells[hotCol], col: rows.map(r => r.cells[hotCol]) }
+  }
+  // 0.4% written for 0.0037: 0.37%, not 0; the whole column in the same form
+  assert.deepEqual(cell('r7#system=base_eval@win_rate', '0.4%'), { hot: '0.37%', col: ['0.37%', '0.0%', '5.5%', '97.8%'] })
+  assert.equal(cell('r7#system=tuned_eval@win_rate', '5.5%').hot, '5.5%')
+  assert.equal(cell('r7#system=tuned_train@win_rate', '97.75%').hot, '97.75%')
+  // words that write no number the value rounds to: the value with two significant digits, never 0 for 0.0037
+  assert.equal(cell('r7#system=base_eval@win_rate', 'almost never').hot, '0.0037')
+  assert.equal(citedForm(0.0037, '9%'), null)
+  assert.deepEqual(citedForm(1268, '1,268 files'), { scale: 1, d: 0, pct: false })
+  assert.equal(inForm(0.3489, citedForm(0.3489, 'cut it from 35% to 2.8%')), '35%')
+  // one value alone reads the same way
+  const one = sourceCard({ ref: 'r8@share', label: '2.6%', resolved: { ref: 'r8@share', rows: [], records: [], chain: [] }, query: { id: 'r8', table: [{ share: 0.0257 }] } })
+  assert.equal(one.parts[0].data.value, '2.6%')
+})
+
+test('long names in a tray table are cut where the rows still differ, and shown whole where there is room', () => {
+  // made-up revert pairs: the first words of two rows are the same
+  const pairs = [['Alpha13 reverted Bravo771', 82], ['Bravo771 reverted Alpha13', 82], ['Alpha13 reverted Charliex', 69], ['Bravo771 reverted Charliex', 48]]
+  const query = { id: 'r3', about: 'who reverted whom', keys: ['pair'], table: pairs.map(([pair, n], i) => ({ pair, n, index: 90 + i })) }
+  const card = sourceCard({ ref: 'r3#pair=Bravo771 reverted Alpha13@n', label: '82', resolved: { ref: 'r3', count: 0, rows: [], records: [], chain: [] }, query })
+  const rowsAt = w => gridText(draw(card.parts[0], w)).split('\n').map(l => l.trim()).filter(l => /\d$/.test(l) && !l.startsWith('pair'))
+  // room enough: every name whole
+  assert.ok(pairs.every(([p]) => rowsAt(60).some(l => l.includes(p))), rowsAt(60).join('\n'))
+  // too little room: the column is cut, and the four rows still read four different ways, each name's end kept
+  const narrow = rowsAt(28).map(l => l.replace(/^▌\s*/, '').replace(/\s+\d+\s+\d+$/, ''))
+  assert.equal(new Set(narrow).size, 4, narrow.join('\n'))
+  assert.ok(narrow.some(l => l.endsWith('Alpha13')) && narrow.some(l => l.endsWith('Bravo771')), narrow.join('\n'))
+  // the cut alone: at the end when that keeps values apart, else in the middle
+  assert.deepEqual(distinctCut(['abcdefgh', 'xyzdefgh'], 5), ['abcd…', 'xyzd…'])
+  assert.deepEqual(distinctCut(['abcdefgh', 'abcdxyzq'], 5), ['a…fgh', 'a…yzq'])
+})
 
 test('a citation whose key holds spaces and brackets is one mark, and its card opens the row behind the value it shows', () => {
   // Claude copied the key's words into the ref: still one link, nothing of it spills into the prose
