@@ -9,8 +9,9 @@
 //   a tray    {stack: [frame, ...]} or null
 //
 //   order(messages)        -> every mark position [{row, i}] in reading order; messages: [{row, marks}], oldest first
-//   step(list, at, dir)    -> the next position (dir 1) or the one before (dir -1), wrapping; from none, the first
-//                             mark of the latest message that has marks (dir 1) or the last mark (dir -1)
+//   step(list, at, dir)    -> the next position (dir 1) or the one before (dir -1), null past the first or the last;
+//                             from none, the first mark of the latest message that has marks (dir 1) or the last mark
+//   stepFrom(list, k, dir) -> the same from the k-th position of any list (marks and cards)
 //   open(frame)            -> a tray showing that frame alone
 //   push(tray, frame)      -> the frame over the tray's top (the same frame twice in a row is not stacked)
 //   back(tray)             -> the tray with its top removed, or null when that was the last card
@@ -35,7 +36,14 @@ export function step(list, at, dir = 1) {
     }
     return list[list.length - 1]
   }
-  return list[(k + (dir > 0 ? 1 : -1) + list.length) % list.length]
+  return stepFrom(list, k, dir)
+}
+
+// The steps stop at the ends: ] on the newest reply's last stop stays there. Going on into the oldest reply would open
+// a mark far above the screen, and the keys would then act on that reply, out of sight.
+export function stepFrom(list, k, dir = 1) {
+  const j = k + (dir > 0 ? 1 : -1)
+  return list && j >= 0 && j < list.length ? list[j] : null
 }
 
 export const open = frame => (frame ? { stack: [frame] } : null)

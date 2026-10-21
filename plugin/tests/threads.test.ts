@@ -138,3 +138,26 @@ test('a second ↵ while the thread\'s agent starts sends nothing more: the ques
   const file = JSON.parse(w.files[`${ROOT}/thimble/threads/${SESSION}/mark-aaaaaaaa-bbbb-cccc-dddd-q1-day-2026-06-18-n.json`]!)
   expect(file.asks.map((a: Any) => a.text)).toEqual(['why so high?'])
 })
+
+test('] stops at the newest reply\'s last mark: it never runs on into the first reply, whose marks are off screen', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, clock)
+  // a second reply with the same two marks
+  const NEWER = 'ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee'
+  await $.turn.start({ turnId: 't2', text: 'and then?' } as never)
+  await $.session.append({ door: 'prompt', uuid: 'pppppppp-0000-0000-0000-000000000001', origin: { kind: 'composer' }, message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'and then?' }] } } as never)
+  await $.session.append({ door: 'response', uuid: NEWER, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: MARKED }] } } as never)
+  await $.turn.complete({ turnId: 't2', answer: MARKED, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  // four ]: the newest reply's two marks, then it stays on the last one; a asks about the mark the tray shows
+  for (let n = 0; n < 4; n++) await press($, clock, edit(']'))
+  await press($, clock, edit('a'))
+  await clock.advance(2000)
+  await pane($, clock)
+  const ui = await mounted($)
+  await ui.input({ key: (await fieldOf($)).key, text: 'why this one?' })
+  await clock.settle()
+  const threads = Object.keys(w.files).filter(f => f.includes(`/thimble/threads/${SESSION}/`)).map(f => f.split('/').pop())
+  expect(threads).toEqual(['mark-ffffffff-bbbb-cccc-dddd-revisions.jsonl-L28.json'])
+})
