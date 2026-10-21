@@ -168,3 +168,21 @@ test('k.want asks the host for data not in hand; the host runs the program again
   assert.equal(again.wants, undefined)
   assert.match(gridText(renderTerm(again, { w: 40 })), /6543 rows/)
 })
+
+test('k.fmt rounds halves up on the decimal digits a reply shows, not on the binary value', () => {
+  const f = globalThis.DrawKit.fmt
+  // 7.925 is 7.92499… in binary, so toFixed(2) reads 7.92 while a reply that cites it reads 7.93
+  assert.deepEqual([f(7.925, { dp: 2 }), f(-7.925, { dp: 2 }), f(1.005, { dp: 2 }), f(9.995, { dp: 2 })], ['7.93', '-7.93', '1.01', '10.00'])
+  assert.deepEqual([f(17.925), f(0.0012345), f(95.4321), f(1546)], ['17.93', '0.001235', '95.43', '1,546'])
+  assert.deepEqual([f(1150, { compact: true }), f(0.07925, { pct: true, dp: 2 })], ['1.2k', '7.93%'])
+})
+
+test('a share that is not zero never reads 0%', () => {
+  const f = globalThis.DrawKit.fmt
+  assert.deepEqual([f(7 / 8571, { pct: true, dp: 0 }), f(0.0004, { pct: true, dp: 1 }), f(0, { pct: true, dp: 0 }), f(0.006, { pct: true, dp: 0 })], ['<1%', '<0.1%', '0%', '1%'])
+  // the label card's note: 7 of 8,571 records
+  const d = runProgram({ id: 'share', program: "return k.bars([{ id: 'a', label: 'yes', value: 7, note: k.fmt(7 / 8571, { pct: true, dp: 0 }) }, { id: 'b', label: 'no', value: 8564, note: k.fmt(8564 / 8571, { pct: true, dp: 0 }) }])", data: {} }, { w: 60, h: 10 })
+  const t = gridText(renderTerm(d, { w: 60 }))
+  assert.match(t, /yes.*<1%/)
+  assert.doesNotMatch(t, / 0%/)
+})

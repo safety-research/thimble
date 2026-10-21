@@ -80,6 +80,23 @@
     return out.join('')
   }
   function sep3(i) { return i.length > 3 ? i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : i }
+  // x >= 0 to dp decimals, half away from zero on the decimal digits a person reads (7.925 -> "7.93"), as the reply
+  // that cites the number rounds it. toFixed rounds the binary value (7.92499…) and so gives "7.92".
+  function fixed(x, dp) {
+    const s = String(x)
+    if (/e/i.test(s)) return x.toFixed(dp)
+    const [ip, fp = ''] = s.split('.')
+    if (fp.length <= dp) return dp ? ip + '.' + fp.padEnd(dp, '0') : ip
+    const d = (ip + fp.slice(0, dp)).split('')
+    if (fp.charCodeAt(dp) >= 53) {
+      let i = d.length - 1
+      while (i >= 0 && d[i] === '9') d[i--] = '0'
+      if (i < 0) d.unshift('1')
+      else d[i] = String(+d[i] + 1)
+    }
+    const n = d.length - dp
+    return d.slice(0, n).join('') + (dp ? '.' + d.slice(n).join('') : '')
+  }
   // Numbers for people: 1546 -> "1,546", 95.4321 -> "95.43". o: {dp, pct, sign, compact, raw}
   function fmt(v, o) {
     o = o || {}
@@ -87,16 +104,25 @@
     if (typeof v !== 'number') { const n = num(v); if (!isFinite(n) || o.raw) return String(v); v = n }
     if (!isFinite(v)) return isNaN(v) ? 'NaN' : (v > 0 ? '∞' : '-∞')
     let suffix = ''
-    if (o.pct) { v = v * 100; suffix = '%' }
+    // a share times 100, without the binary tail the product can carry (0.07925 * 100 = 7.924999…)
+    if (o.pct) { v = +(v * 100).toPrecision(12); suffix = '%' }
     if (o.compact && Math.abs(v) >= 1000) {
       for (const [d, u] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']]) {
-        if (Math.abs(v) >= d) { const x = v / d; return (o.sign && v > 0 ? '+' : '') + String(+x.toFixed(Math.abs(x) >= 100 ? 0 : 1)) + u + suffix }
+        if (Math.abs(v) >= d) { const x = v / d; return (o.sign && v > 0 ? '+' : x < 0 ? '-' : '') + String(+fixed(Math.abs(x), Math.abs(x) >= 100 ? 0 : 1)) + u + suffix }
       }
     }
     let s
-    if (o.dp != null) s = Math.abs(v).toFixed(clamp(int(o.dp, 0), 0, 12))
-    else if (Number.isInteger(v)) s = String(Math.abs(v))
-    else s = String(Math.abs(+v.toPrecision(4)))
+    if (o.dp != null) {
+      const dp = clamp(int(o.dp, 0), 0, 12)
+      s = fixed(Math.abs(v), dp)
+      // a share that is not zero never reads 0%: it reads "<1%" (dp 0), "<0.1%" (dp 1)
+      if (o.pct && v > 0 && +s === 0) return '<' + (dp ? '0.' + '0'.repeat(dp - 1) + '1' : '1') + suffix
+    } else if (Number.isInteger(v)) s = String(Math.abs(v))
+    else {
+      // four significant digits, rounded as fixed() rounds: the decimals toPrecision(4) keeps
+      const t = Math.abs(v).toPrecision(4)
+      s = t.indexOf('e') >= 0 ? t : String(+fixed(Math.abs(v), (t.split('.')[1] || '').length))
+    }
     if (s.indexOf('e') >= 0) return String(v) + suffix
     const p = s.split('.')
     return (v < 0 ? '-' : (o.sign && v > 0 ? '+' : '')) + sep3(p[0]) + (p[1] ? '.' + p[1] : '') + suffix
