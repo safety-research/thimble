@@ -288,8 +288,21 @@ return k.stack(parts)`
 const CODE_PROGRAM = `
 const parts = []
 if (data.head) parts.push(k.text(data.head, { wrap: false }))
-const nw = String(data.code.length).length
-data.code.forEach((l, i) => parts.push(k.beside(k.text('{dim:' + String(i + 1).padStart(nw) + '}', { w: nw, wrap: false }), k.text(l || ' ', { wrap: false }), { gap: 2 })))
+const from = data.from || 0
+if (data.above) parts.push(k.text('{dim:' + k.escape(data.above) + '}', { wrap: false }))
+const nw = String(data.code.length + from).length
+data.code.forEach((l, i) => parts.push(k.beside(k.text('{dim:' + String(i + 1 + from).padStart(nw) + '}', { w: nw, wrap: false }), k.text(l || ' ', { wrap: false }), { gap: 2 })))
+if (data.more) parts.push(k.text('{dim:' + k.escape(data.more) + '}', { wrap: false }))
+return k.stack(parts)`
+
+// what a query printed: a few of its lines, those that hold a cited value marked in the gutter, the value lit
+const OUTPUT_PROGRAM = `
+const parts = []
+if (data.head) parts.push(k.text(data.head, { wrap: false }))
+for (const l of data.lines) {
+  if (l.gap) parts.push(k.text('{dim:' + k.escape(l.gap) + '}', { wrap: false }))
+  else parts.push(k.beside(k.text(l.hot ? '{accent:▌}' : ' ', { w: 1 }), k.text(l.text || ' ', { wrap: false }), { gap: 1 }))
+}
 if (data.more) parts.push(k.text('{dim:' + k.escape(data.more) + '}', { wrap: false }))
 return k.stack(parts)`
 
@@ -438,29 +451,103 @@ function rowsSection(r, what, room) {
   return { id: 'rows', key: SECTION_KEYS.rows, words: w.many, parts: [{ program: RECORDS_PROGRAM, data: { head, recs, max, empty: r.why || `no ${w.many} stand behind it`, more: '' } }] }
 }
 
-/** The code section: the query that made the value, its lines numbered and colored as code is, then the card or the
- *  binding it comes through and the kernel's notes. The files it reads are in the code itself, so no line repeats them.
+/** A printed line as markup: the spans that hold a cited value (`at`, [[start, end]]) lit, the rest as printed. */
+function outLine(text, at) {
+  const t = String(text ?? '').replace(/\t/g, '    ')
+  let out = ''
+  let i = 0
+  for (const [a, b] of (Array.isArray(at) ? at : []).filter(x => Array.isArray(x) && x[0] >= i).sort((x, y) => x[0] - y[0])) {
+    out += esc(t.slice(i, a)) + `{accent:**${esc(t.slice(a, b))}**}`
+    i = b
+  }
+  return out + esc(t.slice(i))
+}
+
+/** The output part of a query: its printed lines from the top, `fit` of them, those that hold a cited value (resolve's
+ *  `shown.lines`) marked and always in view (the lines before them cut, a gap saying how many). */
+export function outputPart(query, shown, fit, head = '') {
+  const all = String(query?.stdout || '').replace(/\n+$/, '').split('\n')
+  if (!String(query?.stdout || '').trim()) return null
+  const hot = new Map((shown?.lines || []).map(l => [l.n, l.at]))
+  const line = n => ({ text: outLine(all[n - 1].slice(0, 300), hot.get(n)), hot: hot.has(n) })
+  const want = Math.max(2, fit)
+  const nums = all.map((_, j) => j + 1)
+  const marked = nums.filter(n => hot.has(n))
+  let pick = nums.slice(0, want)
+  // a marked line past the room: the first lines, a gap, the marked lines (each with the line after it while room is left)
+  if (marked.length && marked.some(n => !pick.includes(n))) {
+    const keep = marked.slice(0, Math.max(1, want - 2))
+    const top = nums.slice(0, Math.max(0, want - 1 - keep.length)).filter(n => n < keep[0])
+    pick = [...top, ...keep]
+  }
+  const lines = []
+  pick.forEach((n, j) => {
+    if (j && n > pick[j - 1] + 1) lines.push({ gap: `… ${plural(n - pick[j - 1] - 1, 'line')}` })
+    else if (!j && n > 1) lines.push({ gap: `… ${plural(n - 1, 'line')}` })
+    lines.push(line(n))
+  })
+  const rest = all.length - pick[pick.length - 1]
+  return { program: OUTPUT_PROGRAM, data: { head, lines, more: rest > 0 ? `… ${plural(rest, 'more line')}` : '' } }
+}
+
+/** The one line a person needs about where a value comes from, when something is wrong with it: a file the query
+ *  read changed since it ran. The kernel's other notes are about how it found rows, and say nothing to a person. */
+function staleLine(r, q) {
+  const stale = (q && Array.isArray(q.stale) && q.stale) || ((r.chain || []).find(c => c.step === 'query') || {}).stale
+  return Array.isArray(stale) && stale.length ? `{dim:${esc(stale.join(', '))} changed since ${esc(q?.id || 'the query')} ran, so this output may be out of date}` : ''
+}
+
+/** The code section: the query that made the value, its lines numbered and colored as code is, then what it printed
+ *  and the head of its result, the cited value marked there; then the card or the binding it comes through. The files
+ *  it reads are in the code itself, so no line repeats them.
  *  `note`: the line the tray adds under the code the first time a session shows a query that calls load or tally. */
 function codeSection(r, query, ref, room) {
   const q = query || (r.chain || []).find(c => c.step === 'query') || null
   const code = String(q?.code || '').replace(/\t/g, '    ').replace(/\n+$/, '').split('\n')
-  const fit = Math.max(3, room - 5)
+  const outN = q?.stdout ? String(q.stdout).replace(/\n+$/, '').split('\n').length : 0
+  const outFit = Math.min(outN, Math.max(3, Math.floor((room - 3) / 2)))
+  const cut = Math.max(3, room - 3 - (outFit ? outFit + 2 : 0))
+  // one line past the room shows whole: the line saying it was cut would take its row
+  const fit = code.length === cut + 1 ? code.length : cut
   const lines = []
   const chain = (r.chain || []).filter(c => c.step === 'object' || c.step === 'binding')
   for (const c of chain) {
     if (c.step === 'object') lines.push(`{dim:card} ${esc(c.title || c.id)}${c.at ? ` {dim:at} ${esc(c.at)}` : ''}`)
     else if (c.step === 'binding') lines.push(`{dim:bound from} ${esc(c.from)}`)
   }
-  for (const n of (r.notes || []).slice(0, 2)) lines.push(`{dim:${esc(short(n, 220))}}`)
+  const stale = staleLine(r, q)
+  if (stale) lines.push(stale)
   const head = q ? `{dim:${esc(q.id || '')} ·} ${esc(q.about || 'the query')}` : `{dim:no query made this value}`
   const shown = q?.code ? code.slice(0, fit) : []
+  const out = q?.code ? outputPart(q, r.shown, outFit, '{dim:output}') : null
   return {
     id: 'code', key: SECTION_KEYS.code, words: 'code',
     ...(shown.some(l => HELPERS.test(l)) ? { note: HELPERS_NOTE } : {}),
     parts: [
       { program: CODE_PROGRAM, data: { head, code: shown.map(codeMarkup), more: code.length > fit ? `… ${plural(code.length - fit, 'more line')}` : '' } },
+      ...(out ? [out] : []),
       ...(lines.length ? [{ program: LINES_PROGRAM, data: { lines } }] : []),
     ],
+  }
+}
+
+/** A citation whose values only the query's printed text holds: the end of its code (up to its last print) and the
+ *  lines it printed that hold them, the values lit, so the person sees where they came from. */
+function printedCard(label, right, query, shown, room) {
+  const code = String(query?.code || '').replace(/\t/g, '    ').replace(/\n+$/, '').split('\n')
+  const outFit = Math.min(3, shown.lines.length)
+  const fit = Math.max(2, room - 4 - outFit)
+  let end = code.length
+  for (let j = code.length - 1; j >= 0; j--) if (/\bprint\s*\(/.test(code[j])) { end = j + 1; break }
+  const start = Math.max(0, end - fit)
+  const head = `{dim:${esc(query?.id || '')} ·} ${esc(short(query?.about || 'the query', 80))}`
+  const out = outputPart(query, { lines: shown.lines }, outFit, `{dim:${esc(query?.id || 'it')} printed}`)
+  // only the marked lines: a printed card shows where the value came from, not the whole output
+  out.data.lines = out.data.lines.filter(l => l.hot)
+  out.data.more = ''
+  return {
+    title: label, right, links: [],
+    parts: [{ program: CODE_PROGRAM, data: { head, from: start, above: start ? `… ${plural(start, 'line')} above` : '', code: code.slice(start, end).map(codeMarkup), more: '' } }, out],
   }
 }
 
@@ -528,6 +615,13 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
       return { title: label || `${query?.id || ''} ${col}`, right, parts: [{ program: SERIES_PROGRAM, data: { about, rows, room: room - 2, labelW, col: col || 'value', first, behind: behindLine(r, files) } }], sections, links: [] }
     }
     const values = cols.filter(c => !keyCols.includes(c))
+    // a citation of the whole query: where it shows the values the words state (resolve's `shown`), its output rows
+    // that hold them, else the lines it printed
+    const sh = r.shown && typeof r.shown === 'object' ? r.shown : null
+    const held = hot < 0 && sh && Array.isArray(sh.rows) ? sh.rows.filter(i => Number.isInteger(i) && table[i]) : []
+    if (hot < 0 && !held.length && sh && Array.isArray(sh.lines) && sh.lines.length && query?.code) {
+      return { ...printedCard(label, right, query, sh, room), sections }
+    }
     const at = hot >= 0 && table[hot] ? hot : kind === 'series' ? 0 : -1
     const value = at >= 0 && table[at] ? table[at][col] : (r.chain || []).find(c => c.step === 'query' && 'value' in c)?.value
     // the cited value as the reply wrote it (a share as a percent when the words write a percent), its column alike
@@ -541,15 +635,23 @@ export function sourceCard({ ref: wrote, label, resolved, query, object, lines, 
     // the columns that fit: the key's first, then the cited one, then the others
     const order = [...keyCols, ...(col && !keyCols.includes(col) ? [col] : []), ...values.filter(c => c !== col)].slice(0, 5)
     const fit = Math.max(2, room - (about ? 1 : 0) - 1 - 2)
+    const hots = held.length ? held : [hot]
     let start = 0
-    if (table.length > fit) start = Math.max(0, Math.min(table.length - fit, hot - Math.floor(fit / 2)))
-    const win = table.slice(start, start + fit)
-    const rows = win.map((t, j) => ({ cells: order.map(c => show(c, t[c])), hot: start + j === hot }))
+    if (table.length > fit) start = Math.max(0, Math.min(table.length - fit, hots[0] - Math.floor((fit - (hots[hots.length - 1] - hots[0])) / 2)))
+    let pick = table.slice(start, start + fit).map((_, j) => start + j)
+    // rows that hold the values too far apart for one window: each of them, a gap row between
+    if (held.length && held.some(i => !pick.includes(i))) pick = held.slice(0, fit)
+    const gap = order.map(() => '⋯')
+    const rows = []
+    pick.forEach((i, j) => {
+      if (j && i > pick[j - 1] + 1) rows.push({ cells: gap, hot: false })
+      rows.push({ cells: order.map(c => show(c, table[i][c])), hot: hots.includes(i) })
+    })
     // the rows around the cited one; the whole output is one key away (expand)
     const more = ''
     return {
       title: label, right, sections, links: [],
-      parts: [{ program: QUERY_PROGRAM, data: { about, cols: order.map(c => ({ label: short(c, 20), align: table.some(t => typeof t[c] === 'number') ? 'right' : 'left' })), rows, hotCol: order.indexOf(col), more, behind: behindLine(r, files) } }],
+      parts: [{ program: QUERY_PROGRAM, data: { about, cols: order.map(c => ({ label: short(c, 20), align: table.some(t => typeof t[c] === 'number') ? 'right' : 'left' })), rows, hotCol: order.indexOf(held.length && sh.cols?.[0] ? sh.cols[0] : col), more, behind: behindLine(r, files) } }],
     }
   }
   if (kind === 'object') {
