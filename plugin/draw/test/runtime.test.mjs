@@ -186,3 +186,20 @@ test('a share that is not zero never reads 0%', () => {
   assert.match(t, /yes.*<1%/)
   assert.doesNotMatch(t, / 0%/)
 })
+
+test('a flow\'s boxes widen to show their notes whole when the frame has room', () => {
+  const nodes = [
+    { id: 'a', label: 'write step', note: 'packs the order, checks the totals, writes the batch file' },
+    { id: 'b', label: 'pickup()', note: 'after each tick, reads new batches and sorts them' },
+  ]
+  const graph = o => `return k.graph({ nodes: ${JSON.stringify(nodes)}, edges: [{ from: 'a', to: 'b' }] }, ${JSON.stringify(o)})`
+  const draw = (o, w) => { const d = runProgram({ id: 'flow', program: graph(o), data: {} }, { w, h: 40 }); return { d, t: gridText(renderTerm(d, { w })) } }
+  const wide = draw({ dir: 'down' }, 100)
+  assert.equal(wide.d.error, undefined)
+  assert.doesNotMatch(wide.t, /…/)
+  assert.match(wide.t.replace(/[│\s]+/g, ' '), /writes the batch file/)
+  // a width the program set is kept, and a narrow frame still fits, its notes cut as before
+  assert.match(draw({ dir: 'down', nodeW: 18 }, 100).t, /…/)
+  const narrow = draw({ dir: 'down' }, 26)
+  assert.ok(narrow.t.split('\n').every(l => l.length <= 26) && !narrow.d.warnings.some(w => /cut at the right/.test(w)))
+})

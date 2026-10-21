@@ -34,6 +34,8 @@
   const MAX_RECORDS = 200
   const MAX_SERIES_POINTS = 2000
   const MAX_KNOB = 2000
+  // the widest line a k.graph box widens to by itself, to show its label and note whole (o.nodeW sets it outright)
+  const WIDE_NODE = 40
   // the refs one part of a map carries (the rows of every thread through it), as many as a selection resolves
   const MAX_PART_REFS = 500
   const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
@@ -2393,6 +2395,17 @@
       if (p.w <= W) { plan = p; break }
     }
     if (!plan) { plan = graphPlan(narrowest.dir, narrowest.nw); warn(ctx, `k.graph needs ${plan.w} columns and has ${W}; it is cut at the right`) }
+    else if (o.nodeW == null) {
+      // boxes as wide as their words need, up to WIDE_NODE, where the width has room: a note cut at 18 columns beside an
+      // empty half of the frame hides what the program wrote
+      let nw0 = plan.nw
+      const whole = s => { const t = clean(String(s)).replace(/\n/g, ' '); return wrapWords(t, nw0, 2).join(' ') === t.split(/\s+/).filter(Boolean).join(' ') }
+      const texts = V.filter(isBox).flatMap(v => [v.node.raw.label != null ? v.node.raw.label : v.node.id].concat(v.node.raw.note != null ? [v.node.raw.note] : []))
+      while (nw0 < WIDE_NODE && !texts.every(whole)) nw0++
+      let lo = plan.nw, hi = nw0
+      while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (graphPlan(plan.dir, mid).w <= W) lo = mid; else hi = mid - 1 }
+      plan = graphPlan(plan.dir, lo)
+    }
     return graphDraw(plan)
 
     // the boxes' sizes and places and the edges' tracks, for one direction and one box width. Positions are in the
