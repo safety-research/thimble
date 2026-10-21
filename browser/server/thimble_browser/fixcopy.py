@@ -161,7 +161,7 @@ async def fix_use(t: Any, args: dict[str, Any]) -> Result:
 
     slug = str(args.get("slug"))
     _copy(slug)
-    said = fix.use(slug)
+    said = fix.use(slug, plugin_dir=False)
     from .hub import hub  # noqa: PLC0415
 
     hub.publish(t.ws, {"type": "fix", "slug": slug, "status": fix.load(slug).get("status")})
@@ -171,7 +171,7 @@ async def fix_use(t: Any, args: dict[str, Any]) -> Result:
 async def fix_undo(t: Any, args: dict[str, Any]) -> Result:
     from .kernel_fix import fix  # noqa: PLC0415
 
-    said = fix.undo()
+    said = fix.undo(plugin_dir=False)
     from .hub import hub  # noqa: PLC0415
 
     hub.publish(t.ws, {"type": "fix", "slug": "", "status": "undone"})

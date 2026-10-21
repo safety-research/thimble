@@ -252,7 +252,7 @@ def on(env: Path, monkeypatch: pytest.MonkeyPatch):
     """A fix that is on (the marketplace points at its copy), whose change is one line of rows.py, left uncommitted."""
     monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
     undone: list[str] = []
-    monkeypatch.setattr(FX, "undo", lambda: undone.append("undo") or "back")
+    monkeypatch.setattr(FX, "undo", lambda plugin_dir=None: undone.append("undo") or "back")
     fx = FX.new("Rows reads a semicolon")
     rows = Path(fx["worktree"]) / "plugin" / "rows.py"
     rows.write_text(rows.read_text().replace("split(',')", "split(';')"))
@@ -299,3 +299,16 @@ def test_follow_goes_back_when_the_quick_tests_fail_after_the_replay(on, monkeyp
     assert "no longer fits thimble 0.11.0" in FX.follow()
     assert undone == ["undo"] and FX.load(fx["slug"])["base"] == fx["base"]
     assert not (Path(fx["worktree"]) / "plugin" / "claims.py").exists()
+
+
+def test_a_caller_that_is_no_session_says_so_and_uses_the_marketplace(env: Path, tmp_path: Path, monkeypatch):
+    # the browser's server runs from a checkout, which looks like --plugin-dir; it passes plugin_dir=False
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    stub = tmp_path / "claude-stub"
+    stub.write_text(CLAUDE_STUB.format(log=tmp_path / "claude.log"))
+    stub.chmod(0o755)
+    monkeypatch.setenv("THIMBLE_CLAUDE", str(stub))
+    assert FX.from_plugin_dir()
+    fx = FX.new("Coverage opens a group")
+    assert "/reload-plugins" in FX.use(fx["slug"], plugin_dir=False) and FX.active_slug() == fx["slug"]
+    assert "back to the release" in FX.undo(plugin_dir=False) and FX.active_slug() is None

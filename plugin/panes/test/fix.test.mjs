@@ -87,6 +87,7 @@ test('/thimble:fix: no words lists the fixes, submit undo and try act on a fix, 
 test('a fix whose copy has no change is submitted as a request: an issue alone, with no pull request', () => {
   const { d, text } = run({ ...STORE, diff: '' })
   assert.match(text, /Submit your request/)
+  assert.match(run({ ...STORE, scan: [] }).text, /Privacy scan · nothing found/)
   assert.doesNotMatch(text, /Draft pull request/)
   assert.match(text, /y send · w save as a file · e edit · esc not now/)
   assert.deepEqual(keys(d).sort(), ['e', 'k', 'w', 'y'])

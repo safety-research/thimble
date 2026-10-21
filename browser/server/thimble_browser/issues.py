@@ -456,7 +456,7 @@ def register(ctx: Any) -> None:
 
         ctx.ws_of(c)
         try:
-            said = fix.use(slug)
+            said = fix.use(slug, plugin_dir=False)
         except fix.FixError as e:
             raise HTTPException(409, str(e)) from None
         hub.publish(c, {"type": "fix", "slug": slug, "status": fix.load(slug).get("status")})
@@ -468,7 +468,7 @@ def register(ctx: Any) -> None:
 
         ctx.ws_of(c)
         try:
-            said = fix.undo()
+            said = fix.undo(plugin_dir=False)
         except fix.FixError as e:
             raise HTTPException(409, str(e)) from None
         hub.publish(c, {"type": "fix", "slug": "", "status": "undone"})

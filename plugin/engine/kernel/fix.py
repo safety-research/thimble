@@ -326,7 +326,7 @@ def _restart(folder: str | Path) -> str:
     return f"claude --continue --plugin-dir {folder}"
 
 
-def use(slug: str) -> str:
+def use(slug: str, plugin_dir: bool | None = None) -> str:
     """Turn the fix's copy on. An install (from GitHub, or a folder marketplace such as scripts/install.sh --local):
     point Claude Code's thimble marketplace at the copy, as install.sh --local does with a checkout. Claude Code reads a
     plugin from a folder marketplace in place, so later edits in the copy load on the next /reload-plugins too.
@@ -335,7 +335,9 @@ def use(slug: str) -> str:
     fx = load(slug)
     if not fx.get("worktree"):
         raise FixError(f"{slug} is a request with no change: there is nothing to turn on")
-    if from_plugin_dir():
+    # plugin_dir: whether the caller is a Claude Code session started with --plugin-dir; None asks this plugin's own
+    # place. A caller that is no Claude Code session (the browser's server, which runs from a checkout) passes False.
+    if from_plugin_dir() if plugin_dir is None else plugin_dir:
         fx["status"] = "applied" if fix_of_plugin() == slug else "ready"
         fx["via"] = "plugin-dir"
         save(fx)
@@ -357,8 +359,8 @@ def use(slug: str) -> str:
     return f"thimble now runs the fix {slug} from {fx['worktree']}/plugin. {RELOAD} `thimble fix undo` goes back to the release."
 
 
-def undo() -> str:
-    if from_plugin_dir():
+def undo(plugin_dir: bool | None = None) -> str:
+    if from_plugin_dir() if plugin_dir is None else plugin_dir:
         slug = fix_of_plugin()
         if not slug:
             return "This session runs no fix: thimble is the one --plugin-dir names."
@@ -456,23 +458,23 @@ def _commit_local(wt: Path, slug: str) -> None:
         git("-c", "user.name=thimble", "-c", "user.email=thimble@localhost", "commit", "-q", "-m", f"thimble fix {slug}", cwd=wt)
 
 
-def _back_to_release(fx: dict[str, Any]) -> str:
+def _back_to_release(fx: dict[str, Any], plugin_dir: bool | None = None) -> str:
     """Turn the fix off. An install goes back to the release at once; a --plugin-dir session needs the one command."""
-    if fix_of_plugin() == fx["slug"] and from_plugin_dir():
+    if fix_of_plugin() == fx["slug"] and (from_plugin_dir() if plugin_dir is None else plugin_dir):
         return f"; quit and run: {_restart(Path(fx.get('source') or '') / 'plugin')}"
-    undo()
+    undo(plugin_dir)
     return ""
 
 
-def follow(force: bool = False) -> str | None:
+def follow(force: bool = False, plugin_dir: bool | None = None) -> str | None:
     """Keep the fix that is on with the newest release, in one line for the person, or None when no fix is on.
 
     At most once a day (or at once with force), thimble fetches the newest release and replays the fix's change on it
     in the copy. In the release already (the replay is empty): back to the plain release. Replays and the quick tests
     pass: the newest release plus the fix. Does not replay, or the tests fail: back to the plain release, the copy kept
     as it was for /thimble:fix to redo it."""
-    slug = on_slug()
-    if not slug:
+    slug = active_slug() if plugin_dir is False else on_slug()
+    if not slug or not fix_dir(slug).is_dir():
         return None
     fx = load(slug)
     title, wt = fx["title"], Path(fx.get("worktree") or "")
@@ -499,7 +501,7 @@ def follow(force: bool = False) -> str | None:
         run(["git", "rebase", "--abort"], cwd=wt, check=False)
     elif run(["git", "diff", "--quiet", commit, "HEAD"], cwd=wt, check=False).returncode == 0:
         git("reset", "-q", "--hard", before, cwd=wt)
-        how = _back_to_release(fx)
+        how = _back_to_release(fx, plugin_dir)
         fx = load(slug)
         fx.update(status="merged", merged_in=version)
         save(fx)
@@ -510,7 +512,7 @@ def follow(force: bool = False) -> str | None:
         return on_line(version)
     else:
         git("reset", "-q", "--hard", before, cwd=wt)
-    how = _back_to_release(fx)
+    how = _back_to_release(fx, plugin_dir)
     fx = load(slug)
     fx.update(status="stale", stale_on=version)
     save(fx)

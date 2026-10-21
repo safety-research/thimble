@@ -97,7 +97,7 @@ export function program(k, data) {
   // the privacy scan: each hit, already removed, with what took its place
   const hits = data.scan
   const kept = hits.filter(h => h.kept).length
-  out.push(k.space(1, 1), k.text(`**Privacy scan** {dim:· ${hits.length} found · ${kept ? `${kept} kept, the rest removed` : 'all removed'}}`, { wrap: false }))
+  out.push(k.space(1, 1), k.text(`**Privacy scan** {dim:· ${hits.length ? `${hits.length} found · ${kept ? `${kept} kept, the rest removed` : 'all removed'}` : 'nothing found'}}`, { wrap: false }))
   const fw = Math.max(4, Math.min(32, Math.floor((W - 20) / 2), Math.max(0, ...hits.map(h => Array.from(String(h.found)).length))))
   hits.forEach(h => {
     const n = st.keeping ? toKeep.indexOf(h) : -1
