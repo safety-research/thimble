@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { barLine, fitBar, previewBarWidth } from '../host.js'
 
 const verbs = [{ key: 'v', words: 'visualize' }, { key: 's', words: 'squeeze' }, { key: 'c', words: '29 claims', short: '29 claims' }]
-const counts = [{ id: 'cov', text: 'r coverage 4/4 files ████████' }, { id: 'labels', text: 'l 3 labels' }]
+const counts = [{ id: 'cov', text: 'r coverage 100% (4/4 files)' }, { id: 'labels', text: 'l 3 labels' }]
 
 test('the reply the keys act on gives way before the counts: its words are cut at their end, and the labels stay', () => {
   const nav = { key: '{ }', words: "reply 2 of 4: The writers didn't change much over the run", short: 'reply 2 of 4', yields: true }
@@ -34,7 +34,7 @@ test('beside a side panel, the bar says the pane\'s plain name where its thread\
 })
 
 test('the settings preview, drawn at the real bar\'s width beside the panel, drops coverage where the bar does', () => {
-  const bar = { label: 'thimble', left: [{ key: 'a', words: 'ask' }, { key: '[', words: 'previous' }], counts: [{ id: 'threads', text: '2 threads' }, { id: 'cov', text: 'r coverage 12/40 files ▆▆▃▁' }] }
+  const bar = { label: 'thimble', left: [{ key: 'a', words: 'ask' }, { key: '[', words: 'previous' }], counts: [{ id: 'threads', text: '2 threads' }, { id: 'cov', text: 'r coverage 30% (12/40 files)' }] }
   // a conversation of 50 columns beside the panel; the band draws the bar 1 column narrower than its viewport
   const real = fitBar(bar, 50 - 1)
   const preview = fitBar(bar, previewBarWidth(50, 1))

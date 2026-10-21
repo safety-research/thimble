@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { amounts, barCells, fileWords, groupLine, itemId, sentence, sizeOf, typeMix } from '../coverage.js'
+import { amounts, fileWords, groupLine, itemId, sentence, sizeOf, topShares } from '../coverage.js'
 
 const MIXED = [{ unit: 'records', units: 14591, seen: 3 }, { unit: 'pages', units: 12, seen: 2 }, { unit: 'file', units: 2, seen: 1 }]
 
@@ -18,18 +18,9 @@ test('the sentence leads with the files touched, as the bar does, then what was 
   assert.equal(sentence({ files: 7, touched_files: 0, seen_files: 0, units: [{ unit: 'rows', units: 891, seen: 0 }] }, 's'), "Claude touched 0 of the folder's 7 files.")
 })
 
-test("the bar's strip fills by the share of files touched: an image weighs as much as a log of 14,591 records", () => {
-  // a log with 3 of its 14,591 records read, and 2 images, one seen: 2 of 3 files touched
-  const types = [{ type: 'jsonl', files: 1, seen_files: 1, touched: 1, rows: 14591, seen_rows: 3 }, { type: 'image', files: 2, seen_files: 1, touched: 1, rows: 2, seen_rows: 1 }]
-  const cells = barCells(typeMix(types), 6)
-  assert.deepEqual(cells.map(c => [c.tone, c.seen, c.n]), [['c1', true, 2], ['c2', true, 2], ['c2', false, 2]])
-  // touched files first, so the strip fills from the left: 3 of 7 files touched is 3 of 8 cells; the csv was only
-  // counted over, with no line read, and lights as much as the jsonl Claude read
-  const seven = [{ type: 'jsonl', files: 1, seen_files: 1, touched: 1, rows: 2400 }, { type: 'csv', files: 1, seen_files: 0, touched: 1, rows: 240 }, { type: 'image', files: 5, seen_files: 0, touched: 1, rows: 5 }]
-  assert.deepEqual(barCells(typeMix(seven), 8).map(c => [c.tone, c.seen, c.n]), [['c1', true, 1], ['c2', true, 1], ['c3', true, 1], ['c3', false, 5]])
-  // a full count and nothing read: the strip is lit, not empty
-  const counted = [{ type: 'csv', files: 1, seen_files: 0, touched: 1, rows: 891 }]
-  assert.deepEqual(barCells(typeMix(counted), 4).map(c => [c.seen, c.n]), [[true, 4]])
+test('the top has two shares of the files, as the bar counts them: read into Claude\'s context, and searched or computed over', () => {
+  assert.deepEqual(topShares({ files: 996, seen_files: 4, touched_files: 13 }), [["read into Claude's context", 4 / 996, 4, 996], ['searched or computed over', 13 / 996, 13, 996]])
+  assert.deepEqual(topShares({ files: 0 }).map(r => r[1]), [0, 0])
 })
 
 test('a group and a file say how much in their unit, never which rows', () => {
@@ -43,28 +34,42 @@ test('a group and a file say how much in their unit, never which rows', () => {
   assert.equal(fileWords({ status: 'not read' }), 'none')
 })
 
-test('a folder of a few files lists them all; a large one lists the touched groups first and the rest on one line, each opening on Enter', async () => {
+test('a folder of a few files lists them all; a large one is a tree of its top folders, each opening one level on Enter, its untouched files on one line', async () => {
   const { listItems } = await import('../coverage.js')
-  const file = (path, o = {}) => ({ path, folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : './', type: path.split('.').pop(), status: 'not read', ...o })
+  const file = (path, o = {}) => ({ path, folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : './', type: path.split('.').pop(), unit: 'lines', units: 3, status: 'not read', ...o })
   // four files: no group to open
   const few = listItems({ files: [file('a.jsonl', { status: 'seen' }), file('b.csv'), file('c.md'), file('d.png')], folder: [] }, 'folder', [], 20)
   assert.deepEqual(few.map(x => x.kind), ['file', 'file', 'file', 'file'])
-  // 400 files in 40 folders, Claude touched two of them: those first, the other 38 folders on one line
-  const files = [file('runs/r01/x.jsonl', { status: 'seen' }), file('runs/r02/y.jsonl', { status: 'computed' })]
+  // 400 files in 40 run folders under runs/, and 5 under tools/; Claude read one and searched one, both in runs/
+  const files = [file('runs/r01/x.jsonl', { status: 'seen', touched: true, read: 0.5, counted: 0.5 }), file('runs/r02/y.jsonl', { status: 'searched', touched: true }), file('notes.md', { status: 'seen', touched: true, read: 1, counted: 1 })]
   const rest = { path: [], unit: [], units: [] }
-  for (let r = 0; r < 40; r++) for (let i = 0; i < 10; i++) if (!((r === 1 && i === 0) || (r === 2 && i === 0))) { rest.path.push(`runs/r${String(r).padStart(2, '0')}/f${i}.txt`); rest.unit.push('lines'); rest.units.push(3) }
-  const folder = Array.from({ length: 40 }, (_, r) => ({ key: `runs/r${String(r).padStart(2, '0')}/`, files: 10, touched: r === 1 || r === 2 ? 1 : 0 }))
-    .sort((a, b) => b.touched - a.touched)
-  const data = { files, rest, folder }
+  const push = p => { rest.path.push(p); rest.unit.push('lines'); rest.units.push(3) }
+  for (let r = 0; r < 40; r++) for (let i = 0; i < 10; i++) if (!((r === 1 && i === 0) || (r === 2 && i === 0))) push(`runs/r${String(r).padStart(2, '0')}/f${i}.txt`)
+  for (let i = 0; i < 5; i++) push(`tools/t${i}.py`)
+  push('LICENSE')
+  const data = { files, rest }
+  // the top: its folders, those touched first, then its files touched, then one line for the rest of its files
   const top = listItems(data, 'folder', [], 20)
-  assert.deepEqual(top.map(x => x.id), [itemId('g', 'runs/r01/'), itemId('g', 'runs/r02/'), 'rest'])
-  assert.equal(top[2].files, 380)
-  assert.equal(top[2].groups, 38)
-  // Enter on a group opens its files under it; on the line of the others, their folders
-  const open = listItems(data, 'folder', ['runs/r01/', 'rest'], 20)
-  assert.deepEqual(open.slice(0, 3).map(x => x.id), [itemId('g', 'runs/r01/'), itemId('f', 'runs/r01/x.jsonl'), itemId('f', 'runs/r01/f1.txt')])
-  assert.equal(open.filter(x => x.kind === 'file').length, 10)
-  assert.equal(open.filter(x => x.kind === 'group' && x.depth === 1).length, 38)
+  assert.deepEqual(top.map(x => x.id), [itemId('g', 'runs/'), itemId('g', 'tools/'), itemId('f', 'notes.md'), 'rest'])
+  assert.equal(top[0].g.files, 400)
+  assert.equal(top[0].g.touched, 2)
+  assert.equal(top[1].g.files, 5)
+  assert.equal(top[3].files, 1)
+  // ↵ on runs/ opens it one level: its 40 folders, the two touched first, named by their own folder
+  const runs = listItems(data, 'folder', ['runs/'], 20)
+  assert.deepEqual(runs.slice(1, 3).map(x => [x.g.key, x.g.name, x.depth]), [['runs/r01/', 'r01/', 1], ['runs/r02/', 'r02/', 1]])
+  assert.equal(runs.filter(x => x.kind === 'group' && x.depth === 1).length, 40)
+  // ↵ on r01/ opens its touched file and one line for its 9 untouched files, which opens to them
+  const r01 = listItems(data, 'folder', ['runs/', 'runs/r01/'], 20)
+  const at = r01.findIndex(x => x.id === itemId('g', 'runs/r01/'))
+  assert.deepEqual(r01.slice(at + 1, at + 3).map(x => [x.kind, x.depth]), [['file', 2], ['rest', 2]])
+  assert.equal(r01[at + 2].files, 9)
+  const all = listItems(data, 'folder', ['runs/', 'runs/r01/', 'rest:runs/r01/'], 20)
+  assert.equal(all.filter(x => x.kind === 'file' && x.depth === 3).length, 9)
+  // a search went over the whole of y.jsonl: r02/ is searched over in part, though none of it was read
+  const r02 = runs.find(x => x.id === itemId('g', 'runs/r02/')).g
+  assert.equal(r02.read, 0)
+  assert.ok(r02.counted > 0)
 })
 
 test("each row has two measures in its own unit: read into Claude's context, and counted or computed over (read is part of it)", async () => {
@@ -93,7 +98,7 @@ test('in a narrow pane no number is cut: the bars narrow and go, then the size s
     const grid = renderTerm(globalThis.DrawKit.run(program, data, { w, h: 30, mode: 'pane' }), { w })
     const text = gridText(grid)
     // every number whole, and no word of the header or the legend cut
-    for (const s of ['0.03%', '100%', '0.1%', '<0.01%', 'read', 'counted', "read into Claude's context"]) assert.ok(text.includes(s), `${s} at ${w}: ${text}`)
+    for (const s of ['0.03%', '100%', '0.1%', '<0.01%', 'read', 'searched', "read into Claude's context", 'searched or computed over']) assert.ok(text.includes(s), `${s} at ${w}: ${text}`)
     assert.doesNotMatch(text, /\d…|co…|…\d/, `at ${w}`)
     if (w >= 100) assert.match(text, /19,931 records/)
     else if (w >= 48) assert.match(text, /19,931 /)
@@ -114,12 +119,12 @@ test('a folder\'s subject leaves out a size its files do not share; an open file
   // a folder of a Makefile and a log: no one unit, so no size, and no empty field in its words
   const groups = Array.from({ length: 30 }, (_, r) => ({ folder: `runs/r${String(r).padStart(2, '0')}/`, files: 2, touched: r === 0 ? 1 : 0, units: [{ unit: 'lines', units: 40 }, { unit: 'records', units: 9 }] }))
   const files = groups.map(g => ({ path: `${g.folder}Makefile`, type: 'txt', unit: 'lines', units: 40, status: 'not read', touched: false }))
-  const cov = { session: 's', total: { files: 60, touched_files: 1 }, files, untouched: { path: [], unit: [], units: [] }, groups, types: [] }
+  const cov = { session: 's', total: { files: 60, touched_files: 1 }, files, untouched: { path: groups.map(g => `${g.folder}events.jsonl`), unit: groups.map(() => 'records'), units: groups.map(() => 9) }, groups, types: [] }
   const data = coverage.data({ coverage: { cov } }, {}, { w: 100, h: 40 })
   const run = state => DK.run(coverage.program, data, { w: 100, h: 40, mode: 'pane', state })
   const top = run({})
   const label = top.regions.find(r => r.id === top.selected).meta.label
-  assert.match(label, /^runs\/r00\/: 2 files; Claude read/)
+  assert.match(label, /^runs\/: 60 files; Claude read/)
   // ↵ on a file nothing touched opens it with no line to walk: the file itself is selected, named by its path
   const few = coverage.data({ coverage: { cov: { session: 's', total: { files: 1, touched_files: 0 }, files: [], untouched: { path: ['passengers.csv'], unit: ['rows'], units: [891] }, groups: [], types: [] } } }, {}, { w: 100, h: 40 })
   const opened = DK.run(coverage.program, few, { w: 100, h: 40, mode: 'pane', state: {}, event: { type: 'key', key: 'return' } })
