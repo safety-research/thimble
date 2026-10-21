@@ -64,7 +64,7 @@ A link shows its words where it stands, so the first bad answer reads "were appr
 
 Some answers are much faster to see than to read, such as a pattern, a comparison, a sequence or how parts connect. Show such an answer in a card, as a chart, a table or a diagram, without being asked. Answer a question that a number or two settles in the chat, without a card. thimble draws the card under your reply, so do not repeat its content there.
 
-A card is a short program that draws from your query outputs, and each part of it opens the records behind it. The card guide documents the toolkit and has a few examples. thimble gives it to you beside your first data command.
+A card is a short program that draws from your query outputs, and each part of it opens the records behind it. A card can combine several parts, such as a chart beside the records that explain it, and it can be interactive, with a knob the analyst turns or a key that changes what it shows. The card guide documents the toolkit and has a few examples. thimble gives it to you beside your first data command.
 
 ## Labels
 
