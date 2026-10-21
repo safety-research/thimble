@@ -291,6 +291,15 @@ def _installed() -> bool:
 
 
 RELOAD = "It takes effect after /reload-plugins in the running session, or in a new session."
+# a Claude Code session that runs thimble from its install loads each switch by itself (the terminal's fix.ts reloads
+# the plugins once it sees it), so the line for its Claude says so, and the person has nothing to do
+LOADED = "This Claude Code session loads it by itself once it is idle, so the person has nothing to do."
+
+
+def _loaded_here(plugin_dir: bool | None) -> str:
+    """How a switch takes effect, for the caller: a Claude Code session that loads thimble from its install loads it by
+    itself; any other caller (no session, or a caller that says it is none) needs /reload-plugins or a new session."""
+    return LOADED if plugin_dir is None and _session_plugin_dir() is False else RELOAD
 
 
 def _is_thimble(folder: str) -> bool:
@@ -423,7 +432,8 @@ def use(slug: str, plugin_dir: bool | None = None) -> str:
     # each use is a round of the fix: the plugin loads the copy again for the person at each new stamp
     fx["used"] = time.time()
     save(fx)
-    said = f"thimble now runs the fix {slug} from {fx['worktree']}/plugin. {RELOAD} `thimble fix undo` goes back to the release."
+    said = (f"thimble now runs the fix {slug} from {fx['worktree']}/plugin. {_loaded_here(plugin_dir)} "
+            f"`thimble fix undo` goes back to the release.")
     if again:
         said += (f"\nThe person sees this fix as '{fx['title']}'. When this round changed what the fix does, give it a "
                  f"title that says what it does now: thimble fix title {slug} \"<new title>\"")
@@ -467,7 +477,7 @@ def undo(plugin_dir: bool | None = None) -> str:
         if fx["status"] == "applied":
             fx["status"] = "ready"
             save(fx)
-    return f"thimble is back to the release from {prev}. {RELOAD}"
+    return f"thimble is back to the release from {prev}. {_loaded_here(plugin_dir)}"
 
 
 def _size(d: Path) -> str:
