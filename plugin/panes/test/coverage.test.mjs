@@ -79,3 +79,30 @@ test("each row has two measures in its own unit: read into Claude's context, and
   assert.match(text, /events\.jsonl +40 records +\S+ +20% +\S+ +100%/)
   assert.match(text, /runs\.csv +30 rows +\S+ +0% +\S+ +0%/)
 })
+
+test('in a narrow pane no number is cut: the bars narrow and go, then the size says its number alone; a row presses on its name, not its bars', async () => {
+  const { default: pane, program } = await import('../coverage.js')
+  await import('../../draw/kit.js')
+  const { gridText, renderTerm } = await import('../../draw/term.js')
+  const file = (path, units, read, counted) => ({ path, type: 'jsonl', unit: 'records', units, lines: units, seen_units: 1, status: 'seen', touched: true, read_share: read, counted_share: counted })
+  const cov = { session: 's', total: { files: 3, touched_files: 3, seen_files: 3, units: [{ unit: 'records', units: 937635, seen: 3 }] },
+    files: [file('events.jsonl', 19931, 0.0003, 1), file('notes/revisions.jsonl', 14591, 0.001, 1), file('big.jsonl', 900000, 0.000001, 0.00001)],
+    untouched: { path: [], unit: [], units: [] }, groups: [], types: [] }
+  for (const w of [100, 57, 48, 40]) {
+    const data = pane.data({ coverage: { cov } }, {}, { w, h: 30 })
+    const grid = renderTerm(globalThis.DrawKit.run(program, data, { w, h: 30, mode: 'pane' }), { w })
+    const text = gridText(grid)
+    // every number whole, and no word of the header or the legend cut
+    for (const s of ['0.03%', '100%', '0.1%', '<0.01%', 'read', 'counted', "read into Claude's context"]) assert.ok(text.includes(s), `${s} at ${w}: ${text}`)
+    assert.doesNotMatch(text, /\d…|co…|…\d/, `at ${w}`)
+    if (w >= 100) assert.match(text, /19,931 records/)
+    else if (w >= 48) assert.match(text, /19,931 /)
+    // the row's press holds its name and stops before its bars
+    const row = grid.regions.find(r => r.id === 'f:events.jsonl')
+    const y = row.rects[0].y
+    const line = grid.rows[y].map(c => c.ch).join('')
+    const end = Math.max(...row.rects.map(q => q.x + q.w))
+    assert.ok(line.slice(0, end).includes('events.jsonl'), line)
+    assert.ok(!/[▆▇█]/.test(line.slice(0, end)), `the press holds a bar at ${w}: ${line}`)
+  }
+})

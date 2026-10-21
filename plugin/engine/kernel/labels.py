@@ -896,7 +896,10 @@ const one = L.kind === 'code'
 const room = Math.max(8, k.w - 4 - Array.from(lead || '').length - 2)
 const cut = Array.from(one).length <= room ? one : Array.from(one).slice(0, room - 1).join('') + '…'
 if (lead && one) parts.push(k.text(`{dim:${lead}} ${k.escape(cut)}`))
-parts.push(k.text(`{dim:${k.escape(how)} · ${k.fmt(total)} records${L.trial ? ' (a trial sample)' : ''}${checked}}`))
+// what made the label, said once: the definition's line names a rule (code, a pattern), so the line under it does not
+// say it again; under a question it says that the model read each record
+const said = lead && one && L.kind !== 'prompt'
+parts.push(k.text(`{dim:${said ? '' : `${k.escape(how)} · `}${k.fmt(total)} records${L.trial ? ' (a trial sample)' : ''}${checked}}`))
 return k.frame(k.stack(...parts), { title: k.title })
 """
 
