@@ -70,6 +70,21 @@ test('a fenced block keeps its lines: a link in it is no mark, an explainer neve
   assert.ok(!drawn.some(n => n.type === 'Button' && /352/.test(n.props.label)), 'no press on the link in the block')
 })
 
+test('a table too wide for its column is drawn as its rows, `header: cell`, each citation in it still a mark that ] stops on', { skip: !view && 'this Node runs no TypeScript' }, () => {
+  const t = 'Who saved most:\n\n| Editor | Saves | Last save | What changed |\n|---|---|---|---|\n| Quill Bot | [412](r2#editor=Quill Bot@n) | [this save](wiki/a.jsonl#L88) | Rewrote the intro and removed the [three cited sources](r2#row=4@n) that the talk page asked for |\n| Fern Helper | [97](r2#editor=Fern Helper@n) | [this save](wiki/a.jsonl#L91) | Small fixes |\n'
+  const rec = newRecord({ row: 'r1', session: 's1', text: t })
+  assert.equal(rec.marks.length, 5)
+  const drawn = nodes(view.messageEl(els, { rec, key: 'm', cols: 60, first: true, theme: 'dark', focus: null, onMark: () => {} }))
+  assert.ok(!drawn.some(n => n.type === 'Markdown' && /\|/.test(n.props.text)), 'no table left to Claude Code')
+  // every citation is a press, and its first run has the key ] scrolls to
+  const stops = drawn.filter(n => n.type === 'Button' && /^mk-r1-/.test(n.props.key)).map(n => n.props.label)
+  assert.deepEqual(stops, ['cite 412', 'cite this save', 'cite three cited sources', 'cite 97', 'cite this save'])
+  const cite = drawn.find(n => n.type === 'Button' && n.props.label === 'cite three cited sources')
+  assert.equal(nodes(cite).find(n => n.type === 'Text').props.underline, true)
+  // the header beside its cell, bold
+  assert.ok(drawn.some(n => n.type === 'Text' && n.props.bold && n.props.children === 'What changed'))
+})
+
 test('a mark wider than the line breaks at its spaces, each piece still the mark; only a word wider than the line is cut', () => {
   const heads = 'This affects every multi-line code block in a reply.'
   const lines = wrapRuns([{ s: heads, mark: 0 }], 21)
