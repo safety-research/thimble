@@ -482,10 +482,11 @@
           if (from && meta.ref == null && !lineageOf(ctx, meta)) meta.ref = from
           return k.region(id != null ? id : (slug(it.label) || refSlug(from)), Object.assign({}, meta, { label: it.regionLabel || `${it.label == null ? '' : it.label} ${texts[i]}`.trim(), cite: it.cite != null ? it.cite : meta.cite, examples: it.examples != null ? it.examples : meta.examples }), row)
         })
-        // the parts' names, once for all rows: a key above them, each name in its part's color
+        // the parts' names, once for all rows: a key above them, each name in its part's color. A part that is 0 in
+        // every row draws no bar, so its name stays out of the key
         const key = []
         items.forEach(it => { if (Array.isArray(it.parts)) it.parts.forEach((p, pi) => {
-          if (!isObj(p) || p.label == null || String(p.label).trim() === '' || key.some(e => e.label === String(p.label))) return
+          if (!isObj(p) || !(num(p.value) > 0) || p.label == null || String(p.label).trim() === '' || key.some(e => e.label === String(p.label))) return
           const t = T(labelTone(p) || p.tone || CATS[pi % 6])
           if (t !== 'unseen') key.push({ label: String(p.label), tone: t })
         }) })

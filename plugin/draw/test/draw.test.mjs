@@ -220,3 +220,14 @@ test("a code line's indent stays when its text wraps", () => {
   assert.equal(t[1], '        if a:')
   assert.equal(t[2], '            go(b, c)')
 })
+
+test('the key of stacked bars names only the parts some bar draws', () => {
+  const d = runProgram({ program: `return k.bars([
+    { label: 'week 1', parts: [{ value: 3, label: 'kept' }, { value: 2, label: 'reverted' }] },
+    { label: 'week 2', parts: [{ value: 0, tone: 'dim', label: 'none' }] },
+    { label: 'week 3', parts: [{ value: 4, label: 'kept' }, { value: 0, label: 'reverted' }] }])` }, { w: 60, h: 24 })
+  const key = JSON.stringify(d.root).match(/"legend":\[[^\]]*\]/)
+  assert.ok(key, 'the bars draw a key')
+  assert.deepEqual(JSON.parse(key[0].slice(9)), ['kept', 'reverted'])
+  assert.doesNotMatch(gridText(renderTerm(d, { w: 60 })), /none/)
+})
