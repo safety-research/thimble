@@ -150,6 +150,10 @@ def test_a_long_message_cited_by_words_that_name_a_passage_opens_on_that_passage
     marked = hot["text"][hot["at"][0]:hot["at"][1]]
     assert marked.startswith("41% over-asking") and marked.endswith("3.6%"), marked
     assert 40 <= hot["at"][0] <= 200 and hot["text"].startswith("…")
+    # a percent the words write may stand at the low end of a range of percents in the text
+    text = "prompting gave 35–45% over-asking, and after the fine-tune over-ask -> 2.8% on the same items"
+    at = LIN._named(text, "from 35% to 2.8%")[1]
+    assert text[at[0]:at[1]] == "35–45% over-asking, and after the fine-tune over-ask -> 2.8%"
     # words that name nothing in it leave the message's first words as they were
     other = next(x for x in LIN.resolve(st, "talk.jsonl#L2", label="trained for 12 hours")["span"]["rows"] if x["hot"])
     assert "at" not in other and other["text"].startswith("All done")

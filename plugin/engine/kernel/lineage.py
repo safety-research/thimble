@@ -372,7 +372,9 @@ def _named(text: str, label: str | None, reach: int = 240) -> tuple[int, tuple[i
     for m in num.finditer(hay):
         x = float(m[1].replace(",", "") + (f".{m[2]}" if m[2] else ""))
         for v, d, pct, tok in nums:
-            if (not pct or m[3]) and abs(x - v) <= 10 ** -d * 1.0001 and len(m[2] or "") >= d:
+            # the low end of a range of percents (`35-45%`) is a percent too
+            here = bool(m[3]) or bool(re.match(r"\s?-\s?\d+(?:\.\d+)?%", hay[m.end():m.end() + 14]))
+            if (not pct or here) and abs(x - v) <= 10 ** -d * 1.0001 and len(m[2] or "") >= d:
                 # a number that stands out weighs two
                 hits.append((m.start(), m.end(), tok, 2 if pct or d or v >= 100 else 1))
     for t in words:
