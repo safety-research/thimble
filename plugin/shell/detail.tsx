@@ -1175,9 +1175,7 @@ export async function detailKeys($: Engine): Promise<string | null> {
   // a pane that says its keys itself leaves the bar its own (the settings panel: the person sees the bar change)
   if (keepsBar(await sideNow($))) return null
   if (draft) return 'esc clears the question'
-  // (← → reach Claude Code's prompt even while the panel holds the keys, so the panel never uses them, and says so in
-  // few words: beside a wide pane the bar has 24 columns)
-  return `esc ${await backWord($)} · no ← →`
+  return `esc ${await backWord($)}`
 }
 
 /** What esc does: back a level of the pane's own (its esc handler: a file open in Coverage, a label open in Labels),
