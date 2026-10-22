@@ -19,6 +19,8 @@
 // the view of the last call with `edits`; its rows new, or kept), and keeps the title unless the call gives a new one;
 // the later call shows one line that points to it. A version that fails leaves the one on screen, its view and rows are
 // kept for the next call's `edits`, and the view's error goes back to Claude.
+// The designer fork changes only the cards it drew under its answer: its call with the id of another card (main's,
+// which it reads in its copy of the conversation) draws a new card of its own from that card's view and rows.
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared } from '../bar/notice'
@@ -176,19 +178,25 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const toolUseId = String(input.tool_use_id ?? '')
   const given = String(input.id ?? '').trim()
   const update = !!given
-  const id = update ? given : cardIdOf(toolUseId)
-  const before = isCardId(id) ? await metaOf($, id) : null
-  if (update && !before) return { result: `There is no card "${oneLine(given, 40)}" to replace. Leave out \`id\` to draw a new card.` }
-  // a version keeps the card's title unless the call gives a new one
-  const title = oneLine(String(input.title ?? ''), 120) || before?.title || ''
-  if (!title) return { result: 'The card did not draw: `title` is empty: give the card\'s title, what it shows in a few words.' }
+  const target = update ? given : cardIdOf(toolUseId)
+  const found = isCardId(target) ? await metaOf($, target) : null
+  if (update && !found) return { result: `There is no card "${oneLine(given, 40)}" to replace. Leave out \`id\` to draw a new card.` }
 
   // a card stands at a call of main's, under the answer the running designer fork draws for, or in the side thread
   // whose fork drew it (`thread:<key>`, under that thread's answer in its pane); another agent's call stands in that
   // agent's own transcript, where the person never sees a card
   const fork = forkOf(input.agentId)
-  const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : fork?.kind === 'thread' ? await threadCardAnchor($, input.agentId, id) : null
+  const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : fork?.kind === 'thread' ? await threadCardAnchor($, input.agentId, target) : null
   if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation, the copy that v starts and a side thread draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
+  // the designer fork draws its own cards under the answer v was pressed on. A card that does not stand there (main's,
+  // whose id the fork read in its copy of the conversation, or one under another answer) is not the fork's to change:
+  // its call draws a new card, from that card's view and rows
+  const borrowed = fork?.kind === 'designer' && found && found.anchorRow !== anchorRow ? found : null
+  const id = borrowed ? cardIdOf(toolUseId) : target
+  const before = borrowed ? null : found
+  // a version keeps the card's title unless the call gives a new one
+  const title = oneLine(String(input.title ?? ''), 120) || found?.title || ''
+  if (!title) return { result: 'The card did not draw: `title` is empty: give the card\'s title, what it shows in a few words.' }
   const placeWords = (row: string | null) => (row?.startsWith('thread:') ? 'in the side thread, under your answer' : 'under the answer v was pressed on')
   const meta: CardMeta = before ?? {
     id, version: 0, last: 0, lastFile: '', title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
@@ -203,8 +211,9 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // a new version may keep the view of the card's last call with a few edits, and its rows: writing the whole view
   // again takes the model half a minute. The last call's folder is the version on screen, or the version after it
   // when that call did not draw (its view did not parse, say), so `edits` fix the view the error was about
-  const lastNo = meta.last ?? meta.version
-  const last = lastNo > 0 ? await versionDir($, id, lastNo) : null
+  const base = borrowed ?? meta
+  const lastNo = base.last ?? base.version
+  const last = lastNo > 0 ? await versionDir($, base.id, lastNo) : null
   const view = await viewOf($, input, last)
   if (view.bad) return refuse(view.bad)
   const keep = !String(input.data ?? '').trim() && last
@@ -213,7 +222,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // the card tool's rules decide every call; the Read rules, a call with new rows (kept rows were read before)
   const no = await refused($, { title, data: input.data, view: view.text, ...(input.id ? { id: input.id } : {}) }, keep ? null : data.path!)
   if (no) return refuse(no)
-  const file = keep ? (meta.lastFile ?? meta.file) : String(input.data)
+  const file = keep ? (base.lastFile ?? base.file) : String(input.data)
   const version = meta.version + 1
   const dir = await versionDir($, id, version)
   await $.fs.write(`${dir}/view.js`, view.text!)
@@ -254,6 +263,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (meta.version > 0) void $.process.run(['rm', '-rf', '--', await versionDir($, id, meta.version)]).catch(() => undefined)
 
   const out: string[] = [
+    ...(borrowed ? [`Card "${borrowed.id}" is ${borrowed.anchorRow ? 'a card under another answer' : "the main conversation's card"}, so this call did not change it: it drew a new card of your own from that card's view and rows.`] : []),
     stays
       ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? placeWords(next.anchorRow) : 'under the call that first drew the card'}.`
       : meta.version > 0

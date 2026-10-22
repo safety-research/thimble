@@ -20,7 +20,7 @@ import { failNotice } from '../bar/notice'
 import { cut } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
 import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
-import { cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
+import { cardOfKey, cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
 import { callOf, cardIdOf, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
 
@@ -112,12 +112,12 @@ export const registerCards: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // a card's Client posted: a Button or a click
-  on('ui.message', { element: /^card-c[0-9a-f]+$/ }, async ($, e) => cardPost($, String(e.element).slice(5), e.data))
+  on('ui.message', { element: /^card-c[0-9a-f]+(-\d+)?$/ }, async ($, e) => cardPost($, cardOfKey(String(e.element)).id, e.data))
     .catch(() => ({}))
 
   // a card's Client failed on screen: the card says why where it stood
-  on('ui.fault', { element: /^card-c[0-9a-f]+$/ }, async ($, e, next) => {
-    await clientFault($, String(e.element).slice(5), String(e.reason ?? ''))
+  on('ui.fault', { element: /^card-c[0-9a-f]+(-\d+)?$/ }, async ($, e, next) => {
+    await clientFault($, String(e.element), String(e.reason ?? ''))
     return next(e)
   }).catch(($, e, next) => next(e))
 }

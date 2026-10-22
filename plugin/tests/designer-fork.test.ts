@@ -5,7 +5,8 @@ import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
 import { failLineNow, failNotice } from '../bar/notice'
-import { saveMeta } from '../cards/store'
+import { metaOf, saveMeta } from '../cards/store'
+import { cardCall } from '../cards/tool'
 import { designAnchor, registerDesigner, vKey } from '../designer/v'
 import { promptStub, tempRun } from './stubs'
 
@@ -38,14 +39,28 @@ function setup() {
     agent: { spawn: async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-${spawns.length}` } } },
     session: { id: async () => 's-made-up' },
     process: { run: async (argv: string[]) => tempRun(argv) ?? { exitCode: 0, stdout: '', stderr: '' } },
-    // the card runner, as far as a text copy goes
-    http: { fetch: async () => ({ text: JSON.stringify({ ok: true, lines: ['Who ran the failing test', '✕ ✕ ● ✕'] }) }) },
+    // the card runner: a drawing, and its text copy
+    http: {
+      fetch: async (url: string) => ({
+        text: JSON.stringify(url.endsWith('/load')
+          ? { ok: true, tree: { t: 'Text', p: {}, c: ['x'] }, state: 'null', keys: '', lines: ['Who ran the failing test'], cut: [], summary: { rows: 9, read: '9 rows', columns: [], first: '' } }
+          : { ok: true, lines: ['Who ran the failing test', '✕ ✕ ● ✕'] }),
+      }),
+    },
+    // what the card tool asks beside the runner: the person's rules, the data file, the screen
+    tool: { check: async () => ({ decision: 'allow' }) },
+    ui: { invalidate: () => undefined, toast: async () => undefined },
   }
-  $.fs.write = async () => undefined
+  const files = new Map<string, string>()
+  $.fs.write = async (p: string, text: string) => { files.set(p, text) }
+  $.fs.read = async (p: string) => files.get(p) ?? promptStub(p) ?? ''
+  $.fs.stat = async (p: string) => (p.endsWith('.json') ? { kind: 'file', size: 64, realPath: p } : { kind: 'dir', size: 0, realPath: p })
+  $.session.cwd = async () => '/made-up/data'
+  $.session.root = async () => '/made-up/data'
   const pass = async (e: Any) => e
   const call = (event: string, e: Any, next: Any = pass) => hooks[event]($, e, next)
   const failLine = async () => String((await failLineNow($))?.text ?? '')
-  return { $, call, failLine, spawns }
+  return { $, call, failLine, spawns, files }
 }
 
 const settle = () => new Promise(r => setTimeout(r, 5))
@@ -103,4 +118,27 @@ test('a fork that drew a card ends done, and main reads the card with the next p
   expect(told).toContain('a copy of you drew a card under it')
   // the card's text, fenced as the records' own words
   expect(told).toContain('“Runs of the failing test” (id "c0000000000001"), as drawn now:\n```text\nWho ran the failing test\n✕ ✕ ● ✕\n```')
+})
+
+test("the fork's card call with the id of main's card draws a new card of its own under the answer; main's card stays", async () => {
+  const s = setup()
+  await pressV(s)
+  const view = 'function view(p, s) { return s.elements.Text({ children: "x" }) }'
+  const main = await cardCall(s.$, { tool_use_id: 'toolu_made_up_main', title: 'Runs of the failing test', data: 'runs.json', view })
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(main.result)![1]
+  // the fork read main's call in its copy of the conversation, and calls card with that id
+  const v = await cardCall(s.$, { tool_use_id: 'toolu_made_up_v', agentId: 'agent-1', id, edits: [{ old: '"x"', new: '"v"' }] })
+  expect(v.result).toContain(`Card "${id}" is the main conversation's card, so this call did not change it: it drew a new card of your own from that card's view and rows.`)
+  expect(v.result).toContain('“Runs of the failing test” is drawn under the answer v was pressed on')
+  const own = /Its id is "(c[0-9a-f]+)"/.exec(v.result)![1]
+  expect(own).not.toBe(id)
+  expect([...s.files].find(([p]) => p.endsWith(`/${own}/v1/view.js`))?.[1]).toBe(view.replace('"x"', '"v"'))
+  // main's card is as it was, at main's call
+  expect(await metaOf(s.$, id)).toMatchObject({ version: 1, agentId: null, anchorRow: null })
+  expect(await metaOf(s.$, own)).toMatchObject({ version: 1, agentId: 'agent-1', anchorRow: ROW })
+  // the fork's end: main reads the card it drew, and no line says it drew none
+  await s.call('turn.complete', end('answer', 'I redrew the card.'), async () => ({ text: '' }))
+  expect(await s.failLine()).toBe('')
+  const told = Object.values(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
+  expect(told).toContain(`(id "${own}")`)
 })
