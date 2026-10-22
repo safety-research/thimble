@@ -81,12 +81,21 @@ function textOf(n: Any): string {
 }
 
 /** The reply's row as the renderer draws it from the state. */
+/** Every element of a drawing. */
+function all(n: Any, out: Any[] = []): Any[] {
+  if (!n || typeof n !== 'object') return out
+  if (Array.isArray(n)) { n.forEach(x => all(x, out)); return out }
+  out.push(n)
+  all(n.props?.children, out)
+  return out
+}
+
 async function drawn($: Any): Promise<string> {
   const reply = await rowMarks($, 'row-1')
   const marks = marksIn(REPLY)
   const looks = marks.map((_m: Any, k: number) => ({ n: k + 1, status: reply!.items[k]!.status, shown: reply!.items[k]!.shown }))
   const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, notes: notesByMark(reply!.items) })
-  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking, wrong: reply!.wrong, unconfirmed: reply!.unconfirmed, corrected: reply!.corrected, unchecked: reply!.unchecked })
+  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking })
   return textOf(body) + '\n' + textOf(foot)
 }
 
@@ -108,7 +117,9 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   const settled = await drawn($)
   expect(settled).toContain('merged 12 of 40.')
   expect(settled).toContain('"ship it" ×')
-  expect(settled).toContain('1 citation wrong · 1 corrected')
+  // once settled no footer counts the marks: each shows its own status where it stands
+  expect(settled).not.toContain('citation wrong')
+  expect(settled).not.toContain('1 corrected')
   // the note on the first sentence, once, under the block that holds it
   expect(settled.split('agent-02 approved each one').length).toBe(2)
   expect(settled).toContain('↳ agent-07 merged none of them alone')
@@ -135,7 +146,8 @@ test('a refused check leaves the marks unchecked, says so once, and nothing spin
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await endCheck($, { agentId: FORK, reason: 'refusal', answer: '' })
   const out = await drawn($)
-  expect(out).toContain('3 citations not checked')
+  // the marks draw unchecked; the failure line, not a footer, says why
+  expect(out).not.toContain('not checked')
   expect(out).not.toContain('checking')
   expect(out).not.toContain('×')
   const line = String((await failLineNow($))?.text ?? '')
@@ -217,4 +229,25 @@ test('a resumed session draws the marks as their check left them; a check the se
   const second = await rowMarks(resumed, 'row-2')
   expect(second!.items[0]!.status).toBe('unchecked')
   expect(second!.checking).toBe(0)
+})
+
+test('a corrected citation draws as a settled one (purple, underlined); a wrong one red with ×; one not confirmed with ?', () => {
+  const text = 'Merged [15 of 40](#), opened [7](#), closed [3](#).'
+  const marks = marksIn(text)
+  const looks = [{ n: 1, status: 'corrected', shown: '12 of 40' }, { n: 2, status: 'failed' }, { n: 3, status: 'unconfirmed' }] as Any
+  const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
+  const look = (words: string) => els.find(n => n.type === 'Text' && n.props.children === words)?.props
+  expect(look('12 of 40')).toMatchObject({ color: 'merged', underline: true })
+  expect(look('7')).toMatchObject({ color: 'error' })
+  expect(look(' ×')).toMatchObject({ color: 'error' })
+  expect(look('3')).toMatchObject({ color: 'warning' })
+  expect(look(' ?')).toMatchObject({ color: 'warning' })
+  // without a gutter (a reply inside the tray's frame) no margin cell stands before its rows: they start at the left
+  const rowsOf = (gutter?: boolean) => messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: false, spin: '', gutter, onMark: () => undefined }).props.children
+  expect(rowsOf()[0].props.children[0].props.width).toBe(2)
+  expect(rowsOf(false)[0].props.children.length).toBe(1)
+  expect(rowsOf(false)[0].props.children[0].props.width).toBe(100)
+  // the footer says only that the check runs
+  expect(footerEl(ELS, { key: 'f', spin: '⠋', checking: 0 })).toBe(null)
+  expect(textOf(footerEl(ELS, { key: 'f', spin: '⠋', checking: 1 }))).toBe('⠋ checking 1 citation')
 })

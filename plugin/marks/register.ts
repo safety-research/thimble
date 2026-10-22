@@ -1,9 +1,9 @@
 // register.ts: marks. Claude marks the claims of its reply as markdown links to `#` (`[352](#) of the [410](#) refund
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): purple underline, a turning glyph while
-// checking, corrected words in place, red with × when wrong, ? when the check could not confirm it, a note under the
-// block whose words the check found false, and a footer under the reply while it is checked or when the check changed
-// or flagged marks. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
+// checking, corrected words in place (purple, as a verified one), red with × when wrong, ? when the check could not
+// confirm it, a note under the block whose words the check found false, and a footer under the reply while it is
+// checked. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
 //   session.start    the marks a resumed session's replies hold, as their check left them (store.ts); the checks a
@@ -151,9 +151,7 @@ export const registerMarks: Register = on => {
         },
       })
       : await (own ? next(e) : next({ ...e, props: { ...e.props, text } }))
-    const foot = reply?.last ? footerEl(els, {
-      key: `mf-${row}`, spin, checking: reply.checking, wrong: reply.wrong, unconfirmed: reply.unconfirmed, corrected: reply.corrected, unchecked: reply.unchecked,
-    }) : null
+    const foot = reply?.last ? footerEl(els, { key: `mf-${row}`, spin, checking: reply.checking }) : null
     const parts = [body, ...(foot ? [foot] : []), ...under]
     return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })
   })

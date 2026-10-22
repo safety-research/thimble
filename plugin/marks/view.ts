@@ -4,8 +4,8 @@
 //   messageEl(els, o)  one text block of a reply: each block of its markdown that holds marks laid out here, each mark a
 //                      press with its status drawn on it; every other run of blocks drawn by Claude Code's own Markdown,
 //                      so paragraphs, lists, code and tables look as in any reply
-//   footerEl(els, o)   the line under a reply's last block while its marks are checked, or when the check changed or
-//                      flagged some
+//   footerEl(els, o)   the line under a reply's last block while its marks are checked (each mark shows its own
+//                      status once the check settled, so nothing counts them after)
 //
 // A note (the check found the words around a mark false) stands right under the block that holds its sentence, after
 // ↳ in the warning color, so the person reads it with the words it is about.
@@ -14,8 +14,8 @@
 //   pending      the turn still runs: purple, underlined
 //   checking     purple, underlined, and a turning glyph right after it
 //   verified     purple, underlined
-//   corrected    the corrected words in place of the marked ones, in the warning color, underlined (the footer counts
-//                them), so a changed claim stands out from the ones that held
+//   corrected    the corrected words in place of the marked ones, purple, underlined: once corrected it holds, so it
+//                looks as a verified one does (its tray card says it was corrected)
 //   failed       wrong as the check read the data: red, with ` ×` after it
 //   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
 //   unchecked    underlined in the text's color: no check could run
@@ -65,6 +65,9 @@ export type MessageOpts = {
   dim?: boolean
   /** what stands in place of the ● of the reply's first block */
   lead?: string | null
+  /** false: no margin cell before each row (a reply drawn inside a frame, such as the tray's, starts at the frame's
+   *  left, as its title does) */
+  gutter?: boolean
   /** the passages a side thread can be asked about: `has` says whether one was asked about already, `ask` starts it
    *  (or opens it). Each row of blocks is a passage, a heading's its whole section */
   passages?: { has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null
@@ -128,7 +131,6 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   else if (look.status === 'failed') p.color = 'error'
   else if (look.status === 'unconfirmed') p.color = 'warning'
   else if (look.status === 'unchecked') p.underline = true
-  else if (look.status === 'corrected') { p.color = 'warning'; p.underline = true }
   else { p.color = PURPLE; p.underline = true }
   // a span inside the mark's words: its fill under the mark's color
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
@@ -252,7 +254,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
       : o.passages
         ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph })
         : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
-    rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [cell, Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+    rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
   // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
@@ -288,24 +290,12 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
 }
 
-export type FooterOpts = { key: string; checking: number; wrong: number; unconfirmed: number; corrected: number; unchecked: number; spin: string }
+export type FooterOpts = { key: string; checking: number; spin: string }
 
-/** The line under a reply's last block: `checking 12 citations` while the check runs; afterwards, when there are any,
- *  `1 citation wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim; nothing when
- *  every mark was verified as written. */
+/** The line under a reply's last block while the check runs: `checking 12 citations`. Nothing once it settled: each
+ *  citation shows its own status where it stands. */
 export function footerEl(els: Any, o: FooterOpts): Any | null {
+  if (!o.checking) return null
   const { Box, Text } = els
-  const marks = (n: number) => `${n} citation${n === 1 ? '' : 's'}`
-  const parts: Any[] = []
-  if (o.checking) parts.push(Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${marks(o.checking)}` }))
-  else {
-    const said: [string, number, Any][] = [['wrong', o.wrong, { color: 'error' }], ['not confirmed', o.unconfirmed, { color: 'warning' }], ['corrected', o.corrected, { dimColor: true }], ['not checked', o.unchecked, { dimColor: true }]]
-    for (const [word, n, style] of said) {
-      if (!n) continue
-      if (parts.length) parts.push(Text({ key: `s${parts.length}`, dimColor: true, children: ' · ' }))
-      parts.push(Text({ key: word, ...style, children: `${parts.length ? n : marks(n)} ${word}` }))
-    }
-  }
-  if (!parts.length) return null
-  return Box({ key: o.key, marginLeft: 2, flexDirection: 'row', children: parts })
+  return Box({ key: o.key, marginLeft: 2, flexDirection: 'row', children: [Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${o.checking} citation${o.checking === 1 ? '' : 's'}` })] })
 }
