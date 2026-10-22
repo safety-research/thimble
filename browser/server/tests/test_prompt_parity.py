@@ -1,11 +1,9 @@
-"""The browser's texts for citations, explain marks and labels are the terminal plugin's (prompts/shared.json), read
-from plugin/ as they are now.
+"""The browser's label classifier is the terminal plugin's (prompts/shared.json), read from plugin/ as it is now.
 
 - Every change shared.json makes still finds its words in the terminal's text, so a reworded sentence there stops
   this test until someone looks at it.
 - Undoing the listed changes gives back the terminal's text word for word, so no other edit slips in.
 - The file the server reads for a prompt of the plugin's registry is the one Node reads from it.
-- The prompts Claude reads hold each shared part whole.
 """
 import json
 import shutil
@@ -60,25 +58,6 @@ def test_the_files_are_the_registrys():
     assert files == {n: prompts.prompt_file(n) for n in files}
     for f in files.values():
         assert (prompts.PLUGIN / f).is_file(), f"{f} is a file of the plugin"
-
-
-def test_main_prompt_holds_the_shared_parts_whole(tmp_path):
-    from thimble_browser import agent
-
-    text = agent.AGENTS["main"].prompt(tmp_path)
-    for part in ("communicating", "citing", "labels-guide", "cards-good", "cards-toolkit"):
-        assert prompts.shared(part) in text
-
-
-def test_the_lenses_hold_the_terminal_lenses_whole(folder):
-    from thimble_browser import home
-    from thimble_browser.features import lenses
-
-    ws = home.open_folder(folder)
-    text = prompts.render("lenses.md", {"lenses": lenses._lens_text(ws, lenses.lens(ws, "explain"))})
-    assert prompts.shared("explain") in text
-    text = prompts.render("lenses.md", {"lenses": lenses._lens_text(ws, lenses.lens(ws, "details"))})
-    assert prompts.shared("heads") in text
 
 
 def test_tool_schemas_parse():

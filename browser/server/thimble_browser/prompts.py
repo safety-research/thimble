@@ -5,15 +5,14 @@ Every prompt is a file under browser/prompts/. Three directives join them:
 - `{{shared:<part>}}` puts in a part of the terminal plugin's text, as shared.json says (below);
 - `{{<slot>}}` is a value the server fills, such as the folder's path.
 
-Shared parts. The terminal plugin's texts that both products use (its thimble skill, its explain lens, its label
-classifier) are read from the plugin itself, plugin/ at the top of the repository, when the server makes a prompt. A
-part names a file of the plugin (`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose
-one file is the one read. prompts/shared.json names each shared part: where it comes from, the `## ` section, which of
-its bullets (all when not given), and the few literal changes the browser needs, such as a ref of the terminal's own
-form written in the browser's form. Each change is a pair of exact strings, and the test (tests/test_prompt_parity.py)
-fails when the terminal's text no longer holds a string that a change replaces. So the browser follows every edit to
-the terminal's text with no change here, and an edit that touches a replaced string stops the test until someone looks
-at it.
+Shared parts. The terminal plugin's text that both products use (its label classifier) is read from the plugin
+itself, plugin/ at the top of the repository, when the server makes a prompt. A part names a file of the plugin
+(`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose one file is the one read.
+prompts/shared.json names the shared part: where it comes from, the `## ` section, which of its bullets (all when not
+given), and the few literal changes the browser needs, such as a ref of the terminal's own form written in the
+browser's form. Each change is a pair of exact strings, and the test (tests/test_prompt_parity.py) fails when the
+terminal's text no longer holds a string that a change replaces. So the browser follows every edit to the terminal's
+text with no change here, and an edit that touches a replaced string stops the test until someone looks at it.
 """
 from __future__ import annotations
 

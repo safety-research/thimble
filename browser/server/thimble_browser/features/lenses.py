@@ -4,9 +4,9 @@ active: a click opens what the lens says about the passage, and a question about
 There are three built-in lenses, and the analyst's own checks (the page calls every lens a check):
 
 - **Explainers** (`explain`, teal) mark the terms the analyst may not know, with what each means here. The instructions
-  are the terminal plugin's explain lens, word for word (prompts/shared.json, part `explain`).
+  are prompts/lens-explain.md, a copy of the terminal plugin's former explain lens.
 - **Important details** (`details`, orange) mark a detail the analyst should know before relying on the text. The
-  instructions are the terminal plugin's heads-up lens, word for word (prompts/shared.json, part `heads`).
+  instructions are prompts/lens-details.md, a copy of the terminal plugin's former heads-up lens.
 - **Unverifiable** (`unverifiable`, off at first) marks a claim that nothing in the files can support.
 - **A check** the analyst asks for (`add_check`, or POST /lenses) marks the passages its instructions name, such as
   "claims no cited source shows".
@@ -271,9 +271,11 @@ def _lens_text(ws: str, x: dict[str, Any]) -> str:
         text = prompts.render(BUILTIN[x["id"]]["prompt"])
         seen = [m["term"] for m in _marks(ws) if m["lens"] == x["id"]][-KEEP_SEEN:]
         if x["id"] == "explain":
-            text += "\n\n" + prompts.shared("explain-digest").replace("{{GLOSSED}}", "\n".join(seen) or "(none)")
+            digest = prompts.read("lens-explain-digest.md").rstrip("\n")
+            text += "\n\n" + digest.replace("{{GLOSSED}}", "\n".join(seen) or "(none)")
         elif x["id"] == "details":
-            text += "\n\n" + prompts.shared("heads-digest").replace("{{HEADS}}", "\n".join(seen) or "(none)")
+            digest = prompts.read("lens-details-digest.md").rstrip("\n")
+            text += "\n\n" + digest.replace("{{HEADS}}", "\n".join(seen) or "(none)")
         return text
     return prompts.render("lens-check.md", {"name": x["name"], "instructions": x["instructions"] or "",
                                             "key": x["id"]})
