@@ -18,8 +18,8 @@ import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
-import { CommentsButton } from './CommentsButton'
-import { listedLabels, type SideTab } from './LabelsSidebar'
+import { useCommentItems } from './CommentsList'
+import { listedLabels } from './LabelsSidebar'
 import { useConcepts } from '../canvas/concepts'
 
 export interface SurfaceTab extends TabOption<Tab> {
@@ -32,28 +32,30 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
-  /** the list the Labels and Comments sidebar shows while open (shell/LabelsSidebar.tsx), and how to open or close it */
-  side?: SideTab | null
-  onSide?: (tab: SideTab | null) => void
+  /** whether the Labels and Comments sidebar is open (shell/LabelsSidebar.tsx), and how to open or close it */
+  side?: boolean
+  onSide?: (open: boolean) => void
 }
 
-/** The top bar's two quiet buttons that open the right sidebar on its Labels or its Comments, each with its count. */
-function SideButtons({ ws, side, onSide }: { ws: string; side: SideTab | null; onSide: (tab: SideTab | null) => void }) {
+/** The top bar's quiet button that opens and closes the right sidebar on the labels and the comments, with their counts. */
+function SideButtons({ ws, side, onSide }: { ws: string; side: boolean; onSide: (open: boolean) => void }) {
   const n = listedLabels(useConcepts(ws)).length
-  const open = side === 'labels'
+  const m = useCommentItems(ws).items.length
   return (
     <span className="shell-side-btns">
-      <button type="button" className={`shell-side-btn${open ? ' on' : ''}`} aria-pressed={open} data-side="labels" onClick={() => onSide(open ? null : 'labels')}>
+      <button type="button" className={`shell-side-btn${side ? ' on' : ''}`} aria-pressed={side} data-side="labels" onClick={() => onSide(!side)}>
         <Icon name="label" size={14} />
         Labels
         <span className="shell-side-n">{n}</span>
+        <span className="shell-side-sep" aria-hidden="true">·</span>
+        Comments
+        <span className="shell-side-n">{m}</span>
       </button>
-      <CommentsButton ws={ws} open={side === 'comments'} onClick={() => onSide(side === 'comments' ? null : 'comments')} />
     </span>
   )
 }
 
-export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopBarProps) {
+export function TopBar({ ws, tabs, onTab, onTabDrag, side = false, onSide }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)
