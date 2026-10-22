@@ -149,7 +149,7 @@ async def _edit(ws: str, chat: str, turn: str, change: Any) -> dict[str, Any] | 
             reply["times"]["settled"] = time.time()
         _save(ws, reply)
     if settled:
-        hub.publish(ws, {"type": "busy", "id": reply["busy"], "word": "checking marks", "on": False})
+        hub.publish(ws, {"type": "busy", "id": reply["busy"], "word": "checking citations", "on": False})
         if text := tell_text(reply["items"]):
             agent.tell(ws, chat, text)
     return reply
@@ -178,7 +178,7 @@ async def start_check(sessions: Any, ws: str, chat: str, turn: str, texts: list[
     try:
         found = await marks_of(texts)
     except (OSError, RuntimeError, ValueError) as e:
-        notice(ws, chat, f"thimble could not read the marks of this reply ({str(e)[:120]}), so they are not checked.")
+        notice(ws, chat, f"thimble could not read the citations of this reply ({str(e)[:120]}), so they are not checked.")
         return
     if not found:
         return
@@ -187,21 +187,21 @@ async def start_check(sessions: Any, ws: str, chat: str, turn: str, texts: list[
     reply = {"chat": chat, "turn": turn, "items": items, "busy": busy, "times": {"reply_end": time.time()}}
     _save(ws, reply)
     if result is not None:
-        await _give_up(ws, chat, turn, {m["n"] for m in items}, "the reply was interrupted before its marks were checked")
+        await _give_up(ws, chat, turn, {m["n"] for m in items}, "the reply was interrupted before its citations were checked")
         return
-    hub.publish(ws, {"type": "busy", "id": busy, "word": f"checking {len(items)} mark{'s' if len(items) != 1 else ''}",
+    hub.publish(ws, {"type": "busy", "id": busy, "word": f"checking {len(items)} citation{'s' if len(items) != 1 else ''}",
                      "on": True})
     folder = str(home.corpus_of(ws))
     template = prompts.fill(prompts.shared("checker"), {"CWD": folder, "ROOT": folder})
     for share in split_marks(items):
         lines = "\n".join(f"{m['n']}. [{m['words']}] in: {m['sentence']}" for m in share)
         try:
-            await sessions.spawn(ws, "checker", chat, prompts.fill(template, {"MARKS": lines}), title="checking marks",
+            await sessions.spawn(ws, "checker", chat, prompts.fill(template, {"MARKS": lines}), title="checking citations",
                                  meta={"check": {"chat": chat, "turn": turn, "marks": [m["n"] for m in share]}})
         except Exception as e:  # noqa: BLE001 — a share that cannot start leaves its marks unchecked, and says so
             log.warning("a check of the marks could not start: %s", e)
             await _give_up(ws, chat, turn, {m["n"] for m in share}, "the check could not start")
-            notice(ws, chat, f"The check of the marks could not start ({str(e)[:80]}), so they are not checked.")
+            notice(ws, chat, f"The check of the citations could not start ({str(e)[:80]}), so they are not checked.")
     r = stored(ws, chat, turn)
     if r:
         r["times"]["spawned"] = time.time()
@@ -245,10 +245,10 @@ def check_finished(s: Any, result: str | None) -> None:
     asyncio.get_running_loop().create_task(end_check(s, result))
 
 
-GIVE_UP = {"refused": "The model's safeguards refused the check of the marks, so they are not checked. Settings can "
+GIVE_UP = {"refused": "The model's safeguards refused the check of the citations, so they are not checked. Settings can "
                       "switch to another model.",
-           "stopped": "The check of the marks was stopped, so they are not checked.",
-           "failed": "The check of the marks stopped on an error, so they are not checked. The next reply is checked "
+           "stopped": "The check of the citations was stopped, so they are not checked.",
+           "failed": "The check of the citations stopped on an error, so they are not checked. The next reply is checked "
                      "again."}
 
 
@@ -277,7 +277,7 @@ async def end_check(s: Any, result: str | None) -> None:
                                       answer, calls, folder, folder, str(home.temp_dir(ws)))
         if not got["parsed"]:
             await _give_up(ws, chat, turn, mine, "the check gave no answer thimble could read")
-            notice(ws, chat, "The check of the marks gave no answer thimble could read, so they are not checked.")
+            notice(ws, chat, "The check of the citations gave no answer thimble could read, so they are not checked.")
             return
         by_n = {int(r["n"]): r for r in got["results"]}
 
@@ -287,7 +287,7 @@ async def end_check(s: Any, result: str | None) -> None:
                 if m["n"] not in mine or m["status"] != "checking":
                     return m
                 if res is None:
-                    return {**m, "status": "unchecked", "reason": "the check gave no answer for this mark"}
+                    return {**m, "status": "unchecked", "reason": "the check gave no answer for this citation"}
                 return {**m, **{k: v for k, v in res.items() if k != "n"}, "shown": str(res.get("shown") or m["words"])}
 
             r["items"] = [judged(m) for m in r["items"]]
@@ -297,10 +297,10 @@ async def end_check(s: Any, result: str | None) -> None:
         await _edit(ws, chat, turn, change)
     except Exception as e:  # noqa: BLE001 — a check that cannot be validated leaves its marks unchecked, and says so
         log.exception("the check of the marks failed")
-        notice(ws, chat, f"thimble could not validate the check of the marks ({type(e).__name__}: {str(e)[:80]}), so "
+        notice(ws, chat, f"thimble could not validate the check of the citations ({type(e).__name__}: {str(e)[:80]}), so "
                          "they are not checked.")
     finally:
-        await _give_up(ws, chat, turn, mine, "the check ended before it judged this mark")
+        await _give_up(ws, chat, turn, mine, "the check ended before it judged this citation")
 
 
 agent.AGENTS["checker"] = agent.AgentDef(
@@ -311,7 +311,7 @@ agent.AFTER_TURN.append(after_turn)
 
 FEATURE = Feature(
     name="marks",
-    title="Marks",
-    does="Claude marks the claims you would check, and a second Claude checks each one after the reply.",
+    title="Citations",
+    does="Claude adds a citation to each claim you would check, and a second Claude checks each one after the reply.",
     prompt="marks.md",
 )

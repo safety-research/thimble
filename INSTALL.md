@@ -123,9 +123,9 @@ The browser workbench:
 
 ## Settings
 
-- **The plugin's features.** Marks, Cards (with `v`), and Labels and coverage on the bar can each be turned on or
+- **The plugin's features.** Citations, Cards (with `v`), and Labels and coverage on the bar can each be turned on or
   off: click `thimble` at the left of the bar or run `/thimble-settings`. Claude Code keeps the values in its settings
-  (`pluginConfigs`). With Marks off, the checker makes no model call.
+  (`pluginConfigs`). With Citations off, the checker makes no model call.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).
@@ -149,7 +149,7 @@ alone. To remove what thimble wrote, delete the `thimble/` folder in each data f
 
 The terminal plugin:
 
-- **No line above the prompt, and no marks.** The plugin is not loaded in this session. Check that the folder is
+- **No line above the prompt, and no citations.** The plugin is not loaded in this session. Check that the folder is
   trusted and that thimble is enabled in `/plugin`. Managed settings that set `disableAllHooks` turn thimble off.
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
 - **A line above the prompt says something failed.** It says what failed and why. `f` asks Claude to fix it in thimble

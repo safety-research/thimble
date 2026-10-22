@@ -1,15 +1,15 @@
 # thimble's browser workbench
 
-A web page for making sense of a folder of files with Claude, with the terminal plugin's guidance, marks and cards. You
-open a folder, ask a question in the chat, and Claude answers. It marks the claims you would check, and after the reply
-a copy of the chat checks each mark against the data: a mark turns into its corrected words, or red when it is wrong,
+A web page for making sense of a folder of files with Claude, with the terminal plugin's guidance, citations and cards.
+You open a folder, ask a question in the chat, and Claude answers. It adds a citation to each claim you would check, and
+after the reply a copy of the chat checks each citation against the data: a citation turns into its corrected words, or red when it is wrong,
 and a click shows the evidence (the file's lines, or the code that ran and its output). When an answer is faster to see
 than to read, Claude draws an interactive card under its call, and v under an answer draws a card of it. The page also
 has a file browser, labels, views built for the folder when you ask for one, and a report you write with Claude.
 
 It runs on your machine. A small server listens on 127.0.0.1, serves the page, and runs Claude itself on the Claude
 API, with your own credentials. Besides the chat, Claude works in the background only for you: the check of a reply's
-marks, the card v draws, and a view's builder, which starts when you accept a view. It never writes into the folder of
+citations, the card v draws, and a view's builder, which starts when you accept a view. It never writes into the folder of
 files.
 
 ## Install and start

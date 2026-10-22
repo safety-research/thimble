@@ -65,7 +65,7 @@ export const registerBar: Register = on => {
     const r = await next(e)
     void refreshFixes($).catch(() => undefined)
     try {
-      await $.command.register({ name: 'thimble-settings', description: "thimble's settings: turn marks, cards, and the bar's coverage and labels on or off", immediate: true })
+      await $.command.register({ name: 'thimble-settings', description: "thimble's settings: turn citations, cards, and the bar's coverage and labels on or off", immediate: true })
     } catch {
       // a click on `thimble` in the bar still opens them
     }

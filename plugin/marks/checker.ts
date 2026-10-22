@@ -168,7 +168,7 @@ export function splitMarks<M extends { sentence: string }>(items: M[]): M[][] {
   return out.filter(s => s.length)
 }
 
-const checkingWord = (n: number) => `checking ${n} mark${n === 1 ? '' : 's'}`
+const checkingWord = (n: number) => `checking ${n} citation${n === 1 ? '' : 's'}`
 
 /** The busy line's step while a reply's forks run, until none of them does: the marks still checked, counting down as
  *  each fork's share settles. */
@@ -199,7 +199,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const root = await startDir($)
   const whole: Check = { agentId: '', key, turnId: e.turnId, marks: items.map(m => m.n), cwd, root, replyEnd: reply[reply.length - 1]!.at, spawnedAt: now }
   if (e.reason !== 'answer') {
-    await giveUp($, whole, 'the reply was interrupted before its marks were checked', now)
+    await giveUp($, whole, 'the reply was interrupted before its citations were checked', now)
     return
   }
   let template = ''
@@ -207,16 +207,16 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     template = await promptText($, 'checker')
   } catch (err) {
     await giveUp($, whole, 'thimble could not read its checker text', now)
-    failNotice($, `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}), so the marks are not checked. Reinstall thimble.`)
+    failNotice($, `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}), so the citations are not checked. Reinstall thimble.`)
     return
   }
   const started: string[] = []
   for (const share of splitMarks(items)) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
-    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd, root), description: 'checking marks' })
+    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd, root), description: 'checking citations' })
     if (!fork.agentId) {
       await giveUp($, c, 'the check could not start', now)
-      failNotice($, `The check of the marks could not start (${String(fork.deny || 'no reason given').slice(0, 80)}), so they are not checked.`)
+      failNotice($, `The check of the citations could not start (${String(fork.deny || 'no reason given').slice(0, 80)}), so they are not checked.`)
       continue
     }
     const agentId = fork.agentId
@@ -242,9 +242,9 @@ function bashCalls(msgs: Any, by: 'checker' | 'main'): { command: string; output
 
 /** The person's line when a check gave no answer, by why its turn ended. */
 function giveUpLine(reason: string): string {
-  if (reason === 'refusal') return "The model's safeguards refused the check of the marks, so they are not checked. Another model may check them: /model."
-  if (reason === 'aborted') return 'The check of the marks was stopped, so they are not checked.'
-  return 'The check of the marks stopped on an error, so they are not checked. The next reply is checked again.'
+  if (reason === 'refusal') return "The model's safeguards refused the check of the citations, so they are not checked. Another model may check them: /model."
+  if (reason === 'aborted') return 'The check of the citations was stopped, so they are not checked.'
+  return 'The check of the citations stopped on an error, so they are not checked. The next reply is checked again.'
 }
 
 /** The validator's result for a fork's answer, or why there is none. */
@@ -257,8 +257,8 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   })
   let out: { parsed: boolean; results: Any[] } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
-  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the marks (${String(ran.stderr || 'no output').trim().split('\n').pop()?.slice(0, 80)}), so they are not checked.` }
-  if (!out.parsed) return { problem: 'The check of the marks gave no answer thimble could read, so they are not checked.' }
+  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${String(ran.stderr || 'no output').trim().split('\n').pop()?.slice(0, 80)}), so they are not checked.` }
+  if (!out.parsed) return { problem: 'The check of the citations gave no answer thimble could read, so they are not checked.' }
   return { results: out.results }
 }
 
@@ -281,7 +281,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     try {
       v = await validate($, c, e, items)
     } catch (err) {
-      v = { problem: `thimble could not validate the check of the marks (${String((err as Error)?.message || err).slice(0, 80)}), so they are not checked.` }
+      v = { problem: `thimble could not validate the check of the citations (${String((err as Error)?.message || err).slice(0, 80)}), so they are not checked.` }
     }
     if (!v.results) {
       await giveUp($, c, 'thimble could not validate the check', forkEnd)
@@ -293,7 +293,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     const reply = await edit($, c, r => settle(r, settled, r.items.map(m => {
       if (!mine.has(m.n)) return m
       const res = byN.get(m.n)
-      if (!res) return { ...m, status: 'unchecked' as MarkStatus, reason: 'the check gave no answer for this mark' }
+      if (!res) return { ...m, status: 'unchecked' as MarkStatus, reason: 'the check gave no answer for this citation' }
       const { n: _n, ...rest } = res
       return { ...m, ...rest, shown: String(res.shown ?? m.words) }
     })))
@@ -307,7 +307,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     })
   } finally {
     // whatever ended the check, none of its marks stays checked
-    await giveUp($, c, 'the check ended before it judged this mark', Number(await $.clock.now())).catch(() => undefined)
+    await giveUp($, c, 'the check ended before it judged this citation', Number(await $.clock.now())).catch(() => undefined)
     await update($, RUNNING, cur => Object.fromEntries(Object.entries(cur ?? {}).filter(([id]) => id !== e.agentId)))
   }
 }
@@ -323,7 +323,7 @@ export async function resumeChecks($: Engine): Promise<void> {
   for (const c of gone) await giveUp($, c, 'the check stopped: thimble lost the copy that checked it', Number(await $.clock.now()))
   if (gone.length) {
     await update($, RUNNING, cur => Object.fromEntries(Object.entries(cur ?? {}).filter(([id]) => !gone.some(c => c.agentId === id))))
-    failNotice($, 'A check of the marks stopped: thimble lost the copy that checked them, so they are not checked. The next reply is checked again.')
+    failNotice($, 'A check of the citations stopped: thimble lost the copy that checked them, so they are not checked. The next reply is checked again.')
   }
   const byReply = new Map<string, string[]>()
   for (const c of Object.values(now).filter(c => alive(c.agentId))) byReply.set(c.key, [...(byReply.get(c.key) ?? []), c.agentId])

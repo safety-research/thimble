@@ -4,8 +4,8 @@ thimble helps you and Claude work through a large amount of data, such as the tr
 behind. It comes in two forms, both in this repository:
 
 - **The terminal plugin** (`plugin/`), for Claude Code. You ask Claude questions in the terminal as usual. Claude
-  marks the claims you would check, a second Claude checks each one after the reply, and Claude draws interactive
-  cards when an answer is faster to see than to read.
+  adds a citation to each claim you would check, a second Claude checks each one after the reply, and Claude draws
+  interactive cards when an answer is faster to see than to read.
 - **The browser workbench** (`browser/`), a web page for a folder of files, with a file browser, a chat with Claude, a
   canvas of cards and a report. Run `thimble-browser` in a folder of files to start it. It runs on your machine and
   calls the Claude API with your own credentials.
@@ -43,13 +43,13 @@ works, and what to do when it does not.
 
 thimble adds these to the session:
 
-- **Marks.** Claude marks the claims in its reply that you would want to check: the numbers that answer your
-  question, quotes, and what code does. A mark is underlined in purple. After the reply, a second Claude, a fork of
-  the session, checks each mark against the files: a number with code whose printed output holds it, a quote or a
-  claim about code with the line of the file that holds it. A spinner follows each mark while it checks. A mark that
-  holds stays as it is; a wrong one shows the corrected words in its place; one the data shows wrong turns red with
+- **Citations.** Claude adds a citation to each claim in its reply that you would want to check: the numbers that
+  answer your question, quotes, and what code does. A citation is underlined in purple. After the reply, a second
+  Claude, a fork of the session, checks each citation against the files: a number with code whose printed output holds
+  it, a quote or a claim about code with the line of the file that holds it. A spinner follows each citation while it
+  checks. A citation that holds stays as it is; a wrong one shows the corrected words in its place; one the data shows wrong turns red with
   `×`, and one the check could not confirm gets a `?`. The line under the reply counts the wrong, unconfirmed and
-  corrected marks. A click on a mark opens its evidence beside the chat: the output and the code for a number, the
+  corrected citations. A click on a citation opens its evidence beside the chat: the output and the code for a number, the
   file at its line for a quote. Claude learns of each correction with your next prompt.
 - **Cards.** When an answer is much faster to see than to read, such as the path one run took or forty runs side by
   side, Claude draws an interactive card in the conversation. A card takes clicks, and the letter keys it names while
@@ -72,19 +72,19 @@ word that starts with one of those keys, thimble gives the letter back to the pr
 ### Settings
 
 Click `thimble` at the left of the line above the prompt, or run `/thimble-settings`, to turn each feature on or off:
-Marks, Cards (with `v`), and Labels and coverage on the bar. With Marks or Cards off, thimble's guidance to Claude
+Citations, Cards (with `v`), and Labels and coverage on the bar. With Citations or Cards off, thimble's guidance to Claude
 leaves that feature out too, from the next conversation or `/compact` on.
 
 ### What it costs
 
-The checker makes one model call after each reply that has marks, with your session's model. It is a fork of the
+The checker makes one model call after each reply that has citations, with your session's model. It is a fork of the
 session, so the prompt cache serves the conversation it reads. `v` makes one fork per press. A `--prompt` label makes
 one call per 50 records. All calls go through your Claude Code login and show in your usage like any other.
 
 ### What it stores
 
 - `~/.thimble/` (or the folder in `THIMBLE_HOME`): per data folder, the labels, with every version of their values;
-  per session, the cards with their rows and state, the marks and their checks, the files Claude read (for coverage),
+  per session, the cards with their rows and state, the citations and their checks, the files Claude read (for coverage),
   and a log of thimble's own model calls; and in `srt/`, the sandbox runtime the cards run in. thimble writes nothing in your data folder (one whose `thimble/labels` an
   earlier thimble made keeps its labels there).
 

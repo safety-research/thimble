@@ -1216,7 +1216,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     wrong, `evidence` when the claim is only not confirmed: the checker could not see it, or its evidence did not hold.
     A `note` is what the checker found wrong in the sentence outside the mark's own claim."""
     n, words = mark["n"], str(mark["words"])
-    out: dict[str, Any] = {"n": n, "status": "unchecked", "shown": words, "reason": "the check gave no answer for this mark"}
+    out: dict[str, Any] = {"n": n, "status": "unchecked", "shown": words, "reason": "the check gave no answer for this citation"}
     if not item:
         return out
     status, kind = item.get("status"), item.get("kind")
@@ -1300,5 +1300,5 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
             results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             results.append({"n": m.get("n"), "status": "unchecked", "shown": str(m.get("words", "")),
-                            "reason": f"thimble could not validate this mark ({type(e).__name__}: {str(e)[:120]})"})
+                            "reason": f"thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})"})
     return {"parsed": items is not None, "results": results}

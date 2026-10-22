@@ -99,7 +99,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(seen.spawned[0].prompt).toBe('CHECK\n1. [40] in: Of the [40] pull requests, agent-07 merged [15 of 40].\n2. [15 of 40] in: Of the [40] pull requests, agent-07 merged [15 of 40].\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data')
   const checking = await drawn($)
   expect(checking).toContain('15 of 40 ⠋')
-  expect(checking).toContain('checking 3 marks')
+  expect(checking).toContain('checking 3 citations')
   expect(checking).not.toContain('(#)')
 
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
@@ -108,7 +108,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   const settled = await drawn($)
   expect(settled).toContain('merged 12 of 40.')
   expect(settled).toContain('"ship it" ×')
-  expect(settled).toContain('1 mark wrong · 1 corrected')
+  expect(settled).toContain('1 citation wrong · 1 corrected')
   // the note on the first sentence, once, under the block that holds it
   expect(settled.split('agent-02 approved each one').length).toBe(2)
   expect(settled).toContain('↳ agent-07 merged none of them alone')
@@ -135,11 +135,11 @@ test('a refused check leaves the marks unchecked, says so once, and nothing spin
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await endCheck($, { agentId: FORK, reason: 'refusal', answer: '' })
   const out = await drawn($)
-  expect(out).toContain('3 marks not checked')
+  expect(out).toContain('3 citations not checked')
   expect(out).not.toContain('checking')
   expect(out).not.toContain('×')
   const line = String((await failLineNow($))?.text ?? '')
-  expect(line).toContain("safeguards refused the check of the marks")
+  expect(line).toContain("safeguards refused the check of the citations")
   expect(line).toContain('/model')
 })
 
@@ -149,7 +149,7 @@ test('a validator that cannot run, or a fork that is gone, leaves no mark checki
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
   expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['unchecked', 'unchecked', 'unchecked'])
-  expect(String((await failLineNow($))?.text)).toContain('thimble could not validate the check of the marks (made-up: the command ran past its time limit)')
+  expect(String((await failLineNow($))?.text)).toContain('thimble could not validate the check of the citations (made-up: the command ran past its time limit)')
   expect((await $.state.get({ plugin: 'thimble', key: 'marksRunning' })).value).toEqual({})
   // a reload of the plugin finds a check whose fork Claude Code no longer runs
   const { $: other } = engine(VALIDATED)

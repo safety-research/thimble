@@ -1,7 +1,7 @@
 // features.mjs: the features a person turns on and off. Pure: no `$`, no Node. The hooks module, the settings pane
 // and the tests import it.
 //
-// Each feature is one switch, named by what the person gets (Marks, Cards), never by the part of thimble that makes
+// Each feature is one switch, named by what the person gets (Citations, Cards), never by the part of thimble that makes
 // it. Each is a field of the plugin's userConfig (.claude-plugin/plugin.json, with the same key, title and default),
 // so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again with the
 // new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key) when it acts.
@@ -10,8 +10,8 @@
  *  one line on what the person gets, the field's description (a test checks). */
 export const SWITCHES = [
   {
-    key: 'marks', title: 'Marks', default: true,
-    does: 'Claude marks the claims you would check, and a second Claude checks each one after the reply.',
+    key: 'marks', title: 'Citations', default: true,
+    does: 'Claude adds a citation to each claim you would check, and a second Claude checks each one after the reply.',
   },
   {
     key: 'cards', title: 'Cards', default: true,

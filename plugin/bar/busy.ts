@@ -2,7 +2,7 @@
 // Code's spinner covers only Claude's main turn; this one line covers the rest, and it is thimble's only sign of work:
 // no pane, message or panel draws a spinner of its own. Each job is a step named in plain words:
 //
-//   checking 12 marks           the checker forks over a reply's marks (marks/checker.ts)
+//   checking 12 citations       the checker forks over a reply's marks (marks/checker.ts)
 //   drawing a card              the designer fork v started, until its first card (designer/v.ts)
 //   improving the card          the designer fork after its first card, until it ends
 //   counting coverage           `thimble coverage`: the bar's count, the coverage pane (bar/counts.ts)
@@ -15,7 +15,7 @@
 //                             own.
 //   busyWhile($, word, alive) a job that ends when `alive()` says false (checked at each tick): work that another
 //                             hook ends, such as a fork, whose turn ends in turn.complete. `alive()` may give new
-//                             words for the step instead of true, as the work goes on ("checking 3 marks").
+//                             words for the step instead of true, as the work goes on ("checking 3 citations").
 //   busyNow($)                what the bar shows: the newest job that has run SHOW_MS or more (the step the person
 //                             most likely just started), as a turning glyph and its words, its seconds from SECS_MS
 //                             on, and the other steps that run beside it, by their words. Reading it makes the drawing

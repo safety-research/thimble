@@ -132,7 +132,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const { row, n } = (args ?? {}) as { row?: string; n?: number }
   const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
-  if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This mark is no longer in the session.' })
+  if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })
   const unconfirmed = m.status === 'failed' && m.failedBy === 'evidence'
   const st = STATUS[unconfirmed ? 'unconfirmed' : m.status] ?? STATUS.unchecked!
   const head = Text({ key: 'head', wrap: 'wrap', children: [

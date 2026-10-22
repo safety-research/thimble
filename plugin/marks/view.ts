@@ -92,7 +92,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   else if (look.status === 'unchecked') p.underline = true
   else if (look.status === 'corrected') { p.color = 'warning'; p.underline = true }
   else { p.color = PURPLE; p.underline = true }
-  const label = `mark ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
+  const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   return els.Button({ key, plain: true, label, hover: { bold: true }, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
 }
 
@@ -224,12 +224,12 @@ export function messageEl(els: Any, o: MessageOpts): Any {
 
 export type FooterOpts = { key: string; checking: number; wrong: number; unconfirmed: number; corrected: number; unchecked: number; spin: string }
 
-/** The line under a reply's last block: `checking 12 marks` while the check runs; afterwards, when there are any,
- *  `1 mark wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim; nothing when
+/** The line under a reply's last block: `checking 12 citations` while the check runs; afterwards, when there are any,
+ *  `1 citation wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim; nothing when
  *  every mark was verified as written. */
 export function footerEl(els: Any, o: FooterOpts): Any | null {
   const { Box, Text } = els
-  const marks = (n: number) => `${n} mark${n === 1 ? '' : 's'}`
+  const marks = (n: number) => `${n} citation${n === 1 ? '' : 's'}`
   const parts: Any[] = []
   if (o.checking) parts.push(Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${marks(o.checking)}` }))
   else {

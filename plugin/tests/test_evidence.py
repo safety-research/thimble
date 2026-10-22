@@ -109,7 +109,7 @@ def test_quote_in_a_decoded_jsonl_line_and_a_range(tmp_path: Path):
 def test_a_failed_mark_keeps_its_reason_and_a_missing_one_stays_unchecked():
     out = check_all([mark("a", 1), mark("b", 2)], '```json\n[{"mark": 1, "status": "wrong", "reason": "no record says so"}]\n```', [], "/data")
     assert out["parsed"] is True
-    assert [(r["status"], r["reason"]) for r in out["results"]] == [("failed", "no record says so"), ("unchecked", "the check gave no answer for this mark")]
+    assert [(r["status"], r["reason"]) for r in out["results"]] == [("failed", "no record says so"), ("unchecked", "the check gave no answer for this citation")]
     assert check_all([mark("a")], "I could not check it.", [], "/data")["parsed"] is False
 
 

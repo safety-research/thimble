@@ -101,7 +101,7 @@ export const registerMarks: Register = on => {
       ? messageEl(els, {
         text, marks, looks, key: `mk-${e.requestId}`, cols: Math.max(20, (e.viewport?.columns ?? 100) - 3), first: !!e.props.isFirstOfReply, spin,
         notes: notesByMark(reply?.items ?? []),
-        onMark: (k: number) => openPane($, 'evidence', { row: e.requestId, n: looks[k]!.n }, `mark ${looks[k]!.n}`),
+        onMark: (k: number) => openPane($, 'evidence', { row: e.requestId, n: looks[k]!.n }, `citation ${looks[k]!.n}`),
       })
       : await next(e)
     const foot = reply?.last ? footerEl(els, {
