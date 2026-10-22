@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import logging
 import os
 import shutil
 import signal
@@ -44,6 +45,7 @@ from typing import Any, Sequence
 
 from .. import home
 
+log = logging.getLogger(__name__)
 RUNNER = Path(__file__).resolve().with_name("runner.py")
 GRACE_S = 10.0  # past the run's own timeout, before the server stops it
 STOP_S = 2.0  # between SIGTERM and SIGKILL
@@ -431,10 +433,14 @@ def write_bytecode() -> None:
     run_dir = Path(tempfile.mkdtemp(prefix="thimble-run-")).resolve()
     try:
         env = {k: v for k, v in child_env(run_dir).items() if k != "PYTHONDONTWRITEBYTECODE"}
-        subprocess.run([sys.executable, "-I", str(RUNNER)], input=json.dumps({"code": "", "corpus": str(run_dir)}),
-                       capture_output=True, text=True, env=env, cwd=run_dir, timeout=PROBE_S * 4)
-    except (OSError, subprocess.SubprocessError):
-        pass  # the runs then compile what they import, as before
+        p = subprocess.run([sys.executable, "-I", str(RUNNER)], input=json.dumps({"code": "", "corpus": str(run_dir)}),
+                           capture_output=True, text=True, env=env, cwd=run_dir, timeout=PROBE_S * 4)
+        if p.returncode != 0:
+            log.warning("thimble could not write the bytecode of the runs' modules, so each run compiles them: %s",
+                        (p.stderr or "").strip().splitlines()[-1:] or "no error text")
+    except (OSError, subprocess.SubprocessError) as e:
+        # the runs then compile what they import, as before
+        log.warning("thimble could not write the bytecode of the runs' modules, so each run compiles them: %s", e)
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
 
