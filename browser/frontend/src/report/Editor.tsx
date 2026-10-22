@@ -292,9 +292,10 @@ const ACTS_GAP = 12
  * prompt) is drawn in. */
 const contentOf = (block: Element): HTMLElement | null => block.querySelector<HTMLElement>(':scope > .bn-block-content, :scope > .react-renderer > .bn-block-content')
 
-/** A block's first line on screen: a line of text (its box's top and its line height), a figure's head row, or the top
- * of any other block's content; and the right edge of the block's content, where the text column ends. */
-function firstLine(block: Element): { top: number; height: number; right: number } | null {
+/** A block's first line on screen: a line of text (its box's top and its line height), the first row of a figure's
+ * head, or the top of any other block's content; and the right edge the actions stand against: the block's content's,
+ * where the text column ends, or for a figure its head row's, inside the card (`inside`). */
+function firstLine(block: Element): { top: number; height: number; right: number; inside?: boolean } | null {
   const content = contentOf(block)
   if (!content) return null
   const right = content.getBoundingClientRect().right
@@ -305,8 +306,13 @@ function firstLine(block: Element): { top: number; height: number; right: number
     return { top: r.top, height: Number.isFinite(lh) ? lh : r.height, right }
   }
   const head = content.querySelector<HTMLElement>('.wu-fig-head')
-  const r = (head ?? content).getBoundingClientRect()
-  return { top: r.top, height: head ? r.height : Math.min(r.height, 24), right }
+  if (head) {
+    const r = head.getBoundingClientRect()
+    const row = parseFloat(getComputedStyle(head).minHeight)
+    return { top: r.top, height: Number.isFinite(row) && row > 0 ? Math.min(r.height, row) : r.height, right: r.right, inside: true }
+  }
+  const r = content.getBoundingClientRect()
+  return { top: r.top, height: Math.min(r.height, 24), right }
 }
 
 /** The top of the pane the page scrolls in (the nearest ancestor that scrolls), in viewport coordinates. */
@@ -318,7 +324,8 @@ function paneTop(el: Element): number {
 }
 
 /** The actions stand in the gutter at the right of the hovered block, centred on its first line, or at the pane's top
- * while that line is scrolled above it (model.ts actsTop). BlockNote places its side menu at the block's left with
+ * while that line is scrolled above it (model.ts actsTop); a figure's stand inside its card, at the right end of its
+ * question line, in the room report.css keeps there. BlockNote places its side menu at the block's left with
  * offsets for its own type sizes, so the placement and the offset are the report's. */
 const ACTS_FLOATING = {
   useFloatingOptions: {
@@ -326,22 +333,23 @@ const ACTS_FLOATING = {
     middleware: [
       {
         name: 'wuFirstLine',
-        fn: ({ x, y, rects, elements }: { x: number; y: number; rects: { floating: { height: number } }; elements: { reference: unknown } }) => {
+        fn: ({ x, y, rects, elements }: { x: number; y: number; rects: { floating: { width: number; height: number } }; elements: { reference: unknown } }) => {
           const el = (elements.reference as { contextElement?: Element }).contextElement
           const line = el ? firstLine(el) : null
           if (!el || !line) return { x: x + ACTS_GAP, y }
           const box = el.getBoundingClientRect()
           const top = actsTop(line, rects.floating.height, box.bottom, paneTop(el) + ACTS_GAP)
-          return { x: x + line.right - box.right + ACTS_GAP, y: y + top - box.top }
+          const left = line.inside ? line.right - rects.floating.width : line.right + ACTS_GAP
+          return { x: x + left - box.right, y: y + top - box.top }
         },
       },
     ],
   },
 }
 
-/** The hovered block's actions in the gutter at the right of its first line: its kind menu, then chat, delete and the
- * lock (a locked block is changed by no model, report_types.set_block_lock). BlockNote's side menu carries them, so
- * they follow the pointer's block. The title has no kind and no delete; a figure and a prompt have no kind; unstored
+/** The hovered block's actions in the gutter at the right of its first line (a figure's inside its card, on its question
+ * line): its kind menu, then chat, delete and the lock (a locked block is changed by no model,
+ * report_types.set_block_lock). BlockNote's side menu carries them, so they follow the pointer's block. The title has no kind and no delete; a figure and a prompt have no kind; unstored
  * blocks have no chat and no lock. A drag on the actions moves the block (⌘⇧↑ and ⌘⇧↓ from the keyboard); a figure
  * also moves by its question line (FigureBlock figureDrag). */
 function BlockActions() {
