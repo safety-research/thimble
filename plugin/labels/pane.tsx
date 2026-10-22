@@ -35,7 +35,8 @@ const n = (x: unknown) => Number(x || 0).toLocaleString('en-US')
 const width = (s: string) => [...s].length
 const cut = (s: string, k: number) => (width(s) <= k ? s : `${[...s].slice(0, Math.max(0, k - 1)).join('')}…`)
 const pad = (s: string, k: number) => cut(s, k) + ' '.repeat(Math.max(0, k - width(cut(s, k))))
-const oneLine = (s: unknown) => String(s ?? '').replace(/\s*\n\s*/g, ' ⏎ ').replace(/\s+/g, ' ').trim()
+/** Text on one line: a line break as ⏎, each run of spaces as one; `trim` false keeps a space at either end. */
+const oneLine = (s: unknown, trim = true) => { const t = String(s ?? '').replace(/\s*\n\s*/g, ' ⏎ ').replace(/\s+/g, ' '); return trim ? t.trim() : t }
 
 /** Where a record is, as a terminal opens it: `path:line` for a line, else its ref. */
 export function placeOf(ref: string): string {
@@ -70,6 +71,13 @@ function share(weights: number[], cells: number): number[] {
     }
   })
   return out
+}
+
+/** A part's share in whole percents, never 0% or 100% for a part that is neither none nor all. */
+function share100(part: number, all: number): string {
+  const p = (100 * part) / all
+  if (part === 0 || part === all) return `${Math.round(p)}%`
+  return p < 1 ? '<1%' : p > 99 ? '>99%' : `${Math.round(p)}%`
 }
 
 /** A label's parts: each value with its records, then those that wait for the model or got no value. */
@@ -151,7 +159,7 @@ function scopeWords(lab: Any): string {
   const parts = [`${n(lab.records)} record${lab.records === 1 ? '' : 's'} in ${lab.in || 'the records Claude named'}`]
   if (lab.where) parts.push(`where ${lab.where}`)
   if (lab.within) parts.push(`within ${lab.within[0]} = ${lab.within[1]}`)
-  if (lab.trial) parts.push(`a trial sample of ${n(lab.matched)}`)
+  if (lab.trial) parts.push(`a trial: ${n(lab.records)} of ${n(lab.matched)} at random`)
   if (lab.checked) parts.push(`you checked ${n(lab.checked)}: ${n(lab.agree)} agree, ${n(lab.disagree)} changed`)
   return parts.join(' · ')
 }
@@ -162,10 +170,10 @@ function wordsOf(els: Any, r: Any, color: string, room: number): unknown[] {
   const { Text } = els
   if (r.missing) return [Text({ key: 'w', dimColor: true, children: String(r.missing) })]
   if (r.hit) {
-    const match = oneLine(r.hit.match)
+    const match = oneLine(r.hit.match, false)
     const side = Math.max(8, Math.floor((room - width(match)) / 2))
-    const before = oneLine(r.hit.before)
-    const after = oneLine(r.hit.after)
+    const before = oneLine(r.hit.before, false).trimStart()
+    const after = oneLine(r.hit.after, false).trimEnd()
     return [
       width(before) > side ? `…${[...before].slice(-side + 1).join('')}` : before,
       Text({ key: 'm', bold: true, color, children: cut(match, room) }),
@@ -202,7 +210,7 @@ async function labelView($: Engine, els: Any, root: string, a: LabelsArgs, lab: 
   const valueRows = picks.map(p => {
     const on = p.v === value
     const cells = p.n ? Math.max(1, Math.round((p.n / most) * barW)) : 0
-    const pct = lab.records ? `${Math.round((100 * p.n) / lab.records)}%` : ''
+    const pct = lab.records ? share100(p.n, lab.records) : ''
     return Button({
       key: `value-${p.v}`, plain: true, onPress: () => go({ value: p.v, at: 0, sel: null }),
       children: [

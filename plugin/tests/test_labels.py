@@ -70,6 +70,10 @@ def test_a_regex_label_gives_each_record_a_value_and_prints_its_counts(root: Pat
     yes = LB.page(st, "sorry", "yes")
     assert [r["ref"] for r in yes["records"]] == ["chat/room.jsonl#L1", "chat/room.jsonl#L3"] and yes["total"] == 2
     assert yes["records"][0]["words"] == "I'm sorry, I broke the build with my last commit."
+    # a record with no words in it shows its short values with their keys
+    (root / "pages.jsonl").write_text(json.dumps({"page_id": "w/Notes", "wiki": "w", "name": "Notes", "n_revs": 3, "tags": ["a"]}) + "\n")
+    run(root, "label", "short", "--in", "pages.jsonl", "--regex", "Notes")
+    assert LB.page(st, "short")["records"][0]["words"] == "wiki w · name Notes · n_revs 3"
     # a rule label asks the plugin for nothing
     assert feed(root) == []
 

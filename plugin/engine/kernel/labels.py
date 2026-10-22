@@ -649,12 +649,23 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
         row = rows.get(r)
         if row is not None:
             words, meta = said[r]
-            e.update(words=words or unit_text(row, 240), meta=meta, text=unit_text(row, 1200))
+            e.update(words=words or fields_line(row) or unit_text(row, 240), meta=meta, text=unit_text(row, 1200))
             e.update(matched_part(lab, row, kinds))
         else:
             e["missing"] = "the record is no longer in its file"
         out.append(e)
     return {"label": head(lab), "value": value, "at": at, "total": total, "records": out}
+
+
+def fields_line(row: S.Row) -> str:
+    """A record with no words in it (S.words_of), as a person scans it: its short values with their keys, in its order,
+    `wiki dse · name AgentNotes · n_revs 3`; no ids. Empty for a record that is not a JSON object."""
+    v = row.value
+    if not isinstance(v, dict):
+        return ""
+    parts = [f"{k} {x}" for k, x in v.items() if isinstance(x, (str, int, float)) and not isinstance(x, bool)
+             and str(x).strip() and len(str(x)) <= 80 and not re.search(r"(^|_)(id|key|uuid|hash)$", str(k), re.I)]
+    return " · ".join(parts)[:240]
 
 
 HIT_ROOM = 320  # characters of a record the label viewer shows around the part its label matched
