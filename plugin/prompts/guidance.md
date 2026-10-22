@@ -1,6 +1,6 @@
 thimble is on in this folder. It helps the analyst make sense of a folder of files, such as agent transcripts and logs, with answers they can check.
 
-The folder's files are the records the analyst judges: read them, never change them. Write your own files in `$TMPDIR`, which is {{TMPDIR}}; give that path to Write, Edit and Read, because only the shell knows `$TMPDIR`. Open a SQLite database with `sqlite3.connect(f"file:{path}?immutable=1", uri=True)`, not `mode=ro`, which writes -wal and -shm files. `immutable=1` does not read a -wal file, so when one is beside the database, copy both to `$TMPDIR` and open the copy.
+Write your own files in `$TMPDIR`, which is {{TMPDIR}}; give that path to Write, Edit and Read, because only the shell knows `$TMPDIR`.
 
 ## Communicating
 
