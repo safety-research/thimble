@@ -344,6 +344,23 @@ def test_a_number_in_a_printed_text_is_typed_only_when_the_output_shows_it_nowhe
     assert "15 in by hand" in check_mark(mark("15"), computed("all 15 had a timeout: True"), [call(alone, "all 15 had a timeout: True")], "/data")["reason"]
 
 
+def test_a_version_or_a_dotted_name_is_no_value_and_a_bound_may_stand_in_printed_words():
+    code = 'import collections\nper = collections.Counter()\ns, t = per["site"], sum(per.values())\nprint(f"Claude Sonnet 4.6: {s/t:.0%} to the site")'
+    out = "Claude Sonnet 4.6: 44% to the site"
+    assert check_mark(mark("Claude Sonnet 4.6: 44% to the site"), computed(out), [call(code, out)], "/data")["status"] == "verified"
+    code = 'print(f"{n} point to localhost; {m} to 127.0.0.1")'
+    out = "429 point to localhost; 298 to 127.0.0.1"
+    assert check_mark(mark("298 to 127.0.0.1"), computed(out), [call(code, out)], "/data")["status"] == "verified"
+    out = "models after switch: ['claude-opus-4-8']"
+    assert check_mark(mark("retried it on Opus 4.8"), computed(out), [call("print(models)", out)], "/data")["status"] == "verified"
+    code = 'under = [a for a in rates if rates[a] < 0.02]\nprint(f"{len(under)} of {len(rates)} agents under 2%")'
+    out = "13 of 16 agents under 2%"
+    assert check_mark(mark("most agents are under 2%"), computed(out), [call(code, out)], "/data")["status"] == "verified"
+    # a value the words state, not a bound or a name, is still typed when only the code's text prints it
+    typed = 'print("Median 2.5 hours")'
+    assert "2.5 in by hand" in check_mark(mark("Median 2.5 hours"), computed("Median 2.5 hours"), [call(typed, "Median 2.5 hours")], "/data")["reason"]
+
+
 def test_one_mark_the_validator_cannot_judge_leaves_the_others_judged(monkeypatch):
     import kernel.evidence as E
     code = "print(len(open('t.txt').read()))"

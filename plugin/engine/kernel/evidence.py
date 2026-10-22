@@ -13,7 +13,8 @@ shows the words, so a mark is never verified on evidence the checker made up:
             each of them (white space read loosely, "…" for left-out text, in any order), and the lines that hold
             them show the marked words (or the corrected words): the words whole, or each part of them that compares
             without reading meaning: each quoted part, each day, each number as a whole number of those lines (a 3
-            never matches inside 2,301 or sweep3; number words read as digits), and for words with no number each
+            never matches inside 2,301 or sweep3; number words read as digits; a number in a name, such as agent-11,
+            Opus 4.8 or 127.0.0.1, is no value), and for words with no number each
             record name, in either case. Words with none of these ("passed when run
             alone") are the checker's reading of the output it cites, as a paraphrase of a quote is. The check reads
             the output the call really printed, never the output the checker wrote down, and it runs nothing.
@@ -23,8 +24,9 @@ shows the words, so a mark is never verified on evidence the checker made up:
             (`age < 12` and "children under 12"): a bound of a comparison, an index or a slice, an operand of
             arithmetic, an argument of another call (`head(5)`, `round(x, 2)`), a value in a list or a dict (the keys
             the code looks up), the digits of a text the code tests the records with (`"2026-06-16" <= day` and "16
-            June"; `startswith("Wrapping up")` and the quoted words), and the words of a line printed only when a
-            condition holds. Not caught: a value
+            June"; `startswith("Wrapping up")` and the quoted words), the words of a line printed only when a
+            condition holds, and a bound the words count under ("under 2%", "within 2 minutes", "5,000 or more"),
+            which code tests in its own unit (`< 0.02`). Not caught: a value
             computed from typed numbers alone (`print(350 + 2)`), a typed list printed back, and code the call ran
             from a file.
   quote     one place or several: the file is inside the folder the session started in or the shell's folder (a
@@ -226,8 +228,13 @@ def same_number(v: str, w: str, approx: bool = False) -> bool:
 
 
 def names_record(text: str, m: re.Match) -> bool:
-    """The number is part of a name, not a value: after `#` (`#118`) or after a letter and a hyphen (`agent-11`)."""
-    return text[max(0, m.start() - 1):m.start()] == "#" or bool(re.search(r"[A-Za-z][-_]$", text[:m.start()]))
+    """The number is part of a name, not a value: after `#` (`#118`), after a letter and a hyphen (`agent-11`), a part
+    of a dotted name (`127.0.0.1`, `2.1.307`), or a version right after a name inside the words (`on Opus 4.8`, `Claude
+    Sonnet 4.6`). A capitalized word that opens the words is no sign of a name ("Median 2.5 hours")."""
+    before, after = text[:m.start()], text[m.end(1):]
+    if text[max(0, m.start() - 1):m.start()] == "#" or re.search(r"[A-Za-z][-_]$", before) or re.match(r"\.\d", after):
+        return True
+    return "." in m.group(1) and bool(re.search(r"\S\s+[A-Z][A-Za-z]*\s$", before)) and not re.match(r"\s*%", after)
 
 
 def numbers(text: str) -> list[str]:
@@ -260,13 +267,22 @@ def date_spans(text: str) -> list[tuple[int, int]]:
     return out
 
 
+# a bound the words count under: "under 2%", "within 2 minutes", "5,000 or more"
+BOUND_BEFORE = re.compile(r"(?:\b(?:under|below|over|above|within|at least|at most|more than|less than|fewer than|up to)|[<>≤≥])\s*$", re.I)
+BOUND_AFTER = re.compile(r"\s*(?:%|percent)?\s*(?:or (?:more|fewer|less|longer|shorter)\b|\+)", re.I)
+
+
 def cited_numbers(words: str) -> set[str]:
     """The numbers of the marked words that the evidence must not type in: each number outside a date or a time, and
     outside a direct quote. A date in code names the period the code counts (`n['2025-04']`, `f"April 2025: {n}"`), so
     a date is never a typed value. A number in a quote is part of the record's words, which must come from the record
-    (typed_quote). A number that is part of a name (`#118`, `agent-11`) is no value either."""
+    (typed_quote). A number that is part of a name (`#118`, `agent-11`) is no value either, and neither is a bound the
+    words count under ("under 2%", "within 2 minutes", "5,000 or more"): code tests it in its own unit (`< 0.02`,
+    `< 120` seconds) and may write it in the words it prints."""
     words = re.sub(r"[\"“][^\"“”]+[\"”]", " ", wordnums(words))
-    return {v for v, in_date in marked_numbers(words) if not in_date}
+    dates = date_spans(words)
+    return {v for m in NUM.finditer(words) if not names_record(words, m) and not any(a <= m.start(1) < b for a, b in dates)
+            and not BOUND_BEFORE.search(words[:m.start()]) and not BOUND_AFTER.match(words[m.end():]) for v in [number_at(m)] if v is not None}
 
 
 TIME_END = re.compile(r"\d{1,2}:\d{2}:\d{2}$")
@@ -389,9 +405,10 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
 
 
 def unescaped(out: str) -> str:
-    """The text with the escapes that repr() prints for white space and quote marks (`\\n`, `\\t`, `\\'`) read as the
-    characters they stand for, as code prints a record's text with repr() to show its line breaks, and a reply may
-    quote it so."""
+    """The text with the escapes that repr() prints for white space and quote marks (`\\n`, `\\t`, `\\'`) read as what
+    they stand for: a white space escape as a space (white space compares loosely), a quote mark as the mark; code
+    prints a record's text with repr() to show its line breaks, and a reply may quote it so. Both the words and the
+    output are read so, so a real backslash (`C:\\new`) changes in both alike."""
     return re.sub(r"\\([nrt'\"])", lambda m: m.group(1) if m.group(1) in "'\"" else " ", out)
 
 
