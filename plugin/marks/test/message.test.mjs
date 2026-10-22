@@ -37,6 +37,9 @@ test('a sentence runs from the stop or line break before the mark to the next on
   const bm = marksIn(bold)
   assert.equal(sentenceOf(bold, bm[0]), '[26] pull requests were merged.')
   assert.equal(sentenceOf(bold, bm[1]), 'Four agents tie with [3 merges each].')
+  // a `__` inside a name is part of it; around words it is bold
+  const named = 'Late: __annotation-platform__underspecified__ at [87%](#).'
+  assert.equal(sentenceOf(named, marksIn(named)[0]), 'Late: annotation-platform__underspecified at [87%].')
 })
 
 test('a block with marks lays out as runs, each mark one group of runs with its own bold and code', () => {

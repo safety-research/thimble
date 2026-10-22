@@ -97,7 +97,8 @@ export function sentenceOf(text, mark) {
   let out = ''
   let at = 0
   for (const m of marksIn(part)) { out += part.slice(at, m.start) + `[${m.words}]`; at = m.end }
-  return (out + part.slice(at)).replace(/\*\*|__/g, '').replace(/\s+/g, ' ').trim()
+  // bold as `**` or `__`; a `__` between two letters or digits is part of a name (`chess-nano__goal`)
+  return (out + part.slice(at)).replace(/\*\*|(?<![\p{L}\p{N}])__|__(?![\p{L}\p{N}])/gu, '').replace(/\s+/g, ' ').trim()
 }
 
 /** A sentence of sentenceOf as a person reads it: no heading, quote or list marker, a table row's cells joined by
