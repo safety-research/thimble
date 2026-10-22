@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  aboutOf, back, base, cutTitle, drawsHyperlinks, explainerText, fileHref, indexOf, open, push, replyPlace, saidOf,
-  scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, top, windowOf,
+  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
+  open, push, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, top,
 } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
@@ -39,7 +39,6 @@ test('the bar names ] with what it goes to while there is a next, else [ with wh
   assert.deepEqual(stepWords({ next: false, prev: true, prevWhat: 'card' }), [{ key: '[', words: 'previous card' }])
   assert.deepEqual(stepWords({ next: true, prev: true }), [{ key: ']', words: 'next' }])
   assert.deepEqual(stepWords({ next: false, prev: false }), [])
-  assert.equal(replyPlace(0, 3), 'reply 1 of 3, above')
   assert.equal(cutTitle('notes/deep/plan.txt:12', 12), '…plan.txt:12')
   assert.equal(cutTitle('a long title here', 8), 'a long …')
 })
@@ -62,12 +61,29 @@ test('an explainer\'s words keep their citations; a heads-up reads as a title, b
   assert.equal(explainerText({ kind: 'heads', term: 'x', title: 'Cold *cache*', bullets: ['a', ' ', 'b'], todo: 'look' }), '**Cold cache**\n\n- a\n- b\n\n→ look')
 })
 
-test('a file link where the terminal draws hyperlinks, and the cited lines the tray has room for', () => {
+test('a file link where the terminal draws hyperlinks', () => {
   assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'iTerm.app' }), true)
   assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'Apple_Terminal' }), false)
   assert.equal(drawsHyperlinks({ FORCE_HYPERLINK: '0', TERM_PROGRAM: 'kitty' }), false)
   assert.equal(fileHref('/data/a #1.txt', '12-14'), 'file:///data/a%20%231.txt#L12')
-  const lines = Array.from({ length: 20 }, (_, i) => ({ n: i + 1, text: `line ${i + 1}`, ...(i === 14 ? { highlight: [0, 4] } : {}) }))
-  assert.deepEqual(windowOf(lines, 5).map(l => l.n), [14, 15, 16, 17, 18])
-  assert.equal(windowOf(lines.slice(0, 3), 5).length, 3)
+})
+
+test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {
+  assert.equal(firstSentence('Counted 12.5 of 40 runs. The rest passed.'), 'Counted 12.5 of 40 runs.')
+  assert.equal(firstSentence('no stop at the end'), 'no stop at the end')
+  // computed: the output line where the first highlight starts, the span moved into it
+  const out = 'runs: 40\nmerged: 12 of 40\nopen: 3'
+  assert.deepEqual(evidenceLine({ kind: 'computed', code: 'print()', output: out, highlight: [[17, 25]] }), { text: 'merged: 12 of 40', spans: [[8, 16]] })
+  assert.deepEqual(evidenceLine({ kind: 'computed', code: 'print()', output: '\nfirst words' }), { text: 'first words', spans: [] })
+  // a file: the cited line that holds the highlight, with its number
+  const lines = [{ n: 3, text: 'runs: 40' }, { n: 4, text: 'failed: 12', highlight: [8, 10] }, { n: 5, text: 'open: 3' }]
+  assert.deepEqual(evidenceLine({ kind: 'quote', file: 'runs/summary.txt', line: '4', lines }), { n: 4, text: 'failed: 12', spans: [[8, 10]] })
+  assert.deepEqual(evidenceLine({ kind: 'quote', file: 'runs/summary.txt', line: '5', lines: [lines[0], lines[2]] }), { n: 5, text: 'open: 3', spans: [] })
+  assert.equal(evidenceLine(null), null)
+  // a long line keeps the value in view, with … where it was cut
+  const long = { text: `${'a'.repeat(100)}VALUE${'b'.repeat(100)}`, spans: [[100, 105]] }
+  const cut = lineWindow(long, 40)
+  assert.ok(cut.text.length <= 40 && cut.text.startsWith('…') && cut.text.endsWith('…'))
+  assert.equal(cut.text.slice(cut.spans[0][0], cut.spans[0][1]), 'VALUE')
+  assert.deepEqual(lineWindow({ text: 'short', spans: [] }, 40), { text: 'short', spans: [] })
 })

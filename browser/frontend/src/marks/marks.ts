@@ -6,7 +6,7 @@
 //   pending      the turn still runs, or its check has not started: violet, underlined
 //   checking     violet, underlined, and a spinner right after it
 //   verified     violet, underlined
-//   corrected    the corrected words in place of the marked ones, in the warning color, underlined
+//   corrected    the corrected words in place of the marked ones, violet, underlined, as a verified one
 //   failed       wrong as the check read the data: red, with ` ×` after it
 //   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
 //   unchecked    underlined in the text's color: no check could run
@@ -78,12 +78,6 @@ export function withMarkHrefs(text: string): string {
     at = m.end
   })
   return out + text.slice(at)
-}
-
-/** The counts a reply's footer says once its check settled: corrected, wrong, not confirmed, not checked. Pure. */
-export function footerCounts(items: readonly MarkItem[]): { look: MarkLook; n: number }[] {
-  const order: MarkLook[] = ['corrected', 'failed', 'unconfirmed', 'unchecked']
-  return order.map((look) => ({ look, n: items.filter((m) => lookOf(m) === look).length })).filter((c) => c.n > 0)
 }
 
 /** The notes of a reply's marks, once each: what the check found false in the sentences around them. Pure. */

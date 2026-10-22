@@ -6,7 +6,7 @@
 // opens over it, and 0 returns to the one under it; 0 on the first closes the tray.
 //
 //   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}), with `open: 'code'` while
-//             a citation's code shows in place of its output
+//             a citation's whole code and output show in place of its one line of evidence
 //   a tray    {stack: [frame, ...]} or null
 //   a stop    what ] and [ move through, in reading order: a mark of a row ({row, kind, n | id, at}) or a card drawn
 //             under a row ({row, card})
@@ -14,15 +14,15 @@
 //   sameRef(a, b), open(f), push(tray, f), back(tray), top(tray), base(tray)
 //   stopsOfRow(row, cites, spans, cards)   one row's stops: its citations and spans by where they stand, then its cards
 //   indexOf(list, at), stepFrom(list, k, dir)
-//   stopWhat(stop), stepWords(ends), replyPlace(at, of), cutTitle(s, n)
+//   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
 //   saidOf(gloss)                          what an explainer or an important detail says, in words for an agent
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
-
-/** The rows a citation's evidence may take in the tray. */
-export const BODY = 9
+//   firstSentence(s)                       a check's reason cut to its first sentence, for a citation's card
+//   evidenceLine(ev)                       the one line of a citation's evidence that holds the cited value
+//   lineWindow(line, room)                 that line cut to `room` characters around the value
 
 export const sameRef = (a, b) => !!a && !!b && a.row === b.row && a.kind === b.kind && (a.kind === 'citation' ? a.n === b.n : a.id === b.id)
 
@@ -89,9 +89,6 @@ export function stepWords(ends) {
   if (!ends) return []
   return ends.next ? [{ key: ']', words: `next${what(ends.nextWhat)}` }] : ends.prev ? [{ key: '[', words: `previous${what(ends.prevWhat)}` }] : []
 }
-
-/** Where an earlier reply is, in words: `reply 1 of 3, above`. */
-export const replyPlace = (at, of) => `reply ${at + 1} of ${of}, above`
 
 /** A title cut to `n` characters: a place (`engine/lineage.py:463`) loses the start of its path first, so its line
  *  stays whole; other words are cut at the end. */
@@ -195,11 +192,60 @@ export function fileHref(abs, line) {
   return `file://${encodeURI(String(abs)).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
 }
 
-/** The lines of a cited place the tray has room for: those around the first highlighted line (else the first ones). */
-export function windowOf(lines, room) {
-  const all = Array.isArray(lines) ? lines : []
-  if (all.length <= room) return all
-  const hit = Math.max(0, all.findIndex(l => l && l.highlight))
-  const from = Math.max(0, Math.min(hit - 1, all.length - room))
-  return all.slice(from, from + room)
+/** A check's reason, its first sentence only: a citation's card says why in one sentence (a decimal point or an
+ *  abbreviation inside it does not end it). */
+export function firstSentence(s) {
+  const t = String(s || '').replace(/\s+/g, ' ').trim()
+  const m = /^.*?[.!?](?=\s+[A-Z0-9"“(']|$)/.exec(t)
+  return m ? m[0] : t
+}
+
+/** Whether line n is one of the cited lines (`12` or `8-11`). */
+function inRange(n, line) {
+  const [a, b] = String(line ?? '').split('-').map(Number)
+  return n >= a && n <= (Number.isNaN(b) || b === undefined ? a : b)
+}
+
+/**
+ * The one line of a citation's evidence that holds the cited value, with the value's spans in it: for code that
+ * computed it, the output line where the first highlight starts (else its first line with words); for a file, the
+ * cited line that holds the highlight (else the first cited line). `n`: the file's line number. Null without one.
+ */
+export function evidenceLine(ev) {
+  if (!ev) return null
+  if (ev.kind === 'computed') {
+    const out = String(ev.output || '')
+    const lines = out.split('\n')
+    const spans = Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h) && h[1] > h[0]) : []
+    let at = 0
+    for (const text of lines) {
+      const end = at + text.length
+      if (spans.length ? spans[0][0] >= at && spans[0][0] <= end : text.trim()) {
+        const mine = spans.map(([a, b]) => [Math.max(a, at) - at, Math.min(b, end) - at]).filter(([a, b]) => b > a)
+        return { text, spans: mine }
+      }
+      at = end + 1
+    }
+    return lines.length && out ? { text: lines[0], spans: [] } : null
+  }
+  const lines = Array.isArray(ev.lines) ? ev.lines : []
+  const l = lines.find(x => x && x.highlight && inRange(x.n, ev.line)) || lines.find(x => x && x.highlight) || lines.find(x => x && inRange(x.n, ev.line)) || lines[0]
+  return l ? { n: l.n, text: String(l.text ?? ''), spans: l.highlight ? [l.highlight] : [] } : null
+}
+
+/** A line cut to `room` characters, around its first span when it is longer, with … where it was cut; its spans moved
+ *  with it. */
+export function lineWindow(line, room) {
+  if (!line) return line
+  const { text, spans } = line
+  if (!(room > 8) || text.length <= room) return line
+  const [a, b] = spans[0] || [0, 0]
+  let from = Math.max(0, Math.min(a - Math.floor((room - (b - a)) / 2), text.length - room + 1))
+  if (from > 0) from = Math.min(from + 1, a)
+  const head = from > 0 ? '…' : ''
+  const left = room - head.length
+  const to = from + left < text.length ? from + left - 1 : text.length
+  const tail = to < text.length ? '…' : ''
+  const moved = spans.map(([x, y]) => [Math.max(x, from) - from + head.length, Math.min(y, to) - from + head.length]).filter(([x, y]) => y > x)
+  return { ...line, text: head + text.slice(from, to) + tail, spans: moved }
 }

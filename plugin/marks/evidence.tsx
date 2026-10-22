@@ -6,8 +6,9 @@
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
 //   code       the substring highlighted
 //
-// A corrected mark says what it was; a wrong one says why, in red, and one the check could not confirm says why, in
-// the warning color, with the evidence the check gave when it is real. What the check found wrong in the rest of the
+// A corrected mark says what it was, its status in the citations' purple (as it draws in the reply); a wrong one says
+// why, in red, and one the check could not confirm says why, in the warning color, with the evidence the check gave
+// when it is real. The cited value is highlighted in the same purple. What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
@@ -23,20 +24,20 @@ const OUTPUT_ROWS = 14 // output lines shown around the first highlight
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
   verified: { word: 'verified', color: 'success' },
-  corrected: { word: 'corrected', color: 'warning' },
+  corrected: { word: 'corrected', color: 'merged' },
   failed: { word: 'wrong', color: 'error' },
   unconfirmed: { word: 'not confirmed', color: 'warning' },
   unchecked: { word: 'not checked', dim: true },
 }
 
-/** A line of text with spans of it highlighted (the theme's warning color behind them), as Text runs. */
-function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
+/** A line of text with spans of it highlighted (the citations' purple behind them), as Text runs. */
+export function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, color: 'inverseText', backgroundColor: 'warning', bold: true, children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, color: 'inverseText', backgroundColor: 'merged', bold: true, children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))

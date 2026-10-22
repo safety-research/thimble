@@ -8,7 +8,7 @@
 // answer view asks trayFocus). While it is open its keys are in the bar, after the busy step:
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed
-//   c code      a citation computed by code: the code in place of its output, and back
+//   c code      a citation computed by code: its whole code and whole output in place of the one line, and back
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
@@ -26,14 +26,14 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import { failNotice, noticeLine } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
-import { actingRow, answerRows, messageOf, partOf, pickAnswer, textRows, turnOfRow, turnsNow } from '../core/answers'
+import { actingRow, messageOf, partOf, pickAnswer, textRows, turnOfRow, turnsNow } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
-import { outputRows, placeRows, wrapCode } from '../marks/evidence'
+import { highlighted, outputRows, wrapCode } from '../marks/evidence'
 import { marksIn, withoutMarks } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
@@ -42,8 +42,8 @@ import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
-  BODY, aboutOf, back, base, cutTitle, drawsHyperlinks, explainerText, fileHref, indexOf, open, push,
-  refOf, replyPlace, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, top, windowOf,
+  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
+  open, push, refOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -156,15 +156,6 @@ async function stepPlace($: Engine): Promise<{ list: Stop[]; at: number }> {
   return { list, at: indexOf(list, b ?? stand) }
 }
 
-/** Where the tray's mark is when it is in an earlier reply than the newest (`reply 1 of 3, above`), since a key cannot
- *  always scroll the chat to it; '' otherwise. */
-async function replyWhere($: Engine, row: string): Promise<string> {
-  const all = await answerRows($)
-  const t = await turnOfRow($, row)
-  const at = t?.answer ? all.indexOf(t.answer) : -1
-  return at >= 0 && at < all.length - 1 ? replyPlace(at, all.length) : ''
-}
-
 /** Whether ] and [ go anywhere from where they stand, and what each goes to. */
 export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean; nextWhat?: string; prevWhat?: string }> {
   const { list, at } = await stepPlace($)
@@ -260,7 +251,7 @@ async function goBack($: Engine): Promise<void> {
   await setTray($, back(tray) as Tray)
 }
 
-/** c on a citation computed by code: its code in place of its output, and back. */
+/** c on a citation computed by code: its whole code and output in place of the one line of evidence, and back. */
 async function toggleCode($: Engine): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
@@ -450,49 +441,42 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
   verified: { word: 'verified', color: 'success' },
-  corrected: { word: 'corrected', color: 'warning' },
+  corrected: { word: 'corrected', color: 'merged' },
   failed: { word: 'wrong', color: 'error' },
   unconfirmed: { word: 'not confirmed', color: 'warning' },
   unchecked: { word: 'not checked', dim: true },
 }
 
-/** A citation's card: its check (what it says, a correction's old words, why it failed), then its evidence: the cited
- *  lines of a file with the words highlighted, or the output of the code that computed it (c: the code). */
-function citationBody(els: Any, f: Frame, m: MarkItem | null, inner: { words: string; heads: boolean; press: () => unknown } | null, w: number): Any[] {
-  const { Box, Button, Text } = els
+/** A citation's card. By default its status, why in one sentence, and the one line of its evidence that holds the
+ *  cited value, the value in the citations' purple (a file's line with its number). With c, for a value code computed:
+ *  the whole code, in code styling, then a blank line and the whole output, the value in purple as before. */
+function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number): Any[] {
+  const { Box, Text } = els
   if (!m) return [Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })]
   const unconfirmed = m.status === 'failed' && m.failedBy === 'evidence'
   const st = STATUS[unconfirmed ? 'unconfirmed' : m.status] ?? STATUS.unchecked!
-  const rows: Any[] = []
-  const said = [
-    Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
-    ...(m.status === 'corrected' && m.was ? [Text({ key: 'was', dimColor: true, children: `  was ${m.was.replace(/\*\*|`/g, '')}` })] : []),
-    ...(m.reason ? [Text({ key: 'why', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: `  ${m.reason}` })] : []),
-  ]
-  rows.push(Text({ key: 'status', wrap: 'wrap', children: said }))
-  if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   const ev = m.evidence
-  if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, wrap: 'wrap', children: 'The check is running; its evidence shows here when it ends.' }))
-  else if (!ev) rows.push(Text({ key: 'none', dimColor: true, wrap: 'wrap', children: 'The check gave no evidence for it.' }))
-  else if (ev.kind === 'computed') {
-    if (f.open === 'code') {
-      rows.push(Text({ key: 'ch', bold: true, children: 'The code' }))
-      rows.push(Text({ key: 'code', wrap: 'wrap', children: wrapCode(ev.code, w).split('\n').slice(0, BODY).join('\n') }))
-    } else {
-      rows.push(Text({ key: 'oh', bold: true, children: ev.by === 'main' ? 'Output of the code Claude ran for the reply' : 'Output of the code the check ran' }))
-      rows.push(Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight, BODY - 2) }))
-    }
-  } else {
-    const room = Math.max(3, BODY - rows.length)
-    rows.push(Box({ key: 'place', flexDirection: 'column', children: placeRows(els, { ...ev, lines: windowOf(ev.lines, room) }, 'p') }))
-    if (ev.more?.length) rows.push(Text({ key: 'more', dimColor: true, children: `and ${ev.more.length} more place${ev.more.length === 1 ? '' : 's'}: click the place to see ${ev.more.length === 1 ? 'it' : 'them'}` }))
+  const why = m.reason ? firstSentence(m.reason) : m.status === 'checking' ? 'The check is running.' : ev ? '' : 'The check gave no evidence for it.'
+  const rows: Any[] = [Text({ key: 'status', wrap: 'wrap', children: [
+    Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
+    ...(why ? [Text({ key: 'why', ...(m.status === 'failed' && !unconfirmed ? { color: st.color } : { dimColor: true }), children: `  ${why}` })] : []),
+  ] })]
+  if (!ev || m.status === 'checking') return rows
+  if (ev.kind === 'computed' && f.open === 'code') {
+    const code = wrapCode(ev.code, w)
+    rows.push(els.Code ? els.Code({ key: 'code', source: code, language: 'python' }) : Text({ key: 'code', color: 'permission', children: code }))
+    rows.push(Text({ key: 'gap', children: ' ' }))
+    rows.push(Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight, Number.MAX_SAFE_INTEGER) }))
+    return rows
   }
-  if (inner) {
-    rows.push(Button({ key: 'inner', plain: true, label: `${inner.heads ? 'heads up' : 'explain'} ${inner.words}`, onPress: inner.press, children: [
-      Text({ key: 'ik', color: inner.heads ? 'warning' : 'suggestion', children: inner.heads ? '▲ heads up ' : 'explain ' }),
-      Text({ key: 'iw', children: inner.words.length > 70 ? `${inner.words.slice(0, 69)}…` : inner.words }),
-    ] }))
-  }
+  const line = evidenceLine(ev)
+  if (!line) return rows
+  const gutter = line.n !== undefined ? `${line.n} │ ` : ''
+  const cut = lineWindow(line, w - gutter.length)
+  rows.push(Box({ key: 'ev', flexDirection: 'row', children: [
+    ...(gutter ? [Text({ key: 'n', dimColor: true, children: gutter })] : []),
+    Box({ key: 'l', flexShrink: 1, children: [highlighted(els, cut.text, cut.spans, 't')] }),
+  ] }))
   return rows
 }
 
@@ -517,8 +501,8 @@ async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Pr
   return els.Button({ key: 'tray-file', plain: true, label: `open ${label}`, onPress: openIt, children: [els.Text({ color: 'merged', underline: true, children: label })] })
 }
 
-/** The tray, drawn above the bar while it is open: one frame, its title and where it is from on top, the mark's card
- *  under them. */
+/** The tray, drawn above the bar while it is open: one frame, its title and its kind (cite, explain, heads up) on top,
+ *  the mark's card under them, its rows starting where the title starts. */
 export async function trayBand($: Engine, els: Any, width: number): Promise<Any[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
@@ -527,32 +511,24 @@ export async function trayBand($: Engine, els: Any, width: number): Promise<Any[
   const w = Math.max(40, Math.min(104, width - 3))
   const inner = w - 4
   const tones = TONES[await themeOf($)]
-  const where = await replyWhere($, f.row)
   let title = ''
-  let from = ''
   let body: Any[] = []
   let under: Any | null = null
   if (f.kind === 'citation') {
     const m = await itemOf($, f.row, f.n)
-    const ev = m?.evidence
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
-    from = ['cite', ev && ev.kind !== 'computed' ? ev.file.split('/').pop() : ev ? 'computed' : ''].filter(Boolean).join(' · ')
-    const ins = await innerOf($, f)
-    const ig = ins && ins.kind !== 'citation' ? await glossOf($, ins.row, ins.id) : null
-    const insEl = ins && ig ? { words: String(ins.kind === 'heads' ? ig.title || ig.term : ig.term), heads: ins.kind === 'heads', press: () => pushMark($, ins) } : null
-    body = citationBody(els, f, m, insEl, inner)
+    body = citationBody(els, f, m, inner)
     under = await fileLinkEl($, els, f, m)
   } else {
     const g = await glossOf($, f.row, f.id)
     const heads = f.kind === 'heads'
     title = String(g?.term || g?.title || (heads ? 'heads up' : 'explain'))
-    from = heads ? 'heads up' : g?.expanded ? 'explain · expanded' : 'explain'
     if (!g) body = [Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` })]
     else {
       const text = explainerText(g)
       const { marks, looks } = await linksOf($, f, text)
       body = [messageEl(els, {
-        text, marks, looks, key: `tray-${f.row}-${f.id}`, cols: inner - 2, first: false, spin: '',
+        text, marks, looks, key: `tray-${f.row}-${f.id}`, cols: inner, first: false, spin: '', gutter: false,
         onMark: (k: number) => { const n = looks[k]?.n; if (n > 0) void pushMark($, { row: f.row, kind: 'citation', n }) },
       })]
     }
@@ -564,13 +540,14 @@ export async function trayBand($: Engine, els: Any, width: number): Promise<Any[
     Text({ key: 'q', children: asked.length > 60 ? asked.slice(0, 59) + '…' : asked }),
     Text({ key: 'b', dimColor: true, children: ' · a opens it' }),
   ] })]
-  const right = [where, from, f.open === 'code' ? 'code' : '', tray.stack.length > 1 ? String(tray.stack.length) : ''].filter(Boolean).join(' · ')
+  // the right of the title says what kind of mark it is, nothing more
+  const right = f.kind === 'citation' ? 'cite' : f.kind === 'heads' ? 'heads up' : 'explain'
   const avail = inner - 2
-  const room = title.length + (right ? right.length + 3 : 0) <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
+  const room = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
   const tone = tones[f.kind]
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
     Text({ key: 't', bold: true, color: tone, wrap: 'truncate-end', children: cutTitle(title, room) }),
-    ...(right ? [Text({ key: 'r', dimColor: true, children: right })] : []),
+    Text({ key: 'r', dimColor: true, children: right }),
   ] })
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: body })] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame, ...(under ? [under] : [])] })]
