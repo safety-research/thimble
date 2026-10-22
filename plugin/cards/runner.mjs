@@ -39,12 +39,14 @@
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
 // string holds no control character but a line break (the others are taken out; a tab is a space). A Button around
 // lines (a Box, or several) becomes a column Box with the Button's onPress number, and a click on its cells presses it.
+// A dense card gets blank rows between its parts (space.js), unless the view reads clicks by cell (surface.onPointer).
 import fs from 'node:fs'
 import http from 'node:http'
 import { types } from 'node:util'
 import vm from 'node:vm'
 
 import { buttonText, layoutLines, pressAt } from './layout.js'
+import { spaced } from './space.js'
 
 const LOAD_MS = 5000
 // the terminal theme the cards draw for (surface.colors), as the newest request named it: 'dark' or 'light'
@@ -445,7 +447,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       if (op === 'key') undoable = undoable.concat([before]).slice(-16)
       else if (before) undoable = []
       const d = op === 'copy' ? peek(a.width) : draw()
-      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, notes: d.notes, state: saved() }))
+      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, notes: d.notes, state: saved(), cells: !!pointer }))
     } catch (e) {
       try {
         columns = was
@@ -484,6 +486,9 @@ function inContext(card, op, args, ms) {
     return { ok: false, phase: op, error: 'the view gave no drawing thimble can read' }
   }
   const r = JSON.parse(out)
+  // blank rows between the card's parts (space.js); a view that reads clicks by cell keeps its rows where it drew them
+  if (r.ok && r.tree && !r.cells) r.tree = spaced(r.tree, Number(args.width) || card.width || 80)
+  delete r.cells
   if (r.ok && drawnSize(r.tree) > MAX_TREE) {
     drop(card)
     return { ok: false, phase: op, error: `the drawing is more than ${MAX_TREE} characters as Claude Code holds it, which it does not draw; draw fewer elements: group the rows, or show a page of them` }

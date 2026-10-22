@@ -71,6 +71,18 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })
 
+test('a dense card gets a blank row under its takeaway; a view that reads clicks by cell keeps its rows', async () => {
+  const view = cells => `function view(props, surface) {
+  const { Box, Text } = surface.elements
+  ${cells ? 'surface.onPointer(() => {})' : ''}
+  return Box({ flexDirection: 'column', children: [Text({ children: 'Bram scored highest of all three.' }), ...Array.from({ length: 12 }, (_, i) => Text({ children: 'row ' + i }))] })
+}`
+  const { r } = await load(view(false))
+  assert.deepEqual(r.lines.slice(0, 3), ['Bram scored highest of all three.', '', 'row 0'])
+  const { r: kept } = await load(view(true))
+  assert.deepEqual(kept.lines.slice(0, 2), ['Bram scored highest of all three.', 'row 0'])
+})
+
 test("the view gets the palette of the request's theme as surface.colors, and draws in the other set when it changes", async () => {
   const view = `function view(p, s) { const { Box, Text } = s.elements, c = s.colors
   return Box({ flexDirection: 'column', children: [
