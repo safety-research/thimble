@@ -49,9 +49,11 @@ function world(on: Any, o: { crash?: string } = {}) {
   const dirs: Record<string, string[]> = {}
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: (dirs[e.path ?? ''] ?? []).map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }))
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
-    value: e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
-      : e.path === DATA || e.path === '/made-up/tmp' ? { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path }
-        : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
+    // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder)
+    value: e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
+      : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
+        : e.path === DATA || e.path === '/made-up/tmp' ? { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path }
+          : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
   }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('env.set', () => ({ value: {} }))
@@ -194,6 +196,14 @@ test("a card call the person's permission rules refuse draws nothing, and says w
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_5', title: 'Secret', data: 'secret.json', view: VIEW } as never)) as Any
   expect(String(r.result)).toBe('The card did not draw: a made-up deny rule.')
+  expect(w.asked).not.toContain('load')
+})
+
+test('a data file whose real path leaves this folder (a symlink out) is refused, and the runner is never asked', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_8', title: 'Out', data: 'escape.json', view: VIEW } as never)) as Any
+  expect(String(r.result)).toContain('is outside this folder and the temp folder')
   expect(w.asked).not.toContain('load')
 })
 

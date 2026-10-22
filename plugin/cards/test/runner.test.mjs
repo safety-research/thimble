@@ -222,3 +222,21 @@ test('the cards undo the last keys they took, and only those', async () => {
   const kept = await ask('undo', { id, n: 1 })
   assert.equal(JSON.parse(kept.state).n, 11)
 })
+
+test("a view's stray rejected promise or async error does not take the runner down for other cards", async () => {
+  // a bare Promise.reject, and an async built-in whose rejection no one awaits: Node would make each a fatal
+  // unhandledRejection, ending the one runner for every card; the runner swallows a card's own async failure.
+  for (const bad of [
+    'function view(p, s) { Promise.reject(new Error("x")); return s.elements.Text({ children: "ok" }) }',
+    'function view(p, s) { WebAssembly.compile(new Uint8Array([0,97,115,109,1,0,0,0])); return s.elements.Text({ children: "ok" }) }',
+  ]) {
+    const { r } = await load(bad)
+    assert.equal(r.ok, true, r.error)
+  }
+  // a key handler that leaves a rejected promise, too
+  const { id } = await load('const keys = "x"\nfunction onKey(k, s) { Promise.reject("boom") }\nfunction view(p, s) { return s.elements.Text({ children: "ok" }) }')
+  await ask('key', { id, key: 'x' })
+  // the runner still answers after every one of these
+  assert.equal((await ask('ping', {})).ok, true)
+  assert.deepEqual((await load(COUNTER)).r.lines, ['count 0', 'ada 3', 'bram 5', 'cleo 1', '[ add ten ]'])
+})
