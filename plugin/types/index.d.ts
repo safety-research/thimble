@@ -89,6 +89,21 @@ declare module 'claude-code' {
       answerRowTurn: StateFamily<string>
       /** the answer the person picked for the keys with { and }, or null: the newest */
       answerSel: string | null
+
+      // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
+      /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,
+       *  asked, error, reveal } (squeeze/term.ts SqzUi) */
+      squeezeUi: StateFamily<unknown>
+      /** what Claude was told of each record's version, and the version waiting for the next prompt, by its id */
+      squeezeTold: Record<string, { told: string; pending: string | null }>
+      /** the record the chips are open on, the picked chip, the chip at its edge, what is typed after +, whether a
+       *  click gave the chips the keyboard, whether the bar says how to type a chip of one's own (squeeze/ui.ts) */
+      squeezeOpen: { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean } | null
+      /** the chips the person typed this session, newest last */
+      squeezeOwn: string[]
+      /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
+       *  shown, what the version shown did to each (squeeze/cards.ts) */
+      squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
     }
   }
 }

@@ -1,0 +1,121 @@
+// Squeeze and catch-up in the terminal (squeeze/): s at an empty prompt opens the chips under the answer, ] asks one
+// rewrite and the new text shows in place of Claude's words, Claude hears the version with the next prompt, 0 brings
+// the original back with no call; with two replies since the person's last prompt, s writes one catch-up in their
+// place, and 0 dismisses it. All data is made up. `claude plugin test plugin`.
+import { expect, mock, test } from 'claude-code/testing'
+
+import { resetSqueeze } from '../squeeze/term'
+import { promptStub, tempRun } from './stubs'
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Any = any
+
+function textOf(n: Any): string {
+  if (n == null || n === false) return ''
+  if (typeof n === 'string' || typeof n === 'number') return String(n)
+  if (Array.isArray(n)) return n.map(textOf).join('')
+  return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : '') + textOf(n.children)
+}
+
+const VIEW = { columns: 100, rows: 40, isFullscreen: true }
+const answer = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: VIEW, props: { text, isFirstOfReply: true } }) as never
+const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: VIEW } as never
+const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
+
+async function setup($: Any, on: Any, replies: string[]) {
+  resetSqueeze()
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+  const clock = mock.clock(on, { now: 0 })
+  const files: Record<string, string> = {}
+  const asked: Any[] = []
+  on('session.id', () => ({ value: 's-squeeze' }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('session.messages', () => ({ value: [] }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
+  on('fs.write', (_$: unknown, e: { path: string; content: string }) => { files[e.path] = String(e.content); return { value: undefined } })
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
+  on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
+  on('env.set', () => ({ value: {} }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'x' } }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.scroll', () => ({ value: undefined }))
+  on('prompt.fill', () => ({ value: undefined }))
+  on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
+  on('model.complete', (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: `<text>\n${replies.shift() ?? 'Short.'}\n</text>`, usage: {} } } })
+  on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
+  on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const ask = (text: string, by = 'composer') => $.prompt.submit({ text, origin: { kind: by } } as never) as Promise<Any>
+  const turn = async (id: string, text: string, prompt: { text: string; by: string } | null = { text: `question ${id}`, by: 'composer' }) => {
+    if (prompt) await ask(prompt.text, prompt.by)
+    await $.turn.start({ text: prompt?.text ?? '', turnId: id } as never)
+    await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: `row-${id}` } as never)
+    await $.turn.complete({ turnId: id, reason: 'answer', answer: text, durationMs: 10, isAborted: false } as never)
+    await clock.advance(100)
+  }
+  const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
+  const bar = async () => textOf(await $.ui.render(above))
+  return { clock, asked, ask, turn, press, bar }
+}
+
+const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
+
+test('s opens the chips; ] writes a longer version in place, Claude hears it with the next prompt, and 0 brings the original back with no call', async ($, on) => {
+  const t = await setup($, on, ['The build failed on [3 of 12](#) runs: the cache key changed with the lockfile, and the mirror timed out on each fresh fetch.'])
+  await t.turn('t1', LONG)
+  expect(await t.bar()).toContain('s squeeze')
+  expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
+  const open = await t.bar()
+  expect(open).toContain('[ ] shorter / longer')
+  expect(open).toContain('s done')
+  expect(open).toContain('+ your own')
+  const under = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(under).toContain(LONG.slice(0, 20))
+  await t.press(']')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  expect(String(t.asked[0].prompt)).toContain('Length: longer')
+  const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(shown).toContain('on each fresh fetch')
+  // the chips close with s; the bar says the levels set
+  await t.press('s')
+  expect(await t.bar()).toContain('● longer')
+  const next = await t.ask('and now?')
+  expect(String((next.context ?? []).join('\n'))).toContain('now reads, for the analyst, as:')
+  // 0 brings the original back, with no call
+  await t.press('s')
+  await t.press('0')
+  await t.clock.advance(1000)
+  expect(t.asked.length).toBe(1)
+  const back = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(back).toContain('The nightly build failed on 3 of 12 runs')
+  expect(back).not.toContain('fresh fetch')
+})
+
+test('with two replies since the last prompt, s writes one catch-up in their place; 0 brings the replies back', async ($, on) => {
+  const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  expect(await t.bar()).toContain('s catch up')
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(String(t.asked[0].prompt)).toContain("Claude's messages since the analyst's last prompt")
+  expect(String(t.asked[0].prompt)).toContain('The analyst asked: why did it fail?')
+  // the covered reply draws nothing; the newest draws the catch-up with its head line
+  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('')
+  const host = textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))
+  expect(host).toContain('catch-up of the 2 replies since your last message')
+  expect(host).toContain('Both: the build failed, and the retry passed.')
+  await t.press('0')
+  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
+  // a catch-up the person read counts: s now opens the chips on the newest reply
+  expect(await t.bar()).not.toContain('catch up')
+})

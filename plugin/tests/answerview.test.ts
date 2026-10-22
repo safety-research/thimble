@@ -6,7 +6,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { checkSpans, RESTORED_KEYS, type Span } from '../core/answerview'
-import { OWN_KEYS } from '../hooks/keys'
+import { ownKeys } from '../hooks/keys'
 import { looksByWords } from '../marks/register'
 import { marksIn } from '../marks/message.js'
 import { messageEl } from '../marks/view'
@@ -94,7 +94,7 @@ test("a version shown in place of Claude's words: its citations look as the chec
 
 test("the features' letters are thimble's own, so no card takes them", () => {
   expect(RESTORED_KEYS).toEqual(['s', 'c', 't'])
-  for (const k of RESTORED_KEYS) expect(OWN_KEYS).toContain(k)
+  for (const k of RESTORED_KEYS) expect(ownKeys()).toContain(k)
 })
 
 const answer = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } }) as never
@@ -139,10 +139,10 @@ test('{ at an empty prompt picks the answer before for the keys, drawn with ▸;
   expect(r).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toContain('▸The revert undid a change.')
   expect(textOf(await $.ui.render(answer('row-t2', 'Two runs failed.')))).toBe('the engine')
-  // the bar and the band above it hold nothing of the features while their seams give nothing
+  // the bar names s (squeeze/seam.ts) once there is an answer
   const band = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))
   expect(band).toContain('thimble')
-  expect(band).not.toContain('squeeze')
+  expect(band).toContain('s squeeze')
   await turn('t3', 'You are welcome.')
   expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toBe('the engine')
 })
