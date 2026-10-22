@@ -378,7 +378,7 @@ def test_a_second_follow_while_one_runs_changes_nothing(on):
     release(src, "0.11.0", {"plugin/claims.py": "CLAIMS = []\n"})
     with open(FX.fixes_home() / "follow.lock", "w") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
-        assert FX.follow(force=True) == f"thimble {fx['version']} + your fix 'Rows reads a semicolon' · u undo"
+        assert FX.follow(force=True) == f"thimble {fx['version'] or '?'} + your fix 'Rows reads a semicolon' · u undo"
     assert FX.load(fx["slug"])["base"] == fx["base"] and not undone
     assert FX.follow(force=True) == "thimble 0.11.0 + your fix 'Rows reads a semicolon' · u undo"
 
