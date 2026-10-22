@@ -1,78 +1,130 @@
-// A mark on the words of a claim in Claude's reply (marks.ts), drawn by its status as the terminal draws it, and a
-// click opens its evidence under the words, as the terminal opens its evidence pane (plugin/marks/evidence.tsx):
+// A mark on the words of a claim in Claude's reply (marks.ts), drawn as a card's citation is (components/RefChip): the
+// words keep the text's color over a thin accent underline, and hovering or opening one gives it the citation's
+// highlight. A mark the check could not confirm has a dashed underline in the warning color and `?` after the words.
+// Hovering opens its evidence in the citation's label (RefChip's .refchip-pop), and a click keeps it open:
 //
-//   computed   the real output of the call that ran the code, the marked words highlighted, first, so they show; then
-//              the code the check ran
-//   quote      each cited place: `path:line` on top (a click opens the file there), the cited lines with a line around
-//   code       them, the words highlighted
+//   computed   the head names the code that ran; the lines of its real output around the marked words, the words
+//              highlighted, then the code
+//   quote      each cited place: its `path:line` chip (a click opens the file there) over the cited lines, the words
+//   code       highlighted
 //
-// A corrected mark says what it was; a wrong one says why, in red, and one the check could not confirm says why, in
-// the warning color, with the evidence the check gave when it is real. What the check found wrong in the rest of the
-// sentence follows. Escape, a press outside, or a second click closes it.
+// A failed mark's label says why in one line first. Escape, a press outside, or a second click closes it.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Chip } from '../components/Chip'
+import { placePop } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
-import { RefChip } from '../components/RefChip'
-import { LOOK_WORD, lookOf, type Evidence, type MarkItem } from './marks'
+import { glyphOf } from '../lib/fileGlyph'
+import { CITED } from '../lib/tableCell'
+import { teleport } from '../lib/teleport'
+import { failedWhy, LOOK_WORD, lookOf, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
 export const MarkItems = createContext<{ items: readonly (MarkItem | undefined)[]; streaming: boolean }>({ items: [], streaming: false })
 
-const OUTPUT_LINES = 14 // output lines shown around the first highlight
+/** output lines shown around the first highlight: this many before it, and up to OUTPUT_LINES in all */
+const OUTPUT_BEFORE = 2
+const OUTPUT_LINES = 7
+/** the label waits this long for the pointer to settle, and this long before it goes (RefChip's) */
+const HOVER_DELAY_MS = 90
+const HIDE_DELAY_MS = 160
 
 export function Mark({ k, children }: { k: number; children: ReactNode }) {
   const { items, streaming } = useContext(MarkItems)
   const item = items[k]
-  const look = streaming ? 'pending' : lookOf(item)
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLSpanElement>(null)
-  const card = useRef<HTMLSpanElement>(null)
+  const look: MarkLook = streaming ? 'pending' : lookOf(item)
+  const [pop, setPop] = useState<{ rect: DOMRect; pinned: boolean } | null>(null)
+  const words = useRef<HTMLSpanElement>(null)
+  const popEl = useRef<HTMLDivElement>(null)
+  const showTimer = useRef<number | undefined>(undefined)
+  const hideTimer = useRef<number | undefined>(undefined)
+  useEffect(
+    () => () => {
+      window.clearTimeout(showTimer.current)
+      window.clearTimeout(hideTimer.current)
+    },
+    [],
+  )
   useEffect(() => {
-    if (!open) return
-    const down = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    if (!pop?.pinned) return
+    const inside = (n: Node) => !!words.current?.contains(n) || !!popEl.current?.contains(n)
+    const down = (e: PointerEvent) => !inside(e.target as Node) && setPop(null)
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setPop(null)
     document.addEventListener('pointerdown', down, true)
     document.addEventListener('keydown', key)
     return () => {
       document.removeEventListener('pointerdown', down, true)
       document.removeEventListener('keydown', key)
     }
-  }, [open])
+  }, [pop?.pinned])
   useLayoutEffect(() => {
-    const el = card.current
-    if (!open || !el || !box.current) return
-    const place = () => placeCard(el, box.current?.querySelector<HTMLElement>('.mark-words') ?? null)
+    const el = popEl.current
+    if (!el || !pop) return
+    const place = () => placePop(el, pop.rect)
     place()
-    window.addEventListener('resize', place)
-    return () => window.removeEventListener('resize', place)
-  }, [open])
-  const corrected = look === 'corrected' && item?.shown
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(place)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [pop])
+
+  const rect = () => words.current?.getBoundingClientRect() ?? null
+  const cancelHide = () => window.clearTimeout(hideTimer.current)
+  const scheduleHide = () => {
+    cancelHide()
+    hideTimer.current = window.setTimeout(() => setPop((p) => (p?.pinned ? p : null)), HIDE_DELAY_MS)
+  }
+  const onEnter = () => {
+    cancelHide()
+    window.clearTimeout(showTimer.current)
+    if (document.body.hasAttribute('data-cmd')) return
+    showTimer.current = window.setTimeout(() => {
+      const r = rect()
+      if (r) setPop((p) => p ?? { rect: r, pinned: false })
+    }, HOVER_DELAY_MS)
+  }
+  const onLeave = () => {
+    window.clearTimeout(showTimer.current)
+    scheduleHide()
+  }
+  const toggle = () => {
+    window.clearTimeout(showTimer.current)
+    cancelHide()
+    const r = rect()
+    setPop((p) => (p?.pinned ? null : r ? { rect: r, pinned: true } : null))
+  }
+
+  const corrected = item?.status === 'corrected' && item.shown
   return (
-    <span ref={box} className={`mark is-${look}${open ? ' is-open' : ''}`} data-mark-look={look}>
+    <span className={`mark is-${look}${pop ? ' is-open' : ''}`} data-mark-look={look}>
       {/* a span, not a button, so long words wrap with the line as the text around them does */}
       <span
+        ref={words}
         role="button"
         tabIndex={0}
         className="mark-words"
-        aria-expanded={open}
-        title={LOOK_WORD[look]}
-        onClick={() => setOpen((o) => !o)}
+        aria-expanded={!!pop}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        onClick={toggle}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
-            setOpen((o) => !o)
+            toggle()
           }
         }}
       >
         {corrected ? plain(item.shown!) : children}
       </span>
+      {look === 'failed' && <span className="mark-glyph">?</span>}
       {look === 'checking' && <Spinner size={9} className="mark-spin" label="checking" />}
-      {look === 'failed' && <span className="mark-glyph"> ×</span>}
-      {look === 'unconfirmed' && <span className="mark-glyph"> ?</span>}
-      {open && (
-        <span className="mark-card" role="note" ref={card}>
-          <MarkEvidence item={item} look={look} />
-        </span>
-      )}
+      {pop &&
+        createPortal(
+          <div ref={popEl} className="refchip-pop overlay mark-pop" role="note" style={{ position: 'fixed', left: 8, top: 0 }} onMouseEnter={cancelHide} onMouseLeave={() => !pop.pinned && scheduleHide()} onMouseDown={(e) => e.stopPropagation()}>
+            <MarkEvidence item={item} look={look} />
+          </div>,
+          document.body,
+        )}
     </span>
   )
 }
@@ -80,69 +132,81 @@ export function Mark({ k, children }: { k: number; children: ReactNode }) {
 /** A mark's words as written, without the markdown's formatting marks. */
 const plain = (s: string) => s.replace(/\*\*|__|`/g, '')
 
-function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: ReturnType<typeof lookOf> }) {
+function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: MarkLook }) {
   if (!item || look === 'pending' || look === 'checking')
     return (
-      <>
-        <span className={`mark-card-status is-${look}`}>{LOOK_WORD[look]}</span>
-      </>
+      <div className="mark-pop-state">
+        {look === 'checking' && <Spinner size={10} label="checking" />} {LOOK_WORD[look]}
+      </div>
     )
   const evs = item.evidence ? (Array.isArray(item.evidence) ? item.evidence : [item.evidence]) : []
+  const value = plain(item.shown ?? item.words)
   return (
     <>
-      <span className={`mark-card-status is-${look}`}>{LOOK_WORD[look]}</span>
-      {look === 'corrected' && item.was && <span className="mark-card-was">was “{plain(item.was)}”</span>}
-      {item.reason && <span className="mark-card-why">{item.reason}</span>}
+      {look === 'failed' && (
+        <div className="mark-pop-why" title={failedWhy(item)}>
+          {failedWhy(item)}
+        </div>
+      )}
       {evs.map((ev, i) => (
-        <EvidenceView key={i} ev={ev} />
+        <EvidenceView key={i} ev={ev} value={value} />
       ))}
     </>
   )
 }
 
-function EvidenceView({ ev }: { ev: Evidence }) {
+function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
   if (ev.kind === 'computed')
     return (
-      <span className="mark-ev">
-        <span className="mark-ev-head">output of the code {ev.by === 'main' ? 'Claude ran' : 'the check ran'}</span>
-        <pre className="mark-ev-out">{outputLines(ev.output ?? '', ev.highlight ?? [])}</pre>
-        <span className="mark-ev-head">code</span>
-        <pre className="mark-ev-code">{ev.code}</pre>
-      </span>
+      <div className="mark-ev">
+        <div className="refchip-pop-head">
+          <Chip kind="ref" tone="evidence" icon="terminal" face="sans" className="refchip-pop-chip">
+            {ev.by === 'main' ? 'code Claude ran' : 'code the check ran'}
+          </Chip>
+          <span className="refchip-pop-value">{value}</span>
+        </div>
+        <div className="refchip-lines mono">{outputLines(ev.output ?? '', ev.highlight ?? [])}</div>
+        {ev.code ? <pre className="refchip-lines mono mark-ev-code">{ev.code}</pre> : null}
+      </div>
     )
   const places = [ev, ...((ev as Evidence & { more?: Evidence[] }).more ?? [])]
   return (
-    <span className="mark-ev">
-      {places.map((p, i) => (
-        <span key={i} className="mark-ev-place">
-          <span className="mark-ev-head">
-            <RefChip ref={`${p.file}#L${String(p.line).split('-')[0]}`} value={`${p.file}:${p.line}`} compact />
-          </span>
-          <pre className="mark-ev-lines">
-            {(p.lines ?? []).map((l) => (
-              <span key={l.n} className="mark-ev-line">
-                <span className="mark-ev-n">{l.n}</span>
-                {l.highlight ? (
-                  <>
-                    {l.text.slice(0, l.highlight[0])}
-                    <mark>{l.text.slice(l.highlight[0], l.highlight[1])}</mark>
-                    {l.text.slice(l.highlight[1])}
-                  </>
-                ) : (
-                  l.text
-                )}
-                {'\n'}
-              </span>
-            ))}
-          </pre>
-        </span>
-      ))}
-    </span>
+    <>
+      {places.map((p, i) => {
+        const at = `${p.file}#L${String(p.line).split('-')[0]}`
+        return (
+          <div key={i} className="mark-ev">
+            <div className="refchip-pop-head">
+              <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => teleport(at)}>
+                {`${p.file}:${p.line}`}
+              </Chip>
+              {i === 0 && <span className="refchip-pop-value">{value}</span>}
+            </div>
+            <div className="refchip-lines mono">
+              {(p.lines ?? []).map((l) => (
+                <div key={l.n} className="refchip-line">
+                  <span className="mark-ev-n">{l.n}</span>
+                  {l.highlight ? (
+                    <>
+                      {l.text.slice(0, l.highlight[0])}
+                      <span className={CITED}>{l.text.slice(l.highlight[0], l.highlight[1])}</span>
+                      {l.text.slice(l.highlight[1])}
+                    </>
+                  ) : (
+                    l.text || ' '
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </>
   )
 }
 
-/** The output's lines around its first highlight, the highlighted spans marked. */
-function outputLines(output: string, spans: [number, number][]): ReactNode[] {
+/** The output's lines around its first highlight, one element each, the highlighted spans marked. */
+export function outputLines(output: string, spans: [number, number][]): ReactNode[] {
   const first = spans.length ? spans[0][0] : 0
   const lines = output.split('\n')
   let at = 0
@@ -152,54 +216,35 @@ function outputLines(output: string, spans: [number, number][]): ReactNode[] {
     return s
   })
   const hit = Math.max(0, starts.findIndex((s, i) => first >= s && first <= s + lines[i].length))
-  const from = Math.max(0, hit - Math.floor(OUTPUT_LINES / 3))
+  const from = Math.max(0, hit - OUTPUT_BEFORE)
   const to = Math.min(lines.length, from + OUTPUT_LINES)
-  const out: ReactNode[] = from > 0 ? ['…\n'] : []
+  const out: ReactNode[] = from > 0 ? [<div key="above" className="refchip-line mark-ev-more">…</div>] : []
+  const sorted = [...spans].sort((p, q) => p[0] - q[0])
   for (let i = from; i < to; i++) {
     const a = starts[i]
     const b = a + lines[i].length
     let pos = a
+    const parts: ReactNode[] = []
     // in order, each part once: the check may give a span twice, or spans that overlap (the terminal's highlighted)
-    for (const [x, y] of [...spans].sort((p, q) => p[0] - q[0])) {
+    for (const [x, y] of sorted) {
       const s = Math.max(x, a, pos)
       const e = Math.min(y, b)
       if (e <= s) continue
-      if (s > pos) out.push(output.slice(pos, s))
-      out.push(<mark key={`${i}:${s}`}>{output.slice(s, e)}</mark>)
+      if (s > pos) parts.push(output.slice(pos, s))
+      parts.push(
+        <span key={s} className={CITED}>
+          {output.slice(s, e)}
+        </span>,
+      )
       pos = e
     }
-    out.push(output.slice(pos, b) + '\n')
+    parts.push(output.slice(pos, b))
+    out.push(
+      <div key={i} className="refchip-line">
+        {lines[i] ? parts : ' '}
+      </div>,
+    )
   }
-  if (to < lines.length) out.push('…')
+  if (to < lines.length) out.push(<div key="below" className="refchip-line mark-ev-more">…</div>)
   return out
-}
-
-const GAP = 6
-const MARGIN = 8
-
-/** Place a mark's card by its words: below them when it fits there, else above them when it fits there, else on the
- * side with more room, its height cut to that room. Across, it stays inside the chat's column. */
-function placeCard(card: HTMLElement, words: HTMLElement | null): void {
-  card.classList.remove('is-above')
-  card.style.maxHeight = ''
-  card.style.left = ''
-  card.style.width = ''
-  const view = { top: MARGIN, bottom: window.innerHeight - MARGIN }
-  const scroller = card.closest('.chat-list')
-  if (scroller) {
-    const r = scroller.getBoundingClientRect()
-    view.top = Math.max(view.top, r.top)
-    view.bottom = Math.min(view.bottom, r.bottom)
-  }
-  const col = (card.closest('.chat-msg') ?? document.body).getBoundingClientRect()
-  if (card.getBoundingClientRect().width > col.width) card.style.width = `${col.width}px`
-  const r = card.getBoundingClientRect()
-  const shift = Math.max(col.left - r.left, Math.min(0, col.right - r.right))
-  if (shift) card.style.left = `${shift}px`
-  const w = (words ?? card.parentElement ?? card).getBoundingClientRect()
-  const below = view.bottom - w.bottom - GAP
-  const above = w.top - view.top - GAP
-  if (r.height <= below) return
-  if (r.height <= above || above > below) card.classList.add('is-above')
-  if (r.height > Math.max(above, below)) card.style.maxHeight = `${Math.max(0, Math.floor(Math.max(above, below)))}px`
 }

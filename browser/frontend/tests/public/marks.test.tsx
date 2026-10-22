@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// A reply's marks drawn by what the check found (marks/Mark.tsx), as the terminal draws them: a correction shows its
-// new words, a wrong mark is red with ×, one the check could not confirm has ?, and a click opens the evidence.
+// A reply's marks drawn by what the check found (marks/Mark.tsx), as a card's citations are drawn: two looks, verified
+// (a correction shows its new words and looks verified) and failed (a wrong mark, one the check could not confirm, one
+// no check could run: ? after the words), and a click opens the evidence in the citation's label.
 import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
@@ -17,7 +18,7 @@ test('a mark keeps its place among the marks of its text, brackets and code span
   expect(withMarkHrefs('[12](#) of [the [x] flag](#) and `[no](#)` [y](z)')).toBe('[12](#mark-0) of [the [x] flag](#mark-1) and `[no](#)` [y](z)')
 })
 
-test('each mark draws as its check says, and a click opens its evidence', async () => {
+test('each mark draws as its check says, verified or failed, and a click opens its evidence', async () => {
   const checks = [
     item(0, '12', {}),
     item(1, '15 of 40', { status: 'corrected', shown: '12 of 40', was: '15 of 40', reason: 'agent-07 merged 12' }),
@@ -27,14 +28,25 @@ test('each mark draws as its check says, and a click opens its evidence', async 
   ]
   const el = await mount(<ChatMarkdown text="[12](#) runs; [15 of 40](#) merged; [all](#) passed; [3](#) failed; [7](#) more." checks={checks} />)
   const looks = [...el.querySelectorAll('.mark')].map((m) => [m.getAttribute('data-mark-look'), m.textContent])
-  expect(looks).toEqual([['verified', '12'], ['corrected', '12 of 40'], ['failed', 'all ×'], ['unconfirmed', '3 ?'], ['checking', '7']])
-  const corrected = el.querySelectorAll<HTMLElement>('.mark .mark-words')[1]
-  await act(async () => corrected.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  expect(looks).toEqual([['verified', '12'], ['verified', '12 of 40'], ['failed', 'all?'], ['failed', '3?'], ['checking', '7']])
+  // a failed mark's label says why in one line
+  const failed = el.querySelectorAll<HTMLElement>('.mark .mark-words')[3]
+  await act(async () => failed.dispatchEvent(new MouseEvent('click', { bubbles: true })))
   await settle()
-  const card = el.querySelector('.mark-card')
-  expect(card?.textContent).toContain('corrected')
-  expect(card?.textContent).toContain('was “15 of 40”')
-  expect(card?.textContent).toContain('agent-07 merged 12')
+  expect(document.querySelector('.mark-pop .mark-pop-why')?.textContent).toBe('Not confirmed: no call printed it.')
+})
+
+test("a mark's label shows its evidence as a citation's label does: the output lines around the words, the words highlighted", async () => {
+  const output = ['rows 40', 'merged 12', 'open 28'].join('\n')
+  const at = output.indexOf('12')
+  const checks = [item(0, '12', { evidence: { kind: 'computed', code: 'print(df.merged.sum())', output, highlight: [[at, at + 2]], by: 'main' } })]
+  const el = await mount(<ChatMarkdown text="[12](#) merged" checks={checks} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  const pop = document.querySelector('.refchip-pop.mark-pop')
+  expect(pop?.querySelector('.refchip-pop-head')?.textContent).toContain('code Claude ran')
+  expect(pop?.querySelector('.refchip-lines .cite-cell')?.textContent).toBe('12')
+  expect(pop?.querySelector('.mark-pop-why')).toBeNull()
 })
 
 test('while the reply streams its marks wait, whatever an earlier check said', async () => {
@@ -72,11 +84,13 @@ test("the check's notes on the sentences around the marks are not shown: neither
   // a footer with nothing but notes is no footer
   const none = await mount(<MarksFooter items={[item(0, '12', { note })]} />)
   expect(none.textContent).toBe('')
-  // the failed citation keeps its own red ×, and its card says nothing of the note
+  // the failed citation has its ?, and its label says nothing of the note
   const el = await mount(<ChatMarkdown text="[12](#) runs; [all](#) passed." checks={checks} />)
-  expect([...el.querySelectorAll('.mark')].map((m) => m.textContent)).toEqual(['12', 'all ×'])
+  expect([...el.querySelectorAll('.mark')].map((m) => m.textContent)).toEqual(['12', 'all?'])
   await act(async () => el.querySelectorAll<HTMLElement>('.mark .mark-words')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })))
   await settle()
-  expect(el.querySelector('.mark-card')?.textContent).toContain('b also failed')
+  const pop = document.querySelector('.mark-pop')
+  expect(pop?.textContent).toContain('b also failed')
+  expect(pop?.textContent).not.toContain(note)
   expect(el.textContent).not.toContain(note)
 })

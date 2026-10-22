@@ -179,8 +179,9 @@ const EXCERPT_MAX = 400
 const QUOTE_MAX_H = 280
 const POP_WIDTH = 360
 const POP_WIDTH_CELL = 440
-const POP_WIDTH_CHART = 640
-const POP_WIDTH_TABLE = 680
+/** a chart, and a table's cell or an output's lines, take at most this width: the label stays near the words */
+const POP_WIDTH_CHART = 560
+const POP_WIDTH_TABLE = 560
 const POP_PAD_X = 26
 const POP_MARGIN = 8
 const POP_GAP = 6
@@ -520,10 +521,20 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   )
 }
 
-/** A table's cell in its table: the header, the rows above and below it and the columns beside it (lib/tableCell
- * cellWindow), the cell at the centre, marked. It reads as tables read everywhere (outputs.css), a step larger. */
+/** The columns a cited cell needs to read: its own, and when the rows are only numbered (0, 1, 2, ...) the first other
+ * column with words in it, which names the row; `index` whether the row labels show, which they do unless such a
+ * column names the row instead. Columns in the table's order. Pure. */
+export function citedColumns(grid: Grid, at: At): { cols: number[]; index: boolean } {
+  const numbered = grid.rows.length > 0 && grid.rows.every((r) => /^\d+$/.test(r.label.trim()))
+  if (!numbered) return { cols: [at.c], index: true }
+  const key = grid.cols.findIndex((_, c) => c !== at.c && grid.rows.some((r) => (r.values[c] ?? '').trim() && !isNumericCell(r.values[c] ?? '')))
+  return key < 0 ? { cols: [at.c], index: true } : { cols: [key, at.c].sort((a, b) => a - b), index: false }
+}
+
+/** A table's cell in a compact table: the header, two rows above and below it, and only the columns it needs to read
+ * (citedColumns), the cell marked. It reads as tables read everywhere (outputs.css). */
 function TablePreview({ grid, at }: { grid: Grid; at: At }) {
-  const w = cellWindow(grid, at)
+  const w = { rows: cellWindow(grid, at, 2, 1).rows, ...citedColumns(grid, at) }
   const first = w.rows[0] ?? 0
   const last = w.rows[w.rows.length - 1] ?? 0
   return (
@@ -532,7 +543,7 @@ function TablePreview({ grid, at }: { grid: Grid; at: At }) {
         <table>
           <thead>
             <tr>
-              <th>{grid.corner}</th>
+              {w.index && <th>{grid.corner}</th>}
               {w.cols.map((c) => (
                 <th key={c} className={isNumericCell(grid.rows[at.r]?.values[c] ?? '') ? 'refchip-table-num' : undefined}>
                   {grid.cols[c]}
@@ -543,7 +554,7 @@ function TablePreview({ grid, at }: { grid: Grid; at: At }) {
           <tbody>
             {w.rows.map((r) => (
               <tr key={r}>
-                <th>{grid.rows[r].label}</th>
+                {w.index && <th>{grid.rows[r].label}</th>}
                 {w.cols.map((c) => {
                   const v = grid.rows[r].values[c] ?? ''
                   const cls = [isNumericCell(v) ? 'outputs-num' : '', r === at.r && c === at.c ? CITED : ''].filter(Boolean).join(' ')

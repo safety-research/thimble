@@ -29,13 +29,13 @@ const FALLBACK: Record<string, string> = {
   '--viz-ink-3': '#a19d94',
   '--viz-ink-4': '#cfcbc2',
   '--viz-other': '#a19d94',
-  '--viz-1': '#5e4bd6',
-  '--viz-2': '#018d82',
-  '--viz-3': '#e26101',
-  '--viz-4': '#306602',
-  '--viz-5': '#0471c8',
-  '--viz-6': '#c8367b',
-  '--viz-7': '#a08319',
+  '--viz-1': '#0471c8',
+  '--viz-2': '#e26101',
+  '--viz-3': '#018d82',
+  '--viz-4': '#c8367b',
+  '--viz-5': '#a08319',
+  '--viz-6': '#5e4bd6',
+  '--viz-7': '#306602',
   '--viz-seq-1': '#eeeffe',
   '--viz-seq-2': '#9d9cff',
   '--viz-seq-3': '#5e4bd6',
@@ -46,7 +46,7 @@ const FALLBACK: Record<string, string> = {
   '--viz-div-3': '#cfcbc2',
   '--viz-div-4': '#9d9cff',
   '--viz-div-5': '#4228aa',
-  '--viz-highlight': '#5e4bd6',
+  '--viz-highlight': '#0471c8',
   '--label-1': '#025ac3',
   '--label-2': '#d0750a',
   '--label-3': '#06572a',
@@ -62,7 +62,7 @@ const FALLBACK: Record<string, string> = {
   '--label-none': '#a09c93',
 }
 export const LABEL_LIMIT = 240
-/** the series, in order: series one is the accent's color family, the rest follow in the palette's fixed order (tokens.css) */
+/** the series, in order: one fixed order on every accent, blue first (tokens.css) */
 export const VIZ_SERIES = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
 /** the sequential ramp: the accent's family from faint (near the paper) to strong */
 export const VIZ_SEQ = ['--viz-seq-1', '--viz-seq-2', '--viz-seq-3', '--viz-seq-4', '--viz-seq-5']

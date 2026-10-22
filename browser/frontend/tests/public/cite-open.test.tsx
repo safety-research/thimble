@@ -143,3 +143,11 @@ describe('the chip that heads a citation\'s hover label', () => {
     }
   })
 })
+
+test("a cited cell's label shows only the columns it needs: its own, and the column that names a numbered row", async () => {
+  const { citedColumns } = await import('../../src/components/RefChip.tsx')
+  const named = { corner: 'team', cols: ['wins', 'losses', 'city'], rows: [{ label: 'Otters', values: ['3', '1', 'Lund'] }, { label: 'Herons', values: ['2', '2', 'Bree'] }] }
+  expect(citedColumns(named, { r: 1, c: 1 })).toEqual({ cols: [1], index: true })
+  const numbered = { corner: '', cols: ['wins', 'team', 'losses'], rows: [{ label: '0', values: ['3', 'Otters', '1'] }, { label: '1', values: ['2', 'Herons', '2'] }] }
+  expect(citedColumns(numbered, { r: 0, c: 2 })).toEqual({ cols: [1, 2], index: false })
+})

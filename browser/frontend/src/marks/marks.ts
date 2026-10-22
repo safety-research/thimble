@@ -1,15 +1,13 @@
-// A reply's marks, as the server checks them (backend features/marks.py) and the terminal draws them
-// (plugin/marks/view.ts). A mark is a markdown link to `#` on the words of a claim, `[352](#)`, found with the terminal
-// plugin's own module (plugin/marks/message.js), so the page, the terminal and the server read the same marks.
+// A reply's marks, as the server checks them (backend features/marks.py). A mark is a markdown link to `#` on the words
+// of a claim, `[352](#)`, found with the terminal plugin's own module (plugin/marks/message.js), so the page, the
+// terminal and the server read the same marks.
 //
-// A mark's look by its status:
-//   pending      the turn still runs, or its check has not started: violet, underlined
-//   checking     violet, underlined, and a spinner right after it
-//   verified     violet, underlined
-//   corrected    the corrected words in place of the marked ones, in the warning color, underlined
-//   failed       wrong as the check read the data: red, with ` ×` after it
-//   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
-//   unchecked    underlined in the text's color: no check could run
+// A mark draws as a card's citation does (components/RefChip): the words in the text's color over a thin accent
+// underline. Once its check settled it has one of two looks:
+//   verified   the plain look; a corrected mark shows its corrected words and looks verified too
+//   failed     the check could not confirm it (wrong, not confirmed, or no check could run): a dashed underline in the
+//              warning color and `?` after the words
+// While the reply streams (`pending`) and while its check runs (`checking`) it has the plain look.
 import { marksIn } from '../../../../plugin/marks/message.js'
 
 /** One piece of evidence a mark's check found (backend: the terminal's engine/kernel/evidence.py). */
@@ -44,24 +42,31 @@ export interface MarkItem {
   note?: string
 }
 
-export type MarkLook = 'pending' | 'checking' | 'verified' | 'corrected' | 'failed' | 'unconfirmed' | 'unchecked'
+export type MarkLook = 'pending' | 'checking' | 'verified' | 'failed'
 
-/** How a mark draws now: `pending` while its reply streams or no check has said anything yet. Pure. */
+/** How a mark draws now: `pending` while its reply streams or no check has said anything yet; a corrected mark is
+ * verified, and a mark the check found wrong, could not confirm or could not check is failed. Pure. */
 export function lookOf(item: MarkItem | undefined): MarkLook {
   if (!item) return 'pending'
-  if (item.status === 'failed') return item.failedBy === 'evidence' ? 'unconfirmed' : 'failed'
+  if (item.status === 'corrected') return 'verified'
+  if (item.status === 'failed' || item.status === 'unchecked') return 'failed'
   return item.status
 }
 
-/** The words a person reads for a look, in the evidence view. */
+/** Why a failed mark failed, in one line: the check's reason, else what kind of failure it was. Pure. */
+export function failedWhy(item: MarkItem | undefined): string {
+  const why = (item?.reason ?? '').replace(/\s+/g, ' ').trim()
+  if (why) return why
+  if (item?.status === 'unchecked') return 'No check could run.'
+  return 'The check could not confirm this.'
+}
+
+/** The words a person reads for a look. */
 export const LOOK_WORD: Record<MarkLook, string> = {
   pending: 'not checked yet',
   checking: 'checking',
   verified: 'verified',
-  corrected: 'corrected',
-  failed: 'wrong',
-  unconfirmed: 'not confirmed',
-  unchecked: 'not checked',
+  failed: 'not confirmed',
 }
 
 /** The href a mark is written with for the markdown parser: `#mark-<k>`, its order among the text's marks. */
@@ -80,8 +85,8 @@ export function withMarkHrefs(text: string): string {
   return out + text.slice(at)
 }
 
-/** The counts a reply's footer says once its check settled: corrected, wrong, not confirmed, not checked. Pure. */
+/** The counts a reply's footer says once its check settled: how many marks failed. Pure. */
 export function footerCounts(items: readonly MarkItem[]): { look: MarkLook; n: number }[] {
-  const order: MarkLook[] = ['corrected', 'failed', 'unconfirmed', 'unchecked']
-  return order.map((look) => ({ look, n: items.filter((m) => lookOf(m) === look).length })).filter((c) => c.n > 0)
+  const n = items.filter((m) => lookOf(m) === 'failed').length
+  return n ? [{ look: 'failed', n }] : []
 }
