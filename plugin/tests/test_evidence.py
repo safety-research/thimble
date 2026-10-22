@@ -15,8 +15,9 @@ def call(code: str, output: str, by: str = "checker") -> dict:
     return {"command": f"cd /data && python3 - <<'PY'\n{code}\nPY", "output": output, "by": by}
 
 
-def computed(code: str = CODE, status: str = "verified", correction: dict | None = None) -> dict:
-    return {"kind": "computed", "status": status, "evidence": {"code": code, "output": "whatever the checker wrote"}, "correction": correction, "reason": "counted"}
+def computed(output: str = "of 40", status: str = "verified", correction: dict | None = None) -> dict:
+    """The checker's answer for a mark, its evidence the call that printed `output`."""
+    return {"kind": "computed", "status": status, "evidence": {"output": output}, "correction": correction, "reason": "counted"}
 
 
 def quote(file: str, line, sub: str, kind: str = "quote") -> dict:
@@ -27,44 +28,58 @@ def mark(words: str, n: int = 1) -> dict:
     return {"n": n, "words": words}
 
 
-def test_computed_needs_a_real_call_that_ran_the_code_and_shows_the_words():
-    ok = check_mark(mark("12 of 40"), computed(), [call(CODE, "12 of 40\n")], "/data")
+def test_computed_evidence_is_the_real_call_that_printed_the_output_the_check_gave():
+    ok = check_mark(mark("12 of 40"), computed("12 of 40"), [call(CODE, "12 of 40\n")], "/data")
     assert ok["status"] == "verified" and ok["evidence"]["output"] == "12 of 40\n" and ok["evidence"]["highlight"] == [[0, 8]]
-    # the checker's own output line does not count: only the call's real output
-    assert check_mark(mark("12 of 40"), computed(), [call(CODE, "11 of 40\n")], "/data")["status"] == "failed"
-    # no call ran this code
-    gone = check_mark(mark("12 of 40"), computed(), [call("print('other')", "12 of 40")], "/data")
-    assert gone["status"] == "failed" and "no command" in gone["reason"]
+    assert ok["evidence"]["code"] == CODE
+    # the checker's own copy of the output does not count: only the call's real output
+    assert check_mark(mark("12 of 40"), computed("12 of 40"), [call(CODE, "11 of 40\n")], "/data")["status"] == "failed"
+    # the call that printed the cited text must show the words
+    other = check_mark(mark("12 of 40"), computed("of 40"), [call(CODE, "11 of 40\n")], "/data")
+    assert other["status"] == "failed" and "does not show" in other["reason"]
+    # left-out text is "…", and white space is read loosely
+    long = "rows: 40\nmerged:   12 of 40\n"
+    assert check_mark(mark("12 of 40"), computed("rows: 40 … merged: 12 of 40"), [call(CODE, long)], "/data")["status"] == "verified"
 
 
-def test_main_calls_count_and_white_space_is_loose():
-    spaced = CODE.replace("prs = [", "prs   =  [")
-    r = check_mark(mark("12 of 40"), computed(), [call(spaced, "12 of 40", by="main")], "/data")
+def test_the_highlight_starts_where_the_cited_output_stands():
+    out = "open: 12\nmerged: 12 of 40\n"
+    r = check_mark(mark("12"), computed("merged: 12 of 40"), [call(CODE, out)], "/data")
+    assert r["status"] == "verified" and r["evidence"]["highlight"] == [[17, 19]]
+
+
+def test_main_calls_count_and_a_call_that_runs_more_than_a_script_shows_whole():
+    r = check_mark(mark("12 of 40"), computed("12 of 40"), [call(CODE, "12 of 40", by="main")], "/data")
     assert r["status"] == "verified" and r["evidence"]["by"] == "main"
+    piped = {"command": f"python3 - <<'PY' 2>&1 | head -5\n{CODE}\nPY", "output": "12 of 40", "by": "main"}
+    r = check_mark(mark("12 of 40"), computed("12 of 40"), [piped], "/data")
+    assert r["status"] == "verified" and r["evidence"]["code"] == piped["command"]
 
 
 def test_a_number_inside_a_longer_number_does_not_show_it():
-    r = check_mark(mark("12 of 40"), computed(), [call(CODE, "112 of 400")], "/data")
+    r = check_mark(mark("12 of 40"), computed("of 400"), [call(CODE, "112 of 400")], "/data")
     assert r["status"] == "failed"
 
 
 def test_number_words_read_as_digits():
-    r = check_mark(mark("three times"), computed(), [call(CODE, "3 times")], "/data")
+    r = check_mark(mark("three times"), computed("3 times"), [call(CODE, "3 times")], "/data")
     assert r["status"] == "verified"
 
 
 def test_a_typed_in_value_is_no_evidence_but_a_bound_is_a_condition():
     typed = 'n = 15\nprint(f"{n} of 40")'
-    assert "by hand" in check_mark(mark("15 of 40"), computed(typed), [call(typed, "15 of 40")], "/data")["reason"]
+    assert "by hand" in check_mark(mark("15 of 40"), computed("15 of 40"), [call(typed, "15 of 40")], "/data")["reason"]
     bound = 'import json\nrows = [json.loads(l) for l in open("p.jsonl")]\nprint(sum(1 for r in rows if r["age"] < 13))'
-    assert check_mark(mark("13 children"), computed(bound), [call(bound, "13")], "/data")["status"] == "verified"
+    assert check_mark(mark("13 children"), computed("13"), [call(bound, "13")], "/data")["status"] == "verified"
+    one_line = {"command": "python3 -c 'print(15)'", "output": "15", "by": "main"}
+    assert "by hand" in check_mark(mark("15 of 40"), computed("15"), [one_line], "/data")["reason"]
 
 
 def test_a_correction_is_checked_on_its_new_words():
     corr = {"words": "12 of 40", "was": "15 of 40"}
-    r = check_mark(mark("15 of 40"), computed(status="corrected", correction=corr), [call(CODE, "12 of 40")], "/data")
+    r = check_mark(mark("15 of 40"), computed("12 of 40", status="corrected", correction=corr), [call(CODE, "12 of 40")], "/data")
     assert (r["status"], r["shown"], r["was"]) == ("corrected", "12 of 40", "15 of 40")
-    bad = check_mark(mark("15 of 40"), computed(status="corrected", correction={"words": "13 of 40"}), [call(CODE, "12 of 40")], "/data")
+    bad = check_mark(mark("15 of 40"), computed("12 of 40", status="corrected", correction={"words": "13 of 40"}), [call(CODE, "12 of 40")], "/data")
     assert bad["status"] == "failed" and bad["shown"] == "15 of 40"
 
 
@@ -99,43 +114,27 @@ def test_a_failed_mark_keeps_its_reason_and_a_missing_one_stays_unchecked():
 
 
 def test_validate_entry_reads_json_on_stdin(tmp_path: Path):
-    req = {"cwd": str(tmp_path), "marks": [mark("12 of 40")], "answer": "```json\n" + json.dumps([{"mark": 1, **computed()}]) + "\n```", "calls": [call(CODE, "12 of 40")]}
+    req = {"cwd": str(tmp_path), "marks": [mark("12 of 40")], "answer": "```json\n" + json.dumps([{"mark": 1, **computed("12 of 40")}]) + "\n```", "calls": [call(CODE, "12 of 40")]}
     r = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
     assert json.loads(r.stdout)["results"][0]["status"] == "verified"
 
 
-def test_code_that_leaves_out_lines_of_the_script_that_ran_counts_and_the_pane_shows_the_whole_script():
-    script = 'import json\nrows = [json.loads(l) for l in open("p.jsonl")]\nprint(f"9: {len(rows)} rows")\nprint(f"10: {sum(r[\'ok\'] for r in rows)} passed")'
-    excerpt = 'import json\nrows = [json.loads(l) for l in open("p.jsonl")]\nprint(f"10: {sum(r[\'ok\'] for r in rows)} passed")'
-    r = check_mark(mark("279 passed"), computed(excerpt), [call(script, "9: 280 rows\n10: 279 passed\n")], "/data")
-    assert r["status"] == "verified" and r["evidence"]["code"] == script
-    # a line that computes something else matches no call
-    changed = excerpt.replace("r['ok']", "r['fail']")
-    assert "no command" in check_mark(mark("279 passed"), computed(changed), [call(script, "10: 279 passed")], "/data")["reason"]
-
-
 def test_a_label_that_opens_an_output_line_shows_no_value():
     code = 'k = len(open("a.txt").read().split())\nprint(f"3: {k} times")'
-    assert check_mark(mark("3 times"), computed(code), [call(code, "3: 2 times")], "/data")["status"] == "failed"
-    assert check_mark(mark("2 times", 3), computed(code), [call(code, "3: 2 times")], "/data")["status"] == "verified"
+    assert check_mark(mark("3 times"), computed("3: 2 times"), [call(code, "3: 2 times")], "/data")["status"] == "failed"
+    assert check_mark(mark("2 times", 3), computed("3: 2 times"), [call(code, "3: 2 times")], "/data")["status"] == "verified"
 
 
 def test_a_record_id_and_a_compared_value_are_conditions_not_typed_values():
     code = 'import sqlite3\nc = sqlite3.connect("f.db")\nprint(c.execute("select at from claims where pr = 118").fetchone()[0])'
-    assert check_mark(mark("claimed #118 at 14:28"), computed(code), [call(code, "14:28")], "/data")["status"] == "verified"
+    assert check_mark(mark("claimed #118 at 14:28"), computed("14:28"), [call(code, "14:28")], "/data")["status"] == "verified"
     code2 = 'import csv\nrows = list(csv.DictReader(open("t.csv")))\nprint(sum(1 for r in rows if r["Pclass"] in ("1", "2") and r["g"] == "teen 13-17"))'
-    assert check_mark(mark("2 of them"), computed(code2), [call(code2, "2")], "/data")["status"] == "verified"
+    assert check_mark(mark("2 of them"), computed("2"), [call(code2, "2")], "/data")["status"] == "verified"
 
 
 def test_a_condition_the_code_uses_may_stand_in_its_printed_words():
     code = 'import csv\nrows = list(csv.DictReader(open("t.csv")))\nkids = [r for r in rows if r["Age"] and float(r["Age"]) < 12]\nprint(f"{sum(r[\'Survived\'] == \'1\' for r in kids)} children under 12 survived")'
-    assert check_mark(mark("39 children under 12 survived"), computed(code), [call(code, "39 children under 12 survived")], "/data")["status"] == "verified"
-
-
-def test_a_copied_line_whose_label_words_differ_still_names_the_call_but_other_code_does_not():
-    script = 'import json\nrows = [json.loads(l) for l in open("t.jsonl")]\nhit = [r for r in rows if r["ok"]]\nprint(f"{len(hit)} of the {len(rows)}")'
-    assert check_mark(mark("4 of the 703"), computed('print(f"{len(hit)} of {len(rows)}")'), [call(script, "4 of the 703")], "/data")["status"] == "verified"
-    assert "no command" in check_mark(mark("4 of the 703"), computed('print(f"{len(rows)} of {len(hit)}")'), [call(script, "4 of the 703")], "/data")["reason"]
+    assert check_mark(mark("39 children under 12 survived"), computed("39 children under 12 survived"), [call(code, "39 children under 12 survived")], "/data")["status"] == "verified"
 
 
 def test_a_number_in_a_name_is_no_value_the_line_must_show(tmp_path: Path):
@@ -149,7 +148,7 @@ def test_json_quoted_with_spaces_and_a_list_of_quoted_values(tmp_path: Path):
     r = check_mark(mark('"pkg:1.0.1:a.yaml"'), quote("p.jsonl", 1, '"record_id": "pkg:1.0.1:a.yaml"'), [], str(tmp_path))
     assert r["status"] == "verified"
     code = 'import json\nkinds = sorted({e["kind"] for l in open("p.jsonl") for e in [json.loads(l)]})\nprint("kinds:", kinds)'
-    assert check_mark(mark('"added", "context" or "removed"'), computed(code), [call(code, "kinds: ['added', 'context', 'removed']")], "/data")["status"] == "verified"
+    assert check_mark(mark('"added", "context" or "removed"'), computed("kinds: ['added', 'context', 'removed']"), [call(code, "kinds: ['added', 'context', 'removed']")], "/data")["status"] == "verified"
 
 
 def test_a_line_number_a_few_lines_off_names_the_line_that_holds_the_words(tmp_path: Path):
@@ -160,33 +159,33 @@ def test_a_line_number_a_few_lines_off_names_the_line_that_holds_the_words(tmp_p
 
 def test_digit_separators_and_a_scale_are_values():
     (code, out) = ('print(open("labels.py").read().count("x"))', "UNIT_CHARS = 4_000 and 8,225 files")
-    assert check_mark(mark("4,000 characters"), computed(code), [call(code, out)], "/data")["status"] == "verified"
-    assert check_mark(mark("8k files"), computed(code), [call(code, out)], "/data")["status"] == "verified"
+    assert check_mark(mark("4,000 characters"), computed(out), [call(code, out)], "/data")["status"] == "verified"
+    assert check_mark(mark("8k files"), computed(out), [call(code, out)], "/data")["status"] == "verified"
     # 12k is no number of an output that holds 12 only inside a date
-    assert check_mark(mark("12k files"), computed(code), [call(code, "as of 2026-10-12: 9,870 files")], "/data")["status"] == "failed"
+    assert check_mark(mark("12k files"), computed("as of 2026-10-12: 9,870 files"), [call(code, "as of 2026-10-12: 9,870 files")], "/data")["status"] == "failed"
 
 
 def test_an_ordinal_in_a_label_and_a_date_in_code_are_no_typed_values():
     code = 'import csv\nrows = list(csv.DictReader(open("t.csv")))\ng = [r for r in rows if r["Pclass"] == "3"]\nprint(f"3rd-class women: {sum(r[\'S\'] == \'1\' for r in g)} of {len(g)}")'
-    assert check_mark(mark("3 of 26"), computed(code), [call(code, "3rd-class women: 3 of 26")], "/data")["status"] == "verified"
+    assert check_mark(mark("3 of 26"), computed("3rd-class women: 3 of 26"), [call(code, "3rd-class women: 3 of 26")], "/data")["status"] == "verified"
     dates = 'import json\nn = {}\nfor l in open("chat.jsonl"):\n    m = json.loads(l)["at"][:7]; n[m] = n.get(m, 0) + 1\nprint(f"April 2025: {n.get(\'2025-04\', 0)}", sorted(n))'
-    assert check_mark(mark("only in April 2025"), computed(dates), [call(dates, "April 2025: 7 ['2025-04']")], "/data")["status"] == "verified"
+    assert check_mark(mark("only in April 2025"), computed("April 2025: 7 ['2025-04']"), [call(dates, "April 2025: 7 ['2025-04']")], "/data")["status"] == "verified"
 
 
 def test_words_with_no_number_are_shown_by_their_record_names():
     code = 'import json\nprint(", ".join(f"#{p[\'n\']}" for l in open("prs.jsonl") for p in [json.loads(l)] if p["merged_by"] == "agent-02"))'
-    assert check_mark(mark("merged #102, #125 and #130"), computed(code), [call(code, "#102, #125, #130")], "/data")["status"] == "verified"
-    assert check_mark(mark("merged #102, #125 and #131"), computed(code), [call(code, "#102, #125, #130")], "/data")["status"] == "failed"
+    assert check_mark(mark("merged #102, #125 and #130"), computed("#102, #125, #130"), [call(code, "#102, #125, #130")], "/data")["status"] == "verified"
+    assert check_mark(mark("merged #102, #125 and #131"), computed("#102, #125, #130"), [call(code, "#102, #125, #130")], "/data")["status"] == "failed"
 
 
 def test_a_correction_to_a_finer_value_leaves_the_marked_words_verified():
     corr = {"words": "06:39:10", "was": "06:39"}
-    r = check_mark(mark("06:39"), computed(status="corrected", correction=corr), [call(CODE, "last event 06:39")], "/data")
+    r = check_mark(mark("06:39"), computed("last event 06:39", status="corrected", correction=corr), [call(CODE, "last event 06:39")], "/data")
     assert (r["status"], r["shown"]) == ("verified", "06:39") and "was" not in r
 
 
 def test_a_failed_mark_keeps_the_real_evidence_the_check_gave():
-    item = {**computed(), "status": "failed", "reason": "the sentence says June 18, the deletions began on June 20"}
+    item = {**computed("602 deletions"), "status": "failed", "reason": "the sentence says June 18, the deletions began on June 20"}
     r = check_mark(mark("602"), item, [call(CODE, "602 deletions, first on 2026-06-20")], "/data")
     assert r["status"] == "failed" and r["failedBy"] == "check" and r["evidence"]["output"].startswith("602")
 
@@ -200,12 +199,12 @@ def test_an_answer_that_quotes_a_fence_still_parses():
 def test_a_quote_comes_from_the_records_its_numbers_with_it():
     read = 'import sqlite3\nc = sqlite3.connect("file:f.db?immutable=1", uri=True)\nprint(c.execute("select body from reports").fetchone()[0])'
     out = "Reviewed and merged 6 PRs: #107 (fix) #108 (docs)"
-    assert check_mark(mark('"Reviewed and merged 6 PRs: #107 … #108"'), computed(read), [call(read, out)], "/data")["status"] == "verified"
+    assert check_mark(mark('"Reviewed and merged 6 PRs: #107 … #108"'), computed(out), [call(read, out)], "/data")["status"] == "verified"
     typed = 'print("Reviewed and merged 6 PRs: #107 and #108")'
-    r = check_mark(mark('"Reviewed and merged 6 PRs: #107 … #108"'), computed(typed), [call(typed, out)], "/data")
+    r = check_mark(mark('"Reviewed and merged 6 PRs: #107 … #108"'), computed(out), [call(typed, out)], "/data")
     assert r["status"] == "failed" and "quoted words" in r["reason"]
     found = read.replace('print(c.execute("select body from reports").fetchone()[0])', 'body = c.execute("select body from reports").fetchone()[0]\nif "merged 6 PRs: #107" in body: print("merged 6 PRs: #107")')
-    assert check_mark(mark('"merged 6 PRs: #107"'), computed(found), [call(found, "merged 6 PRs: #107")], "/data")["status"] == "verified"
+    assert check_mark(mark('"merged 6 PRs: #107"'), computed("merged 6 PRs: #107"), [call(found, "merged 6 PRs: #107")], "/data")["status"] == "verified"
 
 
 def test_a_path_shows_from_the_folder_the_session_started_in(tmp_path: Path):
@@ -218,31 +217,31 @@ def test_a_path_shows_from_the_folder_the_session_started_in(tmp_path: Path):
 
 def test_an_index_a_key_an_operand_and_a_chosen_line_are_no_typed_values():
     median = 'import json\nrates = sorted(json.loads(l)["n"] for l in open("g.jsonl"))\nprint(f"median {rates[len(rates)//2]:.1f} per day")'
-    assert check_mark(mark("about 2"), computed(median), [call(median, "median 2.0 per day")], "/data")["status"] == "verified"
+    assert check_mark(mark("about 2"), computed("median 2.0 per day"), [call(median, "median 2.0 per day")], "/data")["status"] == "verified"
     key = 'import json\nby = {}\nfor l in open("t.jsonl"):\n    r = json.loads(l); by[r["h"]] = by.get(r["h"], 0) + 1\nprint(f"driver ({by[\'01\']})")'
-    assert check_mark(mark("1"), computed(key), [call(key, "driver (1)")], "/data")["status"] == "verified"
+    assert check_mark(mark("1"), computed("driver (1)"), [call(key, "driver (1)")], "/data")["status"] == "verified"
     chosen = 'import json\ngaps = [json.loads(l)["gap"] for l in open("g.jsonl")]\nprint("no gap exceeds 5 minutes" if max(gaps) <= 300 else "a gap exceeds 5 minutes")'
-    assert check_mark(mark("no gap exceeds 5 minutes"), computed(chosen), [call(chosen, "no gap exceeds 5 minutes")], "/data")["status"] == "verified"
+    assert check_mark(mark("no gap exceeds 5 minutes"), computed("no gap exceeds 5 minutes"), [call(chosen, "no gap exceeds 5 minutes")], "/data")["status"] == "verified"
     # a value typed in a field of an f-string is still typed in
     typed = 'print(f"{15} of 40")'
-    assert "by hand" in check_mark(mark("15 of 40"), computed(typed), [call(typed, "15 of 40")], "/data")["reason"]
+    assert "by hand" in check_mark(mark("15 of 40"), computed("15 of 40"), [call(typed, "15 of 40")], "/data")["reason"]
 
 
 def test_a_time_matches_its_fractions_of_a_second_and_about_rounds_to_its_zeros():
     code = 'import json\nprint([json.loads(l)["ts"] for l in open("t.jsonl")][0])'
-    assert check_mark(mark("2026-07-18T21:29:27"), computed(code), [call(code, "2026-07-18T21:29:27.806896Z")], "/data")["status"] == "verified"
+    assert check_mark(mark("2026-07-18T21:29:27"), computed("2026-07-18T21:29:27.806896Z"), [call(code, "2026-07-18T21:29:27.806896Z")], "/data")["status"] == "verified"
     rng = 'import json\nn = [json.loads(l)["s"] for l in open("s.jsonl")]\nprint(f"{min(n)}-{max(n)}")'
     about = {"n": 1, "words": "250–620", "sentence": "Each agent ran about [250–620] sessions."}
-    assert check_mark(about, computed(rng), [call(rng, "248-619")], "/data")["status"] == "verified"
+    assert check_mark(about, computed("248-619"), [call(rng, "248-619")], "/data")["status"] == "verified"
     exact = {"n": 1, "words": "250–620", "sentence": "Each agent ran [250–620] sessions."}
-    assert check_mark(exact, computed(rng), [call(rng, "248-619")], "/data")["status"] == "failed"
+    assert check_mark(exact, computed("248-619"), [call(rng, "248-619")], "/data")["status"] == "failed"
 
 
 def test_a_correction_keeps_only_the_words_that_replace_the_mark():
     m = {"n": 1, "words": "936", "sentence": "Redaction is common ([936] records contain a `[redacted…]` marker, in any field)."}
     corr = {"words": "1405 records contain a `[redacted…]` marker", "was": "936"}
     code = 'import json\nrows = [json.loads(l) for l in open("t.jsonl")]\nprint(f"{sum(\'[redacted\' in json.dumps(r) for r in rows)} records")'
-    r = check_mark(m, computed(code, status="corrected", correction=corr), [call(code, "1405 records")], "/data")
+    r = check_mark(m, computed("1405 records", status="corrected", correction=corr), [call(code, "1405 records")], "/data")
     assert (r["status"], r["shown"]) == ("corrected", "1405")
 
 
@@ -263,7 +262,7 @@ def test_a_claim_that_joins_two_places_cites_both(tmp_path: Path):
 
 
 def test_a_note_on_the_rest_of_the_sentence_stays_beside_a_verified_mark():
-    item = {**computed(), "note": "per-agent chat also rose, from 21.2 to 31.7"}
+    item = {**computed("12 of 40"), "note": "per-agent chat also rose, from 21.2 to 31.7"}
     r = check_mark(mark("12 of 40"), item, [call(CODE, "12 of 40")], "/data")
     assert r["status"] == "verified" and r["note"].startswith("per-agent")
 
@@ -277,23 +276,23 @@ def test_a_comma_between_fields_is_no_digit_separator(tmp_path: Path):
 def test_a_range_of_days_matches_the_same_days_written_another_way():
     code = 'import json\nrows = [json.loads(l) for l in open("e.jsonl")]\nprint(sorted({r["day"] for r in rows}))'
     days = call(code, "['2026-06-08', '2026-06-09', '2026-06-12']")
-    assert check_mark(mark("8–12 June 2026"), computed(code), [days], "/data")["status"] == "verified"
-    assert check_mark(mark("10–11 May"), computed(code), [call(code, "10 May 2025 (Sat), 11 May 2025 (Sun)")], "/data")["status"] == "verified"
+    assert check_mark(mark("8–12 June 2026"), computed("2026-06-08"), [days], "/data")["status"] == "verified"
+    assert check_mark(mark("10–11 May"), computed("10 May 2025 (Sat), 11 May 2025 (Sun)"), [call(code, "10 May 2025 (Sat), 11 May 2025 (Sun)")], "/data")["status"] == "verified"
     # a day is a day: the 5 of 5pm is not 5 April
-    assert check_mark(mark("5–6 April"), computed(code), [call(code, "posted at 5pm, 6 in all")], "/data")["status"] == "failed"
-    assert check_mark(mark("7–12 June 2026"), computed(code), [days], "/data")["status"] == "failed"
+    assert check_mark(mark("5–6 April"), computed("posted at 5pm, 6 in all"), [call(code, "posted at 5pm, 6 in all")], "/data")["status"] == "failed"
+    assert check_mark(mark("7–12 June 2026"), computed("2026-06-08"), [days], "/data")["status"] == "failed"
 
 
 def test_a_number_in_an_f_strings_fixed_text_is_typed_only_when_no_field_printed_it():
     code = 'n = sum(1 for e in ev if e == "ended after 10 minutes")\nprint(f"In {n} of {len(ev)} sessions: ended after 10 minutes")'
-    assert check_mark(mark("10"), computed(code), [call(code, "In 10 of 37 sessions: ended after 10 minutes")], "/data")["status"] == "verified"
+    assert check_mark(mark("10"), computed("In 10 of 37 sessions: ended after 10 minutes"), [call(code, "In 10 of 37 sessions: ended after 10 minutes")], "/data")["status"] == "verified"
     typed = 'n = sum(p["merged"] for p in prs)\nprint(f"{n} of 40")'
-    assert "40 in by hand" in check_mark(mark("12 of 40"), computed(typed), [call(typed, "12 of 40")], "/data")["reason"]
+    assert "40 in by hand" in check_mark(mark("12 of 40"), computed("12 of 40"), [call(typed, "12 of 40")], "/data")["reason"]
 
 
 def test_a_file_name_in_a_typed_sentence_does_not_excuse_its_numbers():
     code = 'print("cv_detect.py and solve.py (3 touches each)")'
-    assert "3 in by hand" in check_mark(mark("cv_detect.py and solve.py (3 touches each)"), computed(code), [call(code, "cv_detect.py and solve.py (3 touches each)")], "/data")["reason"]
+    assert "3 in by hand" in check_mark(mark("cv_detect.py and solve.py (3 touches each)"), computed("cv_detect.py and solve.py (3 touches each)"), [call(code, "cv_detect.py and solve.py (3 touches each)")], "/data")["reason"]
 
 
 def test_what_code_does_may_cite_claudes_own_code_in_the_temp_folder_a_quote_may_not(tmp_path: Path):
@@ -308,24 +307,24 @@ def test_what_code_does_may_cite_claudes_own_code_in_the_temp_folder_a_quote_may
 
 def test_emphasis_in_the_output_is_formatting():
     code = 'import sqlite3\nprint(sqlite3.connect("f").execute("select body from r where id=605").fetchone()[0])'
-    r = check_mark(mark('"one token away from an approval"'), computed(code), [call(code, "It is **one token away from an approval**.")], "/data")
+    r = check_mark(mark('"one token away from an approval"'), computed("It is **one token away from an approval**."), [call(code, "It is **one token away from an approval**.")], "/data")
     assert r["status"] == "verified"
 
 
 def test_a_typed_value_in_a_list_a_dict_or_a_passing_call_is_not_evidence():
     for code in ('d = {"a": 352}\nprint(d["a"])', "vals = [352]\nprint(vals[0])", "print(max(352, 1))"):
-        r = check_mark(mark("352 rows"), computed(code), [call(code, "352")], "/data")
+        r = check_mark(mark("352 rows"), computed("352"), [call(code, "352")], "/data")
         assert r["status"] == "failed" and r["failedBy"] == "evidence" and "352 in by hand" in r["reason"], code
     # an index, a slice and a digits argument stay conditions
     code = 'rows = open("t.csv").read().split("\\n")[:352]\nprint(round(len(rows) / 1, 352))'
-    assert check_mark(mark("352 rows"), computed(code), [call(code, "352")], "/data")["status"] == "verified"
+    assert check_mark(mark("352 rows"), computed("352"), [call(code, "352")], "/data")["status"] == "verified"
 
 
 def test_one_mark_the_validator_cannot_judge_leaves_the_others_judged(monkeypatch):
     import kernel.evidence as E
     code = "print(len(open('t.txt').read()))"
     big = "9" * 400
-    answer = "```json\n" + json.dumps([computed(code) | {"mark": 1}, computed(code) | {"mark": 2}]) + "\n```"
+    answer = "```json\n" + json.dumps([computed("12") | {"mark": 1}, computed("12") | {"mark": 2}]) + "\n```"
     # a number of more digits than a float holds is its digits
     assert [r["status"] for r in check_all([mark(big, 1), mark("12", 2)], answer, [call(code, f"{big} 12")], "/data")["results"]] == ["verified", "verified"]
     real = E.check_mark
@@ -344,3 +343,58 @@ def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path
     os.mkfifo(data / "pipe")
     assert "outside the folder" in check_mark(mark('"the secret line"'), quote("link.txt", 1, "the secret line"), [], str(data))["reason"]
     assert check_mark(mark('"x"'), quote("pipe", 1, "x"), [], str(data))["status"] == "failed"
+
+
+def test_a_path_from_the_start_folder_holds_after_main_moved_the_shell(tmp_path: Path):
+    (tmp_path / "plugin" / "draw").mkdir(parents=True)
+    (tmp_path / "plugin" / "draw" / "box.mjs").write_text("const a = 1\nexport function box() {}\n")
+    # main ran `cd plugin/draw`; the check named the file from the folder the session started in
+    r = check_mark(mark("box"), quote("plugin/draw/box.mjs", 2, "export function box()", kind="code"), [], str(tmp_path / "plugin" / "draw"), str(tmp_path))
+    assert r["status"] == "verified" and r["evidence"]["file"] == "plugin/draw/box.mjs"
+    gone = check_mark(mark("box"), quote("plugin/draw/nobox.mjs", 2, "box", kind="code"), [], str(tmp_path / "plugin" / "draw"), str(tmp_path))
+    assert "there is no file plugin/draw/nobox.mjs" in gone["reason"]
+
+
+def test_a_quote_inside_a_quote_may_use_the_other_quote_mark(tmp_path: Path):
+    (tmp_path / "REPORT.md").write_text('It says "From my phone and computer" implies one shared source of truth.\n')
+    words = "\"'From my phone and computer' implies one shared source of tru…\""
+    r = check_mark(mark(words), quote("REPORT.md", 1, "'From my phone and computer' implies one shared"), [], str(tmp_path))
+    assert r["status"] == "verified" and r["evidence"]["lines"][0]["highlight"] == [8, 55]
+    # a correction that changes only the quote marks leaves the words verified
+    styled = '""From my phone and computer" implies one shared source of tru…"'
+    item = {"kind": "quote", "status": "corrected", "evidence": {"file": "REPORT.md", "line": 1, "substring": "From my phone"},
+            "correction": {"words": styled}, "reason": "inner quotes"}
+    r = check_mark(mark(words), item, [], str(tmp_path))
+    assert r["status"] == "verified" and r["shown"] == words
+
+
+def test_a_call_is_found_by_lines_of_its_output_the_others_left_out_and_a_percent_may_show_as_a_share():
+    out = "step  legal\n500   0.59718\n1000  0.71\n3500  0.93062\n"
+    r = check_mark(mark("59.7%"), computed("500   0.59718\n3500  0.93062"), [call(CODE, out, by="main")], "/data")
+    assert r["status"] == "verified" and r["evidence"]["highlight"] == [[18, 25]]
+    assert check_mark(mark("59.8%"), computed("500   0.59718"), [call(CODE, out)], "/data")["status"] == "failed"
+    # a cited output that shows no number of the words is still highlighted where it stands
+    r = check_mark(mark("one first-class girl"), computed("1 female"), [call(CODE, "class 1 female 1")], "/data")
+    assert r["status"] == "failed" and r["evidence"]["highlight"] == [[6, 14]]
+
+
+def test_a_path_named_from_the_folder_a_call_moved_to_holds(tmp_path: Path):
+    (tmp_path / "toy").mkdir()
+    (tmp_path / "toy" / "board.jsonl").write_text('{"by": "agent-07", "text": "yes, that was me"}\n')
+    moved = {"command": "cd toy && python3 - <<'PY'\nprint(1)\nPY", "output": "1", "by": "checker"}
+    item = quote("board.jsonl", 1, "yes, that was me")
+    assert check_mark(mark('"yes, that was me"'), item, [moved], str(tmp_path))["status"] == "verified"
+    assert "there is no file" in check_mark(mark('"yes, that was me"'), item, [], str(tmp_path))["reason"]
+
+
+def test_a_number_name_shows_as_its_number():
+    out = "merged reverts: [(135, 'Revert #118', 'agent-11')]"
+    assert check_mark(mark("#135"), computed("merged reverts"), [call(CODE, out)], "/data")["status"] == "verified"
+    assert check_mark(mark("#136"), computed("merged reverts"), [call(CODE, out)], "/data")["status"] == "failed"
+
+
+def test_a_dict_that_names_numbers_in_words_is_a_lookup_not_a_typed_value():
+    code = 'n = len(open("t.txt").read().split())\nwords = {10: "ten", 9: "nine"}\nprint(f"asked {words.get(n, n)} times")'
+    assert check_mark(mark("ten"), computed("asked ten times"), [call(code, "asked ten times")], "/data")["status"] == "verified"
+    typed = 'd = {"a": 10}\nprint(f"asked {d[\'a\']} times")'
+    assert "by hand" in check_mark(mark("ten"), computed("asked 10 times"), [call(typed, "asked 10 times")], "/data")["reason"]

@@ -54,7 +54,8 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     let e = k
     while (e + 1 < runs.length && runs[e + 1]!.mark === r.mark) e++
     const look = o.looks[r.mark]
-    out.push(...(look?.status === 'corrected' && look.shown ? [{ s: look.shown, mark: r.mark }] : runs.slice(k, e + 1)))
+    // a correction may hold markdown (a file's line as written): it draws as the reply's own words would
+    out.push(...(look?.status === 'corrected' && look.shown ? inline(look.shown, 0, look.shown.length).map((x: Run) => ({ ...x, mark: r.mark })) : runs.slice(k, e + 1)))
     if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
     if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
     if (look?.status === 'unconfirmed') out.push({ s: ' ?', mark: r.mark, tag: 'x' })

@@ -8,30 +8,33 @@ check_mark() decides what the person sees of that mark; its result wins over the
 What it guarantees. The checker judges what a claim means; this module makes sure the evidence it gave is real and
 shows the words, so a mark is never verified on evidence the checker made up:
 
-  computed  the evidence is code. One of the real calls of the session (the checker's or main's Bash calls, as the
-            transcript stored their output) ran that code: the call's command holds the code's lines, in order. That
-            call's output shows the marked words (or the corrected words): the words whole, the same words with number
-            words as digits ("five" is 5), each quoted part of the words, or every day and every number of the words,
-            each number a whole number of the output (a 3 never matches inside 2,301). The check reads the output the
-            call really printed, never the output the checker wrote down.
-            The code does not type in a number of the words where it is the printed value: assigned, returned,
+  computed  the evidence is a real call of the session: one of the checker's or main's Bash calls, as the transcript
+            stored it. The checker names the call by a part of its output; the call's real output holds that text
+            (white space read loosely, "…" for left-out text) and shows the marked words (or the corrected words):
+            the words whole, the same words with number words as digits ("five" is 5), each quoted part of the words,
+            or every day and every number of the words, each number a whole number of the output (a 3 never matches
+            inside 2,301). The check reads the output the call really printed, never the output the checker wrote
+            down, and it runs nothing.
+            The call's code does not type in a number of the words where it is the printed value: assigned, returned,
             printed, in a list, tuple, set or dict that is assigned or printed, or given to a call that passes it on
             (max, sum, int, ...). A number in the fixed text of an f-string counts as typed only when the output shows
             it nowhere else. A number that is a condition may also stand in the printed words (`age < 12` and "children
             under 12"): a bound of a comparison, an index or a slice, an operand of arithmetic, an argument of another
             call (`head(5)`, `round(x, 2)`), and the words of a line printed only when a condition holds. Not caught: a
-            value computed from typed numbers alone (`print(350 + 2)`).
-  quote     one place or several: the file is inside the working folder or the folder the session started in (for
-  code      what code does, also the temp folder, where Claude keeps its own code), compared by real paths, a regular
-            file, the line (or a range of at most 50 lines) exists, and the place's substring is in it: in the raw line
-            or in the line's JSON strings decoded, runs of white space as one space (or as none: JSON written with no
-            space after its colons), and `**` and backticks as formatting. The quoted words of a direct quote (the case
-            of their first letter aside), and the days and numbers of the words, are in the cited lines too.
+            value computed from typed numbers alone (`print(350 + 2)`), and code the call ran from a file.
+  quote     one place or several: the file is inside the folder the session started in or the shell's folder (a
+  code      relative path is read from either, since main may have run `cd`; for what code does, also the temp
+            folder, where Claude keeps its own code), compared by real paths, a regular file, the line (or a range of
+            at most 50 lines) exists, and the place's substring is in it: in the raw line or in the line's JSON strings
+            decoded, runs of white space as one space (or as none: JSON written with no space after its colons), `**`
+            and backticks as formatting, and every quote mark as the same mark (a quote inside a quote may be written
+            with the other kind). The quoted words of a direct quote (the case of their first letter aside), and the
+            days and numbers of the words, are in the cited lines too.
             Not checked: that a substring means what a paraphrase of it says ("agent-3 deleted the page" on a line that
             holds "page"). That is the checker's judgment; the person sees the line next to the claim.
 
-A number with a scale (8k) matches the values it rounds from, and after "about" a whole number matches the values that
-round to its zeros (about 250 is 248). A calendar day or a range of days ("8–12 June 2026") matches the same days
+A number with a scale (8k) matches the values it rounds from, a percent matches the share it is too (59.7% is 0.59718),
+and after "about" a whole number matches the values that round to its zeros (about 250 is 248). A calendar day or a range of days ("8–12 June 2026") matches the same days
 however they are written (2026-06-08 … 2026-06-12); another number inside a date matches only a number of the words'
 own dates, and a time to the second matches its fractions. A cited line a few lines off from the one that holds the
 words is moved to it. A correction is the words that replace the mark: words of the sentence the checker repeated
@@ -56,7 +59,9 @@ import keyword
 import math
 import os
 import re
+import shlex
 import tokenize
+from decimal import Decimal
 from typing import Any
 
 MONTHS = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
@@ -140,6 +145,15 @@ CONTEXT_MAX = 160  # characters of a line around the cited ones
 
 def norm_ws(s: Any) -> str:
     return " ".join(str(s).split())
+
+
+QUOTES = str.maketrans({c: '"' for c in "“”‘’'"})
+
+
+def one_quote(s: str) -> str:
+    """Every quote mark as `"`: a quote inside a quote is written with either kind ("'personal'" for '"personal"'), and
+    an apostrophe with either form (’ or ')."""
+    return s.translate(QUOTES)
 
 
 def unmark(s: Any) -> str:
@@ -288,13 +302,16 @@ def in_text(frag: str, hay: str) -> bool:
     """A quoted fragment stands in a text, the case of its first letter aside: a quote worked into a sentence starts
     with a small letter where the record starts its sentence with a capital ("the only finalist" for "The only
     finalist")."""
-    f = unmark(frag)
-    return bool(f) and (f in hay or f[:1].swapcase() + f[1:] in hay)
+    f, h = one_quote(unmark(frag)), one_quote(hay)
+    return bool(f) and (f in h or f[:1].swapcase() + f[1:] in h)
 
 
 def has_name(name: str, text: str) -> bool:
-    """A record's name (`#118`, `agent-11`) stands in the text as a whole word."""
-    return re.search(r"(?<![\w#-])" + re.escape(name) + r"(?![\w-])", text) is not None
+    """A record's name (`#118`, `agent-11`) stands in the text as a whole word; a number name (`#118`) also as its
+    number (118), as a table or a list prints it."""
+    if re.search(r"(?<![\w#-])" + re.escape(name) + r"(?![\w-])", text):
+        return True
+    return name.startswith("#") and has_number(name[1:], text, dates=False)
 
 
 LABEL = re.compile(r"^([ \t]*)\d+:[ \t]+", re.M)
@@ -319,22 +336,33 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
     if bounded_in(bare, out) or bounded_in(bare, plain) or bounded_in(wordnums(target), wordnums(out)):
         return True
     frags = quote_fragments(target)
-    if frags and all(any(bounded_in(g, o) for g in (f, f[:1].swapcase() + f[1:]) for o in (out, plain)) for f in frags):
+    if frags and all(any(bounded_in(one_quote(g), one_quote(o)) for g in (f, f[:1].swapcase() + f[1:]) for o in (out, plain)) for f in frags):
         return True
     if calendar_days(target) and not days_shown(target, out):
         return False
     nums = marked_numbers(wordnums(target, counts=True))
     if nums:
-        return all(has_number(v, out, dates=d, approx=approx) for v, d in nums)
+        pct = percents(target)
+        return all(has_number(v, out, dates=d, approx=approx) or (v in pct and has_number(fraction(v), out, approx=approx)) for v, d in nums)
     if calendar_days(target):
         return True
     names = NAME.findall(target)
     return bool(names) and all(has_name(x, out) for x in names)
 
 
+def percents(words: str) -> set[str]:
+    """The numbers of the words that are percents (`48.4%`, `48 percent`), each in one form."""
+    return {num_value(m.group(1)) for m in re.finditer(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(?:%|percent\b)", words)}
+
+
+def fraction(v: str) -> str:
+    """A percent as the share it is (59.7 is 0.597), the digits kept: an output may print the share."""
+    return num_value(str(Decimal(v) / 100))
+
+
 def spans_of(target: str, out: str) -> list[list[int]]:
     """Where the output shows the words, for the pane: the words whole (white space as written in the output), else
-    each of their numbers."""
+    each of their numbers (a percent also as its share)."""
     words = [w for w in norm_ws(target.strip(QUOTE_CHARS + " ")).split(" ") if w]
     if words:
         rx = re.compile(r"\s+".join(re.escape(w) for w in words))
@@ -343,10 +371,11 @@ def spans_of(target: str, out: str) -> list[list[int]]:
             if not (out[a:a + 1].isdigit() and out[a - 1:a].isdigit()) and not (out[b - 1:b].isdigit() and out[b:b + 1].isdigit()):
                 return [[a, b]]
     hits = []
+    pct = percents(target)
     for v in numbers(wordnums(target)):
         for m in NUM_IN_TEXT.finditer(out):
             w = number_at(m)
-            if w is not None and same_number(v, w):
+            if w is not None and (same_number(v, w) or (v in pct and same_number(fraction(v), w))):
                 hits.append([m.start(1), m.end(1)])
                 break
     for x in NAME.findall(target):
@@ -441,7 +470,7 @@ def literals(code: str) -> list[tuple[str, str, str]]:
     """(kind, value, text) of each number the code types where it can be the printed value: a NUMBER token (kind
     `number`), or a number inside a string (`string`), or inside the fixed text of an f-string that prints a field too
     (`fixed`, with that text), assigned to a name, given to print() or a format as the innermost call (not to round()
-    inside it), or returned. A bound in a comparison, a key, an index, an operand of arithmetic (`len(rates) // 2`) or an
+    inside it), or returned. A bound in a comparison, a key (also a dict's), an index, an operand of arithmetic (`len(rates) // 2`) or an
     argument of another call is a condition, not a value; so are the words of a string printed only when a condition
     holds (`"no gap exceeds 5 minutes" if worst <= 300 else …`). A number inside a string is left out in a format spec,
     in a path or a file's name, as a part of a name (agent-02), as a bound of a range ("teen 13-17") and as a label that
@@ -470,8 +499,10 @@ def literals(code: str) -> list[tuple[str, str, str]]:
             # (a `[` or `:` is an index or a slice's bound inside an index; in a list or a dict it opens a value)
             bound = prev is not None and prev.type == tokenize.OP and (prev.string in ("<", ">", "<=", ">=", "==", "!=")
                                                                        or (prev.string in ("[", ":") and stack[-1:] == ["sub"]))
+            # a dict's key looks a value up (`{10: "ten"}[n]`); it is not the value
+            key = nxt is not None and nxt.type == tokenize.OP and nxt.string == ":" and stack[-1:] != ["sub"]
             returned = prev is not None and prev.type == tokenize.NAME and prev.string in ("return", "yield")
-            if (assigned or (printed and not bound) or returned) and not operand(toks, i):
+            if (assigned or (printed and not bound and not key) or returned) and not operand(toks, i):
                 out.append(("number", v, ""))
         elif t.type == tokenize.STRING:
             s = t.string
@@ -635,57 +666,53 @@ def without_texts(out: str, texts: list[str]) -> str:
 
 # ------------------------------------------------------------------------------------------------ computed evidence
 
-def code_lines(text: str) -> list[str]:
-    return [norm_ws(line) for line in str(text).split("\n") if line.strip()]
-
-
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
-
-
-def scripts(command: str) -> list[str]:
-    """The scripts a shell command runs: each here-document's body (`python3 - <<'PY' … PY`), then the command."""
-    return [m.group(3) for m in HEREDOC.finditer(command)] + [command]
-
-
 RUNS_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;|\n)\s*)?\S*python[\d.]*\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\1[ \t]*")
 
 
-def only_script(command: str, script: str) -> bool:
-    """The command does nothing but run the script: `python3 - <<'PY'`, the script, `PY` (after a `cd` at most, with
-    `&&`, `;` or on a line of its own)."""
+def scripts(command: str) -> list[str]:
+    """The code a shell command runs, where a value it types in can stand: each here-document's body (`python3 - <<'PY'
+    … PY`) and each `python3 -c` argument, else the command itself."""
+    out = [m.group(3) for m in HEREDOC.finditer(command)]
+    if re.search(r"python[\d.]*\s", command):
+        try:
+            words = shlex.split(HEREDOC.sub("", command))
+        except ValueError:
+            words = []
+        out += [words[i + 1] for i, w in enumerate(words[:-1]) if w == "-c"]
+    return out or [command]
+
+
+def shown_code(command: str) -> str:
+    """The code the pane shows for a call: the script alone when the call only runs one (`python3 - <<'PY'`, the
+    script, `PY`, after a `cd` at most), else the whole command, since its other parts printed into the same output."""
     m = HEREDOC.search(command)
-    if not m or m.group(3) != script or command[m.end():].strip():
-        return False
-    head = (command[:m.start()] + m.group(0).split("\n", 1)[0]).strip()
-    return RUNS_SCRIPT.fullmatch(head) is not None
-
-
-def computes(line: str) -> str:
-    """A line as what it computes: the words of its labels left out (a string with a space or a `{…}` field), the
-    fields of an f-string kept; a string with neither, such as a key (`r["Survived"]`), stays as written."""
-    def label(m: re.Match) -> str:
-        body = m.group(2)
-        return m.group(0) if not re.search(r"\s|\{", body) else m.group(1) + "".join(re.findall(r"\{[^{}]*\}", body)) + m.group(1)
-    return re.sub(r"(['\"])(.*?)(?<!\\)\1", label, line)
-
-
-def ran(code: str, command: str) -> str | None:
-    """The script of a call's command that ran the code, or None: the code's lines (each with runs of white space as
-    one space, blank lines left out) are lines of the script, in order, so the code may be a few lines of a script that
-    printed more; a one-line code may also stand inside one line (`python3 -c "…"`). When no script holds the lines as
-    written, lines that compute the same (only the words inside their strings differ, as when a copy drops a word of
-    a label) count."""
-    want = code_lines(code)
-    if not want:
-        return None
-    for form in (lambda x: x, computes):
-        for script in scripts(command):
-            have = iter(form(line) for line in code_lines(script))
-            if all(form(line) in have for line in want):
-                return script
-    if len(want) == 1 and any(want[0] in line for line in code_lines(command)):
+    if not m or command[m.end():].strip():
         return command
-    return None
+    head = (command[:m.start()] + m.group(0).split("\n", 1)[0]).strip()
+    return m.group(3) if RUNS_SCRIPT.fullmatch(head) else command
+
+
+def output_parts(given: Any) -> list[str]:
+    """The output the check gave, as its lines, each cut where it put "…" for left-out text: its parts, runs of white
+    space as one space. The check may copy a few lines of an output and leave out the lines between them."""
+    return [p for p in (norm_ws(x) for x in re.split(r"…|\.\.\.|\n", str(given or ""))) if p]
+
+
+def printed(given: Any, output: str) -> list[int] | None:
+    """Where a call's output holds the output the check gave (its parts in that order, white space read loosely): the
+    span of the first part in the output, or None."""
+    parts = output_parts(given)
+    out, at = norm_ws(output), 0
+    for p in parts:
+        i = out.find(p, at)
+        if i < 0:
+            return None
+        at = i + len(p)
+    if not parts:
+        return None
+    m = re.search(r"\s+".join(re.escape(w) for w in parts[0].split(" ")), output)
+    return [m.start(), m.end()] if m else [0, 0]
 
 
 def window(text: str, spans: list[list[int]], size: int) -> tuple[str, list[list[int]]]:
@@ -698,45 +725,45 @@ def window(text: str, spans: list[list[int]], size: int) -> tuple[str, list[list
     return lead + text[a:b] + ("…" if b < len(text) else ""), [[x - a + len(lead), y - a + len(lead)] for x, y in spans if x >= a and y <= b]
 
 
-def check_computed(target: str, code: str, calls: list[dict[str, Any]], approx: bool = False) -> tuple[list[str], dict[str, Any] | None]:
-    """The problems of computed evidence, and the evidence to show: the script of the call that ran the code and that
-    call's real output (the first that shows the words, else the first that ran it). A value typed into any line of
-    that script, not only into the lines the checker gave, is no evidence."""
-    if not code.strip():
-        return ["the check gave no code"], None
-    runs = [(c, script) for c in calls for script in [ran(code, str(c.get("command") or ""))] if script is not None]
+def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False) -> tuple[list[str], dict[str, Any] | None]:
+    """The problems of computed evidence, and the evidence to show. The check names a call by the output it printed;
+    the calls of the session whose real output holds that text are the candidates, and the first whose output shows
+    the words, and whose code types none of them in, is the evidence: its code and its whole output, the words
+    highlighted from the cited place on."""
+    if not output_parts(given):
+        return ["the check gave no output of a call"], None
+    runs = [(c, at) for c in calls for at in [printed(given, str(c.get("output") or ""))] if at is not None]
 
-    def shown(c: dict[str, Any] | None, script: str, spans: list[list[int]]) -> dict[str, Any]:
-        text, hl = window(str((c or {}).get("output") or ""), spans, OUTPUT_MAX)
-        command = str((c or {}).get("command") or "")
-        # the code whose output the pane shows: the script alone when the call ran only it, else the whole command,
-        # since its other parts printed into the same output
-        code = script if not command or only_script(command, script) else command
-        return {"kind": "computed", "code": code.strip("\n"), "output": text, "highlight": hl, "by": (c or {}).get("by") or "checker"}
+    def shown(c: dict[str, Any], spans: list[list[int]]) -> dict[str, Any]:
+        text, hl = window(str(c.get("output") or ""), spans, OUTPUT_MAX)
+        return {"kind": "computed", "code": shown_code(str(c.get("command") or "")).strip("\n"), "output": text, "highlight": hl, "by": c.get("by") or "checker"}
 
     if not runs:
-        return ["no command of the session ran the code the check gave"], shown(None, code, [])
+        return ["no call of the session printed the output the check gave"], None
     problem = ""
-    for c, script in runs:
-        # the whole script that ran, not only the lines the checker gave, types in no value (a script that is the
-        # command itself, not a here-document, is read by the lines given)
-        body = code if script == c.get("command") else script
-        typed, fixed = typed_values(target, body)
-        quoted = typed_quote(target, body)
+    for c, at in runs:
         out = str(c.get("output") or "")
+        typed, fixed, quoted = [], {}, []
+        for code in scripts(str(c.get("command") or "")):
+            t, f = typed_values(target, code)
+            typed += t
+            fixed.update(f)
+            quoted += typed_quote(target, code)
         if fixed and shows(target, out, approx):
             # a number of the words the code also types in the fixed text of an f-string: the output must show it
             # outside that text, where a field printed it
             typed += [v for v in fixed if not has_number(v, without_texts(out, fixed[v]), dates=False, approx=approx)]
         if typed:
-            problem = problem or f"its code writes {', '.join(sorted(typed))} in by hand instead of computing it"
+            problem = problem or f"its code writes {', '.join(sorted(set(typed)))} in by hand instead of computing it"
         elif quoted:
             problem = problem or f"its code writes the quoted words “{quoted[0]}” itself instead of reading them from the records"
         elif shows(target, out, approx):
-            return [], shown(c, script, spans_of(target, out))
+            # the words where the cited output stands, else anywhere, else the cited output itself
+            spans = [[a + at[0], b + at[0]] for a, b in spans_of(target, out[at[0]:])] or spans_of(target, out) or [at]
+            return [], shown(c, spans)
         else:
-            problem = problem or f"the output of its code does not show “{target}”"
-    return [problem], shown(runs[0][0], runs[0][1], [])
+            problem = problem or f"the output of that call does not show “{target}”"
+    return [problem], shown(runs[0][0], [runs[0][1]])
 
 
 # ------------------------------------------------------------------------------------------------ quote evidence
@@ -851,28 +878,43 @@ def shown_forms(raw: str) -> list[tuple[str, bool]]:
 
 
 def find_loose(sub: str, text: str) -> list[int] | None:
-    """Where `sub` stands in `text`, runs of white space as one, `**` and backticks as formatting: [start, end] in
-    `text`, or None."""
+    """Where `sub` stands in `text`, runs of white space as one, `**` and backticks as formatting, any quote mark (as
+    a JSON line escapes it, too) as any other: [start, end] in `text`, or None."""
     words = [w for w in unmark(sub).split(" ") if w]
     if not words:
         return None
     gap = r"(?:[\s*`]|\\n)*"
-    rx = re.compile(r"[*`]*" + gap.join(r"[*`]*".join(map(re.escape, w)) for w in words), re.S)
+    char = lambda c: r"\\?[\"“”‘’']" if c in "\"“”‘’'" else re.escape(c)  # noqa: E731
+    rx = re.compile(r"[*`]*" + gap.join(r"[*`]*".join(map(char, w)) for w in words), re.S)
     m = rx.search(text)
     return [m.start(), m.end()] if m else None
 
 
-def inside(cwd: str, file: str, root: str | None = None, tmp: str | None = None) -> str | None:
-    """The file's path as the person sees it (absolute, its links not followed), when the file it names lies inside the
-    working folder, the folder the session started in, or `tmp` when given, compared by real paths: a link inside the
-    folder to a file outside it is outside. Else None."""
-    p = os.path.abspath(file if os.path.isabs(file) else os.path.join(cwd, file))
-    real = os.path.realpath(p)
-    for r in {cwd, root or cwd} | ({tmp} if tmp else set()):
-        rr = os.path.realpath(r)
-        if real == rr or real.startswith(rr + os.sep):
-            return p
-    return None
+def inside(path: str, folders: list[str]) -> bool:
+    """The absolute path lies inside one of the folders, compared by real paths: a link inside a folder to a file
+    outside it is outside."""
+    real = os.path.realpath(path)
+    return any(real == r or real.startswith(r + os.sep) for r in map(os.path.realpath, folders))
+
+
+LEADING_CD = re.compile(r"\s*cd\s+(\S+)\s*(?:&&|;|\n)")
+
+
+def paths_of(file: str, cwd: str, root: str | None, tmp: str | None, calls: list[dict[str, Any]] = ()) -> list[str]:
+    """The paths a cited file may name inside the session's folders (absolute, links not followed): an absolute path
+    as it is; a relative one from the folder the session started in, from the shell's folder (where main's `cd` left
+    it), and from each folder a call of the session moved to with a leading `cd`, since the check may have named the
+    file from there. A file in `tmp` counts when `tmp` is given."""
+    folders = [f for f in (root, cwd, tmp) if f]
+    if os.path.isabs(file):
+        bases = [""]
+    else:
+        bases = [f for f in (root, cwd) if f]
+        for c in calls:
+            m = LEADING_CD.match(str(c.get("command") or ""))
+            d = m.group(1).strip("'\"") if m else ""
+            bases += [d] if os.path.isabs(d) else [os.path.join(b, d) for b in (root, cwd) if b and d]
+    return [p for p in dict.fromkeys(os.path.abspath(os.path.join(b, file)) for b in bases) if inside(p, folders)]
 
 
 def hay_of(cited: list[str]) -> list[str]:
@@ -884,21 +926,33 @@ def hay_of(cited: list[str]) -> list[str]:
 
 
 def holds(sub: str, hay: list[str]) -> bool:
-    tight = re.sub(r"\s+", "", unmark(sub))
-    return any(norm_ws(sub) in h or unmark(sub) in h or tight in re.sub(r"\s+", "", h) for h in hay)
+    """The cited lines' texts hold the substring: white space as one space or as none, quote marks as one mark."""
+    loose, plain = one_quote(norm_ws(sub)), one_quote(unmark(sub))
+    tight = re.sub(r"\s+", "", plain)
+    return any(loose in h or plain in h or tight in re.sub(r"\s+", "", h) for h in map(one_quote, hay))
 
 
-def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
+def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None, calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None, list[str]]:
     """One cited place: its problems, the place to show (`file`, `line`, the cited lines with a line around them, the
-    substring highlighted) and the texts the cited lines hold. A line number is where to look: when the cited lines do
-    not hold the substring and lines up to SHIFT_MAX away do, the nearest such lines are cited in their place. A file
-    in `tmp` counts too (Claude's own code, such as a label's rule); its path shows whole."""
+    substring highlighted) and the texts the cited lines hold. A relative path names a file of one of the folders
+    paths_of() reads it from: the one whose lines hold the substring. A file in `tmp` counts too (Claude's
+    own code, such as a label's rule); its path shows whole."""
     file, line, sub = ev.get("file"), ev.get("line", ev.get("lines")), ev.get("substring")
     if not file or line is None or not sub:
         return ["the check gave no file, line or words to find there"], None, []
-    path = inside(cwd, str(file), root, tmp)
-    if not path:
+    paths = paths_of(str(file), cwd, root, tmp, calls)
+    if not paths:
         return [f"{file} is outside the folder of this session"], None, []
+    files = [p for p in paths if os.path.isfile(p)]
+    if not files:
+        return [f"there is no file {file} in the folder of this session"], None, []
+    looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]
+    return next((x for x in looks if not x[0]), looks[0])
+
+
+def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
+    """The cited lines of one file, as place() gives them. A line number is where to look: when the cited lines do not
+    hold the substring and lines up to SHIFT_MAX away do, the nearest such lines are cited in their place."""
     span = line_span(line)
     if not span:
         return [f"the check cited lines {line}, which is not one line or a range of at most {MAX_RANGE} lines"], None, []
@@ -932,11 +986,11 @@ def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None
                 break
         else:
             r["text"] = window(r["text"], [], LINE_MAX)[0]
-    rel = path if not inside(cwd, path, root) else os.path.relpath(path, os.path.abspath(root or cwd))
+    rel = path if not inside(path, [root or cwd, cwd]) else os.path.relpath(path, os.path.abspath(root or cwd))
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 
-def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of quote or code evidence, and the cited places to show. The evidence is one place, or several when
     the claim joins places (a value set on one line and used on another): each place holds the words the check gave
     for it, and the places together hold the quoted words of a direct quote and the numbers of the words. A claim about
@@ -946,7 +1000,7 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     shown: list[dict[str, Any]] = []
     hay: list[str] = []
     for ev in evs:
-        p, s, h = place(ev, cwd, root, tmp if kind == "code" else None)
+        p, s, h = place(ev, cwd, root, tmp if kind == "code" else None, calls)
         problems += p
         hay += h
         if s:
@@ -960,8 +1014,9 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     # a quote of a record shows its days and numbers; a claim about what code does may compute them from it (`2 ** k`)
     if kind != "code" and calendar_days(unmark(target)) and not days_shown(unmark(target), " ".join(hay)):
         problems.append(f"{where} does not show the day the words name")
+    pct = percents(target)
     for v, in_date in (marked_numbers(unmark(target)) if kind != "code" else []):
-        if not any(has_number(v, h, dates=in_date) for h in hay):
+        if not any(has_number(v, h, dates=in_date) or (v in pct and has_number(fraction(v), h)) for h in hay):
             problems.append(f"{where} does not show {v}")
     return problems, {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
 
@@ -994,11 +1049,10 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
 def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show."""
     if kind == "computed":
-        code = ev.get("code") if isinstance(ev, dict) else None
-        return check_computed(target, str(code or ""), calls, approx)
+        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
-        return check_quote(target, kind, evs, cwd, root, tmp) if evs else (["the check gave no place"], None)
+        return check_quote(target, kind, evs, cwd, root, tmp, calls) if evs else (["the check gave no place"], None)
     return [f"the check gave evidence of no known kind ({kind!r})"], None
 
 
@@ -1083,6 +1137,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     approx = approximate(mark)
     corr = item.get("correction") if isinstance(item.get("correction"), dict) else None
     new = own_words(norm_ws(corr.get("words") or ""), mark) if status == "corrected" and corr else ""
+    if new and unmark(new) != unmark(words) and one_quote(unmark(new)) == one_quote(unmark(words)):
+        # a change of quote marks alone is no correction: the words hold as written
+        status, new = "verified", ""
     if status == "corrected" and (not new or unmark(new) == unmark(words)):
         # a correction that leaves the words as they were found an error around them (a wrong place, a wrong
         # condition), which the words cannot show: the mark fails, with the checker's reason

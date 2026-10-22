@@ -37,7 +37,10 @@ function engine(validated: Any, files = new Map<string, string>()) {
       id: async () => 's-marks',
       messages: async (a?: Any) => (a?.agentId === FORK
         ? [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u1', tool: 'Bash', input: { command: "python3 - <<'PY'\nprint('12 of 40')\nPY" }, text: '12 of 40' }] }]
-        : []),
+        : [{ role: 'assistant', text: '', toolUses: [
+          { tool_use_id: 'm1', tool: 'Bash', input: { command: 'python3 count.py' }, text: 'merged:  12 of 40\nopen: 3' },
+          { tool_use_id: 'm2', tool: 'Bash', input: { command: 'ls' }, text: 'a.txt b.txt' },
+        ] }]),
     },
     fs: {
       read: async (p: string) => {
@@ -117,6 +120,14 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(await failLineNow($)).toBe(null)
 })
 
+test("main's calls go to the validator only when their output holds an output the check cites", async () => {
+  const { $, seen } = engine(VALIDATED)
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[{"mark": 2, "evidence": {"output": "merged: 12 of 40 … open"}}]\n```' })
+  expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => c.command)).toEqual(["python3 - <<'PY'\nprint('12 of 40')\nPY", 'python3 count.py'])
+})
+
 test('a refused check leaves the marks unchecked, says so once, and nothing spins', async () => {
   const { $, seen } = engine(VALIDATED)
   await noteRow($, 'row-1', REPLY)
@@ -156,7 +167,7 @@ test("the checker reads files, and runs code only as one Python script; a mark's
   for (const t of ['Edit', 'Write', 'NotebookEdit', 'Agent']) expect(call(t)).toContain('only reads')
   for (const c of ['rm -rf data', "python3 - <<'PY'\nprint(1)\nPY\nrm -rf data", "python3 - <<'PY'\nprint(1)\nPY\nrm x\nPY", 'curl https://example.invalid']) expect(call('Bash', c)).toContain('one Python script')
   const item = { n: 1, row: 'r', words: '$5', start: 0, end: 0, sentence: "It cost [$5] and $' more, $$ and $&.", status: 'checking' as const, shown: '$5' }
-  expect(checkerPrompt('A\n{{MARKS}}\nB {{CWD}}', [item], '/made-up/data')).toBe("A\n1. [$5] in: It cost [$5] and $' more, $$ and $&.\nB /made-up/data")
+  expect(checkerPrompt('A\n{{MARKS}}\nB {{CWD}} {{ROOT}}', [item], '/made-up/data/sub', '/made-up/data')).toBe("A\n1. [$5] in: It cost [$5] and $' more, $$ and $&.\nB /made-up/data/sub /made-up/data")
 })
 
 test('a reply with many marks is split between forks of about equal size, a sentence in one share up to its size', () => {
