@@ -10,6 +10,13 @@ Input: `const keys = "jk"` names the letters the card takes at an empty prompt, 
 
 The call returns a text copy of the card or the view's error. Try each key and Button with `actions`, read each copy as the analyst will, and fix what they would misread in one new version before you reply. For a change, also one the analyst asks for, call card with the `id` and `edits`, since a whole view takes half a minute to write. The new version still answers the card's first question, with the change beside it. A new question gets a new card.
 
+Principles:
+- Overview first. The first view shows the whole answer at a glance, in a few words and marks that the analyst reads in seconds.
+- Details on demand. A record's text, exact counts and how they were computed open with a key or a click, not on the first view.
+- Keep it sparse. Show a word or a number only when the answer needs it; a card that needs a footnote to be read is too dense.
+- Make details readable. When a detail opens, show the few lines that matter, in short lines, not a whole raw record.
+- Let people compare by position and length; use color for one thing at a time, and gray for context.
+
 Advice:
 - The first line states the answer, since the analyst reads it first.
 - Each part of the question has its answer on the card, in words that code computes from the rows, next to the marks it explains.
@@ -19,5 +26,5 @@ Advice:
 - Size each column from its longest value; a cut value keeps the part that tells it apart, and a line counts what is left out (`+47 more`).
 - Numbers that touch read as one; a cell of two records shows its count.
 - Put each axis label at its tick, with one scale across states.
-- About 30 rows fit: put details beside or under the selected item, and say which page shows ("rows 1-14 of 28").
+- About 30 rows fit; say which page shows ("rows 1-14 of 28").
 - Keys and Buttons open what the analyst will ask next, such as the records behind a count.
