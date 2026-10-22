@@ -1,7 +1,8 @@
 // gallery.mjs: card views of the shapes Claude draws, on made-up rows, for the layout and runner tests. Each entry is
-// {name, title, rows, view}; test/golden/<name>.txt is what Claude Code's terminal drew for it at GOLDEN_WIDTH columns.
+// {name, title, rows, view}; test/golden/<name>@<width>.txt is what Claude Code's terminal drew for it in a real session,
+// at each of GOLDEN_WIDTHS columns.
 
-export const GOLDEN_WIDTH = 120
+export const GOLDEN_WIDTHS = [120, 92]
 
 const agents = ['ada', 'bram', 'cleo', 'dov', 'eli', 'fay']
 const runs = agents.flatMap((a, i) => [0, 1, 2].map(j => ({ agent: a, run: j + 1, tests: 10 + ((i * 7 + j * 3) % 13), failed: (i + j) % 4 === 0 ? (i % 3) + 1 : 0, minutes: 3 + ((i * 5 + j) % 9) })))

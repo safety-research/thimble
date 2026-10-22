@@ -1,0 +1,18 @@
+10:10  ada   ✗ run 1 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:14  ada   ✓ run 2 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:18  ada   ✓ run 3 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:22  bram  ✓ run 1 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:26  bram  ✓ run 2 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:30  bram  ✓ run 3 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:34  cleo  ✓ run 1 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:38  cleo  ✓ run 2 of the full test suite with every optional plugin turned on and the
+slow network tests included as well
+10:42  cleo  ✗ run 3 of the full test suite with every optional plugin turned on and the
+slow network tests included as well

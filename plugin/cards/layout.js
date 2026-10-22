@@ -85,22 +85,24 @@ function wrapWord(rows, word, cols) {
   if (!visible && rows[rows.length - 1].length > 0 && rows.length > 1) rows[rows.length - 2] += rows.pop()
 }
 
-/** One line wrapped at `cols` cells, words kept whole where they fit and spaces kept (wrap-ansi, hard, no trim). */
+/** One line wrapped at `cols` cells, words kept whole where they fit and spaces kept (wrap-ansi, hard, no trim). When
+ *  a row is full, the space before the next word starts the next row and counts in its length, but is not drawn, as
+ *  Claude Code draws it. */
 function wrapLine(line, cols) {
   const words = line.split(' ')
   const lengths = words.map(textWidth)
   const rows = ['']
+  const opened = new Set()
   words.forEach((word, i) => {
     let len = textWidth(rows[rows.length - 1])
     if (i !== 0) {
-      // the space between two words ends a full row, or goes between them; a row never starts with it
       if (len >= cols) {
         rows.push('')
+        opened.add(rows.length - 1)
         len = 0
-      } else {
-        rows[rows.length - 1] += ' '
-        len++
       }
+      rows[rows.length - 1] += ' '
+      len++
     }
     if (lengths[i] > cols) {
       const left = cols - len
@@ -113,7 +115,7 @@ function wrapLine(line, cols) {
     if (len + lengths[i] > cols && len > 0 && lengths[i] > 0) rows.push('')
     rows[rows.length - 1] += word
   })
-  return rows
+  return rows.map((r, i) => (opened.has(i) && r.startsWith(' ') ? r.slice(1) : r))
 }
 
 /** The first `n` cells of a string, never splitting a wide character. */
@@ -183,10 +185,10 @@ function measureText(node, avail, mode) {
 
 const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v in SPACE ? SPACE[v] : undefined)
 
-/** A size prop: cells, or a percent of `of`; undefined when not given or `of` is not known. */
+/** A size prop: cells, or a percent of `of` rounded to a whole cell; undefined when not given or `of` is not known. */
 function size(v, of) {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.max(0, v)
-  if (typeof v === 'string' && /^\d+(\.\d+)?%$/.test(v.trim())) return of === undefined ? undefined : (of * parseFloat(v)) / 100
+  if (typeof v === 'string' && /^\d+(\.\d+)?%$/.test(v.trim())) return of === undefined ? undefined : Math.round((of * parseFloat(v)) / 100)
   return undefined
 }
 

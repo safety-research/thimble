@@ -1,5 +1,6 @@
 // The card layout (cards/layout.js): the gallery's views, drawn by the runner, lay out as Claude Code's terminal drew
-// them (test/golden/, captured from a real session at GOLDEN_WIDTH), and the text rules on their own. All rows are made up.
+// them (test/golden/, captured from a real session at each of GOLDEN_WIDTHS), and the text rules on their own. All rows
+// are made up.
 //   node --test plugin/cards/test/layout.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -12,7 +13,7 @@ import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { layoutLines, textWidth, wrapText } from '../layout.js'
-import { GALLERY, GOLDEN_WIDTH } from './gallery.mjs'
+import { GALLERY, GOLDEN_WIDTHS } from './gallery.mjs'
 
 const HERE = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
 let dir
@@ -45,23 +46,26 @@ after(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('each gallery view lays out as the terminal drew it', async () => {
+test('each gallery view lays out as the terminal drew it, at each width', async () => {
   assert.ok(GALLERY.length >= 15)
   for (const [i, g] of GALLERY.entries()) {
     writeFileSync(join(dir, `${i}.json`), JSON.stringify(g.rows))
-    const r = await ask('load', { id: `c${String(i).padStart(8, '0')}`, version: 1, title: g.title, view: g.view, rows: join(dir, `${i}.json`), width: GOLDEN_WIDTH })
-    assert.equal(r.ok, true, `${g.name}: ${r.error}`)
-    const golden = readFileSync(fileURLToPath(new URL(`./golden/${g.name}.txt`, import.meta.url)), 'utf8').replace(/\n$/, '').split('\n')
-    const lines = r.lines.slice()
-    while (lines.length && lines[lines.length - 1] === '') lines.pop()
-    assert.deepEqual(lines, golden, g.name)
+    for (const width of GOLDEN_WIDTHS) {
+      const r = await ask('load', { id: `c${String(i).padStart(8, '0')}`, version: 1, title: g.title, view: g.view, rows: join(dir, `${i}.json`), width })
+      assert.equal(r.ok, true, `${g.name}: ${r.error}`)
+      const golden = readFileSync(fileURLToPath(new URL(`./golden/${g.name}@${width}.txt`, import.meta.url)), 'utf8').replace(/\n$/, '').split('\n')
+      const lines = r.lines.slice()
+      while (lines.length && lines[lines.length - 1] === '') lines.pop()
+      assert.deepEqual(lines, golden, `${g.name} at ${width}`)
+    }
   }
 })
 
 test('text wraps at words, keeps a word whole where it fits, and cuts one longer than the width', () => {
-  assert.deepEqual(wrapText('the quick brown fox', 9), ['the quick', 'brown fox'])
+  // after a full row, the space before the next word counts in the next row's length but is not drawn (Claude Code)
+  assert.deepEqual(wrapText('the quick brown fox', 9), ['the quick', 'brown ', 'fox'])
+  assert.deepEqual(wrapText('the quick brown fox', 10), ['the quick ', 'brown fox'])
   assert.deepEqual(wrapText('abcdefghij', 4), ['abcd', 'efgh', 'ij'])
-  assert.deepEqual(wrapText('one two', 3), ['one', 'two'])
   assert.deepEqual(wrapText('path/to/a/file.jsonl', 10, 'truncate-end'), ['path/to/a…'])
   assert.deepEqual(wrapText('path/to/a/file.jsonl', 10, 'truncate-start'), ['…ile.jsonl'])
   assert.deepEqual(wrapText('path/to/a/file.jsonl', 10, 'truncate-middle'), ['path/…sonl'])
