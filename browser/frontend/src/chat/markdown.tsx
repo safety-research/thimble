@@ -1,4 +1,5 @@
-// Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips. The tokens are
+// Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips, and each mark,
+// `[words](#)`, drawn as its check says (marks/Mark.tsx). The tokens are
 // hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
 // the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
 // re-parses only the tail.
@@ -11,6 +12,8 @@ import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { splitValueRef } from '../lib/refs'
+import { Mark, MarkItems } from '../marks/Mark'
+import { MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
 export interface ChipCtx {
   workspace: string
@@ -124,6 +127,8 @@ function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
 }
 
 function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
+  const mark = MARK_HREF.exec(props.href ?? '')
+  if (mark) return <Mark k={Number(mark[1])}>{props.children}</Mark>
   const { node: _node, ...rest } = props
   return <a {...rest} target="_blank" rel="noreferrer" />
 }
@@ -143,28 +148,29 @@ const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
   )
 })
 
-/** Assistant markdown with chips. `streaming`: the text is still growing and renders per completed block. A bare
- * citation in it is its target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming }: { text: string; streaming?: boolean }) {
+/** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
+ * `checks`: what the check found of each of its marks, by their order in the text. A bare citation in it is its
+ * target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
-  if (!chunked && !streaming) {
-    return (
-      <GlyphCites.Provider value={true}>
-        <MarkdownBlock text={text} />
-      </GlyphCites.Provider>
-    )
-  }
-  const chunks = splitMarkdownBlocks(text)
+  // each mark's href names its order in the whole text, so a block cut from it still finds its check
+  const marked = withMarkHrefs(text)
   return (
-    <GlyphCites.Provider value={true}>
-      {chunks.map((chunk, i) => (
-        <Fragment key={i}>
-          {i > 0 && '\n'}
-          <MarkdownBlock text={chunk} />
-        </Fragment>
-      ))}
-    </GlyphCites.Provider>
+    <MarkItems.Provider value={{ items: checks ?? [], streaming: !!streaming }}>
+      <GlyphCites.Provider value={true}>
+        {!chunked && !streaming ? (
+          <MarkdownBlock text={marked} />
+        ) : (
+          splitMarkdownBlocks(marked).map((chunk, i) => (
+            <Fragment key={i}>
+              {i > 0 && '\n'}
+              <MarkdownBlock text={chunk} />
+            </Fragment>
+          ))
+        )}
+      </GlyphCites.Provider>
+    </MarkItems.Provider>
   )
 })
 

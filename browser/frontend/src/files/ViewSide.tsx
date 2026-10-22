@@ -126,7 +126,9 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
     (id: string, value: string | null) => void (value == null ? api.deleteFilter(ws, 'files') : api.putFilter(ws, 'files', id, value)).catch(() => undefined),
     [ws],
   )
-  const pane = (
+  // the labels are listed in the Labels sidebar (shell/LabelsSidebar.tsx), not here: the pane is shown only while a
+  // label's edit card is open in it, as the card's place
+  const pane = editing != null && (
     <LabelsPane
       labels={labels}
       open={p.open}

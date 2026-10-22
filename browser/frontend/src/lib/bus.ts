@@ -45,6 +45,8 @@ export type Events = {
   /** show a surface (shell/panes.ts show): `tab` is Files, Canvas, Report, or a view as `view:<slug>`; `from` is the
      * pane the request came from (lib/surfaces pressedPane), else the pane pressed last */
   showTab: { tab: Tab | `view:${string}`; from?: string | null }
+  /** open the Labels sidebar (shell/LabelsSidebar.tsx), on one label's detail when `id` names one */
+  openLabels: { id?: string | null }
   /** a ref Files places in a view, opened in the pane that shows that view on its own (files/ViewSurface) */
   openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: ViewQuery; picked?: boolean }
   /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard, or main's open_view), or with

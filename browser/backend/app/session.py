@@ -57,7 +57,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_settings, cite, config, modes, terminal_tools, threads, userconf
+from . import agents, cc_settings, cite, config, marks, modes, terminal_tools, threads, userconf
 from . import subagent_files as sfiles
 from .events import TAG as EVENT_TAG
 from .ledger import atomic_write_text
@@ -297,6 +297,7 @@ class Live:
         self.turn_calls: set[str] = set()  # the ids of main's tool calls in the turn (R3, _end_turn)
         self.turn_since: str | None = None  # when the turn opened, which the checks over the cards look from (_end_turn)
         self.turn_text = ""  # main's last text in the turn, the reason R3 quotes
+        self.turn_texts: list[str] = []  # main's texts in the turn, in order, whose marks are checked (marks.turn_ended)
         self.thimble_calls: dict[str, dict] = {}  # tool_use id of main's call for one of thimble's agents -> {name, input}
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
         # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
@@ -467,7 +468,7 @@ def _turn_state(lv: Live) -> dict:
             "turn_threads": lv.turn_threads, "forked": sorted(lv.forked),
             # R2 and R3 (module note), which a pass of the mirror in terminal mode hands to the next
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
-            "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "after_start": lv.after_start, "last_tool": lv.last_tool,
+            "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "turn_texts": lv.turn_texts, "after_start": lv.after_start, "last_tool": lv.last_tool,
             "last_failed": lv.last_failed,
             "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
             # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
@@ -489,6 +490,7 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.thimble_calls = {str(k): v for k, v in calls.items() if isinstance(v, dict)} if isinstance(calls, dict) else {}
     lv.turn_calls = {str(i) for i in cur.get("turn_calls") or []}
     lv.turn_text = str(cur.get("turn_text") or "")
+    lv.turn_texts = [str(t) for t in cur.get("turn_texts") or [] if isinstance(t, str)]
     lv.after_start = bool(cur.get("after_start"))
     lv.last_tool = str(cur.get("last_tool") or "") or None
     lv.last_failed = bool(cur.get("last_failed"))
@@ -1306,7 +1308,7 @@ def _open_turn(lv: Live) -> None:
     if not lv.turn_open or not lv.fresh:
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
-        lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
+        lv.turn_calls, lv.turn_text, lv.turn_since, lv.turn_texts = set(), "", _now(), []
         lv.turn_analyst = lv.api_failed = False
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
@@ -1329,8 +1331,10 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
     if lv.flagged and not lv.answered:
         _stopped(lv, SAFETY_STOP_TEXT)
+    # the turn's id, which its `done` record and its marks' records name (marks.py)
+    turn = marks.new_turn()
     if lv.wrote:
-        agents.mirror(lv.c, "done", by=TERMINAL, session_id=lv.sid)
+        agents.mirror(lv.c, "done", by=TERMINAL, session_id=lv.sid, turn=turn)
     was_open = lv.turn_open
     lv.turn_open = lv.fresh = lv.wrote = False
     agents.set_running(lv.c, agents.MAIN_ID, False)
@@ -1339,7 +1343,20 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
         _cards_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
+            _marks_turn(lv, turn, cut)
         _proposer_turn(lv, cut)
+    lv.turn_texts = []
+
+
+def _marks_turn(lv: Live, turn: str, cut: str | None) -> None:
+    """The turn's marks are checked against the data (marks.turn_ended), from a fork of main at `cut`."""
+    try:
+        main = {"sid": lv.sid, "cwd": lv.cwd, "config": lv.config, "config_known": lv.config_known,
+                "transcript_path": lv.transcript_path, "model": lv.model, "effort": lv.effort,
+                "context_tokens": lv.context_tokens}
+        marks.turn_ended(lv.c, main, turn, list(lv.turn_texts), cut)
+    except Exception:  # noqa: BLE001 — a check that does not start is no reason to fail the mirror
+        log.exception("%s: the check of the citations did not start at main's turn end", lv.c)
 
 
 def _cards_checked(lv: Live) -> None:
@@ -1662,6 +1679,8 @@ def _text(lv: Live, text: str, **extra: Any) -> None:
     if not text.strip():
         return
     lv.turn_text = text
+    if lv.turn_open and not extra:
+        lv.turn_texts.append(text)
     _rec(lv, "text", delta=text, **extra)
 
 
@@ -3706,3 +3725,4 @@ async def shutdown() -> None:
     from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
 
     await proposer.shutdown()
+    marks.stop_all()

@@ -107,6 +107,14 @@ export const isMultiClass = (classes: readonly Pick<LabelClass, 'color'>[]): boo
 export const MULTI_COLOUR = 'var(--label-multi)'
 
 /** A label's own colour: its first class's, or MULTI_COLOUR for a multi-class label. */
+/** What made a label, in the words the terminal says it with (plugin/panes/labels.js howMade): regex, code, or read by
+ * Claude (a model reads each record). Pure. */
+export const howMade = (kind: string): string => (kind === 'regex' ? 'regex' : kind === 'code' ? 'code' : 'read by Claude')
+
+/** A label's definition, what its run applies: the pattern, the code, or the model's question (a prompt label keeps
+ * it in its description). Pure. */
+export const labelDefinition = (k: Pick<Concept, 'kind' | 'spec' | 'description'>): string => ((k.kind === 'prompt' ? k.description || k.spec : k.spec) ?? '').trim()
+
 export const mainColour = (k: Pick<Concept, 'labels' | 'classes'>): string => {
   const classes = classesOf(k)
   return isMultiClass(classes) ? MULTI_COLOUR : colourVar(classes[0]?.color)
@@ -645,7 +653,8 @@ export function draftBody(d: LabelDraft, colour: number, used: readonly number[]
   return {
     name: d.name,
     unit: unitOfOver(d.over, marks),
-    ...(files ? { marks, glob: d.glob } : {}),
+    // a label described with no files chosen reads every file, a scope the analyst can narrow in its card
+    ...(files ? { marks, glob: d.glob || '*' } : {}),
     kind: d.kind,
     model: '',
     classes: draftClasses(d.values, colour, used),

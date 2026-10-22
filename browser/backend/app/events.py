@@ -251,7 +251,7 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
 
 # the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
 # MEANWHILE (prompts/main.md)
-QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types"})
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types", "citations"})
 MEANWHILE = "meanwhile:"
 HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts
 _held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notes, once read
@@ -290,6 +290,8 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"the {fields.get('doc') or 'document'} writer ended"
     elif kind == "checked":
         line = f"a check of the {fields.get('doc') or 'document'} ended"
+    elif kind == "citations":
+        line = "the check of the last reply's citations changed some"
     elif kind == START_AGENT:
         asked = f" (thread {fields['from_thread']})" if fields.get("from_thread") else ""
         line = f"start {fields.get('agent') or 'the dev agent'} for {fields.get('filed') or 'a thread'}{asked}"

@@ -25,7 +25,7 @@ import { hhmm } from '../lib/time'
 import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
 import { examplesNote } from '../canvas/details'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
-import { classesOf, colourVar, draftClasses, freeColour, globPatterns, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
+import { classesOf, colourVar, draftClasses, freeColour, globPatterns, howMade, isFilesLabel, isMultiClass, LABEL_COLOURS, LABEL_ORDER, MULTI_COLOUR, labelStatus, marksOf, outcomeText, overOf, ownColour, paletteFrom, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 import { ValuePalette } from './ValuePalette'
 
@@ -272,7 +272,7 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
         <TextInput bare value={draft.name} onChange={(v) => set({ name: v })} aria-label="Name" className="label-card-name" autoFocus={isNew && !lead} style={compact && !multi ? { color: colourVar(classes[0]?.color) } : undefined} />
         {!lead && <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />}
       </div>
-      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} compact={compact} onDelete={label ? (at) => setDeleting({ id: label.id, name: label.name, at }) : undefined} />
+      <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} compact={compact} editing={changed} onDelete={label ? (at) => setDeleting({ id: label.id, name: label.name, at }) : undefined} />
       <DeleteLabelConfirm
         asked={deleting}
         align="start"
@@ -300,13 +300,20 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
  * switches are saved at once for an existing label. `counts` puts each class's count before its switch. A class's
  * swatch opens the palette Color by's chips open (ValuePalette), with the grey too. `compact`: the type and scope as
  * plain rows, a rule, the body clamped until it has the focus, the classes one line each, and More over the rest. */
-function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, onDelete }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number>; compact?: boolean; onDelete?: (at: HTMLElement) => void }) {
+/** Whether a compact card's body is clamped to four lines: while it does not have the focus, and not while the draft
+ * changes the label. Clamping on blur while a draft is open would shrink the card under a press of Re-run, so the press
+ * would end off the button and run nothing. Pure. */
+export function bodyClamped(compact: boolean, focused: boolean, editing: boolean): boolean {
+  return compact && !focused && !editing
+}
+
+function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, editing = false, onDelete }: { ws: string; label: Concept | null; labels: FilesLabels; draft: Draft; classes: LabelClass[]; set: (patch: Partial<Draft>) => void; counts?: Record<string, number>; compact?: boolean; editing?: boolean; onDelete?: (at: HTMLElement) => void }) {
   const [more, setMore] = useState(moreShown)
   const [bodyFocus, setBodyFocus] = useState(false)
   // whether the clamped body holds more than it shows, which fades its last line
   const bodyEl = useRef<HTMLTextAreaElement>(null)
   const [cut, setCut] = useState(false)
-  const clamped = !!compact && !bodyFocus
+  const clamped = bodyClamped(!!compact, bodyFocus, editing)
   useEffect(() => {
     const el = bodyEl.current
     setCut(clamped && !!el && el.scrollHeight > el.clientHeight + 1)
@@ -550,7 +557,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
       <>
         <div className="label-card-grid label-card-facts">
           <span className="label-card-key">Type</span>
-          <span className="label-card-fact">{CLASSIFIERS.find((c) => c.value === draft.kind)?.label ?? draft.kind}</span>
+          <span className="label-card-fact">{howMade(draft.kind)}</span>
           {label && scopeLine(label, draft.glob) && (
             <>
               <span className="label-card-key">Scope</span>

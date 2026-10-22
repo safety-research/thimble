@@ -60,6 +60,7 @@ import { ServerDown } from './ServerDown'
 import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
 import { TopBar } from './TopBar'
+import { LabelsSidebar } from './LabelsSidebar'
 import { TourHost } from './TourHost'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
@@ -241,6 +242,10 @@ export function Shell({ ws }: { ws: string }) {
     }
   }, [ws, firstOpen])
   const gone = useSessionGone(ws)
+  // the Labels sidebar (LabelsSidebar.tsx): open or not; it pushes the panes, or the chat when it is the only thing
+  // open, rather than covering them
+  const [side, setSide] = useState(false)
+  useEffect(() => bus.on('openLabels', () => setSide(true)), [])
   const demo = useDemo()
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
@@ -317,6 +322,8 @@ export function Shell({ ws }: { ws: string }) {
           setPanes((p) => show(p, id))
         }}
         onTabDrag={startDrag}
+        side={side}
+        onSide={setSide}
       />
       <DemoLine />
       <div className="shell-body">
@@ -367,6 +374,7 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
+        {side && <LabelsSidebar ws={ws} onClose={() => setSide(false)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />

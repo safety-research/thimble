@@ -614,10 +614,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   useEffect(
     () =>
       bus.on('editLabel', ({ id }) => {
-        if (shownSlug) setViewSideChoice(true)
-        else showSide()
-        setLabelsOpen(true)
-        setEditing(id)
+        // a label opens in the Labels sidebar, where its detail offers Edit (shell/LabelsSidebar.tsx)
+        bus.emit('openLabels', { id })
       }),
     [shownSlug, showSide, setViewSideChoice, setLabelsOpen],
   )
