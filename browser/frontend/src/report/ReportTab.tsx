@@ -145,8 +145,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
       else kept.current.delete(s)
       if (slugRef.current === s) setLoad(next)
     }
-    // a page the state says is not written yet is not fetched: its route answers 404 until then; the report, the
-    // slides and the story read as their frame before a write
+    // a page the state says is not written yet is not fetched: its route answers no document until then; the report,
+    // the slides and the story read as their frame before a write
     const framed = renderer === 'document' || renderer === 'slides' || renderer === 'story'
     if (!framed && state?.[s] && !state[s].exists) return settle({ state: 'none' })
     try {
@@ -157,7 +157,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
           if (!isNotFound(e)) throw e
         }
       }
-      settle({ state: 'ok', doc: await docsApi.document(ws, s) })
+      const doc = await docsApi.document(ws, s)
+      settle(doc ? { state: 'ok', doc } : { state: 'none' })
     } catch (e) {
       settle(isNotFound(e) ? { state: 'none' } : { state: 'error', message: (e as Error).message })
     }

@@ -15,7 +15,7 @@ Installs thimble's two products. It checks Node, Python and uv first, and says w
     Without the claude command, it prints the two commands to run.
   The browser workbench (thimble 0.8's browser mode), from this checkout: the server (uv sync in browser/backend,
     with its test extras), the page and the sandbox runtime (npm ci in browser/frontend, then a build), and a
-    thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 600 MB. Then it asks how
+    thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 1 GB. Then it asks how
     the workbench reaches Claude: 1 an Anthropic API key (the default), 2 your Claude Code sign-in (it launches
     headless Claude Code sessions, so it asks you to confirm), 3 Workload Identity Federation (a config file), checks
     the choice and saves it in ~/.thimble-browser. The page asks the same when this step was skipped.

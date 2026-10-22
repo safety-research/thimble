@@ -694,13 +694,9 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
   )
   const actsCtx = useMemo<ActsCtx>(() => ({ slug, locked: shownLocks, toggle: (id, next) => void toggleLock(id, next), chat: (id) => void chatAbout(id), turn: turnInto }), [slug, shownLocks, toggleLock, chatAbout, turnInto])
 
-  // an empty report is one empty block after the title, drawn as an empty cell (report.css `.wu-zone-empty`) until
-  // something is written
-  const [empty, setEmpty] = useState(() => isEmptyDoc(initial as EditorBlockLike[]))
   const figuresCb = useRef(onFigures)
   figuresCb.current = onFigures
   useEditorChange(() => {
-    setEmpty(isEmptyDoc(editor.document as EditorBlockLike[]))
     figuresCb.current?.(figureCells(editor.document as EditorBlockLike[]))
     if (muted.current) return
     dirty.current = true
@@ -958,7 +954,7 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
   return (
     <ReportContext.Provider value={reportCtx}>
       <div
-        className={['wu-zone', empty ? 'wu-zone-empty' : ''].filter(Boolean).join(' ')}
+        className="wu-zone"
         ref={zone}
         onDragOverCapture={onDragOver}
         onDragLeaveCapture={onDragLeave}

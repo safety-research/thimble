@@ -13,8 +13,9 @@ orientation's end merges with main's `↳` turn), and runs the job once main is 
 pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
 
 The gate (due): view proposals are on (views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
-main is attached and idle with a cut to fork at, no view proposal card waits (views.open_offer), and views can be built
-here (views.build_problem_for). There is no other limit.
+Claude can be reached the way chosen (claude_access.problem; the chat's card says what is missing, so no notice
+repeats it), main is attached and idle with a cut to fork at, no view proposal card waits (views.open_offer), and
+views can be built here (views.build_problem_for). There is no other limit.
 
 The call (_argv): `claude -p --resume <main> --resume-session-at <cut> --fork-session --no-session-persistence` with no
 tools, no MCP server, no slash command, `--safe-mode` (no plugin hook moves thimble's main to the fork) and the server-
@@ -251,10 +252,15 @@ async def _run_popped(c: str) -> None:
 
 
 def due(c: str, lv: Any, job: dict[str, Any]) -> tuple[str | None, str]:
-    """(the cut to fork main at, '') when the job may run now, else (None, why not): view proposals off, no main, main
+    """(the cut to fork main at, '') when the job may run now, else (None, why not): view proposals off, Claude cannot
+    be reached the way chosen (the chat's own card says how to fix it, so no notice repeats it), no main, main
     answering, no cut, a card waiting, or views that cannot be built here."""
+    from . import claude_access, runtime  # noqa: PLC0415
+
     if not enabled(c):
         return None, "View proposals are off."
+    if runtime.enabled() and (p := claude_access.problem()):
+        return None, p["what"]
     if lv is None or not getattr(lv, "transcript_path", None):
         return None, "No Claude Code session is attached to thimble."
     if lv.turn_open:
@@ -698,7 +704,7 @@ def _tell(c: str, status: str, *, reason: str = "", fallback: str | None = None,
     elif status == "forbidden":
         tell(NOTICE_FORBIDDEN, TRY_AGAIN)
     elif status in ("timeout", "unparsed", "error"):
-        tell(NOTICE_FAILED.format(reason=reason or REASONS[status]), TRY_AGAIN)
+        tell(NOTICE_FAILED.format(reason=(reason or REASONS[status]).rstrip(".")), TRY_AGAIN)
     elif offered and fallback:
         tell(NOTICE_FALLBACK.format(fallback=session.model_label(fallback)))
     else:

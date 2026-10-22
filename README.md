@@ -25,7 +25,7 @@ The script installs both. It first checks what they need and says what is missin
 and Node.js 22.18 or later for the plugin; Node.js 22.12 or later and [uv](https://docs.astral.sh/uv/) for the browser
 workbench. Both run Claude's card code in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime),
 which the script installs; on Linux it needs bubblewrap, socat and ripgrep, and the script prints the one command that
-installs what is missing. The browser workbench takes about 600 MB of disk, most of it its page's packages and its server's Python
+installs what is missing. The browser workbench takes about 1 GB of disk, most of it its page's packages and its server's Python
 packages, so install the plugin alone if that is all you need:
 
 - `scripts/install.sh --no-browser` installs the terminal plugin only. So do these two commands, with no clone:

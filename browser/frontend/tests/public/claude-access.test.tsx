@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // How thimble reaches Claude (src/shell/ClaudeAccess.tsx): a chat's card that says Claude cannot be reached opens the
-// setup step, and the step asks for consent before it saves Claude Code sign-in.
+// setup step, the step asks for consent before it saves Claude Code sign-in, and on the first run it can be put off.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ErrorRow } from '../../src/chat/Rows.tsx'
@@ -44,4 +44,16 @@ test('Claude Code sign-in is saved only after the consent text is confirmed', as
   await act(async () => save.click())
   expect(sent).toEqual([{ how: 'claude-code', consent: true }])
   expect(closed).toHaveBeenCalled()
+})
+
+test('on the first run Not now and Escape close the step, so the person can look around without access', async () => {
+  const status = { how: '', describe: 'not chosen yet', problem: null, key_saved: false, wif_file: '', consent_text: '' }
+  vi.stubGlobal('fetch', async () => new Response(JSON.stringify(status), { status: 200, headers: { 'content-type': 'application/json' } }))
+  const closed = vi.fn()
+  const el = await mount(<ClaudeAccessDialog first onClose={closed} />)
+  const notNow = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Not now')!
+  await act(async () => notNow.click())
+  expect(closed).toHaveBeenCalledTimes(1)
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+  expect(closed).toHaveBeenCalledTimes(2)
 })

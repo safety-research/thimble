@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import cite, config, investigation, ledger, material, notebook, prompts, refs, slides, undo
@@ -3526,11 +3526,21 @@ async def types_state_route(c: str, inv_id: str) -> dict[str, Any]:
     return out
 
 
-@router.get("/ws/{c}/investigations/{inv_id}/types/{slug}")
-async def get_doc_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
+def get_doc(c: str, inv_id: str, slug: str) -> dict[str, Any]:
+    """The stored document of type `slug`; 404 when the type is unknown or nothing is written yet."""
     investigation.inv_dir(c, inv_id)
     _require_type(c, _check_slug(slug, custom=False))
     return _load(c, inv_id, slug)
+
+
+@router.get("/ws/{c}/investigations/{inv_id}/types/{slug}", response_model=None)
+async def get_doc_route(c: str, inv_id: str, slug: str) -> dict[str, Any] | Response:
+    """The stored document, or 204 with no body before one is written (a fresh workspace's report), which the page
+    reads as no document; 404 only for a type that does not exist."""
+    investigation.inv_dir(c, inv_id)
+    _require_type(c, _check_slug(slug, custom=False))
+    doc = read_doc(c, inv_id, slug)
+    return doc if doc is not None else Response(status_code=204)
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/versions")
