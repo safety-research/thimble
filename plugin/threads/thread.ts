@@ -38,7 +38,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import type { ThreadScope } from './seam'
-import { aboutOf, display, firstMessage, forkDirective, nextMessage, sentNote, subjectOf, threadKey, turnsOf } from './threads.mjs'
+import { aboutOf, display, firstMessage, forkDirective, nextMessage, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,7 +226,7 @@ export async function askThread($: Engine, ask: { text: string; scope: ThreadSco
     // the thread as it was before this question, which a new fork is told
     const was = t
     // the question is in the thread at once, and the thread is listed as answering, while its fork starts
-    t = { ...t, scope, status: 'running', error: undefined, asks: [...was.asks, { text, scope, sent: '', at: now }], turns: [...was.turns, { role: 'person', text, about: aboutOf(scope), at: now }] }
+    t = { ...t, scope, status: 'running', error: undefined, asks: [...was.asks, { text, scope, sent: '', at: now }], turns: [...was.turns, { role: 'person', text, about: shownAbout(scope), at: now }] }
     await keep($, t)
     let sent = ''
     let delivered = false
@@ -426,7 +426,7 @@ export const registerThreads: Register = on => {
     const p = pendingKey
     pendingKey = null
     if (p && threads.has(p)) { await showThread($, p, { ask: true }); return {} }
-    if (!threadCount()) return { text: 'No side threads yet. Open a citation, a label or coverage in the side pane and type a question under it: its thread is listed here.' }
+    if (!threadCount()) return { text: 'No side threads yet.' }
     await listThreads($)
     return {}
   })

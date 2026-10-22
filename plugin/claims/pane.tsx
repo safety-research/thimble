@@ -17,7 +17,7 @@ import type { EngineInterface } from 'claude-code'
 import { messageOf } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { openPane } from '../core/pane'
-import { CITE_TINT, CODE_INK, themeNow, type Theme } from '../core/theme'
+import { CITE_TINT } from '../marks/evidence'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { claimGroup, graphView, groupOf, hopCluster, paneData, sourceView, threadAbout } from './graph.js'
 import { claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
@@ -30,25 +30,27 @@ type Run = { s: string; tone?: string | null; bold?: boolean; underline?: boolea
 /** The clusters' colors (0.10's c1..c6) and what each other tone draws as: theme colors, so light and dark both read;
  *  a faint tone is its color dimmed; `code` the code's color of the citations' card. */
 const CLUSTER = ['#3cc2b9', '#a98be0', '#cfae7e', '#8fa1bd', '#e384b2', '#b2c24f']
+/** A line of code's color: the theme key thimble draws inline code in (tray/tray.ts), shaded by Claude Code. */
+const CODE_INK = 'permission'
 const THEME: Record<string, string> = { accent: 'suggestion', good: 'success', bad: 'error', warn: 'warning', cite: 'merged' }
 
-function look(tone: string | null | undefined, theme: Theme): Record<string, unknown> {
+function look(tone: string | null | undefined): Record<string, unknown> {
   if (!tone) return {}
   const faint = tone.endsWith('-faint')
   const t = faint ? tone.slice(0, -6) : tone
   const c = /^c(\d)$/.exec(t)
-  const color = c ? CLUSTER[(Number(c[1]) - 1) % 6] : t === 'code' ? CODE_INK[theme] : THEME[t]
+  const color = c ? CLUSTER[(Number(c[1]) - 1) % 6] : t === 'code' ? CODE_INK : THEME[t]
   return { ...(color ? { color } : {}), ...(faint || t === 'dim' ? { dimColor: true } : {}) }
 }
 
 /** One row of runs: plain Text, with one Button for each stretch of runs that share a part (a press on it). Each
  *  Button's key is the row's key and its part, so no two in the pane share one: a dot is `<row>:n:<id>`. Cited words
  *  are underlined, and the cited words in evidence tinted as in the citations' card. */
-function rowEl(els: Any, runs: Run[], key: string, press: (part: string) => unknown, theme: Theme = 'dark'): unknown {
+function rowEl(els: Any, runs: Run[], key: string, press: (part: string) => unknown): unknown {
   const { Box, Button, Text } = els
   const span = (r: Run, i: number) => Text({
-    key: `t${i}`, ...look(r.tone, theme), ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
-    ...(r.tint ? { backgroundColor: CITE_TINT[theme] } : {}), children: r.s,
+    key: `t${i}`, ...look(r.tone), ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
+    ...(r.tint ? { backgroundColor: CITE_TINT } : {}), children: r.s,
   })
   if (!runs.length) return Text({ key, children: ' ' })
   if (!runs.some(r => r.part)) return Text({ key, wrap: 'truncate-end', children: runs.map(span) })
@@ -127,7 +129,6 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const W = Math.max(40, Number(e?.props?.bodyColumns) || 90)
   const H = Math.max(14, Number(e?.props?.scroll?.bodyRows) || 36)
   const { Box } = els
-  const theme = await themeNow($)
   const data = await withMarks($, paneData(await claimsStore($)))
   const keys: { k: string; label: string; onPress: () => unknown }[] = []
   const key = (k: string, label: string, onPress: () => unknown) => keys.push({ k, label, onPress })
@@ -140,7 +141,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const lines = sourceView(c, text, W) as Run[][]
     key('b', 'back', () => showClaims($, keep))
     return Box({ flexDirection: 'column', children: [
-      ...lines.map((r, i) => rowEl(els, r, `s${i}`, () => undefined, theme)),
+      ...lines.map((r, i) => rowEl(els, r, `s${i}`, () => undefined)),
       rowEl(els, [], 'gap', () => undefined),
       keysRow(els, keys),
     ] })
@@ -190,7 +191,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     }
     key('e', a.open ? 'close' : 'evidence', () => showClaims($, a.open ? at : { ...at, open: true, cite }))
   }
-  const row = (r: Run[], k: string) => rowEl(els, r, k, press, theme)
+  const row = (r: Run[], k: string) => rowEl(els, r, k, press)
   return Box({ flexDirection: 'column', children: [
     ...(view.head as Run[][]).map((r, i) => row(r, `h${i}`)),
     row([], 'gap'),

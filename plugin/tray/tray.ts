@@ -13,6 +13,9 @@
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
+//   x repair    on a wrong or not-confirmed citation: a turn of main that checks that one claim again against the
+//               records and writes its sentence again if needed (core/tell.ts askMain); a click on `x repair` in the
+//               card too
 //   0 close     back to the mark under it, or close
 //   m more      a tray taller than the rows above the bar: its next lines, then from the top (the line under it says)
 //   ] [         the next mark or card, and the one before
@@ -33,11 +36,10 @@ import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type Tur
 import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
-import { tellAtNextPrompt } from '../core/tell'
-import { CODE_INK, themeNow } from '../core/theme'
+import { askMain, tellAtNextPrompt } from '../core/tell'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
-import { highlighted, wrapCode, type Theme } from '../marks/evidence'
+import { highlighted, wrapCode } from '../marks/evidence'
 import { marksIn, withoutMarks } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
@@ -46,8 +48,8 @@ import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
-  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
-  moreLines, open, pageOf, printLine, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
+  moreLines, open, pageOf, printLine, push, refOf, repairAsk, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -316,7 +318,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
     next = (dir > 0 ? pool[0] : pool[pool.length - 1]) ?? null
   }
-  if (!next) { noticeLine($, "Nothing to step to yet: each citation, explainer, heads-up and card in Claude's replies opens here.", 'tray'); return }
+  if (!next) { noticeLine($, 'Nothing to step to yet.', 'tray'); return }
   if (next.card) await standOn($, next.row, next.card)
   else await openMark($, refOf(next) as Frame, { reveal: true })
 }
@@ -332,6 +334,21 @@ async function askAbout($: Engine, f: Frame): Promise<void> {
 async function askCard($: Engine, stand: NonNullable<Stand>): Promise<void> {
   const meta = await metaOf($, stand.card)
   await openThread($, { about: `the card "${meta?.title ?? stand.card}"`, card: stand.card })
+}
+
+/** x on a wrong or not-confirmed citation: a turn of main that checks that one claim again and writes its sentence
+ *  again if needed. The tray closes first, so the prompt carries the repair alone. */
+async function repair($: Engine, f: Frame): Promise<void> {
+  if (f.kind !== 'citation') return
+  const info = await infoOf($, f)
+  if (!canRepair(info.item)) return
+  const { request, words } = repairAsk(f, info)
+  await setTray($, null)
+  try {
+    await askMain($, words, request)
+  } catch (err) {
+    failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Open the citation and press x to try again.`, 'tray:repair')
+  }
 }
 
 /** e on an explainer: written again at more length, in its place; the tray shows the longer one when it lands. */
@@ -374,6 +391,7 @@ export async function trayKey($: Engine, key: string): Promise<Any | null> {
   if (f.kind === 'citation') {
     const ev = (await itemOf($, f.row, f.n))?.evidence
     if (key === 'c' && ev?.kind === 'computed') return { now: () => toggleCode($), undo: () => toggleCode($) }
+    if (key === 'x' && canRepair(await itemOf($, f.row, f.n))) return { later: () => repair($, f) }
     if (key === 'h') {
       const inner = await innerOf($, f)
       if (inner) return { later: () => pushMark($, inner) }
@@ -412,8 +430,10 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   const out: BarItem[] = []
   const zero: BarItem = { id: 'tray-0', key: '0', words: f.open || tray.stack.length > 1 ? 'back' : 'close', focus: true, press: () => goBack($) }
   if (f.kind === 'citation') {
+    const m = await itemOf($, f.row, f.n)
     out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) })
-    if ((await itemOf($, f.row, f.n))?.evidence?.kind === 'computed') out.push({ id: 'tray-c', key: 'c', words: f.open === 'code' ? 'one line' : 'all code and output', focus: true, press: () => toggleCode($) })
+    if (canRepair(m)) out.push({ id: 'tray-x', key: 'x', words: 'repair', focus: true, press: () => repair($, f) })
+    if (m?.evidence?.kind === 'computed') out.push({ id: 'tray-c', key: 'c', words: f.open === 'code' ? 'one line' : 'all code and output', focus: true, press: () => toggleCode($) })
     out.push(zero, ...(await steps()))
     const inner = await innerOf($, f)
     if (inner) {
@@ -478,27 +498,32 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
 
 const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status === 'failed' && m.failedBy === 'evidence' ? 'unconfirmed' : m.status] : null) ?? STATUS.unchecked!
 
+/** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
+ *  for the theme it draws in. */
+const CODE_INK = 'permission'
+
 /** A part of the tray's body and the rows it takes: an element, or a line of code (the code's lines draw as one Code). */
 type Unit = { h: number; el?: Any; code?: string }
 
 /** A line of evidence in the ruled block under the code or the file's place: a dim rule on the left, so code and
  *  output read apart, and the line, the cited words in the soft tint. */
-function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string, theme: Theme): Unit {
+function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string): Unit {
   const { Box, Text } = els
   const h = rowsOf(text, w - 2)
   return { h, el: Box({ key, flexDirection: 'row', children: [
     Text({ key: 'rule', dimColor: true, children: Array(h).fill('│').join('\n') }),
-    Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [highlighted(els, text, spans, 't', theme)] }),
+    Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [highlighted(els, text, spans, 't')] }),
   ] }) }
 }
 
 /** A citation's card under its header (the status is in the header). A corrected one says what it was; a wrong one,
- *  or one the check could not confirm, why in one sentence; all dim. Then its evidence. For a value code computed: the
+ *  or one the check could not confirm, why in one sentence; all dim, and under it `x repair`, a press that asks main
+ *  to repair it (`onRepair`, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
  *  block, ended by a dim count of the output lines it leaves out; with c, all the code (as code), then all the output
  *  in the ruled block. For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
  *  block. The cited words in the soft tint. */
-function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, theme: Theme, place: Any | null): Unit[] {
+function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: Any | null, onRepair: () => unknown): Unit[] {
   const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
   const ev = m.evidence
@@ -507,6 +532,9 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, theme: 
   if (m.status === 'corrected' && m.was) dim('was', `was ${m.was.replace(/\*\*|`/g, '')}`)
   else if (m.status === 'failed' && m.reason) dim('why', firstSentence(m.reason))
   else if (m.status === 'checking') dim('why', 'The check is running.')
+  if (canRepair(m)) rows.push({ h: 1, el: els.Button({ key: 'repair', plain: true, label: 'repair this citation', hover: { bold: true }, onPress: () => onRepair(), children: [
+    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: 'suggestion', children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: ': check it again and rewrite the sentence' })] }),
+  ] }) })
   if (!ev) {
     if (m.status !== 'checking') dim('none', 'The check gave no evidence for it.')
     return rows
@@ -520,7 +548,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, theme: 
       const s0 = at
       at += line.length + 1
       const mine = spans.map(([a, b]) => [Math.max(a, s0) - s0, Math.min(b, s0 + line.length) - s0] as [number, number]).filter(([a, b]) => b > a)
-      rows.push(ruled(els, line, mine, w, `o${i}`, theme))
+      rows.push(ruled(els, line, mine, w, `o${i}`))
     })
     return rows
   }
@@ -528,10 +556,10 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, theme: 
   if (!line) return rows
   if (ev.kind === 'computed') {
     const said = printLine(ev.code, line.text)
-    if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK[theme], wrap: 'truncate-end', children: said }) })
+    if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
   } else if (place) rows.push({ h: 1, el: place })
   const cut = lineWindow(line, w - 2)
-  rows.push(ruled(els, cut.text, cut.spans, w, 'ev', theme))
+  rows.push(ruled(els, cut.text, cut.spans, w, 'ev'))
   // the output lines the one line leaves out, counted at the end of the ruled block (c shows them)
   const more = hiddenOutput(ev)
   if (more) rows.push({ h: 1, el: els.Box({ key: 'more', flexDirection: 'row', children: [
@@ -600,7 +628,7 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     const m = await itemOf($, f.row, f.n)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
-    units = citationBody(els, f, m, inner, await themeNow($), await fileLinkEl($, els, f, m))
+    units = citationBody(els, f, m, inner, await fileLinkEl($, els, f, m), () => repair($, f))
   } else {
     const g = await glossOf($, f.row, f.id)
     const heads = f.kind === 'heads'

@@ -198,7 +198,7 @@ function Reply({ ws, comment, name, thread }: { ws: string; comment: CommentView
   }
   return (
     <div className="wu-cm-reply" onClick={(e) => e.stopPropagation()}>
-      <TextArea bare block autoGrow rows={1} maxHeight={120} value={text} onChange={setText} onKeyDown={onKey} disabled={busy} placeholder="Reply, or ask thimble to fix…" aria-label="Reply" />
+      <TextArea bare block autoGrow rows={1} maxHeight={120} value={text} onChange={setText} onKeyDown={onKey} disabled={busy} placeholder="Reply…" aria-label="Reply" />
     </div>
   )
 }

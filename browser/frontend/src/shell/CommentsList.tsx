@@ -1,9 +1,9 @@
-// The Comments list of the right sidebar (LabelsSidebar.tsx), next to the Labels: every open comment the checks (and
-// main's notes) left on the cards and in the report, in one place. A row is a comment: its check's color and name,
-// where it is (a card, or the report), its statement and, a click away, its details. Apply sends the comment to main
-// in the chat as the analyst's message (bus openChat with `send`, the composer's own path), so Claude makes the change there; Go to it opens the card or the passage;
-// Done resolves it, as the comment's ✓ does where it stands. The checks themselves, with their switches, stay in the
-// canvas's Comments menu and the report's Comments pane.
+// The comments of the shared Labels and Comments sidebar (LabelsSidebar.tsx): every open comment the checks (and
+// main's and the analyst's notes) left on the cards and in the report. A comment's row says where it is, as a link that
+// goes there (a card, or the passage in the report), its passage, its statement and, a click away, its details. Apply
+// sends the comment to main in the chat as the analyst's message (bus openChat with `send`, the composer's own path),
+// so Claude makes the change there; Go to it opens the card or the passage; Done resolves it, as the comment's check
+// mark does where it stands.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCanvasComments } from '../canvas/CommentLayer'
 import { Button } from '../components/Button'
@@ -11,8 +11,6 @@ import { docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { teleport } from '../lib/teleport'
 import type { WriteupComment } from '../lib/types'
-import { useChecks } from '../report/Checks'
-import { checkLook, commentName } from '../report/checkComments'
 import { commentsApi } from '../report/commentsApi'
 
 const REPORT = 'report'
@@ -90,9 +88,8 @@ export function useCommentItems(ws: string) {
   return { items, cards, report }
 }
 
-export function CommentsList({ ws }: { ws: string }) {
-  const checks = useChecks(ws)
-  const look = useMemo(() => checkLook(checks.list), [checks.list])
+/** The open comments with Done: on a card it resolves the card's comment, in the report the passage's. */
+export function useComments(ws: string) {
   const { items, cards, report } = useCommentItems(ws)
   const done = (c: CommentItem) => {
     if (c.surface === 'canvas') {
@@ -105,29 +102,23 @@ export function CommentsList({ ws }: { ws: string }) {
       .then(() => report.reload())
       .catch((e: Error) => bus.emit('toast', { text: `Could not resolve the comment. ${e.message}`, kind: 'error' }))
   }
-  if (!items.length) return <p className="lside-none">No open comments. The checks leave theirs on the cards and in the report.</p>
-  return (
-    <>
-      {items.map((c) => (
-        <CommentRow key={`${c.surface}:${c.id}`} item={c} name={commentName(c, look)} color={look.colour(c.check)} onDone={() => done(c)} />
-      ))}
-    </>
-  )
+  return { items, done }
 }
 
-function CommentRow({ item: c, name, color, onDone }: { item: CommentItem; name: string; color: string; onDone: () => void }) {
+/** One comment in its category's list: where it is, as a link that goes there, its passage, its statement and details,
+ * and Apply · Go to it · Done. `name` is its category's, which Apply's message names. */
+export function CommentRow({ item: c, name, onDone }: { item: CommentItem; name: string; onDone: () => void }) {
   const [open, setOpen] = useState(false)
   // the chat's own send path: it opens main (and the chat column, when folded) and posts the message there
   const apply = () => bus.emit('openChat', { chatId: 'main', send: applyText(c, name) })
+  const go = () => teleport(c.ref)
   return (
-    <div className="lside-row lside-comment" data-comment={c.id} data-surface={c.surface}>
-      <div className="lside-row-head">
-        <span className="lside-swatch" style={{ '--sw': color } as React.CSSProperties} aria-hidden="true" />
-        <span className="lside-name">{name}</span>
-        <span className="lside-found-where">{c.where}</span>
-      </div>
+    <div className="lside-comment" data-comment={c.id} data-surface={c.surface}>
+      <button type="button" className="lside-comment-where" onClick={go} title="Go to it">
+        {c.where}
+      </button>
       {c.quote && <p className="lside-comment-quote">{`“${c.quote}”`}</p>}
-      <p className="lside-question lside-comment-text">{c.text}</p>
+      <p className="lside-comment-text">{c.text}</p>
       {c.details.trim() && (
         <>
           {open && <p className="lside-comment-details">{c.details}</p>}
@@ -140,7 +131,7 @@ function CommentRow({ item: c, name, color, onDone }: { item: CommentItem; name:
         <Button variant="primary" size="sm" onClick={apply} title="Send this comment to Claude in the chat, to make the change">
           Apply
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => teleport(c.ref)}>
+        <Button variant="ghost" size="sm" onClick={go}>
           Go to it
         </Button>
         <Button variant="ghost" size="sm" onClick={onDone}>
