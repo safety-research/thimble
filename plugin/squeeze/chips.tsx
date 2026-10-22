@@ -5,11 +5,12 @@
 //   props: {items: [{id, n, name, levels, level, word, picked}], plus: what is typed after + (null when nothing is),
 //           width, ack}
 //   one row of chips, wrapped to the width: each its digit, its name, its dots and its level (`1 Length ○●○○○ short`),
-//   the picked chip in the warning color; then `+`, which adds a chip of the person's own
+//   the picked chip in the warning color; then `+`, which adds a chip of the person's own; then `s close`, its key drawn
+//   as the bar draws its keys, which closes the chips (not while words are typed after +, where s is a letter)
 //
 // It sends {events: [{n, press}] | [{n, key}]}: a press on a chip's name or level words (`chip-<id>`, `word-<id>`), on
-// one of its dots (`lvl-<id>-<i>`), on + (`add`); and each key while a click has given it the keyboard (Claude Code
-// keeps tab, the arrows, enter and esc in its prompt otherwise; Escape gives the keyboard back). Each post carries every
+// one of its dots (`lvl-<id>-<i>`), on + (`add`), on s close (`close`); and each key while a click has given it the
+// keyboard (Claude Code keeps tab, the arrows, enter and esc in its prompt otherwise; Escape gives the keyboard back). Each post carries every
 // event the hooks have not answered yet, numbered; ui.ts handles each number once and answers the last as `ack`.
 import type { ClientModule, ClientSurface } from 'claude-code'
 
@@ -51,7 +52,11 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     ] })
   }
   const add = press('add', 'add a chip of your own', [E.Text(plus != null ? { color: 'warning', bold: true, children: `+ ${plus}▏` } : { dimColor: true, children: '+' })])
-  return E.Box({ flexDirection: 'row', flexWrap: 'wrap', width: Number(props?.width) || surface.columns || 80, children: [...items.map(chip), add] })
+  // s close, its key as the bar draws its keys (bar.tsx KEY_COLOR), so leaving is named where the person looks
+  const close = plus == null ? [E.Box({ key: 'c-close', flexDirection: 'row', marginLeft: 3, children: [
+    press('close', 's close', [E.Text({ color: 'suggestion', bold: true, children: 's' }), E.Text({ dimColor: true, children: ' close' })]),
+  ] })] : []
+  return E.Box({ flexDirection: 'row', flexWrap: 'wrap', width: Number(props?.width) || surface.columns || 80, children: [...items.map(chip), add, ...close] })
 }
 
 export default Chips
