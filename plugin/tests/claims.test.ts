@@ -137,7 +137,7 @@ test("an answer's claims come in with the citations near their words; c counts t
   expect(await claimsBar(s.$, k => k !== 'claims', false)).toEqual([])
 })
 
-test('a look that fails leaves a gap the pane names; c opens the pane, where a click selects a cluster first, then one of its claims', async () => {
+test('a look that fails leaves a gap the pane names; c opens the pane, where a press on a name selects a cluster and a press on a dot its claim', async () => {
   setOptions({})
   const s = setup([reply([
     { claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' },
@@ -152,38 +152,52 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a c
   await take!.later!()
   expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
+  const keysOf = (pane: Any) => buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
   const pane = await draw({})
   const t = textOf(pane)
   expect(t).toContain('Claims   3 · 2 clusters')
   expect(t).toContain('Turn 2 was not read:')
-  // at rest the panel shows the newest claim's cluster: its name and its claims, no checks; the keys as the bar draws them
-  expect(t).toContain('causes   1 claim · turn 1')
+  // at rest the panel shows the newest claim's cluster: its name and its claims, no checks
+  expect(t).toContain('● causes  1 claim · turn 1')
   expect(t).toContain('  ● The cache was cold.')
   expect(t).not.toContain('It cites nothing.')
-  expect(t).not.toContain('click a dot')
-  expect(t).toContain('n next · p previous')
-  expect(buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])).toEqual([['n', 'next'], ['p', 'previous']])
-  // a click on a dot selects its cluster first: the cluster's name and both its claims
-  const dots = buttons(pane).filter(b => /^g\d+:d:/.test(b.key))
-  expect([...new Set(dots.map(b => b.key.replace(/^g\d+:/, '')))].sort()).toEqual(['d:c1', 'd:c2', 'd:c3'])
-  await dots.find(b => b.key.endsWith(':d:c1')).onPress()
+  // the keys, each once: a plain Button Claude Code draws as its key, then its words, dim; the words never hold the key,
+  // which drew it twice
+  expect(keysOf(pane)).toEqual([['n', 'next'], ['p', 'previous']])
+  expect(buttons(pane).filter(b => b.hotkey).map(b => textOf(b.children))).toEqual(['next', 'previous'])
+  expect(t).toContain('next · previous')
+  // at rest n lights the cluster the panel shows
+  await buttons(pane).find(b => b.hotkey === 'n').onPress()
+  expect(paneNow(s).args).toMatchObject({ group: 'k2' })
+  // a press on a cluster's name selects the cluster: its name and both its claims
+  const name = buttons(pane).find(b => /^g\d+:g:k1$/.test(b.key))
+  expect(name).toBeDefined()
+  await name.onPress()
   const failures = paneNow(s).args
   expect(failures).toMatchObject({ group: 'k1' })
   const cluster = await draw(failures)
-  expect(textOf(cluster)).toContain('failures   2 claims · turn 1')
+  expect(textOf(cluster)).toContain('● failures  2 claims · turn 1')
   expect(textOf(cluster)).toContain('  ● Run 4 failed on the p95 check.')
   expect(textOf(cluster)).toContain('  ● Run 9 failed on a timeout.')
-  // a dot of the cluster selected selects its claim: the cluster's name and the claim's sentence, no other claim
-  await buttons(cluster).find(b => /^g\d+:d:c1$/.test(b.key)).onPress()
+  // a press on a dot selects its claim, of any cluster: the cluster's name, the claim in full with its turn, no other
+  // claim, and nothing to open: no e, no h
+  const dots = buttons(pane).filter(b => /^g\d+:d:/.test(b.key))
+  expect([...new Set(dots.map(b => b.key.replace(/^g\d+:/, '')))].sort()).toEqual(['d:c1', 'd:c2', 'd:c3'])
+  await dots.find(b => b.key.endsWith(':d:c1')).onPress()
   const one = paneNow(s).args
   expect(one).toMatchObject({ claim: 'c1' })
   const picked = await draw(one)
   const pt = textOf(picked)
-  expect(pt).toContain('failures   2 claims · turn 1')
-  expect(pt).toContain('● Run 4 failed on the p95 check.')
+  expect(pt).toContain('● failures')
+  expect(pt).toContain('Run 4 failed on the p95 check.  turn 1')
+  expect(pt).toContain('It cites nothing.')
   expect(pt).not.toContain('Run 9 failed on a timeout.')
-  expect(pt).toContain('n next · p previous · m source')
-  // so does a claim in the panel of a cluster
+  expect(keysOf(picked)).toEqual([['n', 'next'], ['p', 'previous'], ['m', 'where it was said']])
+  // the claim is bold; its dot again selects its cluster
+  expect(JSON.stringify(picked)).toContain('"bold":true,"children":"Run 4 failed on the p95 check."')
+  await buttons(picked).find(b => /^g\d+:d:c1$/.test(b.key)).onPress()
+  expect(paneNow(s).args).toMatchObject({ group: 'k1' })
+  // a claim in the panel of a cluster selects it
   await buttons(cluster).find(b => /^p\d+:n:c2$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c2' })
   // the cluster's name above the claim selects the cluster again; n the next cluster, the whole of it
@@ -192,9 +206,9 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a c
   await buttons(picked).find(b => b.hotkey === 'n').onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k2' })
   expect(paneNow(s).args.claim).toBeUndefined()
-  // a dot of another cluster selects that cluster, not its claim
+  // a dot of another cluster selects its claim
   await buttons(picked).find(b => /^g\d+:d:c3$/.test(b.key)).onPress()
-  expect(paneNow(s).args).toMatchObject({ group: 'k2' })
+  expect(paneNow(s).args).toMatchObject({ claim: 'c3' })
   // m: where it was said, the message with the claim's words, and b back
   await buttons(picked).find(b => b.hotkey === 'm').onPress()
   const src = paneNow(s)
@@ -202,4 +216,24 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a c
   const said = await drawClaimsPane(s.$, { props: { bodyColumns: 100 } }, src.args, els)
   expect(textOf(said)).toContain("Where it was said  Claude's message")
   expect(buttons(said).filter(b => b.hotkey).map(b => b.hotkey)).toEqual(['b'])
+})
+
+test('a corrected claim shows, under it, what it said before and why, as the claims look gave it', async () => {
+  setOptions({})
+  const s = setup([
+    reply([{ claim: 'The deletions began June 23.', quote: 'The deletions began June 23', cluster: 'cleanup' }]),
+    reply([{ claim: 'The deletions came from June 23 to July 14, after the edits stopped.', quote: 'The deletions came from June 23 to July 14', revises: 'c1', why: '444 of the deletions came before June 23' }]),
+  ])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'When did the deletions start?', rows: ['The deletions began June 23.'] })
+  await answered(s, { id: 't2', prompt: 'Sure?', rows: ['The deletions came from June 23 to July 14, after the edits stopped.'] })
+  expect((await claimsStore(s.$)).claims.find((c: Any) => c.id === 'c2')?.why).toBe('444 of the deletions came before June 23')
+  const pane = await drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, { claim: 'c2' }, els)
+  const t = textOf(pane)
+  expect(t).toContain('Corrected. Before: "The deletions began June 23".')
+  expect(t).toContain('Why: 444 of the deletions came before June 23.')
+  expect(buttons(pane).filter(b => b.hotkey).map(b => b.hotkey)).toEqual(['m'])
+  // a press on the earlier words selects the earlier claim
+  await buttons(pane).find(b => /^p\d+:was-c1$/.test(b.key)).onPress()
+  expect(paneNow(s).args).toMatchObject({ claim: 'c1' })
 })

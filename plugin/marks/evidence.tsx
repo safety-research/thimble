@@ -13,7 +13,7 @@
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
-import { themeNow, type Theme } from '../core/theme'
+import { CITE_TINT, themeNow, type Theme } from '../core/theme'
 import { plainSentence } from './message.js'
 import { type Evidence, type MarkItem, type Place, rowMarks } from './store'
 
@@ -31,8 +31,7 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   unchecked: { word: 'not checked', dim: true },
 }
 
-/** The cited words' tint, per theme: a soft purple behind them that reads on a dark and a light background. */
-export const CITE_TINT: Record<Theme, string> = { dark: '#3d3560', light: '#ebe4fd' }
+export { CITE_TINT }
 export type { Theme }
 
 /** A line of text with spans of it highlighted (the citations' soft purple tint behind them), as Text runs. */

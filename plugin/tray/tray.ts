@@ -34,7 +34,7 @@ import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
-import { themeNow } from '../core/theme'
+import { CODE_INK, themeNow } from '../core/theme'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
 import { highlighted, wrapCode, type Theme } from '../marks/evidence'
@@ -477,9 +477,6 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
 }
 
 const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status === 'failed' && m.failedBy === 'evidence' ? 'unconfirmed' : m.status] : null) ?? STATUS.unchecked!
-
-/** The color of a line of code, per theme: Claude Code's theme has no key for code, so a calm blue. */
-const CODE_INK = { dark: '#9cdcfe', light: '#2b5fa8' } as const
 
 /** A part of the tray's body and the rows it takes: an element, or a line of code (the code's lines draw as one Code). */
 type Unit = { h: number; el?: Any; code?: string }

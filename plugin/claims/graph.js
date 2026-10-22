@@ -3,23 +3,25 @@
 // returns with Claude Code's own elements, and the tests read it as text.
 //
 //   the head        how many claims the conversation holds, and in how many clusters
-//   the graph       the whole pane wide: each cluster a loose group of dots in its own color, its name in plain gray
-//                   among them, the clusters spread over the pane; a hollow dot is a claim a later one corrected, a
-//                   heavier one a claim said twice or more. No lines join the dots. The dots keep their places while the
-//                   person walks them
-//   the selection   a cluster first, then one of its claims (details on demand): a press on a cluster's name, on a dot
-//                   of another cluster, or n p, selects the cluster: its dots bold, every other dot and name dim. A press
-//                   on a dot of the cluster selected, or on a claim in the panel, selects that claim: its dot bold, its
+//   the graph       the whole pane wide: each cluster a loose group of dots in its own color, its name in the same
+//                   color under them, wrapped so a long name shows in full; the clusters spread over the pane; a hollow
+//                   dot is a claim a later one corrected, a heavier one a claim said twice or more. No lines join the
+//                   dots. The dots keep their places while the person walks them
+//   the selection   a press on a cluster's name, or n p, selects the cluster: its dots and name bold, every other dot
+//                   and name dim. A press on a dot, or on a claim in the panel, selects that claim: its dot bold, its
 //                   cluster's other dots lit, the rest dim
-//   the panel       under the graph. A cluster: its name, what it holds in one line, and its claims, each a press that
-//                   selects it. A claim: its cluster's name (a press selects the cluster) and its whole sentence; e adds
-//                   its citations (each with its check, its words and the cited line; a press opens its evidence), h
-//                   its history
+//   the panel       under the graph. A cluster: its name, what it holds in one line, and its claims, one a line, each a
+//                   press that selects it. A claim, all of it at once: its cluster's name (a press selects the
+//                   cluster), the whole sentence in bold with its turn, what it said before a correction and why, then
+//                   each citation: its check's sign, its words underlined, and the evidence as the citation's card in
+//                   the reply draws it (the code line that printed the value and the output line, or the file's place
+//                   and the line, the cited words tinted); a press on a citation opens its evidence
 //   where it was said   the message that said the claim, its words marked, and the other places it was said
 //
 // A canvas (canvas()) is a grid of cells: text and dots that are parts (a press on the part; the blank cells beside a
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, part}.
 import { blocks } from '../marks/message.js'
+import { evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine } from '../tray/tray.mjs'
 import { edgesOf, findQuote, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
@@ -28,7 +30,8 @@ const len = s => Array.from(String(s ?? '')).length
 /** A claim's words as a sentence: with its full stop. */
 export const sentenceOf = s => one(s).replace(/([\p{L}\p{N}%)"'”’])$/u, '$1.')
 const MAX_EVIDENCE = 4
-/** The rows the panel under the graph keeps: a cluster and about fifteen of its claims, or a claim and its citations. */
+/** The rows the panel under the graph keeps: a cluster and about fifteen of its claims, or a claim and its citations
+ *  (more scroll). */
 const PANEL = 17
 
 /** Words wrapped to lines of at most n characters; a word longer than n goes on over the next lines, so no letter is
@@ -172,10 +175,10 @@ function ringOrder(nodes, edges) {
 }
 
 /**
- * The graph laid out in cells, w × h, the whole area used: each cluster a cell of it (cellsOf), its name in the middle
- * of the cell, a little off center by its hash, and its claims a loose ring round the name, linked claims next to each
- * other. Each claim is snapped to a cell so no two dots crowd and no dot touches a name: first inside its cluster's
- * cell, else anywhere. Deterministic. {pos: Map(id -> {x, y}), names: [{id, name, x, y}], h}
+ * The graph laid out in cells, w × h, the whole area used: each cluster a cell of it (cellsOf), its name wrapped at the
+ * foot of the cell, a little off center by its hash, and its claims a loose ring above the name, linked claims next to
+ * each other. Each claim is snapped to a cell so no two dots crowd and no dot touches a name: first inside its
+ * cluster's cell, else anywhere. Deterministic. {pos: Map(id -> {x, y}), names: [{id, name, lines, x, y}], h}
  */
 export function spread(nodes, clusters, edges, { w, h }) {
   const W = Math.max(20, w)
@@ -185,18 +188,23 @@ export function spread(nodes, clusters, edges, { w, h }) {
   const loose = nodes.filter(n => !known.has(String(n.cluster)))
   if (loose.length) groups.push({ id: '', name: 'between clusters', nodes: loose })
   const cells = cellsOf(groups, W, H)
-  // the names first, so no dot lands on one
+  // the names first, at the foot of their cells, so no dot lands on one: each wrapped to its cell's width, so a long
+  // name shows in full (a cell too short for all its lines ends the last one in …)
   const names = cells.map(sl => {
-    const name = cut(sl.g.name, Math.max(4, sl.w - 4))
-    const l = len(name)
-    const cx = sl.x + sl.w / 2 + (hash(sl.g.id + 'x') - 0.5) * sl.w * 0.2
-    const cy = sl.y + sl.h / 2 + (hash(sl.g.id + 'y') - 0.5) * sl.h * 0.2
-    const x = Math.max(sl.x + 1, Math.min(sl.x + sl.w - l - 1, Math.round(cx - l / 2)))
-    const y = Math.max(0, Math.min(H - 1, Math.round(cy - 0.5)))
-    return { id: sl.g.id, name, x, y, len: l, cx, cy: y }
+    const room = Math.max(4, sl.w - 2)
+    const most = Math.max(1, sl.h - 1)
+    let lines = wrap(sl.g.name, room)
+    if (lines.length > most) lines = [...lines.slice(0, most - 1), cut(lines.slice(most - 1).join(' '), room)]
+    const l = Math.max(1, ...lines.map(len))
+    const jx = (hash(sl.g.id + 'x') - 0.5) * Math.max(0, sl.w - l - 2) * 0.3
+    const x = Math.max(sl.x + 1, Math.min(sl.x + sl.w - l - 1, Math.round(sl.x + (sl.w - l) / 2 + jx)))
+    // a blank row under it, before the next row of clusters, where the cell has room
+    const gap = sl.y + sl.h < H && sl.h >= lines.length + 3 ? 1 : 0
+    const y = Math.max(0, Math.min(H - lines.length, sl.y + sl.h - lines.length - gap))
+    return { id: sl.g.id, name: sl.g.name, lines, x, y, len: l }
   })
   const taken = []
-  const onName = (x, y) => names.some(nm => nm.y === y && x >= nm.x - 2 && x <= nm.x + nm.len + 1)
+  const onName = (x, y) => names.some(nm => y >= nm.y && y < nm.y + nm.lines.length && x >= nm.x - 2 && x <= nm.x + nm.len + 1)
   const free = (x, y, b, gap) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1 && !onName(x, y) && !taken.some(t => (t.y === y && Math.abs(t.x - x) < gap) || (Math.abs(t.y - y) === 1 && Math.abs(t.x - x) < 2))
   const near = (x0, y0, b, gap) => {
     for (let r = 0; r <= Math.max(W, H); r++) {
@@ -215,22 +223,25 @@ export function spread(nodes, clusters, edges, { w, h }) {
     const nm = names[ci]
     const order = ringOrder(sl.g.nodes, edges)
     const k = order.length
+    // the dots above the name, round the middle of what the name leaves of the cell
+    const box = { x0: sl.x + 1, x1: Math.max(sl.x + 1, sl.x + sl.w - 3), y0: sl.y, y1: Math.max(sl.y, nm.y - 1) }
+    const cx = nm.x + nm.len / 2
+    const cy = (box.y0 + box.y1) / 2
     const rx = Math.max(2, sl.w / 2 - 4)
-    const ry = Math.max(1, sl.h / 2 - 1)
-    const box = { x0: sl.x + 1, x1: Math.max(sl.x + 1, sl.x + sl.w - 3), y0: sl.y, y1: Math.max(sl.y, sl.y + sl.h - 1) }
+    const ry = Math.max(1, (box.y1 - box.y0) / 2 + 0.5)
     const turn = hash(sl.g.id) * Math.PI * 2
     order.forEach((nd, i) => {
       // a few claims go round one ring, linked ones side by side; many fill the area round the name, a spiral out
       const a = k <= 10 ? turn + (Math.PI * 2 * i) / k : turn + i * 2.39996
       const f = k <= 2 ? 0.7 : k <= 10 ? 0.45 + 0.55 * hash(nd.id + '#') : 0.3 + 0.7 * Math.sqrt((i + 0.5) / k)
-      const x0 = Math.round(nm.cx + Math.cos(a) * rx * f)
-      const y0 = Math.round(nm.cy + Math.sin(a) * ry * f)
+      const x0 = Math.round(cx + Math.cos(a) * rx * f)
+      const y0 = Math.round(cy + Math.sin(a) * ry * f)
       const got = near(x0, y0, box, 5) || near(x0, y0, box, 3) || near(x0, y0, all, 3) || { x: Math.max(0, Math.min(W - 2, x0)), y: Math.max(0, Math.min(H - 1, y0)) }
       taken.push(got)
       pos.set(nd.id, got)
     })
   })
-  return { pos, names: names.map(({ id, name, x, y }) => ({ id, name, x, y })), h: H }
+  return { pos, names: names.map(({ id, name, lines, x, y }) => ({ id, name, lines, x, y })), h: H }
 }
 
 /** A claim's history: the claims before it that it corrected, itself, and the claims after it that corrected it, oldest
@@ -247,7 +258,7 @@ export function historyOf(claim, byId) {
 
 const slim = c => ({
   id: c.id, text: c.text, by: c.by, cluster: c.cluster ?? null, turn: c.turn ?? null, n: c.n || 1,
-  ...(c.revised_by ? { revised_by: c.revised_by } : {}), ...(c.revises ? { revises: c.revises } : {}),
+  ...(c.revised_by ? { revised_by: c.revised_by } : {}), ...(c.revises ? { revises: c.revises } : {}), ...(c.why ? { why: c.why } : {}),
   ...(c.links && c.links.length ? { links: c.links.map(l => ({ to: l.to, how: l.how })) } : {}),
   sources: (c.sources || []).slice(0, 8),
   said: (c.said || []).slice(0, 6).map(s => ({ row: s.row ?? null, by: s.by, turn: s.turn ?? null, quote: s.quote || '', sentence: s.sentence || '', ...(s.start != null ? { start: s.start, end: s.end } : {}), ...(s.ref ? { ref: s.ref } : {}) })),
@@ -333,45 +344,104 @@ function layOf(claims, groups, edges, W, h) {
   return got
 }
 
-/** The words of a source in the panel, as runs: a citation's check, its words, the cited place, and with `full` (e) the
- *  cited line. */
-export function evidenceRuns(s, full = true) {
-  // the check's words, as the evidence pane says them (marks/evidence.tsx)
-  const status = s.status || 'unchecked'
-  const unconfirmed = status === 'failed' && s.failedBy === 'evidence'
-  const tone = status === 'verified' ? 'good' : status === 'corrected' || unconfirmed ? 'warn' : status === 'failed' ? 'bad' : 'dim'
-  const word = unconfirmed ? 'not confirmed' : ({ failed: 'wrong', unchecked: 'not checked', gone: 'no longer in the session' })[status] || status
-  const out = [{ s: word, tone, bold: true }, { s: ' ' }, { s: one(s.shown || s.label), tone: 'cite' }]
-  if (s.place) out.push({ s: `  ${s.place}`, tone: 'dim' })
-  if (full && s.line) out.push({ s: `  ${one(s.line)}` })
-  return out
+// the sign of a citation's check, and its word when it is not verified (the evidence pane's words, marks/evidence.tsx)
+const SIGN = {
+  verified: ['✓', 'good'], corrected: ['✓', 'good'], failed: ['×', 'bad'], unconfirmed: ['?', 'warn'],
+  checking: ['…', 'dim'], unchecked: ['·', 'dim'], gone: ['·', 'dim'],
 }
+const STATUS_WORD = { failed: 'wrong', unconfirmed: 'not confirmed', checking: 'checking', unchecked: 'not checked', gone: 'no longer in the session' }
 
-/** The history as rows in the panel: each version, oldest first, with where it was said; the one selected bold,
- *  each other a press that selects it. [{runs, part}] */
-function historyRows(history, claim, tone) {
+/** A line with spans of it tinted (the cited words), as runs. */
+export function tinted(text, spans = []) {
   const out = []
-  for (const c of history) {
-    const said = (c.said || []).find(x => x.sentence || x.quote)
-    const who = c.by === 'person' ? 'you said' : 'Claude said'
-    const part = c.id === claim.id ? null : `was-${c.id}`
-    out.push({ runs: [{ s: dotOf(c), tone: tone(c) }, { s: ' ' }, { s: sentenceOf(c.text), bold: c.id === claim.id }], part })
-    out.push({ runs: said ? [{ s: '  ' }, { s: who, tone: 'dim' }, { s: ` “${one(said.sentence || said.quote)}”` }] : [{ s: '  ' }, { s: who, tone: 'dim' }], part })
+  let at = 0
+  for (const [a, b] of spans.filter(([x, y]) => y > x).sort((x, y) => x[0] - y[0])) {
+    if (a < at) continue
+    if (a > at) out.push({ s: text.slice(at, a) })
+    out.push({ s: text.slice(a, b), tint: true })
+    at = b
   }
-  return out
+  if (at < text.length) out.push({ s: text.slice(at) })
+  return out.length ? out : [{ s: ' ' }]
 }
 
-/** One graph of clusters on a canvas: their names in plain gray, their claims as dots in the cluster's color, no lines.
- *  With a selection (`chosen`), the cluster selected stays lit and every other dot and name dims; its dots are bold
- *  while the cluster itself is selected, else only the claim selected is. A name is a press on its cluster (`g:<key>`),
+/**
+ * A citation's evidence as its card in the reply draws it (tray/tray.ts citationBody), in `room` characters: for a
+ * value code computed, the one line of the code that printed it and the output line that holds it, with how many output
+ * lines it leaves out; for a file, its place and the cited line. The cited words' spans in the line. Null without
+ * evidence. {code?, place?, text, spans, more}
+ */
+export function snippetOf(ev, room) {
+  const line = evidenceLine(ev)
+  if (!line) return null
+  const fit = lineWindow(line, Math.max(9, room))
+  if (ev.kind === 'computed') return { code: printLine(ev.code, line.text), text: fit.text, spans: fit.spans, more: hiddenOutput(ev) }
+  return { place: `${ev.file}:${line.n ?? ev.line}`, text: fit.text, spans: fit.spans, more: 0 }
+}
+
+/**
+ * A citation in the panel, as rows of runs W wide: its check's sign, its words underlined (and the check's word when it
+ * is not verified); what it was, when the check corrected it, or why it is wrong; then its evidence (snippetOf): the code
+ * line in the code's color or the file's place dim, then the line after a dim │, the cited words tinted, and `+ N more
+ * lines` when the output has more.
+ */
+export function citationRows(s, W) {
+  const key = s.status === 'failed' && s.failedBy === 'evidence' ? 'unconfirmed' : s.status || 'unchecked'
+  const [sign, tone] = SIGN[key] || SIGN.unchecked
+  const word = STATUS_WORD[key]
+  const rows = [fit([{ s: sign, tone, bold: true }, { s: ' ' }, { s: one(s.shown || s.label), underline: true }, ...(word ? [{ s: `  ${word}`, tone: 'dim' }] : [])], W)]
+  const dim = t => wrap(t, W - 2).forEach(l => rows.push([{ s: '  ' }, { s: l, tone: 'dim' }]))
+  if (s.status === 'corrected' && s.was) dim(`was ${one(s.was)}`)
+  else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
+  const sn = s.status === 'checking' || s.status === 'gone' ? null : snippetOf(s.evidence, W - 4)
+  if (!sn) return rows
+  if (sn.code) rows.push([{ s: '  ' }, { s: cut(sn.code, W - 2), tone: 'code' }])
+  if (sn.place) rows.push([{ s: '  ' }, { s: cut(sn.place, W - 2), tone: 'dim' }])
+  const line = [{ s: '  ' }, { s: '│', tone: 'dim-faint' }, { s: ' ' }, ...tinted(sn.text, sn.spans)]
+  const more = sn.more ? moreLines(sn.more) : ''
+  if (more && 4 + len(sn.text) + 2 + len(more) <= W) rows.push([...line, { s: `  ${more}`, tone: 'dim' }])
+  else {
+    rows.push(line)
+    if (more) rows.push([{ s: '  ' }, { s: '│', tone: 'dim-faint' }, { s: ' ' }, { s: more, tone: 'dim' }])
+  }
+  return rows
+}
+
+const bare = t => one(t).replace(/[.]$/, '')
+// why a claim was wrong, as a check of its citations said it: the reason of one it failed or corrected
+const checkWhy = c => (c?.sources || []).map(s => ((s.status === 'failed' || s.status === 'corrected') && s.reason ? s.reason : '')).find(Boolean) || ''
+
+/**
+ * What a claim says of its corrections, each {head, why, part}: a claim that corrects an earlier one, what that one said
+ * and why it was wrong (the claims look's reason, kept with the claim, else the reason of the check that failed the
+ * earlier one's citation); a claim whose citation the check corrected, what the citation said before and the check's
+ * reason; a claim a later one corrected, what the later one says and why. `part`: a press selects the other claim.
+ */
+export function correctionsOf(claim, byId) {
+  const out = []
+  const old = claim.revises ? byId.get(claim.revises) : null
+  if (old) out.push({ head: `Corrected. Before: "${bare(old.text)}".`, why: claim.why || checkWhy(old), part: `was-${old.id}` })
+  const fixed = !old && (claim.sources || []).find(s => s.status === 'corrected' && s.was)
+  if (fixed) out.push({ head: `Corrected. Before: "${bare(fixed.was)}".`, why: fixed.reason || '', part: null })
+  const later = claim.revised_by ? byId.get(claim.revised_by) : null
+  if (later) out.push({ head: `Corrected later: "${bare(later.text)}".`, why: later.why || checkWhy(claim), part: `was-${later.id}` })
+  return out.map(x => ({ ...x, why: x.why ? sentenceOf(x.why).replace(/^\p{Ll}/u, m => m.toUpperCase()) : '' }))
+}
+
+/** One graph of clusters on a canvas: their claims as dots in the cluster's color and their names under them in the
+ *  same color, no lines. With a selection (`chosen`), the cluster selected stays lit and every other dot and name dims;
+ *  its dots and name are bold while the cluster itself is selected, else only the claim selected is. A name is a press on its cluster (`g:<key>`),
  *  a dot a press on its claim (`d:<id>`). */
 function graphOf({ data, claims, groups, edges, W, h, claim, group, tone, chosen }) {
   const lay = layOf(claims, groups, edges, W, h)
   const c = canvas(W, lay.h)
   const keyOf = id => (id === '' ? '-' : id)
+  const toneOfGroup = k => toneOf((groups.find(g => groupKey(g) === k) || { i: 0 }).i)
   for (const nm of lay.names) {
-    const on = !chosen || keyOf(nm.id) === group
-    c.text(nm.x, nm.y, [{ s: nm.name, tone: on ? 'dim' : 'dim-faint', bold: chosen && on, part: `g:${keyOf(nm.id)}` }])
+    const k = keyOf(nm.id)
+    const on = !chosen || k === group
+    const t = toneOfGroup(k)
+    nm.lines.forEach((l, i) => c.text(nm.x, nm.y + i, [{ s: l, tone: on ? t : `${t}-faint`, bold: chosen && on, part: `g:${k}` }]))
   }
   for (const x of claims) {
     const p = lay.pos.get(x.id)
@@ -386,7 +456,7 @@ function graphOf({ data, claims, groups, edges, W, h, claim, group, tone, chosen
     const p = lay.pos.get(x.id)
     if (p) for (const dx of [-1, 1]) c.pad(p.x + dx, p.y, `d:${x.id}`)
   }
-  for (const nm of lay.names) for (const x of [nm.x - 1, nm.x + len(nm.name)]) c.pad(x, nm.y, `g:${keyOf(nm.id)}`)
+  for (const nm of lay.names) nm.lines.forEach((l, i) => { for (const x of [nm.x - 1, nm.x + len(l)]) c.pad(x, nm.y + i, `g:${keyOf(nm.id)}`) })
   return c
 }
 
@@ -422,56 +492,70 @@ export function groupOf(data, key) {
   return { g, name: g ? g.name : 'between clusters', cs: (data.claims || []).filter(c => claimGroup(data, c) === String(key)) }
 }
 
+/** A cluster's name as rows W wide: its dot and the name wrapped (bold when `bold`), and after it, on its last row
+ *  when they fit, else on a row of their own, the dim words `after`. Every run a press on `part`. */
+function nameRows(name, tone, W, { bold = false, after = '', part = null } = {}) {
+  const lines = wrap(name, W - 2)
+  const rows = lines.map((l, i) => [{ s: i ? '  ' : '● ', tone, part }, { s: l, ...(bold ? { bold: true } : { tone }), part }])
+  if (after) {
+    const last = rows[rows.length - 1]
+    if (2 + len(lines[lines.length - 1]) + 2 + len(after) <= W) last.push({ s: `  ${after}`, tone: 'dim', part })
+    else rows.push([{ s: '  ', part }, { s: after, tone: 'dim', part }])
+  }
+  return rows
+}
+
 /**
  * The panel under the graph, as rows of runs W wide, after a rule. With a cluster selected (`claim` null): its name,
  * what it holds, and its claims, one line each, each a press that selects it (`n:<id>`); at most `maxSubs` of them. With
- * a claim selected: its cluster's name (a press selects the cluster, `g:<key>`), then the claim's whole sentence; e
- * (`open` 'ev') adds its citations (a press: the citation's evidence, `ev-N`), h ('hist') its history (a press: that
- * version, `was-<id>`). `fixed` rows come before the cluster's claims. {rows, fixed}
+ * a claim selected, all of it: its cluster's name (a press selects the cluster, `g:<key>`), the claim's whole sentence
+ * in bold with its turn, its corrections (correctionsOf; a press on one selects the other claim, `was-<id>`), and each
+ * citation (citationRows; a press opens its evidence, `ev-N`). `fixed` rows come before the cluster's claims.
+ * {rows, fixed}
  */
-export function panelOf({ data, claim, group, open, evidence, history, tone, W, maxSubs = 8 }) {
+export function panelOf({ data, claim, group, tone, W, byId = new Map((data.claims || []).map(c => [c.id, c])), maxSubs = 8 }) {
   const { name, cs } = groupOf(data, group)
   const gtone = tone(cs[0] || claim || {})
   const top = [[{ s: '─'.repeat(W), tone: 'dim-faint' }]]
   if (!claim) {
-    top.push(fit([{ s: name, tone: gtone, bold: true }, { s: `   ${clusterWords(cs)}`, tone: 'dim' }], W))
+    top.push(...nameRows(name, gtone, W, { bold: true, after: clusterWords(cs) }))
     const k = Math.max(1, maxSubs)
     const shown = cs.length <= k ? cs : cs.slice(0, k - 1)
     const subs = shown.map(c => {
       const part = `n:${c.id}`
       return fit([{ s: '  ', part }, { s: `${dotOf(c)} `, tone: tone(c), part }, { s: sentenceOf(c.text), part }], W)
     })
-    if (cs.length > shown.length) subs.push([{ s: `  … ${cs.length - shown.length} more in this cluster: a dot selects one`, tone: 'dim' }])
+    if (cs.length > shown.length) subs.push([{ s: `  + ${cs.length - shown.length} more: a dot selects one`, tone: 'dim' }])
     return { rows: [...top, ...subs], fixed: top.length }
   }
-  const gpart = `g:${group}`
-  top.push(fit([{ s: name, tone: gtone, bold: true, part: gpart }, { s: `   ${clusterWords(cs)}`, tone: 'dim', part: gpart }], W))
-  const who = saidWords(claim)
-  const words = wrap(`${sentenceOf(claim.text)}${who ? ` · ${who}` : ''}`, W - 2)
-  words.forEach((l, i) => {
-    // the words of who said it stay dim
-    const at = who && i === words.length - 1 ? l.lastIndexOf(` · ${who}`) : -1
-    const body = at >= 0 ? [{ s: l.slice(0, at), bold: true }, { s: l.slice(at), tone: 'dim' }] : [{ s: l, bold: true }]
-    top.push([i ? { s: '  ' } : { s: `${dotOf(claim)} `, tone: tone(claim) }, ...body])
-  })
-  if (open === 'ev') {
-    if (!evidence.length) top.push([{ s: '  ' }, { s: 'It cites nothing.', tone: 'dim' }])
-    evidence.forEach((s, i) => {
-      const part = s.row && s.n ? `ev-${i + 1}` : null
-      top.push(fit([{ s: '  ', part }, ...evidenceRuns(s).map(r => ({ ...r, part }))], W))
-    })
+  top.push(...nameRows(name, gtone, W, { part: `g:${group}` }))
+  // the claim in full, bold, its turn (and who said it, how often) dim after it
+  const when = [claim.turn != null ? `turn ${claim.turn}` : '', saidWords(claim)].filter(Boolean).join(' · ')
+  const words = wrap(sentenceOf(claim.text), W)
+  words.forEach((l, i) => top.push([{ s: l, bold: true }, ...(when && i === words.length - 1 && len(l) + 2 + len(when) <= W ? [{ s: `  ${when}`, tone: 'dim' }] : [])]))
+  if (when && len(words[words.length - 1] || '') + 2 + len(when) > W) top.push([{ s: when, tone: 'dim' }])
+  const fixes = correctionsOf(claim, byId)
+  if (fixes.length) top.push([])
+  for (const x of fixes) {
+    for (const l of wrap(x.head, W)) top.push([{ s: l, tone: 'dim', part: x.part }])
+    if (x.why) for (const l of wrap(`Why: ${x.why}`, W)) top.push([{ s: l, tone: 'dim', part: x.part }])
   }
-  if (open === 'hist') for (const r of historyRows(history, claim, tone)) top.push(fit([{ s: '  ', part: r.part }, ...r.runs.map(x => ({ ...x, part: r.part }))], W))
+  const evidence = evidenceOf(claim)
+  top.push([])
+  if (!evidence.length) top.push([{ s: 'It cites nothing.', tone: 'dim' }])
+  evidence.forEach((s, i) => {
+    const part = s.row && s.n ? `ev-${i + 1}` : null
+    for (const r of citationRows(s, W)) top.push(r.map(x => ({ ...x, part })))
+  })
   return { rows: top, fixed: top.length }
 }
 
 /**
  * The Claims pane as rows of runs, w × h cells (the rows the pane has; the keys' row under it takes two): the head,
- * then the graph, then the panel under it (panelOf). `st` = {claim, group, open, at}: the claim selected, else the
- * cluster selected (its key), what e or h opened ('ev' | 'hist'), the last turn when it was selected. Returns {head,
- * graph, panel, claim, group, history, chosen, open}; head, graph and panel are rows of runs, a run's `part` what a
- * press on it does (`g:<key>` a cluster, `d:<id>` a dot, `n:<id>` a claim of the cluster in the panel, `ev-N`,
- * `was-<id>`).
+ * then the graph, then the panel under it (panelOf). `st` = {claim, group, at}: the claim selected, else the cluster
+ * selected (its key), the last turn when it was selected. Returns {head, graph, panel, claim, group, history, chosen};
+ * head, graph and panel are rows of runs, a run's `part` what a press on it does (`g:<key>` a cluster, `d:<id>` a dot,
+ * `n:<id>` a claim of the cluster in the panel, `ev-N` a citation, `was-<id>` another version of the claim).
  */
 export function graphView(data, st = {}, { w = 90, h = 40 } = {}) {
   const W = Math.max(40, w)
@@ -484,23 +568,21 @@ export function graphView(data, st = {}, { w = 90, h = 40 } = {}) {
   for (const g of data.gaps || []) head.push([{ s: `Turn ${g.turn} was not read: `, tone: 'bad' }, { s: cut(g.why || 'the look at the answer failed', W - 24), tone: 'dim' }])
   if (!claims.length) {
     head.push([], [{ s: 'No claims yet. After each answer, the statements in it come here.', tone: 'dim' }])
-    return { head, graph: [], panel: [], claim: null, group: null, history: [], chosen: false, open: null }
+    return { head, graph: [], panel: [], claim: null, group: null, history: [], chosen: false }
   }
   const { claim, group, fresh } = selectedOf(data, st)
-  const evidence = claim ? evidenceOf(claim) : []
   const history = claim ? historyOf(claim, byId) : []
-  const open = claim && (st.open === 'ev' || (st.open === 'hist' && history.length > 1)) ? st.open : null
   const H = Math.max(10, h - 2)
   // the graph keeps the same rows whatever is selected, so its dots keep their places: PANEL rows are kept for the panel
   // under it (at least 8 rows stay the graph's), and the cluster's claims fit in what the panel's other rows leave
   const all = Math.max(6, H - head.length - 1)
   const room = Math.max(Math.min(8, all), all - PANEL)
-  const panelArgs = { data, claim, group, open, evidence, history, tone, W }
+  const panelArgs = { data, claim, group, tone, W, byId }
   const fixed = panelOf({ ...panelArgs, maxSubs: 1 }).fixed
   const panel = panelOf({ ...panelArgs, maxSubs: Math.max(3, all - room - fixed) }).rows
   const chosen = !fresh && (!!claim || (st.group != null && String(st.group) === group))
   const graph = graphOf({ data, claims, groups, edges: data.edges || [], W, h: room, claim, group, tone, chosen }).rows()
-  return { head, graph, panel, claim, group, history, chosen, open }
+  return { head, graph, panel, claim, group, history, chosen }
 }
 
 /** The head: Claims, how many and in how many clusters. */

@@ -5,7 +5,7 @@
 // folder (core/env.ts keptDir):
 //
 //   {v: 1, session, updated,
-//    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?,
+//    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?,
 //              links?: [{to, how: supports | contradicts | same topic}]}],
 //    clusters: [{id, name, turn, named}],
 //    gaps: [{turn, why}]}
@@ -13,11 +13,14 @@
 //   a place  {row, by, turn, quote, sentence, start, end}: where a claim was said, the message row, who said it
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown.
 //   ×N       a claim's said.length: each distinct place it was said.
+//   why      on a claim that revises another: why the earlier one was wrong, as the lens gave it. The pane shows it
+//            under the claim with what the earlier one said (graph.js correctionsOf); with none, the reason of the
+//            check that failed the earlier one's citation stands for it.
 //   a source {ref, label, row?, at?, quote?}: a citation `[words](#)` near the claim's words, {ref: `<row>@<offset>`,
 //            row, at: the citation's offset in the row's markdown, label: its words}, which the reply's marks
 //            (marks/store.ts) give a check and evidence.
 //
-// After a turn of work the observer's pass lists the turn's claims ({quote, claim, by, cluster, same, revises, links});
+// After a turn of work the observer's pass lists the turn's claims ({quote, claim, by, cluster, same, revises, why, links});
 // applyTurn places each by its quote in the turn's messages, takes the citations in or near its sentence as its
 // sources, merges a restatement into the claim it repeats (a new place, so ×N grows), links a correction both ways
 // (revises / revised_by), keeps the links a claim names to others, and puts each new claim in a cluster: one named so
@@ -31,6 +34,7 @@ export function linkSpans(text) {
 const MAX_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
+const MAX_WHY = 240
 /** A cluster grown this much since it was named is offered to the lens to rename or split. */
 export const GROWN = { least: 6, factor: 2 }
 
@@ -413,7 +417,8 @@ export function parseClaims(list) {
     if (!quote || (!same && !text)) continue
     // `at`: its place in the lens's list (1 for the first), which a later claim of the same turn revises as "#1"
     const links = (Array.isArray(x.links) ? x.links : []).map(l => ({ to: str(String(l?.to ?? ''), 20), how: howOf(l?.how ?? l?.type) })).filter(l => l.to && l.how).slice(0, 4)
-    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null, links })
+    const revises = str(String(x.revises ?? ''), 20) || null
+    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises, why: (revises && str(x.why, MAX_WHY)) || null, links })
   }
   // every claim the turn gave: a long answer can state many
   return out
@@ -473,6 +478,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     const old = it.revises ? store.claims.find(c => c.id === it.revises) : null
     if (old) {
       claim.revises = old.id
+      if (it.why) claim.why = it.why
       old.revised_by = id
       res.revised.push(old.id)
       if (!claim.cluster) claim.cluster = old.cluster ?? null

@@ -5,6 +5,8 @@
 //   themeOf(value)   Claude Code's `theme` setting as a set: its light themes the light one, every other the dark one
 //                    (`auto` too: Claude Code does not say what the terminal matched)
 //   themeNow($)      the set now, from the `theme` row of /config, read again when the last read is a second old
+//   CITE_TINT        the cited words' soft tint, and CODE_INK a line of code's color, per set (the citations' card,
+//                    the evidence pane, the Claims pane)
 //
 // No hook tells a plugin that the person picked another theme (/theme and /config write it themselves), so the drawing
 // hooks ask: the screen draws again when the theme changes, and the first drawing after it reads the new one. A card
@@ -18,6 +20,11 @@ const FRESH_MS = 1000
 
 let current: Theme = 'dark'
 let readAt = -Infinity
+
+/** The cited words' tint, per theme: a soft purple behind them that reads on a dark and a light background. */
+export const CITE_TINT: Record<Theme, string> = { dark: '#3d3560', light: '#ebe4fd' }
+/** The color of a line of code, per theme: Claude Code's theme has no key for code, so a calm blue. */
+export const CODE_INK: Record<Theme, string> = { dark: '#9cdcfe', light: '#2b5fa8' }
 
 export const themeOf = (value: unknown): Theme => (String(value ?? 'dark').startsWith('light') ? 'light' : 'dark')
 
