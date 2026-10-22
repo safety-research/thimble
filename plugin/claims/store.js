@@ -13,9 +13,9 @@
 //   a place  {row, by, turn, quote, sentence, start, end}: where a claim was said, the message row, who said it
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown.
 //   ×N       a claim's said.length: each distinct place it was said.
-//   why      on a claim that revises another: why the earlier one was wrong, as the lens gave it. The pane shows it
-//            under the claim with what the earlier one said (graph.js correctionsOf); with none, the reason of the
-//            check that failed the earlier one's citation stands for it.
+//   why      on a claim that revises another: why the earlier one was wrong, as the lens gave it. The pane shows it in
+//            the claim's history (e) with what the earlier one said (graph.js correctionsOf); with none, the reason
+//            of the check that failed the earlier one's citation stands for it.
 //   a source {ref, label, row?, at?, quote?}: a citation `[words](#)` near the claim's words, {ref: `<row>@<offset>`,
 //            row, at: the citation's offset in the row's markdown, label: its words}, which the reply's marks
 //            (marks/store.ts) give a check and evidence.

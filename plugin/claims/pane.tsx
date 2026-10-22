@@ -1,12 +1,14 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
 // out: the head (how many claims), the graph of clusters, the panel under it (the cluster selected and its claims, or
-// the claim selected, all of it: its cluster, its sentence, its corrections and its citations with their evidence),
-// and the keys. A click is the main way to move: a cluster's name selects the cluster, a dot or a claim in the panel
-// selects that claim (its dot again, the cluster); a citation opens its evidence pane. Tab and Enter reach the same
+// the claim selected in that list, with its chips, and its evidence when opened), and the keys. A click is the main way
+// to move: a cluster's name selects the cluster, a dot or a claim in the panel selects that claim (its dot again, the
+// cluster); a citation opens its evidence pane; where it was said opens the message. Tab and Enter reach the same
 // Buttons.
 //
-//   keys while the pane holds the keyboard, each once: n p the next or previous cluster · m where it was said (a claim
-//   selected) · b back (where it was said). The input under the pane asks about what is selected (threads/pane.tsx).
+//   keys while the pane holds the keyboard, each once: n p the next or previous cluster · e the claim's evidence, open
+//   or closed (a claim selected) · j k the next or previous citation (evidence open, two or more citations) · b back
+//   (where it was said). A Button's hotkey is a letter or a digit, so the citations step on j k, not ] [. The input
+//   under the pane asks about what is selected (threads/pane.tsx).
 //
 // A claim's citations are the reply's marks near its words (store.js sources): their check and evidence come from
 // marks/store.ts as they stand now, so a check that ends after the look shows in the panel.
@@ -129,7 +131,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const data = await withMarks($, paneData(await claimsStore($)))
   const keys: { k: string; label: string; onPress: () => unknown }[] = []
   const key = (k: string, label: string, onPress: () => unknown) => keys.push({ k, label, onPress })
-  const keep = { claim: a.claim ?? null, group: a.group ?? null, at: a.at ?? null }
+  const keep = { claim: a.claim ?? null, group: a.group ?? null, at: a.at ?? null, ...(a.open ? { open: true, cite: a.cite ?? 0 } : {}) }
 
   // ---- where a claim was said
   if (a.source) {
@@ -172,13 +174,22 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const ev = /^ev-(\d+)$/.exec(part)
     if (ev && claim) return openEvidence((claim.sources || [])[Number(ev[1]) - 1])
     if (part.startsWith('was-')) return pick(part.slice(4))
+    if (part === 'src' && claim) return openSource(claim)
   }
   if (data.groups.length > 1 && group != null) {
     // at rest the panel shows a cluster the map does not light yet: n lights that one, then walks on
     key('n', 'next', () => pickGroup(view.chosen ? hopCluster(data, group, 1) : group))
     key('p', 'previous', () => pickGroup(hopCluster(data, group, -1)))
   }
-  if (claim) key('m', 'where it was said', () => openSource(claim))
+  if (claim) {
+    const at = { claim: claim.id, at: data.last }
+    const cite = Math.max(0, Math.min(view.cites - 1, Number(a.cite) || 0))
+    if (a.open && view.cites > 1) {
+      key('j', 'next citation', () => showClaims($, { ...at, open: true, cite: (cite + 1) % view.cites }))
+      key('k', 'previous citation', () => showClaims($, { ...at, open: true, cite: (cite + view.cites - 1) % view.cites }))
+    }
+    key('e', a.open ? 'close' : 'evidence', () => showClaims($, a.open ? at : { ...at, open: true, cite }))
+  }
   const row = (r: Run[], k: string) => rowEl(els, r, k, press, theme)
   return Box({ flexDirection: 'column', children: [
     ...(view.head as Run[][]).map((r, i) => row(r, `h${i}`)),
