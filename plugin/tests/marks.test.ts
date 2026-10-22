@@ -232,16 +232,17 @@ test('a resumed session draws the marks as their check left them; a check the se
   expect(second!.checking).toBe(0)
 })
 
-test('a corrected citation draws as a settled one (purple, underlined); a wrong one red with ×; one not confirmed with ?', () => {
+test('a corrected citation draws as a settled one (purple, underlined); a wrong one red with ×; one not confirmed with ?; each underlined', () => {
   const text = 'Merged [15 of 40](#), opened [7](#), closed [3](#).'
   const marks = marksIn(text)
   const looks = [{ n: 1, status: 'corrected', shown: '12 of 40' }, { n: 2, status: 'failed' }, { n: 3, status: 'unconfirmed' }] as Any
   const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
   const look = (words: string) => els.find(n => n.type === 'Text' && n.props.children === words)?.props
   expect(look('12 of 40')).toMatchObject({ color: 'merged', underline: true })
-  expect(look('7')).toMatchObject({ color: 'error' })
+  expect(look('7')).toMatchObject({ color: 'error', underline: true })
   expect(look(' ×')).toMatchObject({ color: 'error' })
-  expect(look('3')).toMatchObject({ color: 'warning' })
+  expect(look('3')).toMatchObject({ color: 'warning', underline: true })
+  expect(look(' ?')?.underline).toBeUndefined()
   expect(look(' ?')).toMatchObject({ color: 'warning' })
   // without a gutter (a reply inside the tray's frame) no margin cell stands before its rows: they start at the left
   const rowsOf = (gutter?: boolean) => messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: false, spin: '', gutter, onMark: () => undefined }).props.children

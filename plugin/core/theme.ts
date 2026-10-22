@@ -1,10 +1,17 @@
-// theme.ts: Claude Code's theme as thimble's colors read it, 'dark' or 'light'. Most of thimble draws in Claude Code's
-// theme keys (`merged`, `planMode`, `claude`), which follow the theme by themselves; what draws in its own colors (the
-// cards' palette, the explainers' tint inside a citation) asks this module which set to use.
+// theme.ts: which of thimble's two hex sets, 'dark' or 'light', suits the theme Claude Code draws in now. Most of
+// thimble draws in Claude Code's theme keys (`merged`, `planMode`, `permission`, `selectionBg`,
+// `userMessageBackground`), which Claude Code resolves to the shade of the theme it draws in, auto included; prefer a
+// key. Only what has no key (the cards' palette, the explainers' tints) asks this module which hex set to use.
 //
-//   themeOf(value)   Claude Code's `theme` setting as a set: its light themes the light one, every other the dark one
-//                    (`auto` too: Claude Code does not say what the terminal matched)
-//   themeNow($)      the set now, from the `theme` row of /config, read again when the last read is a second old
+//   themeOf(value, o)  Claude Code's `theme` setting as a set, as Claude Code resolves it:
+//                        light, light-daltonized, light-ansi            the light set; dark, dark-* the dark set
+//                        custom:<slug>                                  its base (o.base, from its file)
+//                        auto ("match terminal")                        what the terminal reports in COLORFGBG (o.fgbg),
+//                                                                       as Claude Code reads it
+//                      Claude Code also asks the terminal for its background (OSC 11), and keeps the answer to itself.
+//                      When COLORFGBG says nothing, auto is the light set: its colors read on a light and on a dark
+//                      background (contrast 3.2 or more on both), and the dark set's do not on a light one.
+//   themeNow($)        the set now, from the `theme` row of /config, read again when the last read is a second old
 //
 // No hook tells a plugin that the person picked another theme (/theme and /config write it themselves), so the drawing
 // hooks ask: the screen draws again when the theme changes, and the first drawing after it reads the new one. A card
@@ -19,7 +26,39 @@ const FRESH_MS = 1000
 let current: Theme = 'dark'
 let readAt = -Infinity
 
-export const themeOf = (value: unknown): Theme => (String(value ?? 'dark').startsWith('light') ? 'light' : 'dark')
+/** COLORFGBG (`fg;bg`, or `fg;default;bg`) as Claude Code reads it: the last field is the background's color number,
+ *  0–6 and 8 dark, the others light; null when it says nothing. */
+export function themeOfFgbg(value: unknown): Theme | null {
+  const last = String(value ?? '').split(';').at(-1) ?? ''
+  if (!/^\d+$/.test(last)) return null
+  const n = Number(last)
+  if (n > 15) return null
+  return n <= 6 || n === 8 ? 'dark' : 'light'
+}
+
+export function themeOf(value: unknown, o: { fgbg?: unknown; base?: unknown } = {}): Theme {
+  const v = String(value ?? 'dark')
+  if (v === 'auto') return themeOfFgbg(o.fgbg) ?? 'light'
+  if (v.startsWith('light')) return 'light'
+  if (v.startsWith('dark')) return 'dark'
+  // a custom theme draws over its base; a plugin's theme whose base is not known, by its name
+  if (typeof o.base === 'string' && o.base && o.base !== v) return themeOf(o.base, { fgbg: o.fgbg })
+  return /light/i.test(v) ? 'light' : 'dark'
+}
+
+/** A custom theme's base, from its file in Claude Code's themes folder (`custom:<slug>` is `themes/<slug>.json`). */
+async function baseOf($: Engine, value: string): Promise<string | undefined> {
+  const slug = value.startsWith('custom:') ? value.slice('custom:'.length) : ''
+  if (!slug || /[/\\]|\.\./.test(slug)) return undefined
+  const quiet = (p: Promise<string | undefined>) => p.catch(() => undefined)
+  try {
+    const dir = (await quiet($.env.get('CLAUDE_CONFIG_DIR'))) || `${(await quiet($.env.get('HOME'))) ?? ''}/.claude`
+    const base = JSON.parse(String(await $.fs.read(`${dir.replace(/\/+$/, '')}/themes/${slug}.json`)))?.base
+    return typeof base === 'string' ? base : undefined
+  } catch {
+    return undefined
+  }
+}
 
 export async function themeNow($: Engine): Promise<Theme> {
   let now = 0
@@ -27,7 +66,11 @@ export async function themeNow($: Engine): Promise<Theme> {
   if (now && now - readAt < FRESH_MS) return current
   readAt = now
   try {
-    const next = themeOf((await $.config.list()).find(r => r.key === 'theme')?.value)
+    const value = String((await $.config.list()).find(r => r.key === 'theme')?.value ?? 'dark')
+    let fgbg: string | undefined
+    if (value === 'auto') { try { fgbg = await $.env.get('COLORFGBG') } catch { fgbg = undefined } }
+    const base = value.startsWith('custom:') ? await baseOf($, value) : undefined
+    const next = themeOf(value, { fgbg, base })
     if (next !== current) {
       current = next
       // what was drawn in the other set draws again (a drawing hook asks this; the screen draws after it)
