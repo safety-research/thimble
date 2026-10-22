@@ -7,12 +7,13 @@
 //     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away)
 //     state.json          the person's state of that version (what the view set with setState) and its search
 //
-//   $.state: card (meta, by id), cardTree (the runner's drawing, by id), cardFocus (the card that takes keys),
-//   cardSearch (the card a `/` search types into), cardsAt (the cards drawn under an answer, by the answer's row),
-//   cardCall (the card each call drew or changed, by the call's tool_use_id)
+//   $.state: card (meta, by id), cardTree (the runner's drawing, by id), cardFocus (the card that takes keys first),
+//   cardSeen (the cards drawn on screen since the plugin loaded), cardSearch (the card a `/` search types into),
+//   cardsAt (the cards drawn under an answer, by the answer's row), cardCall (the card each call drew or changed, by the
+//   call's tool_use_id)
 //
 // A card's id comes from the call that first drew it, so a resumed session finds a card from its call's row alone.
-import type { EngineInterface } from 'claude-code'
+import { update, type EngineInterface } from 'claude-code'
 
 import { thimbleHome } from '../core/env'
 import { sessionKey } from '../hooks/conversation'
@@ -25,8 +26,8 @@ export type CardMeta = {
   id: string
   version: number // the version on screen; 0 while no version has drawn
   title: string
-  toolUseId: string // the call that drew its first version: it draws under that call
-  agentId: string | null
+  toolUseId: string // the call of main's that drew the version on screen: it draws under that call
+  agentId: string | null // the fork that drew the version on screen (a designer's), or null for main
   anchorRow: string | null // the answer a designer fork's card draws under
   keys: string[]
   rows: number
@@ -37,11 +38,13 @@ export type CardMeta = {
   calls: Record<string, CardCall> // each call of the card, by its tool_use_id
   at: number
 }
-export type CardTree = { gen: number; width: number; tree: unknown; pointer: boolean }
+/** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it. */
+export type CardTree = { gen: number; width: number; tree: unknown; pointer: boolean; seq: number }
 
 const CARD = { plugin: 'thimble', key: 'card' } as const
 const TREE = { plugin: 'thimble', key: 'cardTree' } as const
 const FOCUS = { plugin: 'thimble', key: 'cardFocus' } as const
+const SEEN = { plugin: 'thimble', key: 'cardSeen' } as const
 const SEARCH = { plugin: 'thimble', key: 'cardSearch' } as const
 const AT = { plugin: 'thimble', key: 'cardsAt' } as const
 const CALL = { plugin: 'thimble', key: 'cardCall' } as const
@@ -91,8 +94,18 @@ export async function treeOf($: Engine, id: string): Promise<CardTree | null> {
   return ((await $.state.get({ ...TREE, id })).value ?? null) as CardTree | null
 }
 
+/** The card's drawing, unless the one it holds came from a newer answer of the runner's. */
 export async function setTree($: Engine, id: string, t: CardTree): Promise<void> {
-  await $.state.set({ ...TREE, id }, t)
+  await update($, { ...TREE, id }, cur => ((cur as CardTree | undefined)?.seq ?? 0) > t.seq && (cur as CardTree).gen === t.gen ? cur : t)
+}
+
+/** The cards drawn on screen since the plugin loaded: only they take keys. */
+export async function seenNow($: Engine): Promise<string[]> {
+  return ((await $.state.get(SEEN)).value ?? []) as string[]
+}
+
+export async function markSeen($: Engine, id: string): Promise<void> {
+  await update($, SEEN, cur => ((cur ?? []).includes(id) ? cur : [...(cur ?? []), id]))
 }
 
 export async function focusNow($: Engine): Promise<string | null> {

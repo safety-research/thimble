@@ -92,6 +92,28 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.deepEqual((await ask('draw', { id, width: 40, text: true })).lines.slice(1, 3), ['bram 5', '[ add ten ]'])
 })
 
+test('the tree holds only what Claude Code draws: a Button of words, and strings with no control character', async () => {
+  const boxed = 'function view(p, s) { const { Box, Text, Button } = s.elements; return Button({ onPress: () => {}, children: Box({ children: Text({ children: "x" }) }) }) }'
+  const r1 = (await load(boxed)).r
+  assert.equal(r1.ok, false)
+  assert.match(r1.error, /a Button holds <Box>/)
+  const empty = 'function view(p, s) { const { Button } = s.elements; return Button({ onPress: () => {} }) }'
+  assert.match((await load(empty)).r.error, /a Button has no words/)
+  const ctrl = 'function view(p, s) { const { Text } = s.elements; return Text({ children: "a\\u0080b\\u0007c\\td" }) }'
+  const r3 = (await load(ctrl)).r
+  assert.equal(r3.ok, true)
+  assert.deepEqual(r3.tree.c[0].c, ['abc d'])
+})
+
+test('a file that is an object gives its rows as props.rows and the whole object as props.data; each answer has a newer seq', async () => {
+  writeFileSync(join(dir, 'obj.json'), JSON.stringify({ rows: [{ a: 1 }], meta: { total: 9 } }))
+  const view = 'function view(p, s) { return s.elements.Text({ children: p.rows.length + " of " + p.data.meta.total }) }'
+  const r = await ask('load', { id: 'c0000aaaa', version: 1, title: 'T', view, rows: join(dir, 'obj.json'), width: 40 })
+  assert.deepEqual([r.lines, r.summary.other], [['1 of 9'], ['meta']])
+  const again = await ask('draw', { id: 'c0000aaaa', width: 40 })
+  assert.ok(again.seq > r.seq)
+})
+
 test('a card loads again with the state it kept', async () => {
   const { r } = await load(COUNTER, { state: { n: 7 }, query: 'cl' })
   assert.deepEqual(r.lines.slice(0, 2), ['count 7', 'cleo 1'])

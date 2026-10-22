@@ -1,6 +1,6 @@
 // register.ts: cards. Claude writes rows as a JSON file and calls the `card` tool with the file and a short view; the
 // plugin runs the view in its runner, draws the card under the call (or under the answer v was pressed on), takes the
-// focused card's keys at an empty prompt, and gives Claude a text copy of what it drew.
+// cards' keys at an empty prompt, and gives Claude a text copy of what it drew.
 //
 //   tool.ts      the card tool: one call draws a card, or a new version of one, and answers its text copy
 //   runner.mjs   the runner, one Node process per session: each card's view in a sandbox, its state and handlers
@@ -15,12 +15,16 @@ import type { Register } from 'claude-code'
 
 import { failNotice } from '../bar/fix'
 import { featureOn } from '../settings/features.mjs'
-import { cardKey, cardPost, clientFault, frame, framesUnder, keepSearch, keptSearchEdit, noteColumns, searchTyped } from './draw'
+import { cardKey, cardPost, clientFault, frame, framesUnder, keepSearch, keyOwner, noteColumns, searchRestored, searchTyped } from './draw'
 import { callOf, cardIdOf, metaOf, restoreCards, searchNow } from './store'
 import { cardCall, registerCardTool } from './tool'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
+
+const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
+// the keys cards took since the person last typed into the box, in the order pressed
+let taken = ''
 
 export const registerCards: Register = on => {
   // the tool, and the cards this conversation drew before (a resumed session, a reload of the plugin)
@@ -41,24 +45,24 @@ export const registerCards: Register = on => {
     return cardCall($, e)
   }).catch(() => ({ result: 'The card did not draw: thimble failed while it drew the card. Call card again; if it fails again, tell the analyst that cards do not work here.' }))
 
-  // the call's row: the call in short (the view's code only in ctrl+o), then the card under the call that first drew
-  // it; a later call that drew a new version says so in one dim line
+  // the call's row: the call in short (the view's code only in ctrl+o), then the card under the call that drew its
+  // version on screen; an earlier call of the card says, in one dim line, that the card now stands further down
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__thimble__card' } }, async ($, e, next) => {
     noteColumns(e.viewport?.columns)
     if (!featureOn('cards')) return next(e)
     const input = (e.props.input ?? {}) as Any
     const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title ?? ''), data: String(input.data ?? '') } } })
-    const id = input.id ? String(input.id) : cardIdOf(e.props.tool_use_id)
+    const id = (await callOf($, e.props.tool_use_id)) ?? (input.id ? String(input.id) : cardIdOf(e.props.tool_use_id))
     const meta = await metaOf($, id)
     if (!meta || meta.version < 1) return own
     const E = $.ui.resolve(e) as Any
-    if (meta.toolUseId !== e.props.tool_use_id) {
+    if (meta.anchorRow || meta.toolUseId !== e.props.tool_use_id) {
       const call = meta.calls[e.props.tool_use_id]
       if (!call || call.error) return own
-      const words = `  ↑ version ${call.version} of “${call.title ?? meta.title}” was drawn in the place of the card above${call.version < meta.version ? `, which now shows version ${meta.version}` : ''}`
-      return E.Box({ flexDirection: 'column', children: [own, E.Text({ key: 'moved', dimColor: true, wrap: 'wrap', children: words })] })
+      const where = meta.anchorRow ? 'under the answer v was pressed on' : 'further down'
+      const words = `↓ “${cut(meta.title, 60)}” is drawn ${where}, as version ${meta.version}`
+      return E.Box({ flexDirection: 'column', children: [own, E.Box({ key: 'moved', marginLeft: 2, children: [E.Text({ dimColor: true, wrap: 'wrap', children: words })] })] })
     }
-    if (meta.anchorRow) return own
     return E.Box({ flexDirection: 'column', children: [own, await frame($, e, meta, null)] })
   }).catch(($, e, next) => next(e))
 
@@ -96,26 +100,43 @@ export const registerCards: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // keys at an empty prompt reach the focused card when it lists them (v and the failure line's keys come first); while
-  // a `/` search runs, what the prompt box holds is the search
+  // keys at an empty prompt reach the card that takes them (v and the failure line's keys come first). Keys that come
+  // quickly arrive as one edit with several letters: when each is a card's key, each goes to its card in turn. Claude
+  // Code makes an edit from the box as it would be with the keys still waiting for an answer typed into it, and asks
+  // the hooks once those answers came: so a box that holds only keys the cards took (the last of them) is empty too.
+  // While a `/` search is typed, what the prompt box holds is the search.
   on('prompt.edit', { origin: { kind: /^composer$/ } }, async ($, e, next) => {
     if (!featureOn('cards')) return next(e)
     const search = await searchNow($)
-    if (search?.kept) return keptSearchEdit($, e.inputText)
-    if (search) {
+    if (search && !search.kept) {
       const r = await next(e)
       await searchTyped($, r.text)
       return r.text ? { ...r, decorations: [...(r.decorations ?? []), { start: 0, end: 0, virtualText: 'search: ', dimColor: true }] } : r
     }
+    if (e.text !== '' && !(taken && taken.endsWith(e.text))) { taken = ''; return next(e) }
+    // what the person typed after keys a card took goes in an empty box
+    const typed = () => { taken = ''; return next(e.text ? { ...e, text: '', cursor: 0, start: 0, end: 0 } : e) }
     const k = e.key
-    if (e.text !== '' || !k || k.ctrl || k.meta || [...k.key].length !== 1) return next(e)
-    return (await cardKey($, k.key)) ? { text: e.text, cursor: e.cursor } : next(e)
+    if (k && (k.ctrl || k.meta || [...k.key].length !== 1)) return typed()
+    const keys = k ? [k.key] : [...e.inputText]
+    if (!keys.length || (keys.length > 1 && keys.includes('/'))) return typed()
+    for (const key of keys) if (!(await keyOwner($, key))) return typed()
+    taken = (taken + keys.join('')).slice(-64)
+    for (const key of keys) await cardKey($, key)
+    return { text: '', cursor: 0 }
   }).catch(($, e, next) => next(e))
 
-  // Enter while a search runs keeps the search on the card and sends nothing (again while its words stay in the box)
+  // Enter while a search is typed keeps the search on the card and sends nothing; Claude Code then puts the words back
+  // in the box, and they are cleared there
   on('prompt.submit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     const search = await searchNow($)
-    if (!search || e.command || !featureOn('cards') || (search.kept && e.text !== search.text)) return next(e)
+    if (!search || search.kept || e.command || !featureOn('cards') || e.text !== search.text) return next(e)
     return { drop: await keepSearch($) }
+  }).catch(($, e, next) => next(e))
+
+  on('prompt.change', { origin: { kind: 'engine' } }, async ($, e, next) => {
+    const r = await next(e)
+    await searchRestored($, e.text)
+    return r
   }).catch(($, e, next) => next(e))
 }

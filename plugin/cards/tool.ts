@@ -6,13 +6,16 @@
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
-//   5. answers what the card read (rows, columns, the first row), the text copy, and the copy after each action
+//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width and, when it
+//      differs, at the width beside a side pane, and the copy after each action
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
-// card in its place; a version that fails leaves the one on screen, and the view's error goes back to Claude.
+// card where this call stands, and the earlier call shows one line that points to it, so the card the reply talks
+// about is always the one right above it; a version that fails leaves the one on screen, and the view's error goes back
+// to Claude.
 import type { EngineInterface } from 'claude-code'
 
-import { failNotice } from '../bar/fix'
+import { failCleared, failNotice } from '../bar/fix'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { designAnchor } from '../designer/v'
@@ -29,8 +32,9 @@ type Any = any
 
 const MAX_ROWS_BYTES = 64 * 1024 * 1024
 const COPY_LINES = 60
-/** The width the card is also drawn at for its text copy: the conversation's width beside a side pane. */
-const NARROW = 64
+/** The conversation's width beside a side pane on a terminal of 120 columns, which the card is also drawn at for its
+ *  text copy. */
+const NARROW_COLUMNS = 68
 /** thimble's own keys at an empty prompt, which a card never gets: v (designer/v.ts), r and l (bar/register.ts), f F
  *  on a failure and p u on a fix in use (bar/fix.ts). */
 export const KEPT_KEYS = ['v', 'r', 'l', 'f', 'F', 'p', 'u']
@@ -42,7 +46,7 @@ const SCHEMA = {
     title: { type: 'string', description: 'the card\'s title: what it shows, in a few words' },
     data: { type: 'string', description: 'the path of the JSON file of rows you wrote, in this folder or in $TMPDIR (a path may start with $TMPDIR/)' },
     view: { type: 'string', description: 'JavaScript that defines function view(props, surface)' },
-    id: { type: 'string', description: 'the id of a card you drew, to draw a new version in its place; leave it out for a new card' },
+    id: { type: 'string', description: 'the id of a card you drew, to draw a new version of it here; leave it out for a new card' },
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
@@ -88,7 +92,7 @@ async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: 
 }
 
 const baseName = (p: string) => String(p).split('/').filter(Boolean).pop() ?? String(p)
-const oneLine = (s: string, n: number) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return [...t].length > n ? `${[...t].slice(0, n - 1).join('')}…` : t }
+const oneLine = (s: string, n: number) => { const t = String(s ?? '').replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim(); return [...t].length > n ? `${[...t].slice(0, n - 1).join('')}…` : t }
 
 /** A text copy for Claude: at most COPY_LINES lines, and a note on the lines cut at the card's width. */
 function copyText(lines: string[], cut: number[], width: number): string[] {
@@ -156,15 +160,18 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
 
   const asked = [...new Set([...String(r.keys || '')].filter(k => /^[\p{L}\p{N}\p{P}\p{S}]$/u.test(k)))]
   const keys = asked.filter(k => !KEPT_KEYS.includes(k))
-  // a card draws under the call that drew its first version (when the first call failed, the call that fixed it)
+  // a card draws under the call of main's that drew this version, or under the answer v was pressed on when the
+  // designer fork drew it
   const next: CardMeta = {
     ...meta, version, title, keys, rows: r.summary.rows, columns: r.summary.columns, file: String(input.data),
-    gen: meta.gen + 1, error: null, anchorRow: meta.anchorRow ?? anchorRow, at: Date.now(),
-    toolUseId: meta.version === 0 ? toolUseId : meta.toolUseId,
+    gen: meta.gen + 1, error: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
+    anchorRow: fork?.kind === 'designer' ? anchorRow ?? meta.anchorRow : null,
+    toolUseId: fork?.kind === 'designer' ? meta.toolUseId : toolUseId,
   }
   await remember(next, { version, title, file: String(input.data), rows: next.rows })
-  await setTree($, id, { gen: next.gen, width, tree: r.tree, pointer: !!r.pointer })
+  await setTree($, id, { gen: next.gen, width, tree: r.tree, pointer: !!r.pointer, seq: Number(r.seq) || 0 })
   await setFocus($, id)
+  await failCleared($, `card:${id}`)
   if ((await searchNow($))?.id === id) await setSearch($, null)
   const drawnMs = Date.now() - t0
   await saveState($, id, version, r.state, null)
@@ -173,21 +180,23 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const where = next.anchorRow ? 'under the answer v was pressed on' : 'where this call stands, above the words you write after it'
   const out: string[] = [
     update && meta.version > 0
-      ? `Version ${version} of “${title}” is drawn in the place of version ${meta.version}, ${where}.`
+      ? `Version ${version} of “${title}” is drawn ${where}${next.anchorRow ? '' : '; the earlier call shows one line that points here'}.`
       : `“${title}” is drawn ${where}. Its id is "${id}": to change it, call card again with this id.`,
     `It read ${r.summary.rows} row${r.summary.rows === 1 ? '' : 's'} from ${baseName(String(input.data))}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
+  if (r.summary.other) out.push(`The file is an object: props.rows is its "rows" list, and props.data the whole object, with ${(r.summary.other as string[]).join(', ')} too.`)
   if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
   for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
   const taken = asked.filter(k => KEPT_KEYS.includes(k))
-  if (taken.length) out.push(`Note: ${taken.join(' ')} ${taken.length > 1 ? 'are' : 'is'} thimble's, so the card does not get ${taken.length > 1 ? 'them' : 'it'}; use other keys.`)
+  if (taken.length) out.push(`Note on the view: ${taken.join(' ')} ${taken.length > 1 ? 'are' : 'is'} thimble's own, so the card does not get ${taken.length > 1 ? 'them' : 'it'}; give the card other keys. The analyst has not seen ${taken.length > 1 ? 'these keys' : 'this key'} on the card.`)
   if (/\bquery\b/.test(view) && !keys.includes('/')) out.push('Note: the view reads props.query, but keys has no "/", so the analyst cannot type a search.')
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
-  if (width > NARROW) {
-    const narrow = await askCard($, next, 'draw', { width: NARROW, text: true })
+  const narrowWidth = cardWidth(NARROW_COLUMNS)
+  if (width > narrowWidth) {
+    const narrow = await askCard($, next, 'draw', { width: narrowWidth, text: true })
     await askCard($, next, 'draw', { width })
     // shown when the narrow drawing cuts or wraps lines (it has more lines), so Claude sees what the person would
-    if (narrow?.ok && (narrow.cut?.length || narrow.lines.length > r.lines.length)) out.push('', `At ${NARROW} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, NARROW))
+    if (narrow?.ok && (narrow.cut?.length || narrow.lines.length > r.lines.length)) out.push('', `At ${narrowWidth} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, narrowWidth))
   }
 
   const actions = Array.isArray(input.actions) ? input.actions : []

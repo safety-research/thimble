@@ -1,10 +1,16 @@
 // client.tsx: the one Client module that draws every card. Claude Code runs it in the terminal's drawing thread; draw.ts
-// names it by this file and hands it the card's drawing as props: {tree, width, ack}, the plain tree the runner made of
-// the view (Box, Text and Button nodes with the props each element takes). It holds no data and no logic of the card.
-// What the person does goes to the hooks module as events:
+// names it by this file and hands it the card's drawing as props: {tree, width, need, ack}, the plain tree the runner
+// made of the view (Box, Text and Button nodes with the props each element takes), or null before there is one. It
+// holds no data and no logic of the card. It sends the hooks module events:
 //
+//   {seen: true}                    once, when the instance is first drawn: the card is on screen, so it takes keys
+//   {draw: need}                    the drawing it needs (`<version>:<width>`), once for each: the card's first
+//                                   drawing in a resumed session, or the drawing at a new width
 //   {press: n}                      a Button, by the number the runner gave its onPress
 //   {pointer: {down, up, button}}   a click, sent when the button comes up
+//
+// A drawing hook may not write the session's state, so the card's frame asks through its Client, whose posts reach a
+// hook that may.
 //
 // It sets no key listener: the card's keys reach it at an empty prompt (draw.ts cardKey), so a click on the card never
 // takes the keyboard from the prompt box.
@@ -26,7 +32,7 @@ const BOX = ['flexDirection', 'flexGrow', 'flexShrink', 'flexWrap', 'alignItems'
 const TEXT = ['color', 'backgroundColor', 'dimColor', 'bold', 'italic', 'underline', 'strikethrough', 'inverse', 'wrap']
 const BUTTON = ['label', 'plain', 'dimColor', 'variant']
 
-type Instance = { id: string; n: number; queue: Array<Record<string, unknown>>; down: { x: number; y: number; button: string } | null }
+type Instance = { id: string; n: number; queue: Array<Record<string, unknown>>; down: { x: number; y: number; button: string } | null; asked: string }
 const instances = new WeakMap<object, Instance>()
 
 function pick(p: Record<string, unknown> | undefined, names: string[]): Record<string, unknown> {
@@ -44,15 +50,22 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   const width = Number(props?.width) || surface.columns || 80
   let I = instances.get(surface)
   if (!I) {
-    I = { id: Math.random().toString(36).slice(2, 10), n: 0, queue: [], down: null }
+    I = { id: Math.random().toString(36).slice(2, 10), n: 0, queue: [], down: null, asked: '' }
     instances.set(surface, I)
   }
+  const fresh = I.n === 0
   const me = I
   const ack = Number(props?.ack?.[me.id]) || 0
   if (ack) me.queue = me.queue.filter(x => Number(x.n) > ack)
   const send = (ev: Record<string, unknown>) => {
     me.queue = [...me.queue, { n: ++me.n, ...ev }].slice(-20)
     surface.post({ client: me.id, events: me.queue })
+  }
+  if (fresh) send({ seen: true })
+  const need = typeof props?.need === 'string' ? props.need : ''
+  if (need && me.asked !== need) {
+    me.asked = need
+    send({ draw: need })
   }
 
   surface.onPointer(ev => {
@@ -83,7 +96,8 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   }
 
   // the region the card's tree is laid out in, as layout.js's cardRoot lays it out for the text copy
-  return E.Box({ flexDirection: 'column', width, children: [draw(props?.tree ?? '', false)] })
+  const tree = props?.tree ? draw(props.tree, false) : E.Text({ dimColor: true, children: 'drawing…' })
+  return E.Box({ flexDirection: 'column', width, children: [tree] })
 }
 
 export default Card

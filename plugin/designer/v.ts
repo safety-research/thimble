@@ -113,6 +113,18 @@ async function checkedSince($: Engine, row: string): Promise<string> {
   return `\n\nSince that answer, thimble checked its marks against the data and found:\n${lines.join('\n')}\nThe card shows the corrected values, computed from the records.`
 }
 
+/** The card an earlier v drew under this answer, for the fork to draw a new version of: v again on the same answer
+ *  changes that card rather than adding a second one. */
+async function earlierCard($: Engine, row: string): Promise<string> {
+  for (const id of [...cardsUnder(row)].reverse()) {
+    const meta = await metaOf($, id)
+    if (meta && meta.version > 0 && meta.anchorRow === row) {
+      return `\n\nAn earlier press of v drew the card “${meta.title}” under this answer. Draw your card as a new version of it, with \`id\` "${meta.id}", so the answer keeps one card.`
+    }
+  }
+  return ''
+}
+
 /** v's fork, spawned while the key's own hook runs (the agent.spawn hook below holds it for the word window). */
 async function start($: Engine, d: Design, prompt: string): Promise<void> {
   try {
@@ -142,9 +154,9 @@ async function finish($: Engine, d: Design, e: { reason: string; answer: string 
   d.cards = drawn.map(m => m.id)
   if (!drawn.length) return end($, d, 'failed', `× v drew no card${said ? `: ${said}` : '.'}`)
   const copies: string[] = []
-  for (const m of drawn) copies.push(`“${m.title}”\n${cut(await cardText($, m.id), TELL_CHARS)}`)
+  for (const m of drawn) copies.push(`“${m.title}” (id "${m.id}")\n${cut(await cardText($, m.id), TELL_CHARS)}`)
   const what = drawn.length === 1 ? 'a card' : `${drawn.length} cards`
-  await tellAtNextPrompt($, `v:${d.key}`, `The person pressed v on your last answer, and a copy of you drew ${what} under it. As drawn now:\n\n${copies.join('\n\n')}`)
+  await tellAtNextPrompt($, `v:${d.key}`, `The person pressed v on your last answer, and a copy of you drew ${what} under it. To change one, call card with its id. As drawn now:\n\n${copies.join('\n\n')}`)
   await end($, d, 'done')
 }
 
@@ -218,7 +230,7 @@ export const registerDesigner: Register = on => {
     const d: Design = { key: `d${now.toString(36)}`, anchorRow: answerRow, agentId: null, status: 'held', at: now, cards: [] }
     current = d
     wordWindow = { at: now, cancelled: false }
-    const prompt = `${await promptText($, 'designer')}${await checkedSince($, d.anchorRow)}`
+    const prompt = `${await promptText($, 'designer')}${await checkedSince($, d.anchorRow)}${await earlierCard($, d.anchorRow)}`
     await save($, d)
     await $.state.set(NOW, d.key)
     void start($, d, prompt)

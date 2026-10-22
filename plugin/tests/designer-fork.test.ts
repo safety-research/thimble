@@ -95,5 +95,5 @@ test('a fork that drew a card ends done, and main reads the card with the next p
   expect(await s.failLine()).toBe('')
   const told = Object.values(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('a copy of you drew a card under it')
-  expect(told).toContain('“Runs of the failing test”\nWho ran the failing test\n✕ ✕ ● ✕')
+  expect(told).toContain('“Runs of the failing test” (id "c0000000000001")\nWho ran the failing test\n✕ ✕ ● ✕')
 })

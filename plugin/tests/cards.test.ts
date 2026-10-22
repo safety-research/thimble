@@ -1,6 +1,6 @@
 // Cards' hooks (cards/): a card call keeps the card and answers what it read and its text copy; the call's row draws
-// the one Client with the runner's tree; a key at an empty prompt reaches the focused card; a card a designer fork drew
-// draws under its answer. The runner is answered here, at http.fetch (cards/test/runner.test.mjs tests the real one).
+// the one Client with the runner's tree; a new version draws at the newer call; a key at an empty prompt, and a burst
+// of keys, reach the card on screen that takes them; a card a designer fork drew draws under its answer. The runner is answered here, at http.fetch (cards/test/runner.test.mjs tests the real one).
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -73,10 +73,14 @@ function world(on: Any) {
   return { files, asked, dirs, clock }
 }
 
+
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
   component: 'ToolUse', surface: 'terminal', requestId: toolUseId, viewport: { columns: 100, rows: 40, isFullscreen: true },
   props: { tool_use_id: toolUseId, tool: TOOL, input, isRunning: false, isErrored: false, isInterrupted: false },
 }) as never
+
+/** The row as the terminal shows it: its card's Client runs, and posts that it is drawn (client.tsx). */
+const shown = ($: Any, row: Any) => $.ui.mount({ plugin: 'thimble', ...row })
 
 test('a card call keeps the card and answers what it read and what it draws; its row draws the Client', async ($, on) => {
   const w = world(on)
@@ -97,7 +101,19 @@ test('a card call keeps the card and answers what it read and what it draws; its
   const client = elements(row).find(n => n.type === 'Client')
   expect(client?.props.module).toContain('client.tsx')
   expect(client?.props.props.tree).toEqual(TREE)
-  expect(textOf(row)).toContain('keys s at an empty prompt')
+  // once its Client says it is drawn, the card is on screen and lists the keys that reach it
+  const id = JSON.parse(meta![1]).id
+  await shown($, callRow('toolu_made_up_1', input))
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_1', input)))).toContain('keys s at an empty prompt')
+
+  // a new version stands at the newer call; the first call points to it
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1b', ...input, id } as never)) as Any
+  expect(String(r2.result)).toContain('Version 2 of “Scores” is drawn where this call stands')
+  const second = await $.ui.render(callRow('toolu_made_up_1b', input))
+  expect(elements(second).some(n => n.type === 'Client')).toBe(true)
+  const first = await $.ui.render(callRow('toolu_made_up_1', input))
+  expect(elements(first).some(n => n.type === 'Client')).toBe(false)
+  expect(textOf(first)).toContain('↓ “Scores” is drawn further down, as version 2')
 })
 
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {
@@ -105,12 +121,21 @@ test('a key at an empty prompt reaches the focused card when it lists the key, a
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_2', title: 'Scores', data: 'runs.json', view: VIEW } as never)
   const edit = (key: string, text = '') => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text, cursor: text.length, start: text.length, end: text.length, inputText: key } as never) as Any
+  // a card not yet on screen takes no keys
+  expect((await edit('s')).text).toBe('s')
+  await shown($, callRow('toolu_made_up_2', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(await edit('s')).toEqual({ text: '', cursor: 0 })
   expect(w.asked).toContain('key')
   const row = await $.ui.render(callRow('toolu_made_up_2', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).find(n => n.type === 'Client')?.props.props.tree).toEqual(SORTED)
   expect((await edit('q')).text).toBe('q')
   expect((await edit('s', 'a')).text).toBe('as')
+  // keys that come quickly arrive as one edit: each reaches the card; a burst with a letter no card takes is typed
+  const burst = (inputText: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText } as never) as Any
+  const keysBefore = w.asked.filter(x => x === 'key').length
+  expect(await burst('sss')).toEqual({ text: '', cursor: 0 })
+  expect(w.asked.filter(x => x === 'key').length).toBe(keysBefore + 3)
+  expect((await burst('sq')).text).toBe('sq')
 })
 
 test('a card the designer fork drew draws under the answer v was pressed on, also in a resumed session', async ($, on) => {
@@ -123,11 +148,13 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   w.dirs['/made-up/.thimble/cards/s-cards'] = ['c0123456789ab']
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const answer = (requestId: string) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.', isFirstOfReply: true } } as never)
-  // the first drawing asks the runner, which loads the card from its copy
-  expect(textOf(await answer('row-made-up'))).toContain('Scores')
-  await w.clock.advance(10)
+  // with no drawing yet, its Client asks for one at its width; the runner loads the card from its copy
+  const first = await answer('row-made-up')
+  expect(textOf(first)).toContain('Scores')
+  expect(elements(first).find(n => n.type === 'Client')?.props.props.need).toBe('1:92')
+  await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.', isFirstOfReply: true } } as never)
   expect(w.asked).toContain('draw')
-  expect(elements(await answer('row-made-up')).some(n => n.type === 'Client')).toBe(true)
+  expect(elements(await answer('row-made-up')).find(n => n.type === 'Client')?.props.props.tree).toEqual(TREE)
   expect(textOf(await answer('another-row'))).not.toContain('Scores')
   // its call's row in the fork draws no second card
   const row = await $.ui.render(callRow('toolu_made_up_3', { title: 'Scores', data: 'runs.json', view: VIEW }))

@@ -24,7 +24,13 @@
 //   unload   {id}
 //   ping
 // Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), and the state
-// and the search to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again from its copy.
+// and the search to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again
+// from its copy. Every answer carries `seq`, which grows with each request, so the hooks keep the newest drawing when two
+// answers come back out of order.
+//
+// The tree holds only what Claude Code's Client draws: a Button's children are strings and Text, and a Text's are
+// strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
+// string holds no control character but a line break (the others are taken out; a tab is a space).
 import fs from 'node:fs'
 import http from 'node:http'
 import { types } from 'node:util'
@@ -106,7 +112,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     Button: ['label', 'plain', 'dimColor', 'variant'],
   }
   const BORDERS = ['single', 'double', 'round', 'bold', 'singleDouble', 'doubleSingle', 'classic', 'arrow', 'dashed', 'quote']
-  let rows = [], title = '', state, query = null, columns = 80
+  let rows = [], data = null, title = '', state, query = null, columns = 80
   let fns = null, pointer = null, keyListener = null, handlers = [], dirty = false, nodes = 0, notes = []
   const element = t => function (props) {
     const p = props && typeof props === 'object' ? props : {}
@@ -129,14 +135,18 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     every() { return () => {} },
     post() {},
   })
-  const props = () => ({ title, rows, query, columns })
+  const props = () => ({ title, rows, data, query, columns })
+  // the characters a terminal would act on instead of drawing: C0 and C1 controls but the line break; a tab is a space
+  const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
+  const clean = v => Str(v).replace(/\t/g, ' ').replace(CONTROL, '')
+  const said = n => n && typeof n === 'object' && typeof n.type === 'string' ? '<' + n.type + '>' : typeof n
 
   // the view's drawing as a plain tree: Box, Text and Button nodes with the props each takes; a Button's onPress
   // becomes a number, the handler kept here
   function kids(c, depth, inText, out) {
     if (c == null || c === false || c === true) return out
     if (isArray(c)) { for (const x of c) kids(x, depth, inText, out); return out }
-    if (typeof c === 'string' || typeof c === 'number' || typeof c === 'bigint') { out.push(inText ? Str(c) : { t: 'Text', p: {}, c: [Str(c)] }); return out }
+    if (typeof c === 'string' || typeof c === 'number' || typeof c === 'bigint') { out.push(inText ? clean(c) : { t: 'Text', p: {}, c: [clean(c)] }); return out }
     const n = node(c, depth, inText)
     if (n) out.push(n)
     return out
@@ -145,7 +155,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     if (!n || typeof n !== 'object' || depth > 30) return null
     const t = n.type
     if (t !== 'Box' && t !== 'Text' && t !== 'Button') return null
-    if (inText && t !== 'Text') return null
+    if (inText && t !== 'Text') throw new Error('a ' + inText + ' holds ' + said(n) + ', and Claude Code draws only strings and Text inside a ' + inText + ': put the ' + inText + ' inside the Box instead')
     if (++nodes > 20000) throw new Error('the drawing has more than 20000 elements; draw fewer rows (show a page of them)')
     const src = n.props && typeof n.props === 'object' ? n.props : {}
     const p = {}
@@ -161,8 +171,16 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     if (t === 'Button') {
       if (typeof src.onPress === 'function') { handlers.push(src.onPress); p.onPress = handlers.length - 1 }
       if (typeof src.key === 'string' || typeof src.key === 'number') p.key = Str(src.key)
+      if (typeof p.label === 'string') p.label = clean(p.label)
     }
-    return { t, p, c: kids(src.children, depth + 1, t !== 'Box', []) }
+    const c = kids(src.children, depth + 1, t === 'Box' ? false : t, [])
+    if (t === 'Button' && !words(c) && !(typeof p.label === 'string' && p.label.trim())) throw new Error('a Button has no words: give it a label, or strings or Text as its children')
+    return { t, p, c }
+  }
+  function words(c) {
+    let w = ''
+    for (const x of c) w += typeof x === 'string' ? x : words(x.c || [])
+    return w.trim()
   }
   function draw() {
     let tree, pass = 0
@@ -187,7 +205,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       return m ? 'line ' + m[1] + ': ' : ''
     } catch (_) { return '' }
   }
-  function said(e) {
+  function errorOf(e) {
     try { return where(e) + (e && typeof e === 'object' && 'message' in e ? Str(e.message) : Str(e)) } catch (_) { return 'the view threw a value thimble cannot read' }
   }
   function parseRows(text) {
@@ -203,7 +221,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       return out
     }
     if (isArray(v)) return v
-    if (v && typeof v === 'object' && isArray(v.rows)) return v.rows
+    if (v && typeof v === 'object' && isArray(v.rows)) { data = v; return v.rows }
     throw new Error('the file is JSON but not a list of rows, or an object with a "rows" list')
   }
   function summary() {
@@ -211,20 +229,21 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     for (const r of rows.slice(0, 50)) if (r && typeof r === 'object' && !isArray(r)) for (const k of keysOf(r)) if (cols.indexOf(k) < 0) cols.push(k)
     let first = ''
     try { first = rows.length ? stringify(rows[0]) : '' } catch (_) { first = '' }
-    return { rows: rows.length, columns: cols.slice(0, 40), first: first.length > 200 ? first.slice(0, 199) + '…' : first }
+    const other = data ? keysOf(data).filter(k => k !== 'rows') : []
+    return { rows: rows.length, columns: cols.slice(0, 40), first: first.length > 200 ? first.slice(0, 199) + '…' : first, ...(other.length ? { other: other.slice(0, 20) } : {}) }
   }
   const OPS = {
     init(a) {
       const view = globalThis.__thimbleView, text = globalThis.__thimbleRows
       delete globalThis.__thimbleView
       delete globalThis.__thimbleRows
-      try { rows = parseRows(text) } catch (e) { return { ok: false, phase: 'rows', error: said(e) } }
+      try { rows = parseRows(text) } catch (e) { return { ok: false, phase: 'rows', error: errorOf(e) } }
       title = Str(a.title || '')
       columns = a.width
       query = typeof a.query === 'string' ? a.query : null
       state = a.state == null ? undefined : a.state
       let got
-      try { got = view() } catch (e) { return { ok: false, phase: 'view', error: said(e) } }
+      try { got = view() } catch (e) { return { ok: false, phase: 'view', error: errorOf(e) } }
       if (!got || typeof got.view !== 'function') return { ok: false, phase: 'view', error: 'the code defines no function view(props, surface)' }
       fns = got
       return { summary: summary(), keys: typeof got.keys === 'string' ? got.keys : '' }
@@ -266,7 +285,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     } catch (e) {
       try {
         if (before) { state = before.state === 'null' ? undefined : parse(before.state); query = before.query }
-        return stringify({ ok: false, phase: op === 'init' ? 'view' : op, error: said(e) })
+        return stringify({ ok: false, phase: op === 'init' ? 'view' : op, error: errorOf(e) })
       } catch (_) { return '{"ok":false,"error":"the view failed"}' }
     }
   }
@@ -308,6 +327,8 @@ export function drawnSize(tree) {
 // ------------------------------------------------------------------------------------------------- the cards
 
 const cards = new Map()
+// the requests answered, for each answer's `seq`
+let answered = 0
 
 /** The text copy of a tree at a width. */
 function copy(tree, width) {
@@ -438,7 +459,7 @@ function serve(sock) {
         out = { ok: false, error: `the runner failed: ${e && e.message}` }
       }
       res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify(out))
+      res.end(JSON.stringify({ ...out, seq: ++answered }))
     })
   })
   server.listen(sock, () => fs.chmodSync(sock, 0o600))

@@ -8,7 +8,7 @@ declare module 'claude-code' {
       /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
        *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, was?, reason?,
-       *  failedBy?, evidence? }] } (marks/store.ts Reply), kept on disk too */
+       *  failedBy?, evidence?, note? }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>
@@ -21,12 +21,13 @@ declare module 'claude-code' {
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,
        *  columns, file, gen, error, calls: { [tool_use_id]: { version, error? } }, at } */
       card: StateFamily<unknown>
-      /** a card's drawing as the runner made it, by the card's id: { gen, width, tree, pointer } */
+      /** a card's drawing as the runner made it, by the card's id: { gen, width, tree, pointer, seq } */
       cardTree: StateFamily<unknown>
-      /** the card that takes keys */
+      /** the card that takes keys first: the newest drawn, or the one clicked last */
       cardFocus: string | null
-      /** the card a `/` search types into, and its words; `kept` once Enter kept it (its words leave the prompt box at
-       *  the next edit) */
+      /** the cards drawn on screen since the plugin loaded, which alone take keys */
+      cardSeen: string[]
+      /** the card a `/` search types into, and its words; `kept` once Enter kept it on the card */
       cardSearch: { id: string; text: string; kept?: boolean } | null
       /** the cards the designer fork drew under an answer, by the answer's row */
       cardsAt: Record<string, string[]>
@@ -52,7 +53,7 @@ declare module 'claude-code' {
       /** what the person opened inside a pane of the bar's, by kind: coverage {open, file}, fixshare {diff} (panes/) */
       paneView: StateFamily<unknown>
       /** the line whose fix keys the bar names (bar/fix.ts): a failure (f F), a fix in use (p u), or a notice */
-      fixLine: { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string } | null
+      fixLine: { kind: 'failed'; text: string; about?: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string } | null
       /** the fixes that work now (bar/fix.ts), for the busy line */
       fixes: { slug: string; title: string; kind: string }[]
       /** each fix as refreshFixes last saw it, and the one that was on (bar/fix.ts), kept across a reload of the plugin */

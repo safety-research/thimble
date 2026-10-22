@@ -3,7 +3,8 @@
 // what the person needs to see of that and gives them its keys.
 //
 //   failNotice    a failure line: the notice, whole, with `f fix this · F report only` (bar.tsx draws it), until the
-//                 person types their next prompt. f or F sends a turn to main (fixask.js)
+//                 person types their next prompt, or until what failed works again (failCleared, by the notice's
+//                 `about`: a card that draws again). f or F sends a turn to main (fixask.js)
 //   refreshFixes  $THIMBLE_HOME/fixes/*/fix.json: a fix that works shows in the bar (`fixing: <title>`); one that the
 //                 person's thimble now uses shows one line, `✓ Your thimble now has the fix: <title>`, with
 //                 `p share it · u undo`. u runs `thimble fix undo` as the person. Each switch it sees (a fix on, a new
@@ -36,7 +37,7 @@ const FIXES = { plugin: 'thimble', key: 'fixes' } as const
 const SHARE = { plugin: 'thimble', key: 'fixShare' } as const
 const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/
 
-export type FixLine = { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string }
+export type FixLine = { kind: 'failed'; text: string; about?: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string }
 type Fix = { slug: string; title: string; kind: string; status: string; created: number; used: number }
 
 const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
@@ -97,11 +98,18 @@ async function reloadPlugins($: Engine): Promise<void> {
 // ------------------------------------------------------------------------------------------------ the failure line
 
 /** A failure the person should know of: one line above the prompt (bar.tsx), the whole text with the keys that fix or
- *  report it, until the person's next prompt. */
-export function failNotice($: Engine, text: string): void {
+ *  report it, until the person's next prompt. `about` names what failed (`card:<id>`), so the line goes when it works
+ *  again (failCleared). */
+export function failNotice($: Engine, text: string, about?: string): void {
   const t = String(text || '').trim()
   if (!t) return
-  void $.state.set(LINE, { kind: 'failed', text: t }).catch(() => undefined)
+  void $.state.set(LINE, { kind: 'failed', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
+}
+
+/** What a failure line was about works again: the line goes, when it is still about that. */
+export async function failCleared($: Engine, about: string): Promise<void> {
+  const l = await fixLineNow($)
+  if (l?.kind === 'failed' && l.about === about) await $.state.set(LINE, null)
 }
 
 /** The line whose keys the bar names now, if any. */
