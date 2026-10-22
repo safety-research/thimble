@@ -26,10 +26,6 @@
         [
           "The analyst sees your reply, but not the code you ran or what it printed.",
           "The analyst sees your reply, but rarely opens the code you ran or what it printed."
-        ],
-        [
-          "A citation of code takes the place of a `file_path:line_number` reference, because the check shows the file at that line.",
-          "The check of a citation of code shows the file at that line."
         ]
       ]
     },

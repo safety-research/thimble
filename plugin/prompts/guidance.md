@@ -28,7 +28,7 @@ Claude    **The build fails because the test runner [reads the timeout as second
           [the 3 runs that passed](#) used the old config.
 ```
 
-Cite the few words that state each claim, and cite the claims that carry the conclusion: the answer itself, "every" or "only", a cause. The checker reads the whole sentence around the cited words. A citation of code takes the place of a `file_path:line_number` reference, because the check shows the file at that line. Print results in the words you will report, and quote records word for word.
+Citing only a number is fine: the checker reads the whole sentence around the cited words. Also cite the claims that carry the conclusion: the answer itself, "every" or "only", a cause. Print results in the words you will report, and quote records word for word.
 
 When thimble corrects or flags a citation, it tells you with the analyst's next message. Use the corrected facts from then on.
 
