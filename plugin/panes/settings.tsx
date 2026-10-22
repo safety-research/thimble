@@ -38,6 +38,5 @@ export async function drawSettings($: EngineInterface, e: Any, _args: unknown, e
     Text({ key: 'head', dimColor: true, children: 'The bar, with these settings' }),
     Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar }),
     ...rows,
-    Box({ key: 'keys', marginTop: 1, children: [Text({ dimColor: true, wrap: 'wrap', children: '↵ or a click turns a switch on or off · tab moves · esc closes' })] }),
   ] })
 }
