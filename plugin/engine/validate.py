@@ -2,9 +2,9 @@
 JSON on stdout. No model call, and no code run: kernel/evidence.py reads the files and the calls' real outputs.
 
     stdin   {"cwd": the working folder, "root": the folder the session started in, which the paths shown start from,
-             "marks": [{"n", "words"}], "answer": the checker's last message,
+             "marks": [{"n", "words", "sentence"}], "answer": the checker's last message,
              "calls": [{"command", "output", "by": "checker" | "main"}]}
-    stdout  {"parsed": bool, "results": [{"n", "status", "shown", "reason", "was"?, "failedBy"?, "evidence"?}]}
+    stdout  {"parsed": bool, "results": [{"n", "status", "shown", "reason", "was"?, "failedBy"?, "evidence"?, "note"?}]}
 """
 import json
 import sys

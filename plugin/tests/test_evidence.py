@@ -214,3 +214,55 @@ def test_a_path_shows_from_the_folder_the_session_started_in(tmp_path: Path):
     # the shell had moved into plugin/, so the checker named the file from there
     r = check_mark(mark("4,000 characters"), quote("engine/labels.py", 1, "UNIT_CHARS = 4_000", kind="code"), [], str(tmp_path / "plugin"), str(tmp_path))
     assert r["status"] == "verified" and r["evidence"]["file"] == "plugin/engine/labels.py"
+
+
+def test_an_index_a_key_an_operand_and_a_chosen_line_are_no_typed_values():
+    median = 'import json\nrates = sorted(json.loads(l)["n"] for l in open("g.jsonl"))\nprint(f"median {rates[len(rates)//2]:.1f} per day")'
+    assert check_mark(mark("about 2"), computed(median), [call(median, "median 2.0 per day")], "/data")["status"] == "verified"
+    key = 'import json\nby = {}\nfor l in open("t.jsonl"):\n    r = json.loads(l); by[r["h"]] = by.get(r["h"], 0) + 1\nprint(f"driver ({by[\'01\']})")'
+    assert check_mark(mark("1"), computed(key), [call(key, "driver (1)")], "/data")["status"] == "verified"
+    chosen = 'import json\ngaps = [json.loads(l)["gap"] for l in open("g.jsonl")]\nprint("no gap exceeds 5 minutes" if max(gaps) <= 300 else "a gap exceeds 5 minutes")'
+    assert check_mark(mark("no gap exceeds 5 minutes"), computed(chosen), [call(chosen, "no gap exceeds 5 minutes")], "/data")["status"] == "verified"
+    # a value typed in a field of an f-string is still typed in
+    typed = 'print(f"{15} of 40")'
+    assert "by hand" in check_mark(mark("15 of 40"), computed(typed), [call(typed, "15 of 40")], "/data")["reason"]
+
+
+def test_a_time_matches_its_fractions_of_a_second_and_about_rounds_to_its_zeros():
+    code = 'import json\nprint([json.loads(l)["ts"] for l in open("t.jsonl")][0])'
+    assert check_mark(mark("2026-07-18T21:29:27"), computed(code), [call(code, "2026-07-18T21:29:27.806896Z")], "/data")["status"] == "verified"
+    rng = 'import json\nn = [json.loads(l)["s"] for l in open("s.jsonl")]\nprint(f"{min(n)}-{max(n)}")'
+    about = {"n": 1, "words": "250–620", "sentence": "Each agent ran about [250–620] sessions."}
+    assert check_mark(about, computed(rng), [call(rng, "248-619")], "/data")["status"] == "verified"
+    exact = {"n": 1, "words": "250–620", "sentence": "Each agent ran [250–620] sessions."}
+    assert check_mark(exact, computed(rng), [call(rng, "248-619")], "/data")["status"] == "failed"
+
+
+def test_a_correction_keeps_only_the_words_that_replace_the_mark():
+    m = {"n": 1, "words": "936", "sentence": "Redaction is common ([936] records contain a `[redacted…]` marker, in any field)."}
+    corr = {"words": "1405 records contain a `[redacted…]` marker", "was": "936"}
+    code = 'import json\nrows = [json.loads(l) for l in open("t.jsonl")]\nprint(f"{sum(\'[redacted\' in json.dumps(r) for r in rows)} records")'
+    r = check_mark(m, computed(code, status="corrected", correction=corr), [call(code, "1405 records")], "/data")
+    assert (r["status"], r["shown"]) == ("corrected", "1405")
+
+
+def test_a_quote_worked_into_a_sentence_may_change_its_first_letter(tmp_path: Path):
+    (tmp_path / "CHANGELOG.md").write_text("- Allowed whitelisted users to chat while public chat is closed\n")
+    r = check_mark(mark('"allowed... to chat while public chat is closed"'), quote("CHANGELOG.md", 1, "to chat while public chat is closed"), [], str(tmp_path))
+    assert r["status"] == "verified"
+
+
+def test_a_claim_that_joins_two_places_cites_both(tmp_path: Path):
+    (tmp_path / "shell.tsx").write_text("const shown = load()\n" + "x\n" * 80 + "write(path, shown)\n")
+    ev = [{"file": "shell.tsx", "line": 1, "substring": "const shown = load()"}, {"file": "shell.tsx", "line": 82, "substring": "write(path, shown)"}]
+    item = {"kind": "code", "status": "verified", "evidence": ev, "reason": "loaded, then written"}
+    r = check_mark(mark('written to a "shown" file'), item, [], str(tmp_path))
+    assert r["status"] == "verified" and r["evidence"]["line"] == "1" and r["evidence"]["more"][0]["line"] == "82"
+    wide = check_mark(mark("x"), quote("shell.tsx", "1-82", "x", kind="code"), [], str(tmp_path))
+    assert wide["status"] == "failed" and wide["reason"].startswith("Not confirmed:")
+
+
+def test_a_note_on_the_rest_of_the_sentence_stays_beside_a_verified_mark():
+    item = {**computed(), "note": "per-agent chat also rose, from 21.2 to 31.7"}
+    r = check_mark(mark("12 of 40"), item, [call(CODE, "12 of 40")], "/data")
+    assert r["status"] == "verified" and r["note"].startswith("per-agent")
