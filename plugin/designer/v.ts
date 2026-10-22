@@ -22,7 +22,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failNotice } from '../bar/fix'
+import { failCleared, failNotice } from '../bar/fix'
 import { WORD_MS } from '../bar/register'
 import { cardsUnder, cardText } from '../cards/draw'
 import { type CardMeta, metaOf } from '../cards/store'
@@ -31,6 +31,7 @@ import { forkOf, spawnFork } from '../core/forks'
 import { tellAtNextPrompt } from '../core/tell'
 import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
+import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 
 type Engine = EngineInterface
@@ -93,14 +94,16 @@ export async function designNow($: Engine): Promise<Design | null> {
 
 const running = () => current?.status === 'held' || current?.status === 'running'
 
-/** The design's end: its state, the bar, and the failure line when it failed. */
+/** The design's end: its state, the bar, and the failure line when it failed; one that drew takes away the line an
+ *  earlier v left. */
 async function end($: Engine, d: Design, status: Design['status'], error?: string): Promise<void> {
   d.status = status
   if (error) d.error = error
   if (current === d) current = null
   await save($, d)
   await $.state.set(NOW, null)
-  if (status === 'failed' && error) failNotice($, error)
+  if (status === 'failed' && error) failNotice($, error, 'v')
+  if (status === 'done') await failCleared($, 'v')
 }
 
 /** What the check of the answer's marks changed since main wrote it, for the fork, whose copy of the conversation
@@ -152,7 +155,7 @@ async function finish($: Engine, d: Design, e: { reason: string; answer: string 
     if (meta && meta.agentId === d.agentId) drawn.push(meta)
   }
   d.cards = drawn.map(m => m.id)
-  if (!drawn.length) return end($, d, 'failed', `× v drew no card${said ? `: ${said}` : '.'}`)
+  if (!drawn.length) return end($, d, 'failed', `× v drew no card.${said ? ` The copy that drew it ended with: “${said}”` : ''}`)
   const copies: string[] = []
   for (const m of drawn) copies.push(`“${m.title}” (id "${m.id}")\n${cut(await cardText($, m.id), TELL_CHARS)}`)
   const what = drawn.length === 1 ? 'a card' : `${drawn.length} cards`
@@ -230,7 +233,8 @@ export const registerDesigner: Register = on => {
     const d: Design = { key: `d${now.toString(36)}`, anchorRow: answerRow, agentId: null, status: 'held', at: now, cards: [] }
     current = d
     wordWindow = { at: now, cancelled: false }
-    const prompt = `${await promptText($, 'designer')}${await checkedSince($, d.anchorRow)}${await earlierCard($, d.anchorRow)}`
+    const tmp = String((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')
+    const prompt = `${fill(await promptText($, 'designer'), { TMPDIR: tmp })}${await checkedSince($, d.anchorRow)}${await earlierCard($, d.anchorRow)}`
     await save($, d)
     await $.state.set(NOW, d.key)
     void start($, d, prompt)

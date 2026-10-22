@@ -4,7 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
-import { fixLineNow } from '../bar/fix'
+import { failNotice, fixLineNow } from '../bar/fix'
 import { saveMeta } from '../cards/store'
 import { designAnchor, registerDesigner } from '../designer/v'
 import { promptStub } from './stubs'
@@ -75,7 +75,7 @@ test("the fork's cards anchor to the answer v was pressed on, and a fork that dr
   await s.call('session.append', { door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, message: { content: [{ type: 'text', text: 'A later answer.' }] } }, async () => ({ uuid: 'row-answer-2' }))
   expect(designAnchor('agent-1')).toBe(ROW)
   await s.call('turn.complete', end('answer', 'The records hold no times to draw.\nMore words.'), async () => ({ text: '' }))
-  expect(await s.failLine()).toContain('v drew no card: The records hold no times to draw.')
+  expect(await s.failLine()).toContain('v drew no card. The copy that drew it ended with: “The records hold no times to draw.”')
   expect(designAnchor('agent-1')).toBe(null)
 })
 
@@ -91,6 +91,9 @@ test('a fork that drew a card ends done, and main reads the card with the next p
   const s = setup()
   await pressV(s)
   await saveMeta(s.$, card('c0000000000001', 'agent-1') as never)
+  // the line an earlier v left goes once this one draws
+  failNotice(s.$, '× v drew no card.', 'v')
+  await settle()
   await s.call('turn.complete', end('answer', 'Runs of the failing test: a timeline.'), async () => ({ text: '' }))
   expect(await s.failLine()).toBe('')
   const told = Object.values(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
