@@ -48,7 +48,10 @@ export function runnerRules({ platform, plugin, node, srt, cards, run, home, thi
     network: {
       allowedDomains: [],
       deniedDomains: [],
-      // the runner listens on its socket, in its own folder: Linux's seccomp filter otherwise refuses any Unix socket
+      // the runner listens on its socket, in its own folder: Linux's seccomp filter otherwise refuses any Unix socket.
+      // Allowing them reaches no other program's: a network rule makes srt start bwrap with a network namespace of its
+      // own (--unshare-net), which holds the abstract sockets the runner can name, and a socket file is reached only
+      // by its path, which the file rules hide unless it is in the folders they show
       ...(linux ? { allowAllUnixSockets: true } : { allowUnixSockets: [trim(run)] }),
     },
     filesystem: {

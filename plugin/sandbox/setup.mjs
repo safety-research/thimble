@@ -9,7 +9,9 @@
 // It needs nothing but the Node it runs on, which is the Node that will run the runner (the hooks run it by `node` on
 // the session's PATH). It installs srt when that version is not there (it never runs sudo), then asks srt whether this
 // machine has what it needs (Linux: bubblewrap, socat and ripgrep; macOS: sandbox-exec), and with --probe starts the
-// card runner in the sandbox and waits for its answer. It prints one line, or with --json one JSON object:
+// card runner in the sandbox and waits for its answer. Setups that run at the same time (two sessions start, a card
+// is called while the session start installs) install once: the others wait for that install. It prints one line, or
+// with --json one JSON object:
 //   {ok, node, platform, version, srt, why, fix, ms}
 // `node` is this Node's binary (the runner's), `srt` the folder srt is in, `why` what is wrong and `fix` the one command
 // or step that fixes it, `ms` how long the probe's runner took to answer. Exits 0 when the sandbox works, else 1.
@@ -56,12 +58,16 @@ function installed() {
   }
 }
 
+const again = `node ${join(HERE, 'setup.mjs')} --probe`
+// npm's messages when it cannot reach its registry
+const UNREACHABLE = /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRESET|EHOSTUNREACH|ENETUNREACH|FetchError|network|proxy|certificate|\b(E40[37]|E5\d\d)\b/i
+
 /** Install srt into its folder: `npm ci` in a new folder beside it, then moved into place, so a session that starts at
- *  the same time never reads half an install. '' when it is installed, else why not. */
+ *  the same time never reads half an install. null when it is installed, else why not and the fix. */
 function install() {
   const npm = which('npm') || [join(dirname(process.execPath), 'npm')].find(p => fs.existsSync(p))
-  if (!npm) return 'npm is not installed, and thimble installs the sandbox with it'
-  fs.mkdirSync(join(home, 'srt'), { recursive: true, mode: 0o700 })
+  if (!npm) return { why: 'npm is not installed, and thimble installs the sandbox with it', fix: `Install npm (it comes with Node), then run: ${again}` }
+  if (!flag('--json')) console.error(`thimble: installing Anthropic's sandbox runtime ${pin} with npm (a minute at most, unless npm cannot reach its registry)...`)
   const tmp = fs.mkdtempSync(join(home, 'srt', `.${pin}-`))
   try {
     fs.copyFileSync(join(HERE, 'package.json'), join(tmp, 'package.json'))
@@ -73,10 +79,13 @@ function install() {
       // npm's message line (`request to … failed, reason: …`), not its code, stack or log lines
       const lines = `${r.stderr || ''}\n${r.stdout || ''}`.split('\n').map(l => l.replace(/^npm (error|ERR!)\s*/, '').trim()).filter(Boolean)
       const said = lines.find(l => !/^(code|syscall|errno|at |A complete log|[{}])/.test(l)) || lines[0] || r.error?.message || `exit ${r.status}`
-      return `npm could not install the sandbox runtime ${pin} (${said.slice(0, 200)})`
+      const why = `npm could not install the sandbox runtime ${pin}: ${said.slice(0, 200)}`
+      return UNREACHABLE.test(said)
+        ? { why, fix: `npm cannot reach its registry. See why with \`npm ping\`, fix npm's proxy or registry setting, then run: ${again}` }
+        : { why, fix: `npm's message says what failed; once it is fixed, run: ${again}` }
     }
     fs.writeFileSync(join(tmp, 'node_modules', '.thimble-lock.json'), lock)
-    if (installed()) return ''
+    if (installed()) return null
     if (fs.existsSync(srt)) fs.renameSync(srt, `${tmp}-old`)
     try {
       fs.renameSync(tmp, srt)
@@ -84,12 +93,41 @@ function install() {
       // another session moved its install into place first
       if (!installed()) throw e
     }
-    return ''
+    return null
   } catch (e) {
-    return `the sandbox runtime could not be installed in ${srt} (${e.message})`
+    return { why: `the sandbox runtime could not be installed in ${srt}: ${e.message}`, fix: `Make ${join(home, 'srt')} a folder you can write, then run: ${again}` }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
     fs.rmSync(`${tmp}-old`, { recursive: true, force: true })
+  }
+}
+
+const alive = pid => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } }
+
+/** `work` while this setup holds the install lock, a folder beside the install that one setup makes at a time, with
+ *  its process id in it; the other setups wait, and take the lock over when its setup is gone. (Two installs at once
+ *  stay safe, since each moves a whole install into place: the lock only keeps a setup that starts later from
+ *  installing again, and makes it wait for the install that runs.) */
+async function locked(work) {
+  fs.mkdirSync(join(home, 'srt'), { recursive: true, mode: 0o700 })
+  const at = join(home, 'srt', `.${pin}.lock`)
+  for (;;) {
+    try {
+      fs.mkdirSync(at)
+      fs.writeFileSync(join(at, 'pid'), String(process.pid))
+      break
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e
+    }
+    const pid = Number(read(join(at, 'pid')))
+    const age = (() => { try { return Date.now() - fs.statSync(at).mtimeMs } catch { return 0 } })()
+    if ((pid && !alive(pid)) || (!pid && age > 5000)) fs.rmSync(at, { recursive: true, force: true })
+    else await new Promise(r => setTimeout(r, 200))
+  }
+  try {
+    return work()
+  } finally {
+    fs.rmSync(at, { recursive: true, force: true })
   }
 }
 
@@ -109,7 +147,7 @@ async function needs() {
   const { errors } = SandboxManager.checkDependencies()
   if (!errors.length) return null
   const packages = platform === 'linux' ? [['bwrap', 'bubblewrap'], ['socat', 'socat'], ['rg', 'ripgrep']].filter(([c]) => !which(c)).map(([, p]) => p) : []
-  return { why: `srt needs what this machine lacks (${errors.join('; ')})`, fix: packages.length ? `Install ${packages.length > 1 ? 'them' : 'it'}: ${installCommand(packages)}` : '' }
+  return { why: `this machine lacks what the sandbox needs: ${errors.join('; ')}`, fix: packages.length ? `Install ${packages.length > 1 ? 'them' : 'it'}: ${installCommand(packages)}` : '' }
 }
 
 /** Start the card runner in the sandbox, as the hooks do, and wait for its answer: '' and the time it took, or why not. */
@@ -137,7 +175,7 @@ async function probe() {
     }
     await new Promise(r => setTimeout(r, 50))
     const why = said.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 300)
-    return { error: ended ? `the card runner did not start in the sandbox${why ? ` (${why})` : ''}` : `the card runner did not answer in ${PROBE_MS / 1000} s` }
+    return { error: ended ? `the card runner did not start in the sandbox${why ? ` (${why})` : ''}` : `the card runner did not answer in ${PROBE_MS / 1000} s`, said }
   } finally {
     child.kill()
     fs.rmSync(dir, { recursive: true, force: true })
@@ -154,8 +192,8 @@ async function main() {
     return { why: `Node ${process.versions.node} is too old for the sandbox runtime`, fix: `Install Node ${NODE_MIN.join('.')} or later.` }
   }
   if (!installed()) {
-    const why = install()
-    if (why) return { why, fix: 'Check that npm can reach its registry (its proxy and registry settings); thimble installs it again at the next card or session' }
+    const failed = await locked(() => (installed() ? null : install()))
+    if (failed) return failed
   }
   const lacking = await needs()
   if (lacking) return lacking
@@ -163,8 +201,11 @@ async function main() {
   const p = await probe()
   out.ms = p.ms
   if (!p.error) return null
-  const fix = platform === 'linux' && read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') === '1'
-    ? "This Linux may keep bubblewrap from making its namespaces (AppArmor). Allow it with `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, or give bwrap an AppArmor profile that allows user namespaces."
+  // bubblewrap could not make its namespaces, and AppArmor restricts them (Ubuntu 24.04 and later): srt's README gives
+  // this command. Any other failure is said as bwrap or the runner said it
+  const userns = /bwrap: .*(uid map|namespace|RTM_NEWADDR|Operation not permitted|Permission denied)/i.test(p.said || '')
+  const fix = userns && platform === 'linux' && read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') === '1'
+    ? 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
     : ''
   return { why: p.error, fix }
 }

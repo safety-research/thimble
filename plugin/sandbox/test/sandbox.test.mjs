@@ -5,8 +5,8 @@
 //   node --test plugin/sandbox/test/sandbox.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -72,11 +72,12 @@ before(() => {
 
 after(() => rmSync(dir, { recursive: true, force: true }))
 
-/** What `code` prints when Node runs it under the runner's rules, with the environment the runner gets. */
-function inSandbox(code) {
+/** What `code` prints when Node runs it under the runner's rules, with the environment the runner gets (and `path`,
+ *  the PATH srt is started with). */
+function inSandbox(code, path = process.env.PATH) {
   const rules = runnerRules({ platform: s.platform, plugin: PLUGIN, node: s.node, srt: s.srt, cards, run, home: homedir(), thimbleHome: process.env.THIMBLE_HOME })
   const r = spawnSync(s.node, [join(PLUGIN, 'sandbox', 'run.mjs'), '--srt', s.srt, JSON.stringify(rules), '--', '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', s.node, '-e', code],
-    { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, HOME: run, TMPDIR: run, CLAUDE_CODE_TMPDIR: run, MADE_UP_TOKEN: 'x' } })
+    { encoding: 'utf8', timeout: 60000, env: { PATH: path, HOME: run, TMPDIR: run, CLAUDE_CODE_TMPDIR: run, MADE_UP_TOKEN: 'x' } })
   assert.equal(r.status, 0, r.stderr)
   return r.stdout.trim()
 }
@@ -110,7 +111,81 @@ test('setup.mjs names what srt lacks on Linux, with the one command that install
   const r = spawnSync(join(bin, 'node'), [SETUP, '--json'], { encoding: 'utf8', env: { PATH: bin, THIMBLE_HOME: process.env.THIMBLE_HOME } })
   const got = JSON.parse(r.stdout)
   assert.equal(got.ok, false)
-  assert.match(got.why, /bubblewrap/)
+  assert.match(got.why, /^this machine lacks what the sandbox needs: .*bubblewrap/)
   assert.match(got.fix, /bubblewrap, socat, ripgrep/)
   assert.equal(r.status, 1)
+})
+
+test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {
+  // as Homebrew on Linux, Nix or conda set PATH up: a bash in a folder the rules hide
+  const own = join(dir, 'own-bash')
+  mkdirSync(own)
+  const bash = ['/bin/bash', '/usr/bin/bash'].find(existsSync)
+  symlinkSync(bash, join(own, 'bash'))
+  assert.equal(inSandbox('console.log("started")', `${own}:${process.env.PATH}`), 'started')
+})
+
+/** setup.mjs's answer with a PATH whose `bwrap` is a made-up one that says `said` and fails. */
+function withFailingBwrap(said) {
+  const bin = mkdtempSync(join(dir, 'bwrap-'))
+  writeFileSync(join(bin, 'bwrap'), `#!/bin/sh\necho ${JSON.stringify(said)} >&2\nexit 1\n`)
+  chmodSync(join(bin, 'bwrap'), 0o755)
+  const r = spawnSync(s.node, [SETUP, '--json', '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: `${bin}:${process.env.PATH}`, THIMBLE_HOME: process.env.THIMBLE_HOME } })
+  return JSON.parse(r.stdout)
+}
+
+test('the AppArmor fix is given only when bubblewrap could not make its namespaces', { skip: process.platform !== 'linux' }, () => {
+  const other = withFailingBwrap('bwrap: execvp /made-up/bash: No such file or directory')
+  assert.equal(other.ok, false)
+  assert.match(other.why, /execvp \/made-up\/bash/)
+  assert.doesNotMatch(other.fix, /AppArmor|sysctl/)
+  const userns = withFailingBwrap('bwrap: setting up uid map: Permission denied')
+  assert.equal(userns.ok, false)
+  const restricted = readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', { encoding: 'utf8', flag: 'r' }).trim() === '1'
+  if (restricted) assert.equal(userns.fix, 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0')
+})
+
+/** setup.mjs in a THIMBLE_HOME of its own, with npm's cache of its own; `env` adds to its environment. */
+function freshSetup(env = {}) {
+  const home = mkdtempSync(join(dir, 'home-'))
+  const cache = mkdtempSync(join(dir, 'npm-cache-'))
+  return { home, run: () => spawn(s.node, [SETUP, '--json'], { env: { PATH: process.env.PATH, THIMBLE_HOME: home, npm_config_cache: cache, ...env } }) }
+}
+
+const answer = child => new Promise(resolve => {
+  let out = ''
+  child.stdout.on('data', d => { out += d })
+  child.on('exit', () => resolve(JSON.parse(out.trim().split('\n').pop())))
+})
+
+test('npm that cannot reach its registry: the fix says how to see why, and the command that tries again', async () => {
+  const got = await answer(freshSetup({ npm_config_registry: 'http://127.0.0.1:9/', npm_config_fetch_retries: '0' }).run())
+  assert.equal(got.ok, false)
+  assert.match(got.why, /^npm could not install the sandbox runtime .*ECONNREFUSED/)
+  assert.match(got.fix, /`npm ping`/)
+  assert.ok(got.fix.endsWith(`run: node ${SETUP} --probe`), got.fix)
+})
+
+test('a setup waits for the install another setup is making, and takes over the lock of one that is gone', async () => {
+  const one = freshSetup()
+  const lock = join(one.home, 'srt', `.${s.version}.lock`)
+  // a setup that is gone left its lock: the next one takes it over and installs
+  mkdirSync(lock, { recursive: true })
+  writeFileSync(join(lock, 'pid'), '999999999')
+  assert.equal((await answer(one.run())).ok, true)
+  assert.equal(existsSync(lock), false)
+  // a setup that installs holds the lock (a live process stands for it): the next one waits until it lets go
+  const two = freshSetup()
+  const lock2 = join(two.home, 'srt', `.${s.version}.lock`)
+  const holder = spawn('sleep', ['30'])
+  mkdirSync(lock2, { recursive: true })
+  writeFileSync(join(lock2, 'pid'), String(holder.pid))
+  const t0 = Date.now()
+  const waiting = answer(two.run())
+  await new Promise(r => setTimeout(r, 800))
+  assert.equal(existsSync(join(two.home, 'srt', s.version)), false, 'it did not install while the lock was held')
+  rmSync(lock2, { recursive: true, force: true })
+  holder.kill()
+  assert.equal((await waiting).ok, true)
+  assert.ok(Date.now() - t0 >= 800)
 })

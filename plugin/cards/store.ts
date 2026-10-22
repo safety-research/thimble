@@ -22,7 +22,7 @@ type Engine = EngineInterface
 
 /** One call of the card tool: the version it drew, with that version's title, data file and what it read from it
  *  ("412 rows", "an object with months (18), agents (44)"), or why it drew none. */
-export type CardCall = { version: number; title?: string; file?: string; read?: string; error?: string }
+export type CardCall = { version: number; title?: string; file?: string; read?: string; error?: string; down?: boolean }
 export type CardMeta = {
   id: string
   version: number // the version on screen; 0 while no version has drawn

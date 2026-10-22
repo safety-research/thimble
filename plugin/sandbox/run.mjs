@@ -13,6 +13,7 @@
 // the process that started it is gone (a long-lived command, such as the card runner, would stay otherwise), and exits
 // with the command's status, or with 3 when the sandbox could not be set up.
 import { spawn } from 'node:child_process'
+import { accessSync, constants as fsConstants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { constants } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -38,6 +39,13 @@ const command = argv.map(quote).join(' ')
 const cwd = process.cwd()
 process.chdir(dirname(fileURLToPath(import.meta.url)))
 
+/** The shell srt starts the command from, inside the sandbox: the system's bash. Left to srt, it is the first bash on
+ *  PATH, and one outside the system folders (Homebrew on Linux, Nix, conda) is hidden by rules that show only those,
+ *  so nothing would start. Undefined (srt's own choice) on a machine with no bash in /bin or /usr/bin. */
+function systemBash() {
+  return ['/bin/bash', '/usr/bin/bash'].find(p => { try { accessSync(p, fsConstants.X_OK); return true } catch { return false } })
+}
+
 let SandboxManager
 let wrapped
 try {
@@ -53,7 +61,7 @@ try {
   // The rules become srt's configuration (bwrapPath is read only from there) without initialize(), which would start
   // the network proxies that a command with no network does not need.
   SandboxManager.updateConfig(rules)
-  wrapped = await SandboxManager.wrapWithSandbox(command, undefined, rules)
+  wrapped = await SandboxManager.wrapWithSandbox(command, systemBash(), rules)
 } catch (e) {
   console.error(`the sandbox could not be set up: ${e instanceof Error ? e.message : String(e)}`)
   process.exit(3)

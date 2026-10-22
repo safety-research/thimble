@@ -120,7 +120,7 @@ if [ ${#missing[@]} -gt 0 ]; then
   say "Then run scripts/install.sh again. Nothing was installed."
   exit 1
 fi
-say "thimble: everything it needs is installed."
+say "thimble: what the install needs is here."
 
 # ---- the terminal plugin
 
@@ -168,7 +168,7 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
 ' || true)"
     if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
-      node "$at/sandbox/setup.mjs" --probe || notes+=("cards do not draw until the sandbox works: run the command above, then start a new claude session")
+      node "$at/sandbox/setup.mjs" --probe || notes+=("cards do not draw until the sandbox works: do what the line above says; the next card tries again, in a running claude session too")
     fi
     say "The plugin works in a new claude session, in a folder of data files that you trust."
   else

@@ -156,8 +156,9 @@ The terminal plugin:
   for you, and `F` writes a report only.
 - **"Cards cannot draw: cards run only in Anthropic's sandbox runtime, which cannot start here".** Cards never run
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
-  ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, how to allow it. The next card tries
-  again, with no new session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
+  ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm
+  cannot reach its registry to install the sandbox, `npm ping` shows why. The next card tries again, with no new
+  session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
   `<plugin>` is the installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
 
 The browser workbench:

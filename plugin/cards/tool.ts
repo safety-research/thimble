@@ -21,7 +21,7 @@
 // kept for the next call's `edits`, and the view's error goes back to Claude.
 import type { EngineInterface } from 'claude-code'
 
-import { failCleared, failNotice } from '../bar/notice'
+import { failCleared } from '../bar/notice'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { tempDir } from '../core/home'
@@ -31,7 +31,7 @@ import { OWN_KEYS } from '../hooks/keys'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
-import { ask } from './ask'
+import { ask, sandboxNotice } from './ask'
 import { applyAnswer, askCard, canRedraw, cardWidth, screenRows } from './draw'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
@@ -218,8 +218,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width })
   if (!r?.ok) {
     // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
-    await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer') })
-    if (r?.down) failNotice($, `Cards cannot draw: ${String(r.error).slice(0, 600)}`, 'sandbox')
+    await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer'), ...(r?.down ? { down: true } : {}) })
+    if (r?.down) sandboxNotice($, `Cards cannot draw: ${String(r.error).slice(0, 600)}`, !!r.machine)
     return { result: failed(id, r, update && meta.version > 0) }
   }
 

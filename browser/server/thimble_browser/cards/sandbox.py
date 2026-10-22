@@ -35,6 +35,7 @@ import functools
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -137,12 +138,18 @@ def status() -> Status:
     failed = _probe(node)
     if failed:
         fix = "The message says what failed; browser/README.md's Sandbox section says what the sandbox needs."
-        if linux and _read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") == "1":
-            fix = ("This Linux keeps bubblewrap from making its namespaces (AppArmor). Allow it with `sudo sysctl -w "
-                   "kernel.apparmor_restrict_unprivileged_userns=0`, or give bwrap an AppArmor profile that allows "
-                   "user namespaces.")
+        # only when bubblewrap could not make its namespaces and AppArmor restricts them (srt's README gives this
+        # command); any other failure is said as it was said
+        if linux and USERNS_REFUSED.search(failed) and \
+                _read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") == "1":
+            fix = ("AppArmor keeps bubblewrap from making its namespaces. Allow them: "
+                   "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0")
         return Status(None, f"the sandbox could not run Python: {failed}", fix, node)
     return Status(f"srt {got} with {'Seatbelt' if macos else 'bubblewrap'}", node=node)
+
+
+# bubblewrap's words when the kernel refuses it a user namespace (sandbox/setup.mjs matches the same)
+USERNS_REFUSED = re.compile(r"bwrap: .*(uid map|namespace|RTM_NEWADDR|Operation not permitted|Permission denied)", re.I)
 
 
 def _read(path: str) -> str:

@@ -20,7 +20,7 @@ import { failNotice } from '../bar/notice'
 import { cut } from '../core/text.js'
 import { forkOf } from '../core/forks'
 import { featureOn } from '../settings/features.mjs'
-import { sandbox, sandboxWhy } from './ask'
+import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
 import { callOf, cardIdOf, inTemp, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
@@ -43,9 +43,15 @@ export const registerCards: Register = on => {
     // no setup of its own), checked at each session start, in the background; when it cannot work, the person reads
     // why and the fix now, and Claude reads it in the card tool's answer
     $.clock.after(0, () => {
-      void sandbox($).then(s => { if (!s.ok) failNotice($, `Cards cannot draw: ${sandboxWhy(s)}.`, 'sandbox') }).catch(() => undefined)
+      void sandbox($).then(s => { if (!s.ok) sandboxNotice($, `Cards cannot draw: ${sandboxWhy(s)}.`, !!s.fix) }).catch(() => undefined)
     })
     return r
+  }).catch(($, e, next) => next(e))
+
+  // the session ends: its runner stops, and the runner's folder (its socket) goes
+  on('session.end', async ($, e, next) => {
+    await stopRunner($).catch(() => undefined)
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__thimble__card' }, async ($, e) => {
@@ -97,8 +103,10 @@ export const registerCards: Register = on => {
     const order = Object.keys(meta.calls)
     const below = !meta.anchorRow && order.indexOf(meta.toolUseId) > order.indexOf(e.props.tool_use_id)
     const now = call.version < meta.version ? `, now version ${meta.version}` : ''
+    // an error of the view's is Claude's to fix, so it is cut to one line; why no card can draw (the sandbox) and its
+    // fix are the person's, whole
     const line = call.error
-      ? `did not draw: ${call.error.slice(0, 160)} · Claude got the error`
+      ? `did not draw: ${call.down ? call.error : cut(call.error, 160)} · Claude got the error`
       : !away
         ? `${meta.read} from ${meta.file.split('/').pop()}`
         : below
