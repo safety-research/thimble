@@ -78,6 +78,28 @@ test('a span is a press of its own; inside a citation it keeps the citation pres
   expect(all(dim).some(n => n.type === 'Text' && n.props.dimColor && n.props.children === 'Two runs failed.')).toBe(true)
 })
 
+test('each passage of a reply drawn here has a margin that asks a side thread about it: ? under the pointer, ↳ once asked', () => {
+  const text = 'Two runs [failed](#).\nBoth timed out.\n\n## Why\n\nThe limit is 10 minutes.\n\n- a\n- b'
+  const asked: string[] = []
+  const has = (p: { label: string }) => p.label === '"a"'
+  const drawn = messageEl(ELS, { text, marks: marksIn(text), looks: [{ n: 1, status: 'verified' }], key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, passages: { has, ask: p => asked.push(p.text) } })
+  const buttons = all(drawn).filter(n => n.type === 'Button' && /^(ask about|open the thread about) /.test(n.props.label))
+  // a line laid out here, a run of Claude Code's Markdown, a heading with its whole section, and a list whose items
+  // stay together
+  expect(buttons.map(b => b.props.label)).toEqual(['ask about "Two runs failed."', 'ask about "Both timed out."', 'ask about the section "Why"', 'ask about "The limit is 10 minutes."', 'open the thread about "a"'])
+  // the ? shows only while the pointer is over its row, over the reply's ● on its first row
+  const first = all(drawn).find(n => n.type === 'Box' && n.props.key === 'k-b0')!
+  expect(textOf(first.props.children[0])).toBe('●?')
+  const hidden = all(first).find(n => n.type === 'Box' && n.props.display === 'none')!
+  expect(hidden.props.hover).toEqual({ display: 'flex' })
+  expect(textOf(all(drawn).find(n => n.type === 'Button' && n.props.label.startsWith('open the thread'))!)).toBe('↳')
+  buttons[2]!.props.onPress()
+  expect(asked).toEqual(['## Why\n\nThe limit is 10 minutes.\n\n- a\n- b'])
+  // with no passages, the rows draw as before: Claude Code's ● and no press
+  const plain = messageEl(ELS, { text, marks: marksIn(text), looks: [{ n: 1, status: 'verified' }], key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
+  expect(all(plain).some(n => n.type === 'Button' && /ask about/.test(n.props.label))).toBe(false)
+})
+
 test("a version shown in place of Claude's words: its citations look as the checked ones with the same words, others unchecked", () => {
   const items = [
     { n: 1, words: '12 of 40', status: 'corrected', shown: '15 of 40' },

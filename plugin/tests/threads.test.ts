@@ -8,7 +8,7 @@ import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere } from '../threads/pane'
-import { threadCardAnchor, threadsBar, threadsKey } from '../threads/seam'
+import { threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { promptStub } from './stubs'
 
@@ -159,4 +159,31 @@ test('where no fork starts, the thread\'s own agent type answers; a card its age
   // its report never reaches main
   const dropped = await s.call('prompt.submit', { text: '<task-notification><task-id>agent-1</task-id></task-notification>', origin: { kind: 'task-notification' } })
   expect(dropped.drop).toContain('thread')
+})
+
+test('the margin of a passage or a card opens its thread; it says asked (↳) once a question was asked there', async () => {
+  const s = setup()
+  const p = { text: 'Two runs failed.', label: '"Two runs failed."' }
+  const margin = await threadPassages(s.$, 'row-made-up-2')
+  expect(margin.has(p)).toBe(false)
+  margin.ask(p)
+  await settle()
+  // opened to be asked, with no question yet: not listed, and the margin still asks
+  expect(threadList().length).toBe(0)
+  expect((await threadPassages(s.$, 'row-made-up-2')).has(p)).toBe(false)
+  const scope = { about: p.label, passage: { row: 'row-made-up-2', text: p.text } }
+  const asked = askHere(s.$, scope, 'which two?')
+  await settle()
+  s.go()
+  await asked
+  expect(s.spawns[0].prompt).toContain('which two?\n\nAbout: this passage of Claude\'s message:\nTwo runs failed.')
+  expect((await threadPassages(s.$, 'row-made-up-2')).has(p)).toBe(true)
+  expect((await threadPassages(s.$, 'row-made-up-3')).has(p)).toBe(false)
+  // a card: the thread the tray's a opens on it
+  const card = await threadOnCard(s.$, 'c00000000000b1', 'Runs per day')
+  expect(card.label).toBe('the card "Runs per day"')
+  expect(card.has).toBe(false)
+  card.press()
+  await settle()
+  expect(threadOf('card-c00000000000b1')!.scope).toEqual({ about: 'the card "Runs per day"', card: 'c00000000000b1' })
 })

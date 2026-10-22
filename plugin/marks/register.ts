@@ -15,11 +15,12 @@
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
-//                    citation the tray shows, the lines under its words (the labels it used), a press on a citation
+//                    citation the tray shows, the lines under its words (the labels it used), a press on a citation,
+//                    and the margin of each passage it draws, which asks a side thread about it
 import type { Register } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
-import { markFocus, markPressed, rowDrawing, spansFor, textView, underText } from '../core/answerview'
+import { markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { openPane } from '../core/pane'
 import { mainRuns } from '../core/turn'
@@ -141,6 +142,8 @@ export const registerMarks: Register = on => {
         text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
         notes: own ? notesByMark(reply?.items ?? []) : [],
         spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null,
+        // while a rewrite of it runs, no passage is asked about
+        passages: view.dim ? null : await passagesFor($, row),
         onMark: async (k: number) => {
           const n = looks[k]!.n
           if (await markPressed($, row, n)) return

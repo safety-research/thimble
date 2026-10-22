@@ -5,8 +5,8 @@
 //                                root and a row per thread, `main/<what it is on>`, the newest first, with how many
 //                                questions it has (or that it is answering) and its last question under it. A row is a
 //                                press (tab walks the rows, ↵ presses): it opens that thread
-//   a thread (kind `thread`)     what it is on at the top (a card, drawn; an explainer's words; else its name), its
-//                                conversation under it, the input bar at the bottom
+//   a thread (kind `thread`)     what it is on at the top (a card, drawn; an explainer's or a passage's words; else
+//                                its name), its conversation under it, the input bar at the bottom
 //   under a pane (threadUnder)   a citation's evidence, a label, coverage, the claims: the pane's thread under it, its
 //                                conversation and the input bar (core/pane.ts calls it)
 //
@@ -211,6 +211,10 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
     const g = (await partOf<Any>($, m.row, 'explain').catch(() => null))?.items?.[m.id]
     const more = g ? [g.body, g.here, ...((g.bullets ?? []) as string[]).map(b => `· ${b}`)].filter(Boolean).map(String) : []
     return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'an important detail in Claude\'s reply' : 'an explainer in Claude\'s reply', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W), 0) }
+  }
+  if (s.passage) {
+    const words = cut(String(s.passage.text).replace(/\s+/g, ' ').trim(), 600)
+    return { el: subjectBlock(els, 'subject', aboutOf(s), 'a passage of Claude\'s reply', [words]), rows: 3 + rowsAt(words, W) }
   }
   if (s.mark) {
     const it = (await rowMarks($, s.mark.row).catch(() => null))?.items.find(x => x.n === (s.mark as Any).n)

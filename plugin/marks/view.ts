@@ -24,6 +24,11 @@
 // explainer on a teal fill; a span inside a mark's words keeps the mark's press and adds its fill. While the tray shows
 // a mark (`focus`), it is drawn bold on the selection's background. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
+//
+// Where side threads can be asked about its passages (`passages`), each row of blocks is a passage (a heading's, its
+// whole section), and its margin cell asks about it (core/askcell.js): a blue ? while the pointer is over the row, a
+// blue ↳ once a thread was asked about it.
+import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
@@ -60,7 +65,13 @@ export type MessageOpts = {
   dim?: boolean
   /** what stands in place of the ● of the reply's first block */
   lead?: string | null
+  /** the passages a side thread can be asked about: `has` says whether one was asked about already, `ask` starts it
+   *  (or opens it). Each row of blocks is a passage, a heading's its whole section */
+  passages?: { has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null
 }
+
+/** A passage of a reply: its words, and a few of them that name it. */
+export type Passage = { text: string; label: string }
 
 /** A purple that follows the person's theme (Claude Code's color for a merged pull request). */
 const PURPLE = 'merged'
@@ -212,6 +223,13 @@ function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
   return out
 }
 
+/** A heading's whole section: from the heading to the next heading of its level or above. */
+function sectionOf(text: string, bs: Any[], i: number): string {
+  let j = i
+  while (j + 1 < bs.length && !(bs[j + 1].type === 'heading' && bs[j + 1].level <= bs[i].level)) j++
+  return text.slice(bs[i].start, bs[j].end)
+}
+
 /** One text block of a reply, drawn with its marks. */
 export function messageEl(els: Any, o: MessageOpts): Any {
   const { Box, Markdown, Text } = els
@@ -220,9 +238,21 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   const rows: Any[] = []
   let dot = o.first || !!o.lead
   let k = 0
-  const push = (content: Any[], gap: boolean) => {
-    const bullet = dot ? (o.lead ? Text({ color: 'suggestion', bold: true, children: o.lead }) : Text({ children: '●' })) : Text({ children: ' ' })
-    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [Box({ width: 2, flexShrink: 0, children: [bullet] }), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+  // a row's passage (its blocks i to j; a heading's, its whole section), when side threads can be asked about them
+  const passageOf = (i: number, j: number): Passage => {
+    const words = bs[i].type === 'heading' ? sectionOf(o.text, bs, i) : o.text.slice(bs[i].start, bs[j].end)
+    return { text: words, label: passageLabel(words) }
+  }
+  const push = (content: Any[], gap: boolean, p: Passage) => {
+    const key = `${o.key}-b${k++}`
+    const lead = dot && o.lead
+    const glyph = dot ? '●' : ' '
+    const cell = lead
+      ? Box({ width: 2, flexShrink: 0, children: [Text({ color: 'suggestion', bold: true, children: o.lead })] })
+      : o.passages
+        ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph })
+        : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
+    rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [cell, Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
   // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
@@ -238,18 +268,21 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     a = z
   }
   const laidOut = (k: number) => laid[k]
+  // where passages can be asked about, a run of blocks drawn by Claude Code's Markdown is one passage: it ends at a
+  // blank line (but a list's items stay together) and before a heading
+  const joins = (a: Any, n: Any) => !o.passages || (n.type !== 'heading' && (!n.gap || (a.type === 'item' && n.type === 'item')))
   let i = 0
   while (i < bs.length) {
     const b = bs[i]
     if (laidOut(i)) {
-      push([...blockLines(els, o, b, `${o.key}-l${i}`, w), ...noteLines(els, o, b, `${o.key}-l${i}`)], b.gap && i > 0)
+      push([...blockLines(els, o, b, `${o.key}-l${i}`, w), ...noteLines(els, o, b, `${o.key}-l${i}`)], b.gap && i > 0, passageOf(i, i))
       i++
       continue
     }
     // a run of blocks with no mark: Claude Code's own Markdown, whole
     let j = i
-    while (j + 1 < bs.length && !laidOut(j + 1)) j++
-    push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0)
+    while (j + 1 < bs.length && !laidOut(j + 1) && joins(bs[j], bs[j + 1])) j++
+    push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0, passageOf(i, j))
     i = j + 1
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })

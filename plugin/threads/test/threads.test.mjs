@@ -16,6 +16,12 @@ test('one thread per citation, explainer, card or pane; a citation\'s evidence p
   assert.equal(threadKey({ about: 'x', pane: { kind: 'labels', args: { label: 'toxic', value: 'yes' } } }), threadKey({ about: 'y', pane: { kind: 'labels', args: { value: 'yes', label: 'toxic' } } }))
   assert.notEqual(threadKey({ about: 'x', pane: { kind: 'labels', args: { label: 'toxic' } } }), threadKey({ about: 'x', pane: { kind: 'labels', args: {} } }))
   assert.equal(nameOf({ subject: 'Saves per day, by the wiki\'s editors and their bots' }), 'main/Saves per day, by the wiki\'s ed…')
+  // a passage of a reply: one thread per row and words
+  const passage = threadKey({ about: '"Two runs failed."', passage: { row: 'row-1', text: 'Two runs failed.' } })
+  assert.match(passage, /^passage-row-1-[0-9a-z]+$/)
+  assert.equal(threadKey({ about: 'other words', passage: { row: 'row-1', text: 'Two runs failed.\n' } }), passage)
+  assert.notEqual(threadKey({ about: 'x', passage: { row: 'row-1', text: 'One run passed.' } }), passage)
+  assert.notEqual(threadKey({ about: 'x', passage: { row: 'row-2', text: 'Two runs failed.' } }), passage)
 })
 
 test('the first question says what it is about and where the data is; a later one names a new thing only', () => {
@@ -24,6 +30,7 @@ test('the first question says what it is about and where the data is; a later on
   assert.equal(first, 'why so many?\n\nAbout: Claude\'s citation "41 of the 44" in its reply.\nIts sentence: "41 of the 44 runs failed."\nThe data: /made-up/data')
   assert.match(firstMessage({ text: 'q', scope: { about: 'Runs', card: 'c1' } }), /About: the card "Runs" \(id "c1"\)\./)
   assert.match(firstMessage({ text: 'q', scope: { about: 'p95', mark: { row: 'r1', kind: 'heads', id: 'h' } } }), /important detail/)
+  assert.equal(firstMessage({ text: 'why?', scope: { about: '"Two runs failed."', passage: { row: 'r1', text: 'Two runs failed. Both timed out.' } } }), 'why?\n\nAbout: this passage of Claude\'s message:\nTwo runs failed. Both timed out.')
   assert.equal(nextMessage({ text: 'and then?', scope, last: scope }), 'and then?')
   assert.equal(nextMessage({ text: 'and then?', scope: { about: 'coverage', pane: { kind: 'coverage', args: {} } }, last: scope }), 'and then?\n\n(About "coverage" now.)')
 })
