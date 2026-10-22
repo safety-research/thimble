@@ -198,7 +198,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   const ask = await cardAsk($, meta.id, meta.title)
-  const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'claude' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: width + 4, children: rows })
+  const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: width + 4, children: rows })
   // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
   // (its title and what it shows); the row's keyed Box scopes the ?'s hover, so it shows while the pointer is on the card
   const framed = ask
