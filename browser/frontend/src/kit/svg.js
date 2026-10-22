@@ -1,4 +1,4 @@
-// svg.js: thimble browser's renderer of a card program's drawing (the terminal plugin's toolkit, plugin/draw/kit.js).
+// svg.js: thimble browser's renderer of a card program's drawing (the drawing toolkit, browser/kit/kit.js).
 // It lays a drawing out in pixels, with type, by rules of its own:
 //
 //   - a column the program counts in (k.w, a `w` option) is `cw` pixels, so the object keeps its proportions, but
@@ -14,12 +14,12 @@
 //   marks    the same list term.js returns for the same drawing: what was drawn, renderer-free
 // Pure: no DOM unless `measure` uses one (canvasMeasure below). In Node it measures with approxMeasure. Its colors are
 // the page's chart tokens when the page passes `color` (tone -> CSS color, KitBody's themeColors), else the plugin's
-// palette (plugin/draw/palette.js), and its faces the page's own: text in the body face, numbers in a right-aligned
+// palette (browser/kit/palette.js), and its faces the page's own: text in the body face, numbers in a right-aligned
 // column and axis ticks in the mono face, as thimble's charts and tables set them. The layout helpers are the
 // plugin's, one copy for both.
-import { distribute } from '../../../../plugin/draw/flex.js'
-import { knobOf } from '../../../../plugin/draw/handoff.js'
-import { hex } from '../../../../plugin/draw/palette.js'
+import { distribute } from '../../../kit/flex.js'
+import { knobOf } from '../../../kit/handoff.js'
+import { hex } from '../../../kit/palette.js'
 
 export const SANS = '"Hanken Grotesk", -apple-system, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif'
 export const MONO = '"Geist Mono", "SF Mono", Menlo, "DejaVu Sans Mono", monospace'

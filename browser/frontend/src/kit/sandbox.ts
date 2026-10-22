@@ -6,7 +6,7 @@
 // reaches neither the network nor the page: only the toolkit (the plugin's kit.js) and the card's data. A program that
 // runs past its time limit is stopped by ending the worker. The server ran the same program once, in its own
 // sandbox, for the drawing it keeps (cards/sandbox.py run_program); this one is only for what happens on the page.
-import KIT_SOURCE from '../../../../plugin/draw/kit.js?raw'
+import KIT_SOURCE from '../../../kit/kit.js?raw'
 import type { Drawing } from './types'
 
 const LIMIT_MS = 2000

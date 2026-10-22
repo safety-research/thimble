@@ -84,7 +84,7 @@ export default defineConfig({
   server: {
     port: 5300,
     // the terminal plugin's drawing toolkit, which a program card draws with (src/kit): one copy for both products
-    fs: { allow: ['.', '../../plugin/draw'] },
+    fs: { allow: ['.', '../kit'] },
     // /api, and the same routes under a signed-in browser's own path, /b/<key>/api (src/lib/browserKey)
     proxy: { '/api': toBackend(), '^/b/[A-Za-z0-9_-]+/api(/|$)': toBackend() },
   },

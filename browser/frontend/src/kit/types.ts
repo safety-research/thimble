@@ -1,4 +1,4 @@
-// A card program's drawing as the toolkit returns it (plugin/draw/kit.js DrawKit.run): plain JSON that the server
+// A card program's drawing as the toolkit returns it (browser/kit/kit.js DrawKit.run): plain JSON that the server
 // keeps with the card's run and the page draws (svg.js). Only the fields the page reads are typed.
 
 export interface Knob {

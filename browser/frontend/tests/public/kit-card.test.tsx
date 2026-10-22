@@ -3,7 +3,7 @@
 // the card's width, each part anchored as card:<id>#<part id>, and a click on a part opens the record it stands for.
 import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
-import KIT from '../../../../plugin/draw/kit.js?raw'
+import KIT from '../../../kit/kit.js?raw'
 import { KitBody, kitRunOf, partRef } from '../../src/kit/KitBody.tsx'
 import { renderSvg } from '../../src/kit/svg.js'
 import { KIT_MIME, type Drawing } from '../../src/kit/types.ts'
@@ -95,7 +95,7 @@ test('a plot draws [x, y] pairs in values, dots per series as its legend shows t
 
 test("a plot's x ticks can name dates: the browser draws each tick's own label, as the terminal does", async () => {
   // @ts-expect-error -- the plugin's terminal renderer is plain JavaScript with no declarations
-  const { renderTerm, gridText } = await import('../../../../plugin/draw/term.js')
+  const { renderTerm, gridText } = await import('../../../kit/term.js')
   // made-up daily counts over 31 days, a tick each week labeled with its date
   const days = ['Mar 3', 'Mar 10', 'Mar 17', 'Mar 24', 'Mar 31']
   const program = `return k.plot([{ name: 'saves', values: ${JSON.stringify(Array.from({ length: 31 }, (_, i) => (i * 7) % 23))} }], { h: 8, x: { ticks: ${JSON.stringify(days.map((label, i) => ({ at: i * 7, label })))} } })`

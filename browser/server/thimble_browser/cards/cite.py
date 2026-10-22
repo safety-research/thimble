@@ -101,7 +101,7 @@ def find(outputs: Any, col: str, row: str) -> tuple[str, str] | None:
 
 
 KIT_MIME = "application/vnd.thimble.kit+json"
-# the ids a drawn part can hold (plugin/draw/kit.js ID_RE)
+# the ids a drawn part can hold (browser/kit/kit.js ID_RE)
 PART_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
 
 

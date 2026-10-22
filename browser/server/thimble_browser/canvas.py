@@ -5,7 +5,7 @@ diagram, timeline, program), which runs in the sandbox (cards/sandbox.py) and ke
 data (kinds note, example, custom). The card shapes are those of thimble 0.8, so the 0.8 canvas draws them unchanged.
 
 A `program` card is drawn as the terminal plugin draws its cards: its code ends in the card's data, and its `program`,
-written against the plugin's toolkit (plugin/draw/kit.js), draws that data. The server runs the program in the sandbox
+written against the drawing toolkit (browser/kit/kit.js), draws that data. The server runs the program in the sandbox
 (sandbox.run_program) and keeps the drawing with the data as the run's last output (KIT_MIME), which the page draws
 and runs again when the analyst turns a knob or presses a part. A part's id cites it: `card:<id>#<part id>`.
 

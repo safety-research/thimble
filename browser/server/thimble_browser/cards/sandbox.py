@@ -1,5 +1,5 @@
 """Runs model-written code in a sandbox: a card's code (runner.py), a view's reader (views/reader_runner.py), and the
-program that draws a card on the terminal plugin's toolkit (run_program: plugin/draw/sandbox-node.mjs in Node).
+program that draws a card on the drawing toolkit (run_program: browser/kit/sandbox-node.mjs in Node).
 
 Each run is a new process. It sees:
 - the folder of files, read-only;
@@ -43,8 +43,8 @@ from typing import Any, Sequence
 from .. import home
 
 RUNNER = Path(__file__).resolve().with_name("runner.py")
-# the terminal plugin's drawing toolkit: kit.js and the Node script that runs a program on it (one copy, both products)
-DRAW = Path(__file__).resolve().parents[4] / "plugin" / "draw"
+# the drawing toolkit: kit.js and the Node script that runs a program on it
+DRAW = Path(__file__).resolve().parents[3] / "kit"
 DRAW_SCRIPT = DRAW / "sandbox-node.mjs"
 PROGRAM_S = 15.0  # a program's whole run, Node's start included; the toolkit's own limit is far shorter
 GRACE_S = 10.0  # past the run's own timeout, before the server stops it
