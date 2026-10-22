@@ -32,6 +32,11 @@ test('a sentence runs from the stop or line break before the mark to the next on
   const ms = marksIn(text)
   assert.equal(sentenceOf(text, ms[0]), '- agent-07 merged [12 of 40] pull requests on [June 3].')
   assert.equal(sentenceOf(text, ms[1]), sentenceOf(text, ms[0]))
+  // a bold sentence ends at its period, and its bold does not show
+  const bold = '**[26](#) pull requests were merged.** Four agents tie with [3 merges each](#).'
+  const bm = marksIn(bold)
+  assert.equal(sentenceOf(bold, bm[0]), '[26] pull requests were merged.')
+  assert.equal(sentenceOf(bold, bm[1]), 'Four agents tie with [3 merges each].')
 })
 
 test('a block with marks lays out as runs, each mark one group of runs with its own bold and code', () => {

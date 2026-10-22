@@ -72,19 +72,27 @@ export function withoutMarks(text) {
 }
 
 /**
- * The sentence that holds a mark, as the checker reads it: from the last `. ` or line break before the mark to the
- * next one after it, on one line, each mark in it written `[words]`.
+ * The sentence that holds a mark, as the checker reads it and its evidence shows it: from the end of the sentence
+ * before the mark to the end of the one it is in (a `.`, `!` or `?`, after any closing quote, bracket or emphasis,
+ * then a space), never across a line break; on one line, with no bold, each mark in it written `[words]`.
  */
 export function sentenceOf(text, mark) {
   const s = String(text || '')
-  const a = Math.max(s.lastIndexOf('. ', mark.start - 1) + 1, s.lastIndexOf('\n', mark.start - 1) + 1, 0)
-  const ends = [s.indexOf('. ', mark.end), s.indexOf('\n', mark.end)].filter(x => x >= 0)
-  const b = ends.length ? Math.min(...ends) + 1 : s.length
+  let a = s.lastIndexOf('\n', mark.start - 1) + 1
+  let b = s.indexOf('\n', mark.end)
+  if (b < 0) b = s.length
+  const end = /[.!?]["'\u201d\u2019)*_]*\s/g
+  end.lastIndex = a
+  for (let e; (e = end.exec(s)) && e.index < b;) {
+    const after = e.index + e[0].length
+    if (after <= mark.start) a = after
+    else if (e.index >= mark.end - 1) { b = after; break }
+  }
   const part = s.slice(a, b)
   let out = ''
   let at = 0
   for (const m of marksIn(part)) { out += part.slice(at, m.start) + `[${m.words}]`; at = m.end }
-  return (out + part.slice(at)).replace(/\s+/g, ' ').trim()
+  return (out + part.slice(at)).replace(/\*\*|__/g, '').replace(/\s+/g, ' ').trim()
 }
 
 // ------------------------------------------------------------------------------------------------ blocks
