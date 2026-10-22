@@ -1,6 +1,7 @@
-// The figure block: a canvas card embedded in the report, with its question, `from canvas` and ×, its output at the
-// card's width (or its body, for cards with no run), and a caption edited in place. Before a card is picked the block is
-// the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor. A
+// The figure block: a canvas card embedded in the report, filling the page's column, with its question, its output at
+// the card's width (or its body, for cards with no run), and a caption edited in place. In the editor the block's
+// actions (chat, delete, lock) stand inside the card, at the right of its question line (Editor.tsx BlockActions).
+// Before a card is picked the block is the picker. Locked (a scene, a slide), the caption is text; `FigureView` is the same figure outside the editor. A
 // figure follows its card: when the card changes (the stream's `cell` record) it is read again and drawn in place, and a
 // caption that still says the card's takeaway word for word takes the new takeaway, also after a change made while the
 // figure was not on the page (captionSource), unless the analyst locked the figure.
@@ -22,7 +23,6 @@ import { bus } from '../lib/bus'
 import { hhmm } from '../lib/time'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import { teleport } from '../lib/teleport'
 import type { CardVersion, Cell, WriteupFigure } from '../lib/types'
 import { useReportCtx } from './context'
 import { anchorFor, figureCandidates, readableText } from './model'
@@ -189,7 +189,7 @@ export function FigureBlock({ block, editor }: FigureBlockProps) {
   const follow = (v: string) => {
     if (!storedFigure(docRef.current?.sections, block.id)?.locked) setProps({ caption: v })
   }
-  return <Figure ws={ws} id={block.id} cellRef={block.props.cell} caption={block.props.caption} stored={stored} readOnly={!!readOnly} onCaption={(v) => setProps({ caption: v })} onFollow={follow} onRemove={remove} drag={drag} />
+  return <Figure ws={ws} id={block.id} cellRef={block.props.cell} caption={block.props.caption} stored={stored} readOnly={!!readOnly} onCaption={(v) => setProps({ caption: v })} onFollow={follow} drag={drag} />
 }
 
 /** A figure standing on its own, outside the editor, from its stored record: a scene's or a slide's figure. `bare`
@@ -211,7 +211,6 @@ interface FigureProps {
   onCaption?: (caption: string) => void
   /** the caption a change of the card carries over (followedCaption), in the editor */
   onFollow?: (caption: string) => void
-  onRemove?: () => void
   /** the question line's drag, in the editor */
   drag?: FigureDrag
 }
@@ -222,7 +221,7 @@ function contentWidth(el: HTMLElement): number {
   return Math.floor(el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0))
 }
 
-function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCaption, onFollow, onRemove, drag }: FigureProps) {
+function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCaption, onFollow, drag }: FigureProps) {
   const pending = !cellRef && !!stored?.make && (stored.status ?? 'pending') === 'pending'
   // Measure the figure's own element, not its body: the body draws nothing until it has a width, so a body measured at 0
     // in a hidden tab would stay at 0. A width of 0 keeps the last one, so the chart is not redrawn on every tab switch.
@@ -339,12 +338,6 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
           <span className="wu-fig-q" draggable={drag ? true : undefined} onDragStart={drag?.onDragStart} onDragEnd={drag?.onDragEnd}>
             {cell?.title || (cell === null ? 'The card is gone' : '')}
           </span>
-          {cellRef && (
-            <button type="button" className="wu-fig-from" onClick={() => teleport(cellRef)}>
-              from canvas
-            </button>
-          )}
-          {!readOnly && onRemove && <Button variant="icon" size="sm" icon="x" title="Remove" aria-label="Remove" className="wu-fig-x" onClick={onRemove} />}
         </div>
       )}
       <div className="wu-fig-body">

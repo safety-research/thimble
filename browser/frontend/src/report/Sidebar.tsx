@@ -11,7 +11,7 @@ import { CommentsPane, type Checks } from './Checks'
 import type { DocComment } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
-const DEFAULT_OPEN: Record<CardSectionKey, boolean> = { starred: true, orientation: true, figures: true, yours: true }
+const DEFAULT_OPEN: Record<CardSectionKey, boolean> = { starred: true, figures: true, yours: true }
 
 export interface SidebarProps {
   ws: string

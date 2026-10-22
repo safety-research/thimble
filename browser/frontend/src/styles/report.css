@@ -1016,12 +1016,17 @@
 .wu-root .wu-editor b {
   font-weight: 500;
 }
-/* a figure block is as wide as the column, not as wide as its content */
+/* a figure block is as wide as the column, not as wide as its content: it starts where the text does and, since its
+   actions stand inside the card (Editor.tsx ACTS_FLOATING), it also takes the actions' gutter at the right, less the
+   left gutter, so the card stands centred in the page's column */
 .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'],
 .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'] > [data-node-view-wrapper] {
   display: block;
   width: 100%;
   min-width: 0;
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'] {
+  width: calc(100% + var(--wu-gutter-r) - var(--wu-gutter-l));
 }
 .wu-root .wu-editor .bn-block-outer {
   line-height: 1.7;
@@ -1120,7 +1125,7 @@
 }
 /* a locked block shows its lock at rest where the actions' lock stands: past the block's right edge by the gap and the
    buttons before the lock (--wu-acts-before), centred on the block's first line (--wu-first plus half a line height),
-   or for a figure on the card's head row */
+   or for a figure inside the card, at the right end of its question line */
 .wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .bn-block-content,
 .wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .react-renderer > .bn-block-content[data-content-type='figure'] {
   position: relative;
@@ -1139,8 +1144,11 @@
   pointer-events: none;
 }
 .wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .react-renderer > .bn-block-content[data-content-type='figure']::after {
-  --wu-acts-before: 2;
+  /* the block's padding (10), the card's (14) and half the 22px question row, less half the glyph; the card's padding
+     (16) and half the space the glyph leaves in its button */
   top: 28px;
+  left: auto;
+  right: calc(16px + (var(--h-control) - 14px) / 2);
 }
 .wu-root .wu-editor .bn-block-outer.wu-locked[data-id='title'] > .bn-block > .bn-block-content::after {
   --wu-acts-before: 1;
@@ -1517,7 +1525,7 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   color: var(--text-tertiary);
 }
 
-/* -------- the figure: a canvas card in the page, bordered: its question, `from canvas` and ×, its result, its
+/* -------- the figure: a canvas card in the page, as wide as the text column, bordered: its question, its result, its
    caption under the 2px ink rule -------- */
 .wu-fig {
   position: relative;
@@ -1554,24 +1562,10 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 .wu-fig-q[draggable='true']:active {
   cursor: grabbing;
 }
-.wu-fig-from {
-  flex: none;
-  height: auto;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: 400 10.5px / 1.2 var(--font-mono);
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-.wu-fig-from:hover {
-  color: var(--text-primary);
-}
-.wu-fig .wu-fig-x {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
+/* in the editor the block's actions (chat, delete, lock) show on hover inside the card, at the right end of the question
+   line (Editor.tsx ACTS_FLOATING): the line keeps their room, so the question never runs under them */
+.wu-root .wu-editor .wu-fig-head {
+  padding-right: calc(3 * var(--h-control));
 }
 .wu-fig-body:empty {
   display: none;
