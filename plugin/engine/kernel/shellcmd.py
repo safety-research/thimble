@@ -1,18 +1,25 @@
-"""What a shell command put in front of Claude of each file it names, for coverage (coverage.py).
+"""What a shell command did with each file of the folder it names, for coverage (coverage.py).
 
-A file is read only when some of its lines reached Claude: `cat`, `head`, `tail` or `sed` printed them, and what came
-after in the pipeline passed them on. A search (`grep`, `rg`, `sed -n '/re/p'`) shows only the lines that matched, so it
-leaves the file searched. A program that computes (`python`, `jq`, `awk`, …), named with the file or holding it in its
-code (a here-document), leaves it computed: the program went over the file, taken as all of it, as code that opens a
-file mostly does, and what it printed of it is not known. A command that only names, lists or counts files (`wc`,
-`ls`, `find`, `git ls-files`, `grep -c`, `grep -l`) and a command whose output goes to a file leave it named. What the
-rule cannot tell, it does not count as read.
+    read      some of its lines reached Claude: `cat`, `head`, `tail` or `sed` printed them, and what came after in the
+              pipeline passed them on
+    searched  a search (`grep`, `rg`, `sed -n '/re/p'`) went over it and showed only the lines that matched
+    computed  a program went over its content and only its results came back: code (`python`, `jq`, `awk`, …) that
+              names the file in its arguments, in a here-document or in the script it runs; a count (`wc`,
+              `grep -c`, `grep -l`); a stage that takes the lines and is not known to pass them on; or a command whose
+              output went to a file. Code is taken to go over all of a file it names, as code that opens a file mostly
+              does
+    listed    only its name came up: a listing (`ls`, `find`), or a program thimble does not know
 
-    shows(command, known, root, cwd, lines_of) -> [(file, how, (first, last) or None, program)]
-        how is "read" (with the lines it printed), "searched", "computed" or "named"
+A folder a command names stands for its files only for a search, which goes into it; any other program only lists it.
+What the rule cannot tell, it does not count as read.
 
-`known` is the root's files as a Known index (or a list, indexed on the call): a folder of a million files is looked up
-by name and by folder, never scanned once per word of a command.
+    shows(command, known, root, cwd, lines_of, scripts) -> [(path, how, (first, last) or None, program)]
+
+`path` is a file, or a folder with a trailing `/` (`runs/`, `./` for the root) that stands for its files: a folder of
+a million screenshots is one entry, never a million. `known` is the root's files as a Known index (or a list, indexed
+on the call), looked up by name and by folder, never scanned once per word of a command. `scripts` keeps the scripts
+the session's commands wrote with a here-document (`cat > scan.py <<'PY'`), so a later `python3 scan.py` goes over
+the files the script names.
 """
 from __future__ import annotations
 
@@ -26,6 +33,11 @@ from typing import Callable, Iterable
 SEARCHES = {"grep", "egrep", "fgrep", "zgrep", "rg", "ag", "ack"}
 # programs that compute over the files their code or their arguments name
 COMPUTES = re.compile(r"^(?:python[\d.]*|pypy3?|jq|g?awk|mawk|node|perl|ruby|Rscript|sqlite3|duckdb|mlr|datamash)$")
+# of those, the ones that run a script file: its first word that is no option (`python3 -I scan.py data.jsonl`)
+SCRIPTED = re.compile(r"^(?:python[\d.]*|pypy3?|node|perl|ruby|Rscript)$")
+# programs that count what they read and print only the counts
+COUNTS = {"wc", "md5sum", "sha1sum", "sha256sum", "sha512sum", "cksum", "cmp"}
+SCRIPT_MAX_BYTES = 1 << 20
 # programs that pass on the lines they get (head, tail and sed narrow them; uniq -c counts them)
 PASSES = {"cat", "less", "more", "cut", "column", "nl", "tr", "fold", "fmt", "expand", "sort", "tee", "uniq", "head", "tail", "sed"}
 WRAPPERS = {"!", "{", "}", "if", "then", "else", "elif", "do", "while", "until", "time", "sudo", "command", "nohup", "exec",
@@ -38,11 +50,11 @@ Range = Callable[[int, int], "tuple[int, int]"]
 
 
 def pipelines(cmd: str) -> list[list[dict]]:
-    """The command as its pipelines, each a list of stages {words, out, bodies}: `out` when the stage's output goes to
-    a file rather than to Claude, `bodies` the text of its heredocs."""
+    """The command as its pipelines, each a list of stages {words, out, to, bodies}: `out` when the stage's output goes
+    to a file rather than to Claude, `to` the files it goes to, `bodies` the text of its heredocs."""
     cmd = cmd.replace("\\\n", " ")
     pipes: list[list[dict]] = [[]]
-    stage: dict = {"words": [], "out": False, "bodies": []}
+    stage: dict = {"words": [], "out": False, "to": [], "bodies": []}
     word: list[str] = []
     has = False
     redirect: str | None = None  # what the next word is: "out", "skip" or "heredoc"
@@ -56,7 +68,9 @@ def pipelines(cmd: str) -> list[list[dict]]:
             if redirect == "heredoc":
                 pending.append((w, stage))
             elif redirect == "out":
-                stage["out"] = stage["out"] or w not in ("/dev/stdout", "/dev/stderr", "/dev/tty")
+                if w not in ("/dev/stdout", "/dev/stderr", "/dev/tty"):
+                    stage["out"] = True
+                    stage["to"].append(w)
             elif redirect != "skip":
                 stage["words"].append(w)
             redirect = None
@@ -67,7 +81,7 @@ def pipelines(cmd: str) -> list[list[dict]]:
         end_word()
         if stage["words"] or stage["out"] or any(s is stage for _, s in pending):
             pipes[-1].append(stage)
-        stage = {"words": [], "out": False, "bodies": []}
+        stage = {"words": [], "out": False, "to": [], "bodies": []}
         if new_pipe and pipes[-1]:
             pipes.append([])
 
@@ -210,7 +224,7 @@ def _count(args: list[str]) -> tuple[str, int]:
 
 def _sed(args: list[str]) -> tuple[str, Range | None]:
     if any(a.startswith("--in-place") or (not a.startswith("--") and re.match(r"^-[A-Za-z]*i", a)) for a in args):
-        return "named", None  # it edits the file and prints nothing
+        return "computed", None  # it edits the file and prints nothing
     quiet = any(a in ("--quiet", "--silent") or (re.match(r"^-[A-Za-z]+$", a) and "n" in a) for a in args)
     script = next((args[j + 1] for j, a in enumerate(args) if a in ("-e", "--expression") and j + 1 < len(args)), None)
     if script is None:
@@ -219,7 +233,7 @@ def _sed(args: list[str]) -> tuple[str, Range | None]:
         return "read", None  # every line, as the script changed it
     m = re.match(r"^\s*(\d+)\s*(?:,\s*(\d+|\$)\s*)?p", script)
     if not m:
-        return ("searched", None) if script.lstrip().startswith("/") else ("named", None)
+        return ("searched", None) if script.lstrip().startswith("/") else ("computed", None)
     x, y = int(m.group(1)), m.group(2)
     if y == "$":
         return "read", (lambda a, b: (a + x - 1, b))
@@ -286,11 +300,13 @@ def search_operands(args: list[str]) -> list[str]:
 
 def stage_shows(prog: str, args: list[str]) -> tuple[str, Range | None]:
     """What one stage does with the lines it gets: ("read", the lines it prints as a function of their range, None for
-    all of them), ("searched", None), ("computed", None) or ("named", None)."""
-    if COMPUTES.match(prog):
+    all of them), ("searched", None), ("computed", None) or ("listed", None)."""
+    if COMPUTES.match(prog) or prog in COUNTS:
         return "computed", None
     if prog in SEARCHES:
-        return ("named" if counts_only(args) else "searched"), None
+        if "--files" in args:  # `rg --files` lists the names it would search
+            return "listed", None
+        return ("computed" if counts_only(args) else "searched"), None
     if prog in ("cat", "tac", "nl", "less", "more", "bat", "batcat"):
         return "read", None
     if prog in ("head", "tail"):
@@ -302,7 +318,27 @@ def stage_shows(prog: str, args: list[str]) -> tuple[str, Range | None]:
         return "read", ((lambda a, b: (a + v - 1, b)) if k == "+" else (lambda a, b: (max(a, b - v + 1), b)))
     if prog == "sed":
         return _sed(args)
-    return "named", None
+    return "listed", None
+
+
+def script_of(prog: str, args: list[str]) -> str | None:
+    """The script file a program runs: an interpreter's first word that is no option (`python3 -I scan.py x.jsonl`),
+    or the file after `-f` (`awk -f count.awk`, `jq -f q.jq`); None for code given inline (`-c`, `-e`, `-m`)."""
+    if SCRIPTED.match(prog):
+        skip = False
+        for a in args:
+            if skip:
+                skip = False
+            elif a in ("-c", "-e", "-E", "-m", "--eval", "--print", "-p"):
+                return None
+            elif a in ("-X", "-W", "-r", "--require"):
+                skip = True
+            elif not a.startswith("-"):
+                return a
+        return None
+    if COMPUTES.match(prog) and "-f" in args[:-1]:
+        return args[args.index("-f") + 1]
+    return None
 
 
 # ------------------------------------------------------------------ the files a command names
@@ -335,7 +371,8 @@ def _glob_rx(pat: str) -> re.Pattern[str]:
     return re.compile("".join(out) + r"\Z")
 
 
-_TOKEN = re.compile(r"[\w./*?\[\]{}~+-]+")
+# a word of code: in code, braces are interpolation or a literal (`f"{d}/{x}.png"`), never part of a file's name
+_TOKEN = re.compile(r"[\w./*?\[\]~+-]+")
 _SHELL_TOKEN = re.compile(r"[\w./*?\[\]{}~+$-]+")
 _VAR = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?])\}?")
 
@@ -401,12 +438,24 @@ class Known:
     @functools.cached_property
     def by_ext(self) -> dict[str, list[str]]:
         """The files by extension, lower case with its dot (`.png`), or "" for a name with none."""
-        out: dict[str, list[str]] = {}
+        raw: dict[str, list[str]] = {}  # by the extension as written: one lookup per file, lower case once per extension
         for f in self.files:
-            name = f[f.rfind("/") + 1:]
-            dot = name.rfind(".")
-            out.setdefault(name[dot:].lower() if 0 < dot < len(name) - 1 else "", []).append(f)
+            dot = f.rfind(".")
+            e = f[dot:] if f.rfind("/") + 1 < dot < len(f) - 1 else ""
+            fs = raw.get(e)
+            if fs is None:
+                fs = raw[e] = []
+            fs.append(f)
+        out: dict[str, list[str]] = {}
+        for e, fs in raw.items():
+            low = e.lower()
+            out[low] = sorted(out[low] + fs) if low in out else fs
         return out
+
+    def has_folder(self, folder: str) -> bool:
+        """Whether some file lies under the folder (a relative path, no trailing `/`)."""
+        i = bisect.bisect_left(self.files, folder + "/")
+        return i < len(self.files) and self.files[i].startswith(folder + "/")
 
     def under(self, folder: str) -> list[str]:
         """The files at any depth under a folder; every file for `.`."""
@@ -508,21 +557,29 @@ def as_known(known: "Known | Iterable[str]") -> Known:
     return known if isinstance(known, Known) else Known(sorted(set(known)))
 
 
+def _here(cwd: str | None, root: str) -> str:
+    """The command's folder relative to the root (`.` for the root); "\\0" for a folder beside the root, whose paths
+    resolve only by their end."""
+    root = root.rstrip("/")
+    if not cwd:
+        return "."
+    if cwd == root or cwd.startswith(root + "/") or root.startswith(cwd.rstrip("/") + "/"):
+        return os.path.relpath(cwd, root)
+    return "\0"
+
+
 def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None = None,
-          values: dict[str, list[str]] | None = None) -> set[str]:
-    """The source files a command's words name, by path, folder or glob. A path resolves from the command's folder
-    first, so `cat x.csv` names that folder's x.csv and not every x.csv under the root, and `*` stays within one folder;
-    a path that does not resolve matches by its end, as after a `cd`. A shell variable takes the values the command
-    gave it (`values`), else stands for one folder or name."""
+          values: dict[str, list[str]] | None = None) -> tuple[set[str], set[str]]:
+    """The files and the folders a command's words name: (files, folders), each a path relative to the root. A file is
+    named by its path or a glob; a folder by its path, and it stands for its files without listing them. A path
+    resolves from the command's folder first, so `cat x.csv` names that folder's x.csv and not every x.csv under the
+    root, and `*` stays within one folder; a path that does not resolve matches by its end, as after a `cd`. A shell
+    variable takes the values the command gave it (`values`), else stands for one folder or name."""
     root = root.rstrip("/")
     K = as_known(known)
-    if not cwd:
-        here = "."
-    elif cwd == root or cwd.startswith(root + "/") or root.startswith(cwd.rstrip("/") + "/"):
-        here = os.path.relpath(cwd, root)
-    else:
-        here = "\0"  # a folder beside the root: its paths resolve only by their end
-    hit: set[str] = set()
+    here = _here(cwd, root)
+    files: set[str] = set()
+    folders: set[str] = set()
     tokens: set[str] = set()
     # a heredoc's body is not shell (no `values`): a `$` in it only ends a word
     for t in (_TOKEN if values is None else _SHELL_TOKEN).findall(text):
@@ -536,39 +593,74 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
         else:
             rel = os.path.normpath(os.path.join(here, t))
         if "*" in t or "?" in t:
-            hit |= K.glob(rel) or K.glob("**/" + re.sub(r"^(?:\./)+", "", t))
-        elif "." in t or "/" in t:
+            files |= K.glob(rel) or K.glob("**/" + re.sub(r"^(?:\./)+", "", t))
+        elif "." not in t and "/" not in t:
+            # a bare word: a shell word names the file or the folder it is (`ls shots`, `cat Makefile`); in code it is
+            # mostly a name of the code's own (`runs = []`), so code names a file only by a path or a name with a dot
+            if values is not None and not t.startswith("-"):
+                if rel in K.set:
+                    files.add(rel)
+                elif K.has_folder(rel):
+                    folders.add(rel)
+        else:
             if rel in K.set:
-                hit.add(rel)
+                files.add(rel)
                 continue
             folder_word = t.endswith("/") or "." not in Path(t).name
-            if folder_word:
-                under = K.under(rel)
-                if under:
-                    hit.update(under)
-                    continue
+            if folder_word and K.has_folder(rel):
+                folders.add(rel)
+                continue
             tt = t.rstrip("/")
             # a path that resolves by its end, as after a `cd`: a file whose path ends with the word, or a word that
-            # ends with the file's path; and for a folder's word, every file under a folder whose path ends with it
-            hit |= K.ending(tt)
+            # ends with the file's path; and for a folder's word, a folder whose path ends with it
+            files |= K.ending(tt)
             if folder_word:
-                for d in K.folders:
-                    if d == tt or d.endswith("/" + tt):
-                        hit.update(K.under(d))
-    return hit
+                folders.update(d for d in K.folders if d == tt or d.endswith("/" + tt))
+    return files, folders
 
 
 # ------------------------------------------------------------------ a whole command
 
 
-def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None,
-          lines_of: Callable[[str], int]) -> list[tuple[str, str, tuple[int, int] | None, str]]:
-    """What the command put in front of Claude of each source file it names: (file, how, (first, last), program), how
-    being "read" with the lines it printed, "searched" or "named". The `thimble` command keeps its own record, so its
-    stages and heredocs are left out here."""
+def _script_key(word: str, cwd: str | None, root: str) -> str:
+    """A script's path as a key: a word that starts at a variable or the home folder stays as written (the same word
+    names the same file in the session's later commands), any other is made absolute from the command's folder."""
+    if word[:1] in ("$", "~"):
+        return os.path.normpath(word)
+    return os.path.normpath(os.path.join(cwd or root, word))
+
+
+def _script_text(key: str, scripts: dict[str, str]) -> str:
+    """A script's text: as a command of the session wrote it with a here-document, else as the file holds it now (a
+    script Claude wrote with its Write tool), up to SCRIPT_MAX_BYTES; "" when neither is known."""
+    if key in scripts:
+        return scripts[key]
+    if key[:1] != "/":
+        return ""
+    try:
+        with open(key, "rb") as f:
+            return f.read(SCRIPT_MAX_BYTES).decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, lines_of: Callable[[str], int],
+          scripts: dict[str, str] | None = None) -> list[tuple[str, str, tuple[int, int] | None, str]]:
+    """What the command did with each file and folder it names: (path, how, (first, last), program), how being "read"
+    (with the lines it printed), "searched", "computed" (with the lines it went over, or None for all) or "listed"; a
+    folder's path ends with `/`. `scripts` keeps the scripts the session's commands wrote, from one command to the next.
+    The `thimble` command keeps its own record, so its stages and heredocs are left out here."""
     out: list[tuple[str, str, tuple[int, int] | None, str]] = []
     known = as_known(known)
+    scripts = {} if scripts is None else scripts
     values = variables(cmd)
+
+    def code(text: str, prog: str) -> None:
+        """Code went over the files it names; a folder it names, it only lists."""
+        files, folders = named(text, known, root, None)
+        out.extend((f, "computed", None, prog) for f in sorted(files))
+        out.extend((d + "/", "listed", None, prog) for d in sorted(folders))
+
     for pipe in pipelines(cmd):
         sent = not pipe[-1]["out"]
         for k, st in enumerate(pipe):
@@ -578,35 +670,59 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None,
                 continue
             if prog == "thimble":
                 continue
+            computes = bool(COMPUTES.match(prog or ""))
+            written = st["to"] + ([a for a in args if not a.startswith("-")] if prog == "tee" else [])
             for body in st["bodies"]:
-                code = "computed" if COMPUTES.match(prog or "") else "named"
-                out.extend((f, code, None, prog or "a heredoc") for f in sorted(named(body, known, root, None)))
-            files = named(" ".join(search_operands(args) if prog in SEARCHES else args), known, root, cwd, values) if prog else set()
-            if not files:
+                if written:
+                    # a here-document written to a file (`cat > scan.py <<'PY'`): a script for a later command to run
+                    for to in written:
+                        scripts[_script_key(to, cwd, root)] = body
+                elif computes:
+                    code(body, prog)
+                else:
+                    files, folders = named(body, known, root, None)
+                    out.extend((p, "listed", None, prog or "a heredoc") for p in sorted(files) + [d + "/" for d in sorted(folders)])
+            script = script_of(prog, args) if computes else None
+            if script:
+                code(_script_text(_script_key(script, cwd, root), scripts), prog)
+            if not prog:
+                continue
+            files, folders = named(" ".join(search_operands(args) if prog in SEARCHES else args), known, root, cwd, values)
+            if prog in SEARCHES:
+                # a search of `.`, or a recursive one with no path, searches the command's folder
+                ops = search_operands(args)
+                here = _here(cwd, root)
+                if (any(o in (".", "./") for o in ops) or (prog in ("rg", "ag", "ack") and not ops)) and (
+                        here == "." or known.has_folder(here)):
+                    folders.add(here)
+            if not files and not folders:
                 continue
             how, rng = stage_shows(prog, args)
             narrow: list[Range] = [rng] if rng else []
             by = prog  # the program that decided what reached Claude
             for later in pipe[k + 1:]:
-                if how in ("named", "computed"):
+                if how in ("listed", "computed"):
                     break
                 p2, a2 = program(later["words"])
                 if p2 in SEARCHES:
-                    how, by = ("named" if counts_only(a2) else "searched"), p2
+                    how, by = ("computed" if counts_only(a2) else "searched"), p2
                 elif p2 in ("head", "tail", "sed") and how == "read":
                     how, r2 = stage_shows(p2, a2)
                     narrow += [r2] if r2 else []
                     by = by if how == "read" else p2
                 elif p2 not in PASSES or (p2 == "uniq" and any(a in ("-c", "--count") for a in a2)):
-                    how, by = "named", p2 or "a pipe"
+                    # a stage that takes the lines and is not known to pass them on went over them
+                    how, by = "computed", p2 or "a pipe"
             if not sent and how in ("read", "searched"):
-                how, by = "named", f"{prog} > a file"  # its output went to a file
+                how, by = "computed", f"{prog} > a file"  # it went over the lines, and its output went to a file
+            # a folder stands for its files only for a search, which goes into it; any other program only lists it
+            out.extend((d + "/", "searched" if how == "searched" else "listed", None, by) for d in sorted(folders))
             for f in sorted(files):
-                if how != "read":
+                if how not in ("read", "computed") or (how == "computed" and not narrow):
                     out.append((f, how, None, by))
                     continue
                 a, b = 1, lines_of(f) or 10 ** 9
                 for r in narrow:
                     a, b = r(a, b)
-                out.append((f, "read", (a, b), by) if a <= b else (f, "named", None, by))
+                out.append((f, how, (a, b), by) if a <= b else (f, "listed", None, by))
     return out

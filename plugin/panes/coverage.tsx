@@ -4,11 +4,11 @@
 //
 // Overview first: two labeled bars of the folder's files, those read into Claude's context and those searched or
 // computed over (the bar's count). Then the folders as a tree, each with its files and the same two measures, in its
-// files' own unit (records, rows, lines, pages, whole files), as a line above the columns says, and how many of its
-// files Claude touched (a search
-// whose lines are not known touches a file without a share of it): those Claude touched first. A press on a folder opens it
-// one level (and closes it again); its files nothing touched are one line, which opens to their names. A press on a
-// file shows its path (with its first line read), so the terminal can open it, and what was read of it.
+// files' own unit (records, rows, lines, pages, whole files), as a line above the columns says: the share read, and
+// the share gone over (read, searched or computed over), with how many of its files Claude touched; those Claude
+// touched first. A press on a folder opens it one level (and closes it again); its files not touched are one line,
+// which says how many were only listed by name and opens to their names. A press on a file shows its path (with its
+// first line read), so the terminal can open it, and what was read of it.
 //
 //   state: paneView/coverage {open: folders open (and `rest:<folder>` for their untouched files), file: the file shown}
 import type { EngineInterface } from 'claude-code'
@@ -31,11 +31,11 @@ const BAR = 8
 /** Names of untouched files listed when their line is opened, at most. */
 const REST_MAX = 200
 
-type Unit = { units: number; seen: number; model: number; computed: number }
+type Unit = { units: number; seen: number; model: number; searched: number; computed: number }
 type Node = { path: string; files: number; touched: number; units: Map<string, Unit>; readSum: number; countedSum: number; kids: Map<string, Node> }
 
 /** A file's status as the kernel names it (kernel/coverage.py ORDER), in the pane's words. */
-const SAID: Record<string, string> = { seen: 'read', model: 'model', searched: 'searched', computed: 'computed', named: 'counted' }
+const SAID: Record<string, string> = { seen: 'read', model: 'model', searched: 'searched', computed: 'computed' }
 /** Cells of the touched column: `12/340` for a folder, `searched` for a file. */
 const TOUCHED = 9
 
@@ -71,10 +71,11 @@ function folderTree(groups: Any[]): Node {
       n.readSum += (Number(g.read_share) || 0) * files
       n.countedSum += (Number(g.counted_share) || 0) * files
       for (const u of g.units || []) {
-        const m = n.units.get(u.unit) ?? { units: 0, seen: 0, model: 0, computed: 0 }
+        const m = n.units.get(u.unit) ?? { units: 0, seen: 0, model: 0, searched: 0, computed: 0 }
         m.units += Number(u.units) || 0
         m.seen += Number(u.seen) || 0
         m.model += Number(u.model) || 0
+        m.searched += Number(u.searched) || 0
         m.computed += Number(u.computed) || 0
         n.units.set(u.unit, m)
       }
@@ -89,7 +90,7 @@ function measures(n: Node): { read: number; searched: number } {
   const us = [...n.units.values()]
   if (us.length === 1 && us[0]!.units) {
     const u = us[0]!
-    return { read: Math.min(1, u.seen / u.units), searched: Math.min(1, (u.seen + u.model + u.computed) / u.units) }
+    return { read: Math.min(1, u.seen / u.units), searched: Math.min(1, (u.seen + u.model + u.searched + u.computed) / u.units) }
   }
   return n.files ? { read: n.readSum / n.files, searched: n.countedSum / n.files } : { read: 0, searched: 0 }
 }
@@ -173,13 +174,15 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
         ] }))
       }
     }
-    // the folder's files nothing touched: one line, which opens to their names
+    // the folder's files not touched: one line, which says how many were only listed and opens to their names
     const n = untouched.filter(p => folderOf(p) === folder)
     const own = (cov.groups || []).find((g: Any) => g.folder === folder)
     const rest = Math.max(n.length, (Number(own?.files) || 0) - mine.length)
     if (!rest) return
+    const listed = Number(own?.by_status?.listed) || 0
     const key = `rest:${folder}`
-    rows.push(Button({ key, plain: true, label: `${rest} files, none touched`, onPress: flip(key), children: [Text({ key: 'r', dimColor: true, children: `${ind}  ${open.has(key) ? '▾' : '▸'} ${rest.toLocaleString('en-US')} ${rest === 1 ? 'file' : 'files'}, none touched` })] }))
+    const words = `${rest.toLocaleString('en-US')} ${rest === 1 ? 'file' : 'files'}, none touched${listed ? ` (${listed === rest ? 'all' : listed.toLocaleString('en-US')} only listed by name)` : ''}`
+    rows.push(Button({ key, plain: true, label: `${rest} files, none touched`, onPress: flip(key), children: [Text({ key: 'r', dimColor: true, children: `${ind}  ${open.has(key) ? '▾' : '▸'} ${words}` })] }))
     if (open.has(key)) {
       for (const p of n.slice(0, REST_MAX)) rows.push(Text({ key: `u:${p}`, dimColor: true, children: `${ind}      ${cut(nameOf(p), W - 2 * depth - 6)}` }))
       if (rest > Math.min(n.length, REST_MAX)) rows.push(Text({ key: `u-more:${folder}`, dimColor: true, children: `${ind}      and ${(rest - Math.min(n.length, REST_MAX)).toLocaleString('en-US')} more` }))
@@ -207,7 +210,7 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
     overview("read into Claude's context", Number(total.seen_files) || 0, READ, 'o-read'),
     overview('searched or computed over', Number(total.touched_files) || 0, SEARCHED, 'o-searched'),
     Text({ key: 'gap', children: ' ' }),
-    Text({ key: 'units', dimColor: true, wrap: 'wrap', children: 'files: touched of all · read, searched: the share of their lines or records' }),
+    Text({ key: 'units', dimColor: true, wrap: 'wrap', children: 'files: touched of all · read, searched: the share of their lines or records read, and searched or computed over' }),
     Text({ key: 'head', dimColor: true, children: `  ${pad('folder', nameW(0))} ${pad('files', TOUCHED, true)} ${pad('read', barW + 7)}  ${pad('searched', barW + 7)}` }),
     ...rows,
   ] })
