@@ -4,6 +4,10 @@ In the folder under analysis (the root), the `thimble/` folder holds what the pe
 
     thimble/labels/<name>.json              each label with every version of its values (labels.py)
 
+A root thimble may not write in (a read-only dataset, a folder the person's sandbox protects) keeps that folder under
+$THIMBLE_HOME/lean/folders/<the root's path as a name>/thimble/ instead, and the kernel says so once, when it first
+writes there. Nothing is ever written inside such a root.
+
 Under $THIMBLE_HOME/lean/events/<session>.jsonl the session's change feed: one line per change the plugin acts on (a
 label whose records wait for the model, a fix's share that waits for the person), so the plugin learns of it from the
 kernel, not from what a command printed.
@@ -17,6 +21,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -28,12 +34,27 @@ def thimble_home() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or os.path.expanduser("~/.thimble"))
 
 
+def kept_dir(root: Path) -> Path:
+    """Where the records of a root thimble may not write in are kept: under THIMBLE_HOME, named by the end of the root's
+    path (the plugin's core/env.ts finds them by the same name)."""
+    return thimble_home() / "lean" / "folders" / re.sub(r"[^A-Za-z0-9_-]", "-", str(root))[-120:] / DIR
+
+
+def records_dir(root: Path) -> Path:
+    """The root's record folder: root/thimble/ when thimble may write there, else kept_dir(root). Once a root's records
+    are kept under THIMBLE_HOME they stay there, so its labels never split between two folders."""
+    own, kept = root / DIR, kept_dir(root)
+    if kept.is_dir():
+        return kept
+    return own if os.access(own if own.exists() else root, os.W_OK) else kept
+
+
 def _holding(start: Path) -> Path | None:
-    """The nearest folder at or above `start` that holds a thimble/ record folder, or None."""
+    """The nearest folder at or above `start` that holds a thimble/ record folder (its own, or one kept for it under
+    THIMBLE_HOME), or None."""
     d = start
     while True:
-        t = d / DIR
-        if (t / "labels").is_dir():
+        if (d / DIR / "labels").is_dir() or (kept_dir(d) / "labels").is_dir():
             return d
         if d.parent == d:
             return None
@@ -69,10 +90,12 @@ class Store:
     def __init__(self, root: str | Path | None = None, session: str | None = None):
         self.root = Path(root).resolve() if root else find_root()
         self.session = session or session_id()
-        self.dir = self.root / DIR
+        self.dir = records_dir(self.root)
         self.cache = thimble_home() / "lean" / "cache" / safe(str(self.root))[-100:]
 
     def sub(self, name: str) -> Path:
+        if not self.dir.is_dir() and self.dir != self.root / DIR:
+            print(f"thimble: {self.root} is read-only here, so its labels are kept in {self.dir}", file=sys.stderr)
         d = self.dir / name
         d.mkdir(parents=True, exist_ok=True)
         return d
@@ -150,4 +173,5 @@ class Store:
 
 
 def safe(s: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_" else "-" for c in s)[:120] or "none"
+    """A name for a file or folder: letters, digits, - and _ (the plugin's core/env.ts and core/feed.ts make the same)."""
+    return re.sub(r"[^A-Za-z0-9_-]", "-", s)[:120] or "none"

@@ -55,7 +55,8 @@ declare module 'claude-code' {
       fixShare: StateFamily<unknown>
 
       // ---- L6 labels
-      /** bumps when a label changes here (its reads ended, the person checked a record): what shows labels redraws */
+      /** goes up when a label changes (Claude's `thimble label` command, a wave of the model's reads, the person's
+       *  check): the labels pane reads the labels again (labels/labels.ts) */
       labelGen: number
 
       // ---- core (L0)

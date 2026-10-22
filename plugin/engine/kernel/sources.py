@@ -24,14 +24,12 @@ import os
 import re
 import sqlite3
 import sys
-import time
 from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
-
-from . import refs as R
+from urllib.parse import quote
 
 SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
              ".thimble", "thimble", ".lite"}
@@ -195,12 +193,42 @@ def _pointer_get(v: Any, pointer: str) -> Any:
     return v
 
 
+def open_db(p: Path) -> closing[sqlite3.Connection]:
+    """A database opened to read only, so that no file appears beside it. To read a database in WAL mode, SQLite makes
+    its -wal and -shm files and leaves them; `immutable=1` reads the database file alone and makes none. A database whose
+    -wal file is already there may hold rows in it, so it is read with that file (mode=ro), which makes nothing new."""
+    uri = f"file:{quote(str(p))}?mode=ro" + ("" if Path(f"{p}-wal").exists() else "&immutable=1")
+    return closing(sqlite3.connect(uri, uri=True))
+
+
 def table_names(root: Path, rel: str) -> list[str]:
     """The tables of a database, by name; none for a file that is not one."""
     if kind_of_file(root, rel) != "sqlite":
         return []
-    with closing(sqlite3.connect(f"file:{root / rel}?mode=ro", uri=True)) as con:
+    with open_db(root / rel) as con:
         return [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
+
+
+def _record(rel: str, i: int, line: str) -> Row:
+    """Line i of a JSONL file as a row: its record, or its text when it is no JSON."""
+    line = line.rstrip("\n")
+    try:
+        v = json.loads(line)
+    except ValueError:
+        v = {"_text": line}
+    return Row(f"{rel}#L{i}", line, v)
+
+
+def json_lines(root: Path, rel: str, nums: set[int]) -> Iterator[Row]:
+    """The records on the lines `nums` of a JSONL file (or a transcript): the file is read up to the last of them, and
+    only those lines are decoded."""
+    top = max(nums, default=0)
+    with open(root / rel, "r", errors="replace") as f:
+        for i, line in enumerate(f, 1):
+            if i > top:
+                break
+            if i in nums and line.strip():
+                yield _record(rel, i, line)
 
 
 def iter_rows(root: Path, rel: str, table: str | None = None) -> Iterator[Row]:
@@ -210,14 +238,8 @@ def iter_rows(root: Path, rel: str, table: str | None = None) -> Iterator[Row]:
     if kind in ("jsonl", "transcript"):
         with open(p, "r", errors="replace") as f:
             for i, line in enumerate(f, 1):
-                line = line.rstrip("\n")
-                if not line.strip():
-                    continue
-                try:
-                    v = json.loads(line)
-                except ValueError:
-                    v = {"_text": line}
-                yield Row(f"{rel}#L{i}", line, v)
+                if line.strip():
+                    yield _record(rel, i, line)
     elif kind == "csv":
         with open(p, newline="", errors="replace") as f:
             for i, row in enumerate(csv.DictReader(f, delimiter="\t" if p.suffix.lower() == ".tsv" else ","), 1):
@@ -232,7 +254,7 @@ def iter_rows(root: Path, rel: str, table: str | None = None) -> Iterator[Row]:
         for i, x in enumerate(items):
             yield Row(f"{rel}#{key}/{i}", json.dumps(x, ensure_ascii=False), x)
     elif kind == "sqlite":
-        with closing(sqlite3.connect(f"file:{p}?mode=ro", uri=True)) as con:
+        with open_db(p) as con:
             con.row_factory = sqlite3.Row
             tables = [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
             for t in tables:
@@ -331,7 +353,7 @@ def _count_sqlite(p: Path) -> int:
     """The rows iter_rows gives of a database, counted by the database: each table's rows, for the tables whose rows
     can be selected by rowid (iter_rows skips the others)."""
     n = 0
-    with closing(sqlite3.connect(f"file:{p}?mode=ro", uri=True)) as con:
+    with open_db(p) as con:
         tables = [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
         for t in tables:
             try:
@@ -488,135 +510,6 @@ def blocks_of(record: Any) -> list[dict[str, str]]:
             if isinstance(c, list):
                 return [b for b in map(_content_block, c) if b is not None]
     return [{"kind": "raw", "text": json.dumps(record, ensure_ascii=False) if not isinstance(record, str) else record}]
-
-
-_FILES: dict[str, tuple[float, list[str]]] = {}  # root -> (when it was listed, its files), for a few seconds
-
-
-def locate(root: Path, rel: str) -> str:
-    """The path under root of the file a ref names. A path may start in a subfolder, where a session ran `cd`: when
-    root/rel is no file, the one file under root whose path ends with /rel is the one meant. Raises RefError when no
-    file ends so, or several do."""
-    if (root / rel).is_file():
-        return rel
-    tail = "/" + rel.removeprefix("./")
-    when, files = _FILES.get(str(root), (0.0, []))
-    if time.monotonic() - when > 5:
-        files = list_files(root)
-        _FILES[str(root)] = (time.monotonic(), files)
-    hits = [f for f in files if f.endswith(tail)]
-    if len(hits) == 1 and (root / hits[0]).is_file():
-        return hits[0]
-    if len(hits) > 1:
-        more = f", and {len(hits) - 3} more" if len(hits) > 3 else ""
-        raise R.RefError(f"no file {rel} under {root}, and {len(hits)} files end with {tail}: {', '.join(hits[:3])}{more}")
-    raise R.RefError(f"no file {rel} under {root}")
-
-
-def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
-    """The rows one source ref or row set names, in file order (at most `limit`). The rows name the file by its path
-    under root (`locate`). Raises RefError when the file is missing or a row is not there."""
-    p = R.parse(rowset)
-    k = p["kind"]
-    rel = locate(root, p.get("path", ""))
-    path = root / rel
-    if k == "file":
-        return [Row(rel, "", {"path": rel})]
-    kind = kind_of_file(root, rel)
-    if k == "lines":
-        want = set(p["nums"])
-        if kind in ("markdown", "diff", "text") or kind is None:
-            # a section, a hunk or a run of lines reads as one row: each run of consecutive lines is one
-            lines: dict[int, str] = {}
-            top = max(want)
-            with open(path, "r", errors="replace") as f:
-                for i, line in enumerate(f, 1):
-                    if i in want:
-                        lines[i] = line.rstrip("\n")
-                    if i >= top:
-                        break
-            if len(lines) < len(want):
-                raise R.RefError(f"{rel} has no line {min(want - set(lines))}")
-            got = []
-            for run in R.format_nums(sorted(want)).split(","):
-                a, _, b = run.partition("-")
-                lo, hi = int(a), int(b or a)
-                body = "\n".join(lines[i] for i in range(lo, hi + 1))
-                got.append(Row(f"{rel}#L{lo}" + (f"-{hi}" if hi > lo else ""), body, body))
-                if limit and len(got) >= limit:
-                    break
-            return got
-        if kind in ("jsonl", "transcript", "json"):
-            # a line of a JSON document is a line of its text: one that holds a whole value (a document on one line,
-            # a .json file of one record per line) reads as that value
-            got = []
-            top = max(want)
-            with open(path, "r", errors="replace") as f:
-                for i, line in enumerate(f, 1):
-                    if i in want:
-                        line = line.rstrip("\n")
-                        try:
-                            v: Any = json.loads(line)
-                        except ValueError:
-                            v = {"_text": line}
-                        got.append(Row(f"{rel}#L{i}", line, v))
-                        if limit and len(got) >= limit:
-                            break
-                    if i >= top:
-                        break
-            if len(got) < len(want) and not (limit and len(got) >= limit):
-                missing = sorted(want - {int(r.ref.rsplit("#L", 1)[1]) for r in got})
-                raise R.RefError(f"{rel} has no line {missing[0]}")
-            return got
-    if k == "csvrows":
-        want = set(p["nums"])
-        got = []
-        with open(path, newline="", errors="replace") as f:
-            for i, row in enumerate(csv.DictReader(f, delimiter="\t" if path.suffix.lower() == ".tsv" else ","), 1):
-                if i in want:
-                    got.append(Row(f"{rel}#row={i}", json.dumps(row, ensure_ascii=False), row))
-                    if limit and len(got) >= limit:
-                        break
-        if len(got) < len(want) and not (limit and len(got) >= limit):
-            raise R.RefError(f"{rel} has fewer rows than {max(want)}")
-        return got
-    if k == "pointer":
-        try:
-            doc = json.loads(path.read_text(errors="replace"))
-        except ValueError as e:
-            raise R.RefError(f"{rel} is not one JSON document ({e}): its rows are lines, as {rel}#L1") from e
-        ptrs = [f"{p['prefix']}{n}" for n in p["nums"]] if "nums" in p else [p["pointer"]]
-        got = []
-        for ptr in ptrs:
-            try:
-                v = _pointer_get(doc, ptr) if ptr != "/" else doc
-            except (KeyError, IndexError, ValueError, TypeError):
-                raise R.RefError(f"{rel} has no value at {ptr}")
-            got.append(Row(f"{rel}#{ptr}", json.dumps(v, ensure_ascii=False), v))
-            if limit and len(got) >= limit:
-                break
-        return got
-    if k in ("dbrows", "table"):
-        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as con:
-            con.row_factory = sqlite3.Row
-            t = p["table"]
-            if not con.execute("select 1 from sqlite_master where type='table' and name=?", (t,)).fetchone():
-                raise R.RefError(f"{rel} has no table {t}")
-            if k == "table":
-                n = con.execute(f'select count(*) from "{t}"').fetchone()[0]
-                return [Row(rowset, "", {"table": t, "rows": n})]
-            keys = p.get("nums") or p.get("keys") or []
-            got = []
-            for key in keys:
-                r = con.execute(f'select * from "{t}" where rowid = ?', (key,)).fetchone()
-                if r is None:
-                    raise R.RefError(f"{rel} has no row {key} in {t}")
-                d = dict(r)
-                got.append(Row(f"{rel}#{t}/{key}", json.dumps(d, ensure_ascii=False, default=str), d))
-                if limit and len(got) >= limit:
-                    break
-            return got
-    raise R.RefError(f"cannot read {rowset}")
 
 
 # ------------------------------------------------------------------ what a row says, in words

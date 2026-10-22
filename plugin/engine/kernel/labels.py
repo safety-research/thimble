@@ -18,10 +18,10 @@ A label is defined once and applied to every record of the files a glob names (o
 
 A value has its source (`by`: regex, code, model, claude), and a person's check stands over it: what the person said a
 record's value is (`checks`), which the counts read in its place. Each record keeps its ref, so the person can open
-the records of a value. `thimble label NAME` prints the counts per value as plain numbers, with the records they are
-counted over; the examples (samples) are records of each value chosen at random, the unchecked first, so the person
-checks a sample before trusting the counts. A label keeps the sessions that applied it (`sessions`), which coverage
-reads.
+the records of a value (the plugin's labels pane, `page`: the unchecked first, so the person checks a sample before
+trusting the counts). `thimble label NAME` prints the counts per value as plain numbers, with the records they are
+counted over; `thimble label NAME --csv` prints each record's value for Claude's own code (`csv_rows`). A label keeps
+the sessions that applied it (`sessions`), which coverage reads.
 
 Every change bumps `rev`. Writes take a lock (the model's reads, the person's checks and Claude's commands may write
 at once).
@@ -29,6 +29,7 @@ at once).
 from __future__ import annotations
 
 import contextlib
+import csv
 import fcntl
 import json
 import random
@@ -47,7 +48,6 @@ DEFAULT_VALUES = ["yes", "no"]
 BATCH_ITEMS = 50  # records per model call, at most
 BATCH_CHARS = 36_000  # or fewer, when their texts add up to this many characters (about 10k tokens)
 UNIT_CHARS = 4_000  # characters of one record the model reads
-SAMPLES = 12  # records of each value shown as examples
 KINDS = ("regex", "code", "prompt", "set")
 SESSIONS_MAX = 50  # sessions a label keeps as the ones that applied it
 
@@ -139,11 +139,6 @@ def status(lab: dict[str, Any]) -> dict[str, Any]:
             "out": len(lab.get("units") or {}) - len(units),
             "checked": len(checks), "agree": agree, "disagree": disagree, "counts": dict(cnt),
             "run": lab.get("run") or {}}
-
-
-def row_ref(ref: str) -> str:
-    """The record a ref names: a block of a transcript record (`a.jsonl#L44.b1`) is its record's."""
-    return re.sub(r"(#L\d+)\.b\d+$", r"\1", ref)
 
 
 ONE_UNIT = {"records": "record", "rows": "row", "lines": "line", "sections": "section", "hunks": "hunk", "files": "file",
@@ -269,6 +264,29 @@ def _kind_of_ref(kinds: dict[str, str | None], ref: str) -> str | None:
     if k != "?":
         return k
     return next((v for f, v in kinds.items() if ref.startswith(f + "#")), None)
+
+
+def rows_of(st: Store, refs: list[str]) -> dict[str, S.Row]:
+    """The rows `refs` name, by ref, each file read once; a record no longer in its file is left out. The lines of a
+    JSONL file or a transcript are read up to the last one wanted, and only those are decoded (S.json_lines), so a page
+    of a large file does not decode the whole file."""
+    by_file: dict[str, set[str]] = {}
+    for r in refs:
+        by_file.setdefault(r.split("#")[0], set()).add(r)
+    out: dict[str, S.Row] = {}
+    for rel, want in by_file.items():
+        nums = {int(m[1]) for r in want if (m := re.fullmatch(r".*#L(\d+)", r))}
+        try:
+            if len(nums) == len(want) and S.kind_of_file(st.root, rel) in ("jsonl", "transcript"):
+                rows = S.json_lines(st.root, rel, nums)
+            else:
+                rows = S.iter_rows(st.root, rel)
+            for row in rows:
+                if row.ref in want:
+                    out[row.ref] = row
+        except OSError:
+            continue
+    return out
 
 
 def unit_text(row: S.Row, cut: int = UNIT_CHARS) -> str:
@@ -440,8 +458,7 @@ def set_values(st: Store, name: str, given: dict[str, str], values: list[str] | 
             if p.get("kind") in ("bad", "file", "table"):
                 bad.append(ref)
                 continue
-            r = row_ref(ref)
-            lab["units"][r] = {"v": str(v), "c": 1.0, "by": "claude"}
+            lab["units"][ref] = {"v": str(v), "c": 1.0, "by": "claude"}
             if str(v) not in lab["values"]:
                 lab["values"].append(str(v))
         write(st, lab)
@@ -455,19 +472,18 @@ def check(st: Store, name: str, ref: str, value: str | None) -> dict[str, Any]:
         lab = load(st, name)
         if lab is None:
             raise LabelError(f"no label {name!r}")
-        r = row_ref(ref)
-        u = (lab.get("units") or {}).get(r)
+        u = (lab.get("units") or {}).get(ref)
         if u is None:
             raise LabelError(f"{ref} is not one of {name}'s records")
         checks = lab.setdefault("checks", {})
         if value is None:
-            checks.pop(r, None)
+            checks.pop(ref, None)
         else:
             if value not in lab["values"]:
                 raise LabelError(f"{value!r} is not a value of {name}: {', '.join(lab['values'])}")
-            checks[r] = {"v": value, "was": u.get("v"), "at": time.time()}
+            checks[ref] = {"v": value, "was": u.get("v"), "at": time.time()}
         write(st, lab)
-    return {"label": lab, "ref": r, "was": u.get("v"), "now": value}
+    return {"label": lab, "ref": ref, "was": u.get("v"), "now": value}
 
 
 # ------------------------------------------------------------------ the model's part (prompt labels)
@@ -480,20 +496,9 @@ def waiting(st: Store, name: str, cut: int = UNIT_CHARS, first: int | None = Non
     if lab is None:
         raise LabelError(f"no label {name!r}")
     refs = [r for r, u in (lab.get("units") or {}).items() if u.get("wait")]
-    by_file: dict[str, list[str]] = {}
-    for r in refs:
-        by_file.setdefault(r.split("#")[0], []).append(r)
-    texts: dict[str, str] = {}
-    for rel, rs in by_file.items():
-        want = set(rs)
-        try:
-            for row in S.iter_rows(st.root, rel):
-                if row.ref in want:
-                    texts[row.ref] = unit_text(row, cut)
-        except OSError:
-            continue
-    units = [{"ref": r, "text": texts[r]} for r in refs if r in texts]
-    gone = [r for r in refs if r not in texts]
+    rows = rows_of(st, refs)
+    units = [{"ref": r, "text": unit_text(rows[r], cut)} for r in refs if r in rows]
+    gone = [r for r in refs if r not in rows]
     total = len(units)
     bs = batches(units)
     if first:
@@ -606,33 +611,22 @@ NO_VALUE = "-"  # the viewer's filter for records with no value yet (waiting for
 
 
 def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = PAGE) -> dict[str, Any]:
-    """One page of a label's records for the label viewer, in the order they were labeled: all of them, those of one
-    value, or those with none (NO_VALUE). Each record has its value, where the value came from (regex, code, model,
-    claude, or the analyst's check), the model's confidence and reason, and its words as the examples show them.
-    Reading them is the person's, never counted as what Claude read."""
+    """One page of a label's records for the labels pane: all of them, those of one value, or those with none
+    (NO_VALUE); the records the analyst has not checked first, each part in the order they were labeled. Each record has
+    its value, where the value came from (regex, code, model, claude, or the analyst's check), the model's confidence
+    and reason, and its words. Reading them is the person's, never counted as what Claude read."""
     lab = load(st, name)
     if lab is None:
         raise LabelError(f"no label {name!r}; labels: {', '.join(names(st)) or 'none'}")
     units = held(lab)
     checks = lab.get("checks") or {}
     refs = [r for r in units if value is None or (value_of(lab, r) or NO_VALUE) == value]
+    refs = [r for r in refs if r not in checks] + [r for r in refs if r in checks]
     total = len(refs)
     n = max(1, min(int(n), 200))
     at = max(0, min(int(at), max(0, total - 1)))
     want = refs[at:at + n]
-    rows: dict[str, S.Row] = {}
-    left = set(want)
-    for rel in dict.fromkeys(r.split("#")[0] for r in want):
-        mine = {r for r in left if r.split("#")[0] == rel}
-        try:
-            for row in S.iter_rows(st.root, rel):
-                if row.ref in mine:
-                    rows[row.ref] = row
-                    mine.discard(row.ref)
-                    if not mine:
-                        break
-        except OSError:
-            continue
+    rows = rows_of(st, want)
     # the rows of a file named by one field, as the rows beside them
     said = S.words_by_file(list(rows.values()))
     kinds = {f: S.kind_of_file(st.root, f) for f in dict.fromkeys(r.split("#")[0] for r in rows)} \
@@ -655,12 +649,23 @@ def page(st: Store, name: str, value: str | None = None, at: int = 0, n: int = P
         row = rows.get(r)
         if row is not None:
             words, meta = said[r]
-            e.update(words=words or unit_text(row, 240), meta=meta, text=unit_text(row, 1200))
+            e.update(words=words or fields_line(row) or unit_text(row, 240), meta=meta, text=unit_text(row, 1200))
             e.update(matched_part(lab, row, kinds))
         else:
             e["missing"] = "the record is no longer in its file"
         out.append(e)
     return {"label": head(lab), "value": value, "at": at, "total": total, "records": out}
+
+
+def fields_line(row: S.Row) -> str:
+    """A record with no words in it (S.words_of), as a person scans it: its short values with their keys, in its order,
+    `wiki dse · name AgentNotes · n_revs 3`; no ids. Empty for a record that is not a JSON object."""
+    v = row.value
+    if not isinstance(v, dict):
+        return ""
+    parts = [f"{k} {x}" for k, x in v.items() if isinstance(x, (str, int, float)) and not isinstance(x, bool)
+             and str(x).strip() and len(str(x)) <= 80 and not re.search(r"(^|_)(id|key|uuid|hash)$", str(k), re.I)]
+    return " · ".join(parts)[:240]
 
 
 HIT_ROOM = 320  # characters of a record the label viewer shows around the part its label matched
@@ -713,42 +718,23 @@ def matched_part(lab: dict[str, Any], row: S.Row, kinds: dict[str, str | None]) 
     return {}
 
 
-def samples(st: Store, lab: dict[str, Any], n: int = SAMPLES, seed: int = 0) -> dict[str, list[dict[str, Any]]]:
-    """Up to n records of each value, chosen at random, the unchecked first, each {ref, words, meta, text}: what the
-    person checks."""
+CSV_FIELDS = ("ref", "value", "confidence", "by", "checked")
+
+
+def csv_rows(lab: dict[str, Any]) -> Iterator[list[Any]]:
+    """Every record of the label as a row for `--csv`: its ref, its value now (the analyst's check wins; empty while it
+    waits for the model or has none), the confidence the value came with, who gave it (regex, code, model, claude, or
+    analyst) and whether the analyst checked it."""
     checks = lab.get("checks") or {}
-    by: dict[str, list[str]] = {}
-    for ref in lab.get("units") or {}:
+    for ref, u in held(lab).items():
+        c = checks.get(ref)
         v = value_of(lab, ref)
-        if v is not None:
-            by.setdefault(v, []).append(ref)
-    rng = random.Random(seed)
-    picked: dict[str, list[str]] = {}
-    for v, refs in by.items():
-        fresh = [r for r in refs if r not in checks]
-        done = [r for r in refs if r in checks]
-        rng.shuffle(fresh)
-        picked[v] = (fresh + done)[:n]
-    want = {r for rs in picked.values() for r in rs}
-    rows: dict[str, S.Row] = {}
-    for rel in sorted({r.split("#")[0] for r in want}):
-        try:
-            for row in S.iter_rows(st.root, rel):
-                if row.ref in want:
-                    rows[row.ref] = row
-        except OSError:
-            continue
-    # the rows of a file named by one field, as the rows beside them
-    said = S.words_by_file(list(rows.values()))
-    out: dict[str, list[dict[str, Any]]] = {}
-    for v, refs in picked.items():
-        recs = []
-        for r in refs:
-            row = rows.get(r)
-            if row is None:
-                continue
-            words, meta = said[r]
-            # the label's value, its source and reason are the detail's to show, from the label as it is now
-            recs.append({"ref": r, "words": words or unit_text(row, 240), "meta": meta, "text": unit_text(row, 600)})
-        out[v] = recs
-    return out
+        conf = None if c or v is None else u.get("c")
+        yield [ref, "" if v is None else v, "" if conf is None else conf, "analyst" if c else u.get("by") or "",
+               "true" if c else "false"]
+
+
+def write_csv(lab: dict[str, Any], out: Any) -> None:
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(CSV_FIELDS)
+    w.writerows(csv_rows(lab))

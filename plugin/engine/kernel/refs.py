@@ -97,24 +97,3 @@ def parse(ref: str) -> dict[str, Any]:
     if re.match(r"^L(\d|$)", frag):
         raise RefError(f"not a line ref: {ref!r} (lines are #L<n>, #L<n>-<m> or #L<n>,<m>-<k>)")
     return {"kind": "file", "path": path, "locator": frag}
-
-
-def format_source(p: dict[str, Any]) -> str:
-    k, path = p["kind"], p.get("path", "")
-    if k == "file":
-        return path + (f"#{p['locator']}" if p.get("locator") else "")
-    if k == "table":
-        return f"{path}#{p['table']}"
-    if k == "lines":
-        return f"{path}#L{format_nums(p['nums'])}"
-    if k == "csvrows":
-        return f"{path}#row={format_nums(p['nums'])}"
-    if k == "dbrows":
-        if "keys" in p:
-            return f"{path}#{p['table']}/{p['keys'][0]}"
-        return f"{path}#{p['table']}/{format_nums(p['nums'])}"
-    if k == "pointer":
-        if "nums" in p:
-            return f"{path}#{p['prefix']}{format_nums(p['nums'])}"
-        return f"{path}#{p['pointer']}"
-    raise RefError(f"{k} is not a source ref")

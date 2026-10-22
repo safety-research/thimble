@@ -2,6 +2,7 @@
 inside it never splits its records."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -30,3 +31,24 @@ def test_records_stay_in_the_folder_the_session_started_in(tmp_path: Path, monke
     assert STORE.find_root(other) == other.resolve()
     monkeypatch.delenv("THIMBLE_START")
     assert STORE.find_root(data / "src") == (data / "src").resolve()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
+def test_a_folder_thimble_may_not_write_in_is_found_by_the_records_kept_for_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = tmp_path / "data"
+    (data / "src").mkdir(parents=True)
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_START", str(data))
+    data.chmod(0o555)
+    try:
+        st = STORE.Store(data)
+        assert st.dir == STORE.kept_dir(data.resolve()) and str(st.dir).startswith(str(tmp_path / "th" / "lean" / "folders"))
+        st.sub("labels")
+        assert not (data / "thimble").exists()
+        # a later command in a subfolder finds the root by its kept records
+        assert STORE.find_root(data / "src") == data.resolve()
+    finally:
+        data.chmod(0o755)
+    # once kept there, they stay there, though the folder may be written now
+    assert STORE.Store(data).dir == STORE.kept_dir(data.resolve())
