@@ -143,8 +143,7 @@ export async function lookFailed($: Engine, look: Look, why: string): Promise<vo
 
 // ------------------------------------------------------------------------------------------------ the bar and c
 
-/** c on the bar: `c 11 claims`, lit with its note when a claim of the answer the keys act on was corrected
- *  (`c ● 12 claims, 1 corrected`). */
+/** c on the bar: `c 11 claims`, in the lit color when a claim of the answer the keys act on was corrected. */
 /** Whether the bar's count is bold now: for a moment after the count went up. */
 export async function claimsBright($: Engine): Promise<boolean> {
   const at = (await $.state.get(BRIGHT)).value
@@ -154,9 +153,14 @@ export async function claimsBright($: Engine): Promise<boolean> {
 export async function claimsBarWords($: Engine): Promise<string> {
   const n = await claimCount($)
   const words = n === 1 ? '1 claim' : n > 1 ? `${n.toLocaleString('en-US')} claims` : 'claims'
+  return words
+}
+
+/** Whether the bar's count is lit: a claim of the answer the keys act on was corrected. */
+export async function claimsLit($: Engine): Promise<boolean> {
   const row = await actingRow($)
   const lit = row ? await partOf<ClaimsPart>($, row, 'claims') : null
-  return lit?.note ? `● ${words}, ${lit.note}` : words
+  return !!lit?.note
 }
 
 /** c, or /claims: the Claims pane, holding the keyboard. */

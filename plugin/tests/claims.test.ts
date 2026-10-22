@@ -132,7 +132,7 @@ test("an answer's claims come in with the citations near their words; c counts t
   // the next look reads every claim so far
   await answered(s, { id: 't2', prompt: 'Are you sure?', rows: ['The edits were not biased: one editor tilted them.'] })
   expect(s.forks[1]).toContain('PROMPT lens-claims')
-  expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['● 3 claims, 1 corrected'])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.words, x.color])).toEqual([['3 claims', 'suggestion']])
   // switched off, c is not on the bar and the key is typed
   expect(await claimsBar(s.$, k => k !== 'claims', false)).toEqual([])
 })
