@@ -186,7 +186,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (width > NARROW) {
     const narrow = await askCard($, next, 'draw', { width: NARROW, text: true })
     await askCard($, next, 'draw', { width })
-    if (narrow?.ok && narrow.cut?.length) out.push('', `At ${NARROW} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, NARROW))
+    // shown when the narrow drawing cuts or wraps lines (it has more lines), so Claude sees what the person would
+    if (narrow?.ok && (narrow.cut?.length || narrow.lines.length > r.lines.length)) out.push('', `At ${NARROW} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, NARROW))
   }
 
   const actions = Array.isArray(input.actions) ? input.actions : []
