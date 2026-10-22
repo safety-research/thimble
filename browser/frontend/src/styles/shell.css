@@ -1153,3 +1153,101 @@ button.settings-ext-name:hover .settings-ext-caret {
     grid-column: 1 / -1;
   }
 }
+
+/* how thimble reaches Claude (shell/ClaudeAccess): the setup step, and its line in Settings */
+.access-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(var(--ink-rgb), 0.28);
+}
+.access {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--raised-ring), var(--shadow-float);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+}
+.access-title {
+  margin: 0 0 4px;
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+.access-lead {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+}
+.access-choices {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.access-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-radius: var(--radius-ui);
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  cursor: pointer;
+}
+.access-choice.on {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.access-choice-label {
+  font-weight: 600;
+}
+.access-choice-note {
+  grid-column: 2;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+.access-field {
+  margin: 8px 0;
+}
+.access-consent {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
+}
+.access-error {
+  margin: 8px 0;
+  color: var(--status-negative);
+}
+.access-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.settings-access {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-access-label {
+  font-weight: 600;
+}
+.settings-access-what {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

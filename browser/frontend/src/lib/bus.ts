@@ -10,6 +10,8 @@ export interface ProblemPrefill {
 }
 
 export type Events = {
+  /** open the step that chooses how thimble reaches Claude (shell/ClaudeAccess) */
+  claudeAccess: Record<string, never>
   /** every record of the workspace stream */
   wsEvent: WsEvent
   chat: { chat: string; deleted?: boolean }

@@ -223,6 +223,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
+/** The error record that says Claude cannot be reached the way chosen (backend runtime.ACCESS_KIND). */
+export const ACCESS_KIND = 'claude-access'
 
 /** Main's note for a dev chat that started: a view's build (`view`, on the backend's agent row), else a code ticket.
  * Pure. */
@@ -959,6 +961,23 @@ function ExtensionLead({ name, text, ws }: { name: string; text: string; ws: str
  * behind the chevron. An API error is its card instead (ApiErrorCard), with Retry. */
 export function ErrorRow({ item, retry }: { item: ErrorRowT; retry?: ErrorRetry }) {
   const [open, setOpen] = useState(false)
+  if (item.errorKind === ACCESS_KIND) {
+    // Claude cannot be reached the way chosen (backend runtime.py): what is missing, and the step that fixes it
+    return (
+      <div className="chat-msg chat-api-error" data-error-kind={item.errorKind}>
+        <ApiErrorCard
+          line={item.message}
+          head={item.message}
+          detail={item.detail || ''}
+          actions={
+            <Button variant="primary" size="sm" onClick={() => bus.emit('claudeAccess', {})}>
+              Set up Claude access
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
   if (item.errorKind === API_ERROR_KIND) {
     const onRetry = retry
       ? () => {

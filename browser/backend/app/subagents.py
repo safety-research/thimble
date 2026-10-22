@@ -305,7 +305,7 @@ def extension_types(c: str) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     try:
         out.update(extensions.agent_definitions(c))
-        for role in ("orientation", "critic", "writer"):
+        for role in ("writer",):  # the orientation and its critic are gone
             out.update(role_parts.subagents(c, role))
     except Exception:  # noqa: BLE001
         log.exception("%s: the extensions' agents were not read", c)
@@ -402,7 +402,7 @@ class Answer(dict):
 
     @property
     def typed(self) -> bool:
-        return "input" in self and not self.refused
+        return "input" in self and not self.refused and not self.started
 
     @property
     def refused(self) -> bool:
@@ -776,6 +776,17 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
         if before is not None:
             return before
     rid = request_id or files.request_id()
+    from . import runtime  # noqa: PLC0415
+
+    if route == TYPED and runtime.enabled():
+        # the server starts the agent itself (runtime.py): a typed start is made at once, as a follow-on is, and its
+        # tool's result says it started (tools.RUNTIME_HINTS)
+        inp = call_input(role, task, description or role)
+        rid = new_request(c, "start", key, inp, values, FOLLOW_ON, role=role, rid=rid, chat=dict(chat or {}),
+                          work=str(work) if work else None, call=call, caller_role=caller_role, typed=True,
+                          **(fields or {}))
+        ans = await _spawn(c, rid, request(c, rid) or {})
+        return Answer({**ans, "input": inp}) if ans.started else ans
     prompt = with_request_line(task, rid) if route == TYPED else task
     inp = call_input(role, prompt, description or role)
     caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None

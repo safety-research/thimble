@@ -452,7 +452,11 @@ def _file_live(c: str, out: dict[str, Any] | None = None) -> bool:
 
 def live(c: str) -> bool:
     """Whether a module holds the long poll for main's session in workspace `c` (module note); in terminal mode, whether
-    main's module wrote its heartbeat lately."""
+    main's module wrote its heartbeat lately. When the server runs the agents itself (runtime.py), always."""
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.enabled():
+        return True
     if transport(c) == FILE:
         return _file_live(c)
     b = _bridges.get(c)
@@ -633,6 +637,10 @@ async def request(c: str, op: str, **args: Any) -> Answer:
     its answer. Never raises for the module's sake: no module, a refusal and a timeout are answers."""
     if op not in OPS:
         raise ValueError(f"unknown module op {op!r}")
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.enabled():  # the server does what the module did (runtime.module_op)
+        return await runtime.module_op(c, op, dict(args))
     if transport(c) == FILE:
         return await _file_request(c, op, args)
     _remember_loop()
@@ -660,6 +668,11 @@ def request_blocking(c: str, op: str, **args: Any) -> Answer:
         running = None
     if running is not None:
         raise RuntimeError("module_bridge.request_blocking was called on the event loop; await request() there")
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.enabled() and runtime._loop is not None and runtime._loop.is_running():
+        return asyncio.run_coroutine_threadsafe(runtime.module_op(c, op, dict(args)), runtime._loop).result(
+            REQUEST_TIMEOUT_S + 5)
     if transport(c) == FILE:
         return asyncio.run(request(c, op, **args))
     if loop is None or not loop.is_running():

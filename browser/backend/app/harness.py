@@ -85,6 +85,9 @@ ROWS = {"dev": "dev"}
 # the roles whose sessions do their own work unasked, as thimble's own sessions of them do (agent_session.fence)
 UNASKED_ROLES = ("critic", "writer", "dev")
 STOP_WAIT_S = 5.0
+NO_CC_SESSIONS = ("thimble reaches Claude with an API key or Workload Identity Federation here, so it starts no Claude "
+                  "Code session for an extension's program. Choose Claude Code sign-in in Settings, Claude access, to "
+                  "run it.")
 NO_BOX = ("The role's sandbox could not run here, so its program runs without one and can read what you can, "
           "thimble's token among it.")
 NO_BOX_ENFORCED = ("thimble runs an agent's program only in its sandbox (sandbox.enforce), and the sandbox can't run on "
@@ -774,6 +777,13 @@ async def session_route(ws: WebSocket) -> None:
     try:
         first = json.loads(await ws.receive_text())
     except (WebSocketDisconnect, ValueError):
+        return
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.uses_api():  # an API key or WIF: thimble starts no Claude Code process (claude_access.py)
+        await ws.send_bytes(b"e" + NO_CC_SESSIONS.encode() + b"\n")
+        await ws.send_text(json.dumps({"exit": 1}))
+        await ws.close()
         return
     argv = [str(a) for a in first.get("argv") or []] if isinstance(first, dict) else []
     if argv in (["-v"], ["--version"]):

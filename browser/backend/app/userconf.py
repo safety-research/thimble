@@ -162,7 +162,8 @@ def private_paths() -> list[str]:
     """The files the hooks module keeps from file tools, and an extension program's box from the program: the local
     API's token, the key the sessions' tokens are signed with, and the hashes of the browsers signed in
     (hook_auth.PAIRED_FILE)."""
-    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON)]
+    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON, "claude-access.json",
+                                                          "anthropic-api-key")]
 
 
 def private_rules() -> list[str]:

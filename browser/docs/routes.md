@@ -25,13 +25,16 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-260 routes, 151 of them writes: 36 token, 1 code, 1 agent token, 119 cookie, 100 cookie or token, 1 media key, 2 none.
+263 routes, 153 of them writes: 36 token, 1 code, 1 agent token, 121 cookie, 101 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
 | WS | `/api/agent/claude` | harness | agent token |
 | POST | `/api/agents` | tray | token |
 | POST | `/api/bg/agent-check` | subagents | token |
+| GET | `/api/claude-access` | claude_access | cookie or token |
+| PUT | `/api/claude-access` | claude_access | cookie |
+| POST | `/api/claude-access/check` | claude_access | cookie |
 | GET | `/api/corpora` | corpus | cookie or token |
 | POST | `/api/corpora/register` | corpus | token |
 | GET | `/api/corpora/{c}/csv-rows` | corpus | cookie or token |

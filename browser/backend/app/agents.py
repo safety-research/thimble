@@ -873,6 +873,12 @@ async def create_route(c: str, body: NewThread) -> dict:
 
 @router.get("/ws/{c}/chats/{chat_id}")
 async def get_route(c: str, chat_id: str) -> Response:
+    if chat_id == MAIN_ID:
+        from . import runtime  # noqa: PLC0415
+
+        if runtime.enabled():  # the server runs main (runtime.py): attached before the page reads it
+            with contextlib.suppress(ValueError):  # a workspace with no folder answers as before
+                runtime.ensure(c)
     meta = ensure_main(c) if chat_id == MAIN_ID else read_meta(c, chat_id)
     _, log_path = paths(c, chat_id)
     meta["running"] = _running(c, chat_id)

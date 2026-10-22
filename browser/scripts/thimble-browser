@@ -1,34 +1,42 @@
 #!/usr/bin/env bash
 # thimble-browser: starts thimble's browser workbench (thimble 0.8's browser mode) on a folder of files. scripts/install.sh,
 # at the top of the repository, installs what it needs and puts a launcher for it on PATH. Here it builds the page again
-# when its sources are newer than the build, then runs the workbench's own launcher (plugin/bin/thimble), which starts
-# the server and a Claude Code session in this terminal with the workbench's plugin (plugin/) loaded; the page shows that
-# session's chat, its cards, the files, the labels and the report.
+# when its sources are newer than the build, then starts the server on 127.0.0.1, opens the folder as a workspace and
+# prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and thimble's agents itself, on
+# the way to reach Claude chosen at install or in the page: an Anthropic API key, your Claude Code sign-in, or Workload
+# Identity Federation. Ctrl-C stops the server.
 #
-#   thimble-browser [FOLDER] [--port N] [claude flags...]   FOLDER: the folder you are in when not given
+#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given
+#   thimble-browser --setup               choose how the workbench reaches Claude, and check it
 #
-# The workbench keeps its workspaces in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the terminal
-# plugin's ~/.thimble. The server listens on 127.0.0.1, on port 8300 or the next free one (--port N takes N alone).
+# The workbench keeps its workspaces and its choice in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the
+# terminal plugin's ~/.thimble. The server listens on 127.0.0.1, on port 8300 or the next free one (--port N takes N alone).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-folder="" args=()
+folder="" setup=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) [ $# -ge 2 ] || { echo "thimble-browser: --port needs a number" >&2; exit 2; }; export THIMBLE_PORT="$2"; shift 2 ;;
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
-    -h | --help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    -*) args+=("$1"); shift ;;
-    *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else args+=("$1"); fi; shift ;;
+    --setup) setup=1; shift ;;
+    -h | --help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
+    *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
   esac
 done
-[ -z "$folder" ] || cd "$folder"
 
 export THIMBLE_HOME="${THIMBLE_BROWSER_HOME:-$HOME/.thimble-browser}"
-mkdir -p "$THIMBLE_HOME"
-
-[ -x "$root/backend/.venv/bin/python" ] || {
+mkdir -p "$THIMBLE_HOME" && chmod 700 "$THIMBLE_HOME"
+# the workspaces (cards, chats, reports) live in the home too, not in this checkout
+export THIMBLE_WORKSPACES_DIR="${THIMBLE_WORKSPACES_DIR:-$THIMBLE_HOME/workspaces}"
+py="$root/backend/.venv/bin/python"
+[ -x "$py" ] || {
   echo "thimble-browser: $root/backend/.venv is missing: run scripts/install.sh at the top of the repository" >&2; exit 1; }
+
+if [ "$setup" = 1 ]; then
+  cd "$root/backend" && exec "$py" -m app.claude_access setup
+fi
 
 # the page is built the first time, and again when its sources are newer than the build (after a pull, say)
 fe="$root/frontend"
@@ -38,4 +46,6 @@ if [ ! -f "$fe/dist/index.html" ] || [ -n "$(find "$fe/src" "$fe/index.html" "$f
   [ -d "$fe/node_modules" ] || npm --prefix "$fe" ci --no-audit --no-fund
   npm --prefix "$fe" run build >/dev/null
 fi
-exec "$root/plugin/bin/thimble" ${args[@]+"${args[@]}"}
+here="$(cd "${folder:-.}" && pwd -P)"
+cd "$root/backend"
+exec "$py" -m app.cli browser --cwd "$here"

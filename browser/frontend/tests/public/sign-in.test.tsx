@@ -11,8 +11,8 @@ import { act, createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const LINE = "This browser isn't signed in. Open the link /thimble shows in your terminal, or run thimble up in a shell."
-const GONE = "This link was used or has expired, so this browser isn't signed in. Open the link /thimble shows in your terminal, or run thimble up in a shell."
+const LINE = "This browser isn't signed in. Open the link thimble-browser printed in your terminal, or run thimble-browser again."
+const GONE = "This link was used or has expired, so this browser isn't signed in. Open the link thimble-browser printed in your terminal, or run thimble-browser again."
 
 let paired: boolean | 'down' = false
 // the server answers reads without the sign-in, as it does for the screenshot tool's credential
@@ -68,14 +68,14 @@ async function gate() {
 describe('the sign-in gate', () => {
   test('the lines are the contract the server and the release test share, and each starts by saying the browser is not signed in', async () => {
     const { SIGN_IN_LINE, CODE_GONE_LINE } = await gate()
-    expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell.")
-    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell.")
+    expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.")
+    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.")
   })
 
   test('a browser that is not signed in sees only the line, and the app never mounts or reads', async () => {
     const { el } = await gate()
     expect(el.textContent).toBe(LINE)
-    expect(el.querySelector('code')?.textContent).toBe('thimble up')
+    expect(el.querySelector('code')?.textContent).toBe('thimble-browser')
     expect(el.querySelector('.stand-in-app')).toBeNull()
     // /ui/paired says no, and one read the server guards (refused) confirms it
     expect(requests).toEqual(['GET /api/ui/paired', 'GET /api/tour'])
@@ -94,7 +94,7 @@ describe('the sign-in gate', () => {
     const { el } = await gate()
     expect(posts).toEqual(['{"code":"old","ws":"logs"}'])
     expect(el.textContent).toBe(GONE)
-    expect(el.querySelector('code')?.textContent).toBe('thimble up')
+    expect(el.querySelector('code')?.textContent).toBe('thimble-browser')
     expect(el.querySelector('.stand-in-app')).toBeNull()
   })
 

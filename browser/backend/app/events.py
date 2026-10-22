@@ -191,6 +191,10 @@ def observe(kind: str, fn: Callable[[str, dict[str, Any], dict[str, Any]], None]
 def listening(c: str, sid: str | None = None) -> bool:
     """Whether a session's shim holds a subscription for the workspace, on any route; with `sid`, one of that session's or
     of a shim that named no session."""
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.enabled():  # the server runs main itself (runtime.py): main always listens
+        return True
     subs = _subs.get(c) or set()
     if sid is None:
         return bool(subs)
@@ -212,6 +216,11 @@ def reachable(c: str) -> bool:
     continued in whose shim has not subscribed yet (_awaits_shim). Another `claude` in the folder subscribes too, and
     never gets main's events, nor does a parked session (_publish). In terminal mode, which has no subscription, main's
     `claude` process runs (launch.json's pid), whose watcher takes the event from the queue file."""
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.enabled():  # the server runs main itself (runtime.py)
+        runtime.ensure(c)
+        return True
     ws = _terminal_ws(c)
     if ws is not None:
         return files.main_pid(ws) is not None
@@ -545,7 +554,18 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     """Queue the event for the watcher of the session that is main when its shim holds a subscription, or of a session
     main just continued in whose shim has not subscribed yet (_awaits_shim); a parked session's subscription, or another
     session's, gets nothing. The analyst's words show on main's statusline until main gets them (_notice). Returns the
-    number reached."""
+    number reached. When the server runs main itself (runtime.py), the event goes to it, with the held ones riding
+    along as below."""
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.enabled():
+        if held(c):
+            riders = pop_held(c)
+            note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}"}
+        runtime.deliver(c, note)
+        log.info("%s: event %s kind=%s delivered to the runtime", c, (note.get("meta") or {}).get("event"),
+                 (note.get("meta") or {}).get("kind"))
+        return 1
     _read_main(c)
     main = _main_sid(c)
     mine = [sub for sub in _live_subs(c, main) if main and sub.session == main]

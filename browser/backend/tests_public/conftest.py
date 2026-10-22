@@ -26,6 +26,9 @@ os.environ.setdefault("THIMBLE_VIEW_REVIEW", "off")
 os.environ.setdefault("THIMBLE_EXTENSION_VIEW_CHECKS", "off")
 # No view proposer run after a turn of main (proposer.py): the tests that need it turn it on.
 os.environ.setdefault("THIMBLE_PROPOSE_VIEWS", "off")
+# 0.8's tests drive main as an interactive Claude Code session through the plugin's hooks and module: the server's own
+# runtime (app/runtime.py) is off, and the tests of the runtime turn it on.
+os.environ.setdefault("THIMBLE_RUNTIME", "off")
 # The suite's corpora are the synthetic ones, always: an inherited THIMBLE_DATA_DIR would point config.DATA_DIR at
 # real corpora. conftest is imported before any app module, so config reads this value.
 DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()

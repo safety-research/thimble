@@ -98,8 +98,9 @@ thimble-browser
 ```
 
 `thimble-browser` starts on the folder you are in, as `claude` does (`thimble-browser path/to/folder` names another).
-It starts the server on 127.0.0.1, port 8300 or the next free one, and a Claude Code session in the terminal, which
-prints the page's sign-in link. The file browser shows the folder. You ask Claude a question in the page's chat, and
+It starts the server on 127.0.0.1, port 8300 or the next free one, and prints the page's sign-in link. The server
+runs the chat itself, with an Anthropic API key (the default), Workload Identity Federation, or your Claude Code sign-in,
+chosen at install or at the page's first start. The file browser shows the folder. You ask Claude a question in the page's chat, and
 Claude answers with cards that cite the evidence. Claude's card code runs in a sandbox that reads the folder.
 [browser/README.md](browser/README.md) says what else it does.
 

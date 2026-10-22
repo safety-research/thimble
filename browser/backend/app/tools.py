@@ -343,8 +343,19 @@ def schema_of(name: str) -> dict[str, Any]:
     return tool_sections((name,))[name][1]
 
 
+# the hints that tell main to make the Agent call of a start, and the ones that say the start is made when the server
+# runs thimble's agents itself (runtime.py), which starts the agent with the tool's call
+RUNTIME_HINTS = {"start_job-subagent": "agent-started", "start_writing-subagent": "agent-started",
+                 "start_agent-fork": "agent-started-fork"}
+
+
 def hint(name: str, **values: Any) -> str:
     """A hint section of prompts/tools.md (`## card-errored` …) with its {placeholders} filled; '' when absent."""
+    if name in RUNTIME_HINTS:
+        from . import runtime  # noqa: PLC0415
+
+        if runtime.enabled():
+            name = RUNTIME_HINTS[name]
     body = descriptions().get(name, "")
     try:
         return body.format(**values) if body else ""
@@ -2919,10 +2930,12 @@ async def _ask_main(ctx: Ctx, ans: Any, *, what: str, thread: dict[str, Any], ag
     main has not made yet is replaced by this one. The fork is told to say in one line in the thread that it is filed
     and main is starting the agent (`## start_agent-fork`). A refused start, or a session that does not listen, is an
     error result."""
-    from . import subagents  # noqa: PLC0415
+    from . import runtime, subagents  # noqa: PLC0415
 
     if ans.refused or "input" not in ans:
         return err(ans.reason or f"{agent} did not start: {ans.kind}")
+    if runtime.enabled() and ans.started:  # the server started it with the fork's call (runtime.py)
+        return ok(hint("start_agent-fork", what=what, agent=agent))
     rid, event_id = str(ans["request"]), secrets.token_hex(4)
     ask = {"what": what, "agent": agent, "thread": str(thread.get("title") or "") or None, "view": view,
            "anchor": thread.get("anchor")}

@@ -143,7 +143,8 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert f"Edit(/{userconf.global_file()})" in perms["ask"]
     assert f"Edit(/{userconf.global_file()})" not in perms["deny"], "an edit of the config asks, not refused"
     home = userconf.global_file().parent
-    assert userconf.private_paths() == [str(home / n) for n in ("server.json", "session.key", "paired.json")]
+    assert userconf.private_paths() == [str(home / n) for n in ("server.json", "session.key", "paired.json",
+                                                              "claude-access.json", "anthropic-api-key")]
     for path in userconf.private_paths():
         assert f"Read(/{path})" in perms["deny"] and f"Edit(/{path})" in perms["deny"], path
     assert userconf.bypass_file() == home / "bypass.json" and f"Edit(/{userconf.bypass_file()})" in perms["deny"]

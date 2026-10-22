@@ -4616,6 +4616,61 @@ def _failed_up(what: str, e: BaseException) -> int:
     return 0
 
 
+BROWSER_LINE = "thimble browser: {what}"
+
+
+def cmd_browser(args: argparse.Namespace) -> int:
+    """`thimble-browser [FOLDER]` (browser/scripts/thimble-browser): start the server if needed, open the folder as a
+    workspace, print the page's sign-in link and how thimble reaches Claude (claude_access.py), then hold the terminal
+    until Ctrl-C, which stops the server. No Claude Code session starts here: the server runs main and every agent
+    itself (runtime.py). With `--detach` it returns once the link is printed and the server keeps running."""
+    from . import claude_access, llm  # noqa: PLC0415
+
+    llm.scrub_env()
+    cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
+    if refused(cwd):
+        print(BROWSER_LINE.format(what=f"{cwd} is not a folder to open as a workspace; start thimble-browser in the "
+                                       "folder that holds your files."))
+        return 1
+    ensure_home()
+    env = resolve_env()
+    data_dir = Path(env["data_dir"])
+    if refuse_foreign(api_url()):
+        return 1
+    try:
+        up: bool | None = ensure_running(WAIT_S)
+    except TimeoutError as e:
+        _log(str(e))
+        up = None
+    url = api_url()
+    if not up and not serves(url):
+        why = start_failure(url)
+        print(BROWSER_LINE.format(what=f"the server did not start: {why or 'see ' + str(log_path())}"))
+        return 1
+    name, opened = open_workspace(cwd.resolve(), data_dir, url, here=True)
+    if name and not opened:  # a folder opened before: registering it again attaches its main at once (runtime.py)
+        _request("POST", f"{url}/api/corpora/register", {"path": str(cwd.resolve()), "exact": True})
+    if not name:
+        print(BROWSER_LINE.format(what=f"could not open {cwd} as a workspace; see {log_path()}"))
+        return 1
+    print(BROWSER_LINE.format(what=ui_url(name, pair=to_terminal())))
+    p = claude_access.problem_line()
+    print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")))
+    if not env["dev"] and not has_ui_build():
+        print(NO_UI_LINE)
+    if getattr(args, "detach", False):
+        return 0
+    print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."))
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        print("")
+        for ln in stop():
+            print(ln)
+    return 0
+
+
 def cmd_server_status(args: argparse.Namespace) -> int:
     return cmd_ensure(_ensure_namespace(args, action="status"))
 
@@ -4662,6 +4717,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     add_server_group(sub)
+    b = sub.add_parser("browser", help="thimble-browser: start the server, open this folder, print the sign-in link")
+    b.add_argument("--cwd")
+    b.add_argument("--detach", action="store_true")
+    b.set_defaults(fn=cmd_browser)
     e = sub.add_parser("up", aliases=["ensure"], help="start the server if needed, open this directory, print the URL")
     e.add_argument("--cwd")
     e.add_argument("--session")

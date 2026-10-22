@@ -32,6 +32,7 @@ import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, exte
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
+import { ClaudeAccessLine } from './ClaudeAccess'
 import { askKeyLabel, isMacPlatform, setAskKey, type AskKey } from '../lib/platform'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 
@@ -499,6 +500,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   return (
     <Popover anchor={anchor} open={open} onClose={onClose} align="end" role="dialog" label="Settings" className="settings-pop">
       <div className="settings" data-panel="settings">
+        <ClaudeAccessLine />
         {!settings && !error && (
           <div className="settings-loading dim">
             <Spinner size={10} label="Loading settings" />

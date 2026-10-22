@@ -55,6 +55,7 @@ import {
   type Panes,
   type SurfaceId,
 } from './panes'
+import { ClaudeAccessHost } from './ClaudeAccess'
 import { Resizer } from './Resizer'
 import { ServerDown } from './ServerDown'
 import { SessionGone, useSessionGone } from './SessionGone'
@@ -371,6 +372,7 @@ export function Shell({ ws }: { ws: string }) {
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />
       <LabelEditorHost ws={ws} />
+      <ClaudeAccessHost />
       <Toasts />
       <TourHost />
       {!gone && <ServerDown />}

@@ -1182,6 +1182,14 @@ A writer of {doc} is running already. Tell the analyst so in one line.
 
 The writer of {doc} is running already, and thimble shows it, so this turn needs nothing more.
 
+## agent-started
+
+thimble started it, and it runs in the background while the analyst sees it in the chat. End the turn now, with no words and no other call, unless the analyst asked for more in this turn.
+
+## agent-started-fork
+
+Filed {what}, and thimble started {agent}; the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and {agent} is running.
+
 ## agent-launched
 
 {who} runs in the background, and the analyst sees it. End the turn now, with no words and no other call, unless the analyst asked for more in this turn. One short sentence is fine when it tells the analyst something thimble does not show. Do not make this call again.

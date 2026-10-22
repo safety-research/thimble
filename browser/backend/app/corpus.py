@@ -1130,6 +1130,9 @@ def register_corpus(body: RegisterBody) -> dict[str, Any]:
     except ValueError as e:
         raise HTTPException(400, str(e))
     view_calls.registered(str(rec["name"]))
+    from . import runtime  # noqa: PLC0415
+
+    runtime.ensure_soon(str(rec["name"]))  # main is attached at once, so the page opens on a live chat
     return rec
 
 

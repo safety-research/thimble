@@ -652,6 +652,13 @@ async def _structured(
             log.warning("structured %s: %s (%s)", tool.name, res.status, res.detail)
         return res
 
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.uses_api():  # an API key or WIF: the call goes to the Messages API from this process
+        res = await _structured_api(prompt, tool=tool, model=requested, effort=effort, fast=fast, system=system,
+                                    corrective_retries=corrective_retries, images=images)
+        attempts = res.attempts
+        return finish(res)
     if not config.CLI_PATH:
         return finish(CallResult(status="error", detail=config.NO_CLAUDE_FOUND))
     if not str(requested or "").strip() or not str(effort or "").strip():
@@ -807,3 +814,60 @@ async def _structured(
     except Exception as e:  # noqa: BLE001 — structured() never raises
         log.exception("structured %s: unexpected failure", tool.name)
         return finish(CallResult(status="error", detail=f"unexpected failure ({type(e).__name__}: {str(e)[:300]})"))
+
+
+async def _structured_api(prompt: str, *, tool: ToolSpec, model: str, effort: str, fast: bool, system: str,
+                          corrective_retries: int, images: Sequence[tuple[bytes, str]]) -> CallResult:
+    """structured() on the Messages API (an API key or Workload Identity Federation, runtime.uses_api): the output
+    tool forced (tool_choice), its input validated as the SDK path validates it, one corrective turn when it does not
+    match, a refusal as `refused`, a cut reply as `truncated`, Claude unreachable as `error` in claude_access's words.
+    Never raises."""
+    import anthropic  # noqa: PLC0415
+
+    from . import llm  # noqa: PLC0415
+
+    if not str(model or "").strip() or not str(effort or "").strip():
+        return CallResult(status="error", detail=f"the {tool.name} call names no model or no effort")
+    try:
+        client = llm.client()
+    except llm.NoCredentials as e:
+        return CallResult(status="error", detail=str(e))
+    state = CallState(tool)
+    content: list[dict[str, Any]] = [*_image_blocks(images), {"type": "text", "text": prompt}]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
+    sys_text = "\n\n".join(x for x in (system, _instruction(tool)) if x)
+    args = llm.request_args(model=model, effort=effort, fast=fast)
+    attempts, used = 0, None
+    for _ in range(1 + max(0, corrective_retries)):
+        attempts += 1
+        try:
+            msg = await client.beta.messages.create(
+                max_tokens=32000, system=sys_text, messages=messages,
+                tools=[{"name": tool.name, "description": tool.description, "input_schema": tool.input_schema}],
+                tool_choice={"type": "tool", "name": tool.name}, **args)
+        except anthropic.RateLimitError as e:
+            return CallResult(status="rate_limited", detail=llm.failure(e), attempts=attempts)
+        except Exception as e:  # noqa: BLE001 — every failure is the call's result
+            return CallResult(status="error", detail=llm.failure(e), attempts=attempts)
+        used = str(getattr(msg, "model", "") or model)
+        usage = msg.usage.model_dump(mode="json", exclude_none=True) if getattr(msg, "usage", None) else None
+        text = "\n".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+        if msg.stop_reason == "refusal":
+            return CallResult(status="refused", detail="the model's safeguards declined the call", model_used=used,
+                              usage=usage, text=text, attempts=attempts)
+        calls = [b for b in msg.content if getattr(b, "type", "") == "tool_use" and b.name == tool.name]
+        if msg.stop_reason == "max_tokens" and not calls:
+            return CallResult(status="truncated", detail="the reply hit its length limit", model_used=used,
+                              usage=usage, attempts=attempts)
+        if not calls:
+            return CallResult(status="no_tool_call", detail="the model did not call the output tool", model_used=used,
+                              usage=usage, text=text, attempts=attempts)
+        verdict = await state.offer_async(calls[-1].input)
+        if verdict == "recorded":
+            return CallResult(status="ok", output=state.captured, model_used=used, usage=usage, attempts=attempts)
+        messages += [{"role": "assistant", "content": [b.model_dump(mode="json", exclude_none=True) for b in msg.content
+                                                        if getattr(b, "type", "") in ("text", "tool_use")]},
+                     {"role": "user", "content": [{"type": "tool_result", "tool_use_id": calls[-1].id, "is_error": True,
+                                                   "content": verdict}]}]
+    return CallResult(status="no_tool_call", detail="; ".join(state.violations[-1:]) or "the output did not match its "
+                      "schema", model_used=used, attempts=attempts)

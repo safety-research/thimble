@@ -72,12 +72,18 @@ until you fix it and run it again. Then it:
    in `browser/backend`), and the page with the sandbox runtime (`npm ci` and a build in `browser/frontend`).
 3. writes a `thimble-browser` launcher in `~/.local/bin` (`--bin-dir DIR` puts it elsewhere), and says when that folder
    is not on your `PATH`.
-4. says how much disk space the browser workbench takes, and whether the sandbox works on this machine.
+4. asks how the browser workbench reaches Claude: 1 an Anthropic API key (the default; you paste it, and it is kept in
+   `~/.thimble-browser` readable by you alone), 2 your Claude Code sign-in (it shows that this launches headless Claude
+   Code sessions in the background and asks you to confirm), or 3 Workload Identity Federation (the path of its config
+   file). It checks the choice with one small call.
+5. says how much disk space the browser workbench takes, and whether the sandbox works on this machine.
 
 Options:
 
 - `--no-browser`: the terminal plugin only.
 - `--no-plugin`: the browser workbench only.
+- `--no-setup`: do not ask how the browser workbench reaches Claude; the page asks at its first start, and
+  `thimble-browser --setup` asks again.
 - `--local`: the plugin from this checkout in place of GitHub, to try a branch. Claude Code then loads the plugin from
   the checkout's `plugin/` folder.
 
@@ -114,8 +120,9 @@ The terminal plugin:
 
 The browser workbench:
 
-1. Run `thimble-browser` in a folder of files. It starts the server on 127.0.0.1, port 8300 or the next free one, and a
-   Claude Code session in the terminal, which prints the page's sign-in link.
+1. Run `thimble-browser` in a folder of files. It starts the server on 127.0.0.1, port 8300 or the next free one, and
+   prints the page's sign-in link. The installer asked how it reaches Claude (an API key, Workload Identity
+   Federation, or your Claude Code sign-in); when it did not, the page asks at its first start.
 2. Open the link, and ask in the page's chat: "How many runs failed, and why?" Claude answers with a card whose claims
    cite the files.
 

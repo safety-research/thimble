@@ -6,7 +6,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install.sh [--no-browser] [--no-plugin] [--local] [--bin-dir DIR]
+Usage: scripts/install.sh [--no-browser] [--no-plugin] [--local] [--bin-dir DIR] [--no-setup]
 
 Installs thimble's two products. It checks Node, Python and uv first, and says what is missing, one line each.
   The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble, then
@@ -15,19 +15,23 @@ Installs thimble's two products. It checks Node, Python and uv first, and says w
     Without the claude command, it prints the two commands to run.
   The browser workbench (thimble 0.8's browser mode), from this checkout: the server (uv sync in browser/backend,
     with its test extras), the page and the sandbox runtime (npm ci in browser/frontend, then a build), and a
-    thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 600 MB.
+    thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 600 MB. Then it asks how
+    the workbench reaches Claude: 1 an Anthropic API key (the default), 2 your Claude Code sign-in (it launches
+    headless Claude Code sessions, so it asks you to confirm), 3 Workload Identity Federation (a config file), checks
+    the choice and saves it in ~/.thimble-browser. The page asks the same when this step was skipped.
 Running it again is safe, and updates both.
 
   --no-browser   install the terminal plugin only
   --no-plugin    install the browser workbench only
   --local        use this checkout as the plugin's marketplace, in place of GitHub (to try a branch)
   --bin-dir DIR  put the thimble-browser launcher in DIR
+  --no-setup     do not ask how the browser workbench reaches Claude (the page asks at its first start)
 EOF
 }
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 browser="$root/browser"
-plugin=1 web=1 local=0
+plugin=1 web=1 local=0 setup=1
 bin_dir="$HOME/.local/bin"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,6 +39,7 @@ while [ $# -gt 0 ]; do
     --no-browser) web=0 ;;
     --no-plugin) plugin=0 ;;
     --local) local=1 ;;
+    --no-setup) setup=0 ;;
     --bin-dir)
       [ $# -ge 2 ] || { echo "install.sh: --bin-dir needs a folder" >&2; exit 2; }
       bin_dir="$2"; shift ;;
@@ -207,6 +212,26 @@ if [ "$web" = 1 ]; then
     esac
   fi
 
+  # how the workbench reaches Claude: asked here once, kept in its home (backend app/claude_access.py)
+  browser_home="${THIMBLE_BROWSER_HOME:-$HOME/.thimble-browser}"
+  access() { (cd "$browser/backend" && THIMBLE_HOME="$browser_home" .venv/bin/python -m app.claude_access "$@"); }
+  if [ "$setup" = 1 ] && [ -t 0 ]; then
+    step "How the browser workbench reaches Claude"
+    mkdir -p "$browser_home" && chmod 700 "$browser_home"
+    ask=1
+    if access status >/dev/null 2>&1; then
+      access status
+      printf 'Keep it? [Y/n]: '
+      read -r keep || keep=""
+      case "$keep" in n | N | no | No) ask=1 ;; *) ask=0 ;; esac
+    fi
+    if [ "$ask" = 1 ]; then
+      access setup || notes+=("Claude access is not set up yet: the page asks at its first start, or run thimble-browser --setup")
+    fi
+  elif [ "$setup" = 1 ]; then
+    notes+=("Claude access was not asked, since this is not a terminal: the page asks at its first start, or run thimble-browser --setup")
+  fi
+
   kb() { du -sk "$1" 2>/dev/null | awk '{print $1}' || echo 0; }
   page=$(kb "$browser/frontend/node_modules"); built=$(kb "$browser/frontend/dist"); venv=$(kb "$browser/backend/.venv")
   mb() { echo $((($1 + 512) / 1024)); }
@@ -224,6 +249,6 @@ if [ "$web" = 1 ]; then
   say ""
   say "  thimble-browser"
   say ""
-  say "It starts the server on 127.0.0.1 (port 8300, or the next free one) and a Claude Code session in that terminal,"
-  say "which prints the page's sign-in link (or: thimble-browser FOLDER). browser/README.md says more."
+  say "It starts the server on 127.0.0.1 (port 8300, or the next free one) and prints the page's sign-in link"
+  say "(or: thimble-browser FOLDER). browser/README.md says more."
 fi

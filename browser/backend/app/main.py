@@ -172,6 +172,8 @@ ROUTER_MODULES = [
     "start_page",
     # the failures of thimble's agents, told in the foreground with their fix
     "notices",
+    # how thimble reaches Claude (an API key, Claude Code sign-in or WIF), and the agents the server runs on it
+    "claude_access", "runtime",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
@@ -316,10 +318,12 @@ async def _lifespan(app: FastAPI):
     log.info("data dir %s, workspaces dir %s", config.DATA_DIR, config.WORKSPACES_DIR)
     # the versions in play, so a log sent with a problem report says what ran
     try:
-        from . import cli
+        from . import cli, runtime
 
+        # with an API key or WIF the server starts no `claude`, not even for its version (runtime.py)
+        cc = "not used" if runtime.uses_api() else (cli.claude_code_version() or "not found on PATH")
         log.info("pid %s, port %s, home %s; %s; Claude Code %s", os.getpid(), os.environ.get("THIMBLE_PORT", "?"),
-                 cli.home(), cli.versions_line(), cli.claude_code_version() or "not found on PATH")
+                 cli.home(), cli.versions_line(), cc)
     except Exception:
         log.exception("reading the versions for the log failed")
     # thimble's state is its owner's alone: <home> and the workspaces are private folders (config.private_dir)

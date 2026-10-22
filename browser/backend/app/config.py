@@ -286,7 +286,15 @@ AUTH_HELP = "log in with `claude auth login` (INSTALL.md, Authentication, has mo
 
 def auth_problem(status: dict[str, Any] | None = None) -> str:
     """The alert when a model call cannot run: no `claude`, or `claude auth status` reporting no login; '' otherwise,
-    when the status cannot be read (the call itself then says what failed), and under THIMBLE_SKIP_KEY."""
+    when the status cannot be read (the call itself then says what failed), and under THIMBLE_SKIP_KEY. When the server
+    runs its agents itself (runtime.py), what keeps the way to reach Claude the person chose from working
+    (claude_access.problem_line)."""
+    from . import runtime  # noqa: PLC0415
+
+    if runtime.enabled():
+        from . import claude_access  # noqa: PLC0415
+
+        return claude_access.problem_line()
     if _skip():
         return ""
     if not CLI_PATH:

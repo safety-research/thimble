@@ -289,7 +289,30 @@ export interface EventPosted {
   thread?: string
 }
 
+/** How thimble reaches Claude (backend claude_access.py): the way chosen ('' before one), in words, and what is missing. */
+export interface ClaudeAccess {
+  how: '' | 'api-key' | 'claude-code' | 'wif'
+  describe: string
+  problem: { what: string; fix: string } | null
+  key_saved: boolean
+  wif_file: string
+  consent_text: string
+}
+
+/** One small call over the way chosen: whether Claude answered, else what is missing. */
+export interface ClaudeAccessCheck {
+  ok: boolean
+  how: string
+  describe: string
+  problem?: { what: string; fix: string }
+}
+
 export const api = {
+  // ---- how thimble reaches Claude, one choice for the install (backend claude_access.py) ----
+  claudeAccess: () => j<ClaudeAccess>(`${apiBase()}/claude-access`),
+  setClaudeAccess: (body: { how: string; key?: string; wif_file?: string; consent?: boolean }) =>
+    j<ClaudeAccess & { check: ClaudeAccessCheck }>(`${apiBase()}/claude-access`, { method: 'PUT', body: JSON.stringify(body) }),
+  checkClaudeAccess: () => j<ClaudeAccessCheck>(`${apiBase()}/claude-access/check`, { method: 'POST' }),
   // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
   tour: () => j<{ seen: boolean }>(`${apiBase()}/tour`),
   tourSeen: () => j<{ seen: boolean }>(`${apiBase()}/tour/seen`, { method: 'POST' }),
