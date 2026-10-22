@@ -2,8 +2,8 @@
 // thimble, load it into the person's thimble, and build the share (plugin/engine/kernel/fix.py); this module shows
 // what the person needs to see of that and gives them its keys.
 //
-//   failNotice    a failure line: the one-line notice, with `f fix this · F report only`; the bar keeps the keys until
-//                 the person types their next prompt. f or F sends a turn to main (fixask.js)
+//   failNotice    a failure line: the notice, whole, with `f fix this · F report only` (bar.tsx draws it), until the
+//                 person types their next prompt. f or F sends a turn to main (fixask.js)
 //   refreshFixes  $THIMBLE_HOME/fixes/*/fix.json: a fix that works shows in the bar (`fixing: <title>`); one that the
 //                 person's thimble now uses shows one line, `✓ Your thimble now has the fix: <title>`, with
 //                 `p share it · u undo`. u runs `thimble fix undo` as the person. Each switch it sees (a fix on, a new
@@ -12,7 +12,7 @@
 //                 commands/fix.md); submit, undo and try do what p and u do, for the fix that is on or the newest;
 //                 remove turns a fix off and deletes its copy and its record
 //   fixAskFromFeed  a `fix_ask` line of the change feed (`thimble fix draft` built the share and waits for the person):
-//                 the preview opens in the side pane (core/pane.ts, kind fixshare). y, w and k run
+//                 the preview opens in the side pane (core/pane.ts, kind fixshare, panes/fixshare.tsx). y, w and keep run
 //                 `thimble fix send|keep … --ask -` as the person: each key press makes a new secret, held only here,
 //                 writes its sha256 into share/ask.json and gives the secret on stdin. No file, argument or feed line holds it, so Claude's
 //                 shell cannot send
@@ -96,12 +96,11 @@ async function reloadPlugins($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the failure line
 
-/** A failure the person should know of, in one line, with the keys that fix or report it. */
+/** A failure the person should know of: one line above the prompt (bar.tsx), the whole text with the keys that fix or
+ *  report it, until the person's next prompt. */
 export function failNotice($: Engine, text: string): void {
   const t = String(text || '').trim()
   if (!t) return
-  // a long line is cut in its words, never in its keys: a toast shows only a few short lines
-  $.ui.toast(`${cut(t, 85)}   ${FAIL_KEYS}`)
   void $.state.set(LINE, { kind: 'failed', text: t }).catch(() => undefined)
 }
 
@@ -394,25 +393,8 @@ async function followFix($: Engine, f: Fix): Promise<void> {
 }
 
 /** The fixes that work now (the bar's note). */
-export async function fixesWorking($: Engine): Promise<{ slug: string; title: string; kind: string }[]> {
+async function fixesWorking($: Engine): Promise<{ slug: string; title: string; kind: string }[]> {
   return ((await $.state.get(FIXES)).value ?? []) as { slug: string; title: string; kind: string }[]
-}
-
-/** The bar's words for the fixes, at its left: the fix line's own keys. (A fix that works is a step of the bar's busy
- *  line, `⠋ fixing: <title>`: refreshFixes.) */
-export async function fixBar($: Engine): Promise<{ key: string; words: string; short?: string; tone?: 'error'; status?: boolean; good?: boolean }[]> {
-  const out: { key: string; words: string; short?: string; tone?: 'error'; status?: boolean; good?: boolean }[] = []
-  const l = await fixLineNow($)
-  if (l?.kind === 'failed') out.push({ key: 'f', words: 'fix this' }, { key: 'F', words: 'report only' })
-  else if (l?.kind === 'notice') {
-    // the whole line is in the transcript; the bar keeps its point and its command whole, which a cut at the line's
-    // end would lose: `your fix '<title>' no longer fits 0.12.0 · /thimble:fix to redo it`
-    const v = /^Your fix '([^']*)' no longer fits thimble (\S+?);/.exec(l.text)
-    if (v) out.push({ key: '', words: `your fix '${cut(v[1]!, 16)}' no longer fits ${v[2]} · /thimble:fix to redo it`, short: 'your fix is off · /thimble:fix to redo it', status: true })
-    else out.push({ key: '', words: l.text.replace(/'([^']*)'/, (_m, t: string) => `'${cut(t, 16)}'`), status: true })
-  }
-  else if (l?.kind === 'applied') out.push({ key: '', words: '✓ fixed', status: true, good: true }, { key: 'p', words: 'submit' }, { key: 'u', words: 'undo' })
-  return out
 }
 
 // ------------------------------------------------------------------------------------------------ the preview
@@ -445,7 +427,8 @@ const showsShare = (v: Any, slug: string) => v?.kind === 'fixshare' && (v.args a
 export async function openShare($: Engine, slug: string): Promise<boolean> {
   if (!SLUG.test(slug)) return false
   await loadShare($, slug)
-  await openPane($, 'fixshare', { slug }, 'Submit your fix')
+  await $.state.set({ plugin: 'thimble', key: 'paneView', id: 'fixshare' }, { diff: false })
+  await openPane($, 'fixshare', { slug }, 'Submit your fix', { focus: true })
   return true
 }
 
@@ -487,13 +470,12 @@ async function keyPress($: Engine, slug: string): Promise<string | null> {
   return secret
 }
 
-/** What the preview's keys do: send or save (y, w), keep a hit (k), edit (e). Each runs as the person, with the secret
- *  of this key press (keyPress), which neither the preview nor Claude sees. */
+/** What the preview's presses do: send or save (y, w), keep a hit. Each runs as the person, with the secret of this
+ *  press (keyPress), which neither the preview nor Claude sees. */
 export async function fixAction($: Engine, args: Record<string, unknown>, a: Record<string, unknown>): Promise<string | void> {
   const slug = String(args.slug || a.slug || '')
   if (!SLUG.test(slug)) return '× That is not the name of a fix.'
   const name = String(a.do || '')
-  if (name === 'edit') return 'Say in the chat what to change in the draft. Claude writes it again, and this preview opens with the new text.'
   if (name !== 'keep' && name !== 'send') return
   const key = await keyPress($, slug)
   if (!key) { await loadShare($, slug); return '× This draft no longer waits for you. Ask Claude for a new draft.' }
