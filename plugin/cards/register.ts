@@ -18,11 +18,10 @@ import type { Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { cut } from '../core/text.js'
-import { forkOf } from '../core/forks'
 import { featureOn } from '../settings/features.mjs'
 import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
-import { callOf, cardIdOf, inTemp, metaOf, restoreCards } from './store'
+import { callOf, cardIdOf, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,23 +57,6 @@ export const registerCards: Register = on => {
     if (!featureOn('cards')) return { deny: 'Cards are off in thimble\'s settings (/thimble-settings).' }
     return cardCall($, e)
   }).catch(() => ({ result: 'The card did not draw: thimble failed while it drew the card. Call card again; if it fails again, tell the analyst that cards do not work here.' }))
-
-  // the rows of a card: thimble asks Claude to write them in the temp folder ($TMPDIR, a folder of thimble's that only
-  // this user can open), which is outside the working folder, so Claude Code would ask the person before Claude reads
-  // them back. A read there needs no dialog; so does a write by v's fork, which works in the background, where a dialog
-  // would stop it until the person answers. Only an ask that the mode makes is let through: a rule or a hook of the
-  // person's still decides. A Glob's absolute pattern names its own folder, so only a relative one is let through.
-  // A query (no tool_use_id, such as the card tool's own check of the person's rules) gets the verdict as it stands:
-  // where an organization manages Claude Code, each verdict a plugin changes is asked again without it, and Claude Code
-  // then says the plugin's hook was skipped
-  on('tool.check', { tool: /^(Read|Grep|Glob|Write)$/ }, async ($, e, next) => {
-    const v = await next(e)
-    if (v.decision !== 'ask' || v.rule || v.hook || v.plugin || e.tool_use_id === undefined || !featureOn('cards')) return v
-    if (e.tool === 'Write' && forkOf(e.agentId)?.kind !== 'designer') return v
-    const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown; pattern?: unknown }
-    if (e.tool === 'Glob' && (typeof input.pattern !== 'string' || input.pattern.startsWith('/') || input.pattern.split('/').includes('..'))) return v
-    return (await inTemp($, input.file_path ?? input.path)) ? { decision: 'allow' } : v
-  }).catch(($, e, next) => next(e))
 
   // the call's row: the call in short (the view's code only in ctrl+o), then the card under the call that drew its
   // first version; a later call's result line says where the card stands

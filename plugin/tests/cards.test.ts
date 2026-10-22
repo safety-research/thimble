@@ -233,27 +233,6 @@ test('a drawing that fails at a narrow width holds only there: the card keeps it
   expect(wide).not.toContain('failed')
 })
 
-test("main reads a card's rows in the temp folder without a dialog; a person's rule still decides; only v's fork writes there freely", async ($, on) => {
-  world(on, { ask: true })
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  // a real call: one with its tool_use_id (a query, which has none, gets the verdict as it stands)
-  const check = (tool: string, file_path: string) => ($.tool as Any).check({ tool, input: { file_path }, tool_use_id: 'toolu_made_up_read' }) as Promise<Any>
-  expect((await ($.tool as Any).check({ tool: 'Read', input: { file_path: '/made-up/tmp/thimble/rows.json' } })).decision).toBe('ask')
-  // thimble's own folder in the person's TMPDIR, by real paths: a link out of it, a path that climbs out, and the rest
-  // of TMPDIR ask as before
-  expect((await check('Read', '/made-up/tmp/thimble/rows.json')).decision).toBe('allow')
-  expect((await check('Read', '/made-up/tmp/rows.json')).decision).toBe('ask')
-  expect((await check('Read', '/made-up/tmp/thimble/link.json')).decision).toBe('ask')
-  expect((await check('Read', '/made-up/elsewhere/rows.json')).decision).toBe('ask')
-  expect((await check('Read', '/made-up/tmp/thimble/../elsewhere/rows.json')).decision).toBe('ask')
-  expect((await check('Read', '/made-up/tmp/mine/rows.json')).decision).toBe('ask')
-  expect((await check('Write', '/made-up/tmp/thimble/rows.json')).decision).toBe('ask')
-  // a Glob's absolute pattern names its own folder, whatever its path
-  const glob = (path: string, pattern: string) => ($.tool as Any).check({ tool: 'Glob', input: { path, pattern }, tool_use_id: 'toolu_made_up_glob' }) as Promise<Any>
-  expect((await glob('/made-up/tmp/thimble', '*.json')).decision).toBe('allow')
-  expect((await glob('/made-up/tmp/thimble', '/made-up/home/**')).decision).toBe('ask')
-})
-
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)

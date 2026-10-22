@@ -16,7 +16,7 @@
 // and when v is pressed again.
 //
 // The fork may read, run code and draw cards; its Write tool writes only into the temp folder, where its rows go
-// (cards/register.ts lets it read and write there without a dialog in front of the person). Its Bash calls are the
+// (hooks/temp_allow.py lets it read and write there without a dialog in front of the person). Its Bash calls are the
 // person's permission mode's to decide, as main's are.
 //
 //   vKey($, key, until)    what v does at an empty prompt now (hooks/keys.ts asks), or null when it types
