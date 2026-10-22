@@ -192,6 +192,19 @@ async function editTurn($: Engine, turnId: string, edit: (t: TurnRec) => TurnRec
   return (out ?? null) as TurnRec | null
 }
 
+/** Whether a turn's text is the words of a prompt submitted for it. */
+const sameText = (a: string, b: string) => a.trim() === b.trim()
+
+/** A prompt whose turn started before its prompt.submit hook ran (turn.start found no prompt waiting): the newest turn,
+ *  recorded with its words and no sender, is given this prompt's sender, and the prompt waits no more. */
+async function senderOfStarted($: Engine, prompt: Prompt): Promise<void> {
+  const newest = (await turnIds($)).at(-1)
+  const t = newest ? await turnOf($, newest) : null
+  if (!t || t.prompt.by !== 'unknown' || !sameText(t.prompt.text, prompt.text)) return
+  if (pending === prompt) pending = null
+  await editTurn($, t.turnId, x => ({ ...x, prompt: { ...x.prompt, by: prompt.by } }))
+}
+
 async function newTurn($: Engine, turnId: string, prompt: Prompt): Promise<void> {
   const ids = await turnIds($)
   if (ids.includes(turnId)) return
@@ -298,13 +311,22 @@ export const registerAnswers: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // the prompt of main's next turn and who sent it (a slash command and a meta prompt start no answer of their own)
+  // the prompt of main's next turn and who sent it (a slash command and a meta prompt start no answer of their own).
+  // Claude Code can start the turn while the hooks beneath this one still run, so the prompt waits before `next`; and
+  // a turn that started before this hook ran is given its sender after
   on('prompt.submit', { origin: { kind: /./ } }, async ($, e, next) => {
+    let mine: Prompt | null = null
+    if (!e.command && !e.isMeta) {
+      mine = { text: String(e.text ?? '').slice(0, PROMPT_MAX), by: String((e.origin as { kind?: string } | undefined)?.kind ?? ''), row: null }
+      pending = mine
+    }
     const r = await next(e)
     try {
-      if (!e.command && !e.isMeta && !(r as { drop?: unknown }).drop) {
-        const by = String((e.origin as { kind?: string } | undefined)?.kind ?? '')
-        pending = { text: String((r as { text?: string }).text ?? e.text ?? '').slice(0, PROMPT_MAX), by, row: null }
+      if (mine && (r as { drop?: unknown }).drop) {
+        if (pending === mine) pending = null
+      } else if (mine) {
+        mine.text = String((r as { text?: string }).text ?? mine.text).slice(0, PROMPT_MAX)
+        if (pending === mine) await senderOfStarted($, mine)
       }
     } catch {
       // the turn keeps its own text
@@ -316,7 +338,7 @@ export const registerAnswers: Register = on => {
     if (e.agentId === undefined) {
       try {
         const text = String(e.text || '').slice(0, PROMPT_MAX)
-        const p = pending && (!text || pending.text.trim() === text.trim()) ? pending : { text, by: text ? 'unknown' : 'continuation', row: null }
+        const p = pending && (!text || sameText(pending.text, text)) ? pending : { text, by: text ? 'unknown' : 'continuation', row: null }
         pending = null
         await newTurn($, e.turnId, p)
         // a new turn of main's: the keys act on its answer
