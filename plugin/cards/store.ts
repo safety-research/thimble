@@ -7,7 +7,7 @@
 //     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away)
 //     state.json          the person's state of that version (what the view set with setState)
 //
-//   $.state: card (meta, by id), cardTree (the runner's drawing, by id), cardFocus (the card that takes keys first),
+//   $.state: card (meta, by id), cardTree (the runner's drawings, by id: one for each width it is drawn at), cardFocus (the card that takes keys first),
 //   cardSeen (the cards drawn on screen since the plugin loaded), cardsAt (the cards drawn under an answer, by the
 //   answer's row), cardCall (the card each call drew or changed, by the call's tool_use_id)
 //
@@ -43,8 +43,16 @@ export type CardMeta = {
   calls: Record<string, CardCall> // each call of the card, by its tool_use_id
   at: number
 }
-/** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it. */
-export type CardTree = { gen: number; width: number; tree: unknown; seq: number }
+/** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it.
+ *  `width` and `tree` are the runner's newest drawing, at the width the runner holds the card at; `others` are its
+ *  drawings at other widths (the card's copy in a side pane, the conversation before the pane opened) of the same
+ *  state; `since` is the answer that last changed the state, and a drawing older than it is gone. */
+export type CardTree = { gen: number; width: number; tree: unknown; seq: number; since?: number; others?: Record<string, { tree: unknown; seq: number }> }
+/** A card's drawing at one width. */
+export type CardDrawing = { gen: number; width: number; tree: unknown; seq: number }
+
+/** The drawings at other widths a card keeps, the newest first. */
+const OTHERS = 4
 
 const CARD = { plugin: 'thimble', key: 'card' } as const
 const TREE = { plugin: 'thimble', key: 'cardTree' } as const
@@ -101,9 +109,36 @@ export async function treeOf($: Engine, id: string): Promise<CardTree | null> {
   return ((await $.state.get({ ...TREE, id })).value ?? null) as CardTree | null
 }
 
-/** The card's drawing, unless the one it holds came from a newer answer of the runner's. */
-export async function setTree($: Engine, id: string, t: CardTree): Promise<void> {
-  await update($, { ...TREE, id }, cur => ((cur as CardTree | undefined)?.seq ?? 0) > t.seq && (cur as CardTree).gen === t.gen ? cur : t)
+/** A card's drawing laid out at `width` for version `gen`, or null when it has none: a drawing laid out at another
+ *  width is never drawn in its place. */
+export function drawingAt(t: CardTree | null | undefined, gen: number, width: number): CardDrawing | null {
+  if (!t || t.gen !== gen) return null
+  if (t.width === width) return { gen, width, tree: t.tree, seq: t.seq }
+  const o = t.others?.[String(width)]
+  return o ? { gen, width, tree: o.tree, seq: o.seq } : null
+}
+
+/** A drawing of the runner's added to the card's: an answer to an event (`changed`: a key, a click, a new version)
+ *  changed the state, and the drawings older than it go; a drawing at a width (not `changed`) keeps the drawings at
+ *  other widths. An answer older than the drawing kept at its width, or than the last change, is dropped. The runner's
+ *  width is that of its newest answer. */
+export function withDrawing(cur: CardTree | null | undefined, t: CardDrawing, changed: boolean): CardTree {
+  if (!cur || cur.gen !== t.gen) return { ...t, since: changed ? t.seq : 0, others: {} }
+  const since = Math.max(cur.since ?? 0, changed ? t.seq : 0)
+  const all: Record<string, { tree: unknown; seq: number }> = { ...cur.others, [String(cur.width)]: { tree: cur.tree, seq: cur.seq } }
+  // (on a tie, which only answers with no seq make, the one that came last wins)
+  const fresh = t.seq >= since && (all[String(t.width)]?.seq ?? -1) <= t.seq
+  if (fresh) all[String(t.width)] = { tree: t.tree, seq: t.seq }
+  const first = (w: string) => (fresh && w === String(t.width) ? 1 : 0)
+  const kept = Object.entries(all).filter(([, d]) => d.seq >= since).sort((a, b) => b[1].seq - a[1].seq || first(b[0]) - first(a[0]))
+  if (!kept.length) return cur
+  const [[w, top], ...rest] = kept as [[string, { tree: unknown; seq: number }], ...Array<[string, { tree: unknown; seq: number }]>]
+  return { gen: t.gen, width: Number(w), tree: top.tree, seq: top.seq, since, others: Object.fromEntries(rest.slice(0, OTHERS)) }
+}
+
+/** The card's drawing, unless the one it holds at that width came from a newer answer of the runner's (withDrawing). */
+export async function setTree($: Engine, id: string, t: CardDrawing, changed = true): Promise<void> {
+  await update($, { ...TREE, id }, cur => withDrawing(cur as CardTree | undefined, t, changed))
 }
 
 /** The cards drawn on screen since the plugin loaded: only they take keys. */
