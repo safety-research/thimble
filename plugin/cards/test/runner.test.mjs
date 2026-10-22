@@ -3,31 +3,18 @@
 //   node --test plugin/cards/test/runner.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
-import { fileURLToPath } from 'node:url'
 
-import { runnerArgv } from '../argv.mjs'
+import { startRunner } from './start.mjs'
 import { checkView } from '../runner.mjs'
 
-const HERE = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
 let dir
-let child
-let sock
+let runner
 
-const ask = (op, body) => new Promise((resolve, reject) => {
-  const q = http.request({ socketPath: sock, path: `/${op}`, method: 'POST' }, res => {
-    let t = ''
-    res.on('data', d => { t += d })
-    res.on('end', () => resolve(JSON.parse(t)))
-  })
-  q.on('error', reject)
-  q.end(JSON.stringify(body))
-})
+const ask = (op, body) => runner.ask(op, body)
 
 const ROWS = [{ name: 'ada', score: 3 }, { name: 'bram', score: 5 }, { name: 'cleo', score: 1 }]
 const COUNTER = `const keys = "+r"
@@ -54,18 +41,11 @@ async function load(view, extra = {}) {
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), 'thimble-runner-'))
   writeFileSync(join(dir, 'rows.json'), JSON.stringify(ROWS))
-  sock = join(dir, 'r.sock')
-  const [cmd, ...args] = runnerArgv({ plugin: join(HERE, '..'), cards: dir, run: dir, sock, path: process.env.PATH })
-  child = spawn(cmd, args, { stdio: 'ignore' })
-  for (let i = 0; i < 100; i++) {
-    try { if ((await ask('ping', {})).ok) return } catch { /* not yet */ }
-    await new Promise(r => setTimeout(r, 20))
-  }
-  throw new Error('the runner did not start')
+  runner = await startRunner(dir)
 })
 
 after(() => {
-  child?.kill()
+  runner?.stop()
   rmSync(dir, { recursive: true, force: true })
 })
 

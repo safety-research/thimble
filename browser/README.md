@@ -61,9 +61,10 @@ writes a card's rows. It does not see your home folder, `~/.thimble-browser`, th
 and it is stopped when its time is up. A card's view runs in the terminal plugin's card runner (`plugin/cards/
 runner.mjs`): one Node process per workspace, in the same sandbox, that reads only the runner's code and the cards'
 copies and draws each card in a context of its own with no module, file or network. The sandbox is Anthropic's [sandbox
-runtime](https://github.com/anthropics/sandbox-runtime), pinned in `server/sandbox/package.json`, on Seatbelt (macOS) or
-bubblewrap (Linux). If no sandbox works, code does not run, and the call and the server's first lines say why.
-`thimble-browser --check-sandbox` tests it, one line per check.
+runtime](https://github.com/anthropics/sandbox-runtime), on Seatbelt (macOS) or bubblewrap (Linux), at the version the
+terminal plugin pins (`plugin/sandbox/package.json`; `server/sandbox/package.json` links to it), and each run starts in
+it through the plugin's launcher (`plugin/sandbox/run.mjs`). If no sandbox works, code does not run, and the call and
+the server's first lines say why. `thimble-browser --check-sandbox` tests it, one line per check.
 
 ## Layout
 
@@ -71,7 +72,7 @@ bubblewrap (Linux). If no sandbox works, code does not run, and the call and the
 |---|---|
 | `frontend/` | the page (React and Vite); `npm run build` writes `frontend/dist`, which the server serves |
 | `server/` | the server (Python, uv): sign-in, the folder's readers, the workspace, the agents' loop and their tools |
-| `server/sandbox/` | the pinned sandbox runtime and how one run starts in it |
+| `server/sandbox/` | where the sandbox runtime is installed, from the plugin's pin |
 | `prompts/` | the texts Claude reads, and `shared.json`, the parts it reads from the terminal plugin |
 | `docs/`, `samples/views/` | the view kit's guides and worked examples, which the view builder reads |
 | `samples/agent-runs/` | a made-up folder of agent runs to try it on, written by `samples/make_agent_runs.py` |

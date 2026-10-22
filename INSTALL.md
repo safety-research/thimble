@@ -11,18 +11,22 @@ For both:
 - **Node.js** on your `PATH`: 22.18 or later for the plugin, 22.12 or later for the browser workbench. Check with
   `node --version`.
 
+- **bubblewrap, socat and ripgrep**, on Linux, for Anthropic's [sandbox
+  runtime](https://github.com/anthropics/sandbox-runtime), which the code Claude writes for a card runs in (on Ubuntu:
+  `sudo apt-get install bubblewrap socat ripgrep`). The install says which are missing, with the one command for your
+  system. macOS has its own sandbox.
+
 For the terminal plugin:
 
 - **Claude Code** 2.1.307 or later. Check with `claude --version`.
 - **Python 3.10 or later**, on `python3` (or the Python that `THIMBLE_PYTHON` names). thimble's kernel needs nothing
   beyond the standard library.
+- **npm**, which comes with Node.js: the plugin installs the sandbox runtime with it, about 10 MB, in `~/.thimble/srt`.
 
 For the browser workbench:
 
 - **[uv](https://docs.astral.sh/uv/)** 0.8 or later, which installs the server's Python packages, and a Python 3.11
   or later when you have none.
-- **bubblewrap**, on Linux, for the sandbox that Claude's code runs in (`sudo apt install bubblewrap`). macOS has its
-  own sandbox.
 - **Credentials for the Claude API**: an API key, or Workload Identity Federation. You give them when it runs; see
   [browser/README.md](browser/README.md#credentials). The browser workbench does not use your Claude Code login.
 - **About 600 MB of disk** in the checkout: the page's packages (about 290 MB), the server's Python packages (about
@@ -60,9 +64,13 @@ The script first checks what the products need and says what is missing, one lin
 until you fix it and run it again. Then it:
 
 1. adds the marketplace `safety-research/thimble` to Claude Code and installs the plugin `thimble@thimble` from it.
-   Without the `claude` command, it prints the two commands to run once Claude Code is installed.
+   Without the `claude` command, it prints the two commands to run once Claude Code is installed. Then it installs
+   the sandbox the plugin's cards run in: the version of Anthropic's sandbox runtime the plugin pins, with `npm ci`, in
+   `~/.thimble/srt`. It starts the card runner in it once, and says whether it works; on Linux, when bubblewrap, socat
+   or ripgrep is missing, it prints the one command that installs them (it never runs `sudo` itself).
 2. installs the browser workbench from the checkout: the server's Python packages (`uv sync` in `browser/server`), the
-   page (`npm ci` and a build in `browser/frontend`), and the sandbox runtime (`npm ci` in `browser/server/sandbox`).
+   page (`npm ci` and a build in `browser/frontend`), and the sandbox runtime (`npm ci` in `browser/server/sandbox`, the
+   same version the plugin pins).
 3. writes a `thimble-browser` launcher in `~/.local/bin` (`--bin-dir DIR` puts it elsewhere), and says when that folder
    is not on your `PATH`.
 4. says how much disk space the browser workbench takes, and whether the sandbox works on this machine.
@@ -85,7 +93,8 @@ claude plugin install thimble@thimble
 ```
 
 You can do the same inside Claude Code: run `/plugin`, add the marketplace `safety-research/thimble`, and install
-thimble from it.
+thimble from it. The plugin installs its sandbox runtime at the first session start, in the background; when the
+sandbox cannot work here, the line above the prompt says why and the command that fixes it.
 
 ### Python
 
@@ -145,6 +154,11 @@ The terminal plugin:
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
 - **A line above the prompt says something failed.** It says what failed and why. `f` asks Claude to fix it in thimble
   for you, and `F` writes a report only.
+- **"Cards cannot draw: cards run only in Anthropic's sandbox runtime, which cannot start here".** Cards never run
+  without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
+  ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, how to allow it. The next card tries
+  again, with no new session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
+  `<plugin>` is the plugin's folder that `/plugin` shows.
 
 The browser workbench:
 

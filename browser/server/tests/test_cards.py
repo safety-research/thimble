@@ -17,8 +17,8 @@ from thimble_browser.features import cards
 node = pytest.mark.skipif(shutil.which("node") is None, reason="the card runner runs on Node")
 
 ARGV = """
-import { runnerArgv } from './cards/argv.mjs'
-console.log(JSON.stringify(runnerArgv({ plugin: process.argv[1], cards: '/c', run: '/r', sock: '/r/s.sock' })))
+import { runnerCommand } from './cards/argv.mjs'
+console.log(JSON.stringify(runnerCommand({ plugin: process.argv[1], node: 'node', cards: '/c', run: '/r', sock: '/r/s.sock' })))
 """
 
 
@@ -28,10 +28,8 @@ def test_the_runner_starts_as_the_terminal_starts_it():
 
     got = subprocess.run(["node", "--input-type=module", "-e", ARGV, str(cardrunner.PLUGIN)], cwd=cardrunner.PLUGIN,
                          capture_output=True, text=True, check=True)
-    theirs = json.loads(got.stdout)
-    ours = cardrunner.argv("node", "/c", "/r", "/r/s.sock")
-    # the terminal's starts with `env -i PATH=…`; the browser gives the runner the same empty environment itself
-    assert theirs[:3] == ["env", "-i", "PATH=/usr/bin:/bin"] and theirs[3:] == ours
+    # both start it in srt with an empty environment, each with its own rules (the browser's: cards/sandbox.py)
+    assert json.loads(got.stdout) == cardrunner.argv("node", "/c", "/r", "/r/s.sock")
 
 
 async def test_a_data_file_outside_the_folder_and_the_temp_folder_is_refused(folder, tmp_path):

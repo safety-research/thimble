@@ -3,9 +3,11 @@
 // Claude a text copy of what it drew. The cards' keys at an empty prompt reach them through hooks/keys.ts.
 //
 //   tool.ts      the card tool: one call draws a card, or a new version of one, and answers its text copy
-//   runner.mjs   the runner, one Node process per session: each card's view in a sandbox, its state and handlers
-//   argv.mjs     the command that starts the runner
-//   ask.ts       the runner from the hooks: started when first needed, again when it stopped
+//   runner.mjs   the runner, one Node process per session in Anthropic's sandbox runtime: each card's view in a context
+//                of its own, its state and handlers
+//   argv.mjs     the command that starts the runner, and the sandbox's rules for it
+//   ask.ts       the runner from the hooks: started when first needed, again when it stopped; the sandbox, which
+//                ../sandbox/setup.mjs installs at the first session start
 //   layout.js    a tree laid out on a grid of cells: the text copy
 //   client.tsx   the one Client module that draws a card's tree in the terminal
 //   draw.ts      the frame, the drawing at the screen's width, the person's keys and clicks
@@ -18,6 +20,7 @@ import { failNotice } from '../bar/notice'
 import { cut } from '../core/text.js'
 import { forkOf } from '../core/forks'
 import { featureOn } from '../settings/features.mjs'
+import { sandbox, sandboxWhy } from './ask'
 import { cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
 import { callOf, cardIdOf, inTemp, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
@@ -36,6 +39,12 @@ export const registerCards: Register = on => {
       try { failNotice($, `Cards are off for this session: thimble could not add its card tool (${String((err as Error)?.message || err).slice(0, 160)}).`) } catch { /* a session with no line above the prompt */ }
     }
     try { await restoreCards($) } catch { /* the cards draw again from their calls when their copies can be read */ }
+    // the sandbox the cards run in: installed the first time (a plugin installed with `claude plugin install` alone ran
+    // no setup of its own), checked at each session start, in the background; when it cannot work, the person reads
+    // why and the fix now, and Claude reads it in the card tool's answer
+    $.clock.after(0, () => {
+      void sandbox($).then(s => { if (!s.ok) failNotice($, `Cards cannot draw: ${sandboxWhy(s)}.`, 'sandbox') }).catch(() => undefined)
+    })
     return r
   }).catch(($, e, next) => next(e))
 

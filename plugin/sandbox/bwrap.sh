@@ -1,6 +1,6 @@
 #!/bin/sh
-# bubblewrap as srt runs it on Linux (sandbox.rules names this file as srt's bwrapPath), with two more rules just
-# before the command:
+# bubblewrap as srt runs it on Linux (the rules name this file as srt's bwrapPath: the plugin's cards/argv.mjs, the
+# browser's cards/sandbox.py), with two more rules just before the command:
 #   --unshare-ipc             System V shared memory and semaphores of its own: the command cannot attach to another
 #                             program's (srt leaves this namespace shared);
 #   --tmpfs /tmp/claude       an empty folder over srt's own temp folder, which srt shows, writable, whenever it
@@ -20,7 +20,7 @@ while [ "$n" -gt 0 ]; do
   set -- "$@" "$a"
 done
 if [ -z "$found" ]; then
-  echo "thimble browser: srt ran bubblewrap with no command" >&2
+  echo "thimble: srt ran bubblewrap with no command" >&2
   exit 3
 fi
 exec bwrap "$@"

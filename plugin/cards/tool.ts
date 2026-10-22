@@ -219,7 +219,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (!r?.ok) {
     // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
     await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer') })
-    if (r?.down) failNotice($, `Cards cannot draw: ${String(r.error).slice(0, 200)}`)
+    if (r?.down) failNotice($, `Cards cannot draw: ${String(r.error).slice(0, 400)}`, 'sandbox')
     return { result: failed(id, r, update && meta.version > 0) }
   }
 
@@ -238,6 +238,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
   await setFocus($, id)
   await failCleared($, `card:${id}`)
+  await failCleared($, 'sandbox')
   const drawnMs = Date.now() - t0
   await saveState($, id, version, r.state)
   if (meta.version > 0) void $.process.run(['rm', '-rf', '--', await versionDir($, id, meta.version)]).catch(() => undefined)

@@ -9,7 +9,9 @@ usage() {
 Usage: scripts/install.sh [--no-browser] [--no-plugin] [--local] [--bin-dir DIR]
 
 Installs thimble's two products. It checks Node, Python and uv first, and says what is missing, one line each.
-  The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble.
+  The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble, then
+    the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt); on Linux it
+    says which system packages the sandbox lacks, with the one command that installs them (it never runs sudo).
     Without the claude command, it prints the two commands to run.
   The browser workbench, from this checkout: the server (uv sync, with pytest for a fix's tests), the page (npm ci,
     then a build), the sandbox runtime (npm ci in browser/server/sandbox), and a thimble-browser launcher in
@@ -150,6 +152,23 @@ for k, v in (manifest.get("userConfig") or {}).items():
         print(k + "=" + json.dumps(v["default"]))
 ')
       claude plugin install thimble@thimble ${config[@]+"${config[@]}"}
+    fi
+    # the sandbox the plugin's cards run in: Anthropic's sandbox runtime, at the version the installed plugin pins, in
+    # thimble's home (the plugin's sandbox/setup.mjs, which the plugin also runs at each session start)
+    at="$(cd / && "$py" -c '
+import json, os
+plugins = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins")
+try:
+    at = json.load(open(os.path.join(plugins, "known_marketplaces.json")))["thimble"]["installLocation"]
+    entry = next(p for p in json.load(open(os.path.join(at, ".claude-plugin", "marketplace.json")))["plugins"]
+                 if p.get("name") == "thimble")
+    print(os.path.normpath(os.path.join(at, entry["source"])))
+except (OSError, ValueError, KeyError, TypeError, StopIteration):
+    pass
+' || true)"
+    if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
+      say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
+      node "$at/sandbox/setup.mjs" --probe || notes+=("cards do not draw until the sandbox works: run the command above, then start a new claude session")
     fi
     say "The plugin works in a new claude session, in a folder of data files that you trust."
   else

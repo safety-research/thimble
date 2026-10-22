@@ -3,7 +3,8 @@
 # things:
 #
 #   scan            scripts/scan.sh over the new commits, with its generic patterns (CI has no private lists)
-#   plugin          the terminal plugin: its validation, hooks tests, Node tests and Python tests
+#   plugin          the terminal plugin: its validation, hooks tests, Node tests (the card runner in its sandbox, with
+#                   bubblewrap, socat and ripgrep) and Python tests
 #   parity          the browser's shared prompts still apply to the plugin's texts (browser/prompts/shared.json)
 #   browser-server  the browser workbench's server tests, with bubblewrap and the sandbox runtime
 #   browser-page    the browser workbench's page: type check, unit tests and build
@@ -77,6 +78,11 @@ jobs:
           uv pip install --python "$RUNNER_TEMP/py/bin/python" pandas pytest
           echo "THIMBLE_PYTHON=$RUNNER_TEMP/py/bin/python" >> "$GITHUB_ENV"
 
+      - name: Install the sandbox's system packages, and let bubblewrap make its namespaces (the runner's AppArmor keeps it from them)
+        run: |
+          sudo apt-get install -y bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Validate the plugin
         run: scripts/check.sh validate
 
@@ -131,7 +137,7 @@ jobs:
           sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      - name: Sandbox check (installs the sandbox runtime pinned in browser/server/sandbox, fails when it does not work)
+      - name: Sandbox check (installs the sandbox runtime the plugin pins in browser/server/sandbox, fails when it does not work)
         run: browser/scripts/thimble-browser --check-sandbox
 
       - name: Server tests
