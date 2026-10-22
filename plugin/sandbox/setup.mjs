@@ -70,8 +70,10 @@ function install() {
       cwd: tmp, encoding: 'utf8', timeout: 300000, env: { ...process.env, NPM_CONFIG_UPDATE_NOTIFIER: 'false' },
     })
     if (r.status !== 0) {
-      const said = `${r.stderr || ''}${r.stdout || ''}`.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ')
-      return `npm could not install the sandbox runtime ${pin} (${said.slice(0, 200) || r.error?.message || `exit ${r.status}`})`
+      // npm's message line (`request to … failed, reason: …`), not its code, stack or log lines
+      const lines = `${r.stderr || ''}\n${r.stdout || ''}`.split('\n').map(l => l.replace(/^npm (error|ERR!)\s*/, '').trim()).filter(Boolean)
+      const said = lines.find(l => !/^(code|syscall|errno|at |A complete log|[{}])/.test(l)) || lines[0] || r.error?.message || `exit ${r.status}`
+      return `npm could not install the sandbox runtime ${pin} (${said.slice(0, 200)})`
     }
     fs.writeFileSync(join(tmp, 'node_modules', '.thimble-lock.json'), lock)
     if (installed()) return ''
@@ -153,7 +155,7 @@ async function main() {
   }
   if (!installed()) {
     const why = install()
-    if (why) return { why, fix: 'Check that npm can reach its registry, then start a new claude session, which installs it again.' }
+    if (why) return { why, fix: 'Check that npm can reach its registry (its proxy and registry settings); thimble installs it again at the next card or session' }
   }
   const lacking = await needs()
   if (lacking) return lacking

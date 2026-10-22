@@ -105,7 +105,7 @@ function scrub(src) {
   return out
 }
 
-/** What the view must not hold, as a friendly early error; the vm context is the boundary, not this check. */
+/** What the view must not hold, as a friendly early error; the sandbox holds the view, not this check. */
 export function checkView(src) {
   const bad = []
   if (src.length > MAX_VIEW) bad.push(`the view is ${src.length} characters; at most ${MAX_VIEW}`)

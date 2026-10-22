@@ -219,7 +219,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (!r?.ok) {
     // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
     await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer') })
-    if (r?.down) failNotice($, `Cards cannot draw: ${String(r.error).slice(0, 400)}`, 'sandbox')
+    if (r?.down) failNotice($, `Cards cannot draw: ${String(r.error).slice(0, 600)}`, 'sandbox')
     return { result: failed(id, r, update && meta.version > 0) }
   }
 

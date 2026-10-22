@@ -158,7 +158,7 @@ The terminal plugin:
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
   ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, how to allow it. The next card tries
   again, with no new session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
-  `<plugin>` is the plugin's folder that `/plugin` shows.
+  `<plugin>` is the installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
 
 The browser workbench:
 
