@@ -71,6 +71,22 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })
 
+test("the view gets the card palette as surface.colors, and a view that colors with it draws", async () => {
+  const view = `function view(p, s) { const { Box, Text } = s.elements, c = s.colors
+  return Box({ flexDirection: 'column', children: [
+    ...p.rows.map((r, i) => Text({ children: [Text({ color: c.cat[i], children: '█' }), ' ' + r.name] })),
+    Text({ children: [0, 0.5, 1, -2, 'x'].map(t => Text({ color: c.seq(t), children: '█' })) }),
+    Text({ children: [Text({ color: c.good, children: '✓' }), Text({ color: c.bad, children: '×' }), Text({ color: c.gray, children: 'other' })] }),
+  ] }) }`
+  const { r } = await load(view)
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.lines, ['█ ada', '█ bram', '█ cleo', '█████', '✓×other'])
+  const colors = []
+  const walk = n => { if (n && typeof n === 'object') { if (n.p?.color) colors.push(n.p.color); (n.c || []).forEach(walk) } }
+  walk(r.tree)
+  assert.deepEqual(colors, ['#588ac1', '#ca7c4e', '#449d98', '#7e8792', '#6289b5', '#3e89d7', '#7e8792', '#7e8792', '#66a159', '#c65b4d', '#928f88'])
+})
+
 test('a text copy at another width leaves the card as it was: its width and its Buttons', async () => {
   const wide = `function view(p, s) { const { Box, Text, Button } = s.elements
   const st = s.state || { n: 0 }

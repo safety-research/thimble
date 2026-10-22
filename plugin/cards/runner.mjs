@@ -153,8 +153,34 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     return { type: t, props: p }
   }
   const elements = freeze({ Box: element('Box'), Text: element('Text'), Button: element('Button') })
+  // the card palette: browser mode's chart colors (browser/frontend/src/styles/tokens.css), muted and set to one
+  // lightness that reads on a light and a dark terminal (3:1 or more on white and on black). The categories keep the
+  // browser's families in a fixed order (blue, orange, teal, pink, gold), with no violet, which is thimble's purple for
+  // agents' work and citations, and no green or red, which mean success and failure. seq(t) runs from a blue-gray (0)
+  // to the blue (1) at that lightness, so its order reads the same on both themes; gray is --viz-ink-3 for context.
+  const SEQ = ['#7e8792', '#77889b', '#7189a4', '#6a89ad', '#6289b5', '#5a89be', '#5289c6', '#4989cf', '#3e89d7']
+  const hex2 = (a, b, f) => {
+    let out = '#'
+    for (let i = 1; i < 7; i += 2) {
+      const x = parseInt(a.slice(i, i + 2), 16), y = parseInt(b.slice(i, i + 2), 16)
+      out += Math.round(x + (y - x) * f).toString(16).padStart(2, '0')
+    }
+    return out
+  }
+  const colors = freeze({
+    cat: freeze(['#588ac1', '#ca7c4e', '#449d98', '#b56c89', '#a49447']),
+    seq(t) {
+      const v = typeof t === 'number' && t === t ? Math.max(0, Math.min(1, t)) : 0
+      const at = v * (SEQ.length - 1), i = Math.min(SEQ.length - 2, Math.floor(at))
+      return hex2(SEQ[i], SEQ[i + 1], at - i)
+    },
+    gray: '#928f88',
+    good: '#66a159',
+    bad: '#c65b4d',
+  })
   const surface = freeze({
     elements,
+    colors,
     get state() { return state },
     setState(next) { state = next; dirty = true },
     get columns() { return columns },
