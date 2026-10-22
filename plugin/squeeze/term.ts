@@ -235,7 +235,8 @@ async function once($: Engine, id: string, want: Want): Promise<void> {
   // held to the whole answer it was shown: the message, and its cards' words and rows when the request had them
   const checked = checkRewrite(answerText(rec.text, answer?.cards ?? []), whole.text)
   // the cards this version changes, made as the person's; one that does not draw is left out, said why
-  const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, rec.row, setWords(probe) || 'as written') : null
+  // (a card a catch-up adds stands under the catch-up, at the row it draws at)
+  const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, rec.catchup ? drawnAt(rec) : rec.row, setWords(probe) || 'as written') : null
   const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []
   const cards = answer && changed?.done.length ? cardsAfter(answer.orig, rec.row, changed.done) : null
   // the record as it is now (the person may have added a chip meanwhile)
@@ -357,11 +358,25 @@ export async function catchUpOn($: Engine, row: string): Promise<Rec | null> {
   return rec && catchUpStands(rec) ? rec : null
 }
 
+/** The row a catch-up draws at: the newest of the messages it covers, so it stands last above the prompt. Its record
+ *  stays on the newest reply (its host), where the keys find it. */
+export const drawnAt = (rec: Rec): string => rec.catchup?.rows.at(-1) ?? rec.row
+
+/** The catch-up drawn at `row` while it stands (whether or not a version of it is written yet), or null. */
+export async function catchUpAt($: Engine, row: string): Promise<Rec | null> {
+  const own = await catchUpOn($, row)
+  if (own && drawnAt(own) === row) return own
+  const host = (await partNow($, row)).inCatchUp
+  const cu = host ? await catchUpOn($, host) : null
+  return cu && drawnAt(cu) === row && cu.catchup?.rows.includes(row) ? cu : null
+}
+
 /**
- * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt, drawn in their place: a record
- * whose original is those messages as written, one after another, first written at Length short (one call, as any
- * chip change is). The newest reply (`host`) keeps it and draws it; each other message names the host, and draws no
- * text of its own while its version shows. Returns its id; the first version is on its way.
+ * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt: a record whose original is
+ * those messages as written, one after another, first written at Length short (one call, as any chip change is). The
+ * newest reply (`host`) keeps it; each other message names the host. It draws at the newest of the messages (drawnAt),
+ * the last above the prompt, and every other message it covers draws no text while its version shows. Returns its id;
+ * the first version is on its way.
  */
 export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null }): Promise<string | null> {
   const texts: string[] = []
