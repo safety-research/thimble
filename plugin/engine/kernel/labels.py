@@ -32,6 +32,7 @@ import contextlib
 import csv
 import fcntl
 import json
+import os
 import random
 import re
 import time
@@ -83,14 +84,14 @@ def names(st: Store) -> list[str]:
 
 @contextlib.contextmanager
 def locked(st: Store, name: str) -> Iterator[None]:
-    """One writer of a label at a time."""
-    d = st.sub("labels")
-    with open(d / f".{slug(name)}.lock", "w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+    """One writer of the labels at a time: a lock on the labels folder itself, so no lock file is left behind. (`name`
+    names the label the writer changes; writes are short, so one lock serves every label of the folder.)"""
+    fd = os.open(st.sub("labels"), os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def write(st: Store, lab: dict[str, Any], change: bool = True) -> None:

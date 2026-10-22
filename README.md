@@ -80,9 +80,10 @@ one call per 50 records. All calls go through your Claude Code login and show in
 
 ### What it stores
 
-- `thimble/`, in your data folder: the labels, with every version of their values.
-- `~/.thimble/` (or the folder in `THIMBLE_HOME`): per session, the cards with their rows and state, the files Claude
-  read (for coverage), and a log of thimble's own model calls.
+- `~/.thimble/` (or the folder in `THIMBLE_HOME`): per data folder, the labels, with every version of their values;
+  per session, the cards with their rows and state, the marks and their checks, the files Claude read (for coverage),
+  and a log of thimble's own model calls. thimble writes nothing in your data folder (one whose `thimble/labels` an
+  earlier thimble made keeps its labels there).
 
 The plugin sends nothing anywhere except through your Claude Code session, and starts no other Claude Code process.
 

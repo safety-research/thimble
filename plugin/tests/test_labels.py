@@ -234,6 +234,8 @@ def test_labels_are_kept_under_thimble_home_and_nothing_is_written_in_the_folder
     assert "  sorry: yes 3 · no 3 of 6 records" in run(root, "label", "sorry").stdout
     assert run(root, "label", "sorry", "--csv").stdout.count("\n") == 7
     assert sorted(p.name for p in root.rglob("*")) == before
+    # a write takes a lock on the labels folder, and leaves no lock file
+    assert sorted(p.name for p in (kept / "labels").iterdir()) == ["sorry.json"]
 
 
 def test_a_label_over_a_database_leaves_no_file_beside_it(root: Path):
