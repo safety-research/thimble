@@ -3,7 +3,7 @@
 // identity token comes from, never its IDs), or an API key the analyst pastes in a password field; once saved, the key
 // is never shown again, only that one is saved. Then the one model every agent
 // runs on (the known ids, or another typed in), its effort, and thimble's features, each with its switch (features.ts:
-// cards, citations, explainers and checks, labels, report, views). A feature turned off takes its part of Claude's
+// marks, cards, labels, report, views). A feature turned off takes its part of Claude's
 // prompt, its tools and its surfaces on the page with it, and leaves the others as they are. Save sends only what
 // changed; a choice applies from Claude's next request. Check asks the Models API once with the saved sign-in and says
 // whether it works.
