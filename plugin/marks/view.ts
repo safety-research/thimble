@@ -1,73 +1,67 @@
-// view.ts: the message layer's drawings as Claude Code elements. No `$`: the shell resolves the elements and hands in
-// what to draw and what a press does.
+// view.ts: a reply with marks, as Claude Code elements. No `$`: register.ts resolves the elements and hands in what to
+// draw and what a press does.
 //
-//   messageEl(els, o)   one of Claude's messages drawn from its record: the blocks that hold marks laid out here, each
-//                       mark a press (a cite underlined, a gloss on a teal fill, a sparkline in place), and every other
-//                       run of blocks drawn by Claude Code's own Markdown, so paragraphs, lists, code and tables look
-//                       as in any reply
-//   catchUpEl(els, o)   a catch-up in place of the replies it stands in for: a rule down its left side, `thimble  catch-up of …`, then
-//                       its text (a message drawn as above)
-//   messageRows(els, o) a message as rows, one element a row of the terminal, each block laid out here (as the
-//                       catch-up's), so a side thread's answer can be cut to the rows its panel has
-//   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
-//                       rows; its keys are in the bar under it, and its color says cite or explain
-import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
-import { paintRegions } from './cells'
-import { quiet } from '../draw/hover.js'
+//   messageEl(els, o)  one text block of a reply: each block of its markdown that holds marks laid out here, each mark a
+//                      press with its status drawn on it; every other run of blocks drawn by Claude Code's own Markdown,
+//                      so paragraphs, lists, code and tables look as in any reply
+//   footerEl(els, o)   the line under a reply's last block while its marks are checked, or when some failed
+//
+// A mark's look by its status:
+//   pending    the turn still runs: purple, underlined
+//   checking   purple, underlined, and a turning glyph right after it
+//   verified   purple, underlined
+//   corrected  the corrected words in place of the marked ones, purple, underlined
+//   failed     red, with ` ×` after it
+//   unchecked  underlined in the text's color: no check could run
+import { blocks, inline, marksWithin, runsText, tableOf, width, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; within?: number; tag?: string }
-export type Theme = 'dark' | 'light'
+type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; tag?: string }
+type Mark = { start: number; end: number; words: string }
 
-/** The marks' colors, per theme: a citation's purple, a mid tone that reads on a dark and a light background; an explained term as a highlighter pen marks it, dark text on a
- *  light teal, and an important detail the same on a light orange, so both read in a light and a dark terminal; the
- *  focused one a deeper shade of its own. `gloss` and `heads` are their frames' colors in the tray. */
-export function markColors(theme: Theme) {
-  const pen = { glossInk: '#10201e', glossBg: '#9fe0d5', focusGloss: '#4fc3b2', headsInk: '#2a1600', headsBg: '#ffcf94', focusHeads: '#f5a142' }
-  return theme === 'light'
-    ? { cite: '#8b3fd9', gloss: '#1f8a85', heads: '#c2610f', paper: '#ffffff', ...pen, glossBg: '#c4eee6', headsBg: '#ffe0b8' }
-    : { cite: '#b36bff', gloss: '#62d2c6', heads: '#f2a24b', paper: '#1e1e1e', ...pen }
-}
-
-/** A key's color in the bar: v's, s's and c's own, else the bar's blue. */
-export function keyColor(key: string, theme: Theme): string {
-  const own: Record<string, [string, string]> = { v: ['#4f46e5', '#9a93ff'], s: ['#b7791f', '#e0a43a'], c: ['#8a4fb5', '#c792ea'] }
-  const pair = own[key] || ['#2a78c4', '#5aa2e6']
-  return theme === 'light' ? pair[0] : pair[1]
-}
-
-// ------------------------------------------------------------------------------------------------ the message
+export type MarkStatus = 'pending' | 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked'
+export type MarkLook = { n: number; status: MarkStatus; shown?: string }
 
 export type MessageOpts = {
-  rec: Any
+  text: string
+  /** the text's marks (message.js marksIn) and, at the same index, how each is drawn */
+  marks: Mark[]
+  looks: MarkLook[]
   key: string
   cols: number
+  /** the block draws the bullet that opens a reply */
   first: boolean
-  theme: Theme
-  focus: number | null
-  onMark: (i: number) => unknown
-  /** a rewrite of it is running (squeeze): the words dim, and `lead` takes the place of its first ● */
-  dim?: boolean
-  lead?: string | null
-  /** the color of `lead` (squeeze's amber when none) */
-  leadColor?: string | null
-  /** the words' color where the terminal's own may not read (a pane's background: `text`) */
-  ink?: string | null
-  /** the passages a side thread can be asked about: `has` says whether one has a thread already, `ask` starts it (or
-   *  opens it). Each row of blocks is a passage, a heading's its whole section */
-  passages?: { has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null
+  /** the turning glyph's frame now, after a mark that is checked */
+  spin: string
+  onMark: (k: number) => unknown
 }
 
-/** A passage of a message a side thread can be about: its words as written, and a few words naming it. */
-export type Passage = { text: string; label: string }
+/** A purple that follows the person's theme (Claude Code's color for a merged pull request). */
+const PURPLE = 'merged'
+
+/** Each mark's runs as its status draws them: a correction's words in place of the marked ones, and the glyph after a
+ *  mark that is checked or failed as a run of the mark's own. */
+function withLooks(runs: Run[], o: MessageOpts): Run[] {
+  const out: Run[] = []
+  for (let k = 0; k < runs.length; k++) {
+    const r = runs[k]!
+    if (r.mark === undefined) { out.push(r); continue }
+    let e = k
+    while (e + 1 < runs.length && runs[e + 1]!.mark === r.mark) e++
+    const look = o.looks[r.mark]
+    out.push(...(look?.status === 'corrected' && look.shown ? [{ s: look.shown, mark: r.mark }] : runs.slice(k, e + 1)))
+    if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
+    if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    k = e
+  }
+  return out
+}
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
-function runText(els: Any, r: Run, dim = false, ink: string | null = null, wrap?: string) {
+function runText(els: Any, r: Run, wrap?: string) {
   const p: Any = { children: r.s }
   if (wrap) p.wrap = wrap
-  if (ink) p.color = ink
-  if (dim) p.dimColor = true
   if (r.b) p.bold = true
   if (r.it) p.italic = true
   if (r.code) p.color = 'permission'
@@ -75,124 +69,49 @@ function runText(els: Any, r: Run, dim = false, ink: string | null = null, wrap?
   return els.Text(p)
 }
 
-/** A mark's run as a press: the citation underlined in purple, the gloss on its teal fill, the sparkline in place; the
- *  focused citation bold. A gloss on words inside a citation's words keeps its fill, underlined, and a click on it opens
- *  the citation (the words are the citation's); the citation's card in the tray offers the gloss. */
+/** A mark's run as a press that opens its evidence, drawn by its status. */
 function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
-  const m = o.rec.marks[r.mark as number]
-  const c = markColors(o.theme)
-  const inCite = m.kind === 'gloss' && r.within !== undefined && o.rec.marks[r.within]?.kind === 'cite'
-  const on = o.focus === r.mark || (inCite && o.focus === r.within)
+  const look: MarkLook = o.looks[r.mark as number] ?? { n: (r.mark as number) + 1, status: 'pending' }
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
-  if (r.tag) {
-    // the healing pass's glyph after a citation's words: a small spinner while it checks, a red × when contradicted, a
-    // grey ? when the cited place is gone
-    if (r.tag === 'bad') p.color = 'error'
-    else if (r.tag === 'gone') p.color = on ? 'text' : 'inactive'
-    else p.dimColor = true
-  } else if (m.kind === 'cite' && m.heal === 'gone') {
-    // a citation whose place does not exist: still a citation (underlined) but grey, so it reads as one that failed; a
-    // press or the tray says what is missing
-    if (on) { p.backgroundColor = 'selectionBg'; p.color = 'text' } else { p.color = 'inactive'; p.underline = true }
-  } else if (m.kind === 'cite' && m.heal === 'quiet') {
-    // a value the pass unwrapped: plain grey words (a press still says why)
-    if (on) { p.backgroundColor = 'selectionBg'; p.color = 'text' } else p.color = 'inactive'
-  } else if (m.kind === 'cite') {
-    // (the focused one bold in its own color: never a fill, so it reads like the rest of the reply)
-    p.color = c.cite; p.underline = true
-    if (on) p.bold = true
-  } else if (m.kind === 'gloss') {
-    const heads = o.rec.glosses?.[m.gloss as string]?.kind === 'heads'
-    p.color = heads ? c.headsInk : c.glossInk
-    p.backgroundColor = on ? (heads ? c.focusHeads : c.focusGloss) : heads ? c.headsBg : c.glossBg
-    if (r.within !== undefined) p.underline = true
-  } else {
-    p.color = on ? 'text' : 'inactive'
-    if (on) p.backgroundColor = 'selectionBg'
-  }
-  const label = inCite ? `cite ${o.rec.marks[r.within as number].label}` : m.kind === 'gloss' ? `${o.rec.glosses?.[m.gloss as string]?.kind === 'heads' ? 'heads up' : 'explain'} ${r.s}` : m.kind === 'spark' ? `cite sparkline ${m.ref}` : `cite ${m.label}`
-  // the first run of a mark has a key of its own, `mk-<row>-<i>`, so the keys can scroll it into view
-  const seen = (o as MessageOpts & { seen?: Set<number> }).seen
-  const own = seen && !seen.has(r.mark as number) ? `mk-${o.rec.row}-${r.mark}` : key
-  seen?.add(r.mark as number)
-  const opens = inCite ? (r.within as number) : (r.mark as number)
-  // under the pointer a mark turns bold, never inverse, all its runs at once: one hover group per mark (hover.js)
-  return els.Button({ key: own, plain: true, label, hover: quiet(`mk-${o.rec.row}-${opens}`, { underline: false, bold: true }), children: [els.Text(p)], onPress: () => o.onMark(opens) })
+  if (r.it) p.italic = true
+  if (r.tag === 'spin') p.color = PURPLE
+  else if (look.status === 'failed') p.color = 'error'
+  else if (look.status === 'unchecked') p.underline = true
+  else { p.color = PURPLE; p.underline = true }
+  const label = `mark ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
+  return els.Button({ key, plain: true, label, hover: { bold: true }, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
 }
 
-/** One laid-out line: its runs, each mark a press. */
+/** One laid-out line: its runs, each mark a press. A line with marks is a row of its words and presses, cut at its end
+ *  when the column narrows before the next drawing arrives (a piece of words wrapping in its own narrow column would
+ *  break the text into columns). */
 function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] = []) {
-  const row = runs.some(r => r.mark !== undefined)
-  // a line with marks is a row of its words and presses, laid out here at the width this drawing had. When the column
-  // narrows (a side panel opens) Claude Code lays out this drawing in it until the next one arrives: each piece of
-  // words then cuts at its end rather than wrapping in its own narrow column, which broke the text into columns
-  const wrap = row ? 'truncate-end' : undefined
   const kids: Any[] = [...lead]
-  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, !!o.dim, o.ink ?? null, wrap)))
-  if (!row) return els.Text({ key, wrap: 'truncate-end', children: kids })
-  return els.Box({ key, flexDirection: 'row', children: kids.map(k => (typeof k === 'string' ? els.Text({ wrap, children: k }) : k)) })
-}
-
-/** The 2 columns left of a reply: Claude Code's ● on the reply's first row, else blank. A passage's cell (`ask`): a
- *  blue ↳ once a side thread was asked about it, which opens it; else a blue ? over the ● or the blank, shown only
- *  while the pointer is over the passage's row (the row's keyed Box scopes the hover), which asks about it. The mark
- *  takes the ●'s own cell, so it never adds indent. */
-function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'dark', leadColor?: string | null, ask?: { key: string; label: string; has: boolean; press: () => unknown } | null) {
-  if (lead) return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: leadColor || keyColor('s', theme), children: lead })] })
-  const glyph = els.Text({ children: dot ? '●' : ' ' })
-  if (!ask) return els.Box({ width: 2, flexShrink: 0, children: [glyph] })
-  const blue = keyColor('?', theme)
-  if (ask.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${ask.key}-asked`, plain: true, label: `open the thread about ${ask.label}`, onPress: ask.press, hover: quiet(`${ask.key}-asked`), children: [els.Text({ color: blue, children: '↳' })] })] })
-  const q = els.Button({ key: `${ask.key}-ask`, plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`${ask.key}-ask`), children: [els.Text({ color: blue, bold: true, children: '?' })] })
-  return els.Box({ width: 2, flexShrink: 0, children: [glyph, els.Box({ width: 1, display: 'none', hover: { display: 'flex' }, position: 'absolute', top: 0, left: 0, children: [q] })] })
-}
-
-/** A passage's few words: a heading's section by its heading, else its first words. */
-function passageLabel(text: string): string {
-  const first = text.split('\n')[0]!.trim()
-  const head = /^#{1,6}\s+(.*)$/.exec(first)
-  const words = (head ? head[1]! : first).replace(/[*_`#>]|\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/^\s*(?:[-+]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim()
-  const cut = [...words].length > 40 ? [...words].slice(0, 39).join('') + '…' : words
-  return head ? `the section "${cut}"` : `"${cut}"`
-}
-
-/** A heading's whole section: from the heading to the next heading of its level or above. */
-function sectionOf(text: string, bs: Any[], i: number): string {
-  let j = i
-  while (j + 1 < bs.length && !(bs[j + 1].type === 'heading' && bs[j + 1].level <= bs[i].level)) j++
-  return text.slice(bs[i].start, bs[j].end)
+  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, 'truncate-end')))
+  return els.Box({ key, flexDirection: 'row', children: kids })
 }
 
 /** A block that holds marks, as lines laid out here. */
-function blockLines(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number): Any[] {
-  const out: Any[] = []
-  if (b.type === 'table') return tableLines(els, o, text, b, key, w)
-  const runs: Run[] = inline(text, b.from, b.to, o.rec.marks)
+function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): Any[] {
+  if (b.type === 'table') return tableLines(els, o, b, key, w)
+  const runs = withLooks(inline(o.text, b.from, b.to, o.marks), o)
   if (b.type === 'heading') runs.forEach(r => { r.b = true })
   if (b.type === 'quote') runs.forEach(r => { r.it = true })
   if (b.type === 'item') {
-    const pad = ' '.repeat(b.indent)
-    const head = `${pad}${b.marker} `
-    const lines = wrapRuns(runs, w - width(head))
-    lines.forEach((l: Run[], k: number) => out.push(lineEl(els, o, l, `${key}-${k}`, [els.Text({ children: k === 0 ? head : ' '.repeat(width(head)) })])))
-    return out
+    const head = `${' '.repeat(b.indent)}${b.marker} `
+    return wrapRuns(runs, w - width(head)).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ children: k === 0 ? head : ' '.repeat(width(head)) })]))
   }
-  if (b.type === 'quote') {
-    const lines = wrapRuns(runs, w - 2)
-    lines.forEach((l: Run[], k: number) => out.push(lineEl(els, o, l, `${key}-${k}`, [els.Text({ dimColor: true, children: '▎ ' })])))
-    return out
-  }
-  wrapRuns(runs, w).forEach((l: Run[], k: number) => out.push(lineEl(els, o, l, `${key}-${k}`)))
-  return out
+  if (b.type === 'quote') return wrapRuns(runs, w - 2).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ dimColor: true, children: '▎ ' })]))
+  return wrapRuns(runs, w).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`))
 }
 
 /** A table that holds marks, drawn as Claude Code draws a table: a box of light rules, its header bold. One too wide to
  *  draw whole is a list of its rows instead, each row a block of `header: cell` lines (a blank line between rows): the
- *  header bold, the cell's words wrapped at spaces beside it, each mark a press as in a paragraph. A header wider than
- *  half the column stands on a line of its own, its cell under it, indented. */
-function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number): Any[] {
-  const rows: Run[][][] = tableOf(text, b, o.rec.marks)
+ *  header bold, the cell's words wrapped beside it, each mark a press as in a paragraph. A header wider than half the
+ *  column stands on a line of its own, its cell under it, indented. */
+function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): Any[] {
+  const rows: Run[][][] = tableOf(o.text, b, o.marks).map((cells: Run[][]) => cells.map(c => withLooks(c, o)))
   const n = Math.max(...rows.map(r => r.length))
   const widths = Array.from({ length: n }, (_, c) => Math.max(1, ...rows.map(r => width(runsText(r[c] || [])))))
   const total = widths.reduce((s, x) => s + x + 3, 1)
@@ -231,7 +150,7 @@ function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string,
       const pad = widths[c]! - width(runsText(runs))
       const left = k === 0 ? Math.floor(pad / 2) : 0
       kids.push(els.Text({ children: ' ' + ' '.repeat(left) }))
-      runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-t${k}-${c}-${j}`) : runText(els, r, false, o.ink ?? null)))
+      runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-t${k}-${c}-${j}`) : runText(els, r)))
       kids.push(els.Text({ children: ' '.repeat(pad - left) + ' │' }))
     }
     out.push(els.Box({ key: `${key}-r${k}`, flexDirection: 'row', children: kids }))
@@ -241,159 +160,51 @@ function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string,
   return out
 }
 
-/** One of Claude's messages drawn from its record. */
-export function messageEl(els: Any, given: MessageOpts): Any {
-  const { Box, Markdown } = els
-  const o = { ...given, seen: new Set<number>() }
-  const text = shownOf(o.rec)
-  const bs = blocks(text)
+/** One text block of a reply, drawn with its marks. */
+export function messageEl(els: Any, o: MessageOpts): Any {
+  const { Box, Markdown, Text } = els
+  const bs = blocks(o.text)
   const w = Math.max(20, o.cols)
   const rows: Any[] = []
   let dot = o.first
   let k = 0
-  // a row's passage (its blocks i to j; a heading's, its whole section), when side threads can be asked about them
-  const passageOf = (i: number, j: number): Passage => {
-    const words = bs[i].type === 'heading' ? sectionOf(text, bs, i) : text.slice(bs[i].start, bs[j].end)
-    return { text: words, label: passageLabel(words) }
-  }
-  const push = (content: Any[], gap: boolean, p: Passage | null) => {
-    const key = `${o.key}-b${k++}`
-    const ask = p && o.passages ? { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p) } : null
-    rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot, rows.length === 0 ? o.lead : null, o.theme, o.leadColor, ask), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+  const push = (content: Any[], gap: boolean) => {
+    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [Box({ width: 2, flexShrink: 0, children: [Text({ children: dot ? '●' : ' ' })] }), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
   // a block laid out here: one that holds marks. A code block never is: its lines stay as written, in Claude Code's
   // Markdown, whatever lies in it
-  const laidOut = (b: Any) => b.type !== 'code' && marksIn(o.rec.marks, b.start, b.end).length > 0
+  const laidOut = (b: Any) => b.type !== 'code' && marksWithin(o.marks, b.start, b.end).length > 0
   let i = 0
   while (i < bs.length) {
     const b = bs[i]
     if (laidOut(b)) {
-      push(blockLines(els, o, text, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i))
+      push(blockLines(els, o, b, `${o.key}-l${i}`, w), b.gap && i > 0)
       i++
       continue
     }
-    // a run of blocks with no mark: Claude Code's own Markdown, whole. Where passages can be asked about, a run is one
-    // passage: it ends at a blank line (but a list's items stay together) and before a heading
-    const joins = (a: Any, n: Any) => !o.passages || (n.type !== 'heading' && (!n.gap || (a.type === 'item' && n.type === 'item')))
+    // a run of blocks with no mark: Claude Code's own Markdown, whole
     let j = i
-    while (j + 1 < bs.length && !laidOut(bs[j + 1]) && joins(bs[j], bs[j + 1])) j++
-    push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0, passageOf(i, j))
+    while (j + 1 < bs.length && !laidOut(bs[j + 1])) j++
+    push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0)
     i = j + 1
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
 }
 
-// ------------------------------------------------------------------------------------------------ the catch-up
+export type FooterOpts = { key: string; checking: number; failed: number; unchecked: number; spin: string }
 
-export type CatchUpOpts = MessageOpts & {
-  /** what it covers, after `thimble`: `catch-up of 3 replies since your last message` */
-  head: string
-  /** a line in place of its text: while its first version is written, or why that failed */
-  note?: { text: string; error?: boolean } | null
-}
-
-/** One block of a catch-up as rows, each one row of the terminal: every kind laid out here, none left to Claude Code's
- *  Markdown, whose wrapping cannot be counted. */
-function blockRows(els: Any, o: MessageOpts, text: string, b: Any, key: string, w: number): Any[] {
-  const cutRow = (s: string, k: number, p: Any = {}) => els.Text({ key: `${key}-${k}`, wrap: 'truncate-end', ...p, children: s || ' ' })
-  if (b.type === 'code') return text.slice(b.start, b.end).split('\n').slice(1, -1).map((l, k) => cutRow(l, k, { color: 'permission', ...(o.dim ? { dimColor: true } : {}) }))
-  if (b.type === 'rule') return [cutRow('─'.repeat(Math.min(w, 40)), 0, { dimColor: true })]
-  if (b.type === 'table') return tableLines(els, o, text, b, key, w)
-  return blockLines(els, o, text, b, key, w)
-}
-
-/**
- * A catch-up under the newest reply: its head line (`thimble  catch-up of …`) and its text, each row of it after a rule
- * in thimble's color, so the rule runs down its left side as tall as the text. Its text is drawn as a message's is (the
- * marks presses, a citation underlined), every block laid out here so each row can carry the rule.
- */
-export function catchUpEl(els: Any, o: CatchUpOpts): Any {
+/** The line under a reply's last block: `checking 12 marks` while the check runs; afterwards `2 marks failed` in red
+ *  and `3 marks not checked` dim, when there are any; nothing when every mark passed. */
+export function footerEl(els: Any, o: FooterOpts): Any | null {
   const { Box, Text } = els
-  const color = o.theme === 'light' ? '#4f46e5' : '#9a93ff'
-  const mo = { ...o, seen: new Set<number>() }
-  const w = Math.max(20, o.cols - 2)
-  const ruled = (key: string, kids: Any[]) => Box({ key, flexDirection: 'row', children: [Text({ color, children: '▎ ' }), Box({ flexDirection: 'column', width: w, children: kids })] })
-  const rows: Any[] = [ruled(`${o.key}-head`, [Text({ children: [Text({ color, bold: true, children: 'thimble' }), Text({ dimColor: true, children: `  ${o.head}` })] })])]
-  if (o.note) rows.push(ruled(`${o.key}-note`, [Text({ wrap: 'truncate-end', ...(o.note.error ? { color: 'error' } : { dimColor: true }), children: o.note.text })]))
+  const marks = (n: number) => `${n} mark${n === 1 ? '' : 's'}`
+  const parts: Any[] = []
+  if (o.checking) parts.push(Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${marks(o.checking)}` }))
   else {
-    const text = shownOf(o.rec)
-    blocks(text).forEach((b: Any, i: number) => {
-      if (b.gap && i > 0) rows.push(ruled(`${o.key}-g${i}`, [Text({ children: ' ' })]))
-      blockRows(els, mo, text, b, `${o.key}-l${i}`, w).forEach((line: Any, j: number) => rows.push(ruled(`${o.key}-l${i}-${j}`, [line])))
-    })
+    if (o.failed) parts.push(Text({ key: 'f', color: 'error', children: `${marks(o.failed)} failed` }))
+    if (o.unchecked) parts.push(Text({ key: 'u', dimColor: true, children: `${parts.length ? ' · ' : ''}${marks(o.unchecked)} not checked` }))
   }
-  return Box({ key: o.key, flexDirection: 'column', marginTop: 1, children: rows })
-}
-
-/** One of Claude's messages as rows, each one row of the terminal: `● ` on its first row (Claude Code's mark of a
- *  reply), every block laid out here as a catch-up's is, the marks presses. For a side thread's answer in its panel. */
-export function messageRows(els: Any, o: MessageOpts & { mark?: string }): Any[] {
-  const { Box, Text } = els
-  const mo = { ...o, seen: new Set<number>() }
-  const w = Math.max(20, o.cols - 2)
-  const text = shownOf(o.rec)
-  const out: Any[] = []
-  let first = true
-  blocks(text).forEach((b: Any, i: number) => {
-    if (b.gap && i > 0 && out.length) out.push(Text({ key: `${o.key}-g${i}`, children: ' ' }))
-    blockRows(els, mo, text, b, `${o.key}-l${i}`, w).forEach((line: Any, j: number) => {
-      out.push(Box({ key: `${o.key}-l${i}-${j}`, flexDirection: 'row', children: [Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: first ? `${o.mark ?? '●'} ` : '  ' })] }), Box({ flexDirection: 'column', width: w, children: [line] })] }))
-      first = false
-    })
-  })
-  return out
-}
-
-// ------------------------------------------------------------------------------------------------ the tray
-
-export type TrayOpts = {
-  key: string
-  w: number
-  body: number
-  theme: Theme
-  kind: 'cite' | 'gloss' | 'spark'
-  title: string
-  grids: Any[] | null
-  /** rows of text in place of the card (a side thread), the newest at the bottom */
-  lines?: Any[]
-  problem?: string | null
-  links: { id: string; ref: string; label: string }[]
-  onLink: (id: string) => unknown
-}
-
-/** The tray: one card in a frame of `body` rows, its title on the top border; a cite's frame purple, an explain's
- *  teal. One frame: the card inside it has none of its own, and its keys are in the hint line. */
-export function trayEl(els: Any, o: TrayOpts): Any {
-  const { Box, Text } = els
-  const c = markColors(o.theme)
-  const tone = o.kind === 'gloss' ? c.gloss : c.cite
-  const inner = o.w - 4
-  const cutTo = (s: string, n: number) => ([...s].length <= n ? s : [...s].slice(0, Math.max(0, n - 1)).join('') + '…')
-  const title = cutTo(o.title, Math.max(8, inner - 6))
-  const fill = Math.max(1, o.w - 2 - 2 - width(title) - 1 - 2)
-  const titleText = o.kind === 'gloss'
-    ? Text({ color: c.glossInk, backgroundColor: c.glossBg, bold: true, children: title })
-    : Text({ color: c.cite, underline: o.kind === 'cite', bold: true, children: title })
-  const top = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╭─ ' }), titleText, Text({ color: tone, children: ' ' + '─'.repeat(fill) + '─╮' })] })
-  const bottom = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╰' + '─'.repeat(Math.max(1, o.w - 2)) + '╯' })] })
-  const side = Text({ color: tone, children: '│ ' })
-  const sideR = Text({ color: tone, children: ' │' })
-  const rows: Any[] = []
-  const blank = (k: string) => Box({ key: k, flexDirection: 'row', children: [side, Text({ children: ' '.repeat(inner) }), sideR] })
-  if (o.lines) {
-    for (const [i, l] of o.lines.slice(-o.body).entries()) rows.push(Box({ key: `${o.key}-l${i}`, flexDirection: 'row', children: [side, Box({ width: inner, flexShrink: 0, children: [l] }), sideR] }))
-  } else if (!o.grids) {
-    rows.push(Box({ key: `${o.key}-wait`, flexDirection: 'row', children: [side, Text({ dimColor: true, children: (o.problem ? cutTo(o.problem, inner) : 'reading it through the kernel…').padEnd(inner) }), sideR] }))
-  } else {
-    o.grids.forEach((g: Any, gi: number) => {
-      if (gi && rows.length < o.body) rows.push(blank(`${o.key}-gap${gi}`))
-      for (let y = 0; y < g.h && rows.length < o.body; y++) {
-        const painted = paintRegions(g, els, { theme: o.theme, key: `${o.key}-g${gi}`, from: y, rows: 1, onPress: (id: string) => o.onLink(id) })
-        rows.push(Box({ key: `${o.key}-${gi}-${y}`, flexDirection: 'row', children: [side, Box({ width: inner, flexShrink: 0, children: [painted] }), sideR] }))
-      }
-    })
-  }
-  while (rows.length < o.body) rows.push(blank(`${o.key}-pad${rows.length}`))
-  return Box({ flexDirection: 'column', marginLeft: 2, width: o.w, children: [top, ...rows, bottom] })
+  if (!parts.length) return null
+  return Box({ key: o.key, marginLeft: 2, flexDirection: 'row', children: parts })
 }
