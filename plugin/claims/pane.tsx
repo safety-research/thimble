@@ -1,14 +1,15 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
-// out: the head (how many claims, the folder's action), the graph of clusters with the claim selected in a framed box
-// over it, and the keys under it. Each dot is a press (on the claim selected it opens where the claim was said; on
-// another it selects that one), as are the box's rows (its sentence: where it was said; a citation: its evidence pane;
-// a version in its history: that claim).
+// out: the head (how many claims, the folder's action), the graph of clusters, the panel under it (the claim selected,
+// its citations, its cluster and the cluster's claims), and the keys. A click is the main way to move: each dot is a
+// Button (on the claim selected it opens where the claim was said; on another it selects that one), as is each claim
+// of the cluster in the panel, the claim's sentence (where it was said), a citation (its evidence pane) and a version
+// in its history (that claim). Tab and Enter reach the same Buttons.
 //
-//   keys while the pane holds the keyboard: j k the next or previous claim · n p the next or previous cluster ·
-//   e evidence · h history · m where it was said · a ask about it in a side thread · b back (where it was said)
+//   keys while the pane holds the keyboard: n p the next or previous cluster · e evidence (the cited lines) ·
+//   h history · m where it was said · a ask about it in a side thread · b back (where it was said)
 //
 // A claim's citations are the reply's marks near its words (store.js sources): their check and evidence come from
-// marks/store.ts as they stand now, so a check that ends after the look shows in the box.
+// marks/store.ts as they stand now, so a check that ends after the look shows in the panel.
 import type { EngineInterface } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
@@ -17,7 +18,7 @@ import { tellOpened } from '../core/engaged'
 import { openPane } from '../core/pane'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { openThread } from '../threads/seam'
-import { graphView, hopCluster, paneData, sourceView, stepClaim, threadAbout } from './graph.js'
+import { graphView, hopCluster, paneData, sourceView, threadAbout } from './graph.js'
 import { askFolderLater, claimsPaneStore, placeText, showClaims, type ClaimsArgs } from './term'
 
 type Engine = EngineInterface
@@ -39,15 +40,23 @@ function look(tone: string | null | undefined): Record<string, unknown> {
   return { ...(color ? { color } : {}), ...(faint || t === 'dim' ? { dimColor: true } : {}) }
 }
 
-/** One row of runs: plain Text, with a Button for each run that is a press. */
+/** One row of runs: plain Text, with one Button for each stretch of runs that share a part (a press on it). Each
+ *  Button's key is the row's key and its part, so no two in the pane share one: a dot is `<row>:n:<id>`. */
 function rowEl(els: Any, runs: Run[], key: string, press: (part: string) => unknown): unknown {
   const { Box, Button, Text } = els
   const span = (r: Run, i: number) => Text({ key: `t${i}`, ...look(r.tone), ...(r.bold ? { bold: true } : {}), children: r.s })
   if (!runs.length) return Text({ key, children: ' ' })
   if (!runs.some(r => r.part)) return Text({ key, wrap: 'truncate-end', children: runs.map(span) })
-  return Box({ key, flexDirection: 'row', children: runs.map((r, i) => (r.part
-    ? Button({ key: `p${i}-${r.part}`, plain: true, label: r.s, onPress: () => press(r.part!), children: [span(r, i)] })
-    : Text({ key: `t${i}`, ...look(r.tone), ...(r.bold ? { bold: true } : {}), children: r.s }))) })
+  const kids: unknown[] = []
+  for (let i = 0; i < runs.length;) {
+    const part = runs[i]!.part
+    if (!part) { kids.push(span(runs[i]!, i)); i++; continue }
+    let j = i
+    while (j < runs.length && runs[j]!.part === part) j++
+    kids.push(Button({ key: `${key}:${part}`, plain: true, onPress: () => press(part), children: runs.slice(i, j).map((r, k) => span(r, i + k)) }))
+    i = j
+  }
+  return Box({ key, flexDirection: 'row', children: kids })
 }
 
 /** Where `path:line` a mark's evidence shows, and its first highlighted line. */
@@ -94,7 +103,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
   const W = Math.max(40, Number(e?.props?.bodyColumns) || 90)
   const H = Math.max(14, Number(e?.props?.scroll?.bodyRows) || 36)
-  const { Box, Button } = els
+  const { Box, Button, Text } = els
   const data = await withMarks($, paneData(await claimsPaneStore($)))
   const keys: unknown[] = []
   const key = (k: string, label: string, onPress: () => unknown) => keys.push(Button({ key: `key-${k}`, plain: true, hotkey: k, label, onPress }))
@@ -136,7 +145,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (!claim) return
     if (part.startsWith('n:')) {
       const id = part.slice(2)
-      // a press on the dot selected opens where it was said; on another dot it selects that one
+      // a press on the claim selected (its dot, its row in the panel) opens where it was said; on another it selects that one
       if (id === claim.id && view.chosen) return openSource(claim)
       return pick(id)
     }
@@ -147,21 +156,22 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   }
   if (claim) {
     const toggle = (what: 'ev' | 'hist') => showClaims($, { claim: claim.id, open: view.open === what ? null : what, at: data.last })
-    key('j', 'next claim', () => pick(stepClaim(data, claim.id, 1)))
-    key('k', 'previous', () => pick(stepClaim(data, claim.id, -1)))
     if (data.groups.length > 1) {
       key('n', 'next cluster', () => pick(hopCluster(data, claim.id, 1)))
       key('p', 'previous cluster', () => pick(hopCluster(data, claim.id, -1)))
     }
-    key('e', view.open === 'ev' ? 'evidence ●' : 'evidence', () => toggle('ev'))
+    if ((claim.sources || []).length) key('e', view.open === 'ev' ? 'evidence ●' : 'evidence', () => toggle('ev'))
     if (view.history.length > 1) key('h', view.open === 'hist' ? 'history ●' : 'history', () => toggle('hist'))
     key('m', 'where it was said', () => openSource(claim))
     key('a', 'ask about it', () => ask(threadAbout(claim), { claim: claim.id }))
   }
+  // the click is the main way: said once, dim, before the keys
+  if (claim) keys.unshift(Text({ key: 'key-click', dimColor: true, children: 'click a dot or a claim to select it' }))
   return Box({ flexDirection: 'column', children: [
     ...(view.head as Run[][]).map((r, i) => rowEl(els, r, `h${i}`, press)),
     rowEl(els, [], 'gap', press),
     ...(view.graph as Run[][]).map((r, i) => rowEl(els, r, `g${i}`, press)),
+    ...(view.panel as Run[][]).map((r, i) => rowEl(els, r, `p${i}`, press)),
     ...(keys.length ? [rowEl(els, [], 'gap2', press), Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: keys })] : []),
   ] })
 }
