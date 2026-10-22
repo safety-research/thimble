@@ -32,7 +32,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; refused?: boolean } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -78,6 +78,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     asked.push(op)
     // no runner listens when the sandbox cannot start
     if (o.sandbox?.ok === false) throw new Error('made-up: no such socket')
+    // Claude Code refuses the plugin's requests, its Unix socket's too
+    if (o.refused) return { deny: '$.http.fetch: refused: nonessential network traffic is disabled for this session' }
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
@@ -234,7 +236,9 @@ test('a drawing that fails at a narrow width holds only there: the card keeps it
 test("main reads a card's rows in the temp folder without a dialog; a person's rule still decides; only v's fork writes there freely", async ($, on) => {
   world(on, { ask: true })
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const check = (tool: string, file_path: string) => ($.tool as Any).check({ tool, input: { file_path } }) as Promise<Any>
+  // a real call: one with its tool_use_id (a query, which has none, gets the verdict as it stands)
+  const check = (tool: string, file_path: string) => ($.tool as Any).check({ tool, input: { file_path }, tool_use_id: 'toolu_made_up_read' }) as Promise<Any>
+  expect((await ($.tool as Any).check({ tool: 'Read', input: { file_path: '/made-up/tmp/thimble/rows.json' } })).decision).toBe('ask')
   // thimble's own folder in the person's TMPDIR, by real paths: a link out of it, a path that climbs out, and the rest
   // of TMPDIR ask as before
   expect((await check('Read', '/made-up/tmp/thimble/rows.json')).decision).toBe('allow')
@@ -245,7 +249,7 @@ test("main reads a card's rows in the temp folder without a dialog; a person's r
   expect((await check('Read', '/made-up/tmp/mine/rows.json')).decision).toBe('ask')
   expect((await check('Write', '/made-up/tmp/thimble/rows.json')).decision).toBe('ask')
   // a Glob's absolute pattern names its own folder, whatever its path
-  const glob = (path: string, pattern: string) => ($.tool as Any).check({ tool: 'Glob', input: { path, pattern } }) as Promise<Any>
+  const glob = (path: string, pattern: string) => ($.tool as Any).check({ tool: 'Glob', input: { path, pattern }, tool_use_id: 'toolu_made_up_glob' }) as Promise<Any>
   expect((await glob('/made-up/tmp/thimble', '*.json')).decision).toBe('allow')
   expect((await glob('/made-up/tmp/thimble', '/made-up/home/**')).decision).toBe('ask')
 })
@@ -358,6 +362,19 @@ test('a view that stops the runner is not sent again, and the call says to draw 
   expect(String(r.result)).toContain('the card stopped the card runner, most likely by using too much memory')
   expect(String(r.result)).toContain('Fix the view')
   expect(String(r.result)).not.toContain('cannot draw in this session')
+})
+
+test('when Claude Code refuses the requests to the runner, the call and the failure line say so, and not that the sandbox failed', async ($, on) => {
+  const w = world(on, { refused: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(10)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_9', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  const text = String(r.result)
+  expect(text).toContain("Claude Code refuses thimble's requests to its card runner in this session: nonessential network traffic is disabled for this session")
+  expect(text).not.toContain('did not start in its sandbox')
+  const bar = textOf(await $.ui.render(BAND))
+  expect(bar).toContain("Claude Code refuses thimble's requests to its card runner")
+  expect(w.asked).not.toContain('load')
 })
 
 test('when the sandbox cannot start, no card runs: the call and the failure line say why and the fix', async ($, on) => {

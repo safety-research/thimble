@@ -63,10 +63,13 @@ export const registerCards: Register = on => {
   // this user can open), which is outside the working folder, so Claude Code would ask the person before Claude reads
   // them back. A read there needs no dialog; so does a write by v's fork, which works in the background, where a dialog
   // would stop it until the person answers. Only an ask that the mode makes is let through: a rule or a hook of the
-  // person's still decides. A Glob's absolute pattern names its own folder, so only a relative one is let through
+  // person's still decides. A Glob's absolute pattern names its own folder, so only a relative one is let through.
+  // A query (no tool_use_id, such as the card tool's own check of the person's rules) gets the verdict as it stands:
+  // where an organization manages Claude Code, each verdict a plugin changes is asked again without it, and Claude Code
+  // then says the plugin's hook was skipped
   on('tool.check', { tool: /^(Read|Grep|Glob|Write)$/ }, async ($, e, next) => {
     const v = await next(e)
-    if (v.decision !== 'ask' || v.rule || v.hook || v.plugin || !featureOn('cards')) return v
+    if (v.decision !== 'ask' || v.rule || v.hook || v.plugin || e.tool_use_id === undefined || !featureOn('cards')) return v
     if (e.tool === 'Write' && forkOf(e.agentId)?.kind !== 'designer') return v
     const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown; pattern?: unknown }
     if (e.tool === 'Glob' && (typeof input.pattern !== 'string' || input.pattern.startsWith('/') || input.pattern.split('/').includes('..'))) return v
