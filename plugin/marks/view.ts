@@ -7,8 +7,8 @@
 //   footerEl(els, o)   the line under a reply's last block while its marks are checked (each mark shows its own
 //                      status once the check settled, so nothing counts them after)
 //
-// A note (the check found the words around a mark false) stands right under the block that holds its sentence, after
-// ↳ in the warning color, so the person reads it with the words it is about.
+// The check's notes (it found words around a mark false) are not drawn: main reads them with the next prompt
+// (checker.ts tellText), and a detail the person must see is a heads-up's.
 //
 // A mark's look by its status:
 //   pending      the turn still runs: purple, underlined
@@ -54,8 +54,6 @@ export type MessageOpts = {
   first: boolean
   /** the turning glyph's frame now, after a mark that is checked */
   spin: string
-  /** at a mark's index, the check's note on the words around it, if any */
-  notes?: (string | undefined)[]
   onMark: (k: number) => unknown
   /** the features' spans on the text's words, in order */
   spans?: ViewSpan[]
@@ -164,13 +162,6 @@ function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
   return wrapRuns(runs, w - pad.length).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, pad ? [els.Text({ children: pad })] : []))
 }
 
-/** The check's notes on the marks of a block, each once, under it: indented as the block's words. */
-function noteLines(els: Any, o: MessageOpts, b: Any, key: string): Any[] {
-  const said = [...new Set(marksWithin(o.marks, b.start, b.end).map((m: Any) => o.notes?.[m.i]).filter(Boolean))] as string[]
-  const pad = b.type === 'item' ? textWidth(`${' '.repeat(b.indent)}${b.marker} `) : b.indent ?? 0
-  return said.map((note, k) => els.Box({ key: `${key}-n${k}`, flexDirection: 'row', paddingLeft: pad, children: [els.Text({ color: 'warning', children: '↳ ' }), els.Box({ flexShrink: 1, children: [els.Text({ wrap: 'wrap', children: note })] })] }))
-}
-
 /** A table that holds marks, drawn as Claude Code draws a table: a box of light rules, its header bold. One too wide to
  *  draw whole is a list of its rows instead, each row a block of `header: cell` lines (a blank line between rows): the
  *  header bold, the cell's words wrapped beside it, each mark a press as in a paragraph. A header wider than half the
@@ -277,7 +268,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   while (i < bs.length) {
     const b = bs[i]
     if (laidOut(i)) {
-      push([...blockLines(els, o, b, `${o.key}-l${i}`, w), ...noteLines(els, o, b, `${o.key}-l${i}`)], b.gap && i > 0, passageOf(i, i))
+      push(blockLines(els, o, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i))
       i++
       continue
     }

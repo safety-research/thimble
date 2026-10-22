@@ -4,6 +4,7 @@
 import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
+import { MarksFooter } from '../../src/marks/MarksFooter.tsx'
 import type { MarkItem } from '../../src/marks/marks.ts'
 import { withMarkHrefs } from '../../src/marks/marks.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -59,4 +60,23 @@ test("a turn's marks go to its own text rows in order, and its reply gets the fo
   expect(texts[1].checks?.map((m) => m.words)).toEqual(['b'])
   expect(texts[2].checks?.map((m) => m.words)).toEqual(['c'])
   expect(texts[2].turnMarks?.length).toBe(2)
+})
+
+test("the check's notes on the sentences around the marks are not shown: neither under the reply nor in a mark's card", async () => {
+  const note = 'Deletions did not only begin after the edits stopped.'
+  const checks = [item(0, '12', { note }), item(1, 'all', { status: 'failed', failedBy: 'check', reason: 'b also failed', note })]
+  const foot = await mount(<MarksFooter items={checks} />)
+  expect(foot.textContent).toContain('1')
+  expect(foot.textContent).not.toContain(note)
+  expect(foot.querySelector('.marks-foot-note')).toBeNull()
+  // a footer with nothing but notes is no footer
+  const none = await mount(<MarksFooter items={[item(0, '12', { note })]} />)
+  expect(none.textContent).toBe('')
+  // the failed citation keeps its own red ×, and its card says nothing of the note
+  const el = await mount(<ChatMarkdown text="[12](#) runs; [all](#) passed." checks={checks} />)
+  expect([...el.querySelectorAll('.mark')].map((m) => m.textContent)).toEqual(['12', 'all ×'])
+  await act(async () => el.querySelectorAll<HTMLElement>('.mark .mark-words')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  expect(el.querySelector('.mark-card')?.textContent).toContain('b also failed')
+  expect(el.textContent).not.toContain(note)
 })

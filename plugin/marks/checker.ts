@@ -104,10 +104,10 @@ function settle(r: Reply, now: number, items: MarkItem[]): Reply {
   return { ...r, items, settledAt: items.some(m => m.status === 'checking') ? null : now }
 }
 
-/** What main reads with the person's next prompt: each mark the check corrected or flagged, and each note, as the
- *  person reads them. The person has read them in the reply, so main uses them from now on and need not say them
- *  again. A mark whose evidence did not hold is not shown to be wrong, and main hears it that way. The check's own
- *  words (its reason, its note) are quoted, since they may quote the records. */
+/** What main reads with the person's next prompt: each mark the check corrected or flagged, as the person reads it in
+ *  the reply (so main uses it from now on and need not say it again), and each note, which the person does not see. A
+ *  mark whose evidence did not hold is not shown to be wrong, and main hears it that way. The check's own words (its
+ *  reason, its note) are quoted, since they may quote the records. */
 export function tellText(items: MarkItem[]): string {
   const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
   const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
@@ -120,8 +120,8 @@ export function tellText(items: MarkItem[]): string {
   if (!said.length && !notes.length) return ''
   const parts = ['thimble checked the citations of your last reply against the data. Its words in the blocks below may quote the records.']
   if (said.length) parts.push(`The analyst sees these changes in the reply:\n${fenced(said.join('\n'))}`)
-  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its uncited statements:\n${fenced(notes.join('\n'))}`)
-  parts.push('Use the corrected facts from now on. The analyst has read these where they stand, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
+  if (notes.length) parts.push(`The check also found these uncited statements false. The analyst does not see these:\n${fenced(notes.join('\n'))}`)
+  parts.push('Use the corrected facts from now on. The analyst has read the changes in the reply, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
   return parts.join('\n')
 }
 

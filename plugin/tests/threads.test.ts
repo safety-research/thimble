@@ -7,9 +7,10 @@ import { expect, test } from 'claude-code/testing'
 import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
-import { askHere, drawThreads } from '../threads/pane'
+import { askHere, drawThreads, passageRuns } from '../threads/pane'
 import { threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
+import { threadKey } from '../threads/threads.mjs'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -227,4 +228,25 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   expect(m.props.hotkey).toBe('m')
   expect(m.props.label).toBe('send this answer to Claude')
   expect(m.props.children).toBe(undefined)
+})
+
+test("a passage's thread shows the passage as the reply reads, under one label: no citation markup, no quoted title", async () => {
+  const s = setup()
+  const text = 'Saves peaked on [June 18, with 6,543 saves under 906 names](#).\n\n- **Links** came [after noon](#).'
+  const scope = { about: '"Saves peaked on June 18…"', passage: { row: 'row-made-up-4', text } }
+  const asked = askHere(s.$, scope, 'why then?')
+  await settle()
+  s.go()
+  await asked
+  const tree = await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: threadKey(scope) }, els)
+  const subject = nodes(tree).find(n => n.props?.key === 'subject')
+  const shown = textOf(subject)
+  expect(shown).toContain("A passage of Claude's reply")
+  expect(shown).toContain('Saves peaked on June 18, with 6,543 saves under 906 names. Links came after noon.')
+  expect(shown).not.toContain('](#)')
+  expect(shown).not.toContain('**')
+  expect(shown).not.toContain(scope.about)
+  // each cited words underlined as in the reply
+  expect(nodes(subject).filter(n => n.props?.underline).map(textOf)).toEqual(['June 18, with 6,543 saves under 906 names', 'after noon'])
+  expect(passageRuns('a [b](#) c', 4).map(r => r.s).join('')).toBe('a b…')
 })

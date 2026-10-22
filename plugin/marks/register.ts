@@ -28,7 +28,7 @@ import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { checkerDenial, endCheck, noteRow, resumeChecks, startCheck } from './checker'
 import { marksIn, withoutMarks } from './message.js'
-import { notesByMark, restoreMarks, rowMarks, type MarkItem } from './store'
+import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { footerEl, messageEl, type MarkLook } from './view'
 
 type Engine = EngineInterface
@@ -155,7 +155,6 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const body = marks.length || spans.length || view.dim || view.lead
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
-      notes: own ? notesByMark(reply?.items ?? []) : [],
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null,
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),

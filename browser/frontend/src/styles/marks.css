@@ -47,7 +47,6 @@
 .mark-card-status.is-failed { color: var(--status-negative); }
 .mark-card-status.is-unchecked, .mark-card-status.is-checking, .mark-card-status.is-pending { color: var(--text-tertiary); }
 .mark-card-was, .mark-card-why { color: var(--text-secondary); }
-.mark-card-note { padding-top: 6px; border-top: 1px solid var(--border-hairline); color: var(--status-negative); }
 .mark-ev { display: flex; flex-direction: column; gap: 4px; }
 .mark-ev-place { display: flex; flex-direction: column; gap: 4px; }
 .mark-ev-head { font: var(--type-label); color: var(--text-tertiary); }
@@ -70,5 +69,3 @@
 .marks-foot-counts { display: flex; gap: 10px; color: var(--text-tertiary); }
 .marks-foot-n.is-corrected, .marks-foot-n.is-unconfirmed { color: var(--status-warning); }
 .marks-foot-n.is-failed { color: var(--status-negative); }
-.marks-foot-note { color: var(--status-negative); }
-.marks-foot-note::before { content: '× '; }
