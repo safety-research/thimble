@@ -210,7 +210,6 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
     overview("read into Claude's context", Number(total.seen_files) || 0, READ, 'o-read'),
     overview('searched or computed over', Number(total.touched_files) || 0, SEARCHED, 'o-searched'),
     Text({ key: 'gap', children: ' ' }),
-    Text({ key: 'units', dimColor: true, wrap: 'wrap', children: 'files: touched of all · read, searched: the share of their lines or records read, and searched or computed over' }),
     Text({ key: 'head', dimColor: true, children: `  ${pad('folder', nameW(0))} ${pad('files', TOUCHED, true)} ${pad('read', barW + 7)}  ${pad('searched', barW + 7)}` }),
     ...rows,
   ] })
