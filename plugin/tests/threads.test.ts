@@ -7,7 +7,7 @@ import { expect, test } from 'claude-code/testing'
 import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
-import { askHere } from '../threads/pane'
+import { askHere, drawThreads } from '../threads/pane'
 import { threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { promptStub } from './stubs'
@@ -87,6 +87,22 @@ function setup(o: { denyFork?: boolean } = {}) {
   const answer = (id: string, text: string) => transcripts.get(id)!.push({ role: 'assistant', content: [{ type: 'text', text }] })
   const told = async () => Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   return { $, call, files, spawns, sent, ended, answer, told, go: () => release?.() }
+}
+
+/** Elements as plain objects, for reading what the pane draws. */
+const els: Any = new Proxy({}, { get: (_t, type: string) => (props: Any) => ({ type, props }) })
+const nodes = (node: Any, out: Any[] = []): Any[] => {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) { node.forEach(n => nodes(n, out)); return out }
+  out.push(node)
+  nodes(node.props?.children, out)
+  return out
+}
+const textOf = (node: Any): string => {
+  if (node == null || node === false) return ''
+  if (typeof node === 'string') return node
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  return textOf(node.props?.children)
 }
 
 const settle = () => new Promise(r => setTimeout(r, 5))
@@ -186,4 +202,29 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
   card.press()
   await settle()
   expect(threadOf('card-c00000000000b1')!.scope).toEqual({ about: 'the card "Runs per day"', card: 'c00000000000b1' })
+})
+
+test('the thread pane: its steps without the folders they ran in, and m drawn once as Claude Code draws a key', async () => {
+  const s = setup()
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  s.$.session.messages = async () => [
+    { role: 'user', content: [{ type: 'text', text: `<fork-boilerplate>b</fork-boilerplate>\nYour directive: ${s.spawns[0].prompt}` }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'cd /made-up/data/runs/r1 && python3 count.py' } }] },
+    { role: 'user', content: [{ type: 'tool_result', content: '41' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Most stopped early (runs.jsonl).' }] },
+  ]
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  const tree = await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)
+  const all = nodes(tree)
+  const steps = all.find(n => String(n.props?.key ?? '').endsWith('-steps'))
+  expect(textOf(steps)).toBe('● 1 step · python3 count.py')
+  expect(all.some(n => typeof n.props?.children === 'string' && n.props.children.includes('/made-up'))).toBe(false)
+  // the Button draws its key and label itself (`m: send this answer to Claude`): no second key or label inside it
+  const m = all.find(n => n.type === 'Button' && n.props?.key === 'conv-m')
+  expect(m.props.hotkey).toBe('m')
+  expect(m.props.label).toBe('send this answer to Claude')
+  expect(m.props.children).toBe(undefined)
 })

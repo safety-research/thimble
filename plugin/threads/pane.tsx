@@ -16,12 +16,13 @@
 //
 //   ❯ why so many links?   about Jun 18       each question after ❯ on the prompt's background, with what it is about
 //
-//   ● 2 steps · python3 count.py              the steps the thread took, on one dim row
+//   ● 2 steps · python3 count.py              the steps the thread took, on one dim row, without the folders they
+//                                             ran in (threads.mjs stepWords)
 //
 //   ● Links peaked that day: 2,994 of …       the answer after ●
 //
 //     [a card it drew]
-//   m send this answer to Claude              once it answered: m (or a click) sends the answer to main
+//   m: send this answer to Claude             once it answered: m (or a click) sends the answer to main
 //                                             a question at work: the bar says `⠋ answering: <thread>` (bar/busy.ts)
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
 //   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them
@@ -39,7 +40,7 @@ import { rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
-import { aboutOf, nameOf, rowsOf, threadKey } from './threads.mjs'
+import { aboutOf, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,7 +100,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     const calls = x.calls ?? []
     if (calls.length) {
       out.push(Text({ key: `${k}-sgap`, children: ' ' }))
-      out.push(Text({ key: `${k}-steps`, dimColor: true, wrap: 'truncate-end', children: `● ${cut(`${calls.length} step${calls.length === 1 ? '' : 's'} · ${calls[calls.length - 1]}`, w - 4)}` }))
+      out.push(Text({ key: `${k}-steps`, dimColor: true, wrap: 'truncate-end', children: `● ${cut(`${calls.length} step${calls.length === 1 ? '' : 's'} · ${stepWords(calls[calls.length - 1], t.root)}`, w - 4)}` }))
     }
     if (x.text) {
       // its citations as Claude wrote them: no checker reads a side thread, so they draw unchecked
@@ -127,9 +128,8 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     out.push(Text({ key: 'conv-m-gap', children: ' ' }))
     out.push(sent
       ? Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude: it reads this answer with your next message' })
-      : Button({ key: 'conv-m', plain: true, hotkey: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) }, children: [
-        Text({ color: 'suggestion', bold: true, children: '  m' }), Text({ dimColor: true, children: ' send this answer to Claude' }),
-      ] }))
+      // a plain Button draws its key and label itself (`m: send this answer to Claude`); children would draw them twice
+      : Button({ key: 'conv-m', plain: true, dimColor: true, hotkey: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } }))
   }
   return out
 }
