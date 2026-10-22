@@ -361,6 +361,15 @@ def test_a_version_or_a_dotted_name_is_no_value_and_a_bound_may_stand_in_printed
     assert "2.5 in by hand" in check_mark(mark("Median 2.5 hours"), computed("Median 2.5 hours"), [call(typed, "Median 2.5 hours")], "/data")["reason"]
 
 
+def test_main_calls_whose_output_the_answer_cites_are_kept_also_for_a_list_of_lines():
+    from kernel.evidence import cited_calls
+    calls = [call("print(n)", "merged:  12 of 40\nopen: 3", by="main"), call("ls", "a.txt b.txt", by="main"), call("print(1)", "1")]
+    items = [{"mark": 1, "kind": "computed", "evidence": {"output": ["merged: 12 of 40", "open"]}}]
+    assert [c["output"] for c in cited_calls(items, calls)] == ["merged:  12 of 40\nopen: 3", "1"]
+    answer = "```json\n" + json.dumps([computed(["merged: 12 of 40"]) | {"mark": 1}]) + "\n```"
+    assert check_all([mark("12 of 40")], answer, calls[:2], "/data")["results"][0]["status"] == "verified"
+
+
 def test_one_mark_the_validator_cannot_judge_leaves_the_others_judged(monkeypatch):
     import kernel.evidence as E
     code = "print(len(open('t.txt').read()))"

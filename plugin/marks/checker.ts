@@ -239,31 +239,6 @@ function bashCalls(msgs: Any, by: 'checker' | 'main'): { command: string; output
   return out
 }
 
-const flat = (s: string) => s.replace(/\s+/g, ' ').trim()
-
-/** The outputs the checker's answer cites as evidence (`"output": "…"`), each as its parts: its lines, cut at "…",
- *  white space as one space. A call of main's whose output holds none of them cannot be a mark's evidence, so the validator is not
- *  sent it; evidence.py `printed` reads a cited output the same way. */
-function citedOutputs(answer: string): string[][] {
-  const out: string[][] = []
-  for (const m of String(answer).matchAll(/"output"\s*:\s*("(?:[^"\\]|\\.)*")/g)) {
-    try {
-      const parts = String(JSON.parse(m[1]!)).split(/…|\.\.\.|\n/).map(flat).filter(Boolean)
-      if (parts.length) out.push(parts)
-    } catch {
-      // not a JSON string: no output
-    }
-  }
-  return out
-}
-
-
-/** The output holds each of the parts, in any order, as evidence.py `printed` reads it. */
-function holdsParts(output: string, parts: string[]): boolean {
-  const text = flat(output)
-  return parts.every(p => text.includes(p))
-}
-
 /** The person's line when a check gave no answer, by why its turn ended. */
 function giveUpLine(reason: string): string {
   if (reason === 'refusal') return "The model's safeguards refused the check of the marks, so they are not checked. Another model may check them: /model."
@@ -273,9 +248,8 @@ function giveUpLine(reason: string): string {
 
 /** The validator's result for a fork's answer, or why there is none. */
 async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
-  const cited = citedOutputs(e.answer)
-  const main = bashCalls(await $.session.messages(), 'main').filter(x => cited.some(parts => holdsParts(x.output, parts)))
-  const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...main]
+  // main's calls too: the check may cite what main printed (the validator keeps the calls whose output the answer cites)
+  const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(), 'main')]
   const ran = await $.process.run([`${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`, 'dev', 'validate'], {
     cwd: c.cwd, timeoutMs: 120000,
     stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: await tempDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),

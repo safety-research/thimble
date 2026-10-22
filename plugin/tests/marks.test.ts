@@ -104,7 +104,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
 
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
   // the validator read the fork's real Bash call
-  expect(JSON.parse(seen.stdin[0]!).calls).toEqual([{ command: "python3 - <<'PY'\nprint('12 of 40')\nPY", output: '12 of 40', by: 'checker' }])
+  expect(JSON.parse(seen.stdin[0]!).calls[0]).toEqual({ command: "python3 - <<'PY'\nprint('12 of 40')\nPY", output: '12 of 40', by: 'checker' })
   const settled = await drawn($)
   expect(settled).toContain('merged 12 of 40.')
   expect(settled).toContain('"ship it" ×')
@@ -121,12 +121,12 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(await failLineNow($)).toBe(null)
 })
 
-test("main's calls go to the validator only when their output holds an output the check cites", async () => {
+test("the validator gets the fork's calls and main's (it keeps main's whose output the check cites)", async () => {
   const { $, seen } = engine(VALIDATED)
   await noteRow($, 'row-1', REPLY)
   await startCheck($, { turnId: 't-1', reason: 'answer' })
-  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[{"mark": 2, "evidence": {"output": "merged: 12 of 40 … open"}}]\n```' })
-  expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => c.command)).toEqual(["python3 - <<'PY'\nprint('12 of 40')\nPY", 'python3 count.py'])
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[{"mark": 2, "evidence": {"output": ["merged: 12 of 40", "open"]}}]\n```' })
+  expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => [c.command, c.by])).toEqual([["python3 - <<'PY'\nprint('12 of 40')\nPY", 'checker'], ['python3 count.py', 'main'], ['ls', 'main']])
 })
 
 test('a refused check leaves the marks unchecked, says so once, and nothing spins', async () => {

@@ -1268,10 +1268,26 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     return res
 
 
+def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The checker's own calls, and the calls of main's whose output holds an output the answer cites: only such a call
+    can be a mark's evidence, so the others are not read again for each mark."""
+    cited = [p for it in items for ev in [it.get("evidence")] if isinstance(ev, dict) for p in [output_parts(ev.get("output"))] if p]
+    out = []
+    for c in calls:
+        if c.get("by") == "checker":
+            out.append(c)
+            continue
+        text = norm_ws(c.get("output") or "")
+        if any(all(p in text for p in parts) for parts in cited):
+            out.append(c)
+    return out
+
+
 def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
     folder. A mark the validator fails on stays unchecked, with why; the other marks are judged."""
     items = parse_answer(answer)
+    calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
     for it in items or []:
         try:
