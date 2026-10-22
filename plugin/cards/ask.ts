@@ -32,6 +32,7 @@ import type { EngineInterface } from 'claude-code'
 import { failNotice, noticeLine } from '../bar/notice'
 import { tempDir, thimbleHome } from '../core/home'
 import { runDir, shortHash } from '../core/layout.mjs'
+import { themeNow } from '../core/theme'
 import { sessionKey } from '../hooks/conversation'
 import { runnerArgv } from './argv.mjs'
 import { cardsDir } from './store'
@@ -134,7 +135,8 @@ async function removeFolder($: Engine, sock: string): Promise<void> {
 const REFUSED = /\$\.http\.fetch: refused: (.+)/
 
 async function post($: Engine, sock: string, op: string, body: unknown): Promise<Any> {
-  const r = await $.http.fetch(`http://runner/${op}`, { method: 'POST', body: JSON.stringify(body ?? {}), socketPath: sock })
+  // each request names the theme, so the cards' palette (surface.colors) is the one for the person's terminal
+  const r = await $.http.fetch(`http://runner/${op}`, { method: 'POST', body: JSON.stringify({ ...(body && typeof body === 'object' ? body : {}), theme: await themeNow($) }), socketPath: sock })
   return JSON.parse(r.text)
 }
 

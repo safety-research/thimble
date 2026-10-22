@@ -59,16 +59,12 @@ const TRAY = { plugin: 'thimble', key: 'tray' } as const
 const STAND = { plugin: 'thimble', key: 'trayCard' } as const
 const ASKED = { plugin: 'thimble', key: 'trayAsked' } as const
 
-/** The colors of the tray's frame by what it shows: a citation's purple (the marks' own), an explainer's teal and a
- *  heads-up's orange, as 0.10's tray drew them, per theme. */
-const TONES = {
-  dark: { citation: 'merged', explain: '#62d2c6', heads: '#f2a24b' },
-  light: { citation: 'merged', explain: '#1f8a85', heads: '#c2610f' },
-} as const
+/** The colors of the tray's frame by what it shows, the ones its words are drawn in (explain/place.mjs markColors): a
+ *  citation's purple, an explainer's teal and a heads-up's orange, theme keys that follow the person's theme. */
+const TONES = { citation: 'merged', explain: 'planMode', heads: 'claude' } as const
 
 // the question the person typed with the tray open, until main's turn for it starts (then kept by its turn)
 let pendingAbout: string | null = null
-let theme: 'dark' | 'light' | null = null
 
 const quietly = (p: Promise<unknown> | unknown) => Promise.resolve(p).catch(() => undefined)
 
@@ -416,17 +412,6 @@ export async function openTray($: Engine, mark: MarkRef): Promise<boolean> {
 
 // ------------------------------------------------------------------------------------------------ the band
 
-async function themeOf($: Engine): Promise<'dark' | 'light'> {
-  if (theme) return theme
-  try {
-    const row = (await $.config.list()).find((r: Any) => r.key === 'theme') as Any
-    theme = /light/i.test(String(row?.value ?? '')) ? 'light' : 'dark'
-  } catch {
-    theme = 'dark'
-  }
-  return theme
-}
-
 async function hyperlinksHere($: Engine): Promise<boolean> {
   // each name literal at its call, so the variables the module reads can be listed
   const env: Record<string, string | undefined> = {
@@ -510,7 +495,6 @@ export async function trayBand($: Engine, els: Any, width: number): Promise<Any[
   const { Box, Text } = els
   const w = Math.max(40, Math.min(104, width - 3))
   const inner = w - 4
-  const tones = TONES[await themeOf($)]
   let title = ''
   let body: Any[] = []
   let under: Any | null = null
@@ -544,7 +528,7 @@ export async function trayBand($: Engine, els: Any, width: number): Promise<Any[
   const right = f.kind === 'citation' ? 'cite' : f.kind === 'heads' ? 'heads up' : 'explain'
   const avail = inner - 2
   const room = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
-  const tone = tones[f.kind]
+  const tone = TONES[f.kind]
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
     Text({ key: 't', bold: true, color: tone, wrap: 'truncate-end', children: cutTitle(title, room) }),
     Text({ key: 'r', dimColor: true, children: right }),
@@ -603,5 +587,4 @@ export const registerTray: Register = on => {
 /** For tests: the module's memory, cleared. */
 export function resetTray(): void {
   pendingAbout = null
-  theme = null
 }

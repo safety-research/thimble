@@ -28,6 +28,8 @@
 //   undo     {id, n}                  the state as it was before the last n keys
 //   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was
 //   ping
+// Any request may also name `theme`, 'dark' or 'light' (Claude Code's theme): the palette surface.colors gives every
+// card from then on (the hooks send it with each request, and draw the cards again when it changes).
 // Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), and the state
 // to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again from its copy.
 // Every answer carries `seq`, which grows with each request, so the hooks keep the newest drawing when two answers come
@@ -45,6 +47,8 @@ import vm from 'node:vm'
 import { buttonText, layoutLines, pressAt } from './layout.js'
 
 const LOAD_MS = 5000
+// the terminal theme the cards draw for (surface.colors), as the newest request named it: 'dark' or 'light'
+let theme = 'dark'
 const EVENT_MS = 1000
 // Claude Code takes a Client's props, and the tree the Client draws, up to 100000 characters each; the Client's tree
 // spells each node out (type, props, children), so the cap is measured on that form (drawnSize)
@@ -153,12 +157,31 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     return { type: t, props: p }
   }
   const elements = freeze({ Box: element('Box'), Text: element('Text'), Button: element('Button') })
-  // the card palette: browser mode's chart colors (browser/frontend/src/styles/tokens.css), muted and set to one
-  // lightness that reads on a light and a dark terminal (3:1 or more on white and on black). The categories keep the
-  // browser's families in a fixed order (blue, orange, teal, pink, gold), with no violet, which is thimble's purple for
-  // agents' work and citations, and no green or red, which mean success and failure. seq(t) runs from a blue-gray (0)
-  // to the blue (1) at that lightness, so its order reads the same on both themes; gray is --viz-ink-3 for context.
-  const SEQ = ['#7e8792', '#77889b', '#7189a4', '#6a89ad', '#6289b5', '#5a89be', '#5289c6', '#4989cf', '#3e89d7']
+  // the card palette: browser mode's chart colors (browser/frontend/src/styles/tokens.css), one set for each terminal
+  // theme, the one Claude Code's theme names (the request's theme, 'dark' or 'light'). On dark, the Dark paper's
+  // chart steps lightened toward its pastel step and a little desaturated, so they read calm on a black background; on
+  // light, the light papers' strong step, deep enough for a white one. The categories keep the browser's families in a
+  // fixed order (blue, orange, teal, pink, gold), with no violet, which is thimble's purple for agents' work and
+  // citations, and no green or red, which mean success and failure (good and bad: the papers' status colors). seq(t)
+  // runs from a blue-gray (0) to the first category's blue (1), its lightness rising on dark and falling on light, so
+  // more reads as stronger on both; gray is --viz-ink-3 for context.
+  const PALETTES = freeze({
+    dark: freeze({
+      cat: freeze(['#80b2ea', '#ed9a6b', '#6fd0cc', '#ed95ba', '#f0ca78']),
+      seq: ['#5f6670', '#636f7e', '#68788d', '#6c829c', '#708bab', '#7495bb', '#789fca', '#7ca8da', '#80b2ea'],
+      gray: '#85827a',
+      good: '#67cda8',
+      bad: '#f59183',
+    }),
+    light: freeze({
+      cat: freeze(['#0471c8', '#e26101', '#018d82', '#c8367b', '#a08319']),
+      seq: ['#9aa1ab', '#8c9cb0', '#7e96b4', '#6f91b8', '#608bbb', '#5085bf', '#3e7fc2', '#2978c5', '#0471c8'],
+      gray: '#a19d94',
+      good: '#0b7c5f',
+      bad: '#c93a28',
+    }),
+  })
+  let theme = 'dark'
   const hex2 = (a, b, f) => {
     let out = '#'
     for (let i = 1; i < 7; i += 2) {
@@ -167,16 +190,18 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     }
     return out
   }
+  // read at each use, so a view that draws again after the theme changed draws in the new set
   const colors = freeze({
-    cat: freeze(['#588ac1', '#ca7c4e', '#449d98', '#b56c89', '#a49447']),
+    get cat() { return PALETTES[theme].cat },
     seq(t) {
+      const SEQ = PALETTES[theme].seq
       const v = typeof t === 'number' && t === t ? Math.max(0, Math.min(1, t)) : 0
       const at = v * (SEQ.length - 1), i = Math.min(SEQ.length - 2, Math.floor(at))
       return hex2(SEQ[i], SEQ[i + 1], at - i)
     },
-    gray: '#928f88',
-    good: '#66a159',
-    bad: '#c65b4d',
+    get gray() { return PALETTES[theme].gray },
+    get good() { return PALETTES[theme].good },
+    get bad() { return PALETTES[theme].bad },
   })
   const surface = freeze({
     elements,
@@ -363,6 +388,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     try {
       if (op === 'key' || op === 'press' || op === 'pointer') before = saved()
       const a = parse(json)
+      if (a.theme === 'dark' || a.theme === 'light') theme = a.theme
       const r = OPS[op](a)
       if (r.ok === false) return stringify(r)
       if (op === 'key') undoable = undoable.concat([before]).slice(-16)
@@ -395,7 +421,7 @@ const TAIL = "\n;return { view: typeof view === 'function' ? view : undefined, o
 function inContext(card, op, args, ms) {
   let out
   try {
-    out = vm.runInContext(`__thimble.call(${JSON.stringify(op)}, ${JSON.stringify(JSON.stringify(args))})`, card.ctx, { filename: 'call.js', timeout: ms })
+    out = vm.runInContext(`__thimble.call(${JSON.stringify(op)}, ${JSON.stringify(JSON.stringify({ ...args, theme }))})`, card.ctx, { filename: 'call.js', timeout: ms })
   } catch (e) {
     // the vm makes its time-limit error in the context's realm: its own `code` is read as data, never through a getter
     const code = e && typeof e === 'object' && !types.isProxy(e) ? Object.getOwnPropertyDescriptor(e, 'code') : undefined
@@ -584,7 +610,9 @@ function serve(sock) {
       const op = String(req.url || '').replace(/^\/+/, '')
       let out
       try {
-        out = Object.hasOwn(OPS, op) ? OPS[op](JSON.parse(body || '{}')) : { ok: false, error: `no request ${op}` }
+        const a = JSON.parse(body || '{}')
+        if (a && (a.theme === 'dark' || a.theme === 'light')) theme = a.theme
+        out = Object.hasOwn(OPS, op) ? OPS[op](a) : { ok: false, error: `no request ${op}` }
       } catch (e) {
         out = { ok: false, error: `the runner failed: ${e && e.message}` }
       }

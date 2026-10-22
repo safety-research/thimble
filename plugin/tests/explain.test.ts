@@ -8,7 +8,8 @@ import { partOf, registerAnswers, resetAnswers } from '../core/answers'
 import { spansFor } from '../core/answerview'
 import { resetEngaged } from '../core/engaged'
 import { registerTurn } from '../core/turn'
-import { explainState, expandExplainer, registerExplain, resetExplain, type ExplainPart } from '../explain/seam'
+import { resetTheme, themeNow } from '../core/theme'
+import { explainState, expandExplainer, resetExplain, type ExplainPart } from '../explain/seam'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -21,6 +22,8 @@ function setup(replies: Any[], o: { theme?: string; complete?: Any } = {}) {
   resetObserver()
   resetExplain()
   resetEngaged()
+  resetTheme()
+  let theme = o.theme ?? 'dark'
   const hooks: Record<string, Any[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
@@ -29,7 +32,6 @@ function setup(replies: Any[], o: { theme?: string; complete?: Any } = {}) {
   registerTurn(on, {} as never)
   registerAnswers(on, {} as never)
   registerObserver(on, {} as never)
-  registerExplain(on, {} as never)
   const state = new Map<string, { value: unknown; version: number }>()
   const files = new Map<string, string>()
   const calls: Any[] = []
@@ -38,7 +40,7 @@ function setup(replies: Any[], o: { theme?: string; complete?: Any } = {}) {
     env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp', THIMBLE_START: '/made-up/data' } as Any)[k] },
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     session: { id: async () => 's-explain', cwd: async () => '/made-up/data', root: async () => '/made-up/data', messages: async () => [] },
-    config: { list: async () => [{ key: 'theme', value: o.theme ?? 'dark' }] },
+    config: { list: async () => [{ key: 'theme', value: theme }] },
     ui: { invalidate: () => undefined },
     fs: {
       read: async (p: string) => { const t = promptStub(p); if (t !== undefined) return t; if (files.has(p)) return files.get(p); throw new Error(`no file ${p}`) },
@@ -69,7 +71,7 @@ function setup(replies: Any[], o: { theme?: string; complete?: Any } = {}) {
     const at = (i: number): ((e: Any) => Promise<Any>) => async (x: Any) => (i < chain.length ? chain[i]($, x, at(i + 1)) : last(x))
     return at(0)(e)
   }
-  return { $, call, files, calls, state }
+  return { $, call, files, calls, state, setTheme: (v: string) => { theme = v } }
 }
 
 const settle = () => new Promise(r => setTimeout(r, 5))
@@ -92,7 +94,7 @@ const LOOK = reply({
   heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['[The log covers one office](logs/upload.log).'], todo: 'Check the other office.' },
 })
 
-test("after a look, the answer's explainer and heads-up stand on their words in 0.10's colors, and the digest knows them", async () => {
+test("after a look, the answer's explainer and heads-up stand on their words in the theme's teal and orange, and the digest knows them", async () => {
   setOptions({})
   const s = setup([LOOK])
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
@@ -102,8 +104,8 @@ test("after a look, the answer's explainer and heads-up stand on their words in 
   expect(part!.items.h1).toMatchObject({ kind: 'heads', title: 'Only one network', todo: 'Check the other office.' })
   const spans = await spansFor(s.$, 't1-row', ANSWER, [{ start: 57, end: 75, words: '41 of the 44' }])
   expect(spans.map(x => ANSWER.slice(x.start, x.end))).toEqual(['retry budget', '30 seconds after a drop'])
-  expect(spans[0]!.look).toEqual({ color: '#10201e', backgroundColor: '#9fe0d5' })
-  expect(spans[1]!.look).toEqual({ color: '#2a1600', backgroundColor: '#ffcf94' })
+  expect(spans[0]!.look).toEqual({ color: 'planMode', underline: true, tint: '#2b3b39' })
+  expect(spans[1]!.look).toEqual({ color: 'claude', underline: true, tint: '#47322b' })
   expect(spans[0]!.label).toBe('explain retry budget')
   expect(await explainState(s.$)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })
   expect(JSON.parse(s.files.get('/made-up/.thimble/conversations/s-explain/explain.json')!)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })
@@ -158,10 +160,16 @@ test('a Longer that fails says why and how to try again; the explainer stays as 
   expect((await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!.items.g1!.expanded).toBe(undefined)
 })
 
-test('the light theme draws the light pens', async () => {
+test('the light theme gives the light tints, and a change of theme the other set', async () => {
   setOptions({})
   const s = setup([LOOK], { theme: 'light' })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
   const spans = await spansFor(s.$, 't1-row', ANSWER, [])
-  expect(spans.find(x => x.id === 'g1')!.look.backgroundColor).toBe('#c4eee6')
+  expect(spans.find(x => x.id === 'g1')!.look).toEqual({ color: 'planMode', underline: true, tint: '#d6e8e6' })
+  // the person picks a dark theme: a second later, the next drawing reads it (each clock read here is 100 ms on)
+  s.setTheme('dark-daltonized')
+  expect(await themeNow(s.$)).toBe('light')
+  for (let i = 0; i < 12; i++) await s.$.clock.now()
+  expect(await themeNow(s.$)).toBe('dark')
+  expect((await spansFor(s.$, 't1-row', ANSWER, [])).find(x => x.id === 'g1')!.look.tint).toBe('#2b3b39')
 })

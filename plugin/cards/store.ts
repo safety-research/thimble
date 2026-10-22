@@ -44,7 +44,9 @@ export type CardMeta = {
   at: number
 }
 /** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it. */
-export type CardTree = { gen: number; width: number; tree: unknown; seq: number }
+/** A card's drawing as the runner made it: at a width, for a theme (core/theme.ts; absent in a drawing kept before
+ *  themes: dark). */
+export type CardTree = { gen: number; width: number; tree: unknown; seq: number; theme?: 'dark' | 'light' }
 
 const CARD = { plugin: 'thimble', key: 'card' } as const
 const TREE = { plugin: 'thimble', key: 'cardTree' } as const

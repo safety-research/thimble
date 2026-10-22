@@ -20,14 +20,16 @@
 //   cardText      a card's text copy as it draws now (for v)
 //
 // The width a card is drawn at is the screen's columns less its frame. A drawing hook may not write the session's
-// state, so when the frame has no drawing at its width (a resumed session, a resize), its Client asks for one
-// (client.tsx), and that request draws it; the Client also says when the card is first on screen.
+// state, so when the frame has no drawing at its width (a resumed session, a resize) or for the theme (core/theme.ts:
+// the view's surface.colors give one set for each), its Client asks for one (client.tsx), and that request draws it;
+// the Client also says when the card is first on screen.
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, underCard } from '../core/answerview'
 import { askCell } from '../core/askcell.js'
 import { cut } from '../core/text.js'
+import { themeNow } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
@@ -108,7 +110,7 @@ export async function askCard($: Engine, meta: CardMeta, op: string, body: Recor
 export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: number, drawing = false): Promise<void> {
   if (r?.ok) {
     const before = await treeOf($, meta.id)
-    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0 })
+    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0, theme: await themeNow($) })
     if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state).catch(() => undefined)
     if (meta.error) await saveMeta($, { ...meta, error: null, errorWidth: null })
     await failCleared($, about(meta.id))
@@ -172,12 +174,15 @@ export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   const fault = f && current && f.seq === current.seq ? f.reason : null
   // a drawing that failed at another width: the card draws again at this one
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
+  // the drawing the Client asks for: one at this width, or (a drawing made for the other theme) in this theme's colors
+  const theme = await themeNow($)
+  const need = current?.width !== width || failedElsewhere ? `${meta.gen}:${width}` : (current.theme ?? 'dark') !== theme ? `${meta.gen}:${width}:${theme}` : ''
   // the title on a line of its own, then the card
   const rows: Any[] = [
     E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
     ...(fault ? [] : [E.Client({
       key: `card-${meta.id}`, module: './client.tsx', width: current?.width ?? width,
-      props: { tree: current?.tree ?? null, width: current?.width ?? width, need: current?.width === width && !failedElsewhere ? '' : `${meta.gen}:${width}` },
+      props: { tree: current?.tree ?? null, width: current?.width ?? width, need },
     })]),
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))

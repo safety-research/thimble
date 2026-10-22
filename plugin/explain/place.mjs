@@ -17,7 +17,7 @@
 //   glossesOf(list, text, skip)         -> the look's explainers as a part keeps them, those whose term the text holds
 //   headsOf(item, text)                 -> the look's heads-up as a part keeps it (one at most), or null
 //   mergeLook(msgs, out, memory)        -> what one look adds to each message's part, and the terms it explained
-//   markColors(theme)                   -> the explainers' and heads-ups' colors, as 0.10 drew them
+//   markColors(theme)                   -> the explainers' and heads-ups' colors: theme keys, and a tint per theme
 import { codeRanges, marksIn } from '../marks/message.js'
 
 const inside = (ranges, a, b) => ranges.some(([x, y]) => a < y && b > x)
@@ -325,18 +325,16 @@ export function mergeLook(msgs, out, memory) {
   return { parts, placed, heads }
 }
 
-/** The colors of 0.10 (shell/view.ts markColors): an explained term as a highlighter pen marks it, dark text on a light
- *  teal, and an important detail the same on a light orange, so both read in a light and a dark terminal; the one the
- *  tray shows a deeper shade of its own. `gloss` and `heads` are their frames' colors in the tray. */
+/** The explainers' and heads-ups' colors. Their words are drawn in a color of Claude Code's theme, underlined, so the
+ *  theme picks a shade that reads on its own background: an explainer teal (`planMode`), a heads-up orange (`claude`).
+ *  A citation is purple and underlined (`merged`), and a citation the check found wrong or could not confirm is red or
+ *  amber with no underline, so the four stay apart. Inside a citation's words, which keep the citation's purple, an
+ *  explainer or a heads-up shows as a faint tint of its own color behind them (`glossTint`, `headsTint`: one per theme,
+ *  as a background takes no theme key); the one the tray shows is bold on that tint. */
 export function markColors(theme) {
-  const pen = { glossInk: '#10201e', glossBg: '#9fe0d5', focusGloss: '#4fc3b2', headsInk: '#2a1600', headsBg: '#ffcf94', focusHeads: '#f5a142' }
-  return theme === 'light'
-    ? { gloss: '#1f8a85', heads: '#c2610f', ...pen, glossBg: '#c4eee6', headsBg: '#ffe0b8' }
-    : { gloss: '#62d2c6', heads: '#f2a24b', ...pen }
+  const tint = theme === 'light' ? { glossTint: '#d6e8e6', headsTint: '#f8e0d7' } : { glossTint: '#2b3b39', headsTint: '#47322b' }
+  return { gloss: 'planMode', heads: 'claude', ...tint }
 }
-
-/** Claude Code's `theme` setting as a palette: its light themes the light one, every other the dark one. */
-export const themeOf = value => (String(value ?? 'dark').startsWith('light') ? 'light' : 'dark')
 
 /** The file places a text links to (`[words](path#L12-20)`, `[words](path:12)`), as {path, from, to}; no web link, no
  *  citation `(#)`. */

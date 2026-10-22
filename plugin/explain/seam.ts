@@ -5,7 +5,7 @@
 // The observer's look after each answer gives explainers (terms the analyst may lack the background for) and at most
 // one heads-up (a detail they should know before they rely on the answer). explainMerge places each on the words of the
 // newest message that holds them (place.mjs mergeLook) and keeps it as that message's part `explain`. The row draws
-// each as a press on its words: an explainer on a teal fill, a heads-up on an orange one, in 0.10's colors; a press
+// each as a press on its words: an explainer in teal, a heads-up in orange, each underlined (place.mjs markColors); a press
 // opens the tray on it (tray/seam.ts openTray), and Claude hears with the next prompt that the analyst opened it
 // (core/engaged.ts). A term is explained once per conversation; the lenses' digests name the terms already explained
 // and the heads-ups already given, which this module keeps in the conversation's folder (explain.json).
@@ -17,15 +17,16 @@
 //   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept
 //   expandExplainer($, mark)           Longer: the explainer written again at more length, in its place (expand.ts);
 //                                      null when it did, else a sentence that says why not
-//   registerExplain                    its own hooks: the theme the colors follow
 //
+// The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
 // Each lens's switch (settings: Explainers, Important details) also hides what it gave while it is off.
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
+import { themeNow } from '../core/theme'
 import { tellOpened } from '../core/engaged'
 import { readKept, writeKept } from '../core/env'
 import type { Take } from '../hooks/keys'
@@ -35,7 +36,7 @@ import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray, trayFocus } from '../tray/seam'
 import { expandGloss } from './expand'
-import { markColors, mergeLook, placeGlosses, themeOf } from './place.mjs'
+import { markColors, mergeLook, placeGlosses } from './place.mjs'
 
 type Engine = EngineInterface
 
@@ -55,7 +56,7 @@ const HEADS_KEEP = 40 // heads-ups already given that the heads lens is told of
 const FILE = 'explain.json'
 
 // this conversation's memory, kept in its folder (a reload of the plugin reads it back)
-const M = { session: '', loaded: false, glossed: [] as string[], headsGiven: [] as string[], theme: 'dark' as 'dark' | 'light' }
+const M = { session: '', loaded: false, glossed: [] as string[], headsGiven: [] as string[] }
 
 async function memory($: Engine): Promise<typeof M> {
   const id = await sessionKey($)
@@ -76,7 +77,7 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
   if (!order.length) return []
   const own = (await messageOf($, row))?.text ?? ''
   const original = text !== own && text !== withoutMarks(own)
-  const c = markColors(M.theme)
+  const c = markColors(await themeNow($))
   return (placeGlosses(text, { items: part.items, order }, original) as { id: string; start: number; end: number }[]).map(p => {
     const g = part.items[p.id]!
     const heads = g.kind === 'heads'
@@ -85,8 +86,8 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
       id: p.id,
       start: p.start,
       end: p.end,
-      look: { color: heads ? c.headsInk : c.glossInk, backgroundColor: heads ? c.headsBg : c.glossBg },
-      focus: { backgroundColor: heads ? c.focusHeads : c.focusGloss },
+      look: { color: heads ? c.heads : c.gloss, underline: true, tint: heads ? c.headsTint : c.glossTint },
+      focus: { bold: true, backgroundColor: heads ? c.headsTint : c.glossTint },
       label: `${heads ? 'heads up' : 'explain'} ${text.slice(p.start, p.end).replace(/`/g, '')}`.slice(0, 120),
       onPress: async () => {
         await openTray($, { row, kind, id: p.id })
@@ -153,21 +154,7 @@ export async function expandExplainer($: Engine, mark: MarkRef): Promise<string 
   return why
 }
 
-export const registerExplain: Register = on => {
-  // the colors follow Claude Code's theme: its light themes the light palette, every other the dark one
-  on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
-    const r = await next(e)
-    try {
-      const row = (await $.config.list()).find(x => x.key === 'theme')
-      M.theme = themeOf(row?.value)
-    } catch {
-      // the dark palette, which also reads on a light background
-    }
-    return r
-  }).catch(($, e, next) => next(e))
-}
-
 /** For tests: the module's memory, cleared. */
 export function resetExplain(): void {
-  Object.assign(M, { session: '', loaded: false, glossed: [], headsGiven: [], theme: 'dark' })
+  Object.assign(M, { session: '', loaded: false, glossed: [], headsGiven: [] })
 }

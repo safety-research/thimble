@@ -21,7 +21,8 @@
 //   unchecked    underlined in the text's color: no check could run
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
-// explainer on a teal fill; a span inside a mark's words keeps the mark's press and adds its fill. While the tray shows
+// explainer in teal, underlined; a span inside a mark's words keeps the mark's press and look and adds its `tint` behind
+// them. While the tray shows
 // a mark (`focus`), it is drawn bold on the selection's background. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
@@ -35,7 +36,7 @@ import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './mess
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; span?: number; tag?: string }
-type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean }
+type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string }
 /** Words a feature draws as a press of its own (core/answerview.ts Span). */
 export type ViewSpan = { start: number; end: number; look: SpanLook; label: string; onPress?: () => unknown }
 type Mark = { start: number; end: number; words: string }
@@ -113,7 +114,8 @@ function runText(els: Any, r: Run, wrap?: string, dim = false) {
 /** A span's run as a press of the feature's, drawn in the span's look. */
 function spanEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const sp = o.spans?.[r.span as number]
-  const p: Any = { children: r.s, ...(sp?.look ?? {}) }
+  const { tint: _tint, ...look } = sp?.look ?? {}
+  const p: Any = { children: r.s, ...look }
   if (r.b) p.bold = true
   if (r.it) p.italic = true
   if (r.code && !p.color) p.color = 'permission'
@@ -132,9 +134,10 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   else if (look.status === 'unconfirmed') p.color = 'warning'
   else if (look.status === 'unchecked') p.underline = true
   else { p.color = PURPLE; p.underline = true }
-  // a span inside the mark's words: its fill under the mark's color
+  // a span inside the mark's words: its tint under the mark's color
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
-  if (sp?.look.backgroundColor) p.backgroundColor = sp.look.backgroundColor
+  const bg = sp?.look.backgroundColor ?? sp?.look.tint
+  if (bg) p.backgroundColor = bg
   if (o.focus === r.mark) { p.bold = true; p.backgroundColor = 'selectionBg' }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   return els.Button({ key, plain: true, label, hover: { bold: true }, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })

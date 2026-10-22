@@ -25,7 +25,6 @@
 //   labeluse    ../labels/use.ts        the labels an answer or a card used; the ask before a large label run
 //   observer    ../observer/observer.ts one look at each answer, for the explainers, important details and claims
 //   squeeze     ../squeeze/seam.ts      squeeze, stretch and catch-up
-//   explain     ../explain/seam.ts      the explainers and important details
 //   claims      ../claims/seam.ts       the claims
 //   threads     ../threads/seam.ts      the side threads
 //   tray        ../tray/seam.ts         the citation and explanation tray
@@ -43,7 +42,6 @@ import { registerPanes } from '../core/pane'
 import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { registerDesigner } from '../designer/v'
-import { registerExplain } from '../explain/seam'
 import { registerGuidance } from '../guidance/guidance'
 import { registerLabels } from '../labels/register'
 import { registerLabelUse } from '../labels/use'
@@ -81,7 +79,6 @@ export const register: Register = (on, options) => {
   registerLabelUse(on, options)
   registerObserver(on, options)
   registerSqueeze(on, options)
-  registerExplain(on, options)
   registerClaims(on, options)
   registerThreads(on, options)
   registerTray(on, options)

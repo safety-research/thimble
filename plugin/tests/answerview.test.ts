@@ -33,7 +33,7 @@ function all(n: Any, out: Any[] = []): Any[] {
   return out
 }
 
-const TEAL = { color: '#10201e', backgroundColor: '#9fe0d5' }
+const TEAL = { color: 'planMode', underline: true, tint: '#2b3b39' }
 const TEXT = 'The page waits on hydrate until [the user query ends](#), then hydrate runs.'
 
 test('spans are kept on plain words or inside one citation, never across one or over another; the focused one looks focused', () => {
@@ -53,7 +53,7 @@ test('spans are kept on plain words or inside one citation, never across one or 
   expect(checkSpans('not a list', TEXT, marks, null)).toEqual([])
 })
 
-test('a span is a press of its own; inside a citation it keeps the citation press and adds its fill; the tray\'s citation is bold', () => {
+test('a span is a press of its own; inside a citation it keeps the citation press and look and adds its tint; the tray\'s citation is bold', () => {
   const marks = marksIn(TEXT)
   const pressed: string[] = []
   const spans = [
@@ -72,6 +72,14 @@ test('a span is a press of its own; inside a citation it keeps the citation pres
   expect(pressed).toEqual(['span', 'mark'])
   const innerText = all(inner).find(n => n.type === 'Text' && n.props.children === 'user query')
   expect(innerText.props).toMatchObject({ backgroundColor: 'selectionBg', bold: true })
+  // the span's own words: its color, underlined, no fill; inside the citation: the citation's purple on the span's tint
+  const ownText = all(own).find(n => n.type === 'Text' && n.props.children === 'hydrate')
+  expect(ownText.props).toMatchObject({ color: 'planMode', underline: true })
+  expect(ownText.props.backgroundColor).toBe(undefined)
+  expect(ownText.props.tint).toBe(undefined)
+  const calm = messageEl(ELS, { text: TEXT, marks, looks: [{ n: 1, status: 'verified' }], key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, spans, focus: null })
+  const tinted = all(calm).find(n => n.type === 'Text' && n.props.children === 'user query')
+  expect(tinted.props).toMatchObject({ color: 'merged', underline: true, backgroundColor: '#2b3b39' })
   // dim words and the ▸ of an answer picked for the keys
   const dim = messageEl(ELS, { text: 'Two runs failed.', marks: [], looks: [], key: 'd', cols: 100, first: true, spin: '⠋', onMark: () => undefined, dim: true, lead: '▸' })
   expect(textOf(dim)).toContain('▸Two runs failed.')
