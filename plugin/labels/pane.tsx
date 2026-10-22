@@ -257,12 +257,20 @@ async function labelView($: Engine, els: Any, root: string, a: LabelsArgs, lab: 
     recs.forEach((r, i) => {
       const on = i === cur
       const status = r.checked ? `✓ you: ${r.value}` : r.waiting ? 'waits for the model' : r.error ? `× ${r.error}` : r.by === 'model' && r.confidence != null ? `confidence ${Math.round(100 * r.confidence)}%` : ''
+      // one line: the status whole, the place cut in its middle (its folder's end, its file and line stay), the meta
+      // (who wrote it) in what is left
+      const said = status ? `  ${cut(status, 60)}` : ''
+      const room = Math.max(12, W - 2 - width(said))
+      const place = placeOf(String(r.ref))
+      const meta = r.meta ? `  ${cut(String(r.meta), 40)}` : ''
+      const placeShown = cut(place, Math.max(10, room - Math.min(width(meta), 12)), true)
+      const metaShown = cut(meta, Math.max(0, room - width(placeShown)))
       body.push(Box({ key: `rec-${r.ref}`, flexDirection: 'column', children: [
         Button({ key: `sel-${r.ref}`, plain: true, onPress: () => go({ at: pageAt, sel: r.ref }), children: [
           Text({ key: 'p', children: on ? '▸ ' : '  ' }),
-          Text({ key: 'at', bold: on, children: placeOf(String(r.ref)) }),
-          Text({ key: 'meta', dimColor: true, children: r.meta ? `  ${cut(String(r.meta), 40)}` : '' }),
-          Text({ key: 's', dimColor: !r.error, ...(r.error ? { color: 'error' } : {}), children: status ? `  ${cut(status, 60)}` : '' }),
+          Text({ key: 'at', bold: on, children: placeShown }),
+          Text({ key: 'meta', dimColor: true, children: metaShown }),
+          Text({ key: 's', dimColor: !r.error, ...(r.error ? { color: 'error' } : {}), children: said }),
         ] }),
         Box({ key: 'words', paddingLeft: 4, children: [Text({ key: 'w', wrap: 'wrap', children: wordsOf(els, r, colorOf(values, String(r.value ?? NONE)), 2 * (W - 4) - 2) })] }),
         ...(on && r.reason ? [Box({ key: 'why', paddingLeft: 4, children: [Text({ key: 'r', dimColor: true, italic: true, wrap: 'truncate-end', children: `the model: ${oneLine(r.reason)}` })] })] : []),

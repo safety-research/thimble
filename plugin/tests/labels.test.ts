@@ -5,7 +5,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { paneNow } from '../core/pane'
-import { drawLabels, openLabels } from '../labels/pane'
+import { drawLabels, openLabels, showLabels } from '../labels/pane'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,4 +165,47 @@ test('the labels pane: the list, a label with its definition and its records at 
   expect(tree.some(n => n.type === 'Text' && /you checked 1: 0 agree, 1 changed/.test(words(n)))).toBe(true)
   // Claude hears the label's checks with the next prompt
   expect(Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value)).toEqual(['The analyst checked records of the label sorry in the labels pane. It now holds 1 check: 0 agree with the label and 1 changed a value: chat.jsonl#L1 (the label gave yes, the analyst says no). The checks count in place of the label\'s values; `thimble label sorry` prints the counts now.'])
+})
+
+test('a key in the labels pane (j, v) redraws it and Esc still closes it: each open keeps closeOnEscape and its rows', async () => {
+  const ran: string[][] = []
+  const $ = paneEngine(ran)
+  const opens: Any[] = []
+  let shown = true
+  $.ui.open = async (o: Any) => { opens.push(o); return { isPlaced: true } }
+  $.ui.panes = async () => (shown ? [{ id: 'thimble', title: 'Labels' }] : [])
+  const draw = async () => nodes(await drawLabels($, { props: { bodyColumns: 90, scroll: { bodyRows: 40 } } }, (await paneNow($))?.args, ELS))
+  await openLabels($, { label: 'sorry' })
+  expect(opens[0]).toMatchObject({ focus: true, closeOnEscape: true, rows: 28 })
+  await (await draw()).find(n => n.type === 'Button' && n.props.hotkey === 'j').props.onPress()
+  await (await draw()).find(n => n.type === 'Button' && n.props.hotkey === 'v').props.onPress()
+  expect(opens.length).toBe(3)
+  for (const o of opens.slice(1)) {
+    expect(o).toMatchObject({ closeOnEscape: true, rows: 28 })
+    expect(o.focus).toBeUndefined()
+  }
+  // once the person closed it, a pane thimble opens on its own does not take Esc
+  shown = false
+  await showLabels($, { label: 'sorry' })
+  expect(opens[3].closeOnEscape).toBeUndefined()
+})
+
+test('a record\'s line in the labels pane stays on one line: its place cut in the middle, its confidence whole', async () => {
+  const ran: string[][] = []
+  const $ = paneEngine(ran)
+  const ref = 'runs/sweep3-made-up-managed_prs_with_a_long_name/board.jsonl#L361'
+  const rec = { ref, i: 0, value: 'yes', by: 'model', confidence: 0.96, words: 'Still looking for a reviewer.', meta: 'agent-43 of the made-up swarm' }
+  const run = $.process.run
+  $.process.run = async (argv: string[]) => (argv.includes('--records')
+    ? { exitCode: 0, stdout: JSON.stringify({ label: { ...HEAD, kind: 'prompt' }, value: 'yes', at: 0, total: 1, records: [rec] }), stderr: '' }
+    : run(argv))
+  const W = 60
+  // the module keeps what the kernel said per change of the labels: a change of its own, so this kernel answers
+  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 99)
+  await openLabels($, { label: 'sorry' })
+  const tree = nodes(await drawLabels($, { props: { bodyColumns: W, scroll: { bodyRows: 40 } } }, (await paneNow($))?.args, ELS))
+  const line = words(tree.find(n => n.type === 'Button' && n.props.key === `sel-${ref}`))
+  expect(line.endsWith('  confidence 96%')).toBe(true)
+  expect(line.length).toBeLessThanOrEqual(W)
+  expect(line).toMatch(/^▸ runs\/swe.*….*board\.jsonl:361/)
 })

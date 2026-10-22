@@ -82,6 +82,32 @@ def _holding(start: Path) -> Path | None:
         d = d.parent
 
 
+def temp_folders() -> list[Path]:
+    """thimble's temp folders, as real paths (the plugin's core/home.ts tempDir, hooks/temp_allow.py temp_folders): the
+    session's commands get thimble's folder as their TMPDIR, so TMPDIR itself when it is a folder named thimble, then
+    thimble/ in TMPDIR, then $THIMBLE_HOME/tmp; only those that exist."""
+    tmp = (os.environ.get("TMPDIR") or "").rstrip("/")
+    cands = [Path(tmp)] if tmp and os.path.basename(os.path.realpath(tmp)) == "thimble" else []
+    cands += ([Path(tmp) / "thimble"] if tmp else []) + [thimble_home() / "tmp"]
+    out: list[Path] = []
+    for c in cands:
+        if c.is_dir() and not c.is_symlink():
+            r = c.resolve()
+            if r not in out:
+                out.append(r)
+    return out
+
+
+def in_temp(path: str | Path) -> bool:
+    """Whether `path` (its real path) lies in one of thimble's temp folders: a file Claude derived for the session (a
+    table of the records, a filtered copy) belongs to the session's root, not to a root of its own."""
+    try:
+        p = Path(path).resolve()
+    except (OSError, RuntimeError):
+        return False
+    return any(p == t or t in p.parents for t in temp_folders())
+
+
 def find_root(start: str | Path | None = None) -> Path:
     """The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above `start` (the working folder) that
     holds a thimble/ record folder, else `start` itself.
@@ -90,7 +116,9 @@ def find_root(start: str | Path | None = None) -> Path:
     does not move the records: they stay in the start folder's thimble/ (or one above it), so a session whose first
     command is `cd src` keeps one record folder, not a second one inside the source tree. When no folder at or above
     the start folder holds records, a folder between it and the working folder that holds them is used. A working
-    folder outside the start folder is found as before, and so is any folder outside a session."""
+    folder in thimble's temp folder (Claude derived a file there and labels it) is the start folder's too: its labels
+    belong to the session's root, so they show in the session's answers and bar. Any other working folder outside the
+    start folder is found as before, and so is any folder outside a session."""
     env = os.environ.get("THIMBLE_ROOT")
     if env:
         return Path(env).resolve()
@@ -100,6 +128,8 @@ def find_root(start: str | Path | None = None) -> Path:
         a = Path(anchor).resolve()
         if here == a or a in here.parents:
             return _holding(a) or _holding(here) or a
+        if in_temp(here):
+            return _holding(a) or a
     return _holding(here) or here
 
 

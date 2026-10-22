@@ -167,9 +167,13 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
     out = [head, f"  {LB.unit_count(s['records'], unit)} of {scope}" + (f" (a trial: {s['records']:,} of {lab.get('matched', 0):,} at random)" if lab.get("trial") else "")
            + (f"; the code returned None for {s['out']:,} more, which are outside the label" if s["out"] else "")]
     vals = lab["values"] + [v for v in s["counts"] if v not in lab["values"]]
-    if s["valued"] or not s["waiting"]:
-        each = " · ".join(f"{v} {s['counts'].get(v, 0):,}" for v in vals)
+    each = " · ".join(f"{v} {s['counts'].get(v, 0):,}" for v in vals)
+    if not s["waiting"]:
         out.append(f"  {lab['name']}: {each} of {LB.unit_count(s['records'], unit)}")
+    elif s["valued"]:
+        # the records read so far (a trial, or the first calls) are no count of the label: it has more that wait
+        out.append(f"  so far, only of the {LB.unit_count(s['valued'], unit)} with a value: {each}; not the label's "
+                   f"counts while {s['waiting']:,} wait")
     if len(parts) > 1:
         # a file's unit is its own: a count over lines and whole files together is no count of either
         out.append(f"  the records mix units: {LB.units_said(parts)}; count each unit apart:")
@@ -183,8 +187,12 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
         out.append(f"  {s['waiting']:,} records wait for the analyst's choice: the model reads all of them "
                    f"({EST.calls_line((run.get('ask') or {}).get('calls') or 0)}), a random sample of {EST.SAMPLE}, or none")
     elif s["waiting"]:
-        out.append(f"  {s['waiting']:,} records wait for the model"
-                   + (f" (the analyst chose a random sample of {EST.SAMPLE})" if run.get("chose") == "sample" else ""))
+        chose = {"sample": f"the random sample of {run.get('of') or EST.SAMPLE} the analyst chose",
+                 "all": "the run the analyst chose"}.get(str(run.get("chose") or ""), "")
+        doing = "the model is reading them" if run.get("state") == "running" else "the model's reads start beside the session"
+        read = int(run.get("of") or 0) - s["waiting"] if run.get("chose") else 0
+        out.append(f"  {s['waiting']:,} records wait for the model" + (f" ({chose}; {read:,} read)" if chose else "")
+                   + f": {doing}. `thimble label {lab['name']} --wait` waits for them, then prints the counts")
     if run.get("state") == "cancelled":
         out.append(f"  the analyst chose not to run it over its {run.get('units') or 0:,} records")
     rest = int(lab.get("matched") or 0) - s["records"]
@@ -363,9 +371,9 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             choices = "run them or cancel" if ask["rest"] else f"run all, run on a random sample of {EST.SAMPLE}, or cancel"
             print(f"  Not started: the model would read {'the other ' if ask['rest'] else ''}{ask['units']:,} records in "
                   f"{EST.calls_line(ask['calls'])}, so the analyst is asked first, in the terminal: {choices}. "
-                  f"Their choice reaches you with their next message, and `thimble label {name}` shows it (then the "
-                  f"counts, once the reads end). Answer now from what you have, and say that the label waits for their "
-                  f"choice. The choices leave the screen once they answer, so after that do not point them to a key: "
+                  f"`thimble label {name} --wait` waits for their choice, then for the model's reads, and prints the "
+                  f"label's counts; run it before you answer from this label. Counts from a trial are not the "
+                  f"label's. The choices leave the screen once they answer, so after that do not point them to a key: "
                   f"to read more records, run this command again, and the terminal asks again. A trial (--limit N) "
                   f"never asks.")
         elif s["waiting"]:
@@ -382,11 +390,15 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             run = lab.get("run") or {}
             if not s["waiting"] or run.get("state") == "cancelled":
                 break
-            if run.get("state") == "ask":
-                # nothing runs before the analyst chooses, so waiting here would only hold up the reply
-                print(f"{name}: waiting for the analyst's choice in the bar; nothing runs until then. "
-                      f"{s['waiting']:,} records wait. Their choice reaches you with their next message.")
+            if run.get("state") == "ask" and time.time() - t0 > a.wait:
+                # the ask waits in the bar while this waits; once the analyst chooses, the reads start and this waits on
+                print(f"{name}: still waiting for the analyst's choice in the bar after {a.wait:.0f}s; nothing runs "
+                      f"until then. {s['waiting']:,} records wait, and the counts so far are not the label's. Their "
+                      f"choice reaches you with their next message.")
                 return 0
+            if run.get("state") == "ask":
+                time.sleep(1.0)
+                continue
             if time.time() - t0 > a.wait:
                 print(f"{name}: still {s['waiting']:,} records waiting after {a.wait:.0f}s; the calls go on beside the session")
                 break

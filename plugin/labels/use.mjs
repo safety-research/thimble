@@ -116,9 +116,11 @@ const n = x => Number(x || 0).toLocaleString('en-US')
 
 export function answerNote(a, choice, got) {
   if (choice === 'cancel') return `The analyst chose not to run the label ${a.name}: the model reads none of its ${n(a.units)} records.`
-  if (choice === 'all') return `The analyst chose to run the label ${a.name} on ${a.rest ? 'the other' : 'all'} ${n(a.units)} records. The model reads them beside the session; \`thimble label ${a.name}\` shows the counts.`
+  // the reads run now: Claude waits for their counts, and counts it had before the choice (a trial) are not the label's
+  const wait = `\`thimble label ${a.name} --wait\` waits for them and prints the label's counts; counts from before this choice (a trial) are not the label's.`
+  if (choice === 'all') return `The analyst chose to run the label ${a.name} on ${a.rest ? 'the other' : 'all'} ${n(a.units)} records. The model is reading them beside the session now; ${wait}`
   // a sample: the ask has left the screen, so Claude must not point at a key; the rest needs a new ask
   const reads = Number((got && got.reads) || a.sample)
   const other = Math.max(0, (Number(got && got.of) || a.units) - reads)
-  return `The analyst chose a random sample of ${n(reads)} of the label ${a.name}'s ${n(a.units)} records, not all of them. The model reads the sample beside the session; \`thimble label ${a.name}\` shows the counts. The choices have left the screen, and the other ${n(other)} records stay without a value. To label them, run the same \`thimble label\` command again without --limit: the terminal then asks the analyst again, to run them or cancel.`
+  return `The analyst chose a random sample of ${n(reads)} of the label ${a.name}'s ${n(a.units)} records, not all of them. The model is reading the sample beside the session now; ${wait} The choices have left the screen, and the other ${n(other)} records stay without a value. To label them, run the same \`thimble label\` command again without --limit: the terminal then asks the analyst again, to run them or cancel.`
 }

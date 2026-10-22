@@ -33,6 +33,24 @@ def test_records_stay_in_the_folder_the_session_started_in(tmp_path: Path, monke
     assert STORE.find_root(data / "src") == (data / "src").resolve()
 
 
+def test_a_command_in_thimbles_temp_folder_keeps_the_start_folders_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # `cd $TMPDIR && thimble label …` over a file Claude derived there: the start folder is the root, not the temp folder
+    data, temp = tmp_path / "data", tmp_path / "tmp" / "thimble"
+    data.mkdir()
+    temp.mkdir(parents=True)
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("TMPDIR", str(temp))
+    monkeypatch.setenv("THIMBLE_START", str(data))
+    assert STORE.in_temp(temp / "rows.jsonl") and not STORE.in_temp(data)
+    assert STORE.find_root(temp) == data.resolve()
+    # thimble/ in the person's TMPDIR counts too; outside a session the temp folder is a folder like any other
+    monkeypatch.setenv("TMPDIR", str(temp.parent))
+    assert STORE.find_root(temp) == data.resolve()
+    monkeypatch.delenv("THIMBLE_START")
+    assert STORE.find_root(temp) == temp.resolve()
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
 def test_a_folder_thimble_may_not_write_in_is_found_by_the_records_kept_for_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     data = tmp_path / "data"
