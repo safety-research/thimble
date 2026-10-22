@@ -135,7 +135,8 @@ test('a card call keeps the card and answers what it read and what it draws; its
   // once its Client says it is drawn, the card is on screen and lists the keys that reach it
   const id = JSON.parse(meta![1]).id
   await shown($, callRow('toolu_made_up_1', input))
-  expect(textOf(await $.ui.render(callRow('toolu_made_up_1', input)))).toContain('keys s at an empty prompt')
+  // the frame holds the title and the card, with no line of thimble's own under or over it
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_1', input)))).not.toContain('at an empty prompt')
 
   // a new version takes the card's place, under the first call; the newer call points to it
   const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1b', ...input, id } as never)) as Any
@@ -143,7 +144,8 @@ test('a card call keeps the card and answers what it read and what it draws; its
   const second = await $.ui.render(callRow('toolu_made_up_1b', input))
   expect(elements(second).some(n => n.type === 'Client')).toBe(false)
   const first = await $.ui.render(callRow('toolu_made_up_1', input))
-  expect(textOf(first)).toContain('version 2')
+  expect(elements(first).some(n => n.type === 'Client')).toBe(true)
+  expect(textOf(first)).not.toContain('version 2')
   const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
   expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above')
   expect(textOf(await resultOf('toolu_made_up_1'))).toBe('2 rows from runs.json')
@@ -221,14 +223,12 @@ test('a drawing that fails at a narrow width holds only there: the card keeps it
   await drawn(28)
   const narrow = textOf(await $.ui.render(at(28)))
   expect(narrow).toContain('at 20 columns the view failed (line 4: Invalid count value: -1)')
-  expect(narrow).toContain('keys s at an empty prompt')
   // the pane closes: the card draws again at its width, with no failure
   const drawsBefore = w.asked.filter(x => x === 'draw').length
   await drawn(100)
   expect(w.asked.filter(x => x === 'draw').length).toBe(drawsBefore + 1)
   const wide = textOf(await $.ui.render(at(100)))
   expect(wide).not.toContain('failed')
-  expect(wide).toContain('keys s at an empty prompt')
 })
 
 test("main reads a card's rows in the temp folder without a dialog; a person's rule still decides; only v's fork writes there freely", async ($, on) => {

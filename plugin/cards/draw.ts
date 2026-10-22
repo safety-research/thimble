@@ -154,7 +154,7 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
 }
 
 /** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now. */
-export async function frame($: Engine, e: Any, meta: CardMeta, note: string | null): Promise<Any> {
+export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   const E = $.ui.resolve(e) as Any
   const width = cardWidth(e.viewport?.columns)
   const t = await treeOf($, meta.id)
@@ -164,11 +164,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
   const fault = f && current && f.seq === current.seq ? f.reason : null
   // a drawing that failed at another width: the card draws again at this one
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
-  // the title on a line of its own; under it, dim, where the card comes from when that is not plain from its place
-  const from = [note, meta.version > 1 ? `version ${meta.version}` : ''].filter(Boolean).join(' · ')
+  // the title on a line of its own, then the card
   const rows: Any[] = [
     E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
-    ...(from ? [E.Text({ key: 'about', dimColor: true, wrap: 'truncate-end', children: from })] : []),
     ...(fault ? [] : [E.Client({
       key: `card-${meta.id}`, module: './client.tsx', width: current?.width ?? width,
       props: { tree: current?.tree ?? null, width: current?.width ?? width, need: current?.width === width && !failedElsewhere ? '' : `${meta.gen}:${width}` },
@@ -176,9 +174,6 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  const mine: string[] = []
-  for (const k of meta.keys) if ((await keyOwner($, k))?.id === meta.id) mine.push(k)
-  if (mine.length) rows.push(E.Text({ key: 'keys', dimColor: true, wrap: 'truncate-end', children: `keys ${mine.join(' ')} at an empty prompt` }))
   return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'claude' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: width + 4, children: rows })
 }
 
@@ -212,7 +207,7 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
   }
   if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
   const out: Any[] = []
-  for (const meta of metas) out.push(await frame($, e, meta, 'drawn after you pressed v'))
+  for (const meta of metas) out.push(await frame($, e, meta))
   return out
 }
 

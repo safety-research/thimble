@@ -86,7 +86,7 @@ export const registerCards: Register = on => {
     if (meta.anchorRow || meta.toolUseId !== e.props.tool_use_id) return own
     const E = $.ui.resolve(e) as Any
     noteShown($, [meta.id], e.props.onScreen)
-    return E.Box({ flexDirection: 'column', children: [own, await frame($, e, meta, null)] })
+    return E.Box({ flexDirection: 'column', children: [own, await frame($, e, meta)] })
   }).catch(($, e, next) => next(e))
 
   // the call's result: the person reads the card, not the text copy Claude got; one line in its place: what the card
