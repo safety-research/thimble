@@ -318,6 +318,9 @@ def test_a_glob_and_a_path_by_its_end_are_looked_up_folder_by_folder() -> None:
         "runs/a/meta.json", "runs/b/meta.json", "runs/c.json"}, set())
     # a folder is named as a folder, never as each of its files
     assert SH.named("ls shots/d1 shots/", K, "/data", "/data") == (set(), {"shots/d1", "shots"})
+    # a bare shell word names the folder or the file it is; in code it is a name of the code's own
+    assert SH.named("ls -la shots README", K, "/data", "/data", {}) == (set(), {"shots"})
+    assert SH.named("shots = []", K, "/data", "/data") == (set(), set())
     # only a leading "./" goes from a word: `.9*` in code names no file that starts with 9
     assert SH.named("r = .9* x", ["9a.png", "b/9c.png", ".9d"], "/data") == ({".9d"}, set())
 

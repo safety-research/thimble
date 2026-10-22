@@ -594,7 +594,15 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
             rel = os.path.normpath(os.path.join(here, t))
         if "*" in t or "?" in t:
             files |= K.glob(rel) or K.glob("**/" + re.sub(r"^(?:\./)+", "", t))
-        elif "." in t or "/" in t:
+        elif "." not in t and "/" not in t:
+            # a bare word: a shell word names the file or the folder it is (`ls shots`, `cat Makefile`); in code it is
+            # mostly a name of the code's own (`runs = []`), so code names a file only by a path or a name with a dot
+            if values is not None and not t.startswith("-"):
+                if rel in K.set:
+                    files.add(rel)
+                elif K.has_folder(rel):
+                    folders.add(rel)
+        else:
             if rel in K.set:
                 files.add(rel)
                 continue
