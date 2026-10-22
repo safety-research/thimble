@@ -530,7 +530,7 @@ export function cardOf(s, W, { whole = false } = {}) {
   const words = one(s.shown || s.label)
   const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - 7)), tone: 'cite', bold: true }, ...right]]
   const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
-  if (s.status === 'corrected' && s.was) dim(`was ${one(s.was)}`)
+  if (s.status === 'corrected' && s.was) dim(`corrected; was ${one(s.was)}`)
   else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
   if (s.status === 'checking' || s.status === 'gone' || !s.evidence) return { rows, cut: false }
   if (whole) return { rows: [...rows, ...wholeRows(s.evidence, W)], cut: true }

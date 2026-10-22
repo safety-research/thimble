@@ -53,8 +53,9 @@ Cited lines a few lines off from the ones that hold the words, or a few lines sh
 correction is the words that replace the mark: words of the sentence the checker repeated around them go.
 
 A mark the checker verified whose evidence does not hold here fails as not confirmed, with the reason. A mark the
-checker found wrong stays wrong, with its reason: the checker finds a mark wrong also for the words around it (a wrong
-condition), which evidence that prints the marked words does not answer. A correction whose evidence does not show its
+checker found wrong stays failed, with its reason: the checker finds a mark wrong also for the words around it (a wrong
+condition), which evidence that prints the marked words does not answer; one it found wrong and gave the right words for
+is a correction. A correction whose evidence does not show its
 new words is not confirmed: its evidence confirms neither the new words nor the marked ones. A mark the checker could
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, stays unchecked. A checker's note on the rest of the sentence stays beside the mark.
@@ -1282,6 +1283,11 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if new and unmark(new) != unmark(words) and one_quote(unmark(new)) == one_quote(unmark(words)):
         # a change of quote marks alone is no correction: the words hold as written
         status, new = "verified", ""
+    if status == "wrong" and corr:
+        # a claim found wrong whose right words the check gave is a correction: the person sees the right words
+        found = own_words(norm_ws(corr.get("words") or ""), mark)
+        if found and one_quote(unmark(found)) != one_quote(unmark(words)):
+            status, new = "corrected", found
     if status == "corrected" and (not new or unmark(new) == unmark(words)):
         # a correction that leaves the words as they were found an error around them (a wrong place, a wrong
         # condition), which the words cannot show: the mark is wrong, with the checker's reason
@@ -1299,7 +1305,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return res
 
     if status == "wrong":
-        return judged("check", reason or "the check found this claim wrong")
+        return judged("check", reason or "the data do not show this claim")
     if status == "unconfirmed":
         return judged("evidence", reason or "the check could not show this claim from the data")
     if status not in ("verified", "corrected"):
@@ -1312,7 +1318,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
         # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
         # printed False, is no sign that they hold)
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check found these words wrong, but {problems[0]}.")
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check gave other words, but {problems[0]}.")
     elif problems:
         res.update(status="failed", failedBy="evidence", reason=f"Not confirmed: {problems[0]}. The claim may still be true.")
     elif new:

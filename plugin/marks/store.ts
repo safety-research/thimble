@@ -24,9 +24,10 @@ export type Place = { file: string; line: string; lines: { n: number; text: stri
 export type Evidence =
   | { kind: 'computed'; code: string; output: string; highlight: [number, number][]; by: 'checker' | 'main' }
   | ({ kind: 'quote' | 'code'; more?: Place[] } & Place)
-/** One mark: its number in the reply, its words, the row and place it stands at, its sentence, and its check. `failedBy`
- *  says who failed it: the checker (`check`: the claim is wrong), or thimble, when the checker's evidence did not hold
- *  (`evidence`: the claim is not confirmed). `note` is what the check found wrong in the sentence outside the mark.
+/** One mark: its number in the reply, its words, the row and place it stands at, its sentence, and its check. The
+ *  person sees two outcomes: verified (`verified`, or `corrected`: the right words in place) and `failed`. `failedBy`
+ *  says who failed it, for main alone: the checker (`check`: the claim is false and the check found no right words),
+ *  or thimble, when the checker's evidence did not hold (`evidence`: the claim is not confirmed). `note` is what the check found wrong in the sentence outside the mark.
  *  `repair`: the person pressed x on it, and this check is the one x started (checker.ts startRepair). */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
@@ -35,9 +36,10 @@ export type MarkItem = {
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[] }
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */
 export type RowMarks = { row: string; last: boolean; items: MarkItem[] } & Counts
-/** A reply's marks by what the person sees: `checking` the marks still checked, `wrong` failed by the check,
- *  `unconfirmed` failed because the evidence did not hold. */
-export type Counts = { total: number; checking: number; corrected: number; wrong: number; unconfirmed: number; unchecked: number }
+/** A reply's marks by what the person sees: `checking` the marks still checked, `verified` those the check confirmed
+ *  or corrected in place (`corrected` counts the corrections among them), `failed` those it could not confirm, by
+ *  either cause (a failed mark looks one way, whoever failed it). */
+export type Counts = { total: number; checking: number; verified: number; corrected: number; failed: number; unchecked: number }
 
 const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
@@ -94,9 +96,9 @@ export function counts(r: Reply): Counts {
   return {
     total: r.items.length,
     checking: n(m => m.status === 'checking'),
+    verified: n(m => m.status === 'verified' || m.status === 'corrected'),
     corrected: n(m => m.status === 'corrected'),
-    wrong: n(m => m.status === 'failed' && m.failedBy !== 'evidence'),
-    unconfirmed: n(m => m.status === 'failed' && m.failedBy === 'evidence'),
+    failed: n(m => m.status === 'failed'),
     unchecked: n(m => m.status === 'unchecked'),
   }
 }

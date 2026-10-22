@@ -116,7 +116,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(JSON.parse(seen.stdin[0]!).calls[0]).toEqual({ command: "python3 - <<'PY'\nprint('12 of 40')\nPY", output: '12 of 40', by: 'checker' })
   const settled = await drawn($)
   expect(settled).toContain('merged 12 of 40.')
-  expect(settled).toContain('"ship it" ×')
+  expect(settled).toContain('"ship it" ?')
   // once settled no footer counts the marks: each shows its own status where it stands
   expect(settled).not.toContain('citation wrong')
   expect(settled).not.toContain('1 corrected')
@@ -226,22 +226,23 @@ test('a resumed session draws the marks as their check left them; a check the se
   await restoreMarks(resumed)
   const first = await rowMarks(resumed, 'row-1')
   expect(first!.items.map(m => [m.status, m.shown])).toEqual([['verified', '40'], ['corrected', '12 of 40'], ['failed', '"ship it"']])
-  expect(first!.wrong).toBe(1)
+  expect([first!.verified, first!.corrected, first!.failed]).toEqual([2, 1, 1])
   const second = await rowMarks(resumed, 'row-2')
   expect(second!.items[0]!.status).toBe('unchecked')
   expect(second!.checking).toBe(0)
 })
 
-test('a corrected citation draws as a settled one (purple, underlined); a wrong one red with ×; one not confirmed with ?; each underlined', () => {
+test('a corrected citation draws as a settled one (purple, underlined); a failed one in the warning color with ?, whatever failed it; each underlined', () => {
   const text = 'Merged [15 of 40](#), opened [7](#), closed [3](#).'
   const marks = marksIn(text)
-  const looks = [{ n: 1, status: 'corrected', shown: '12 of 40' }, { n: 2, status: 'failed' }, { n: 3, status: 'unconfirmed' }] as Any
+  const looks = [{ n: 1, status: 'corrected', shown: '12 of 40' }, { n: 2, status: 'failed' }, { n: 3, status: 'failed' }] as Any
   const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
   const look = (words: string) => els.find(n => n.type === 'Text' && n.props.children === words)?.props
   expect(look('12 of 40')).toMatchObject({ color: 'merged', underline: true })
-  expect(look('7')).toMatchObject({ color: 'error', underline: true })
-  expect(look(' ×')).toMatchObject({ color: 'error' })
+  expect(look('7')).toMatchObject({ color: 'warning', underline: true })
+  expect(els.some(n => n.type === 'Text' && /×/.test(String(n.props.children)))).toBe(false)
   expect(look('3')).toMatchObject({ color: 'warning', underline: true })
+  expect(els.filter(n => n.type === 'Text' && n.props.children === ' ?').length).toBe(2)
   expect(look(' ?')?.underline).toBeUndefined()
   expect(look(' ?')).toMatchObject({ color: 'warning' })
   // without a gutter (a reply inside the tray's frame) no margin cell stands before its rows: they start at the left

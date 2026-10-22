@@ -146,7 +146,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   let band = textOf(drawnBand)
   // the header's status, what it was under it (no reason), the code line that printed the value, its output line
   expect(band).toContain('✓ verified · cite')
-  expect(band).toContain('was 12 of 40')
+  expect(band).toContain('corrected; was 12 of 40')
   expect(band).not.toContain('The output says 11')
   expect(band).toContain('print(f"failed: {bad}")│failed: 11')
   // the two output lines the one line leaves out, counted at the end of the ruled block, dim
@@ -179,19 +179,21 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('failed: 11')
 })
 
-test('a wrong citation: × wrong in the header, why in one dim sentence under it, x repair, then its evidence; x starts a check of it again in the background, no turn of main', async ($, on) => {
+test('a citation the check found false: ? failed in the header, as any failed one, why in one dim sentence under it, x repair, then its evidence; x starts a check of it again in the background, no turn of main', async ($, on) => {
   const { submitted, clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed, but 3 were retried. The rest passed.' }, 's-tray-5')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('× wrong · cite')
-  expect(drawn.find(n => n.type === 'Text' && textOf(n) === '× wrong')?.props?.color).toBe('error')
+  expect(band).toContain('? failed · cite')
+  expect(band).not.toContain('wrong')
+  expect(drawn.find(n => n.type === 'Text' && textOf(n) === '? failed')?.props?.color).toBe('warning')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'Line 4 counts 12 failed, but 3 were retried.')?.props).toMatchObject({ dimColor: true })
   expect(band).not.toContain('The rest passed')
   expect(band).toContain('failed: 12')
-  // the citation stays underlined in the reply, red, with × after it
+  // the citation stays underlined in the reply, in the warning color, with ? after it
   const reply = all(await $.ui.render(answer('row-t1', TEXT)))
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'error', underline: true })
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
   // x repair: in the bar and in the card
   expect(band).toContain('x repair')
   expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'repair this citation')).toBe(true)
@@ -236,7 +238,7 @@ test('x and then a letter in the word window types the word and starts no repair
   expect(((await $.prompt.edit(key('y'))) as Any).text).toBe('xy')
   await clock.advance(2000)
   expect(spawns.length).toBe(0)
-  expect(textOf(await $.ui.render(above()))).toContain('× wrong')
+  expect(textOf(await $.ui.render(above()))).toContain('? failed')
 })
 
 test('a citation not confirmed: ? in the warning color, underlined; a click on x repair in its card checks it again at once', async ($, on) => {
@@ -245,7 +247,7 @@ test('a citation not confirmed: ? in the warning color, underlined; a click on x
   expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
   expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(above()))).toContain('? not confirmed · cite')
+  expect(textOf(await $.ui.render(above()))).toContain('? failed · cite')
   const btn = all(await $.ui.render(above())).find(n => n.type === 'Button' && n.props?.label === 'repair this citation')
   const ui = await $.ui.mount(above())
   await ui.press({ key: btn.props.key })
