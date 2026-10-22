@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, pageOf, push, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  open, pageOf, printLine, push, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
@@ -114,4 +114,17 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.ok(cut.text.length <= 40 && cut.text.startsWith('…') && cut.text.endsWith('…'))
   assert.equal(cut.text.slice(cut.spans[0][0], cut.spans[0][1]), 'VALUE')
   assert.deepEqual(lineWindow({ text: 'short', spans: [] }, 40), { text: 'short', spans: [] })
+})
+
+test('the code line that printed the cited output line: its own words stand in that line, else the last print', () => {
+  const code = 'day, n, names = peak()\nprint(f"peak: {day}, with {n:,} saves under {names} names")\nprint(f"total: {total:,}")'
+  assert.equal(printLine(code, 'peak: June 18, with 6,543 saves under 906 names'), 'print(f"peak: {day}, with {n:,} saves under {names} names")')
+  assert.equal(printLine('  print(before, "before Jun 23")\n  print(after, "after")', '444 before Jun 23'), 'print(before, "before Jun 23")')
+  // the most words on a tie of fit, the later line on an even tie
+  assert.equal(printLine('print("a:", x)\nprint("a: %d of %d" % (x, y))', 'a: 3 of 4'), 'print("a: %d of %d" % (x, y))')
+  // none fits: the last print; no print: the last line with code
+  assert.equal(printLine('print(count())\nprint(other())\n# done', 'failed: 11'), 'print(other())')
+  assert.equal(printLine('x = 1\nx + 1\n', '2'), 'x + 1')
+  assert.equal(printLine('', 'x'), '')
+  assert.equal(printLine('echo "rows: $n"\necho "cols: ${m}"', 'rows: 12'), 'echo "rows: $n"')
 })
