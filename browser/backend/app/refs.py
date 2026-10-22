@@ -58,6 +58,7 @@ before storage.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -1026,5 +1027,13 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             meta["span"] = {"out": p["out"], "line": n, "text": "\n".join(lines[n - 1 : last])}
             if m_end is not None:
                 meta["span"]["end_line"] = last
+            # printed output that is a table (a printed DataFrame): its header and the rows around the cited one, which
+            # the page draws as a small table (the citation check's own reading, plugin/engine/kernel/evidence.py)
+            from . import marks  # noqa: PLC0415 — marks loads the validator by its path
+
+            at = sum(len(x) + 1 for x in lines[: n - 1])
+            with contextlib.suppress(Exception):
+                if table := marks.evidence().text_table("\n".join(lines), [[at, at]]):
+                    meta["text_table"] = table
     return {"ref": ref, "kind": "cell", "cell_id": p["cell_id"], "notebook": nb_id, "record": cell,
             "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}

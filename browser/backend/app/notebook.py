@@ -3652,6 +3652,42 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
     return True
 
 
+TAKEAWAY_MARKS = "takeaway_marks"  # {text, items}: the citation check of the marks of the takeaway `text` (marks.py)
+
+
+def takeaways_to_check(workspace: str) -> list[tuple[str, str, str]]:
+    """(card id, title, takeaway) for each card whose takeaway holds marks, `[words](#)`, that no check has started on
+    for that text (marks.py checks them with main's next reply)."""
+    ws = _ws(workspace)
+    out: list[tuple[str, str, str]] = []
+    for _, nb in _stored(ws):
+        for cell in nb.get("cells") or []:
+            text = str(cell.get("takeaway") or "")
+            kept = cell.get(TAKEAWAY_MARKS) if isinstance(cell.get(TAKEAWAY_MARKS), dict) else {}
+            if "](#)" in text and kept.get("text") != text and cell.get("id"):
+                out.append((str(cell["id"]), str(cell.get("title") or ""), text))
+    return out
+
+
+def set_takeaway_marks(workspace: str, cell_id: str, text: str, change: Any) -> bool:
+    """The check of a takeaway's marks changed: `change(items)` gives the items for the takeaway `text` (its marks, in
+    their order, each with what the check found); nothing changes when the card's takeaway is no longer that text. The
+    card goes to the page as any change of it does. False when nothing changed."""
+    ws = _ws(workspace)
+    hit = _locate(ws, cell_id)
+    if hit is None:
+        return False
+    nb, cell = hit
+    if str(cell.get("takeaway") or "") != text:
+        return False
+    kept = cell.get(TAKEAWAY_MARKS) if isinstance(cell.get(TAKEAWAY_MARKS), dict) else {}
+    items = change(list(kept.get("items") or []) if kept.get("text") == text else [])
+    cell[TAKEAWAY_MARKS] = {"text": text, "items": items}
+    write_notebook(ws, nb)
+    _emit(workspace, cell)
+    return True
+
+
 async def run_code(
     workspace: str,
     code: str,

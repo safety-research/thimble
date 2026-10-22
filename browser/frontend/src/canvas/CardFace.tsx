@@ -31,6 +31,7 @@ import { conceptName, labelsShown, staleLabels, type ConceptDetailState } from '
 import { CanvasContext } from './context'
 import { editedLabels, labelDraft, setLabelDraft, useLabelDrafts } from './labelDrafts'
 import { kindOf } from './layout'
+import { takeawayChecks } from '../marks/marks'
 import { RefEditor } from './RefEditor'
 
 export type CardField = 'title' | 'takeaway'
@@ -143,7 +144,7 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} />
+            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} />
           </div>
           {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>

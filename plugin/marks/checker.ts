@@ -4,7 +4,9 @@
 // wrong or unconfirmed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
 // without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence names one
 // of the session's real Bash calls (the checker's or main's) by a part of its output, and that call's real output must
-// show the words. Its result is what the person sees.
+// show the words; card evidence names a place of one of the session's cards (cards/store.ts), whose value must show
+// them. Before the forks start, the cards' places and values are written to a file the checker greps (cardsIndex).
+// Its result is what the person sees.
 //
 //   noteRow($, row, text)     a text row of main's reply, as session.append stored it
 //   startCheck($, e)          at the end of main's turn: the reply's marks (store.ts, all `checking`), the forks
@@ -27,6 +29,7 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
+import { cardsDir } from '../cards/store'
 import { failNotice, noticeLine } from '../bar/notice'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
@@ -99,10 +102,36 @@ function itemsOf(reply: { row: string; text: string }[]): MarkItem[] {
   })))
 }
 
-/** The checker's prompt: checker.md with the marks (`n. [words] in: <sentence>`), the shell's folder and the folder
- *  the session started in filled in. */
-export function checkerPrompt(template: string, items: MarkItem[], cwd: string, root: string): string {
-  return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd, ROOT: root })
+/** The checker's prompt: checker.md with the marks (`n. [words] in: <sentence>`), the shell's folder, the folder the
+ *  session started in and the file of the cards' values (cardsIndex) filled in. */
+export function checkerPrompt(template: string, items: MarkItem[], cwd: string, root: string, cards = ''): string {
+  return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd, ROOT: root, CARDS: cards })
+}
+
+/** The command that validates a check's answer (engine/validate.py), which also writes the cards' index. */
+function validateArgv($: Engine): string[] {
+  return [`${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`, 'dev', 'validate']
+}
+
+/** The cards' index the last check wrote: a repair (x) reads it, so the key's hook makes no more calls before its
+ *  spawn ('' after a reload of the plugin: the repair's check then finds no card). */
+let lastIndex = ''
+
+/** The file the checker greps for a value a card shows: each place of the session's cards and its value
+ *  (engine/kernel/evidence.py card_index), written in the temp folder before the check starts. An empty file when it
+ *  cannot be written: the check then finds no card and uses its other evidence. */
+export async function cardsIndex($: Engine): Promise<string> {
+  const path = `${await tempDir($)}/cards-index.tsv`
+  lastIndex = path
+  try {
+    const dir = await cardsDir($)
+    const cards = await $.fs.list(dir).catch(() => [])
+    if (!cards.length) await $.fs.write(path, '')
+    else await $.process.run(validateArgv($), { cwd: await startDir($), timeoutMs: 30000, stdin: JSON.stringify({ index: path, cards_dir: dir }) })
+  } catch {
+    // the check runs without the cards
+  }
+  return path
 }
 
 /** The reply with its items changed, and the time it settled once no mark is checked. */
@@ -237,9 +266,10 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     return
   }
   const started: string[] = []
+  const cards = await cardsIndex($)
   for (const share of splitMarks(items)) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
-    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd, root), description: 'checking citations' })
+    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd, root, cards), description: 'checking citations' })
     if (!fork.agentId) {
       await giveUp($, c, 'the check could not start', now)
       failNotice($, `The check of the citations could not start (${String(fork.deny || 'no reason given').slice(0, 80)}), so they are not checked.`)
@@ -297,7 +327,7 @@ export async function repairOf($: Engine, row: string, n: number): Promise<Repai
   }
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
-  return { key, turnId: r.turnId, n, cwd, root, prompt: `${checkerPrompt(template, [m], cwd, root)}\n\n${repairRequest(m)}` }
+  return { key, turnId: r.turnId, n, cwd, root, prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex)}\n\n${repairRequest(m)}` }
 }
 
 /** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
@@ -357,9 +387,9 @@ function giveUpLine(reason: string): string {
 async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
   // main's calls too: the check may cite what main printed (the validator keeps the calls whose output the answer cites)
   const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(), 'main')]
-  const ran = await $.process.run([`${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`, 'dev', 'validate'], {
+  const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
-    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: await tempDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: await tempDir($), cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
   })
   let out: { parsed: boolean; results: Any[] } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }

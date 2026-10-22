@@ -161,7 +161,8 @@ async function detailOf($: Engine, scope: ThreadScope): Promise<string> {
       lines.push(`Its sentence: "${it.sentence.replace(/\s+/g, ' ').trim()}"`)
       lines.push(`thimble's check: ${it.status}${it.reason ? ` (${it.reason})` : ''}${it.status === 'corrected' && it.shown ? `; the analyst reads "${it.shown}"` : ''}.`)
       const ev = it.evidence as Any
-      if (ev?.kind === 'computed') lines.push(`Its evidence, code that was run:\n${cutChars(String(ev.code), 1200)}\nIt printed:\n${cutChars(String(ev.output), 1200)}`)
+      if (ev?.kind === 'card') lines.push(`Its evidence: the card "${ev.title}" (${ev.ref}) shows ${JSON.stringify(String(ev.value ?? ''))}.`)
+      else if (ev?.kind === 'computed') lines.push(`Its evidence, code that was run:\n${cutChars(String(ev.code), 1200)}\nIt printed:\n${cutChars(String(ev.output), 1200)}`)
       else if (ev?.file) lines.push(`Its evidence: ${ev.file}:${ev.line}${(ev.more ?? []).length ? ` and ${(ev.more as Any[]).map(x => `${x.file}:${x.line}`).join(', ')}` : ''}.`)
     }
   } else if (m) {

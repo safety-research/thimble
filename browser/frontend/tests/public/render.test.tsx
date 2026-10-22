@@ -54,7 +54,8 @@ describe('chat rows', () => {
     expect(el.querySelector('.chat-user .refchip')?.classList.contains('chip-tone-evidence')).toBe(true)
     expect(el.querySelector('.chat-text strong')?.textContent).toBe('three')
     expect(el.querySelectorAll('.chat-text li')).toHaveLength(2)
-    const value = el.querySelector('.chat-text .refchip-value')
+    // an old citation of a card's value reads as a verified mark with that place as its evidence
+    const value = el.querySelector('.chat-text .mark[data-ref]')
     expect(value?.textContent).toBe('3')
     expect(value?.getAttribute('data-ref')).toBe('card:abcd1234#agents/total')
     const tool = el.querySelector('.chat-tool.toolcard[data-tool="add_card"]')

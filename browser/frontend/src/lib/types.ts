@@ -212,6 +212,8 @@ export interface Cell {
   takeaway_author?: string
   /** the takeaway was written before the card's last run changed its outputs (backend notebook.TAKEAWAY_STALE) */
   takeaway_stale?: boolean
+  /** the citation check of the takeaway's marks, `[words](#)`, for the takeaway `text` (backend marks.py) */
+  takeaway_marks?: { text?: string; items?: import('../marks/marks').MarkItem[] }
   created_by: string
   created_at_event?: number | null
   created_ts?: string

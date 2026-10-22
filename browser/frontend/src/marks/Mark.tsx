@@ -7,16 +7,25 @@
 //              highlighted, then the code
 //   quote      each cited place: its `path:line` chip (a click opens the file there) over the cited lines, the words
 //   code       highlighted
+//   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
+//              marked, as a card's citation shows it (components/RefChip); a line of its printed output shows as the
+//              computed output does. An evidence that names only the place (an old `[[value|card:…]]` citation) reads
+//              the place when the label opens.
+//
+// Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked.
 //
 // A failed mark's label says why in one line first. Escape, a press outside, or a second click closes it.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Chip } from '../components/Chip'
-import { placePop } from '../components/RefChip'
+import { citedTable, placePop, printedTable, TablePreview, useRefLabel } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
+import { api } from '../lib/api'
 import { glyphOf } from '../lib/fileGlyph'
-import { CITED } from '../lib/tableCell'
+import { parseRef } from '../lib/refs'
+import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
+import { workspaceFromUrl } from '../lib/workspace'
 import { failedWhy, LOOK_WORD, lookOf, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
@@ -29,9 +38,10 @@ const OUTPUT_LINES = 7
 const HOVER_DELAY_MS = 90
 const HIDE_DELAY_MS = 160
 
-export function Mark({ k, children }: { k: number; children: ReactNode }) {
+/** A mark: the k-th of its text's marks (MarkItems), or `item` when the caller has it (an old card citation). */
+export function Mark({ k, item: given, children }: { k: number; item?: MarkItem; children: ReactNode }) {
   const { items, streaming } = useContext(MarkItems)
-  const item = items[k]
+  const item = given ?? items[k]
   const look: MarkLook = streaming ? 'pending' : lookOf(item)
   const [pop, setPop] = useState<{ rect: DOMRect; pinned: boolean } | null>(null)
   const words = useRef<HTMLSpanElement>(null)
@@ -96,7 +106,7 @@ export function Mark({ k, children }: { k: number; children: ReactNode }) {
 
   const corrected = item?.status === 'corrected' && item.shown
   return (
-    <span className={`mark is-${look}${pop ? ' is-open' : ''}`} data-mark-look={look}>
+    <span className={`mark is-${look}${pop ? ' is-open' : ''}`} data-mark-look={look} data-ref={cardRef(item)}>
       {/* a span, not a button, so long words wrap with the line as the text around them does */}
       <span
         ref={words}
@@ -129,6 +139,12 @@ export function Mark({ k, children }: { k: number; children: ReactNode }) {
   )
 }
 
+/** The card place a mark's evidence names, for the mark's `data-ref`: what a card's citation carries. */
+const cardRef = (item: MarkItem | undefined): string | undefined => {
+  const ev = Array.isArray(item?.evidence) ? item?.evidence[0] : item?.evidence
+  return ev?.kind === 'card' ? ev.ref : undefined
+}
+
 /** A mark's words as written, without the markdown's formatting marks. */
 const plain = (s: string) => s.replace(/\*\*|__|`/g, '')
 
@@ -156,6 +172,21 @@ function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: MarkLo
 }
 
 function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
+  if (ev.kind === 'card') return <CardEvidence ev={ev} value={value} />
+  const printed = ev.kind === 'computed' ? printedTable(ev.table, value) : null
+  if (printed)
+    return (
+      <div className="mark-ev">
+        <div className="refchip-pop-head">
+          <Chip kind="ref" tone="evidence" icon="terminal" face="sans" className="refchip-pop-chip">
+            {ev.by === 'main' ? 'code Claude ran' : 'code the check ran'}
+          </Chip>
+          <span className="refchip-pop-value">{value}</span>
+        </div>
+        <TablePreview grid={printed.grid} at={printed.at} />
+        {ev.code ? <pre className="refchip-lines mono mark-ev-code">{ev.code}</pre> : null}
+      </div>
+    )
   if (ev.kind === 'computed')
     return (
       <div className="mark-ev">
@@ -202,6 +233,73 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
         )
       })}
     </>
+  )
+}
+
+type Resolved = { state: 'loading' } | { state: 'gone' } | { state: 'table'; grid: Grid; at: At } | { state: 'lines'; lines: string[]; from: number; to: number }
+
+/** A value a card shows: the card's chip over the table around the cited cell, or the printed lines around the cited
+ * one. Evidence that names only the place is read when the label opens (api.resolveRef), as RefChip reads it. */
+function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
+  const own = printedTable(ev.table, value)
+  const [got, setGot] = useState<Resolved>({ state: 'loading' })
+  const ref = ev.ref ?? `card:${ev.card}`
+  useEffect(() => {
+    if (own || ev.output != null) return
+    const p = parseRef(ref)
+    const ws = workspaceFromUrl() ?? ''
+    let live = true
+    api
+      .resolveRef(ws, ref)
+      .then((r) => {
+        if (!live) return
+        if (p?.kind === 'cell' && p.col != null && p.row != null) {
+          const t = citedTable(r, p.col, p.row)
+          return setGot(t ? { state: 'table', ...t } : { state: 'gone' })
+        }
+        const t = printedTable(r.meta?.text_table, value)
+        if (t) return setGot({ state: 'table', ...t })
+        const span = r.meta?.span as { text?: unknown } | undefined
+        const lines = typeof span?.text === 'string' && p?.kind === 'cell' && p.line != null ? citedLines(r.excerpt ?? '', span.text, p.line) : null
+        setGot(lines ? { state: 'lines', ...lines } : { state: 'gone' })
+      })
+      .catch(() => live && setGot({ state: 'gone' }))
+    return () => {
+      live = false
+    }
+  }, [ref])
+  const card = ev.card ?? (parseRef(ref) as { cellId?: string } | null)?.cellId ?? ''
+  const name = useRefLabel(`card:${card}`)
+  const title = ev.title || name || 'card'
+  const table = own ?? (got.state === 'table' ? got : null)
+  return (
+    <div className="mark-ev">
+      <div className="refchip-pop-head">
+        <Chip kind="ref" tone="evidence" icon="cell" face="sans" className="refchip-pop-chip" onClick={() => teleport(ref)}>
+          {title}
+        </Chip>
+        {!table ? <span className="refchip-pop-value">{value}</span> : null}
+      </div>
+      {table ? (
+        <TablePreview grid={table.grid} at={table.at} />
+      ) : ev.output != null ? (
+        <div className="refchip-lines mono">{outputLines(ev.output, ev.highlight ?? [])}</div>
+      ) : got.state === 'lines' ? (
+        <div className="refchip-lines mono">
+          {got.lines.map((l, i) => (
+            <div key={i} className={i >= got.from && i <= got.to ? `refchip-line ${CITED}` : 'refchip-line'}>
+              {l || ' '}
+            </div>
+          ))}
+        </div>
+      ) : got.state === 'loading' ? (
+        <div className="mark-pop-state">
+          <Spinner size={10} label="reading the card" />
+        </div>
+      ) : (
+        <div className="mark-pop-state">This place is no longer in the card's output.</div>
+      )}
+    </div>
   )
 }
 

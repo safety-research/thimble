@@ -67,7 +67,7 @@ describe('what a comment shows', () => {
     const details = el.querySelector('.wu-cm-details')!
     expect(order(details, more)).toBeTruthy() // Show less stands under the details it folds
     expect([...details.querySelectorAll('li')].map((li) => li.textContent?.trim())).toEqual(['The pandas build fetches two libraries from GitHub 2.', 'Bake them into the image.'])
-    expect([...details.querySelectorAll<HTMLElement>('.refchip')].map((c) => c.dataset.ref)).toEqual(['card:abc123#libs/TOTAL'])
+    expect([...details.querySelectorAll<HTMLElement>('.refchip, .mark[data-ref]')].map((c) => c.dataset.ref)).toEqual(['card:abc123#libs/TOTAL'])
     expect(el.querySelector('.wu-cm-reply')).toBeNull() // Show more opens the details, not the field
     await click(more)
     expect(el.querySelector('.wu-cm-details')).toBeNull()

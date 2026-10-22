@@ -184,6 +184,7 @@ export function saidOf(g) {
 function evidenceWords(ev) {
   if (!ev) return ''
   if (ev.kind === 'computed') return ` Its evidence is the output of code ${ev.by === 'main' ? 'you' : 'the check'} ran.`
+  if (ev.kind === 'card') return ` Its evidence is the card "${ev.title}" (${ev.ref}).`
   return ` Its evidence is ${ev.file}:${ev.line}.`
 }
 
@@ -277,7 +278,11 @@ function inRange(n, line) {
  */
 export function evidenceLine(ev) {
   if (!ev) return null
-  if (ev.kind === 'computed') {
+  if (ev.kind === 'card' && ev.output == null) {
+    const text = String(ev.value ?? '')
+    return { text, spans: text ? [[0, text.length]] : [] }
+  }
+  if (ev.kind === 'computed' || ev.kind === 'card') {
     const out = String(ev.output || '')
     const lines = out.split('\n')
     const spans = Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h) && h[1] > h[0]) : []

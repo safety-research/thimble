@@ -162,3 +162,76 @@ def test_main_still_reads_the_check_s_notes_which_the_analyst_does_not_see():
     told = marks.tell_text([{"n": 1, "words": "41", "status": "verified", "note": "Runs did not only stop after noon."}])
     assert "The analyst does not see these" in told
     assert '- "Runs did not only stop after noon."' in told
+
+
+TABLE = {"text/html": "<table><tr><th>agent</th><th>merged</th><th>total</th></tr>"
+                      "<tr><th>agent-03</th><td>4</td><td>10</td></tr><tr><th>agent-07</th><td>12</td><td>40</td></tr></table>"}
+PRINTED = {"text/plain": "          merged  total\nagent-03       4     10\nagent-07      12     40\n"}
+
+
+def _seed_card(takeaway: str, outputs: list[dict]) -> str:
+    from app import notebook
+
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "Board", role="exploration")
+    cell = notebook.new_cell("code", "run", "Merged pull requests by agent", nb["id"], code="print()")
+    cell.update(status="ok", outputs=outputs, takeaway=takeaway)
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    return cell["id"]
+
+
+def test_a_takeaway_s_marks_are_checked_with_main_s_reply_and_a_card_s_cell_is_their_evidence(_fresh):
+    """The checker reads the cards' index first; a card's cell is evidence the validator reads back. A takeaway's marks
+    are checked with main's next reply, their line naming the card, and what the check found is kept on the card."""
+    from app import notebook
+
+    cid = _seed_card("agent-07 merged [12](#) of [40](#) pull requests.", [TABLE])
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        index = next(w for w in prompt.split("`") if w.endswith("cards-index.tsv"))
+        listed = Path(index).read_text(encoding="utf-8")
+        assert f"card:{cid}#merged/agent-07\t12" in listed and f"card:{cid}#total/agent-07\t40" in listed
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": f"card:{cid}#merged/agent-07"}, "status": "verified",
+                "correction": None, "reason": "the table says 12"},
+               {"mark": 2, "kind": "card", "evidence": {"ref": f"card:{cid}#total/agent-07"}, "status": "verified",
+                "correction": None, "reason": "a place that shows another value"},
+               {"mark": 3, "kind": "card", "evidence": {"ref": f"card:{cid}#total/agent-07"}, "status": "verified",
+                "correction": None, "reason": "the table says 40"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    asyncio.run(marks.start_check(CORPUS, main, turn, ["Merged: [12](#) for agent-07."], "cut", fork=fork))
+    assert f"in the takeaway of card:{cid} (Merged pull requests by agent): agent-07 merged [12] of" in seen[0]
+    (chat,) = marks.stored(CORPUS, turn)["items"]
+    assert chat["status"] == "verified" and chat["evidence"]["kind"] == "card"
+    t = chat["evidence"]["table"]
+    assert t["rows"][t["at"]["r"]]["label"] == "agent-07" and t["cols"][t["at"]["c"]] == "merged"
+    kept = notebook.get_cell(CORPUS, cid)["takeaway_marks"]
+    assert kept["text"] == "agent-07 merged [12](#) of [40](#) pull requests."
+    first, second = kept["items"]
+    assert first["k"] == 0 and first["status"] == "failed" and "shows 40" in first["reason"]
+    assert second["k"] == 1 and second["status"] == "verified" and second["evidence"]["value"] == "40"
+    # a takeaway checked once waits for no other check
+    assert notebook.takeaways_to_check(CORPUS) == []
+
+
+def test_a_printed_table_line_of_a_card_is_evidence_and_reads_as_a_table():
+    cid = _seed_card("", [PRINTED])
+    cards = marks.session_cards(CORPUS)
+    ev = marks.evidence()
+    r = ev.check_mark({"n": 1, "words": "12"}, {"kind": "card", "status": "verified", "evidence": {"ref": f"card:{cid}@out0#L3"}},
+                      [], "/", cards=cards)
+    assert r["status"] == "verified" and r["evidence"]["table"]["cols"] == ["merged", "total"]
+    t = r["evidence"]["table"]
+    assert t["rows"][t["at"]["r"]]["values"][t["at"]["c"]] == "12"
+
+
+def test_a_marked_number_in_a_takeaway_is_left_for_the_check():
+    from app import cite
+
+    res = cite.resolve("abc12345", "agent-07 merged [12](#) pull requests", [TABLE])
+    assert res.annotated == "agent-07 merged [12](#) pull requests" and not res.links

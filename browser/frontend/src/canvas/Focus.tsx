@@ -4,6 +4,7 @@
 // type's page draws more at full size.
 import { useContext, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
+import { takeawayChecks } from '../marks/marks'
 import { Button } from '../components/Button'
 import { ComposerFrame } from '../components/Composer'
 import { CARD_MIME, primaryArtifact } from '../components/Outputs'
@@ -102,7 +103,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
                 {cell.takeaway ? (
                   <div className="bfocus-take">
                     <div className={'chat-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-                      <ChatMarkdown text={cell.takeaway} />
+                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} />
                     </div>
                   </div>
                 ) : null}

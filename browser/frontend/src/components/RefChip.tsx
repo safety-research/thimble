@@ -197,7 +197,7 @@ type CitedLines = { lines: string[]; from: number; to: number }
 
 /** The table a resolved cell citation read its value from (meta.table_html, a chart's rows as a table included), read
  * as a Grid with the cited cell located; null when the reply carries none or the cell is not in it. */
-function citedTable(r: ResolvedRef, col: string, row: string): { grid: Grid; at: At } | null {
+export function citedTable(r: ResolvedRef, col: string, row: string): { grid: Grid; at: At } | null {
   const html = typeof r.meta?.table_html === 'string' ? r.meta.table_html : ''
   if (!html || typeof DOMParser === 'undefined') return null
   const table = new DOMParser().parseFromString(html, 'text/html').querySelector('table')
@@ -398,7 +398,10 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
         return setPop({ state: 'error', rect, message: 'This cell is no longer in the card\'s table' })
       }
       if (parsed.kind === 'cell' && parsed.out != null && parsed.line != null) {
-        // a line of the card's printed output: the lines around it with the value marked, never its line number in words
+        // a line of printed output that is a table (a printed DataFrame): the table around its row, the value's cell
+        // marked; else the lines around it with the value marked, never its line number in words
+        const printed = printedTable(r.meta?.text_table, value)
+        if (printed) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table: printed })
         const span = r.meta?.span as { text?: unknown } | undefined
         const lines = typeof span?.text === 'string' ? citedLines(r.excerpt ?? '', span.text, parsed.line) : null
         if (lines) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', lines })
@@ -531,9 +534,23 @@ export function citedColumns(grid: Grid, at: At): { cols: number[]; index: boole
   return key < 0 ? { cols: [at.c], index: true } : { cols: [key, at.c].sort((a, b) => a - b), index: false }
 }
 
+/** A table the citation check read (marks.ts EvidenceTable: a card's cell, printed output that is a table) as a Grid
+ * and its cited cell; the cell of a row cited by its name alone is the first of its values that shows `value`, else its
+ * first value. Null for anything else. Pure. */
+export function printedTable(t: unknown, value?: string): { grid: Grid; at: At } | null {
+  const x = t as { corner?: unknown; cols?: unknown; rows?: unknown; at?: { r?: unknown; c?: unknown } } | null
+  if (!x || !Array.isArray(x.cols) || !Array.isArray(x.rows) || !x.at || typeof x.at.r !== 'number') return null
+  const rows = (x.rows as { label?: unknown; values?: unknown }[]).map((r) => ({ label: String(r.label ?? ''), values: Array.isArray(r.values) ? r.values.map((v) => String(v ?? '')) : [] }))
+  const r = x.at.r
+  if (!rows[r]) return null
+  let c = typeof x.at.c === 'number' ? x.at.c : -1
+  if (c < 0) c = Math.max(0, value ? rows[r].values.findIndex((v) => !!valueSpan(v, value)) : 0)
+  return { grid: { corner: String(x.corner ?? ''), cols: (x.cols as unknown[]).map(String), rows }, at: { r, c } }
+}
+
 /** A table's cell in a compact table: the header, two rows above and below it, and only the columns it needs to read
  * (citedColumns), the cell marked. It reads as tables read everywhere (outputs.css). */
-function TablePreview({ grid, at }: { grid: Grid; at: At }) {
+export function TablePreview({ grid, at }: { grid: Grid; at: At }) {
   const w = { rows: cellWindow(grid, at, 2, 1).rows, ...citedColumns(grid, at) }
   const first = w.rows[0] ?? 0
   const last = w.rows[w.rows.length - 1] ?? 0

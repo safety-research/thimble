@@ -5,6 +5,10 @@
 //              the check ran
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
 //   code       the substring highlighted
+//   card       the card's title, then the header over the cited row, the cited cell tinted (or the card's printed
+//              lines around the words)
+//
+// Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words.
 //
 // A corrected mark says what it was, its status in the citations' purple (as it draws in the reply); a wrong one says
 // why, in red, and one the check could not confirm says why, in the warning color, with the evidence the check gave
@@ -14,7 +18,8 @@
 import type { EngineInterface } from 'claude-code'
 
 import { plainSentence } from './message.js'
-import { type Evidence, type MarkItem, type Place, rowMarks } from './store'
+import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
+import { tableLines } from './table.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -114,12 +119,28 @@ export function placeRows(els: Any, p: Place, key: string): Any[] {
   ]
 }
 
+/** A cited cell of a table: the header over its row, the cell tinted (marks/table.mjs). */
+export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb'): Any[] {
+  const lines = tableLines(t, Math.max(20, width))
+  if (!lines) return []
+  return [
+    els.Text({ key: `${key}h`, dimColor: true, wrap: 'truncate-end', children: lines[0]!.text }),
+    highlighted(els, lines[1]!.text, lines[1]!.spans as [number, number][], `${key}r`),
+  ]
+}
+
 function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
+  if (ev.kind === 'card') {
+    return [
+      Text({ key: 'ct', wrap: 'wrap', children: [Text({ key: 'k', dimColor: true, children: 'card  ' }), Text({ key: 't', bold: true, children: ev.title || ev.card })] }),
+      Box({ key: 'cv', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output ?? ev.value, ev.highlight ?? [], OUTPUT_ROWS) }),
+    ]
+  }
   if (ev.kind === 'computed') {
     return [
       Text({ key: 'oh', bold: true, children: ev.by === 'main' ? 'Output of the code Claude ran for the reply' : 'Output of the code the check ran' }),
-      Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight, OUTPUT_ROWS) }),
+      Box({ key: 'out', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output, ev.highlight, OUTPUT_ROWS) }),
       Text({ key: 'ch', bold: true, children: ' ' }),
       Text({ key: 'ch2', bold: true, children: 'The code' }),
       Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),

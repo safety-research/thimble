@@ -11,7 +11,7 @@ import { MarkdownCode } from '../components/Code'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
-import { splitValueRef } from '../lib/refs'
+import { parseRef, shownValue, splitValueRef } from '../lib/refs'
 import { Mark, MarkItems } from '../marks/Mark'
 import { MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
@@ -114,10 +114,28 @@ export function rehypeRefChips() {
   }
 }
 
+/** An old citation of a value a card shows, `[[value|card:<id>#<col>/<row>]]` or `[[value|card:<id>@out<i>#L<n>]]`,
+ * as a mark the check verified with that place as its evidence (failed when the link pass found it broken), so it
+ * reads and opens as a mark does; null for any other ref. Pure. */
+export function cardCitationMark(ref: string, value: string, broken?: string | null): MarkItem | null {
+  const p = parseRef(ref)
+  if (p?.kind !== 'cell' || !((p.col != null && p.row != null) || (p.out != null && p.line != null))) return null
+  return {
+    n: 0, piece: 0, k: 0, words: value, sentence: '', shown: value,
+    status: broken != null ? 'failed' : 'verified',
+    ...(broken != null ? { reason: broken || 'The value is no longer at this place of the card.' } : {}),
+    evidence: { kind: 'card', card: p.cellId, ref },
+  }
+}
+
 function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   const ctx = useContext(ChipContext)
   const ref = (props as Record<string, unknown>)['data-ref']
   const value = (props as Record<string, unknown>)['data-value']
+  if (typeof ref === 'string' && typeof value === 'string') {
+    const item = cardCitationMark(ref, value, ctx.broken.has(ref) ? (ctx.why?.get(ref) ?? '') : null)
+    if (item) return <Mark k={-1} item={item}>{shownValue(value)}</Mark>
+  }
   if (typeof ref === 'string') {
     const broken = ctx.broken.has(ref)
     return <RefChip ref={ref} value={typeof value === 'string' ? value : undefined} broken={broken} brokenWhy={broken ? ctx.why?.get(ref) : undefined} anchor={ctx.anchor} workspace={ctx.workspace} cite />
