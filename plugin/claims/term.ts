@@ -29,9 +29,14 @@ type Store = ReturnType<typeof emptyStore> & Record<string, Any>
 type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: string }
 /** What c shows for one answer: lit with a note when a look corrected a claim in it. */
 export type ClaimsPart = { lit: true; note: string; claims: string[] }
-/** The pane's arguments: the claim selected, else the cluster selected (its key: graph.js groupKey), what e or h
- *  opened, the last turn when it was selected; with `source`, where that claim was said. */
-export type ClaimsArgs = { claim?: string | null; group?: string | null; open?: 'ev' | 'hist' | null; at?: number | null; source?: string; row?: string }
+/** The pane's arguments: the claim picked, else the cluster chosen (its key: graph.js groupKey), the last turn when it
+ *  was chosen; with a claim, `open` while its evidence is open, `cite` the citation shown (from 0), `all` the whole
+ *  history, `whole` the citation's code and output whole; `from` the first claim of the list's window, once the person
+ *  paged it; with `source`, where that claim was said. */
+export type ClaimsArgs = {
+  claim?: string | null; group?: string | null; at?: number | null; open?: boolean; cite?: number; all?: boolean; whole?: boolean; from?: number
+  source?: string; row?: string
+}
 
 const CLAIMS = { plugin: 'thimble', key: 'claims' } as const
 const BRIGHT = { plugin: 'thimble', key: 'claimsBright' } as const

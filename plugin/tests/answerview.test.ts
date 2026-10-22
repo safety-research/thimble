@@ -115,7 +115,7 @@ test("a version shown in place of Claude's words: its citations look as the chec
   ] as unknown as MarkItem[]
   const marks = marksIn('On [june 3](#), [12  of 40](#) merged; [ten](#) were open.')
   expect(looksByWords(marks, items, false)).toEqual([
-    { n: 2, status: 'unconfirmed', shown: 'June 3' },
+    { n: 2, status: 'failed', shown: 'June 3' },
     { n: 1, status: 'corrected', shown: '15 of 40' },
     { n: 0, status: 'unchecked' },
   ])

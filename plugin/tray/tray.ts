@@ -13,7 +13,7 @@
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
-//   x repair    on a wrong or not-confirmed citation: a check of that one claim again in the background, which looks in
+//   x repair    on a failed citation: a check of that one claim again in the background, which looks in
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair); the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card or the bar too (this module's ui.press hook, so the fork starts inside a hook)
@@ -505,12 +505,11 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   checking: { word: 'checking', dim: true },
   verified: { word: '✓ verified', color: 'success' },
   corrected: { word: '✓ verified', color: 'success' },
-  failed: { word: '× wrong', color: 'error' },
-  unconfirmed: { word: '? not confirmed', color: 'warning' },
+  failed: { word: '? failed', color: 'warning' },
   unchecked: { word: 'not checked', dim: true },
 }
 
-const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status === 'failed' && m.failedBy === 'evidence' ? 'unconfirmed' : m.status] : null) ?? STATUS.unchecked!
+const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status] : null) ?? STATUS.unchecked!
 
 /** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
  *  for the theme it draws in. */
@@ -530,8 +529,8 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
   ] }) }
 }
 
-/** A citation's card under its header (the status is in the header). A corrected one says what it was; a wrong one,
- *  or one the check could not confirm, why in one sentence; after a repair (x), what it did; all dim, and under it
+/** A citation's card under its header (the status is in the header). A corrected one says what it was; a failed one
+ *  why in one sentence; after a repair (x), what it did; all dim, and under it
  *  `x repair`, a press that checks it again (the ui.press hook, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
  *  block, ended by a dim count of the output lines it leaves out; with c, all the code (as code), then all the output
@@ -543,7 +542,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  const fixed = m.repair ? 'repaired; ' : ''
+  const fixed = m.repair ? 'repaired; ' : 'corrected; '
   const notFixed = m.repair ? 'not repaired: ' : ''
   if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${m.was.replace(/\*\*|`/g, '')}`)
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)

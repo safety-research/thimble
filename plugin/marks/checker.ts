@@ -12,7 +12,7 @@
 //   resumeChecks($)           at session start: the checks a reload of the plugin left running, on the busy line again;
 //                             a check whose fork is gone gives up, and says so
 //   checkerDenial(e)          why the checker may not make a call: it reads files, and runs code only as one Python script
-//   repairOf($, row, n)       x on a wrong or not-confirmed citation (tray): what a check of that one mark again needs
+//   repairOf($, row, n)       x on a failed citation (tray): what a check of that one mark again needs
 //   launchRepair($, r, hold)  that check's fork, with a request to find the right value and correct the cited words;
 //                             its mark is `checking` while it runs, and its end is endCheck's as any check's. Call it
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
@@ -111,8 +111,9 @@ function settle(r: Reply, now: number, items: MarkItem[]): Reply {
 }
 
 /** What main reads with the person's next prompt: each mark the check corrected or flagged, as the person reads it in
- *  the reply (so main uses it from now on and need not say it again), and each note, which the person does not see. A
- *  mark whose evidence did not hold is not shown to be wrong, and main hears it that way. The check's own words (its
+ *  the reply (so main uses it from now on and need not say it again), and each note, which the person does not see.
+ *  The person sees every failed mark alike (not confirmed); main hears whether the check found it false or only could
+ *  not confirm it. The check's own words (its
  *  reason, its note) are quoted, since they may quote the records. */
 const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
 const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
@@ -281,8 +282,8 @@ export function repairRequest(m: MarkItem): string {
   ].join('\n')
 }
 
-/** x on citation `n` of `row`: what a check of it again needs; null when there is nothing to repair (it is not wrong
- *  or not confirmed, or a repair of it runs), or why none can start. */
+/** x on citation `n` of `row`: what a check of it again needs; null when there is nothing to repair (it did not fail,
+ *  or a repair of it runs), or why none can start. */
 export async function repairOf($: Engine, row: string, n: number): Promise<Repair | string | null> {
   const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null

@@ -6,9 +6,8 @@
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
 //   code       the substring highlighted
 //
-// A corrected mark says what it was, its status in the citations' purple (as it draws in the reply); a wrong one says
-// why, in red, and one the check could not confirm says why, in the warning color, with the evidence the check gave
-// when it is real. The cited value has a soft tint behind it (CITE_TINT). What the check found wrong in the rest of the
+// Two outcomes, as in the reply and the tray: verified (a corrected mark is verified too, and says what it was) and
+// failed, which says why in the warning color, with the evidence the check gave when it is real. The cited value has a soft tint behind it (CITE_TINT). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
@@ -24,9 +23,8 @@ const OUTPUT_ROWS = 14 // output lines shown around the first highlight
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
   verified: { word: 'verified', color: 'success' },
-  corrected: { word: 'corrected', color: 'merged' },
-  failed: { word: 'wrong', color: 'error' },
-  unconfirmed: { word: 'not confirmed', color: 'warning' },
+  corrected: { word: 'verified', color: 'success' },
+  failed: { word: 'failed', color: 'warning' },
   unchecked: { word: 'not checked', dim: true },
 }
 
@@ -139,14 +137,13 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })
-  const unconfirmed = m.status === 'failed' && m.failedBy === 'evidence'
-  const st = STATUS[unconfirmed ? 'unconfirmed' : m.status] ?? STATUS.unchecked!
+  const st = STATUS[m.status] ?? STATUS.unchecked!
   const head = Text({ key: 'head', wrap: 'wrap', children: [
     Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
     Text({ key: 'w', children: `  ${m.shown.replace(/\*\*|`/g, '')}` }),
   ] })
   const rows: Any[] = [head]
-  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `was ${m.was.replace(/\*\*|`/g, '')}` }))
+  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `corrected; was ${m.was.replace(/\*\*|`/g, '')}` }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   // the sentence as the person read it, the mark's own words in bold

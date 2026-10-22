@@ -93,7 +93,7 @@ def test_a_correction_is_confirmed_only_when_the_evidence_shows_the_words_it_put
     # a free description of what the output means: its quoted part is in the output, the words it puts in are not
     r = corrected('looking only at the file summary (git diff --stat) and running only the "weekly" tests')
     assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", was) and "was" not in r
-    assert r["reason"].startswith("Not confirmed: the check found these words wrong") and "looking only at" in r["reason"]
+    assert r["reason"].startswith("Not confirmed: the check gave other words") and "looking only at" in r["reason"]
     # words the output holds as words, a changed count, and words only left out are confirmed
     assert corrected('reading the diff --stat and running only the "weekly" tests')["status"] == "corrected"
     assert corrected('running 9 "weekly" tests')["status"] == "corrected"
@@ -213,7 +213,7 @@ def test_a_correction_whose_output_does_not_show_its_new_words_is_not_confirmed_
     item = {**computed(out, status="corrected", correction=corr), "reason": "the earliest report came at message 126"}
     r = check_mark(mark("in the first session, after 250 or more of its messages"), item, [call(CODE, out)], "/data")
     assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", "in the first session, after 250 or more of its messages")
-    assert r["reason"].startswith("Not confirmed: the check found these words wrong") and "125" in r["reason"] and "was" not in r
+    assert r["reason"].startswith("Not confirmed: the check gave other words") and "125" in r["reason"] and "was" not in r
 
 
 def test_an_unconfirmed_claim_is_not_confirmed_never_wrong():
@@ -228,6 +228,14 @@ def test_a_failed_mark_keeps_the_real_evidence_the_check_gave():
     item = {**computed("602 deletions"), "status": "wrong", "reason": "the sentence says June 18, the deletions began on June 20"}
     r = check_mark(mark("602"), item, [call(CODE, "602 deletions, first on 2026-06-20")], "/data")
     assert r["status"] == "failed" and r["failedBy"] == "check" and r["evidence"]["output"].startswith("602")
+
+
+def test_a_wrong_verdict_with_the_right_words_is_a_correction_and_one_without_them_fails():
+    item = {**computed("12 of 40", status="wrong", correction={"words": "12 of 40"}), "reason": "agent-07 merged 12, not 15"}
+    r = check_mark(mark("15 of 40"), item, [call(CODE, "12 of 40")], "/data")
+    assert (r["status"], r["shown"], r["was"]) == ("corrected", "12 of 40", "15 of 40")
+    bare = check_mark(mark("15 of 40"), {**item, "correction": None}, [call(CODE, "12 of 40")], "/data")
+    assert (bare["status"], bare["failedBy"], bare["shown"]) == ("failed", "check", "15 of 40")
 
 
 def test_an_answer_that_quotes_a_fence_still_parses():

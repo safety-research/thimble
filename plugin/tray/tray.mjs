@@ -19,7 +19,7 @@
 //   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
-//   canRepair(item)                        whether x repairs a citation: the check found it wrong, or could not confirm it
+//   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it)
 //   saidOf(gloss)                          what an explainer or an important detail says, in words for an agent
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
@@ -207,7 +207,7 @@ export function scopeText(f, info = {}) {
   return `The analyst asked this with an explainer of your reply open in the tray: the term "${plain(g.term)}"${where}. The explainer said: ${plain(g.body || g.title)}${g.here ? ` ${plain(g.here)}` : ''} "This" or "it" may mean that term.`
 }
 
-/** Whether a citation can be repaired (x): the check found it wrong, or could not confirm it. */
+/** Whether a citation can be repaired (x): it failed (the check could not confirm it). */
 export const canRepair = m => !!m && m.status === 'failed'
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
