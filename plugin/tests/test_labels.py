@@ -84,7 +84,7 @@ def test_a_regex_label_gives_each_record_a_value_and_prints_its_counts(root: Pat
     cov = CV.coverage(st)
     f = next(x for x in cov["files"] if x["path"] == "chat/room.jsonl")
     assert f["status"] == "computed" and f["computed"] == 6 and not f["seen"] and cov["total"]["seen_rows"] == 0
-    assert "Computed over by a rule label, none of it read: 6 of 6 records (100%)." in CV.coverage_text(cov)
+    assert "Computed over by a rule label or Claude's code, none of it read: 6 of 6 records (100%)." in CV.coverage_text(cov)
     # another session did not apply it, so its coverage holds none of it
     assert CV.coverage(Store(root, session="s-other"))["total"]["touched_files"] == 0
     # the pane's page of a value: its records with their words

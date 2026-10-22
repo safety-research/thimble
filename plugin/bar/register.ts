@@ -11,7 +11,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
-import { recount } from './counts'
+import { countsNow, recount } from './counts'
 import { failCleared, fixCommand, noticeLine, promptTyped, refreshFixes } from './fix'
 
 type Engine = EngineInterface
@@ -38,7 +38,12 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void>
   if (kind === 'coverage') void recount($).catch(() => undefined)
   const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind])
   if (placed) await failCleared($, `pane:${kind}`)
-  else noticeLine($, `Claude Code opens the ${kind} pane from a key only in a wider terminal. Click “${kind}” below to open it here.`, `pane:${kind}`)
+  else {
+    // the words the bar shows for it, which a click opens
+    const n = (await countsNow($))?.labels ?? 0
+    const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
+    noticeLine($, `Claude Code opens the ${kind} pane from a key only in a wider terminal. Click “${shown}” in the bar below to open it here.`, `pane:${kind}`)
+  }
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */

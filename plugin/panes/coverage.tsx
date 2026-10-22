@@ -4,7 +4,8 @@
 //
 // Overview first: two labeled bars of the folder's files, those read into Claude's context and those searched or
 // computed over (the bar's count). Then the folders as a tree, each with its files and the same two measures, in its
-// files' own unit (records, rows, lines, pages, whole files), and how many of its files Claude touched (a search
+// files' own unit (records, rows, lines, pages, whole files), as a line above the columns says, and how many of its
+// files Claude touched (a search
 // whose lines are not known touches a file without a share of it): those Claude touched first. A press on a folder opens it
 // one level (and closes it again); its files nothing touched are one line, which opens to their names. A press on a
 // file shows its path (with its first line read), so the terminal can open it, and what was read of it.
@@ -133,23 +134,33 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
   // a row is its name, the touched column and two measures (a bar and its percent): in a narrow pane the bars give
   // way first, so a name keeps 14 cells and the row never wraps
   const barW = Math.max(2, Math.min(BAR, Math.floor((W - 19 - TOUCHED - 14) / 2)))
-  const nameW = (depth: number) => Math.max(6, W - 2 * depth - 19 - TOUCHED - 2 * barW)
+  const nameW = (depth: number) => Math.max(6, W - 2 * depth - 20 - TOUCHED - 2 * barW)
   const measureCells = (m: { read: number; searched: number }, k: string) => [
     Text({ key: `${k}-g1`, children: ' ' }), ...bar(m.read, barW, READ, `${k}-r`), Text({ key: `${k}-rp`, children: pad(percent(m.read), 7, true) }),
     Text({ key: `${k}-g2`, children: '  ' }), ...bar(m.searched, barW, SEARCHED, `${k}-s`), Text({ key: `${k}-sp`, children: pad(percent(m.searched), 7, true) }),
   ]
   const rows: Any[] = []
+  // a row of a folder or a file: its name, then its columns; a name too long for its column stands whole on a line of
+  // its own above them, since names that start alike differ at their end (`…__specified`, `…__underspecified`)
+  const named = (key: string, label: string, lead: string, name: string, depth: number, look: Any, onPress: () => unknown, cells: Any[]) => {
+    const w = nameW(depth)
+    if (len(name) <= w) {
+      rows.push(Button({ key, plain: true, label, onPress, children: [Text({ key: 'n', ...look, children: `${lead}${pad(name, w)} ` }), ...cells] }))
+      return
+    }
+    rows.push(Button({ key: `${key}:name`, plain: true, label, onPress, children: [Text({ key: 'n', ...look, children: `${lead}${cut(name, W - len(lead), true)}` })] }))
+    rows.push(Button({ key, plain: true, label, onPress, children: [Text({ key: 'n', children: ' '.repeat(len(lead) + w + 1) }), ...cells] }))
+  }
   const fileRows = (folder: string, depth: number) => {
     const ind = '  '.repeat(depth)
     const mine = files.filter(f => folderOf(String(f.path)) === folder).sort((a, b) => (b.counted_share || 0) - (a.counted_share || 0) || String(a.path).localeCompare(String(b.path)))
     for (const f of mine) {
       const path = String(f.path)
       const shown = view.file === path
-      rows.push(Button({ key: `file:${path}`, plain: true, label: path, onPress: () => setView({ file: shown ? null : path }), children: [
-        Text({ key: 'n', ...(shown ? { bold: true } : {}), children: `${ind}  ${pad(nameOf(path), nameW(depth))}` }),
+      named(`file:${path}`, path, `${ind}  `, nameOf(path), depth, shown ? { bold: true } : {}, () => setView({ file: shown ? null : path }), [
         Text({ key: 'f', dimColor: true, children: pad(SAID[String(f.status)] || '', TOUCHED, true) }),
         ...measureCells({ read: Number(f.read_share) || 0, searched: Number(f.counted_share) || 0 }, 'm'),
-      ] }))
+      ])
       if (shown) {
         const first = Array.isArray(f.ranges) && f.ranges.length ? Number(f.ranges[0][0]) : 0
         // the whole path where it fits on one line (a terminal opens it), else the folder's own
@@ -177,11 +188,10 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
   const folderRows = (at: Node, depth: number) => {
     for (const k of [...at.kids.values()].sort(byTouch)) {
       const isOpen = open.has(k.path)
-      rows.push(Button({ key: `dir:${k.path}`, plain: true, label: k.path, onPress: flip(k.path), children: [
-        Text({ key: 'n', ...(k.touched ? {} : { dimColor: true }), children: `${'  '.repeat(depth)}${isOpen ? '▾' : '▸'} ${pad(nameOf(k.path), nameW(depth))}` }),
+      named(`dir:${k.path}`, k.path, `${'  '.repeat(depth)}${isOpen ? '▾' : '▸'} `, nameOf(k.path), depth, k.touched ? {} : { dimColor: true }, flip(k.path), [
         Text({ key: 'f', dimColor: true, children: pad(`${short(k.touched)}/${short(k.files)}`, TOUCHED, true) }),
         ...measureCells(measures(k), 'm'),
-      ] }))
+      ])
       if (isOpen) {
         folderRows(k, depth + 1)
         fileRows(k.path, depth + 1)
@@ -197,7 +207,8 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
     overview("read into Claude's context", Number(total.seen_files) || 0, READ, 'o-read'),
     overview('searched or computed over', Number(total.touched_files) || 0, SEARCHED, 'o-searched'),
     Text({ key: 'gap', children: ' ' }),
-    Text({ key: 'head', dimColor: true, children: `  ${pad('folder', nameW(0))}${pad('touched', TOUCHED, true)} ${pad('read', barW + 7)}  ${pad('searched', barW + 7)}` }),
+    Text({ key: 'units', dimColor: true, wrap: 'wrap', children: 'files: touched of all · read, searched: the share of their lines or records' }),
+    Text({ key: 'head', dimColor: true, children: `  ${pad('folder', nameW(0))} ${pad('files', TOUCHED, true)} ${pad('read', barW + 7)}  ${pad('searched', barW + 7)}` }),
     ...rows,
   ] })
 }

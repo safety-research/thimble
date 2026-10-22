@@ -8,9 +8,9 @@ and what was only computed over. A file's status is the strongest of:
                (shellcmd.py), or a search that showed them with their line numbers (Grep)
     model      only a label's model read some of its records (`thimble label --prompt`)
     searched   a search went over it and which lines it showed is not known (grep or rg in the shell)
-    computed   a rule label (regex, code) went over its records, and none of them entered a context
-    named      it was only named, listed or counted (wc, ls, find, git ls-files, grep -c), or named by a program whose
-               output is not known (python, jq); the text says "counted"
+    computed   a rule label (regex, code) or Claude's own code (python, jq: shellcmd.py) went over its records, and none
+               of them entered a context
+    named      it was only named, listed or counted (wc, ls, find, git ls-files, grep -c); the text says "counted"
     not read   nothing touched it (the text says "untouched")
 
 Only seen counts as read. What a label's model read and what a rule computed over are counted apart.
@@ -177,7 +177,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
         x = per.get(f)
         if x is None:
             x = per[f] = {"computed": 0, "lines": [], "searched": False, "matched": 0, "named": False, "hits": set(),
-                          "by": set(), "searched_by": set(), "model": 0, "labels": set(), "model_labels": set(),
+                          "by": set(), "searched_by": set(), "computed_by": set(), "model": 0, "labels": set(), "model_labels": set(),
                           "pages": [], "whole": False}
         return x
     # the labels this session applied (each label keeps the sessions that defined it): a model's reads of a --prompt
@@ -256,6 +256,11 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                 if f not in known.set:
                     continue
                 x = at(f)
+                if how == "computed":
+                    # a program went over it, taken as all of it
+                    x["computed"] = max(x["computed"], count(f).get("rows") or 1)
+                    x["computed_by"].add(prog)
+                    continue
                 if how == "read" and unit_of(f) in ("pages", "file"):
                     # a file with no lines printed whole (cat of an image or a PDF)
                     x["whole"] = True
@@ -348,7 +353,8 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                           "model_labels": sorted(x["model_labels"]),
                           "searched": x["searched"], "matched": x["matched"],
                           "hits": len(x["hits"]), "named": x["named"], "by": sorted(x["by"]),
-                          "searched_by": sorted(x["searched_by"]), "type": type_of(f), "folder": folder_of(f),
+                          "searched_by": sorted(x["searched_by"]), "computed_by": sorted(x["computed_by"]),
+                          "type": type_of(f), "folder": folder_of(f),
                           # which lines entered Claude's context, and which of them a search showed
                           "ranges": _merged(x["lines"]),
                           "hit_lines": sorted({n for n in map(_line_of, x["hits"]) if n})[:HITS_MAX]})
@@ -456,7 +462,7 @@ def _n(x: float) -> str:
 
 def file_line(o: dict[str, Any]) -> str:
     """What happened to one file, in its own unit, as the coverage pane says it: how much of it Claude read (an image
-    or another whole file: seen), what a label's model read, what a rule label computed over, or why none of it
+    or another whole file: seen), what a label's model read, what a rule label or Claude's code computed over, or why none of it
     entered a context; `none` when nothing touched it. It never lists which rows were read."""
     s = o["status"]
     rows, unit = o["rows"], o.get("unit") or "lines"
@@ -469,7 +475,7 @@ def file_line(o: dict[str, Any]) -> str:
         bits.append(f"a label's model read {o['model']:,} of {rows:,} {rw}" + (f" ({', '.join(by_model[:3])})" if by_model else ""))
     if o["computed"]:
         whole = o["computed"] >= rows > 0
-        what = [lb for lb in o.get("labels") or [] if lb not in (o.get("model_labels") or [])][:4]
+        what = ([lb for lb in o.get("labels") or [] if lb not in (o.get("model_labels") or [])] + list(o.get("computed_by") or []))[:4]
         bits.append(f"computed over {'all ' + format(rows, ',') if whole else format(o['computed'], ',') + ' of ' + format(rows, ',')} {rw}"
                     + (f" ({', '.join(what)})" if what else ""))
     if s == "searched":
@@ -545,7 +551,7 @@ def percent(part: float) -> str:
 def coverage_sentence(cov: dict[str, Any]) -> str:
     """What the session did, in words that claim no more than happened: first the files touched (the bar's number: a
     file is touched when some of it entered Claude's context, or a rule label, a search, a count or a program went
-    over it), then what was read, each unit apart; what a label's model read and what a rule label computed over
+    over it), then what was read, each unit apart; what a label's model read and what a rule label or Claude's code computed over
     are said apart. A file only listed by name is not touched."""
     t = cov["total"]
     if not t["files"]:
@@ -567,7 +573,7 @@ def coverage_sentence(cov: dict[str, Any]) -> str:
     if model:
         out.append(f"Read by a label's model: {model}.")
     if computed:
-        out.append(f"Computed over by a rule label, none of it read: {computed}.")
+        out.append(f"Computed over by a rule label or Claude's code, none of it read: {computed}.")
     if t["not_seen_files"]:
         by = {k: [o["path"] for o in cov["files"] if (o["status"] == k and o["touched"]) or (k == "not read" and not o["touched"])]
               for k in ("model", "searched", "computed", "named", "not read")}

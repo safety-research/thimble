@@ -3,7 +3,7 @@
 //
 //   textWidth(s)   the cells a string takes: 2 for a wide character (CJK, most emoji), 0 for a combining mark or a
 //                  zero-width character, 1 for the rest
-//   cut(s, n)      s in at most n cells, ending in `…` when it was longer
+//   cut(s, n, middle)  s in at most n cells, with `…` where it was cut: at its end, or in its middle
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
 function charWidth(cp) {
@@ -31,17 +31,26 @@ export function textWidth(s) {
   return w
 }
 
-/** s in at most n cells, ending in `…` when it was longer. */
-export function cut(s, n) {
-  const t = String(s ?? '')
-  if (textWidth(t) <= n) return t
+/** The first characters of a list of them that fit in n cells. */
+function fit(chars, n) {
   let out = ''
   let w = 0
-  for (const ch of t) {
+  for (const ch of chars) {
     const cw = textWidth(ch)
-    if (w + cw > n - 1) break
+    if (w + cw > n) break
     out += ch
     w += cw
   }
-  return n > 0 ? `${out}…` : ''
+  return out
+}
+
+/** s in at most n cells, with `…` where it was cut: at its end, or with `middle` after its first third, so that names
+ *  that start alike keep the end that tells them apart (`annot…underspecified-fan-out`). */
+export function cut(s, n, middle = false) {
+  const t = String(s ?? '')
+  if (textWidth(t) <= n) return t
+  if (n <= 0) return ''
+  if (!middle) return `${fit(t, n - 1)}…`
+  const left = Math.floor((n - 1) / 3)
+  return `${fit(t, left)}…${[...fit([...t].reverse(), n - 1 - left)].reverse().join('')}`
 }

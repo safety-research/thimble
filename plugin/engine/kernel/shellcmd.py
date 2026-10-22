@@ -2,12 +2,14 @@
 
 A file is read only when some of its lines reached Claude: `cat`, `head`, `tail` or `sed` printed them, and what came
 after in the pipeline passed them on. A search (`grep`, `rg`, `sed -n '/re/p'`) shows only the lines that matched, so it
-leaves the file searched. A command that only names, lists or counts files (`wc`, `ls`, `find`, `git ls-files`,
-`grep -c`, `grep -l`), a command whose output goes to a file, and a program whose output thimble cannot tell (`python`,
-`jq`, `awk`) leave it named. What the rule cannot tell, it does not count as read.
+leaves the file searched. A program that computes (`python`, `jq`, `awk`, …), named with the file or holding it in its
+code (a here-document), leaves it computed: the program went over the file, taken as all of it, as code that opens a
+file mostly does, and what it printed of it is not known. A command that only names, lists or counts files (`wc`,
+`ls`, `find`, `git ls-files`, `grep -c`, `grep -l`) and a command whose output goes to a file leave it named. What the
+rule cannot tell, it does not count as read.
 
     shows(command, known, root, cwd, lines_of) -> [(file, how, (first, last) or None, program)]
-        how is "read" (with the lines it printed), "searched" or "named"
+        how is "read" (with the lines it printed), "searched", "computed" or "named"
 
 `known` is the root's files as a Known index (or a list, indexed on the call): a folder of a million files is looked up
 by name and by folder, never scanned once per word of a command.
@@ -22,6 +24,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 SEARCHES = {"grep", "egrep", "fgrep", "zgrep", "rg", "ag", "ack"}
+# programs that compute over the files their code or their arguments name
+COMPUTES = re.compile(r"^(?:python[\d.]*|pypy3?|jq|g?awk|mawk|node|perl|ruby|Rscript|sqlite3|duckdb|mlr|datamash)$")
 # programs that pass on the lines they get (head, tail and sed narrow them; uniq -c counts them)
 PASSES = {"cat", "less", "more", "cut", "column", "nl", "tr", "fold", "fmt", "expand", "sort", "tee", "uniq", "head", "tail", "sed"}
 WRAPPERS = {"!", "{", "}", "if", "then", "else", "elif", "do", "while", "until", "time", "sudo", "command", "nohup", "exec",
@@ -282,7 +286,9 @@ def search_operands(args: list[str]) -> list[str]:
 
 def stage_shows(prog: str, args: list[str]) -> tuple[str, Range | None]:
     """What one stage does with the lines it gets: ("read", the lines it prints as a function of their range, None for
-    all of them), ("searched", None) or ("named", None)."""
+    all of them), ("searched", None), ("computed", None) or ("named", None)."""
+    if COMPUTES.match(prog):
+        return "computed", None
     if prog in SEARCHES:
         return ("named" if counts_only(args) else "searched"), None
     if prog in ("cat", "tac", "nl", "less", "more", "bat", "batcat"):
@@ -573,7 +579,8 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None,
             if prog == "thimble":
                 continue
             for body in st["bodies"]:
-                out.extend((f, "named", None, prog or "a heredoc") for f in sorted(named(body, known, root, None)))
+                code = "computed" if COMPUTES.match(prog or "") else "named"
+                out.extend((f, code, None, prog or "a heredoc") for f in sorted(named(body, known, root, None)))
             files = named(" ".join(search_operands(args) if prog in SEARCHES else args), known, root, cwd, values) if prog else set()
             if not files:
                 continue
@@ -581,7 +588,7 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None,
             narrow: list[Range] = [rng] if rng else []
             by = prog  # the program that decided what reached Claude
             for later in pipe[k + 1:]:
-                if how == "named":
+                if how in ("named", "computed"):
                     break
                 p2, a2 = program(later["words"])
                 if p2 in SEARCHES:
@@ -592,7 +599,7 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None,
                     by = by if how == "read" else p2
                 elif p2 not in PASSES or (p2 == "uniq" and any(a in ("-c", "--count") for a in a2)):
                     how, by = "named", p2 or "a pipe"
-            if not sent and how != "named":
+            if not sent and how in ("read", "searched"):
                 how, by = "named", f"{prog} > a file"  # its output went to a file
             for f in sorted(files):
                 if how != "read":

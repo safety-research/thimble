@@ -69,8 +69,11 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     status = {o["path"]: o["status"] for o in cov["files"]}
     assert {f for f, s in status.items() if s == "seen"} == {"src/a.py", "src/b.py", "src/c.py", "src/d.py", "src/j.py"}
     assert status["src/e.py"] == "searched"
-    assert {f for f, s in status.items() if s == "named"} == {"src/f.py", "src/g.py", "src/h.py", "src/i.py", "src/k.py",
-                                                              "src/l.py", "runs.csv"}
+    assert {f for f, s in status.items() if s == "named"} == {"src/f.py", "src/g.py", "src/h.py", "src/k.py", "src/l.py",
+                                                              "runs.csv"}
+    # a program that opens a file goes over it: computed over all of it, none of it read
+    i = next(o for o in cov["files"] if o["path"] == "src/i.py")
+    assert (i["status"], i["computed"], i["computed_by"]) == ("computed", i["rows"], ["python3"])
     lines = {o["path"]: o["seen_lines"] for o in cov["files"] if o["seen"]}
     assert lines == {"src/a.py": 30, "src/b.py": 30, "src/c.py": 5, "src/d.py": 3, "src/j.py": 4}
     t = cov["total"]
@@ -80,9 +83,10 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     text = CV.coverage_text(cov)
     assert "Every source file" not in text
     assert ("Touched 13 of 13 files (read, searched, counted or computed over). Read 5 of the files, at least in part: "
-            "0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's context. Not read: 8 files (3 rows and 210 lines): "
-            "7 only named or counted (runs.csv, src/f.py, src/g.py, src/h.py and 3 more); 1 searched, which lines a search "
-            "showed is not known (src/e.py).") in text
+            "0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's context. Computed over by a rule label or Claude's code, "
+            "none of it read: 30 of 360 lines (8%). Not read: 8 files (3 rows and 210 lines): "
+            "1 only computed over (src/i.py); 6 only named or counted (runs.csv, src/f.py, src/g.py, src/h.py and 2 more); 1 "
+            "searched, which lines a search showed is not known (src/e.py).") in text
     assert "  src/c.py  read 5 of 30 lines (17%)\n" in text
     assert "runs.csv  only named or counted (wc); Claude read none of it" in text
     assert "src/g.py  only named or counted (find, ls, wc)" in text
