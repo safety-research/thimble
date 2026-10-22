@@ -21,11 +21,11 @@ async function pluginVersion($: Engine): Promise<string | null> {
   try { return String(JSON.parse(String(await $.fs.read(`${rootOf($)}/.claude-plugin/plugin.json`))).version || '') || null } catch { return null }
 }
 
-/** A text, as {text, id}: its file's words. The id a record names it by is its name. */
-export async function promptText($: Engine, name: PromptName): Promise<{ text: string; id: string }> {
+/** A text: its file's words. A record names the text by its name. */
+export async function promptText($: Engine, name: PromptName): Promise<string> {
   if (!TEXTS[name]) throw new Error(`no prompt text ${name}`)
   if (!texts.has(name)) texts.set(name, String(await $.fs.read(`${rootOf($)}/${fileOf(name)}`)))
-  return { text: texts.get(name)!, id: name }
+  return texts.get(name)!
 }
 
 export const registerPrompts: Register = on => {

@@ -15,9 +15,10 @@ https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
 3. Run `scripts/install.sh` in a clone, with `--no-browser` for the plugin alone. It checks what is needed first and
    says what is missing, one line each. Tell the user what is missing, with the command that fixes it, and run that
    command only when the user agrees. Then run the script again.
-4. End with a short reply: the plugin works in a new `claude` session in a folder of data files that they trust, and
-   the line above the prompt lists its keys; a click on `thimble` in that line (or `/thimble-settings`) turns each of
-   its features on or off, and `/plugin` turns thimble off. The browser workbench starts
+4. End with a short reply: the plugin works in a new `claude` session in a folder of data files that they trust; Claude
+   marks the claims it makes and a second Claude checks them; the line above the prompt lists the keys that work, such
+   as `v` for a card of the last answer; a click on `thimble` in that line (or `/thimble-settings`) turns each feature
+   on or off, and `/plugin` turns thimble off. The browser workbench starts
    with `thimble-browser` in a folder of files (or `thimble-browser FOLDER`), and asks for credentials in its Settings.
 
 ## Working on thimble
@@ -25,11 +26,14 @@ https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
 [CONTRIBUTING.md](CONTRIBUTING.md) gives the layout of each product and how to test it. `scripts/check.sh` runs every
 check CI runs, and `scripts/check.sh STEP` one of them.
 
-- A change to a text the plugin's model reads is an edit of its one file (`plugin/prompts/<text>.md`, or the skill), and
-  follows CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
+- A change to a text the plugin's model reads is an edit of its one file (`plugin/prompts/<text>.md`), and follows
+  CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
   symptom.
-- The browser workbench reads its shared texts from `plugin/`, with the changes `browser/prompts/shared.json` lists.
-  When a plugin text changes, run `scripts/check.sh parity` and fix the pairs it names.
+- The browser workbench reads one text from `plugin/`, the label classifier, with the changes
+  `browser/prompts/shared.json` lists. When that text changes, run `scripts/check.sh parity` and fix the pairs it names.
+- In the plugin, Claude's card views run only in the card runner's sandbox (`plugin/cards/runner.mjs`: Node with
+  `--permission`, a `vm` context per card, only strings in and out). The hooks never run a view themselves. Keep it that
+  way.
 - The browser's server binds 127.0.0.1 only. Card code and view readers run only in its sandbox
   (`browser/server/thimble_browser/cards/sandbox.py`), and its agents get only the tools
   `browser/server/thimble_browser/agent.py` names. Keep both that way.

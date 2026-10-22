@@ -5,12 +5,12 @@ Bug reports, suggestions and pull requests are welcome.
 ## Set up a checkout
 
 You need what [INSTALL.md](INSTALL.md) lists for both products, with Node.js 22.18 or later, and a Python 3.10 or later
-with pandas and pytest for the plugin's tests.
+with pytest for the plugin's tests. The plugin's kernel needs nothing else.
 
 ```
 git clone https://github.com/safety-research/thimble.git
 cd thimble
-python3 -m venv .venv && .venv/bin/pip install pandas pytest
+python3 -m venv .venv && .venv/bin/pip install pytest
 export THIMBLE_PYTHON="$PWD/.venv/bin/python"
 scripts/install.sh --local
 ```
@@ -42,22 +42,27 @@ without it.
 
 ## Layout
 
-The terminal plugin, `plugin/`:
+The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.ts` registers them in order.
 
 | What | Where |
 |---|---|
-| the manifest, with the plugin's settings: a switch per feature (`plugin/settings/features.mjs` lists them) | `plugin/.claude-plugin/plugin.json` |
-| the `thimble` command and the kernel it runs: sources, queries, cards, lineage, labels | `plugin/bin/thimble`, `plugin/engine/` |
-| the hooks module: what it registers, in order | `plugin/hooks/register.ts` |
-| the shell: cards under replies, citations, the tray, the bar, the side panel (a card's detail, a citation, any pane) and its side thread, labels | `plugin/shell/` |
-| the card runtime that a card's program draws through, and its terminal renderer | `plugin/draw/` |
-| the panes thimble draws as programs on that runtime (detail, tray, chips, proposals, the side panel's mark and thread list) | `plugin/panes/` |
-| the side agent that reads each reply with the whole session (a queue, one fork per look), and its lenses | `plugin/observer/` |
-| the features a person turns on and off, and the settings panel with its preview of the bar (`/thimble-settings`, a click on `thimble` in the bar) | `plugin/settings/`, `plugin/panes/settings.js` |
-| the rewrite behind `s`, and the catch-up | `plugin/squeeze/` |
-| Claims: the session's claims, the Claims pane behind `c`, and the map of the folder's claims | `plugin/claims/` |
-| the texts the model reads: the skill and card guide, and the prompts | `plugin/skills/`, `plugin/prompts/` |
-| the session's events and its cost per feature (`thimble dev stats`) | `plugin/telemetry/` |
+| the manifest: name, version, the three switches (Marks, Cards, Labels and coverage on the bar) | `plugin/.claude-plugin/plugin.json` |
+| the `thimble` command (`label`, `coverage`, `fix`; `thimble dev prompts`, `thimble dev stats`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
+| the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
+| the hooks module, its order, the session's PATH, and which files Claude read (for coverage) | `plugin/hooks/` |
+| shared parts: the forks (checker, designer), what thimble tells Claude with the next prompt, the change feed, the one side pane | `plugin/core/` |
+| the guidance: the `thimble` context block in every conversation | `plugin/guidance/` |
+| the texts the model reads, and their registry | `plugin/prompts/` |
+| marks: find `[words](#)` in a reply, draw them, run the checker fork and the validator, the evidence pane | `plugin/marks/` |
+| cards: the `card` tool, the runner that runs a card's view in a sandbox (`runner.mjs`), drawing, keys | `plugin/cards/` |
+| `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
+| the line above the prompt: busy step, failure line, fix keys, counts | `plugin/bar/` |
+| the settings, coverage and fix-share panes | `plugin/panes/` |
+| the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
+| a `--prompt` label's model reads, and the labels pane | `plugin/labels/` |
+| each model call and turn in the session's events, per feature (`thimble dev stats`) | `plugin/telemetry/` |
+| every `$.state` key, one block per module | `plugin/types/index.d.ts` |
+| `/thimble:fix` | `plugin/commands/fix.md` |
 | tests | `plugin/tests/` (hooks tests and pytest), and a `test/` folder beside the code it tests (node) |
 
 The browser workbench, `browser/`:
@@ -68,6 +73,7 @@ The browser workbench, `browser/`:
 | the server: sign-in, the folder's readers, the workspace, the agents' loop and their tools | `browser/server/thimble_browser/` |
 | the features (cards, citations, lenses, labels, report, views), registered in one place, each one module with its routes, tools and prompt part | `browser/server/thimble_browser/features/` |
 | the sandbox that card code and view readers run in | `browser/server/thimble_browser/cards/sandbox.py`, `browser/server/sandbox/` |
+| the card toolkit that card code draws with, in the sandbox and the page | `browser/kit/` |
 | the texts Claude reads, and the parts it reads from the plugin | `browser/prompts/`, `browser/prompts/shared.json` |
 | the view kit's guides and worked examples, which the view builder reads | `browser/docs/`, `browser/samples/views/` |
 | the server's tests | `browser/server/tests/` |
@@ -77,11 +83,19 @@ The browser workbench, `browser/`:
 
 ## Changing what the model reads
 
-The texts the plugin's models read are the thimble skill (`plugin/skills/thimble/SKILL.md`), the card guide
-(`plugin/skills/thimble/cards.md`) and the prompts in `plugin/prompts/<text>.md`, one file per text, each paragraph on
-one line. To change a text, edit its file; git keeps the earlier wording, so compare with `git diff` or `git log -p`.
-`plugin/prompts/registry.mjs` names each text, what it is for and what reads it, and `thimble dev prompts` lists them
-with their files. `THIMBLE_PROMPTS=lens-explain:off,...` turns an optional text off for a session.
+Every text a model reads is one file in `plugin/prompts/`, each paragraph on one line:
+
+| Text | File | Read by | As |
+|---|---|---|---|
+| guidance | `prompts/guidance.md` | `guidance/guidance.ts` | the `thimble` context block of every conversation, without the section of a switched-off feature |
+| card tool | `prompts/card-tool.md` | `cards/tool.ts` | the description of the `card` tool |
+| checker | `prompts/checker.md` | `marks/checker.ts` | the prompt of the fork that checks a reply's marks |
+| designer | `prompts/designer.md` | `designer/v.ts` | the prompt of the fork that `v` starts |
+| label classifier | `prompts/labels.md` | `labels/labels.ts` | each model call of a `--prompt` label |
+
+To change a text, edit its file; git keeps the earlier wording, so compare with `git diff` or `git log -p`.
+`plugin/prompts/registry.mjs` names each text, its reader and what it is for, and `thimble dev prompts` lists them. A
+fork (the checker, the designer) is a copy of the conversation, so it reads the guidance too.
 
 When the model does something you do not want, change the cause, not the symptom:
 
@@ -94,11 +108,10 @@ When the model does something you do not want, change the cause, not the symptom
    status) is fixed in code.
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
-The browser workbench reads some of those texts from `plugin/` when it makes a prompt: Communicating, Citing and Labels
-from the thimble skill, and the explain lens and the label classifier. Each part may carry a few changes for the
-browser, each a pair of exact strings, listed in `browser/prompts/shared.json`. When you reword the plugin's text, the
-parity test says which change no longer applies; fix the pair in `shared.json`, and keep the browser's version of a ref
-or a tool name in it.
+The browser workbench reads one of those texts from `plugin/` when it makes a prompt: the label classifier. Its few
+changes for the browser, each a pair of exact strings, are listed in `browser/prompts/shared.json`. When you reword the
+classifier, the parity test says which change no longer applies; fix the pair in `shared.json`. The browser keeps its
+own copies of the other texts it used to share.
 
 ## Pull requests
 
