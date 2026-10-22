@@ -130,6 +130,9 @@ async function removeFolder($: Engine, sock: string): Promise<void> {
   await $.process.run(['rm', '-rf', '--', folderOf(sock)]).catch(() => undefined)
 }
 
+/** How Claude Code words a `$.http.fetch` it refuses; the rest of the line is why. */
+const REFUSED = /\$\.http\.fetch: refused: (.+)/
+
 async function post($: Engine, sock: string, op: string, body: unknown): Promise<Any> {
   const r = await $.http.fetch(`http://runner/${op}`, { method: 'POST', body: JSON.stringify(body ?? {}), socketPath: sock })
   return JSON.parse(r.text)
@@ -172,16 +175,21 @@ async function start($: Engine, sock: string): Promise<Down | null> {
     })()
   })
   const t0 = Number(await $.clock.now())
+  let refused = ''
   while (Number(await $.clock.now()) - t0 < START_MS) {
     try {
       if ((await post($, sock, 'ping', {})).ok) return null
-    } catch {
-      // not listening yet
+    } catch (err) {
+      // not listening yet; or Claude Code refuses the plugin's requests (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+      // refuses a Unix socket's too), which no wait changes
+      refused = REFUSED.exec(String((err as Error)?.message || err))?.[1]?.trim() ?? ''
+      if (refused) break
     }
     if (runner.exit) break
     await $.clock.sleep(20)
   }
   runner.stop?.()
+  if (refused) return { why: `Claude Code refuses thimble's requests to its card runner in this session: ${refused}`, machine: true }
   // what kept it from starting: setup.mjs starts a runner of its own in the sandbox, and says why that one does not start
   const probed = await setup($, true)
   if (!probed.ok) return downOf(probed)

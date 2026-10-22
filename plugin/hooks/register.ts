@@ -7,7 +7,7 @@
 //   path        ./path.ts               the session's environment: the plugin's bin/ first on PATH, and a TMPDIR
 //   watch       ./watch.ts              which files Claude's Read, Grep and Bash calls touched, for `thimble coverage`
 //   prompts     ../prompts/prompts.ts   the prompt registry: one file per text a model reads
-//   guidance    ../guidance/guidance.ts the `thimble` context block in every conversation
+//   guidance    ../guidance/guidance.ts guidance.md beside the prompt, once in every conversation
 //   turn        ../core/turn.ts         whether main's turn runs
 //   forks       ../core/forks.ts        the checker and designer forks: spawn, know, end; their reports kept from main
 //   tell        ../core/tell.ts         what Claude reads of thimble's work, with the person's next prompt
