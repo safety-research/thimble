@@ -1,4 +1,4 @@
-"""What a shell command put in front of Claude of each file it names, for coverage (lineage.coverage).
+"""What a shell command put in front of Claude of each file it names, for coverage (coverage.py).
 
 A file is read only when some of its lines reached Claude: `cat`, `head`, `tail` or `sed` printed them, and what came
 after in the pipeline passed them on. A search (`grep`, `rg`, `sed -n '/re/p'`) shows only the lines that matched, so it

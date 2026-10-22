@@ -1,2 +1,2 @@
-"""thimble's kernel: sources (rows with stable ids), objects (program + data + lineage) and lineage (how every
-value was derived). The `thimble` command (cli.py) is its whole interface for Claude; the shell runs it."""
+"""thimble's kernel: sources (a folder's records, each with a stable ref), labels, coverage, fix, and the validator of
+the marks' evidence. The `thimble` command (cli.py) is its whole interface for Claude; the shell runs it."""

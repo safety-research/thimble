@@ -73,7 +73,7 @@ async function start($: Engine, sock: string): Promise<string | null> {
   }
   const why = runner.exit.split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 300)
   return /permission|bad option/i.test(why)
-    ? `Node 22 or later is needed to draw cards (${why})`
+    ? `Node 22.18 or later is needed to draw cards (${why})`
     : `the card runner did not start${why ? ` (${why})` : ''}`
 }
 

@@ -75,8 +75,8 @@ notes=()
 if [ "$macos" = 1 ]; then node_fix="brew install node"; uv_fix="brew install uv"
 else node_fix="from your system's packages or https://nodejs.org"; uv_fix="curl -LsSf https://astral.sh/uv/install.sh | sh"; fi
 
-node_min=22.0.0
-[ "$web" = 1 ] && node_min=22.12.0
+node_min=22.12.0
+[ "$plugin" = 1 ] && node_min=22.18.0
 if ! command -v node >/dev/null 2>&1; then
   missing+=("Node.js ${node_min%.0} or later is not installed: $node_fix")
 else
@@ -95,7 +95,7 @@ if [ "$plugin" = 1 ]; then
   fi
   if command -v claude >/dev/null 2>&1; then
     have="$(claude --version 2>/dev/null | awk '{print $1}')"
-    ver_ge "$have" 2.1.301 || missing+=("Claude Code is $have, and the terminal plugin needs 2.1.301 or later: claude update")
+    ver_ge "$have" 2.1.307 || missing+=("Claude Code is $have, and the terminal plugin needs 2.1.307 or later: claude update")
   fi
 fi
 
