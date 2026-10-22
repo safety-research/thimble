@@ -66,8 +66,8 @@ declare module 'claude-code' {
       // ---- core (core/)
       /** what the side pane shows (core/pane.ts) */
       pane: { kind: string; args: unknown } | null
-      /** whether main's turn runs (core/turn.ts) */
-      mainRuns: boolean
+      /** the id of main's turn that runs, null when none runs (core/turn.ts) */
+      mainTurn: string | null
       /** which agents are thimble's forks, and their kind (core/forks.ts) */
       forks: Record<string, 'checker' | 'designer'>
       /** what Claude reads with the person's next prompt, by key (core/tell.ts) */

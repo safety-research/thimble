@@ -9,7 +9,7 @@
 //   1. checks the file is in the session's folder or the temp folder, and copies it into the card's folder
 //   2. loads the view and the copy into the runner (runner.mjs), which draws the card and makes its text copy
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
-//      the designer fork called
+//      the designer fork called; a new version draws in the card's place
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
 //   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, and the copy after
 //      each action
@@ -25,13 +25,14 @@ import { failCleared, failNotice } from '../bar/fix'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { tempDir } from '../core/home'
+import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
 import { OWN_KEYS } from '../hooks/keys'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask } from './ask'
-import { applyAnswer, askCard, canRedraw, cardWidth, mainTurn, screenRows } from './draw'
+import { applyAnswer, askCard, canRedraw, cardWidth, screenRows } from './draw'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
@@ -220,8 +221,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // a new version takes the card's place: under the call of main's that drew its first version, or under the answer v
   // was pressed on when the designer fork drew it. Where Claude Code cannot draw that place again (the main screen,
   // once main's turn that drew it ended), main's version stands at its own call
-  const stays = meta.version > 0 && (!!fork || canRedraw(meta.turn))
-  const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn } : { toolUseId, anchorRow, turn: fork ? meta.turn : mainTurn() }
+  const stays = meta.version > 0 && (!!fork || (await canRedraw($, meta.turn)))
+  const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($) }
   const next: CardMeta = {
     ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
     gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,

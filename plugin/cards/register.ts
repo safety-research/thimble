@@ -18,7 +18,7 @@ import { failNotice } from '../bar/fix'
 import { cut } from '../core/text.js'
 import { forkOf } from '../core/forks'
 import { featureOn } from '../settings/features.mjs'
-import { cardPost, clientFault, frame, framesUnder, noteShown, noteTurn, noteViewport } from './draw'
+import { cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
 import { callOf, cardIdOf, inTemp, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
 
@@ -37,11 +37,6 @@ export const registerCards: Register = on => {
     }
     try { await restoreCards($) } catch { /* the cards draw again from their calls when their copies can be read */ }
     return r
-  }).catch(($, e, next) => next(e))
-
-  on('turn.start', { turnId: /\S/ }, async ($, e, next) => {
-    if (e.agentId === undefined) noteTurn(e.turnId)
-    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__thimble__card' }, async ($, e) => {

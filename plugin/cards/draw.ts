@@ -1,6 +1,7 @@
-// draw.ts: cards on screen. A card draws in a frame under the call of main's that drew its newest version (an earlier
-// call of the same card shows one line that points to it), or under the answer v was pressed on when the designer
-// fork drew it. Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
+// draw.ts: cards on screen. A card draws in a frame under the call of main's that drew its first version, or under the
+// answer v was pressed on when the designer fork drew it; a new version takes its place, and a later call of the same
+// card shows one line that points to it (on Claude Code's main screen, a version of a later turn stands at its own
+// call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
 //   frame         the card's frame: its title, the Client, a failure, and the keys that reach it now
@@ -22,6 +23,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/fix'
 import { cut } from '../core/text.js'
+import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
 import { type CardMeta, anchoredAt, focusNow, markSeen, metaOf, readState, saveMeta, saveState, seenNow, setFocus, setTree, treeOf, versionDir } from './store'
@@ -40,11 +42,9 @@ const FRAME_ROWS = 5
 let columnsSeen = 0
 let rowsSeen = 0
 // whether the terminal draws the conversation in its fullscreen layout, where every row can be drawn again; on the main
-// screen a row that has scrolled into the terminal's own scrollback stays as it was printed
+// screen a row that has scrolled into the terminal's own scrollback stays as it was printed. Not known until a drawing
+// says (after a reload of the plugin), and then read as the main screen
 let fullscreen: boolean | undefined
-// main's turn now, from its turn.start: on the main screen, a card drawn in this turn still stands where Claude Code
-// draws again (the turn's rows are printed for good after it)
-let turnNow = ''
 // the rows each card's Client takes, as it last reported them, and whether the screen shows each card now (a surface
 // that does not say where its rows are leaves a card out: then every card drawn takes keys)
 const heights = new Map<string, number>()
@@ -60,19 +60,10 @@ export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?
   if (typeof v?.isFullscreen === 'boolean') fullscreen = v.isFullscreen
 }
 
-export function noteTurn(turnId: string): void {
-  turnNow = turnId
-}
-
-/** Main's turn now ('' when not known). */
-export function mainTurn(): string {
-  return turnNow
-}
-
 /** Whether Claude Code can still draw a card again that main drew in `turn`: always in the fullscreen layout; on the
  *  main screen only while that turn runs, since the main screen says nothing of which rows have scrolled away. */
-export function canRedraw(turn: string | undefined): boolean {
-  return fullscreen !== false || (!!turn && turn === turnNow)
+export async function canRedraw($: Engine, turn: string | undefined): Promise<boolean> {
+  return fullscreen === true || (!!turn && turn === (await mainTurn($)))
 }
 
 /** The screen's rows, or 0 while no drawing said. */
@@ -211,8 +202,8 @@ export async function cardText($: Engine, id: string): Promise<string> {
   return r?.ok ? (r.lines as string[]).join('\n') : `(the card did not draw: ${r?.error ?? 'no answer'})`
 }
 
-/** The cards an answer row holds, framed, under it: those still anchored there (a card main drew a new version of
- *  stands at main's call). */
+/** The cards an answer row holds, framed, under it: those still anchored there (on the main screen, a version main
+ *  draws of such a card in a later turn stands at main's call: canRedraw). */
 export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
   const metas: CardMeta[] = []
   for (const id of await anchoredAt($, e.requestId)) {
