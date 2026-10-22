@@ -71,20 +71,28 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })
 
-test("the view gets the card palette as surface.colors, and a view that colors with it draws", async () => {
+test("the view gets the palette of the request's theme as surface.colors, and draws in the other set when it changes", async () => {
   const view = `function view(p, s) { const { Box, Text } = s.elements, c = s.colors
   return Box({ flexDirection: 'column', children: [
     ...p.rows.map((r, i) => Text({ children: [Text({ color: c.cat[i], children: '█' }), ' ' + r.name] })),
     Text({ children: [0, 0.5, 1, -2, 'x'].map(t => Text({ color: c.seq(t), children: '█' })) }),
     Text({ children: [Text({ color: c.good, children: '✓' }), Text({ color: c.bad, children: '×' }), Text({ color: c.gray, children: 'other' })] }),
   ] }) }`
-  const { r } = await load(view)
+  const { id, r } = await load(view, { theme: 'dark' })
   assert.equal(r.ok, true)
   assert.deepEqual(r.lines, ['█ ada', '█ bram', '█ cleo', '█████', '✓×other'])
-  const colors = []
-  const walk = n => { if (n && typeof n === 'object') { if (n.p?.color) colors.push(n.p.color); (n.c || []).forEach(walk) } }
-  walk(r.tree)
-  assert.deepEqual(colors, ['#588ac1', '#ca7c4e', '#449d98', '#7e8792', '#6289b5', '#3e89d7', '#7e8792', '#7e8792', '#66a159', '#c65b4d', '#928f88'])
+  const colorsOf = tree => {
+    const out = []
+    const walk = n => { if (n && typeof n === 'object') { if (n.p?.color) out.push(n.p.color); (n.c || []).forEach(walk) } }
+    walk(tree)
+    return out
+  }
+  assert.deepEqual(colorsOf(r.tree), ['#80b2ea', '#ed9a6b', '#6fd0cc', '#5f6670', '#708bab', '#80b2ea', '#5f6670', '#5f6670', '#67cda8', '#f59183', '#85827a'])
+  const light = await ask('draw', { id, width: 40, theme: 'light' })
+  assert.deepEqual(colorsOf(light.tree), ['#0471c8', '#e26101', '#018d82', '#9aa1ab', '#608bbb', '#0471c8', '#9aa1ab', '#9aa1ab', '#0b7c5f', '#c93a28', '#a19d94'])
+  // a request that names no theme keeps the last one
+  assert.deepEqual(colorsOf((await ask('draw', { id, width: 40 })).tree).slice(0, 1), ['#0471c8'])
+  await ask('ping', { theme: 'dark' })
 })
 
 test('a text copy at another width leaves the card as it was: its width and its Buttons', async () => {

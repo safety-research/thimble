@@ -13,6 +13,7 @@
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
+import { themeNow, type Theme } from '../core/theme'
 import { plainSentence } from './message.js'
 import { type Evidence, type MarkItem, type Place, rowMarks } from './store'
 
@@ -31,8 +32,8 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
 }
 
 /** The cited words' tint, per theme: a soft purple behind them that reads on a dark and a light background. */
-export const CITE_TINT = { dark: '#3d3560', light: '#ebe4fd' } as const
-export type Theme = keyof typeof CITE_TINT
+export const CITE_TINT: Record<Theme, string> = { dark: '#3d3560', light: '#ebe4fd' }
+export type { Theme }
 
 /** A line of text with spans of it highlighted (the citations' soft purple tint behind them), as Text runs. */
 export function highlighted(els: Any, text: string, spans: [number, number][], key: string, theme: Theme = 'dark'): Any {
@@ -132,11 +133,6 @@ function evidenceRows(els: Any, ev: Evidence, width: number, theme: Theme): Any[
   ]
 }
 
-/** Claude Code's theme: its light themes the light tint, every other the dark one. */
-async function themeOf($: EngineInterface): Promise<Theme> {
-  try { return /light/i.test(String((await $.config.list()).find(r => r.key === 'theme')?.value ?? '')) ? 'light' : 'dark' } catch { return 'dark' }
-}
-
 /** The pane of one mark. */
 export async function drawEvidence($: EngineInterface, e: Any, args: unknown, els: Any): Promise<unknown> {
   const { Box, Text } = els
@@ -161,6 +157,6 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + m.words.replace(/`/g, '').length) }), sentence.slice(at + m.words.replace(/`/g, '').length),
   ] }))
   if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'The check is running; its evidence shows here when it ends.' }))
-  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60, await themeOf($)) }))
+  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60, await themeNow($)) }))
   return Box({ flexDirection: 'column', children: rows })
 }

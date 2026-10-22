@@ -293,6 +293,17 @@ export function evidenceLine(ev) {
   return l ? { n: l.n, text: String(l.text ?? ''), spans: l.highlight ? [l.highlight] : [] } : null
 }
 
+/** The output lines a citation's one-line card leaves out: the lines the code printed (a trailing newline ends the
+ *  last, it starts none) less the `shown` ones. 0 for a file's evidence or no output. */
+export function hiddenOutput(ev, shown = 1) {
+  if (!ev || ev.kind !== 'computed') return 0
+  const out = String(ev.output || '').replace(/\n+$/, '')
+  return out ? Math.max(0, out.split('\n').length - shown) : 0
+}
+
+/** What a citation's one-line card says of the output lines it leaves out: `+ 3 more lines`, `+ 1 more line`. */
+export const moreLines = n => `+ ${n} more line${n === 1 ? '' : 's'}`
+
 /** A line cut to `room` characters, around its first span when it is longer, with … where it was cut; its spans moved
  *  with it. */
 export function lineWindow(line, room) {

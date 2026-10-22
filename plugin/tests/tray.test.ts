@@ -145,6 +145,9 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('was 12 of 40')
   expect(band).not.toContain('The output says 11')
   expect(band).toContain('print(f"failed: {bad}")│failed: 11')
+  // the two output lines the one line leaves out, counted at the end of the ruled block, dim
+  expect(band).toContain('│failed: 11│+ 2 more lines')
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ 2 more lines')?.props?.dimColor).toBe(true)
   expect(band).not.toContain('runs: 40')
   expect(band).not.toContain('print("runs:", n)')
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('#9cdcfe')
@@ -159,6 +162,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(code?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
   band = textOf(open)
   expect(band).toContain('│runs: 40│failed: 11│passed: 29')
+  expect(band).not.toContain('more line')
   expect(band).toContain('c one line')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')

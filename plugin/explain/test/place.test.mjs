@@ -7,7 +7,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { anchorTerm, filePlaces, findInLink, findRead, findTerm, glossesOf, headsOf, linksOf, markColors, mergeLook, placeGlosses, themeOf } from '../place.mjs'
+import { anchorTerm, filePlaces, findInLink, findRead, findTerm, glossesOf, headsOf, linksOf, markColors, mergeLook, placeGlosses } from '../place.mjs'
 
 const at = (text, p) => (p ? text.slice(p.start, p.end) : null)
 
@@ -79,10 +79,13 @@ test('a look places each explainer in the newest message that holds it, adds to 
   assert.deepEqual(mergeLook(msgs, { glosses: [{ term: 'p95' }], heads: null }, { glossed: ['P95'] }).placed, [])
 })
 
-test("0.10's colors: teal and orange pens, the light palette only for a light theme", () => {
-  assert.equal(markColors('dark').glossBg, '#9fe0d5')
-  assert.equal(markColors('light').glossBg, '#c4eee6')
-  assert.equal(markColors('light').headsBg, '#ffe0b8')
-  assert.equal(themeOf('light-daltonized'), 'light')
-  assert.equal(themeOf('auto'), 'dark')
+test('the colors: theme keys for the words, apart from the citations; a tint per theme inside a citation', () => {
+  for (const theme of ['dark', 'light']) {
+    const c = markColors(theme)
+    assert.equal(c.gloss, 'planMode')
+    assert.equal(c.heads, 'claude')
+    assert.ok(![c.gloss, c.heads].some(k => ['merged', 'warning', 'error'].includes(k)))
+  }
+  assert.notEqual(markColors('dark').glossTint, markColors('light').glossTint)
+  assert.notEqual(markColors('dark').headsTint, markColors('dark').glossTint)
 })

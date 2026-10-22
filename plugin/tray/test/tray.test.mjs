@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, pageOf, printLine, push, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
+  moreLines, open, pageOf, printLine, push, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
@@ -108,6 +108,13 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.deepEqual(evidenceLine({ kind: 'quote', file: 'runs/summary.txt', line: '4', lines }), { n: 4, text: 'failed: 12', spans: [[8, 10]] })
   assert.deepEqual(evidenceLine({ kind: 'quote', file: 'runs/summary.txt', line: '5', lines: [lines[0], lines[2]] }), { n: 5, text: 'open: 3', spans: [] })
   assert.equal(evidenceLine(null), null)
+  // the output lines the one line leaves out: a trailing newline starts none; a file's evidence has none
+  assert.equal(hiddenOutput({ kind: 'computed', output: out }), 2)
+  assert.equal(hiddenOutput({ kind: 'computed', output: 'merged: 12\nopen: 3\n' }), 1)
+  assert.equal(hiddenOutput({ kind: 'computed', output: 'merged: 12\n' }), 0)
+  assert.equal(hiddenOutput({ kind: 'quote', file: 'runs/summary.txt', line: '4', lines }), 0)
+  assert.equal(moreLines(1), '+ 1 more line')
+  assert.equal(moreLines(3), '+ 3 more lines')
   // a long line keeps the value in view, with … where it was cut
   const long = { text: `${'a'.repeat(100)}VALUE${'b'.repeat(100)}`, spans: [[100, 105]] }
   const cut = lineWindow(long, 40)

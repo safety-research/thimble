@@ -7,7 +7,7 @@
 //     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away)
 //     state.json          the person's state of that version (what the view set with setState)
 //
-//   $.state: card (meta, by id), cardTree (the runner's drawings, by id: one for each width it is drawn at), cardFocus (the card that takes keys first),
+//   $.state: card (meta, by id), cardTree (the runner's drawings, by id: one for each width and theme it is drawn at), cardFocus (the card that takes keys first),
 //   cardSeen (the cards drawn on screen since the plugin loaded), cardsAt (the cards drawn under an answer, by the
 //   answer's row), cardCall (the card each call drew or changed, by the call's tool_use_id)
 //
@@ -15,6 +15,7 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import { keptDir } from '../core/env'
+import type { Theme } from '../core/theme'
 import { tempDir } from '../core/home'
 import { shortHash } from '../core/layout.mjs'
 
@@ -44,14 +45,16 @@ export type CardMeta = {
   at: number
 }
 /** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it.
- *  `width` and `tree` are the runner's newest drawing, at the width the runner holds the card at; `others` are its
- *  drawings at other widths (the card's copy in a side pane, the conversation before the pane opened) of the same
- *  state; `since` is the answer that last changed the state, and a drawing older than it is gone. */
-export type CardTree = { gen: number; width: number; tree: unknown; seq: number; since?: number; others?: Record<string, { tree: unknown; seq: number }> }
-/** A card's drawing at one width. */
-export type CardDrawing = { gen: number; width: number; tree: unknown; seq: number }
+ *  `width`, `theme` and `tree` are the runner's newest drawing, at the width the runner holds the card at, for a
+ *  terminal theme (core/theme.ts; absent in a drawing kept before themes: dark); `others` are its drawings at other
+ *  widths or for the other theme (the card's copy in a side pane, the conversation before the pane opened, the theme
+ *  before the person changed it) of the same state, by `<width>:<theme>`; `since` is the answer that last changed the
+ *  state, and a drawing older than it is gone. */
+export type CardTree = { gen: number; width: number; tree: unknown; seq: number; theme?: Theme; since?: number; others?: Record<string, { tree: unknown; seq: number }> }
+/** A card's drawing at one width, for one theme. */
+export type CardDrawing = { gen: number; width: number; tree: unknown; seq: number; theme?: Theme }
 
-/** The drawings at other widths a card keeps, the newest first. */
+/** The drawings at other widths and themes a card keeps, the newest first. */
 const OTHERS = 4
 
 const CARD = { plugin: 'thimble', key: 'card' } as const
@@ -109,31 +112,50 @@ export async function treeOf($: Engine, id: string): Promise<CardTree | null> {
   return ((await $.state.get({ ...TREE, id })).value ?? null) as CardTree | null
 }
 
-/** A card's drawing laid out at `width` for version `gen`, or null when it has none: a drawing laid out at another
- *  width is never drawn in its place. */
-export function drawingAt(t: CardTree | null | undefined, gen: number, width: number): CardDrawing | null {
+// a drawing's place among a card's: its width and theme (a key with no theme, kept before themes, is dark)
+const placeOf = (width: number, theme: Theme | undefined) => `${width}:${theme ?? 'dark'}`
+const parsePlace = (k: string): { width: number; theme: Theme } => {
+  const [w, th] = k.split(':')
+  return { width: Number(w), theme: th === 'light' ? 'light' : 'dark' }
+}
+
+/** A card's drawing laid out at `width` for version `gen`, or null when it has none: the one for `theme`, else the one
+ *  at that width for the other theme (drawn until the one for this theme comes; its `theme` says which it is). A
+ *  drawing laid out at another width is never drawn in its place. */
+export function drawingAt(t: CardTree | null | undefined, gen: number, width: number, theme: Theme = 'dark'): CardDrawing | null {
   if (!t || t.gen !== gen) return null
-  if (t.width === width) return { gen, width, tree: t.tree, seq: t.seq }
-  const o = t.others?.[String(width)]
-  return o ? { gen, width, tree: o.tree, seq: o.seq } : null
+  const all: Record<string, { tree: unknown; seq: number }> = {}
+  for (const [k, d] of Object.entries(t.others ?? {})) all[placeOf(parsePlace(k).width, parsePlace(k).theme)] = d
+  all[placeOf(t.width, t.theme)] = { tree: t.tree, seq: t.seq }
+  const other: Theme = theme === 'light' ? 'dark' : 'light'
+  for (const th of [theme, other]) {
+    const d = all[placeOf(width, th)]
+    if (d) return { gen, width, tree: d.tree, seq: d.seq, theme: th }
+  }
+  return null
 }
 
 /** A drawing of the runner's added to the card's: an answer to an event (`changed`: a key, a click, a new version)
- *  changed the state, and the drawings older than it go; a drawing at a width (not `changed`) keeps the drawings at
- *  other widths. An answer older than the drawing kept at its width, or than the last change, is dropped. The runner's
- *  width is that of its newest answer. */
+ *  changed the state, and the drawings older than it go; a drawing at a width or for a theme (not `changed`) keeps the
+ *  drawings at other widths and for the other theme. An answer older than the drawing kept at its width and theme, or
+ *  than the last change, is dropped. The runner's width and theme are those of its newest answer. */
 export function withDrawing(cur: CardTree | null | undefined, t: CardDrawing, changed: boolean): CardTree {
-  if (!cur || cur.gen !== t.gen) return { ...t, since: changed ? t.seq : 0, others: {} }
+  const theme: Theme = t.theme ?? 'dark'
+  if (!cur || cur.gen !== t.gen) return { gen: t.gen, width: t.width, tree: t.tree, seq: t.seq, theme, since: changed ? t.seq : 0, others: {} }
   const since = Math.max(cur.since ?? 0, changed ? t.seq : 0)
-  const all: Record<string, { tree: unknown; seq: number }> = { ...cur.others, [String(cur.width)]: { tree: cur.tree, seq: cur.seq } }
+  const all: Record<string, { tree: unknown; seq: number }> = {}
+  for (const [k, d] of Object.entries(cur.others ?? {})) all[placeOf(parsePlace(k).width, parsePlace(k).theme)] = d
+  all[placeOf(cur.width, cur.theme)] = { tree: cur.tree, seq: cur.seq }
+  const here = placeOf(t.width, theme)
   // (on a tie, which only answers with no seq make, the one that came last wins)
-  const fresh = t.seq >= since && (all[String(t.width)]?.seq ?? -1) <= t.seq
-  if (fresh) all[String(t.width)] = { tree: t.tree, seq: t.seq }
-  const first = (w: string) => (fresh && w === String(t.width) ? 1 : 0)
+  const fresh = t.seq >= since && (all[here]?.seq ?? -1) <= t.seq
+  if (fresh) all[here] = { tree: t.tree, seq: t.seq }
+  const first = (k: string) => (fresh && k === here ? 1 : 0)
   const kept = Object.entries(all).filter(([, d]) => d.seq >= since).sort((a, b) => b[1].seq - a[1].seq || first(b[0]) - first(a[0]))
   if (!kept.length) return cur
-  const [[w, top], ...rest] = kept as [[string, { tree: unknown; seq: number }], ...Array<[string, { tree: unknown; seq: number }]>]
-  return { gen: t.gen, width: Number(w), tree: top.tree, seq: top.seq, since, others: Object.fromEntries(rest.slice(0, OTHERS)) }
+  const [[k, top], ...rest] = kept as [[string, { tree: unknown; seq: number }], ...Array<[string, { tree: unknown; seq: number }]>]
+  const at = parsePlace(k)
+  return { gen: t.gen, width: at.width, tree: top.tree, seq: top.seq, theme: at.theme, since, others: Object.fromEntries(rest.slice(0, OTHERS)) }
 }
 
 /** The card's drawing, unless the one it holds at that width came from a newer answer of the runner's (withDrawing). */

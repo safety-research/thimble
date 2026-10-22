@@ -20,20 +20,22 @@
 //   cardText      a card's text copy as it draws now (for v)
 //
 // The width a card is drawn at is the screen's columns less its frame. A drawing hook may not write the session's
-// state, so when the frame has no drawing at its width (a resumed session, a resize, a side pane that opens or closes),
-// its Client asks for one (client.tsx), and that request draws it; the Client also says when the card is first on
-// screen. A card keeps a drawing for each width it shows at (the conversation, its copy in a side pane: store.ts
-// withDrawing), and a frame draws only the one laid out at its own width.
+// state, so when the frame has no drawing at its width (a resumed session, a resize, a side pane that opens or closes)
+// or for the theme (core/theme.ts: the view's surface.colors give one set for each), its Client asks for one
+// (client.tsx), and that request draws it; the Client also says when the card is first on screen. A card keeps a
+// drawing for each width and theme it shows at (the conversation, its copy in a side pane: store.ts withDrawing), and a
+// frame draws only the one laid out at its own width.
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, underCard } from '../core/answerview'
 import { askCell } from '../core/askcell.js'
 import { cut } from '../core/text.js'
+import { themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
-import { type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, markSeen, metaOf, readState, saveMeta, saveState, seenNow, setFocus, setTree, treeOf, versionDir } from './store'
+import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, markSeen, metaOf, readState, saveMeta, saveState, seenNow, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -117,7 +119,7 @@ export async function askCard($: Engine, meta: CardMeta, op: string, body: Recor
 export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: number, drawing = false): Promise<void> {
   if (r?.ok) {
     const before = await treeOf($, meta.id)
-    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0 }, !drawing)
+    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0, theme: await themeNow($) }, !drawing)
     if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state).catch(() => undefined)
     if (meta.error) await saveMeta($, { ...meta, error: null, errorWidth: null })
     await failCleared($, about(meta.id))
@@ -176,18 +178,21 @@ export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   const width = cardWidth(e.viewport?.columns)
   const t = await treeOf($, meta.id)
   const focused = (await focusNow($)) === meta.id
-  // only a drawing laid out at this width: until it comes, the Client says it is drawing
-  const current = drawingAt(t, meta.gen, width)
+  // only a drawing laid out at this width (for this theme, else the other's until this one's comes): until one comes,
+  // the Client says it is drawing
+  const theme = await themeNow($)
+  const current = drawingAt(t, meta.gen, width, theme)
   const f = faulted.get(meta.id)
   const fault = f && current && f.gen === current.gen && f.seq === current.seq ? f.reason : null
   // a drawing that failed at another width: the card draws again at this one
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
+  const need = needOf(meta, current, width, theme)
   // the title on a line of its own, then the card
   const rows: Any[] = [
     E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
     ...(fault ? [] : [E.Client({
       key: clientKey(meta), module: './client.tsx', width: current?.width ?? width,
-      props: { tree: current?.tree ?? null, width: current?.width ?? width, need: current?.width === width && !failedElsewhere ? '' : `${meta.gen}:${width}` },
+      props: { tree: current?.tree ?? null, width: current?.width ?? width, need },
     })]),
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
@@ -294,11 +299,18 @@ async function atWidth($: Engine, meta: CardMeta, width: number): Promise<void> 
   if (r?.ok) await applyAnswer($, meta, r, width, true)
 }
 
-/** A Client's next props at its width: the drawing laid out at that width, or none and the drawing it needs. */
-function clientProps(meta: CardMeta, t: CardTree | null, width: number): Any {
-  const d = drawingAt(t, meta.gen, width)
+/** The drawing a Client asks for: one at this width (none there, or one that failed at another width), or one in this
+ *  theme's colors (the drawing it has was made for the other theme); '' when it has the one it needs. */
+function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: Theme): string {
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
-  return { tree: d?.tree ?? null, width, need: d && !failedElsewhere ? '' : `${meta.gen}:${width}` }
+  if (!d || failedElsewhere) return `${meta.gen}:${width}`
+  return (d.theme ?? 'dark') !== theme ? `${meta.gen}:${width}:${theme}` : ''
+}
+
+/** A Client's next props at its width: the drawing laid out at that width, or none and the drawing it needs. */
+function clientProps(meta: CardMeta, t: CardTree | null, width: number, theme: Theme): Any {
+  const d = drawingAt(t, meta.gen, width, theme)
+  return { tree: d?.tree ?? null, width, need: needOf(meta, d, width, theme) }
 }
 
 /** A Client's post: the events it has not had an answer for, each handled once, in order. After a press or a click,
@@ -322,5 +334,5 @@ export async function cardPost($: Engine, id: string, data: Any): Promise<Any> {
   // the props at the Client's own width: two Clients of a card (the conversation's, a side pane's) post at their widths
   const t = await treeOf($, id)
   const now = (await metaOf($, id)) ?? meta
-  return t ? { props: { ...clientProps(now, t, Number(data.width) || t.width), ack: { [client]: last } } } : {}
+  return t ? { props: { ...clientProps(now, t, Number(data.width) || t.width, await themeNow($)), ack: { [client]: last } } } : {}
 }

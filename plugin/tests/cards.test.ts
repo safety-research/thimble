@@ -4,6 +4,7 @@
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { resetTheme } from '../core/theme'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,7 +42,10 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   let runnerWidth = 0
   let sorted = false
   let seq = 0
-  const laidOut = () => ({ t: 'Text', p: {}, c: [`${sorted ? 'sorted' : 'rows'} at ${runnerWidth}`] })
+  // Claude Code's theme setting (/config), and the theme the runner was last asked to draw in (a light one says so)
+  const look = { theme: 'dark', runner: 'dark' }
+  on('config.list', () => ({ value: [{ key: 'theme', value: look.theme, isLocked: false }] }) as never)
+  const laidOut = () => ({ t: 'Text', p: {}, c: [`${sorted ? 'sorted' : 'rows'} at ${runnerWidth}${look.runner === 'light' ? ' light' : ''}`] })
   on('session.id', () => ({ value: 's-cards' }))
   on('session.cwd', () => ({ value: DATA }))
   on('session.root', () => ({ value: DATA }))
@@ -92,6 +96,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (op === 'load' && String(body.view).includes('BROKEN')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' }) } }
     if (op === 'draw' && body.width < 30) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'draw', error: 'line 4: Invalid count value: -1' }) } }
     if (o.wide && (op === 'load' || op === 'draw') && body.width) runnerWidth = body.width
+    if (body.theme === 'dark' || body.theme === 'light') look.runner = body.theme
     if (o.wide && op === 'key' && body.key === 'o') sorted = true
     if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, handled: body.key === 'o', tree: laidOut(), state: 'null', seq: ++seq }) } }
     // a view whose tree the terminal refuses: a Text whose bold is not a boolean
@@ -113,7 +118,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       : o.ask && !String(e.input?.file_path).startsWith(DATA) ? { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' } : { decision: 'allow' }) as never)
   on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, dirs, clock, spawned, runs }
+  return { files, asked, dirs, clock, spawned, runs, look }
 }
 
 
@@ -284,6 +289,34 @@ test('a side pane opens: the card in the conversation and its copy in the pane e
   await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 2, press: 0, width: 32 }] }, { in: key })
   expect(w.asked.slice(-2)).toEqual(['draw', 'press'])
   await pane.unmount()
+})
+
+test('the person picks a light theme: the card asks for a drawing in its colors, shows the dark one until it comes, and keeps both', async ($, on) => {
+  resetTheme()
+  const w = world(on, { wide: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_15', ...input } as never)
+  const at = () => ({ ...(callRow('toolu_made_up_15', input) as Any), viewport: { columns: 100, rows: 40, isFullscreen: true } })
+  const client = async () => elements(await $.ui.render(at())).find(n => n.type === 'Client')?.props
+  // the call's drawing, made in the dark theme
+  await (await shown($, at())).unmount()
+  expect((await client()).props).toMatchObject({ tree: TREE, need: '' })
+  // /theme writes the setting; the next drawing a second later reads it
+  w.look.theme = 'light'
+  await w.clock.advance(1000)
+  const asked = await client()
+  expect(asked.props.tree).toEqual(TREE)
+  expect(asked.props.need).toBe('1:92:light')
+  await (await shown($, at())).unmount()
+  expect((await client()).props).toMatchObject({ tree: { t: 'Text', p: {}, c: ['rows at 92 light'] }, need: '' })
+  // back to dark: the dark drawing at that width is still kept, so no request draws it again
+  const draws = w.asked.filter(x => x === 'draw').length
+  w.look.theme = 'dark'
+  await w.clock.advance(1000)
+  expect((await client()).props).toMatchObject({ tree: TREE, need: '' })
+  expect(w.asked.filter(x => x === 'draw').length).toBe(draws)
+  resetTheme()
 })
 
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {

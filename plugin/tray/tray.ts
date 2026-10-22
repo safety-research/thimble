@@ -34,6 +34,7 @@ import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
+import { themeNow } from '../core/theme'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
 import { highlighted, wrapCode, type Theme } from '../marks/evidence'
@@ -45,8 +46,8 @@ import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
-  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, pageOf, printLine, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
+  moreLines, open, pageOf, printLine, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -62,18 +63,14 @@ const TRAY = { plugin: 'thimble', key: 'tray' } as const
 const STAND = { plugin: 'thimble', key: 'trayCard' } as const
 const ASKED = { plugin: 'thimble', key: 'trayAsked' } as const
 
-/** The colors of the tray's frame by what it shows: a citation's purple (the marks' own), an explainer's teal and a
- *  heads-up's orange, as 0.10's tray drew them, per theme. */
-const TONES = {
-  dark: { citation: 'merged', explain: '#62d2c6', heads: '#f2a24b' },
-  light: { citation: 'merged', explain: '#1f8a85', heads: '#c2610f' },
-} as const
+/** The colors of the tray's frame by what it shows, the ones its words are drawn in (explain/place.mjs markColors): a
+ *  citation's purple, an explainer's teal and a heads-up's orange, theme keys that follow the person's theme. */
+const TONES = { citation: 'merged', explain: 'planMode', heads: 'claude' } as const
 
 // the question the person typed with the tray open, until main's turn for it starts (then kept by its turn)
 let pendingAbout: string | null = null
 // the tray as last drawn, when its body was taller than the room above the bar: the frame and where m goes next
 let paged: { f: Frame; next: number | null } | null = null
-let theme: 'dark' | 'light' | null = null
 
 const quietly = (p: Promise<unknown> | unknown) => Promise.resolve(p).catch(() => undefined)
 
@@ -458,17 +455,6 @@ export async function openTray($: Engine, mark: MarkRef): Promise<boolean> {
 
 // ------------------------------------------------------------------------------------------------ the band
 
-async function themeOf($: Engine): Promise<'dark' | 'light'> {
-  if (theme) return theme
-  try {
-    const row = (await $.config.list()).find((r: Any) => r.key === 'theme') as Any
-    theme = /light/i.test(String(row?.value ?? '')) ? 'light' : 'dark'
-  } catch {
-    theme = 'dark'
-  }
-  return theme
-}
-
 async function hyperlinksHere($: Engine): Promise<boolean> {
   // each name literal at its call, so the variables the module reads can be listed
   const env: Record<string, string | undefined> = {
@@ -512,8 +498,9 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
 /** A citation's card under its header (the status is in the header). A corrected one says what it was; a wrong one,
  *  or one the check could not confirm, why in one sentence; all dim. Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
- *  block; with c, all the code (as code), then all the output in the ruled block. For a file: its place (`place`, a
- *  click opens the side pane), then the cited line in the ruled block. The cited words in the soft tint. */
+ *  block, ended by a dim count of the output lines it leaves out; with c, all the code (as code), then all the output
+ *  in the ruled block. For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
+ *  block. The cited words in the soft tint. */
 function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, theme: Theme, place: Any | null): Unit[] {
   const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
@@ -548,6 +535,12 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, theme: 
   } else if (place) rows.push({ h: 1, el: place })
   const cut = lineWindow(line, w - 2)
   rows.push(ruled(els, cut.text, cut.spans, w, 'ev', theme))
+  // the output lines the one line leaves out, counted at the end of the ruled block (c shows them)
+  const more = hiddenOutput(ev)
+  if (more) rows.push({ h: 1, el: els.Box({ key: 'more', flexDirection: 'row', children: [
+    Text({ key: 'rule', dimColor: true, children: '│' }),
+    els.Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [Text({ key: 'n', dimColor: true, wrap: 'truncate-end', children: moreLines(more) })] }),
+  ] }) })
   return rows
 }
 
@@ -602,7 +595,6 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const { Box, Text } = els
   const w = Math.max(40, Math.min(104, width - 3))
   const inner = w - 4
-  const tones = TONES[await themeOf($)]
   let title = ''
   let units: Unit[] = []
   let words: { text: string; start: number; end: number } | null = null
@@ -611,7 +603,7 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     const m = await itemOf($, f.row, f.n)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
-    units = citationBody(els, f, m, inner, await themeOf($), await fileLinkEl($, els, f, m))
+    units = citationBody(els, f, m, inner, await themeNow($), await fileLinkEl($, els, f, m))
   } else {
     const g = await glossOf($, f.row, f.id)
     const heads = f.kind === 'heads'
@@ -662,7 +654,7 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const right = status ? `${status.word} · ${kind}` : kind
   const avail = inner - 2
   const roomT = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
-  const tone = tones[f.kind]
+  const tone = TONES[f.kind]
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
     Text({ key: 't', bold: true, color: tone, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
     status
@@ -724,5 +716,4 @@ export const registerTray: Register = on => {
 export function resetTray(): void {
   pendingAbout = null
   paged = null
-  theme = null
 }
