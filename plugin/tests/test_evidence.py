@@ -391,3 +391,10 @@ def test_a_number_name_shows_as_its_number():
     out = "merged reverts: [(135, 'Revert #118', 'agent-11')]"
     assert check_mark(mark("#135"), computed("merged reverts"), [call(CODE, out)], "/data")["status"] == "verified"
     assert check_mark(mark("#136"), computed("merged reverts"), [call(CODE, out)], "/data")["status"] == "failed"
+
+
+def test_a_dict_that_names_numbers_in_words_is_a_lookup_not_a_typed_value():
+    code = 'n = len(open("t.txt").read().split())\nwords = {10: "ten", 9: "nine"}\nprint(f"asked {words.get(n, n)} times")'
+    assert check_mark(mark("ten"), computed("asked ten times"), [call(code, "asked ten times")], "/data")["status"] == "verified"
+    typed = 'd = {"a": 10}\nprint(f"asked {d[\'a\']} times")'
+    assert "by hand" in check_mark(mark("ten"), computed("asked 10 times"), [call(typed, "asked 10 times")], "/data")["reason"]

@@ -46,10 +46,10 @@ const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
 const ROWS = { plugin: 'thimble', key: 'marksRows' } as const
 
 /** A reply with many marks is split between forks, each with about PER_FORK marks (at most MAX_FORKS forks): a fork's
- *  time grows with its marks (about 10 s to start, then 3 to 9 s a mark, by how much its code has to compute), and the
- *  forks run at once, each from main's cached conversation, so the reply settles when its slowest share does. */
-export const PER_FORK = 5
-export const MAX_FORKS = 6
+ *  time grows with its marks (about 10 s to start, then 3 to 9 s a mark, mostly the answer it writes for each), and
+ *  the forks run at once, each from main's cached conversation, so the reply settles when its slowest share does. */
+export const PER_FORK = 4
+export const MAX_FORKS = 8
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'Bash'])
 

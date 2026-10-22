@@ -470,7 +470,7 @@ def literals(code: str) -> list[tuple[str, str, str]]:
     """(kind, value, text) of each number the code types where it can be the printed value: a NUMBER token (kind
     `number`), or a number inside a string (`string`), or inside the fixed text of an f-string that prints a field too
     (`fixed`, with that text), assigned to a name, given to print() or a format as the innermost call (not to round()
-    inside it), or returned. A bound in a comparison, a key, an index, an operand of arithmetic (`len(rates) // 2`) or an
+    inside it), or returned. A bound in a comparison, a key (also a dict's), an index, an operand of arithmetic (`len(rates) // 2`) or an
     argument of another call is a condition, not a value; so are the words of a string printed only when a condition
     holds (`"no gap exceeds 5 minutes" if worst <= 300 else …`). A number inside a string is left out in a format spec,
     in a path or a file's name, as a part of a name (agent-02), as a bound of a range ("teen 13-17") and as a label that
@@ -499,8 +499,10 @@ def literals(code: str) -> list[tuple[str, str, str]]:
             # (a `[` or `:` is an index or a slice's bound inside an index; in a list or a dict it opens a value)
             bound = prev is not None and prev.type == tokenize.OP and (prev.string in ("<", ">", "<=", ">=", "==", "!=")
                                                                        or (prev.string in ("[", ":") and stack[-1:] == ["sub"]))
+            # a dict's key looks a value up (`{10: "ten"}[n]`); it is not the value
+            key = nxt is not None and nxt.type == tokenize.OP and nxt.string == ":" and stack[-1:] != ["sub"]
             returned = prev is not None and prev.type == tokenize.NAME and prev.string in ("return", "yield")
-            if (assigned or (printed and not bound) or returned) and not operand(toks, i):
+            if (assigned or (printed and not bound and not key) or returned) and not operand(toks, i):
                 out.append(("number", v, ""))
         elif t.type == tokenize.STRING:
             s = t.string
