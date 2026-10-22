@@ -1,0 +1,94 @@
+"""Cards: the card tool and the runner are the terminal plugin's (plugin/cards/), started the same way; a card's data
+file must be in the folder or the temp folder; v starts a copy of the chat whose card stands under the answer, and main
+hears of it with the analyst's next message."""
+import json
+import shutil
+import time
+
+import pytest
+from fakes import ScriptedClient, turns
+from fastapi.testclient import TestClient
+
+from thimble_browser import agent, cardrunner, chats, home, llm, tools
+from thimble_browser.app import build
+from thimble_browser.features import cards
+
+node = pytest.mark.skipif(shutil.which("node") is None, reason="the card runner runs on Node")
+
+ARGV = """
+import { runnerArgv } from './cards/argv.mjs'
+console.log(JSON.stringify(runnerArgv({ plugin: process.argv[1], cards: '/c', run: '/r', sock: '/r/s.sock' })))
+"""
+
+
+@node
+def test_the_runner_starts_as_the_terminal_starts_it():
+    import subprocess
+
+    got = subprocess.run(["node", "--input-type=module", "-e", ARGV, str(cardrunner.PLUGIN)], cwd=cardrunner.PLUGIN,
+                         capture_output=True, text=True, check=True)
+    theirs = json.loads(got.stdout)
+    ours = cardrunner.argv("node", "/c", "/r", "/r/s.sock")
+    # the terminal's starts with `env -i PATH=…`; the browser gives the runner the same empty environment itself
+    assert theirs[:3] == ["env", "-i", "PATH=/usr/bin:/bin"] and theirs[3:] == ours
+
+
+async def test_a_data_file_outside_the_folder_and_the_temp_folder_is_refused(folder, tmp_path):
+    ws = home.open_folder(folder)
+    (tmp_path / "rows.json").write_text("[]")
+    t = tools.Tools(ws, "main", folder)
+    for data, why in ((str(tmp_path / "rows.json"), "outside this folder and the temp folder"), ("", "`data` is empty"),
+                      ("$TMPDIR/none.json", "there is no file")):
+        r = await cards.card(t, {"title": "t", "data": data, "view": "function view(){}"})
+        assert r.is_error and why in r.text, r.text
+
+
+VIEW = "function view(props, surface) { const { Text } = surface.elements; return Text({ children: `${props.rows.length} runs` }) }"
+
+
+def designer(req):
+    asked = req["messages"][-1]["content"]
+    asked = asked if isinstance(asked, str) else json.dumps(asked)
+    if "pressed v under your last answer" in asked:
+        if turns(req) == 1:  # the designer's first step, after main's one answer
+            return [{"tool": "card", "input": {"title": "Runs", "data": "$TMPDIR/runs.json", "view": VIEW}}]
+        return ["Runs, as a count."]
+    if turns(req) == 0:
+        return ["There are 2 runs."]
+    return ["Noted."]
+
+
+@node
+def test_v_draws_a_card_under_the_answer_and_main_hears_of_it(folder, monkeypatch):
+    ws = home.open_folder(folder)
+    (home.temp_dir(ws) / "runs.json").write_text(json.dumps([{"run": "a"}, {"run": "b"}]))
+    monkeypatch.setattr(llm, "client", lambda: ScriptedClient(script=designer))
+    monkeypatch.setattr(agent, "AFTER_TURN", [])
+    app, auth, _ = build(21097, unsandboxed=True)
+    own = "http://127.0.0.1:21097"
+    with TestClient(app, base_url=own) as c:
+        r = c.post("/api/ui/key", json={"code": auth.mint()}, headers={"origin": own})
+        key, cookie = r.json()["key"], r.headers["set-cookie"].split(";")[0]
+
+        def api(method, path, **kw):
+            return c.request(method, f"/b/{key}/api/ws/{ws}{path}", headers={"cookie": cookie, "origin": own}, **kw)
+
+        assert api("POST", "/v", json={"chat": "main"}).status_code == 409  # no answer yet
+        api("POST", "/events", json={"kind": "main", "payload": {"text": "How many runs?"}})
+        t0 = time.time()
+        while not any(r["type"] == "done" for r in api("GET", "/chats/main").json()["events"]):
+            assert time.time() - t0 < 10
+            time.sleep(0.05)
+        started = api("POST", "/v", json={"chat": "main"})
+        assert started.status_code == 200, started.text
+        turn = started.json()["turn"]
+        t0 = time.time()
+        while not agent.load_messages(ws, "main") or not (notes := home.read_json(agent._notes_path(ws, "main"), [])):
+            assert time.time() - t0 < 10
+            time.sleep(0.05)
+        drawn = [r for r in chats.records(ws, "main") if r["type"] == "card"]
+        assert [d["turn"] for d in drawn] == [turn]
+        card = api("GET", f"/cards/{drawn[0]['card']}").json()
+        assert card["title"] == "Runs" and "2 runs" in json.dumps(card["tree"])
+        assert "a copy of you drew a card under it" in notes[0] and "2 runs" in notes[0]
+        assert [m["id"] for m in api("GET", "/chats").json()] == ["main"]

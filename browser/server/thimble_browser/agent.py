@@ -18,14 +18,18 @@ says the analyst stopped it, so the conversation stays valid for the next messag
 No process is started for an agent, and no tool reaches past what tools.py allows: an agent can read the folder, run
 Python in the sandbox and change the workspace's own store, nothing more.
 
-There are two agents. The chat agent, `main`, answers in main and in each thread; its tools and its prompt are the
-core's and those of the features that are on (features/). The views feature adds a view's builder, which starts only
-when the analyst asks for a view. Nothing else runs an agent.
+The chat agent, `main`, answers in main and in each thread; its tools and its prompt are the core's and those of the
+features that are on (features/). The features add the other agents: the marks' checker (features/marks.py), which a
+reply with marks starts, the cards' designer (features/cards.py), which v starts, and a view's builder (features/
+views.py), which starts when the analyst accepts a view. The checker and the designer are copies of the conversation
+(Sessions.spawn): they run main's prompt and main's tools, so their requests read main's cached conversation, and they
+may call only the tools their AgentDef allows.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets
 import threading
 from dataclasses import dataclass
@@ -50,14 +54,17 @@ READ = ("Read", "Grep", "Glob")
 
 @dataclass
 class AgentDef:
-    """What an agent is: its prompt (from the folder) and the tools it may call, each a value or a function read at each
-    request (the chat agent's change with the features that are on). `finished(session, result)` runs after each of its
-    turns (result: None when the turn ended normally, else stopped, failed or refused). The views feature adds its
-    builder to AGENTS."""
-    prompt: Callable[[Path], str]
+    """What an agent is: its prompt (made for its session) and the tools it gets, each a value or a function read at
+    each request (the chat agent's change with the features that are on). `allowed` are the tools it may call, when
+    not all it gets: a call of another tool answers `denied`. `finished(session, result)` runs after each of its
+    turns (result: None when the turn ended normally, else stopped, failed or refused). The features add their agents
+    to AGENTS."""
+    prompt: Callable[["Session"], str]
     tools: tuple[str, ...] | Callable[[], tuple[str, ...]]
     extra_roots: tuple[Path, ...] = ()
     finished: Callable[["Session", str | None], None] | None = None
+    allowed: tuple[str, ...] | None = None
+    denied: str = ""
 
     def tool_names(self) -> tuple[str, ...]:
         return self.tools() if callable(self.tools) else self.tools
@@ -66,18 +73,34 @@ class AgentDef:
 CORE_TOOLS = READ + ("run_python", "draft_report", *fixcopy.TOOLS)
 
 
-def _main_prompt(folder: Path) -> str:
-    """The chat agent's prompt: its core (prompts/main.md), then the part of each feature that is on."""
-    parts = "\n\n".join(prompts.render(name, {"workdir": str(folder)}) for name in features.main_prompt_parts())
-    return prompts.render("main.md", {"workdir": str(folder), "features": parts})
+MARK = re.compile(r"\[([^\]]*)\]\(#\)")
+
+
+def slots(ws: str, folder: Path) -> dict[str, str]:
+    """The values the prompts and the tool texts fill in: the folder, and the workspace's temp folder (`$TMPDIR` of
+    the code Claude runs), which Read takes as a path."""
+    return {"workdir": str(folder), "TMPDIR": str(home.temp_dir(ws)), "KEPT": "v"}
+
+
+def main_prompt(s: "Session") -> str:
+    """The chat agent's prompt: its core (prompts/main.md), then the part of each feature that is on. With marks off,
+    the marks in the texts' examples read as plain words (as the terminal's guidance.ts does)."""
+    vals = slots(s.ws, s.folder)
+    parts = "\n\n".join(prompts.render(name, vals) for name in features.main_prompt_parts())
+    text = prompts.render("main.md", {**vals, "features": parts})
+    return text if features.is_on("marks") else MARK.sub(r"\1", text)
+
+
+def main_tools() -> tuple[str, ...]:
+    return CORE_TOOLS + features.main_tools()
 
 
 AGENTS: dict[str, AgentDef] = {
-    "main": AgentDef(_main_prompt, lambda: CORE_TOOLS + features.main_tools()),
+    "main": AgentDef(main_prompt, main_tools),
 }
 
 # what runs after each turn of the chat agent, in main or a thread: fn(session, answer, result), `answer` the turn's
-# text and `result` None when the turn ended normally. A feature adds its own (the lenses' one look after a turn); it
+# text and `result` None when the turn ended normally. A feature adds its own (the marks' check after a turn); it
 # must not wait (start a task for work that takes time) and must not raise.
 AFTER_TURN: list[Callable[["Session", str, str | None], None]] = []
 
@@ -201,6 +224,22 @@ def reply_of(pieces: Any) -> str:
     return "".join(after if "".join(after).strip() else before).strip()
 
 
+def texts_of(pieces: Any) -> list[str]:
+    """A turn's texts, from its pieces in order, each `(is_call, text)`: the words between two calls joined, as the
+    page folds them into one row each (frontend chat/model.ts foldRecords). Pure."""
+    out: list[str] = []
+    joined = False  # the last piece was a text, so the next one joins it
+    for is_call, text in pieces:
+        if is_call:
+            joined = False
+        elif joined:
+            out[-1] += text
+        else:
+            out.append(text)
+            joined = True
+    return out
+
+
 def _block(b: Any) -> dict[str, Any]:
     """A content block of a reply as the next request sends it back: unchanged (thinking blocks keep their
     signatures)."""
@@ -248,8 +287,11 @@ class Session:
         self._pending_notify: asyncio.TimerHandle | None = None
         self._following: set[str] = set()  # the ON_INPUT tools that heard input in this request
         self.meta = meta
-        self.tools = Tools(ws, chat, folder, read_roots=[folder, *self.defn.extra_roots], unsandboxed=unsandboxed,
-                           on_card=self.cards.append, view=meta.get("view"))
+        self.turn: str | None = None  # the id of the turn running now, or the last one, in its `user` record
+        self.texts: list[str] = []  # the turn's texts, each the words between two calls, as the page shows them
+        self.tools = Tools(ws, chat, folder, read_roots=[folder, home.temp_dir(ws), *self.defn.extra_roots],
+                           unsandboxed=unsandboxed, on_card=self.cards.append, view=meta.get("view"),
+                           allowed=self.defn.allowed, denied=self.defn.denied)
         self.tools.session = self
 
     # ---- the request
@@ -266,10 +308,10 @@ class Session:
             "fast") is True
 
     def request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        tools = definitions(self.defn.tool_names())
+        tools = definitions(self.defn.tool_names(), slots(self.ws, self.folder))
         tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
         return {"max_tokens": MAX_TOKENS, "thinking": {"type": "adaptive"},
-                "system": [{"type": "text", "text": self.defn.prompt(self.folder), "cache_control": {"type": "ephemeral"}}],
+                "system": [{"type": "text", "text": self.defn.prompt(self), "cache_control": {"type": "ephemeral"}}],
                 "tools": tools, "messages": messages, "cache_control": {"type": "ephemeral"},
                 **llm.request_args(effort=self.effort(), fast=self.fast())}
 
@@ -299,8 +341,9 @@ class Session:
         `record` more fields of its row)."""
         if self.running:
             raise RuntimeError("Claude is still answering the last message in this chat")
+        self.turn = secrets.token_hex(4)
         chats.append(self.ws, self.chat, {"type": "user", "text": shown if shown is not None else text, "by": "browser",
-                                          **(record or {})})
+                                          "turn": self.turn, **(record or {})})
         messages = load_messages(self.ws, self.chat)
         self._close_open_calls(messages)  # a turn a server that stopped left open
         notes = take_notes(self.ws, self.chat)
@@ -443,6 +486,7 @@ class Session:
         self.running = False
         chats.hub.publish(self.ws, {"type": "chat", "chat": self.chat})
         self.finished(result)
+        self.texts = texts_of(pieces)
         if self.role == "main":
             text_out = reply_of(pieces)
             for fn in AFTER_TURN:
@@ -509,9 +553,22 @@ class Sessions:
     def running(self, ws: str) -> set[str]:
         return {c for (w, c), s in self._s.items() if w == ws and s.running}
 
-    def fork(self, ws: str, chat: str) -> None:
-        """A new thread's conversation: a copy of main's, up to its last finished turn."""
-        save_messages(ws, chat, complete_prefix(load_messages(ws, "main")))
+    def fork(self, ws: str, chat: str, source: str = "main") -> None:
+        """A new chat's conversation: a copy of `source`'s, up to its last finished turn."""
+        save_messages(ws, chat, complete_prefix(load_messages(ws, source)))
+
+    async def spawn(self, ws: str, kind: str, source: str, prompt: str, *, title: str,
+                    meta: dict[str, Any] | None = None) -> Session:
+        """A copy of the chat `source` that works in the background as the agent `kind` (one of AGENTS): a chat the
+        thread list does not show (chats.HIDDEN), with `source`'s conversation, sent `prompt` as its message. `meta`:
+        more fields of its chat's meta, which its agent reads (Session.meta)."""
+        chat = f"{kind[0]}{secrets.token_hex(5)}"
+        m = {**chats.new_meta(chat, kind=kind, title=title, parent=source), **(meta or {}), "agent": kind}
+        chats.save_meta(ws, m)
+        self.fork(ws, chat, source)
+        s = self.get(ws, chat)
+        await s.send(prompt)
+        return s
 
     async def restart_idle(self, ws: str) -> None:
         """Nothing to restart: each request reads the settings anew."""

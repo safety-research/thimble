@@ -2,12 +2,14 @@
 input schemas are the `## <name>` sections of prompts/tools*.md; each agent gets a fixed set (agent.AGENTS).
 
 The core's tools are here: Read, Grep and Glob, and run_python. Each feature adds its own (features/, register), such
-as the cards' add_card or the report's write_document, as functions fn(tools, args) -> Result.
+as the cards' card or the report's write_document, as functions fn(tools, args) -> Result.
 
 What a tool can touch:
-- Read, Grep and Glob read files under the agent's read roots (the folder; for the view builder also the view kit's
-  docs and the worked examples), each path resolved, symlinks included, and checked to be inside one of them.
-- run_python runs code in the sandbox (cards/sandbox.py), as a card's code does.
+- Read, Grep and Glob read files under the agent's read roots (the folder and the workspace's temp folder; for the view
+  builder also the view kit's docs and the worked examples), each path resolved, symlinks included, and checked to be
+  inside one of them.
+- run_python runs code in the sandbox (cards/sandbox.py), which reads the folder and writes only the workspace's temp
+  folder (its $TMPDIR).
 - draft_report drafts a report of a problem with thimble for the person to preview (issues.py); it never sends.
 - A feature's tools change the workspace's own store (its cards, its report, a view's files), never the folder of
   files.
@@ -24,7 +26,7 @@ from typing import Any, Awaitable, Callable
 
 import jsonschema
 
-from . import canvas, chats, corpus, prompts
+from . import canvas, chats, corpus, home, prompts
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -43,8 +45,6 @@ REF_RESOLVERS: dict[str, Callable[[str, str], dict[str, Any]]] = {}
 def resolver(ref: str) -> Callable[[str, str], dict[str, Any]] | None:
     """The feature's resolver of `ref`, or None for a ref of the core's own (a card, a file)."""
     return next((fn for prefix, fn in REF_RESOLVERS.items() if ref.startswith(prefix)), None)
-# what read_ref reads for a ref of a feature's own form, by its prefix, such as `call:` (calls.py): fn(tools, ref)
-REFS: dict[str, Callable[["Tools", str], "Result"]] = {}
 
 
 def register(name: str, fn: Callable[["Tools", dict[str, Any]], Awaitable["Result"]]) -> None:
@@ -69,20 +69,20 @@ def _err(text: str) -> Result:
     return Result(text, True)
 
 
-def schema_of(name: str) -> tuple[str, dict[str, Any]]:
-    """(description, input schema) of a tool, from prompts/tools.md."""
-    body = prompts.tool_text(name)
+def schema_of(name: str, slots: dict[str, str] | None = None) -> tuple[str, dict[str, Any]]:
+    """(description, input schema) of a tool, from prompts/tools.md, with `slots` filled in its description."""
+    body = prompts.tool_text(name, slots)
     m = re.search(r"```json\n(.*?)\n```", body, re.S)
     if not m:
         raise prompts.PromptError(f"tools.md: no schema for {name}")
     return body[: m.start()].strip(), json.loads(m.group(1))
 
 
-def definitions(names: tuple[str, ...]) -> list[dict[str, Any]]:
+def definitions(names: tuple[str, ...], slots: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """The tools as the Messages API takes them, in a fixed order so the request's prefix stays cacheable."""
     out = []
     for name in names:
-        desc, schema = schema_of(name)
+        desc, schema = schema_of(name, slots)
         out.append({"name": name, "description": desc, "input_schema": schema, "eager_input_streaming": True})
     return out
 
@@ -92,16 +92,19 @@ class Tools:
 
     def __init__(self, ws: str, chat: str, folder: Path, *, read_roots: list[Path] | None = None,
                  unsandboxed: bool = False, on_card: Callable[[str], None] | None = None,
-                 view: str | None = None) -> None:
+                 view: str | None = None, allowed: tuple[str, ...] | None = None, denied: str = "") -> None:
         self.ws, self.chat, self.folder, self.unsandboxed = ws, chat, folder.resolve(), unsandboxed
         self.read_roots = [p.resolve() for p in (read_roots or [folder])]
         self.on_card = on_card or (lambda cid: None)
         self.view = view  # the slug of the view this agent builds
+        self.allowed, self.denied = allowed, denied  # the tools this agent may call (None: all), and why not another
         self.session: Any = None  # the agent.Session these tools serve, which a feature's tool may read
 
     async def call(self, name: str, args: Any) -> Result:
         """Run tool `name` on `args`, checked against its schema first (inputs stream in, so the API does not check
         them)."""
+        if self.allowed is not None and name not in self.allowed:
+            return _err(self.denied or f"this agent may not call {name}")
         fn = getattr(self, f"t_{name}", None)
         if fn is None and name in EXTRA:
             extra = EXTRA[name]
@@ -209,7 +212,7 @@ class Tools:
 
     async def t_run_python(self, args: dict[str, Any]) -> Result:
         res = await canvas.run_code(self.ws, str(args.get("code") or ""), self.folder, timeout=120,
-                                    unsandboxed=self.unsandboxed)
+                                    unsandboxed=self.unsandboxed, tmp=home.temp_dir(self.ws))
         cell = {"id": "run", "outputs": [{**o, "_out": i} for i, o in enumerate(res.get("outputs") or [])]}
         text = canvas.outputs_text(cell, limit=RESULT_CHARS).replace("(cite a value as card:run#<column>/<row>)", "")
         return Result(text, res.get("status") != "ok")

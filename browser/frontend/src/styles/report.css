@@ -3147,15 +3147,6 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   font: var(--type-ui-sm);
   color: var(--text-secondary);
 }
-/* -------- a lens's mark on its words (decorations.ts): its lens's fill; open, an underline in the ink -------- */
-.wu-root .wu-editor .wu-lens {
-  background: var(--lens);
-  border-radius: var(--radius-hl);
-  cursor: pointer;
-}
-.wu-root .wu-editor .wu-lens-active {
-  box-shadow: 0 1.5px 0 currentColor;
-}
 /* -------- a block Claude wrote, until the person edits it: a quiet "Claude" in the right gutter, a line below the block's
    actions (which stand on its first line) and gone while the block is hovered -------- */
 .wu-root .wu-editor .wu-by-claude .bn-block-content {

@@ -28,7 +28,6 @@ import { Icon, type IconName } from '../components/Icon'
 import { Menu } from '../components/Menu'
 import { api, reportApi } from '../lib/api'
 import { bus } from '../lib/bus'
-import { HealScope } from '../lib/heal'
 import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import { useTheme } from '../lib/theme'
@@ -36,9 +35,9 @@ import type { Writeup } from '../lib/types'
 import { blockPos, caretBack, caretInBlock, caretNear } from './caret'
 import { CARD_MIME } from './cards'
 import { ReportContext, type ReportCtx } from './context'
-import { marksExtension, refreshMarks, type Flag, type MarksCtx, type TermMark } from './decorations'
+import { marksExtension, refreshMarks, type Flag, type MarksCtx } from './decorations'
 import { mergeUnsaved } from './merge'
-import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, docText, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, lastChanged, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
+import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, lastChanged, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
 import { schema, type ReportPartialBlock } from './schema'
 
 export const SAVE_DEBOUNCE_MS = 800
@@ -116,8 +115,6 @@ export interface ReportEditorProps {
   doc: Writeup
   /** the tint of every marked passage */
   flags: ReadonlyMap<string, Flag>
-  /** the lenses' marks, highlighted on their words */
-  marks?: readonly TermMark[]
   filter: DocFilter | null
   /** this tab's token, echoed in the `edited` event */
   client: string
@@ -361,17 +358,16 @@ const pointerPressExtension = () =>
     prosemirrorPlugins: [new Plugin({ props: { handleDOMEvents: { mousedown: (_view, e) => e.button === 0 && pointKeyHeld(e) } } })],
   })
 
-export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSaved, onFigures, captionOf, ref }: ReportEditorProps) {
+export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onFigures, captionOf, ref }: ReportEditorProps) {
   const { resolved } = useTheme()
   const docRef = useRef<Writeup | null>(doc)
-  const ctx = useRef<MarksCtx>({ slug, doc, flags, marks, filter: filter?.sets ?? null })
+  const ctx = useRef<MarksCtx>({ slug, doc, flags, filter: filter?.sets ?? null })
   const initial = useMemo(() => editorBlocksFromWire(blocksFromDoc(doc)) as ReportPartialBlock[], []) // eslint-disable-line react-hooks/exhaustive-deps
   // the line where a moved block lands is drawn by report.css as the card's drop line is (`.wu-dropline`), not in
   // BlockNote's pale blue bar, so both drags show one mark and neither reads as Notion's
   const editor = useCreateBlockNote({ schema, initialContent: initial, dictionary: DICTIONARY as typeof en, extensions: [marksExtension(ctx.current), pointerPressExtension()], trailingBlock: true, dropCursor: { color: false, width: 3 }, domAttributes: { editor: { spellcheck: 'false' } } }, [])
 
   // the words the citations in the text are checked against: the document as last stored
-  const healText = useMemo(() => docText(doc), [doc])
   const lastSaved = useRef<DocBlocks>(blocksFromDoc(doc))
   const orig = useRef<Map<string, string>>(origTexts(lastSaved.current))
   const own = useRef<Writeup | null>(null)
@@ -604,9 +600,8 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
     ctx.current.flags = flags
     ctx.current.filter = filter?.sets ?? null
     ctx.current.slug = slug
-    ctx.current.marks = marks
     refreshMarks(editor)
-  }, [doc, flags, marks, filter, slug, editor])
+  }, [doc, flags, filter, slug, editor])
 
   // a card from the sidebar: a figure block before the block `before` names, else after the document's last block
   // that says something (the trailing empty line stays last)
@@ -797,7 +792,6 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
         onDropCapture={onDrop}
       >
         {line && <div className="wu-dropline" style={{ top: line.top }} />}
-        <HealScope text={healText} workspace={ws}>
         <BlockNoteView
           editor={editor}
           editable={!doc.drafting}
@@ -826,7 +820,6 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
             <SideMenuController floatingUIOptions={ACTS_FLOATING} sideMenu={BlockActions} />
           </ActsContext.Provider>
         </BlockNoteView>
-        </HealScope>
       </div>
     </ReportContext.Provider>
   )

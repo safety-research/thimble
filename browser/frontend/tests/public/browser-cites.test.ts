@@ -1,5 +1,5 @@
-// thimble browser: citations written as Markdown links (the terminal plugin's form) become chips, and explain marks
-// fold onto the reply row whose words they mark.
+// thimble browser: links to cards and records become chips, and a reply's marks and v's cards fold onto the text rows
+// of the turn they belong to.
 import { describe, expect, it } from 'vitest'
 import { citeLinks } from '../../src/chat/markdown'
 import { foldRecords } from '../../src/chat/model'
@@ -21,20 +21,26 @@ describe('citeLinks', () => {
   })
 })
 
-describe('lens marks', () => {
-  it('go to the first text row of the turn that holds the term, an earlier explainers record among them', () => {
+describe('marks', () => {
+  it('go to the text of their turn they were found in, at their order there, also after the next turn started', () => {
+    const item = (piece: number, k: number, words: string, status: 'verified' | 'corrected') => ({ n: piece * 10 + k, piece, k, words, sentence: '', status, shown: words })
     const records: ChatRecord[] = [
-      { type: 'user', text: 'why?' },
-      { type: 'text', delta: 'Counting first.' },
+      { type: 'user', text: 'why?', turn: 'aaaa0001' },
+      { type: 'text', delta: 'Counting [3](#) first.' },
       { type: 'tool_use', id: 't1', name: 'Read', input: {} },
-      { type: 'text', delta: 'Most are a flaky-test.' },
+      { type: 'text', delta: 'Most [12](#) of [40](#) are flaky.' },
       { type: 'done' },
-      { type: 'glosses', glosses: [{ term: 'flaky-test', body: 'A test that fails at random.' }] },
-      { type: 'marks', marks: [{ id: 'm1', lens: 'details', term: 'Counting first', body: 'It counted one file.' }] },
+      { type: 'user', text: 'and then?', turn: 'aaaa0002' },
+      { type: 'marks', turn: 'aaaa0001', items: [item(0, 0, '3', 'verified'), item(1, 0, '12', 'verified'), item(1, 1, '40', 'corrected')] },
+      { type: 'card', turn: 'aaaa0001', card: 'c00000001' },
+      { type: 'text', delta: 'Then it stopped.' },
     ]
-    const rows = foldRecords(records)
-    const texts = rows.filter((r) => r.kind === 'text') as { text: string; marks?: { term: string; lens: string }[] }[]
-    expect(texts[0].marks?.map((m) => [m.lens, m.term])).toEqual([['details', 'Counting first']])
-    expect(texts[1].marks?.map((m) => [m.lens, m.term])).toEqual([['explain', 'flaky-test']])
+    const texts = foldRecords(records).filter((r) => r.kind === 'text') as { text: string; checks?: { words: string; status: string }[]; turnMarks?: unknown[]; cards?: string[] }[]
+    expect(texts[0].checks?.map((m) => m.words)).toEqual(['3'])
+    expect(texts[1].checks?.map((m) => [m.words, m.status])).toEqual([['12', 'verified'], ['40', 'corrected']])
+    // the reply carries the turn's marks for its footer, and v's cards
+    expect(texts[1].turnMarks).toHaveLength(3)
+    expect(texts[1].cards).toEqual(['c00000001'])
+    expect(texts[2].checks).toBeUndefined()
   })
 })

@@ -54,7 +54,7 @@ List the folder's files whose path matches a glob, such as `**/*.jsonl` or `runs
 
 ## run_python
 
-Run Python over the folder's files to compute a value: a count, a total, a first or last. The code runs in a sandbox, in the folder, which it can read and not change, with no network, and with pandas. It returns what the code prints and the value of its last line, such as a DataFrame. Each run starts fresh, so the code loads what it needs. Put a result the analyst should see in a card.
+Run Python over the folder's files to compute a value: a count, a total, a first or last. The code runs in a sandbox, in the folder, which it can read and not change, with no network, and with pandas. It returns what the code prints and the value of its last line, such as a DataFrame. Each run starts fresh, so the code loads what it needs; a file it writes in `$TMPDIR` stays there for this conversation.
 
 ```json
 {

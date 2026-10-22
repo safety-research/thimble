@@ -222,7 +222,7 @@ def footer(removed: int) -> str:
 
 def kernel_fixes() -> Path:
     """Where the kernel keeps the fixes that change thimble's code (fixcopy.py), as the terminal's `thimble fix`."""
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     return fix.fixes_home()
 
@@ -250,7 +250,7 @@ class _NoFeed:
 def draft_fix(ws: str, slug: str, title: str, body: str) -> tuple[str, int]:
     """The draft of a fix the agent made in a copy (fixcopy.py), built by the kernel: the issue, and when the copy has
     a change, the pull request's text and its diff, all scanned with this session's terms. (slug, details removed)."""
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     fx = fix.load(slug)
     fx["workspace"] = ws
@@ -407,7 +407,7 @@ async def draft_report(t: Any, args: dict[str, Any]) -> Result:
 def _send_fix(d: Path, slug: str, answer: Any, ask: Any) -> dict[str, Any]:
     """The person's answer to a fix's preview, through the kernel: send (a draft pull request and an issue, or an
     issue alone for a request), file (one Markdown file, nothing sent) or cancel."""
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     if answer not in ("send", "file", "cancel"):
         raise HTTPException(400, "answer is send, file or cancel")
@@ -427,7 +427,7 @@ def _send_fix(d: Path, slug: str, answer: Any, ask: Any) -> dict[str, Any]:
 
 def fixes_of(ws: str) -> dict[str, Any]:
     """This workspace's fixes of thimble's code as the page's fix line reads them, and the one turned on."""
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     out = []
     for slug in fix.all_slugs():
@@ -455,7 +455,7 @@ def register(ctx: Any) -> None:
     @app.post("/api/ws/{c}/fixes/{slug}/use")
     async def fixes_use(c: str, slug: str) -> Any:
         """Try it: restart this server from the fix's copy (restart.py). The terminal plugin is left as it is."""
-        from .kernel_fix import fix  # noqa: PLC0415
+        from .kernel import fix  # noqa: PLC0415
 
         ctx.ws_of(c)
         try:
@@ -496,7 +496,7 @@ def register(ctx: Any) -> None:
         if not first.startswith("# "):
             raise HTTPException(400, 'the text starts with its title as "# ..."')
         if _is_kernel(d):
-            from .kernel_fix import fix  # noqa: PLC0415
+            from .kernel import fix  # noqa: PLC0415
 
             # the kernel's footer goes, and the pull request's text comes back as the draft's "## Change"
             issue = re.split(r"\n---\nthimble ", text, maxsplit=1)[0].rstrip()
@@ -525,7 +525,7 @@ def register(ctx: Any) -> None:
         if not privacy.keepable(hit):
             raise HTTPException(400, "a key or a token is never sent: edit the text instead")
         if _is_kernel(d):
-            from .kernel_fix import fix  # noqa: PLC0415
+            from .kernel import fix  # noqa: PLC0415
 
             if not body.get("keep", True):
                 raise HTTPException(400, "a kept detail of a fix stays kept: edit the text to take it out")

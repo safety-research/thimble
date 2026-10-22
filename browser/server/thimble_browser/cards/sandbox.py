@@ -1,10 +1,12 @@
-"""Runs model-written code in a sandbox: a card's code (runner.py), a view's reader (views/reader_runner.py), and the
-program that draws a card on the drawing toolkit (run_program: browser/kit/sandbox-node.mjs in Node).
+"""Runs model-written code in a sandbox: a card's code and run_python's (runner.py), a view's reader
+(views/reader_runner.py), a fix's tests (run_tests), and the card runner, which draws the cards of the chat
+(cardrunner.py, in Node).
 
 Each run is a new process. It sees:
 - the folder of files, read-only;
 - the Python it runs on and the system's libraries, read-only;
-- a new, empty folder of its own (its TMPDIR and HOME), deleted when the run ends.
+- a new, empty folder of its own (its HOME), deleted when the run ends;
+- for the code Claude runs, the workspace's temp folder (its TMPDIR, home.temp_dir), kept between runs.
 It does not see the person's home folder, thimble browser's own folder (the workspaces), the network (127.0.0.1
 included) or the server's environment: its environment is child_env's few variables. It is stopped when its time is up.
 
@@ -43,10 +45,6 @@ from typing import Any, Sequence
 from .. import home
 
 RUNNER = Path(__file__).resolve().with_name("runner.py")
-# the drawing toolkit: kit.js and the Node script that runs a program on it
-DRAW = Path(__file__).resolve().parents[3] / "kit"
-DRAW_SCRIPT = DRAW / "sandbox-node.mjs"
-PROGRAM_S = 15.0  # a program's whole run, Node's start included; the toolkit's own limit is far shorter
 GRACE_S = 10.0  # past the run's own timeout, before the server stops it
 STOP_S = 2.0  # between SIGTERM and SIGKILL
 
@@ -197,12 +195,13 @@ def python_dirs() -> list[str]:
 
 def rules(*, platform: str, corpus: str | Path, run_dir: str | Path, python: Sequence[str | Path],
           read: Sequence[str | Path] = (), home_dir: str | Path, workspaces: str | Path,
-          seccomp: str | Path = SECCOMP, bwrap: str | Path = BWRAP) -> dict[str, Any]:
+          seccomp: str | Path = SECCOMP, bwrap: str | Path = BWRAP, write: Sequence[str | Path] = ()) -> dict[str, Any]:
     """srt's configuration for one run (module docstring). `platform` is sys.platform; `python` the folders the Python
     runs from (python_dirs); `read` more folders it reads (the runner's, a view's); `home_dir` the person's home
-    folder; `workspaces` thimble browser's own folder."""
+    folder; `workspaces` thimble browser's own folder; `write` more folders it writes besides its own (the
+    workspace's temp folder)."""
     linux = platform.startswith("linux")
-    shown = [str(corpus), str(run_dir), *map(str, python), *map(str, read)]
+    shown = [str(corpus), str(run_dir), *map(str, write), *map(str, python), *map(str, read)]
     if linux:
         shown = [*(p for p in LINUX_SYSTEM if os.path.lexists(p)), str(seccomp), *shown]
         hidden = ["/", str(home_dir), str(workspaces)]
@@ -214,7 +213,7 @@ def rules(*, platform: str, corpus: str | Path, run_dir: str | Path, python: Seq
         "filesystem": {
             "denyRead": [_literal(p) for p in _outermost(hidden, shown)],
             "allowRead": [_literal(p) for p in shown],
-            "allowWrite": [_literal(str(run_dir))],
+            "allowWrite": [_literal(str(run_dir)), *(_literal(str(p)) for p in write)],
             "denyWrite": [_literal(p) for p in NO_WRITE],
         },
     }
@@ -223,10 +222,10 @@ def rules(*, platform: str, corpus: str | Path, run_dir: str | Path, python: Seq
     return out
 
 
-def rules_for(corpus: Path, run_dir: Path, read: Sequence[Path] = ()) -> dict[str, Any]:
+def rules_for(corpus: Path, run_dir: Path, read: Sequence[Path] = (), write: Sequence[Path] = ()) -> dict[str, Any]:
     """rules() for a run on this machine: the runner's folder is always read."""
     return rules(platform=sys.platform, corpus=corpus, run_dir=run_dir, python=python_dirs(),
-                 read=[RUNNER.parent, *read], home_dir=Path.home(), workspaces=home.root())
+                 read=[RUNNER.parent, *read], home_dir=Path.home(), workspaces=home.root(), write=write)
 
 
 def _literal(p: str) -> dict[str, Any]:
@@ -255,10 +254,11 @@ def _under(p: Path, root: Path) -> bool:
 # ---------------------------------------------------------------- a run
 
 
-def child_env(run_dir: str | Path) -> dict[str, str]:
-    """The run's whole environment: nothing of the server's but its time zone."""
+def child_env(run_dir: str | Path, tmp: str | Path | None = None) -> dict[str, str]:
+    """The run's whole environment: nothing of the server's but its time zone. TMPDIR is `tmp` when given (the
+    workspace's temp folder), else the run's own folder."""
     d = str(run_dir)
-    env = {"PATH": "/usr/bin:/bin", "HOME": d, "TMPDIR": d, "LANG": "C.UTF-8", "MPLCONFIGDIR": f"{d}/mpl",
+    env = {"PATH": "/usr/bin:/bin", "HOME": d, "TMPDIR": str(tmp or d), "LANG": "C.UTF-8", "MPLCONFIGDIR": f"{d}/mpl",
            "XDG_CACHE_HOME": f"{d}/cache", "IPYTHONDIR": f"{d}/ipython", "PYTHONDONTWRITEBYTECODE": "1",
            "MPLBACKEND": "Agg"}
     zone = os.environ.get("TZ") or _zone_file()
@@ -305,10 +305,10 @@ def copy_in(run_dir: Path, req: dict[str, Any], folders: Sequence[Path]) -> tupl
 
 
 async def run_script(script: Path, req: dict[str, Any], corpus: Path, *, extra_ro: list[Path] | None = None,
-                     timeout: float = 60.0, unsandboxed: bool = False) -> dict[str, Any]:
+                     timeout: float = 60.0, unsandboxed: bool = False, tmp: Path | None = None) -> dict[str, Any]:
     """Run `script` (a runner of this package) in the sandbox with `req` as JSON on stdin; its JSON answer, or
     {status: error, ...} with an error bundle when it could not run. `extra_ro` are more folders the run reads
-    (copy_in)."""
+    (copy_in); `tmp` a folder it may write, its TMPDIR, kept after the run."""
     corpus = corpus.resolve()
     py = sys.executable
     st = status()
@@ -316,10 +316,10 @@ async def run_script(script: Path, req: dict[str, Any], corpus: Path, *, extra_r
         return _failed("NoSandbox", f"thimble browser runs code only in a sandbox, and found none: {st.why}. {st.fix}")
     run_dir = Path(tempfile.mkdtemp(prefix="thimble-run-")).resolve()
     try:
-        env = child_env(run_dir)
+        env = child_env(run_dir, tmp)
         if st.kind:
             req, ro = copy_in(run_dir, req, extra_ro or [])
-            argv = launcher_argv(st.node, rules_for(corpus, run_dir, [script.resolve().parent, *ro]),
+            argv = launcher_argv(st.node, rules_for(corpus, run_dir, [script.resolve().parent, *ro], [tmp] if tmp else []),
                                  [py, "-I", str(script)], env)
             env = launcher_env(run_dir)
         else:
@@ -428,61 +428,8 @@ def _failed(ename: str, evalue: str, tb: list[str] | None = None) -> dict[str, A
                                                                                 "traceback": tb or []}}]}
 
 
-async def run_code(code: str, corpus: Path, *, timeout: float = 60.0, unsandboxed: bool = False) -> dict[str, Any]:
+async def run_code(code: str, corpus: Path, *, timeout: float = 60.0, unsandboxed: bool = False,
+                   tmp: Path | None = None) -> dict[str, Any]:
     """{status, outputs, frame} for a card's `code` run over `corpus`."""
     req = {"code": code, "corpus": str(corpus.resolve()), "timeout": timeout}
-    return await run_script(RUNNER, req, corpus, timeout=timeout, unsandboxed=unsandboxed)
-
-
-async def run_program(program: str, data: Any, *, w: int, h: int = 30, title: str = "", card_id: str = "",
-                      mode: str = "inline", unsandboxed: bool = False) -> dict[str, Any]:
-    """The drawing of `program` on `data` (the toolkit's JSON: root, regions, cites, examples, warnings, error), run in
-    Node inside the sandbox, which reads only the toolkit's folder and Node itself, writes only its own folder and has
-    no network. Inside, the program runs in a vm context of its own with the toolkit and its data alone
-    (sandbox-node.mjs, started with Node's --permission to read only that folder). A run that cannot start or does not
-    end comes back as a drawing whose `error` says why."""
-    req = {"program": program, "data": data, "w": w, "h": h, "mode": mode, "surface": "browser", "title": title,
-           "id": card_id}
-    st = status()
-    if not st.kind and not unsandboxed:
-        return _no_drawing("NoSandbox", f"thimble browser runs a card's program only in a sandbox, and found none: "
-                           f"{st.why}. {st.fix}", title, w)
-    node = st.node or shutil.which("node") or "node"
-    command = [node, "--permission", f"--allow-fs-read={DRAW}", str(DRAW_SCRIPT)]
-    run_dir = Path(tempfile.mkdtemp(prefix="thimble-draw-")).resolve()
-    try:
-        env = child_env(run_dir)
-        if st.kind:
-            prefix = Path(os.path.realpath(node)).parent.parent
-            rule = rules(platform=sys.platform, corpus=run_dir, run_dir=run_dir, python=[prefix], read=[DRAW],
-                         home_dir=Path.home(), workspaces=home.root())
-            argv = launcher_argv(node, rule, command, env)
-            env = launcher_env(run_dir)
-        else:
-            argv = command
-        proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.PIPE,
-                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                                                    env=env, cwd=str(run_dir), start_new_session=True)
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(json.dumps(req, default=str).encode()), PROGRAM_S)
-        except asyncio.TimeoutError:
-            await _stop(proc)
-            return _no_drawing("TimeLimit", f"the program did not end in {PROGRAM_S:g} s", title, w)
-        try:
-            got = json.loads(out.decode() or "null")
-        except ValueError:
-            got = None
-        if not isinstance(got, dict):
-            return _no_drawing("SandboxError", (err.decode(errors="replace").strip()[-300:] or
-                                                "the program's run printed no drawing"), title, w)
-        return got
-    finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
-
-
-def _no_drawing(name: str, message: str, title: str, w: int) -> dict[str, Any]:
-    """A drawing that says the program could not run, as the toolkit draws any other error."""
-    return {"kit": 1, "w": w, "h": 1, "mode": "inline", "title": title, "regions": [], "cites": {}, "examples": {},
-            "warnings": [], "error": {"name": name, "message": message, "line": None, "fix": message},
-            "root": {"t": "text", "runs": [{"s": "× ", "tone": "bad"}, {"s": "could not draw: ", "tone": "dim"},
-                                            {"s": f"{name}: {message}", "tone": "ink"}]}}
+    return await run_script(RUNNER, req, corpus, timeout=timeout, unsandboxed=unsandboxed, tmp=tmp)

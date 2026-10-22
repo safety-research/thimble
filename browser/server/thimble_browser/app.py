@@ -1,8 +1,9 @@
 """The server: the page's files and the API it reads, on 127.0.0.1 only.
 
 The core is here: the sign-in, the workspaces and the folder of files, the chats and their agents, the event stream and
-the page. Each feature (features/: cards, citations, lenses, labels, report, views) adds its own routes, tools and
-prompt part in one place, features.register_all. The routes are the ones thimble 0.8's page calls, so its components
+the page, the Canvas tab's routes (canvas.py) and what a ref names (GET /api/corpora/{c}/ref, for the page's links
+to cards, labels and records). Each feature (features/: marks, cards, labels, report, views) adds its own routes, tools
+and prompt part in one place, features.register_all. The routes are the ones thimble 0.8's page calls, so its components
 work unchanged (frontend/). A route the page calls that no part answers yet answers with an empty list, which the page
 shows as nothing to show.
 """
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 import os
 import secrets
 from pathlib import Path
@@ -19,7 +21,7 @@ from typing import Any, Callable
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import chats, corpus, features, files, fixcopy, home, issues, settings, settings_api
+from . import canvas, cardrunner, chats, corpus, features, files, fixcopy, home, issues, settings, settings_api, tools
 from .agent import Sessions
 from .auth import Auth, Guard
 from .hub import hub
@@ -45,8 +47,31 @@ class Ctx:
     bad: Callable[[Exception], HTTPException]
 
 
+def resolve(ws: str, folder: Path, ref: str, value: str | None = None) -> dict[str, Any]:
+    """What `ref` points at, as the page opens it: {ref, kind, excerpt, ...}; KeyError, FileNotFoundError or
+    corpus.OutsideFolder for a ref that names nothing. `value` is the link's own words, which a value of a card is read
+    against (canvas.resolve_card_ref)."""
+    if (fn := tools.resolver(ref)) is not None:
+        return fn(ws, ref)
+    if ref.startswith(("card:", "cell:")):
+        got = canvas.resolve_card_ref(ws, ref, value)
+        got["record"] = canvas.find(ws, ref)[1]
+        return got
+    got = corpus.resolve(folder, ref, read=lambda: chats.read_paths(ws, folder))
+    if got["kind"] in ("record", "range"):
+        end = got.get("meta", {}).get("end", got["line"])
+        page = corpus.page(folder, got["path"], got["line"], end - got["line"] + 1)
+        got.update(end_line=end, records=page["records"])
+    return got
+
+
 def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]:
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(_app: Any) -> Any:
+        yield
+        await cardrunner.close_all()  # the card runners stop with the server
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     auth = Auth(port)
     sessions = Sessions(unsandboxed=unsandboxed)
     started = home.now()
@@ -354,10 +379,19 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
 
     # ---- the core's own modules, then the features (features/): each adds its own routes, tools and agents
 
+    @app.get("/api/corpora/{c}/ref")
+    def resolve_ref(c: str, ref: str, value: str | None = None) -> dict[str, Any]:
+        """What `ref` names, as the page opens it: a card of the canvas, a label's value or a record of a file."""
+        try:
+            return resolve(c, folder_of(c), ref, value)
+        except Exception as e:  # noqa: BLE001
+            raise bad(e) from None
+
     ctx = Ctx(app=app, auth=auth, sessions=sessions, folder_of=folder_of, ws_of=ws_of, bad=bad)
     settings_api.register(ctx)
     files.register(ctx)
     issues.register(ctx)
+    canvas.register(ctx)
     features.register_all(ctx)
 
     @app.get("/api/ws/{c}/features")

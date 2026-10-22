@@ -3,9 +3,8 @@
 // surfaces it names, and the place that draws a surface asks `useFeature(name)` first, so a feature turned off in
 // Settings takes its surfaces with it and leaves the others as they are:
 //
-//   cards      the Canvas tab, which opens on the first card a turn makes (lib/events.ts)
-//   citations  links from Claude's words to their records (chat/markdown.tsx): off, a link's words are plain text
-//   lenses     the marks of the explainers, important details and checks (components/LensMark.tsx)
+//   marks      the marks on the claims of a reply, and their check (marks/)
+//   cards      the cards Claude draws under its calls and v's cards under an answer (cards/)
 //   labels     the Labels pane of the Files tab and the colors it gives records (files/FilesTab.tsx)
 //   report     the Report tab (shell/Shell.tsx)
 //   views      the views bar of the Files tab and a view proposal's card (files/FilesTab.tsx, chat/ProposalCard.tsx)
@@ -16,7 +15,7 @@ import { useSyncExternalStore } from 'react'
 import { apiUrl } from './lib/browserKey'
 import { bus } from './lib/bus'
 
-export type FeatureName = 'cards' | 'citations' | 'lenses' | 'labels' | 'report' | 'views'
+export type FeatureName = 'marks' | 'cards' | 'labels' | 'report' | 'views'
 
 /** A feature as Settings lists it (server features.listing). */
 export interface FeatureRow {
@@ -27,7 +26,7 @@ export interface FeatureRow {
 }
 
 /** The features in the order the server registers them. */
-export const FEATURES: readonly FeatureName[] = ['cards', 'citations', 'lenses', 'labels', 'report', 'views']
+export const FEATURES: readonly FeatureName[] = ['marks', 'cards', 'labels', 'report', 'views']
 
 let rows: readonly FeatureRow[] = []
 let readFor: string | null = null

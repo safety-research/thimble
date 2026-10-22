@@ -20,9 +20,8 @@ import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
-import { listedLabels, type SideTab } from './LensSidebar'
+import { listedLabels, type SideTab } from './LabelsSidebar'
 import { useConcepts } from '../canvas/concepts'
-import { useLenses } from '../lib/marks'
 import { useFeature } from '../features'
 
 export interface SurfaceTab extends TabOption<Tab> {
@@ -35,20 +34,18 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
-  /** the Labels and Checks sidebar's tab while it is open (shell/LensSidebar.tsx), and how to open or close it */
+  /** the Labels sidebar's tab while it is open (shell/LabelsSidebar.tsx), and how to open or close it */
   side?: SideTab | null
   onSide?: (tab: SideTab | null) => void
 }
 
-/** The top bar's two quiet buttons that open the Labels and Checks sidebar on their tab, each with its count; a button
- * whose feature is off (features.ts) is not shown. */
+/** The top bar's quiet button that opens the Labels sidebar, with its count; not shown while labels are off
+ * (features.ts). */
 function SideButtons({ ws, side, onSide }: { ws: string; side: SideTab | null; onSide: (tab: SideTab | null) => void }) {
   const labelsOn = useFeature('labels')
-  const lensesOn = useFeature('lenses')
   const concepts = useConcepts(ws)
-  const lenses = useLenses(ws)
   const nLabels = listedLabels(concepts).length
-  const button = (tab: SideTab, icon: 'label' | 'comment', word: string, n: number) => (
+  const button = (tab: SideTab, icon: 'label', word: string, n: number) => (
     <button type="button" className={`shell-side-btn${side === tab ? ' on' : ''}`} aria-pressed={side === tab} data-side={tab} onClick={() => onSide(side === tab ? null : tab)}>
       <Icon name={icon} size={14} />
       {word}
@@ -58,7 +55,6 @@ function SideButtons({ ws, side, onSide }: { ws: string; side: SideTab | null; o
   return (
     <span className="shell-side-btns">
       {labelsOn && button('labels', 'label', 'Labels', nLabels)}
-      {lensesOn && button('checks', 'comment', 'Checks', lenses.length)}
     </span>
   )
 }

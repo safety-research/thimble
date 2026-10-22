@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from thimble_browser import home, restart
 from thimble_browser.app import build
 from thimble_browser.cards import sandbox
-from thimble_browser.kernel_fix import fix
+from thimble_browser.kernel import fix
 
 PORT = 21098
 OWN = f"http://127.0.0.1:{PORT}"

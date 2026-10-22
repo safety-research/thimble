@@ -3,14 +3,16 @@
 Every prompt is a file under browser/prompts/. Three directives join them:
 - `{{include:<file>}}` puts in another file of browser/prompts/;
 - `{{shared:<part>}}` puts in a part of the terminal plugin's text, as shared.json says (below);
-- `{{<slot>}}` is a value the server fills, such as the folder's path.
+- `{{<slot>}}` is a value the server fills, such as the folder's path (`{{workdir}}`) or, in the terminal's texts, the
+  temp folder (`{{TMPDIR}}`).
 
-Shared parts. The terminal plugin's text that both products use (its label classifier) is read from the plugin
-itself, plugin/ at the top of the repository, when the server makes a prompt. A part names a file of the plugin
-(`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose one file is the one read.
-prompts/shared.json names the shared part: where it comes from, the `## ` section, which of its bullets (all when not
-given), and the few literal changes the browser needs, such as a ref of the terminal's own form written in the
-browser's form. Each change is a pair of exact strings, and the test (tests/test_prompt_parity.py) fails when the
+Shared parts. The terminal plugin's texts are read from the plugin itself, plugin/ at the top of the repository, when
+the server makes a prompt: its guidance (how to write for the analyst, mark claims, draw cards and make labels), the
+card tool's description, the checker's and the designer's prompts, and the label classifier. A part names a file of the
+plugin (`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose one file is the one read.
+prompts/shared.json names each shared part: where it comes from, the `## ` section, which of its bullets (all when not
+given), and the few literal changes the browser needs, such as the terminal's Bash call written as the browser's
+run_python call. Each change is a pair of exact strings, and the test (tests/test_prompt_parity.py) fails when the
 terminal's text no longer holds a string that a change replaces. So the browser follows every edit to the terminal's
 text with no change here, and an edit that touches a replaced string stops the test until someone looks at it.
 """
@@ -26,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[2] / "prompts"
 PLUGIN = Path(__file__).resolve().parents[3] / "plugin"
 REGISTRY = "prompts/registry.mjs"
 DIRECTIVE = re.compile(r"\{\{(include|shared):([A-Za-z0-9_./-]+)\}\}")
-SLOT = re.compile(r"\{\{([a-z_]+)\}\}")
+SLOT = re.compile(r"\{\{([A-Za-z_]+)\}\}")
 
 
 class PromptError(Exception):
@@ -230,11 +232,19 @@ def render(rel: str, slots: dict[str, str] | None = None, _depth: int = 0) -> st
     return text
 
 
-def tool_text(name: str) -> str:
+def fill(text: str, slots: dict[str, str]) -> str:
+    """`text` with each `{{NAME}}` that `slots` holds filled in; the others stay as written (the terminal's
+    registry.mjs fill)."""
+    return SLOT.sub(lambda m: slots.get(m.group(1), m.group(0)), text)
+
+
+def tool_text(name: str, slots: dict[str, str] | None = None) -> str:
     """The description of one of the browser's tools: its `## <name>` section in prompts/tools.md, or in a
-    feature's prompts/tools-<feature>.md."""
+    feature's prompts/tools-<feature>.md, with its shared parts put in and `slots` filled."""
     for p in [ROOT / "tools.md", *sorted(ROOT.glob("tools-*.md"))]:
         text = p.read_text(encoding="utf-8")
         if re.search(rf"^## {re.escape(name)}$", text, re.M):
-            return section(text, name)
+            body = DIRECTIVE.sub(lambda m: render(m.group(2), None, 1) if m.group(1) == "include" else shared(m.group(2)),
+                                 section(text, name))
+            return fill(body, slots or {})
     raise PromptError(f"no tool text for {name!r} in prompts/tools*.md")

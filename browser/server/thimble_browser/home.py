@@ -4,7 +4,8 @@ The home folder is $THIMBLE_BROWSER_HOME, else ~/.thimble-browser. It holds:
 - server.json: the port and pid of the server that runs now;
 - browsers.json: the sha256 of each signed-in browser's cookie and key (auth.py);
 - workspaces/<name>/: one folder per folder of files the person opened: workspace.json (the folder's path), its
-  chats, its canvas and its documents.
+  chats, its cards, its canvas and its documents;
+- tmp/<name>/: the workspace's temp folder, `$TMPDIR` of the code Claude runs there, where it writes a card's rows.
 
 thimble browser never writes into the folder of files itself.
 """
@@ -70,6 +71,15 @@ def workspace_dir(name: str) -> Path:
     d = workspaces_dir() / name
     if not (d / "workspace.json").is_file():
         raise KeyError(name)
+    return d
+
+
+def temp_dir(name: str) -> Path:
+    """The workspace's temp folder (mode 700): the one folder the code Claude runs may write, kept between runs, so
+    a card can read the rows its code wrote."""
+    workspace_dir(name)
+    d = root() / "tmp" / name
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
     return d
 
 

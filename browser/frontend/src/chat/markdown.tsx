@@ -1,8 +1,9 @@
-// Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips. The tokens are
-// hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
-// the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
-// re-parses only the tail.
-import { Fragment, createContext, memo, useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
+// Assistant markdown: react-markdown with remark-gfm. A mark, `[words](#)`, draws as its check says (marks/Mark.tsx);
+// a link to a card, a label or a record of the folder, and a `[[value|ref]]` token, as a chip. The tokens are hidden
+// from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns the
+// markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta re-parses
+// only the tail.
+import { Fragment, createContext, memo, useContext, useState, type JSX, type ReactNode } from 'react'
 import Markdown, { type Components, type ExtraProps, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Element, Properties, Root, Text } from 'hast'
@@ -11,10 +12,8 @@ import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { mapLinks, splitValueRef } from '../lib/refs'
-import { LensMark } from '../components/LensMark'
-import type { Lens, Mark } from '../lib/marks'
-import { useFeature } from '../features'
-import { HealScope } from '../lib/heal'
+import { Mark, MarkItems } from '../marks/Mark'
+import { MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
 export interface ChipCtx {
   workspace: string
@@ -131,107 +130,10 @@ export function rehypeRefChips() {
   }
 }
 
-/** The marks a text shows, with the lenses that made them (lib/marks.ts). */
-const NO_MARKS: { marks: readonly Mark[]; lenses: readonly Lens[] } = { marks: [], lenses: [] }
-const MarkContext = createContext(NO_MARKS)
-
-/** Markdown inside it shows no marks. A mark's own card (components/LensMark) stands inside the reply it marks, and
- * would otherwise mark its own text with the reply's marks, such as an explainer's term in an important detail. */
-export function NoMarks({ children }: { children: ReactNode }) {
-  return <MarkContext.Provider value={NO_MARKS}>{children}</MarkContext.Provider>
-}
-
-const WORD_CHAR = /[\p{L}\p{N}]/u
-const DIGIT_CHAR = /\d/
-const NUMBER_JOIN = /[.,]/
-
-/** Whether `term` at `at` in `s` stands on its own: no letter or digit touches it, and no decimal point or thousands
- * comma joins it to a number. The 26 of "2026", of "1,260" or of "0.265" is part of another number. */
-export function standsAlone(s: string, at: number, term: string): boolean {
-  const end = at + term.length
-  if (WORD_CHAR.test(s[at - 1] ?? '') || WORD_CHAR.test(s[end] ?? '')) return false
-  if (DIGIT_CHAR.test(term[0] ?? '') && NUMBER_JOIN.test(s[at - 1] ?? '') && DIGIT_CHAR.test(s[at - 2] ?? '')) return false
-  if (DIGIT_CHAR.test(term[term.length - 1] ?? '') && NUMBER_JOIN.test(s[end] ?? '') && DIGIT_CHAR.test(s[end + 1] ?? '')) return false
-  return true
-}
-
-/** Where `term` first stands in `s`: on its own when `alone`, else anywhere; -1 when it does not. */
-function findTerm(s: string, term: string, alone: boolean): number {
-  if (!term) return -1
-  if (!alone) return s.indexOf(term)
-  for (let at = s.indexOf(term); at >= 0; at = s.indexOf(term, at + 1)) if (standsAlone(s, at, term)) return at
-  return -1
-}
-
-/** rehype plugin: the first place each term of `terms` stands in the text (outside code) becomes a
- * `<span data-mark-at=i>` that renders as its lens's mark. A place where the term stands on its own comes first, so
- * the term "26" marks the 26 of "26 of the 36" and not the one inside "2026"; a term found only inside other words
- * marks its first place. A citation whose words hold the term on its own is such a place: the mark goes around the
- * citation, as when the 26 of "26 of the 36" cites the card that counts it. */
-export function rehypeMarks(terms: readonly string[]) {
-  return (tree: Root) => {
-    const left = new Set(terms.map((_, i) => i))
-    const visit = (node: Root | Element, alone: boolean): void => {
-      if (!left.size) return
-      if (node.type === 'element' && (node.tagName === 'code' || node.tagName === 'pre' || node.properties?.dataRef != null || node.properties?.dataMarkAt != null)) return
-      const next: (typeof node.children)[number][] = []
-      let changed = false
-      for (const child of node.children) {
-        if (alone && child.type === 'element' && child.properties?.dataRef != null) {
-          const words = child.properties.dataValue
-          const cited = typeof words === 'string' ? [...left].find((i) => findTerm(words, terms[i], true) >= 0) : undefined
-          if (cited != null) {
-            changed = true
-            left.delete(cited)
-            next.push({ type: 'element', tagName: 'span', properties: { dataMarkAt: String(cited) }, children: [child] })
-            continue
-          }
-        }
-        if (child.type !== 'text' || !left.size) {
-          if (child.type === 'element') visit(child, alone)
-          next.push(child)
-          continue
-        }
-        let rest = child.value
-        for (;;) {
-          let best: { i: number; at: number } | null = null
-          for (const i of left) {
-            const at = findTerm(rest, terms[i], alone)
-            if (at >= 0 && (!best || at < best.at)) best = { i, at }
-          }
-          if (!best) break
-          changed = true
-          left.delete(best.i)
-          if (best.at > 0) next.push({ type: 'text', value: rest.slice(0, best.at) })
-          next.push({ type: 'element', tagName: 'span', properties: { dataMarkAt: String(best.i) }, children: [{ type: 'text', value: terms[best.i] }] })
-          rest = rest.slice(best.at + terms[best.i].length)
-        }
-        if (rest) next.push({ type: 'text', value: rest })
-      }
-      if (changed) node.children = next as typeof node.children
-    }
-    visit(tree, true)
-    visit(tree, false)
-  }
-}
-
 function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   const ctx = useContext(ChipContext)
-  const marks = useContext(MarkContext)
-  // citations are the citations feature's (features.ts): while it is off, a link's words are plain text
-  const citing = useFeature('citations')
-  const markAt = (props as Record<string, unknown>)['data-mark-at']
-  if (typeof markAt === 'string' && marks.marks[Number(markAt)]) {
-    const m = marks.marks[Number(markAt)]
-    return (
-      <LensMark mark={m} lens={marks.lenses.find((l) => l.id === m.lens)}>
-        {props.children}
-      </LensMark>
-    )
-  }
   const ref = (props as Record<string, unknown>)['data-ref']
   const value = (props as Record<string, unknown>)['data-value']
-  if (typeof ref === 'string' && !citing) return <span className="cite-off">{typeof value === 'string' ? value : props.children}</span>
   if (typeof ref === 'string') {
     const broken = ctx.broken.has(ref)
     return <RefChip ref={ref} value={typeof value === 'string' ? value : undefined} broken={broken} brokenWhy={broken ? ctx.why?.get(ref) : undefined} anchor={ctx.anchor} workspace={ctx.workspace} cite />
@@ -242,6 +144,8 @@ function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
 
 function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
   const { node: _node, ...rest } = props
+  const mark = MARK_HREF.exec(props.href ?? '')
+  if (mark) return <Mark k={Number(mark[1])}>{props.children}</Mark>
   return <a {...rest} target="_blank" rel="noreferrer" />
 }
 
@@ -253,58 +157,34 @@ const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: fals
 const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
 
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
-  const { marks } = useContext(MarkContext)
-  const plugins = useMemo(() => (marks.length ? [...rehypePlugins, () => rehypeMarks(marks.map((m) => m.term))] : rehypePlugins), [marks])
   return (
-    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={components}>
+    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
       {protectTokens(citeLinks(text))}
     </Markdown>
   )
 })
 
-/** Assistant markdown with chips. `streaming`: the text is still growing and renders per completed block. A bare
- * citation in it is its target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites).
- * Once the text is whole, its citations of card values are checked by the healing pass (lib/heal HealScope), and each
- * shows the result in place. */
-export const ChatMarkdown = memo(function ChatMarkdown(props: { text: string; streaming?: boolean; marks?: readonly Mark[]; lenses?: readonly Lens[] }) {
-  const ctx = useContext(ChipContext)
-  return (
-    <HealScope text={props.text} settled={!props.streaming} workspace={ctx.workspace}>
-      <ReplyMarkdown {...props} />
-    </HealScope>
-  )
-})
-
-const ReplyMarkdown = memo(function ReplyMarkdown({ text, streaming, marks, lenses }: { text: string; streaming?: boolean; marks?: readonly Mark[]; lenses?: readonly Lens[] }) {
+/** Assistant markdown with marks and chips. `streaming`: the text is still growing and renders per completed block.
+ * `checks`: what the check found of each of its marks, by their order in the text. A bare citation in it is its
+ * target's glyph alone, its name in the hover (components/RefChip GlyphCites). */
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
-  if (marks?.length && !streaming) {
-    // the marks come after the reply is whole: one block, so each term is marked once
-    return (
-      <MarkContext.Provider value={{ marks, lenses: lenses ?? [] }}>
-        <GlyphCites.Provider value={true}>
-          <MarkdownBlock text={text} />
-        </GlyphCites.Provider>
-      </MarkContext.Provider>
-    )
-  }
-  if (!chunked && !streaming) {
-    return (
-      <GlyphCites.Provider value={true}>
-        <MarkdownBlock text={text} />
-      </GlyphCites.Provider>
-    )
-  }
-  const chunks = splitMarkdownBlocks(text)
+  // each mark's href names its order in the whole text, so a block cut from it still finds its check
+  const marked = withMarkHrefs(text)
   return (
-    <GlyphCites.Provider value={true}>
-      {chunks.map((chunk, i) => (
-        <Fragment key={i}>
-          {i > 0 && '\n'}
-          <MarkdownBlock text={chunk} />
-        </Fragment>
-      ))}
-    </GlyphCites.Provider>
+    <MarkItems.Provider value={{ items: checks ?? [], streaming: !!streaming }}>
+      <GlyphCites.Provider value={true}>
+        {chunked
+          ? splitMarkdownBlocks(marked).map((chunk, i) => (
+              <Fragment key={i}>
+                {i > 0 && '\n'}
+                <MarkdownBlock text={chunk} />
+              </Fragment>
+            ))
+          : <MarkdownBlock text={marked} />}
+      </GlyphCites.Provider>
+    </MarkItems.Provider>
   )
 })
 

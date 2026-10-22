@@ -6,6 +6,7 @@
 // its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft.
 import { useRef, useState, type ReactNode } from 'react'
 import { ComposerFrame, type ComposerFrameProps } from '../components/Composer'
+import { keyAtEmpty } from '../cards/keys'
 import type { MainEffort } from '../lib/types'
 import { MODEL_TIP, ModelLine } from './ModelLine'
 
@@ -90,6 +91,7 @@ export function Composer({ model, effort, onEffort, fast = null, onFast, chip: o
       busy={sending}
       model={chip}
       stop={stop}
+      onEmptyKey={keyAtEmpty}
     />
   )
 }

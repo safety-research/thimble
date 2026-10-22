@@ -1,7 +1,6 @@
-// The marks, the tints and the filter as ProseMirror decorations over the editor. Stored sentences are located in each
+// The tints and the filter as ProseMirror decorations over the editor. Stored sentences are located in each
 // block's text; every sentence carries `data-anchor` (for the ⌘ pointer) and `data-sid`, and every stored block carries
-// its own `data-anchor-cell`. A lens's mark highlights its words in its lens's color (`data-mark`, which a click and the
-// margin read), a block Claude wrote carries `wu-by-claude` until the person edits it, a flagged passage takes its
+// its own `data-anchor-cell`. A block Claude wrote carries `wu-by-claude` until the person edits it, a flagged passage takes its
 // flag's tint, blocks outside the filter dim, and the space before a bare citation is marked so it hides with the chip. A tint is drawn as one element per text node, so only the first and last
 // element of each run round their outer corners. None of this is in the document, so a save carries none of it.
 import { createExtension } from '@blocknote/core'
@@ -31,23 +30,12 @@ export function gapFlag(a: Flag | undefined, b: Flag | undefined): Flag | null {
   return cids.length ? { color: a.color, cids, active: a.active } : null
 }
 
-/** A lens's mark as the editor highlights it: its words, and its lens's fill. */
-export interface TermMark {
-  id: string
-  term: string
-  /** the highlight's fill, a CSS color */
-  fill: string
-  active: boolean
-}
-
 export interface MarksCtx {
   slug: string
   doc: Writeup | null
   /** the tint of every flagged passage, by sentence or section id */
   flags: ReadonlyMap<string, Flag>
   filter: ReportFilterSets | null
-  /** the lenses' marks on the report, each on the first place its words stand */
-  marks?: readonly TermMark[]
 }
 
 /** The ids of the stored blocks Claude wrote (a heading, a paragraph, a list item, a figure), by their `by`. Pure. */
@@ -154,22 +142,11 @@ function build(pmDoc: PMNode, ctx: MarksCtx): DecorationSet {
   const idx = indexDoc(doc)
   const claude = claudeBlocks(doc)
   const decos: Decoration[] = []
-  // each mark highlights the first place its words stand, once
-  const left = new Map((ctx.marks ?? []).map((m) => [m.id, m]))
   pmDoc.descendants((node, pos) => {
     if (node.type.name !== 'blockContainer') return true
     const id = String(node.attrs.id ?? '')
     if (claude.has(id)) decos.push(Decoration.node(pos, pos + node.nodeSize, { class: 'wu-by-claude', 'data-by': 'claude' }))
     const content = node.firstChild
-    if (content && content.isTextblock && left.size) {
-      const text = plainOfNode(content)
-      for (const m of [...left.values()]) {
-        const at = m.term ? text.indexOf(m.term) : -1
-        if (at < 0) continue
-        left.delete(m.id)
-        decos.push(Decoration.inline(pos + 2 + at, pos + 2 + at + m.term.length, { class: m.active ? 'wu-lens wu-lens-active' : 'wu-lens', style: `--lens: ${m.fill}`, 'data-mark': m.id }))
-      }
-    }
     if (!content || !content.isTextblock) return true
     const type = content.type.name
     const start = pos + 2

@@ -1,4 +1,5 @@
-"""The browser's label classifier is the terminal plugin's (prompts/shared.json), read from plugin/ as it is now.
+"""The browser's texts that are the terminal plugin's (prompts/shared.json: its guidance, the card tool, the checker, the
+designer and the label classifier), read from plugin/ as they are now.
 
 - Every change shared.json makes still finds its words in the terminal's text, so a reworded sentence there stops
   this test until someone looks at it.
@@ -61,9 +62,9 @@ def test_the_files_are_the_registrys():
 
 
 def test_tool_schemas_parse():
-    from thimble_browser import agent, tools
-    from thimble_browser.features import views  # noqa: F401  (adds the view builder)
+    from thimble_browser import agent, features, tools
 
+    features.all_features()  # each feature adds its agents (the checker, the designer, a view's builder)
     for a in agent.AGENTS.values():
         for t in tools.definitions(a.tool_names()):
             assert t["description"] and t["input_schema"]["type"] == "object"

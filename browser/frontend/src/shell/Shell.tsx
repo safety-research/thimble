@@ -30,7 +30,7 @@ import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeSto
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
 import { FeatureOff } from './FeatureOff'
-import { LensSidebar, type SideTab } from './LensSidebar'
+import { LabelsSidebar, type SideTab } from './LabelsSidebar'
 import { loadFeatures, useFeature, type FeatureName } from '../features'
 import { tabSignals, useReportTypes, useTabDots, writing } from './dots'
 import { DemoLine } from './DemoLine'
@@ -65,11 +65,12 @@ import { TopBar } from './TopBar'
 import { TourHost } from './TourHost'
 import { ShareReportHost } from './ShareReport'
 
-export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
+// wide enough by default for a card of about 70 cells, which the chat draws under Claude's calls (cards/Card.tsx)
+export const CHAT_WIDTH = { def: 560, min: 280, max: 960 }
 // the surfaces' tabs, each with the feature it belongs to (features.ts): a tab whose feature is off is not shown
 const BASE: { id: Tab; label: string; icon: IconName; feature?: FeatureName }[] = [
   { id: 'files', label: 'Files', icon: 'files' },
-  { id: 'canvas', label: 'Canvas', icon: 'canvas', feature: 'cards' },
+  { id: 'canvas', label: 'Canvas', icon: 'canvas' },
   { id: 'report', label: 'Report', icon: 'report', feature: 'report' },
 ]
 interface Layout {
@@ -247,10 +248,9 @@ export function Shell({ ws }: { ws: string }) {
   const demo = useDemo()
   // which features are on (features.ts): read once here, and again when Settings changes them
   useEffect(() => void loadFeatures(ws), [ws])
-  const cardsOn = useFeature('cards')
   const reportOn = useFeature('report')
-  const featureOn = (t: { feature?: FeatureName }) => !t.feature || (t.feature === 'cards' ? cardsOn : reportOn)
-  // the Labels and Checks sidebar (LensSidebar.tsx): its tab while open; it pushes the panes, or the chat when it is the
+  const featureOn = (t: { feature?: FeatureName }) => !t.feature || reportOn
+  // the Labels sidebar (LabelsSidebar.tsx): its tab while open; it pushes the panes, or the chat when it is the
   // only thing open, rather than covering them
   const [side, setSide] = useState<SideTab | null>(null)
   useEffect(() => bus.on('openLens', (e) => setSide(e.tab)), [])
@@ -295,7 +295,7 @@ export function Shell({ ws }: { ws: string }) {
   const surfaces = useMemo<SurfaceSpec[]>(
     () => [
       { id: 'files', label: 'Files', icon: 'files', panel: 'files', keep: true, render: (v, f) => <FilesTab ws={ws} active={v} focused={f} /> },
-      { id: 'canvas', label: 'Canvas', icon: 'canvas', panel: 'canvas', keep: true, render: (v, f) => (cardsOn ? <Canvas ws={ws} active={v} focused={f} /> : <FeatureOff title="Cards" />) },
+      { id: 'canvas', label: 'Canvas', icon: 'canvas', panel: 'canvas', keep: true, render: (v, f) => <Canvas ws={ws} active={v} focused={f} /> },
       { id: 'report', label: 'Report', icon: 'report', panel: 'report', keep: true, render: (v) => (reportOn ? <ReportTab ws={ws} active={v} /> : <FeatureOff title="Report" />) },
       ...views.map<SurfaceSpec>((view) => ({
         id: viewSurface(view.slug),
@@ -306,7 +306,7 @@ export function Shell({ ws }: { ws: string }) {
         render: (v) => <ViewSurface ws={ws} view={view} active={v} />,
       })),
     ],
-    [ws, views, cardsOn, reportOn],
+    [ws, views, reportOn],
   )
 
   const dots = useTabDots(shown.filter((s): s is Tab => (BASE_SURFACES as readonly string[]).includes(s)))
@@ -381,7 +381,7 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
-        {side && <LensSidebar ws={ws} tab={side} onClose={() => setSide(null)} />}
+        {side && <LabelsSidebar ws={ws} tab={side} onClose={() => setSide(null)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />

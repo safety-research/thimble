@@ -28,11 +28,10 @@ import type { IconName } from './Icon'
 import { chartLabels, Output, isNumericCell, primaryArtifact } from './Outputs'
 import { useConcepts } from '../canvas/concepts'
 import { Spinner } from './Spinner'
-import { CHECKED_REF, HealContext, checkFileRef, markRefFailed, refFailure, useRefFailure } from '../lib/heal'
+import { checkFileRef, markRefFailed, refFailure, useRefFailure } from '../lib/refPlaces'
 import { QuoteBox, RecordFacts } from '../canvas/Quote'
 import { FACT_KINDS, markFacts, markValue, recordFacts, type RecordFact } from '../canvas/facts'
 import { quoteParts, type QuotePart } from '../canvas/quotes'
-import { KIT_MIME } from '../kit/types'
 
 /** The seven things a chip can point to, by the ref's kind; a record (a row of a file) is its file. */
 const KIND_ICON: Record<string, IconName> = { cell: 'cell', group: 'group', concept: 'label', chat: 'thread', call: 'terminal', row: 'file', table: 'file', report: 'report', view: 'view' }
@@ -204,8 +203,6 @@ export interface RefChipProps {
   /** a citation in prose: its target's glyph alone where GlyphCites holds (and for a card anywhere), and hidden while
    * the links are off */
   cite?: boolean
-  /** the ref as written, when the healing pass re-pointed the citation here: its card says so, faintly */
-  movedFrom?: string
 }
 
 /** Place a body-portaled label beside the chip at `rect`, inside the viewport. */
@@ -239,24 +236,10 @@ const FILE_REFS = new Set(['record', 'range', 'block', 'span', 'page', 'pointer'
 /** the ref kinds with nothing to excerpt: the label names them and the click teleports */
 const NAME_ONLY = new Set(['group', 'report', 'view', 'ui', 'chat'])
 
-/** A ref on every surface, and a citation of a card as the healing pass of the text around it left it (lib/heal): a
- * spinner right after it while the check runs, then the place it was re-pointed to, a red × when the cited place shows
- * another value, grey when its place is gone. */
-export function RefChip(props: RefChipProps) {
-  const heal = useContext(HealContext)
-  const c = heal && props.cite && CHECKED_REF.test(props.ref) ? heal.get(props.value, props.ref) : null
-  const fix: Partial<RefChipProps> =
-    c?.state === 'contradicted' ? { broken: true, brokenWhy: c.why }
-    : c?.state === 'quiet' ? { quiet: true, quietWhy: c.why }
-    : c?.to && c.to !== c.ref ? { ref: c.to, movedFrom: c.ref }
-    : {}
-  // while the check runs, the busy line above the chat's input box says `checking citations` (lib/busy.ts)
-  return <RefChipBody {...props} {...fix} />
-}
-
-function RefChipBody({ ref, value, compact, workspace, broken: contradicted, brokenWhy, quiet: unwrapped, quietWhy: unwrappedWhy, late, anchor, cite, movedFrom }: RefChipProps) {
+/** A ref on every surface: a chip, or an inline link in prose. A place gone since it was last opened (lib/refPlaces)
+ * draws as a link that failed, gray with why. */
+export function RefChip({ ref, value, compact, workspace, broken: contradicted, brokenWhy, quiet: unwrapped, quietWhy: unwrappedWhy, late, anchor, cite }: RefChipProps) {
   const ws = workspace ?? workspaceFromUrl() ?? ''
-  // a place gone since the text was checked (lib/heal useRefFailure) draws as a citation that failed, gray with why
   const failed = useRefFailure(ws, ref)
   const quiet = unwrapped || failed != null
   const quietWhy = failed ?? unwrappedWhy
@@ -320,7 +303,7 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
     return null
   }
 
-  // a citation of a file is checked once it shows (lib/heal checkFileRef): a place that is not there draws as failed
+  // a citation of a file is checked once it shows (lib/refPlaces checkFileRef): a place that is not there draws as failed
   // in place before anyone hovers it
   const fileRef = !!parsed && FILE_REFS.has(parsed.kind)
   useEffect(() => {
@@ -378,9 +361,7 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null && !drawnPart) {
         // a table's cell: the table around it, never its column and row in words
         const table = citedTable(r, parsed.col, parsed.row)
-        // a citation the healing pass re-pointed says where it pointed as written, faintly, so the fix is not invisible
-        const moved = movedFrom ? `moved here from ${chipLabel(movedFrom, null, ws)}, which does not show this value` : undefined
-        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table, note: [versionNote(r), moved].filter(Boolean).join(' · ') || undefined })
+        if (table) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', table, note: versionNote(r) || undefined })
         return setPop({ state: 'error', rect, message: 'This cell is no longer in the card\'s table' })
       }
       if (parsed.kind === 'cell' && parsed.out != null && parsed.line != null) {
@@ -426,13 +407,9 @@ function RefChipBody({ ref, value, compact, workspace, broken: contradicted, bro
   const onClick = (e: React.MouseEvent | React.KeyboardEvent) => {
     // a ⌘-click is the pointer's: it asks about the ref and never leaves the page
     if ('metaKey' in e && pointKeyHeld(e)) return
-    // a citation inside a lens's marked words (components/LensMark): a click opens the mark's card, and the hover's
-    // label still opens the cited place
-    const inMark = !!chipEl.current?.closest('.lens-mark-term') && !popEl.current?.contains(e.target as Node)
-    if (!inMark) e.stopPropagation()
+    e.stopPropagation()
     window.clearTimeout(showTimer.current)
     setPop(null)
-    if (inMark) return
     unmark()
     if (unresolved) return
     if (home && openCited(home, ref)) return
@@ -603,20 +580,15 @@ export function plainLine(text: string | undefined, max = 140): string {
   return first.length > max ? first.slice(0, max - 1).trimEnd() + '…' : first
 }
 
-/** The cell's question over its primary artifact. A card a program draws shows its question and, at most, its
- * takeaway's first sentence: the text its drawing carries is the list of parts Claude cites, written for Claude. */
+/** The cell's question over its primary artifact. */
 function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?: number }) {
   const concepts = useConcepts(ws)
   const pick = primaryArtifact(cell.outputs)
   const title = (cell.title ?? '').trim() || cellLabel(cell.id) || 'card'
-  const drawn = cell.kind === 'program' || (cell.outputs ?? []).some((o) => !!o && typeof o === 'object' && KIT_MIME in o)
-  const line = drawn ? plainLine(cell.takeaway) : ''
   return (
     <div className="refchip-cell">
       <div className="refchip-cell-title">{title}</div>
-      {drawn ? (
-        line ? <div className="refchip-pop-note">{line}</div> : null
-      ) : pick ? (
+      {pick ? (
         <div className={`refchip-cell-artifact${pick.kind !== 'chart' ? ' refchip-cell-clip' : ''}`}>
           <Output bundle={pick.bundle} maxLines={40} fitWidth={fitWidth} labels={chartLabels(cell.labels, concepts)} />
         </div>

@@ -2975,8 +2975,3 @@ button.bdetail-hist:hover {
   z-index: 7;
 }
 
-/* a card drawn by a program on the terminal's toolkit (kit/KitBody): the drawing at the card's width; a part that opens
-   something takes the pointer */
-.bcell-output-kit svg { display: block; max-width: 100%; height: auto; }
-.bcell-output-kit svg text { font-family: var(--font-body); font-size: 13px; font-variant-numeric: tabular-nums; font-kerning: normal; }
-.bcell-output-kit .dk-hits rect { cursor: pointer; }

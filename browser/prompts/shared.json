@@ -1,6 +1,126 @@
 {
   "about": "The parts of the terminal plugin's texts that thimble browser uses (server/thimble_browser/prompts.py). Each part is read from the plugin at run time: `file`, a file under plugin/, or `prompt`, a prompt of plugin/prompts/registry.mjs, read from its one file. Then a section of it and, when given, some of its bullets (counted from 1). `replace` and `drop` are the only changes, exact strings; tests/test_prompt_parity.py fails when the terminal's text no longer holds one of them.",
   "parts": {
+    "databases": {
+      "prompt": "guidance",
+      "after": "how to use thimble.",
+      "until": "## Communicating"
+    },
+    "communicating": {
+      "prompt": "guidance",
+      "section": "Communicating",
+      "heading": "Communicating",
+      "replace": [
+        [
+          "A table wider than the conversation draws as one block of lines per row, so give a table only the columns the question needs.",
+          "A wide table is hard to read in the chat, so give a table only the columns the question needs."
+        ]
+      ]
+    },
+    "marking": {
+      "prompt": "guidance",
+      "section": "Marking claims",
+      "heading": "Marking claims",
+      "replace": [
+        [
+          "The analyst never sees your shell output,",
+          "The analyst rarely opens your code's output,"
+        ],
+        [
+          "Its mark does the work of the `file_path:line_number` reference that Claude Code asks for, because the mark's evidence shows the file at the line that holds that code, and the terminal can open it there.",
+          "The mark's evidence shows the file at the line that holds that code."
+        ],
+        [
+          "```bash\npython3 - <<'PY'\n",
+          "```python\n"
+        ],
+        [
+          "refund requests were approved\")\nPY\n```",
+          "refund requests were approved\")\n```"
+        ]
+      ]
+    },
+    "cards": {
+      "prompt": "guidance",
+      "section": "Cards",
+      "heading": "Cards",
+      "replace": [
+        [
+          "the Write, Edit and Read tools take that path as written, because only the shell knows `$TMPDIR`.",
+          "your code sees it as `$TMPDIR`, and the Read tool takes that path as written."
+        ],
+        [
+          "press v under an answer,",
+          "press v under an answer (or type v in the empty message box),"
+        ]
+      ]
+    },
+    "labels-guide": {
+      "prompt": "guidance",
+      "section": "Labels",
+      "heading": "Labels",
+      "replace": [
+        [
+          "read its values with `--csv` in the code that counts or draws them,",
+          "read its values with `thimble.labels(name, negatives=True)` in the code that counts or draws them,"
+        ],
+        [
+          "(`thimble label refund --in \"tickets/*.jsonl\" --regex \"refund|money back|chargeback|reimburse\"`)",
+          "(apply_label `refund`, paths `[\"tickets/*.jsonl\"]`, a regex `refund|money back|chargeback|reimburse`)"
+        ]
+      ]
+    },
+    "card-tool": {
+      "prompt": "card-tool",
+      "replace": [
+        [
+          "write the rows as a JSON file in this folder or in `$TMPDIR` ({{TMPDIR}})",
+          "write the rows as a JSON file in `$TMPDIR` ({{TMPDIR}})"
+        ],
+        [
+          "which changes when a side pane opens.",
+          "which changes when the analyst makes the chat wider or narrower."
+        ],
+        [
+          "the letters the card takes at an empty prompt",
+          "the letters the card takes at an empty message box"
+        ],
+        [
+          "a text copy of the card at its width and, when it differs, beside a side pane;",
+          "a text copy of the card at its width;"
+        ]
+      ]
+    },
+    "checker": {
+      "prompt": "checker",
+      "replace": [
+        [
+          "Run each piece of code as one Bash call from `{{CWD}}`, in the form `python3 - <<'PY'`, then the code, then `PY`, and nothing else in the call: thimble shows the person that call's whole output.",
+          "Run each piece of code as one run_python call, which runs in `{{CWD}}`: thimble shows the person that call's whole output."
+        ],
+        [
+          "A label's values come from `thimble label NAME --csv`, which the code can read with `subprocess`.",
+          "A label's values come from `thimble.labels(NAME, negatives=True)`, which the code can call."
+        ]
+      ]
+    },
+    "designer": {
+      "prompt": "designer",
+      "replace": [
+        [
+          "since the card reads its data only from this folder or `$TMPDIR`. The Write, Edit and Read tools take that folder's path as written here, because only the shell knows `$TMPDIR`.",
+          "since the card reads its data only from `$TMPDIR`. The Read tool takes that folder's path as written here."
+        ],
+        [
+          "Use only what a terminal can show:",
+          "Use only what a card can show:"
+        ],
+        [
+          "You cannot know if the terminal's background is light or dark,",
+          "You cannot know if the page's background is light or dark,"
+        ]
+      ]
+    },
     "labels": {
       "prompt": "labels",
       "until": "{{RECORDS}}",

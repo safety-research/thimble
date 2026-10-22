@@ -127,68 +127,6 @@ async def test_a_refusal_is_a_row_not_a_crash(ws, monkeypatch):
     assert errs and "declined" in errs[0]["message"]
 
 
-async def test_the_page_opens_the_canvas_on_the_first_card_of_each_turn(ws, monkeypatch):
-    from thimble_browser import tools
-    from thimble_browser.features import cards
-    from thimble_browser.hub import hub
-    for name in ("add_card", "edit_card"):
-        monkeypatch.setitem(tools.EXTRA, name, getattr(cards, name))
-    opened = []
-    monkeypatch.setattr(hub, "publish", lambda w, rec: rec.get("type") == "open-card" and opened.append(rec["card"]))
-
-    def note(q):
-        return {"kind": "note", "question": q, "text": "One line."}
-    client = FakeClient([
-        NS(content=[call("t1", "add_card", note("How many runs?")), call("t2", "add_card", note("Which merged?"))],
-           stop_reason="tool_use", usage=usage(), stop_details=None),
-        NS(content=[text("Two cards.")], stop_reason="end_turn", usage=usage(), stop_details=None),
-    ])
-    s = await run_turn(ws, client, monkeypatch)
-    await s.task
-    first, second = [r["cell_id"] for r in chats.records(ws, "main") if r["type"] == "tool_result"]
-    assert opened == [first]  # once a turn, on its first card
-    client.replies += [
-        NS(content=[call("t3", "edit_card", {"card": second, "takeaway": "One merged."}),
-                    call("t4", "add_card", note("Which failed?"))], stop_reason="tool_use", usage=usage(),
-           stop_details=None),
-        NS(content=[text("One more.")], stop_reason="end_turn", usage=usage(), stop_details=None),
-    ]
-    await s.send("And the failed one?")
-    await s.task
-    third = [r["cell_id"] for r in chats.records(ws, "main") if r["type"] == "tool_result"][-1]
-    assert opened == [first, third]  # an edit opens nothing; the next turn's first new card does
-
-
-async def test_a_card_that_names_no_group_goes_in_its_turns_group_named_after_its_question(ws, monkeypatch):
-    """A card added with no `group` went to a group titled Canvas. Now a turn's cards that name none share one group,
-    named after the first one's question, and the next turn's start another."""
-    from thimble_browser import canvas, tools
-    from thimble_browser.features import cards
-    monkeypatch.setitem(tools.EXTRA, "add_card", cards.add_card)
-
-    def note(q, **kw):
-        return {"kind": "note", "question": q, "text": "One line.", **kw}
-    client = FakeClient([
-        NS(content=[call("t1", "add_card", note("How many pages does each wiki have?")),
-                    call("t2", "add_card", note("Which wiki grew fastest?")),
-                    call("t3", "add_card", note("Who edits most?", group="Editors"))],
-           stop_reason="tool_use", usage=usage(), stop_details=None),
-        NS(content=[text("Three cards.")], stop_reason="end_turn", usage=usage(), stop_details=None),
-        NS(content=[call("t4", "add_card", note("When were the edits made?"))], stop_reason="tool_use", usage=usage(),
-           stop_details=None),
-        NS(content=[text("One more.")], stop_reason="end_turn", usage=usage(), stop_details=None),
-    ])
-    s = await run_turn(ws, client, monkeypatch, "How big is each wiki?")
-    await s.task
-    await s.send("And when?")
-    await s.task
-    groups = {nb["title"]: [c["title"] for c in nb["cells"]] for nb in canvas.notebooks(ws)}
-    assert groups == {"How many pages does each wiki have?": ["How many pages does each wiki have?",
-                                                              "Which wiki grew fastest?"],
-                      "Editors": ["Who edits most?"],
-                      "When were the edits made?": ["When were the edits made?"]}
-
-
 async def test_a_report_write_shows_in_the_report_as_it_streams_in(ws, monkeypatch):
     import json
 
@@ -253,41 +191,42 @@ def turn_steps(*steps):
     return out + [NS(content=list(steps[-1]), stop_reason="end_turn", usage=usage(), stop_details=None)]
 
 
-async def heard_and_read(ws, monkeypatch, client):
-    """What the after-turn checks hear as the turn's answer, and what a check added later reads as main's answer."""
-    from thimble_browser.features import lenses
-    heard, read = [], []
+async def heard_and_texts(ws, monkeypatch, client):
+    """What the after-turn work hears as the turn's reply, and the turn's texts, which the marks are read from."""
+    heard = []
     monkeypatch.setattr(agent, "AFTER_TURN", [lambda s, answer, result: heard.append(answer)])
     s = await run_turn(ws, client, monkeypatch)
     await s.task
-
-    async def fake_read(ws, **kw):
-        read.append(kw.get("answer"))
-        return 0
-    monkeypatch.setattr(lenses, "read", fake_read)
-    await lenses.read_all(ws, surfaces=["chat"])
-    return heard, read
+    return heard, s.texts
 
 
-async def test_an_answer_and_then_a_card_with_nothing_after_keeps_the_answer_as_the_reply(ws, monkeypatch):
-    answer = "Three of the five runs merged [3](results.csv#row=1)."
-    client = FakeClient(turn_steps([text(answer), call("t1", "add_card", {"question": "How many merged?"})], []))
-    assert await heard_and_read(ws, monkeypatch, client) == ([answer], [answer])
+async def test_an_answer_and_then_a_call_with_nothing_after_keeps_the_answer_as_the_reply(ws, monkeypatch):
+    answer = "Three of the five runs merged [3](#)."
+    client = FakeClient(turn_steps([text(answer), call("t1", "Glob", {"pattern": "*.csv"})], []))
+    assert await heard_and_texts(ws, monkeypatch, client) == ([answer], [answer])
 
 
 async def test_a_note_a_call_and_then_the_answer_reads_only_the_answer(ws, monkeypatch):
     client = FakeClient(turn_steps([text("Let me count the runs first."), call("t1", "Read", {"file_path": "results.csv"})],
                                    [text("Three of the five runs merged.")]))
-    assert await heard_and_read(ws, monkeypatch, client) == (["Three of the five runs merged."],) * 2
+    assert await heard_and_texts(ws, monkeypatch, client) == (
+        ["Three of the five runs merged."], ["Let me count the runs first.", "Three of the five runs merged."])
 
 
-async def test_a_note_the_answer_and_then_a_card_reads_the_answer_not_the_note(ws, monkeypatch):
+async def test_a_note_the_answer_and_then_calls_reads_the_answer_not_the_note(ws, monkeypatch):
     client = FakeClient(turn_steps(
         [text("Let me count the runs first."), call("t1", "Read", {"file_path": "results.csv"})],
-        [text("Three of the five runs merged."), call("t2", "add_card", {"question": "How many merged?"})],
-        [call("t3", "edit_card", {"card": "card:x"})],
+        [text("Three of the five runs merged."), call("t2", "Glob", {"pattern": "*.csv"})],
+        [call("t3", "Glob", {"pattern": "*.md"})],
         [text("\n\n")]))
-    assert await heard_and_read(ws, monkeypatch, client) == (["Three of the five runs merged."],) * 2
+    heard, texts = await heard_and_texts(ws, monkeypatch, client)
+    assert heard == ["Three of the five runs merged."]
+    assert texts == ["Let me count the runs first.", "Three of the five runs merged.", "\n\n"]
+
+
+def test_a_turns_texts_join_the_words_between_two_calls():
+    assert agent.texts_of([(False, "A "), (False, "b."), (True, ""), (False, "C.")]) == ["A b.", "C."]
+    assert agent.texts_of([(True, ""), (True, "")]) == []
 
 
 def test_reply_of_is_the_text_after_the_last_call_else_the_last_text_before_it():

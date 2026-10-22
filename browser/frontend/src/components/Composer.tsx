@@ -46,10 +46,13 @@ export interface ComposerFrameProps {
   spellCheck?: boolean
   className?: string
   textRef?: Ref<HTMLTextAreaElement>
+  /** a letter typed while the field is empty: true when something took it (a card's key, v), so the field gets
+   * nothing; `type(text)` puts a word in the field (chat/Composer, cards/keys.ts) */
+  onEmptyKey?: (key: string, type: (text: string) => void) => boolean
   [data: `data-${string}`]: string | undefined
 }
 
-export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, disabled = false, tip, busy = false, model, tools, head, stop, sendIcon = 'arrow-up', sendLabel = 'Send', mono, rows = 2, maxHeight = 200, submitOnMod = false, spellCheck, className, textRef, ...rest }: ComposerFrameProps) {
+export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, disabled = false, tip, busy = false, model, tools, head, stop, sendIcon = 'arrow-up', sendLabel = 'Send', mono, rows = 2, maxHeight = 200, submitOnMod = false, spellCheck, className, textRef, onEmptyKey, ...rest }: ComposerFrameProps) {
   const ready = !!value.trim() && !disabled
   const { props: tipProps, tip: tipEl } = useTooltip(tip, undefined, 'start')
   const submit = (e?: FormEvent) => {
@@ -75,6 +78,10 @@ export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, d
         spellCheck={spellCheck}
         className="composer-text"
         onKeyDown={(e) => {
+          if (!value && onEmptyKey && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && !e.nativeEvent.isComposing && onEmptyKey(e.key, onChange)) {
+            e.preventDefault()
+            return
+          }
           if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
           const mod = e.metaKey || e.ctrlKey
           if (submitOnMod ? mod : !e.shiftKey) {

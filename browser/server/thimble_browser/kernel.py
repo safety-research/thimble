@@ -1,6 +1,10 @@
-"""The terminal plugin's kernel `fix` module (plugin/engine/kernel/fix.py), imported in this process: thimble browser
-makes, turns on and shares a fix of thimble with the same code as the terminal's `thimble fix`, in the same place
-(the kernel's THIMBLE_HOME), so either product sees the other's fixes.
+"""The terminal plugin's kernel (plugin/engine/kernel/), imported in this process, for the two of its modules that thimble
+browser runs as the terminal does:
+
+- `fix`: thimble browser makes, turns on and shares a fix of thimble with the same code as the terminal's `thimble
+  fix`, in the same place (the kernel's THIMBLE_HOME), so either product sees the other's fixes;
+- `evidence`: the deterministic check of the checker's answer to a reply's marks (features/marks.py), the same
+  validator as the terminal's `thimble dev validate`.
 
 The kernel is imported as the package `thimble_kernel`, under its own name, so that no other package called `kernel`
 stands in for it (the same loader as the browser's other kernel imports). The dependency goes one way: the browser
@@ -49,3 +53,4 @@ def module(name: str) -> ModuleType:
 
 
 fix = module("fix")
+evidence = module("evidence")

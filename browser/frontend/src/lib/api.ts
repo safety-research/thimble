@@ -383,9 +383,6 @@ export const api = {
   forgeQuery: (c: string, path: string, sql: string) =>
     j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${apiBase()}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
   /** `value`: a citation's own words, so a card value is read from the version of the card that states it. */
-  /** `POST /corpora/{c}/heal`: the citation healing pass over a text (backend cards/heal.py): what it did to each
-   * citation of a card's value, and the text with each re-pointed one at its new place. */
-  heal: (c: string, text: string) => j<HealResult>(`${apiBase()}/corpora/${enc(c)}/heal`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) }),
   resolveRef: (c: string, ref: string, value?: string) => j<ResolvedRef>(`${apiBase()}/corpora/${enc(c)}/ref${q(value ? { ref, value } : { ref })}`),
   /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
    * n the number a row is cited by (`<path>#row=<n>`). */
@@ -638,10 +635,6 @@ import type { ReportBlocksBody } from './types'
 export const reportApi = {
   /** `PUT …/types/{slug}/blocks`: the editor's whole document as blocks; answers the stored document. */
   putBlocks: (c: string, slug: DocumentType, body: ReportBlocksBody) => j<Writeup>(`${inv(c, slug)}/blocks`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `GET /lenses`: the lenses whose marks the report draws, each with its color (a viz family name). */
-  lenses: (c: string) => j<{ id: string; name: string; color: string }[]>(`${ws(c)}/lenses`),
-  /** `POST /marks/{id}/dismiss`: a mark the analyst is done with, which no longer shows. */
-  dismissMark: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/marks/${enc(id)}/dismiss`, { method: 'POST' }),
 }
 
 // ---- the problem report (shell/ProblemReport.tsx; backend feedback.py) ----
@@ -776,10 +769,29 @@ export const undoApi = {
   redo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/redo`, { method: 'POST' }),
 }
 
-/** What the healing pass did to a text's citations (backend cards/heal.py). */
-export interface HealResult {
-  text: string
-  of: string
-  version: string
-  changes: { label: string; ref: string; state: 'linked' | 'quiet' | 'contradicted'; how: string; to?: string; source?: string; why?: string }[]
+/** A card Claude drew, as the page draws it (backend features/cards.py drawing): its title, version and keys, and the
+ * card runner's tree, or why there is none. */
+export interface CardDrawing {
+  id: string
+  title: string
+  version: number
+  keys: string[]
+  chat?: string | null
+  turn?: string | null
+  tree?: unknown
+  error?: string
+  /** an event the view takes no listener for (a key with no onKey, a click with no onPointer) */
+  handled?: boolean
+}
+
+export const cardsApi = {
+  /** `GET /ws/{c}/cards/{id}?width=`: the card drawn at `width` cells, which it draws at from then on. */
+  get: (c: string, id: string, width: number) => j<CardDrawing>(`${ws(c)}/cards/${enc(id)}${q({ width })}`),
+  /** `POST /ws/{c}/cards/{id}/{key|press|pointer|undo}`: the analyst's key or click, and the card drawn after it. */
+  event: (c: string, id: string, op: 'key' | 'press' | 'pointer' | 'undo', body: Record<string, unknown>) =>
+    j<CardDrawing>(`${ws(c)}/cards/${enc(id)}/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  /** `PUT /ws/{c}/cards/width`: the chat's width in cells, which Claude's next card is drawn at. */
+  width: (c: string, cols: number) => j<{ cols: number }>(`${ws(c)}/cards/width`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cols }) }),
+  /** `POST /ws/{c}/v`: v on the chat's last answer: a copy of the chat draws a card of it (409 says why not now). */
+  v: (c: string, chat: string) => j<{ id: string; chat: string; turn: string }>(`${ws(c)}/v`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat }) }),
 }

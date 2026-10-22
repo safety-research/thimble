@@ -21,12 +21,23 @@ def test_every_agent_has_a_fixed_tool_set_and_no_shell():
     from thimble_browser import fixcopy  # noqa: PLC0415  (the fix tools, confined to a fix's copy)
 
     given = {name for f in features.all_features() for name in f.tools} | set(fixcopy.TOOLS)
-    assert set(agent.AGENTS) == {"main", "dev"}
+    assert set(agent.AGENTS) == {"main", "checker", "designer", "dev"}
     for name, a in agent.AGENTS.items():
         for t in a.tool_names():
             assert hasattr(tools.Tools, f"t_{t}") or t in given, (name, t)
             tools.schema_of(t)
         assert not {"Bash", "Write", "Edit", "WebFetch"} & set(a.tool_names())
+        assert a.allowed is None or set(a.allowed) <= set(a.tool_names()), name
+    # the copies of a conversation run main's tools, so their requests read main's cache, and may call only a few
+    assert agent.AGENTS["checker"].allowed == ("Read", "Grep", "Glob", "run_python")
+    assert agent.AGENTS["designer"].allowed == ("Read", "Grep", "Glob", "run_python", "card")
+
+
+async def test_a_copy_may_call_only_its_allowed_tools(folder):
+    t = tools.Tools("ws", "c1", folder, allowed=("Read",), denied="only reads")
+    r = await t.call("run_python", {"code": "print(1)"})
+    assert r.is_error and r.text == "only reads"
+    assert not (await t.call("Read", {"file_path": "runs/a.jsonl"})).is_error
 
 
 def test_the_environment_gives_no_credentials(monkeypatch):
