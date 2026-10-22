@@ -6,6 +6,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { resetSqueeze } from '../squeeze/term'
+import Chips from '../squeeze/chips.tsx'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,7 +77,9 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
   const open = await t.bar()
   expect(open).toContain('[ ] shorter / longer')
-  expect(open).toContain('s done')
+  // leaving comes first: `s close` is the bar's first item while the chips are open
+  expect(open).toContain('thimble  s close · ')
+  expect(open).not.toContain('s done')
   expect(open).toContain('+ your own')
   const under = textOf(await $.ui.render(answer('row-t1', LONG)))
   expect(under).toContain(LONG.slice(0, 20))
@@ -120,6 +123,54 @@ test('with two replies since the last prompt, s writes one catch-up of them unde
   expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
   // a catch-up the person read counts: s now opens the chips on the newest reply
   expect(await t.bar()).not.toContain('catch up')
+})
+
+/** The chips' Client under a row, as the terminal would draw it: its props from the row, its elements as plain nodes. */
+const ELS = Object.fromEntries(['Box', 'Text', 'Button'].map(k => [k, (props: Any) => ({ type: k, props })]))
+const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(nodes) : [n, ...nodes(n.props?.children), ...nodes(n.children)])
+async function chipsDrawn($: Any, row: string, text: string, override: Any = {}) {
+  const client = nodes(await $.ui.render(answer(row, text))).find(n => n.type === 'Client')
+  const posts: Any[] = []
+  const surface = { elements: ELS, columns: 100, onKey: () => undefined, post: (d: Any) => posts.push(d) }
+  return { client, tree: Chips({ ...client?.props.props, ...override } as never, surface as never), posts }
+}
+
+test('s close leads the bar while the chips are open, the chips row ends with it, and s, ↵ or a press on it closes them', async ($, on) => {
+  const t = await setup($, on, [])
+  // what the chips' Client posts reaches the hooks as Claude Code hands it on; closed, the bar offers s squeeze again
+  const post = async (data: Any) => { const ui = await $.ui.mount(answer('row-t1', LONG)) as Any; await ui.post(data, { element: 'sqchips-row-t1' }); await ui.unmount() }
+  const closed = async () => expect(await t.bar()).toMatch(/thimble {2}v card · s squeeze/)
+  await t.turn('t1', LONG)
+  await t.press('s')
+  expect(await t.bar()).toMatch(/thimble {2}s close · \[ \] shorter \/ longer · 1–3 chip · \+ your own/)
+  // the chips row ends with `s close`, its key drawn as the bar's keys
+  const { client, tree, posts } = await chipsDrawn($, 'row-t1', LONG)
+  expect(client?.props.module).toContain('chips.tsx')
+  const row = tree.props.children
+  const btn = nodes(row[row.length - 1]).find(n => n.type === 'Button')
+  expect(btn.props.label).toBe('s close')
+  expect(btn.props.children[0].props).toEqual({ color: 'suggestion', bold: true, children: 's' })
+  expect(btn.props.children[1].props).toEqual({ dimColor: true, children: ' close' })
+  // a press on it closes the chips
+  btn.props.onPress()
+  expect(posts.at(-1).events.at(-1)).toMatchObject({ press: 'close' })
+  await post(posts.at(-1))
+  await closed()
+  // while words are typed after +, s is a letter: the row names no close
+  await t.press('s')
+  const typing = await chipsDrawn($, 'row-t1', LONG, { plus: 'for my man' })
+  expect(nodes(typing.tree).some(n => n.props?.label === 's close')).toBe(false)
+  // with the keyboard in the chips: s close still leads the bar, the rest stays short, and s closes them
+  await post({ client: 'k', events: [{ n: 1, key: 'tab' }] })
+  const held = await t.bar()
+  expect(held).toMatch(/thimble {2}s close · tab next chip · ← → facts \/ interpretation · \+ your own · esc back to the prompt/)
+  expect(held).not.toContain('↵ done')
+  await post({ client: 'k', events: [{ n: 2, key: 's' }] })
+  await closed()
+  // ↵ in the chips closes them too
+  await t.press('s')
+  await post({ client: 'k2', events: [{ n: 1, key: 'tab' }, { n: 2, key: 'return' }] })
+  await closed()
 })
 
 const HEAD = 'thimble  catch-up of the 2 replies since your last message'

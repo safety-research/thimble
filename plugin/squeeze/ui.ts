@@ -7,10 +7,11 @@
 // drawn under the newest of them while they draw no text (term.ts catchUp), with the chips open on it. A letter right after s undoes it (hooks/keys.ts word window).
 // While the chips are open their keys come first (core/answerview.ts restoredKey):
 //   [ ] shorter / longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
-//   1–N pick a chip · 0 the original (on a catch-up: the replies again) · s done · + a chip in the person's own words
+//   1–N pick a chip · 0 the original (on a catch-up: the replies again) · s close · + a chip in the person's own words
 //   (typed as `/squeeze <words>`, with the earlier ones offered as it is typed)
+// The bar names `s close` first while the chips are open, and the chips' row ends with it too (a press there closes them).
 // A click on the chips hands them the keyboard (their Client, chips.tsx): then tab and shift+tab move between the chips,
-// ← and → between the levels, ↵ is done, and + types the chip's words in the chips, until esc gives the keys back.
+// ← and → between the levels, s or ↵ closes them, and + types the chip's words in the chips, until esc gives the keys back.
 //
 //   state squeezeOpen: {id, focus, edge, typing, held, hint} | null   the record the chips are open on (term.ts ids)
 //   state squeezeOwn: [words]                                          the chips the person typed this session
@@ -231,7 +232,7 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
 }
 
 /** What a key in the chips does, once a click gave them the keyboard: tab and shift+tab move between the chips, ← and
- *  → between the levels, ↵ is done; + types a chip's words, ↵ adds it, tab lets it go. The prompt's keys work too. */
+ *  → between the levels, s or ↵ closes them; + types a chip's words, ↵ adds it, tab lets it go. The prompt's keys work too. */
 async function heldKey($: Engine, open: Open, key: string, shift: boolean): Promise<void> {
   const rec = await recOf($, open.id)
   if (!rec) return
@@ -272,6 +273,7 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
     if (typeof ev.key === 'string') { await heldKey($, open, ev.key, !!ev.shift); continue }
     const r = String(ev.press ?? '')
     if (r === 'add') { await setOpen($, { typing: '', held: true, edge: null }); continue }
+    if (r === 'close') { await setOpen($, null); continue }
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)
     if (dot) { await setLevel($, open, dot[1]!, Number(dot[2])); continue }
     const cid = r.replace(/^(chip|word)-/, '')
@@ -316,6 +318,8 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
     say('sq-hint', `type what to squeeze for, such as "for my manager", then ↵${dims.length ? `; earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, 'warning')
     return out
   }
+  // s close comes first, so leaving is the first thing the bar names while the chips hold the keys
+  key('sq-close', 's', 'close', () => setOpen($, null))
   if (ui.error) say('sq-error', `× ${ui.error}`, 'error')
   else if (open.edge && focus) say('sq-edge', `${focus.name} goes no further than ${focus.levels[focus.level]}`, 'warning')
   else if ((rec.squeeze?.problems ?? [])[0] && typeof rec.shown === 'string') say('sq-problem', `! ${rec.squeeze.problems[0]}`, 'warning')
@@ -323,7 +327,6 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   if (open.held) {
     key('sq-tab', 'tab', 'next chip')
     key('sq-lr', '← →', ways, () => step($, open, focus.id, 1, null))
-    key('sq-done', '↵', 'done', () => setOpen($, null))
     if (revertable) key('sq-revert', '0', 'revert', () => revert($, open))
     key('sq-own', '+', 'your own', () => setOpen($, { typing: '', edge: null }))
     key('sq-esc', 'esc', 'back to the prompt')
@@ -332,7 +335,6 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   key('sq-step', '[ ]', ways, () => step($, open, focus.id, 1, ']'))
   key('sq-pick', row.length > 1 ? `1–${Math.min(9, row.length)}` : '1', 'chip')
   if (revertable) key('sq-revert', '0', 'revert', () => revert($, open))
-  key('sq-done', 's', 'done', () => setOpen($, null))
   key('sq-own', '+', 'your own', () => askOwn($))
   return out
 }
