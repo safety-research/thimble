@@ -89,6 +89,13 @@ declare module 'claude-code' {
       answerRowTurn: StateFamily<string>
       /** the answer the person picked for the keys with { and }, or null: the newest */
       answerSel: string | null
+
+      // ---- side threads (threads/)
+      /** a side thread, by its key (threads/thread.ts Thread): { id, key, agentId, scope, subject, root, status, asks,
+       *  turns, sent?, error?, at }, kept on disk too; read by the pane that draws it, so it draws again at each change */
+      thread: StateFamily<unknown>
+      /** goes up when a thread changes: the bar's count and the thread list draw again */
+      threadsGen: number
     }
   }
 }

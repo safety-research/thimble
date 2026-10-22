@@ -10,6 +10,9 @@
 //   threads    ../threads/seam.ts       the side threads (t)
 //   thread     ../threads/seam.ts       one side thread: what it is about, its turns, its input
 //
+// Under the evidence, labels, coverage and claims panes stands the pane's side thread (threads/seam.ts threadUnder):
+// its conversation and an input bar that asks it about what the pane shows, as 0.10's side panel had under each pane.
+//
 // (Each kind's draw is imported and called by name: Claude Code follows `$` only into functions a file declares or
 // imports, so a list of draws that take `$` cannot be called from here.)
 import type { EngineInterface, Register } from 'claude-code'
@@ -20,7 +23,7 @@ import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawFixShare } from '../panes/fixshare'
 import { drawSettings } from '../panes/settings'
-import { drawThreadsPane } from '../threads/seam'
+import { drawThreadsPane, threadUnder } from '../threads/seam'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,17 +53,25 @@ export async function paneNow($: Engine): Promise<{ kind: string; args: unknown 
   return ((await $.state.get(NOW)).value ?? null) as { kind: string; args: unknown } | null
 }
 
+/** A pane's drawing with its side thread under it (threads/seam.ts threadUnder); the drawing alone when the thread
+ *  cannot be drawn. */
+async function withThread($: Engine, e: Any, now: { kind: string; args: unknown }, els: Any, drawn: unknown): Promise<unknown> {
+  let under: unknown[] = []
+  try { under = await threadUnder($, e, now.kind, now.args, els) } catch { under = [] }
+  return under.length ? els.Box({ flexDirection: 'column', children: [drawn, ...under] }) : drawn
+}
+
 export const registerPanes: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
     const els = $.ui.resolve(e) as Any
     const now = await paneNow($)
     try {
-      if (now?.kind === 'evidence') return await drawEvidence($, e, now.args, els)
-      if (now?.kind === 'labels') return await drawLabels($, e, now.args, els)
-      if (now?.kind === 'coverage') return await drawCoverage($, e, now.args, els)
+      if (now?.kind === 'evidence') return withThread($, e, now, els, await drawEvidence($, e, now.args, els))
+      if (now?.kind === 'labels') return withThread($, e, now, els, await drawLabels($, e, now.args, els))
+      if (now?.kind === 'coverage') return withThread($, e, now, els, await drawCoverage($, e, now.args, els))
       if (now?.kind === 'settings') return await drawSettings($, e, now.args, els)
       if (now?.kind === 'fixshare') return await drawFixShare($, e, now.args, els)
-      if (now?.kind === 'claims') return await drawClaimsPane($, e, now.args, els)
+      if (now?.kind === 'claims') return withThread($, e, now, els, await drawClaimsPane($, e, now.args, els))
       if (now?.kind === 'threads' || now?.kind === 'thread') return await drawThreadsPane($, e, now.kind, now.args, els)
       return els.Text({ dimColor: true, children: now ? `thimble has no pane ${now.kind}.` : 'Nothing is open here.' })
     } catch (err) {

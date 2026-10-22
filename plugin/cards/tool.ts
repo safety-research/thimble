@@ -27,6 +27,7 @@ import { forkOf } from '../core/forks'
 import { tempDir } from '../core/home'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
+import { threadCardAnchor } from '../threads/seam'
 import { OWN_KEYS } from '../hooks/keys'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
@@ -175,11 +176,13 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const title = oneLine(String(input.title ?? ''), 120) || before?.title || ''
   if (!title) return { result: 'The card did not draw: `title` is empty: give the card\'s title, what it shows in a few words.' }
 
-  // a card stands at a call of main's, or under the answer the running designer fork draws for; another agent's call
-  // stands in that agent's own transcript, where the person never sees a card
+  // a card stands at a call of main's, under the answer the running designer fork draws for, or in the side thread
+  // whose fork drew it (`thread:<key>`, under that thread's answer in its pane); another agent's call stands in that
+  // agent's own transcript, where the person never sees a card
   const fork = forkOf(input.agentId)
-  const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : null
-  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation and the copy that v starts draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
+  const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : fork?.kind === 'thread' ? await threadCardAnchor($, input.agentId, id) : null
+  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation, the copy that v starts and a side thread draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
+  const placeWords = (row: string | null) => (row?.startsWith('thread:') ? 'in the side thread, under your answer' : 'under the answer v was pressed on')
   const meta: CardMeta = before ?? {
     id, version: 0, last: 0, lastFile: '', title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
     keys: [], read: '', columns: [], file: '', gen: 0, error: null, errorWidth: null, calls: {}, at: Date.now(),
@@ -245,10 +248,10 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
 
   const out: string[] = [
     stays
-      ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? 'under the answer v was pressed on' : 'under the call that first drew the card'}.`
+      ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? placeWords(next.anchorRow) : 'under the call that first drew the card'}.`
       : meta.version > 0
         ? `Version ${version} of “${title}” is drawn where this call stands, since the terminal cannot draw the earlier place again; the earlier call shows one line that points here.`
-        : `“${title}” is drawn ${next.anchorRow ? 'under the answer v was pressed on' : 'where this call stands, above the words you write after it'}. Its id is "${id}": to change it, call card again with this id.`,
+        : `“${title}” is drawn ${next.anchorRow ? placeWords(next.anchorRow) : 'where this call stands, above the words you write after it'}. Its id is "${id}": to change it, call card again with this id.`,
     `It read ${r.summary.read} from ${baseName(file)}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
   if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
