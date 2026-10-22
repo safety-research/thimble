@@ -93,7 +93,7 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('passed: 28')
   // the value in the soft tint, the place dim
   const drawnBand = all(await $.ui.render(above()))
-  expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT.dark && textOf(n) === '12')).toBe(true)
+  expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT && textOf(n) === '12')).toBe(true)
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'runs/summary.txt:4')?.props).toMatchObject({ dimColor: true })
   expect(band).toContain('a ask')
   expect(band).toContain('0 close')
@@ -150,7 +150,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ 2 more lines')?.props?.dimColor).toBe(true)
   expect(band).not.toContain('runs: 40')
   expect(band).not.toContain('print("runs:", n)')
-  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('#9cdcfe')
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('permission')
   expect(drawnBand.some(n => n.type === 'Code')).toBe(false)
   expect(band).toContain('c all code and output')
   // (keys apart, so they are not a word typed)
@@ -166,7 +166,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('c one line')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')
-  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT.dark && textOf(n) === '11')).toBe(true)
+  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT && textOf(n) === '11')).toBe(true)
   // c again: back to the one line
   await clock.advance(2000)
   await $.prompt.edit(key('c'))
@@ -175,8 +175,8 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('failed: 11')
 })
 
-test('a wrong citation: × wrong in the header, why in one dim sentence under it, then its evidence', async ($, on) => {
-  await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed, but 3 were retried. The rest passed.' }, 's-tray-5')
+test('a wrong citation: × wrong in the header, why in one dim sentence under it, x repair, then its evidence; x asks main to repair it', async ($, on) => {
+  const { submitted, clock } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed, but 3 were retried. The rest passed.' }, 's-tray-5')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
@@ -185,6 +185,52 @@ test('a wrong citation: × wrong in the header, why in one dim sentence under it
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'Line 4 counts 12 failed, but 3 were retried.')?.props).toMatchObject({ dimColor: true })
   expect(band).not.toContain('The rest passed')
   expect(band).toContain('failed: 12')
+  // the citation stays underlined in the reply, red, with × after it
+  const reply = all(await $.ui.render(answer('row-t1', TEXT)))
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'error', underline: true })
+  // x repair: in the bar and in the card
+  expect(band).toContain('x repair')
+  expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'repair this citation')).toBe(true)
+  // x: a turn of main, with the claim, the check's reason and the task beside the prompt; the tray closes
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key('x'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const sent = submitted.at(-1)
+  expect(sent?.origin).toMatchObject({ kind: 'plugin' })
+  // the request is the prompt itself, under the words the person reads first: Claude Code runs no hook of the plugin's
+  // own for a prompt it submits
+  expect(String(sent?.text).split('\n')[0]).toBe('Repair citation 1: "12 of 40"')
+  const told = String(sent?.text)
+  expect(told).toContain('pressed x (repair) on citation 1')
+  expect(told).toContain('The check found it wrong: Line 4 counts 12 failed, but 3 were retried.')
+  expect(told).toContain('Its evidence is runs/summary.txt:4.')
+  expect(told).toContain('Check this one claim again against the records.')
+  expect(told).not.toContain('open in the tray')
+  expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
+})
+
+test('a citation not confirmed: ? in the warning color, underlined; a click on x repair in its card asks main to repair it', async ($, on) => {
+  const { submitted, clock } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'evidence', reason: 'The quote is not in runs/summary.txt.' }, 's-tray-6')
+  const reply = all(await $.ui.render(answer('row-t1', TEXT)))
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await $.ui.render(above()))).toContain('? not confirmed · cite')
+  const btn = all(await $.ui.render(above())).find(n => n.type === 'Button' && n.props?.label === 'repair this citation')
+  const ui = await $.ui.mount(above())
+  await ui.press({ key: btn.props.key })
+  await ui.unmount()
+  await clock.advance(10)
+  expect(String(submitted.at(-1)?.text).split('\n')[0]).toBe('Repair citation 1: "12 of 40"')
+  expect(String(submitted.at(-1)?.text)).toContain('The check could not confirm it: it did not find these words in the evidence it read (The quote is not in runs/summary.txt.).')
+})
+
+test('a verified citation offers no repair', async ($, on) => {
+  await resumed($, on, QUOTED, 's-tray-7')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const drawn = all(await $.ui.render(above()))
+  expect(textOf(drawn)).not.toContain('repair')
+  expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'repair this citation')).toBe(false)
 })
 
 test('] stops on a card Claude drew inline, where it stands in the answer: here before the words, so first; a asks about it', async ($, on) => {

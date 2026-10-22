@@ -8,12 +8,11 @@
 //
 // A corrected mark says what it was, its status in the citations' purple (as it draws in the reply); a wrong one says
 // why, in red, and one the check could not confirm says why, in the warning color, with the evidence the check gave
-// when it is real. The cited value has a soft purple tint behind it. What the check found wrong in the rest of the
+// when it is real. The cited value has a soft tint behind it (CITE_TINT). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
-import { themeNow, type Theme } from '../core/theme'
 import { plainSentence } from './message.js'
 import { type Evidence, type MarkItem, type Place, rowMarks } from './store'
 
@@ -31,18 +30,18 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   unchecked: { word: 'not checked', dim: true },
 }
 
-/** The cited words' tint, per theme: a soft purple behind them that reads on a dark and a light background. */
-export const CITE_TINT: Record<Theme, string> = { dark: '#3d3560', light: '#ebe4fd' }
-export type { Theme }
+/** The cited words' tint: the theme key of the soft band Claude Code draws behind the person's own messages, so Claude
+ *  Code picks its shade for the theme it draws in (auto too), and the text on it reads as on those messages. */
+export const CITE_TINT = 'userMessageBackground'
 
-/** A line of text with spans of it highlighted (the citations' soft purple tint behind them), as Text runs. */
-export function highlighted(els: Any, text: string, spans: [number, number][], key: string, theme: Theme = 'dark'): Any {
+/** A line of text with spans of it highlighted (the citations' soft tint behind them), as Text runs. */
+export function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, backgroundColor: CITE_TINT[theme], children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, backgroundColor: CITE_TINT, children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))
@@ -51,7 +50,7 @@ export function highlighted(els: Any, text: string, spans: [number, number][], k
 
 /** The output's lines around its first highlight, each with the parts of the spans that fall in it; `rows` of them
  *  (the tray shows fewer than the pane). */
-export function outputRows(els: Any, output: string, spans: [number, number][], rows = OUTPUT_ROWS, theme: Theme = 'dark'): Any[] {
+export function outputRows(els: Any, output: string, spans: [number, number][], rows = OUTPUT_ROWS): Any[] {
   const lines = output.split('\n')
   const starts: number[] = []
   let at = 0
@@ -64,7 +63,7 @@ export function outputRows(els: Any, output: string, spans: [number, number][], 
   for (let i = from; i < to; i++) {
     const s = starts[i]!
     const mine = spans.map(([a, b]) => [Math.max(a, s) - s, Math.min(b, s + lines[i]!.length) - s] as [number, number]).filter(([a, b]) => b > a)
-    out.push(highlighted(els, lines[i]!, mine, `o${i}`, theme))
+    out.push(highlighted(els, lines[i]!, mine, `o${i}`))
   }
   if (to < lines.length) out.push(els.Text({ key: 'down', dimColor: true, children: `… ${lines.length - to} line${lines.length - to === 1 ? '' : 's'} below` }))
   return out
@@ -100,7 +99,7 @@ export function wrapCode(code: string, width: number): string {
 
 /** One cited place: `path:line` of the line that holds the words (the terminal opens it there), with the cited
  *  range when it is wider, then its lines, the cited ones in full color. */
-export function placeRows(els: Any, p: Place, key: string, theme: Theme = 'dark'): Any[] {
+export function placeRows(els: Any, p: Place, key: string): Any[] {
   const { Box, Text } = els
   const gutter = Math.max(...p.lines.map(l => String(l.n).length))
   const hit = p.lines.find(l => l.highlight && inRange(l.n, p.line))?.n
@@ -110,17 +109,17 @@ export function placeRows(els: Any, p: Place, key: string, theme: Theme = 'dark'
     ...p.lines.map(l => Box({ key: `${key}l${l.n}`, flexDirection: 'row', children: [
       // the gap after the gutter is the box's margin: a trailing space of a Text is lost when the line beside it wraps
       Text({ dimColor: true, children: `${String(l.n).padStart(gutter)} ${l.decoded ? '›' : '│'}` }),
-      Box({ flexShrink: 1, marginLeft: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't', theme) : Text({ wrap: 'wrap', dimColor: !inRange(l.n, p.line), children: l.text || ' ' })] }),
+      Box({ flexShrink: 1, marginLeft: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't') : Text({ wrap: 'wrap', dimColor: !inRange(l.n, p.line), children: l.text || ' ' })] }),
     ] })),
   ]
 }
 
-function evidenceRows(els: Any, ev: Evidence, width: number, theme: Theme): Any[] {
+function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
   if (ev.kind === 'computed') {
     return [
       Text({ key: 'oh', bold: true, children: ev.by === 'main' ? 'Output of the code Claude ran for the reply' : 'Output of the code the check ran' }),
-      Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight, OUTPUT_ROWS, theme) }),
+      Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight, OUTPUT_ROWS) }),
       Text({ key: 'ch', bold: true, children: ' ' }),
       Text({ key: 'ch2', bold: true, children: 'The code' }),
       Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),
@@ -128,7 +127,7 @@ function evidenceRows(els: Any, ev: Evidence, width: number, theme: Theme): Any[
   }
   const places = [ev, ...(ev.more ?? [])]
   return [
-    ...places.flatMap((p, k) => [...(k ? [Text({ key: `gap${k}`, children: ' ' })] : []), ...placeRows(els, p, `p${k}`, theme)]),
+    ...places.flatMap((p, k) => [...(k ? [Text({ key: `gap${k}`, children: ' ' })] : []), ...placeRows(els, p, `p${k}`)]),
     ...(places.some(p => p.lines.some(l => l.decoded)) ? [Text({ key: 'dec', dimColor: true, children: '› the line\'s JSON text, decoded' })] : []),
   ]
 }
@@ -157,6 +156,6 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + m.words.replace(/`/g, '').length) }), sentence.slice(at + m.words.replace(/`/g, '').length),
   ] }))
   if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'checking…' }))
-  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60, await themeNow($)) }))
+  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60) }))
   return Box({ flexDirection: 'column', children: rows })
 }

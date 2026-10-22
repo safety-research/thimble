@@ -6,6 +6,11 @@
 // person never sees as typed. One text per key, the latest wins (a reply's check is told once, as it ends), and each
 // is sent once.
 //
+// askMain starts a turn of main's itself, for a press of the person's that asks main for work (x in the tray). Claude
+// Code runs none of a plugin's own prompt.submit hooks for a prompt the plugin submits, so the context above cannot
+// ride with it: the request is part of the prompt, under the words the person reads first. What waits keeps waiting
+// for the person's next prompt.
+//
 // The texts that wait are kept in $.state (merged with update(), so two modules that keep a text at once both land),
 // so a reload of the plugin does not lose them, and in the conversation's kept folder (core/env.ts), so a resumed
 // session still tells them.
@@ -35,6 +40,12 @@ export async function tellLine($: Engine, key: string, head: string, line: strin
     return { ...(cur ?? {}), [key]: `${was || head}\n${line}` }
   })
   await writeKept($, FILE, next ?? {}).catch(() => undefined)
+}
+
+/** A turn of main's that a press of the person's starts (x in the tray, which asks main to repair a citation): the
+ *  prompt is `words`, as the person would type them, then `request`, what thimble asks for and why. */
+export async function askMain($: Engine, words: string, request: string): Promise<void> {
+  await $.prompt.submit({ text: [words, request].map(t => String(t || '').trim()).filter(Boolean).join('\n\n') })
 }
 
 /** The texts that wait, in the order they were first kept, taken out of the state. */

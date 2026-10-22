@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
-  moreLines, open, pageOf, printLine, push, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
+  moreLines, open, pageOf, printLine, push, repairAsk, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
@@ -134,4 +134,20 @@ test('the code line that printed the cited output line: its own words stand in t
   assert.equal(printLine('x = 1\nx + 1\n', '2'), 'x + 1')
   assert.equal(printLine('', 'x'), '')
   assert.equal(printLine('echo "rows: $n"\necho "cols: ${m}"', 'rows: 12'), 'echo "rows: $n"')
+})
+
+test('x repairs a wrong or not-confirmed citation: the prompt names it, the report gives the claim, what the check found and the task', () => {
+  assert.equal(canRepair({ status: 'failed' }), true)
+  assert.equal(canRepair({ status: 'verified' }), false)
+  assert.equal(canRepair({ status: 'corrected' }), false)
+  assert.equal(canRepair(null), false)
+  const item = { n: 2, words: '7 of 30', shown: '7 of 30', sentence: 'Of the jobs, [7 of 30] timed out.', status: 'failed', failedBy: 'check', reason: 'The log shows 9 timeouts.', evidence: { kind: 'quote', file: 'jobs.log', line: '12' } }
+  const wrong = repairAsk({ row: 'r1', kind: 'citation', n: 2 }, { begins: 'Of the jobs, 7 of 30 timed out.', words: '7 of 30', item })
+  assert.equal(wrong.words, 'Repair citation 2: "7 of 30"')
+  assert.match(wrong.request, /pressed x \(repair\) on citation 2 of your reply that begins "Of the jobs/)
+  assert.match(wrong.request, /in the sentence "Of the jobs, 7 of 30 timed out\."/)
+  assert.match(wrong.request, /The check found it wrong: The log shows 9 timeouts\. Its evidence is jobs\.log:12\./)
+  assert.match(wrong.request, /Check this one claim again against the records\./)
+  const unsure = repairAsk({ row: 'r1', kind: 'citation', n: 2 }, { words: '7 of 30', item: { ...item, failedBy: 'evidence', reason: '', evidence: undefined } })
+  assert.match(unsure.request, /The check could not confirm it: it did not find these words in the evidence it read\./)
 })

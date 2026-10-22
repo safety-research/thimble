@@ -10,14 +10,16 @@
 // The check's notes (it found words around a mark false) are not drawn: main reads them with the next prompt
 // (checker.ts tellText), and a detail the person must see is a heads-up's.
 //
-// A mark's look by its status:
+// A mark's look by its status. Every mark is underlined, whatever its status, so a citation reads as one; the status
+// shows as its color and the sign after it:
 //   pending      the turn still runs: purple, underlined
 //   checking     purple, underlined, and a turning glyph right after it
 //   verified     purple, underlined
 //   corrected    the corrected words in place of the marked ones, purple, underlined: once corrected it holds, so it
 //                looks as a verified one does (its tray card says it was corrected)
-//   failed       wrong as the check read the data: red, with ` ×` after it
-//   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
+//   failed       wrong: the check found the words false in the data: red, underlined, with ` ×` after it
+//   unconfirmed  not confirmed: the check could not find the words in its evidence: the warning color, underlined,
+//                with ` ?` after it
 //   unchecked    underlined in the text's color: no check could run
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
@@ -127,11 +129,12 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
   if (r.it) p.italic = true
+  // the words underlined in every status; the turning glyph and the sign after them are not words
+  if (!r.tag) p.underline = true
   if (r.tag === 'spin') p.color = PURPLE
   else if (look.status === 'failed') p.color = 'error'
   else if (look.status === 'unconfirmed') p.color = 'warning'
-  else if (look.status === 'unchecked') p.underline = true
-  else { p.color = PURPLE; p.underline = true }
+  else if (look.status !== 'unchecked') p.color = PURPLE
   // a span inside the mark's words: its tint under the mark's color
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
