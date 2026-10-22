@@ -124,6 +124,15 @@ test('a card call keeps the card and answers what it read and what it draws; its
   // the earlier call's result line says where the card is now, in place of what it read
   const result = await $.ui.render({ ...(callRow('toolu_made_up_1', input) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_1', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
   expect(textOf(result)).toBe('↓ version 1 · “Scores” is drawn further down, as version 2')
+
+  // a small change: edits to the view on screen, its rows kept (no `view`, no `data`)
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1c', title: 'Scores', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
+  expect(String(r3.result)).toContain('Version 3 of “Scores” is drawn')
+  expect(String(r3.result)).toContain('It read 2 rows from runs.json')
+  expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "y"'))
+  // an edit whose text is not in the view draws nothing, and says why
+  const r4 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1d', title: 'Scores', id, edits: [{ old: 'no such text', new: 'z' }] } as never)) as Any
+  expect(String(r4.result)).toContain('edit 1: its `old` text is not in the view on screen')
 })
 
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {

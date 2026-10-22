@@ -49,7 +49,7 @@ export const registerCards: Register = on => {
     noteViewport(e.viewport)
     if (!featureOn('cards')) return next(e)
     const input = (e.props.input ?? {}) as Any
-    const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title ?? ''), data: String(input.data ?? '') } } })
+    const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title ?? ''), ...(input.data ? { data: String(input.data) } : {}) } } })
     const id = (await callOf($, e.props.tool_use_id)) ?? (input.id ? String(input.id) : cardIdOf(e.props.tool_use_id))
     const meta = await metaOf($, id)
     if (!meta || meta.version < 1) return own

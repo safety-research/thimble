@@ -86,8 +86,12 @@
           "the letters the card takes at an empty message box"
         ],
         [
-          "(not {{KEPT}}: they open thimble's designer, fixes and panes)",
-          "(not {{KEPT}}, which are thimble's)"
+          " and {{KEPT}} open thimble's designer, fixes and panes:",
+          " and {{KEPT}} are thimble's:"
+        ],
+        [
+          "a digit or a sign types into the prompt",
+          "a digit or a sign types into the message box"
         ]
       ]
     },
