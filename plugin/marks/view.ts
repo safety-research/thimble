@@ -4,8 +4,11 @@
 //   messageEl(els, o)  one text block of a reply: each block of its markdown that holds marks laid out here, each mark a
 //                      press with its status drawn on it; every other run of blocks drawn by Claude Code's own Markdown,
 //                      so paragraphs, lists, code and tables look as in any reply
-//   footerEl(els, o)   the lines under a reply's last block while its marks are checked, or when the check changed or
-//                      flagged some or found a statement no mark carries false (a note)
+//   footerEl(els, o)   the line under a reply's last block while its marks are checked, or when the check changed or
+//                      flagged some
+//
+// A note (the check found the words around a mark false) stands right under the block that holds its sentence, after
+// ↳ in the warning color, so the person reads it with the words it is about.
 //
 // A mark's look by its status:
 //   pending      the turn still runs: purple, underlined
@@ -38,6 +41,8 @@ export type MessageOpts = {
   first: boolean
   /** the turning glyph's frame now, after a mark that is checked */
   spin: string
+  /** at a mark's index, the check's note on the words around it, if any */
+  notes?: (string | undefined)[]
   onMark: (k: number) => unknown
 }
 
@@ -110,8 +115,16 @@ function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
     const head = `${' '.repeat(b.indent)}${b.marker} `
     return wrapRuns(runs, w - textWidth(head)).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ children: k === 0 ? head : ' '.repeat(textWidth(head)) })]))
   }
-  if (b.type === 'quote') return wrapRuns(runs, w - 2).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ dimColor: true, children: '▎ ' })]))
-  return wrapRuns(runs, w).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`))
+  const pad = ' '.repeat(b.indent ?? 0)
+  if (b.type === 'quote') return wrapRuns(runs, w - pad.length - 2).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ dimColor: true, children: `${pad}▎ ` })]))
+  return wrapRuns(runs, w - pad.length).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, pad ? [els.Text({ children: pad })] : []))
+}
+
+/** The check's notes on the marks of a block, each once, under it: indented as the block's words. */
+function noteLines(els: Any, o: MessageOpts, b: Any, key: string): Any[] {
+  const said = [...new Set(marksWithin(o.marks, b.start, b.end).map((m: Any) => o.notes?.[m.i]).filter(Boolean))] as string[]
+  const pad = b.type === 'item' ? textWidth(`${' '.repeat(b.indent)}${b.marker} `) : b.indent ?? 0
+  return said.map((note, k) => els.Box({ key: `${key}-n${k}`, flexDirection: 'row', paddingLeft: pad, children: [els.Text({ color: 'warning', children: '↳ ' }), els.Box({ flexShrink: 1, children: [els.Text({ wrap: 'wrap', children: note })] })] }))
 }
 
 /** A table that holds marks, drawn as Claude Code draws a table: a box of light rules, its header bold. One too wide to
@@ -196,7 +209,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   while (i < bs.length) {
     const b = bs[i]
     if (laidOut(i)) {
-      push(blockLines(els, o, b, `${o.key}-l${i}`, w), b.gap && i > 0)
+      push([...blockLines(els, o, b, `${o.key}-l${i}`, w), ...noteLines(els, o, b, `${o.key}-l${i}`)], b.gap && i > 0)
       i++
       continue
     }
@@ -209,17 +222,15 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
 }
 
-export type FooterOpts = { key: string; checking: number; wrong: number; unconfirmed: number; corrected: number; unchecked: number; notes?: string[]; spin: string }
+export type FooterOpts = { key: string; checking: number; wrong: number; unconfirmed: number; corrected: number; unchecked: number; spin: string }
 
-/** The lines under a reply's last block: `checking 12 marks` while the check runs; afterwards, when there are any,
- *  `1 mark wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim, then each
- *  note, a statement of the reply that no mark carried and the check found false, after a red ×; nothing when every
- *  mark was verified as written and no note came. */
+/** The line under a reply's last block: `checking 12 marks` while the check runs; afterwards, when there are any,
+ *  `1 mark wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim; nothing when
+ *  every mark was verified as written. */
 export function footerEl(els: Any, o: FooterOpts): Any | null {
   const { Box, Text } = els
   const marks = (n: number) => `${n} mark${n === 1 ? '' : 's'}`
   const parts: Any[] = []
-  const notes: Any[] = []
   if (o.checking) parts.push(Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${marks(o.checking)}` }))
   else {
     const said: [string, number, Any][] = [['wrong', o.wrong, { color: 'error' }], ['not confirmed', o.unconfirmed, { color: 'warning' }], ['corrected', o.corrected, { dimColor: true }], ['not checked', o.unchecked, { dimColor: true }]]
@@ -228,10 +239,7 @@ export function footerEl(els: Any, o: FooterOpts): Any | null {
       if (parts.length) parts.push(Text({ key: `s${parts.length}`, dimColor: true, children: ' · ' }))
       parts.push(Text({ key: word, ...style, children: `${parts.length ? n : marks(n)} ${word}` }))
     }
-    for (const [k, note] of (o.notes ?? []).entries()) {
-      notes.push(Box({ key: `n${k}`, flexDirection: 'row', children: [Text({ color: 'error', children: '× ' }), Box({ flexShrink: 1, children: [Text({ wrap: 'wrap', children: note })] })] }))
-    }
   }
-  if (!parts.length && !notes.length) return null
-  return Box({ key: o.key, marginLeft: 2, flexDirection: 'column', children: [...(parts.length ? [Box({ key: 'counts', flexDirection: 'row', children: parts })] : []), ...notes] })
+  if (!parts.length) return null
+  return Box({ key: o.key, marginLeft: 2, flexDirection: 'row', children: parts })
 }

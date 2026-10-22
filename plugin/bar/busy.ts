@@ -3,7 +3,8 @@
 // no pane, message or panel draws a spinner of its own. Each job is a step named in plain words:
 //
 //   checking 12 marks           the checker forks over a reply's marks (marks/checker.ts)
-//   drawing a card              the designer fork v started, until it ends (designer/v.ts)
+//   drawing a card              the designer fork v started, until its first card (designer/v.ts)
+//   improving the card          the designer fork after its first card, until it ends
 //   counting coverage           `thimble coverage`: the bar's count, the coverage pane (bar/counts.ts)
 //   labeling <name>             a --prompt label's model reads (labels/labels.ts)
 //   fixing: <title>             a fix Claude works on, while its record says `working` (bar/fix.ts refreshFixes)
@@ -13,7 +14,8 @@
 //                             (telemetry.ts) does this for every model call, so a new call shows without code of its
 //                             own.
 //   busyWhile($, word, alive) a job that ends when `alive()` says false (checked at each tick): work that another
-//                             hook ends, such as a fork, whose turn ends in turn.complete.
+//                             hook ends, such as a fork, whose turn ends in turn.complete. `alive()` may give new
+//                             words for the step instead of true, as the work goes on ("checking 3 marks").
 //   busyNow($)                what the bar shows: the newest job that has run SHOW_MS or more (the step the person
 //                             most likely just started), as a turning glyph and its words, its seconds from SECS_MS
 //                             on, and the other steps that run beside it, by their words. Reading it makes the drawing
@@ -25,7 +27,8 @@
 import type { EngineInterface } from 'claude-code'
 
 type Engine = EngineInterface
-type Alive = () => boolean | Promise<boolean>
+/** Whether a job still runs: false ends it; true, or the step's words now, keeps it. */
+type Alive = () => boolean | string | Promise<boolean | string>
 
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
 export const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
@@ -70,9 +73,10 @@ export async function busyWhile($: Engine, word: string, alive: Alive): Promise<
 async function prune($: Engine): Promise<void> {
   for (const [id, j] of [...jobs]) {
     if (!j.alive) continue
-    let on = false
+    let on: boolean | string = false
     try { on = await j.alive() } catch { on = false }
     if (!on) end($, id)
+    else if (typeof on === 'string') j.word = on
   }
 }
 

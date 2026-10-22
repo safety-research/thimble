@@ -140,8 +140,8 @@ const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
 
 /**
  * The markdown's blocks, each with its offsets: `{type, start, end, from, to, gap, ...}`. `from`..`to` is the content
- * (after a heading's hashes, an item's marker, a quote's `>`); `gap` says a blank line stood before it. Types: para,
- * heading (level), item (indent, marker), quote, code, table (rows), rule.
+ * (after a heading's hashes, an item's marker, a quote's `>`); `gap` says a blank line stood before it. Types: para
+ * (indent), heading (level), item (indent, marker), quote (indent: a quote inside an item), code, table (rows), rule.
  */
 export function blocks(text) {
   const s = String(text || '')
@@ -177,24 +177,26 @@ export function blocks(text) {
     const head = HEAD.exec(t)
     if (head) { out.push({ type: 'heading', level: head[1].length, start: L.start, end: L.end, from: L.start + head[0].length, to: L.end, gap }); i++; gap = false; continue }
     if (/^\s*>/.test(t)) {
-      let j = i
-      while (j < lines.length && /^\s*>/.test(lines[j].line)) j++
+      // each line of a quote on its own, as a paragraph's lines (a quoted record's lines stay lines)
       const lead = /^\s*>\s?/.exec(t)[0].length
-      out.push({ type: 'quote', start: L.start, end: lines[j - 1].end, from: L.start + lead, to: lines[j - 1].end, gap })
-      i = j; gap = false; continue
+      out.push({ type: 'quote', indent: t.search(/\S/), start: L.start, end: L.end, from: L.start + lead, to: L.end, gap })
+      i++; gap = false; continue
     }
     const item = ITEM.exec(t)
     if (item) {
-      // the item and its continuation lines: indented further than its marker, no new marker, no blank line
+      // the item and its continuation lines: indented further than its marker, no new marker, quote, code or heading,
+      // no blank line
       let j = i + 1
       const indent = item[1].length
-      while (j < lines.length && !blank(j) && !ITEM.exec(lines[j].line) && !FENCE.test(lines[j].line) && !HEAD.test(lines[j].line) && /^\s+\S/.test(lines[j].line) && lines[j].line.search(/\S/) > indent) j++
+      const goesOn = k => !blank(k) && !ITEM.exec(lines[k].line) && !FENCE.test(lines[k].line) && !HEAD.test(lines[k].line) && !/^\s*>/.test(lines[k].line)
+      while (j < lines.length && goesOn(j) && /^\s+\S/.test(lines[j].line) && lines[j].line.search(/\S/) > indent) j++
       out.push({ type: 'item', indent, marker: item[2], start: L.start, end: lines[j - 1].end, from: L.start + item[0].length, to: lines[j - 1].end, gap })
       i = j; gap = false; continue
     }
     // a line of its own: a line break written inside a paragraph stays a line break (a report's rows, a commit
-    // message's lines), with no blank row between the lines
-    out.push({ type: 'para', start: L.start, end: L.end, from: L.start, to: L.end, gap })
+    // message's lines), with no blank row between the lines; indented, it goes on an item above it
+    const lead = t.search(/\S/)
+    out.push({ type: 'para', indent: lead, start: L.start, end: L.end, from: L.start + lead, to: L.end, gap })
     i++; gap = false
   }
   return out

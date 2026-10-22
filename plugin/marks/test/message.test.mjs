@@ -82,3 +82,10 @@ test('a table splits its cells at | outside code and marks, each cell its runs',
   const named = '| agent | last |\n|---|---|\n| [Temporary] Leader | [13:27](#) |'
   assert.deepEqual(tableOf(named, blocks(named)[0], marksIn(named)).map(r => r.map(runsText)), [['agent', 'last'], ['[Temporary] Leader', '13:27']])
 })
+
+test('a quote inside a list item is a quote of its own, and an indented line after it goes on under the item', () => {
+  const text = '1. agent-a removed [42](#) of its lines, including:\n   > = HEADING =\n   > a line\n\n   agent-b put its own list there.'
+  const bs = blocks(text)
+  assert.deepEqual(bs.map(b => [b.type, b.indent]), [['item', 0], ['quote', 3], ['quote', 3], ['para', 3]])
+  assert.deepEqual(bs.slice(1).map(b => text.slice(b.from, b.to)), ['= HEADING =', 'a line', 'agent-b put its own list there.'])
+})

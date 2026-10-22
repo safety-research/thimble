@@ -8,7 +8,7 @@ import { expect, test } from 'claude-code/testing'
 import { failLineNow } from '../bar/fix'
 import { checkerDenial, checkerPrompt, endCheck, noteRow, PER_FORK, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
-import { restoreMarks, rowMarks } from '../marks/store'
+import { notesByMark, restoreMarks, rowMarks } from '../marks/store'
 import { footerEl, messageEl } from '../marks/view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -84,8 +84,8 @@ async function drawn($: Any): Promise<string> {
   const reply = await rowMarks($, 'row-1')
   const marks = marksIn(REPLY)
   const looks = marks.map((_m: Any, k: number) => ({ n: k + 1, status: reply!.items[k]!.status, shown: reply!.items[k]!.shown }))
-  const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
-  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking ? reply!.total : 0, wrong: reply!.wrong, unconfirmed: reply!.unconfirmed, corrected: reply!.corrected, unchecked: reply!.unchecked, notes: reply!.notes })
+  const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, notes: notesByMark(reply!.items) })
+  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking ? reply!.total : 0, wrong: reply!.wrong, unconfirmed: reply!.unconfirmed, corrected: reply!.corrected, unchecked: reply!.unchecked })
   return textOf(body) + '\n' + textOf(foot)
 }
 
@@ -108,9 +108,9 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(settled).toContain('merged 12 of 40.')
   expect(settled).toContain('"ship it" ×')
   expect(settled).toContain('1 mark wrong · 1 corrected')
-  // the note on the first sentence, once, under the reply
+  // the note on the first sentence, once, under the block that holds it
   expect(settled.split('agent-02 approved each one').length).toBe(2)
-  expect(settled).toContain('× agent-07 merged none of them alone')
+  expect(settled).toContain('↳ agent-07 merged none of them alone')
   expect(settled).not.toContain('checking')
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('"15 of 40" is corrected to "12 of 40"')

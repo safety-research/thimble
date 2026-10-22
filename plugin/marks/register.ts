@@ -1,8 +1,9 @@
 // register.ts: marks. Claude marks the claims of its reply as markdown links to `#` (`[352](#) of the [410](#) refund
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): purple underline, a turning glyph while
-// checking, corrected words in place, red with × when wrong, ? when the check could not confirm it, and a footer under
-// the reply while it is checked or when the check changed or flagged marks or found an unmarked statement false. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
+// checking, corrected words in place, red with × when wrong, ? when the check could not confirm it, a note under the
+// block whose words the check found false, and a footer under the reply while it is checked or when the check changed
+// or flagged marks. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
 //   session.start    the marks a resumed session's replies hold, as their check left them (store.ts); the checks a
@@ -21,7 +22,7 @@ import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { checkerDenial, endCheck, noteRow, resumeChecks, startCheck } from './checker'
 import { marksIn, withoutMarks } from './message.js'
-import { restoreMarks, rowMarks } from './store'
+import { notesByMark, restoreMarks, rowMarks } from './store'
 import { footerEl, messageEl, type MarkLook } from './view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,11 +100,12 @@ export const registerMarks: Register = on => {
     const body = marks.length
       ? messageEl(els, {
         text, marks, looks, key: `mk-${e.requestId}`, cols: Math.max(20, (e.viewport?.columns ?? 100) - 3), first: !!e.props.isFirstOfReply, spin,
+        notes: notesByMark(reply?.items ?? []),
         onMark: (k: number) => openPane($, 'evidence', { row: e.requestId, n: looks[k]!.n }, `mark ${looks[k]!.n}`),
       })
       : await next(e)
     const foot = reply?.last ? footerEl(els, {
-      key: `mf-${e.requestId}`, spin, checking: reply.checking ? reply.total : 0, wrong: reply.wrong, unconfirmed: reply.unconfirmed, corrected: reply.corrected, unchecked: reply.unchecked, notes: reply.notes,
+      key: `mf-${e.requestId}`, spin, checking: reply.checking ? reply.total : 0, wrong: reply.wrong, unconfirmed: reply.unconfirmed, corrected: reply.corrected, unchecked: reply.unchecked,
     }) : null
     return foot ? els.Box({ flexDirection: 'column', children: [body, foot] }) : body
   })

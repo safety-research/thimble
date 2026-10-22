@@ -34,8 +34,8 @@ export type Reply = { key: string; turnId: string; rows: string[]; startedAt: nu
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */
 export type RowMarks = { row: string; last: boolean; items: MarkItem[] } & Counts
 /** A reply's marks by what the person sees: `wrong` failed by the check, `unconfirmed` failed because the evidence did
- *  not hold; `notes` what the check found false in sentences no mark carries. */
-export type Counts = { total: number; checking: boolean; corrected: number; wrong: number; unconfirmed: number; unchecked: number; notes: string[] }
+ *  not hold. */
+export type Counts = { total: number; checking: boolean; corrected: number; wrong: number; unconfirmed: number; unchecked: number }
 
 const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
@@ -75,11 +75,16 @@ export async function editReply($: Engine, key: string, edit: (r: Reply) => Repl
   return (out ?? null) as Reply | null
 }
 
-/** The notes of a reply as the person reads them under it: what the check found false in a sentence that no mark of
- *  it carries, one note a sentence (the forks share out sentences, so two notes on one sentence say the same thing). */
-export function notesOf(items: MarkItem[]): string[] {
+/** At each mark, the note the person reads under the block of its sentence: what the check found false in the words
+ *  around the mark, one note a sentence (the forks share out sentences, so two notes on one sentence say the same
+ *  thing). */
+export function notesByMark(items: MarkItem[]): (string | undefined)[] {
   const seen = new Set<string>()
-  return items.filter(m => m.note && !seen.has(m.sentence) && seen.add(m.sentence)).map(m => m.note!)
+  return items.map(m => (m.note && !seen.has(m.sentence) && seen.add(m.sentence) ? m.note : undefined))
+}
+
+export function notesOf(items: MarkItem[]): string[] {
+  return notesByMark(items).filter((n): n is string => !!n)
 }
 
 export function counts(r: Reply): Counts {
@@ -91,7 +96,6 @@ export function counts(r: Reply): Counts {
     wrong: n(m => m.status === 'failed' && m.failedBy !== 'evidence'),
     unconfirmed: n(m => m.status === 'failed' && m.failedBy === 'evidence'),
     unchecked: n(m => m.status === 'unchecked'),
-    notes: notesOf(r.items),
   }
 }
 

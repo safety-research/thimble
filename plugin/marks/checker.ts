@@ -21,7 +21,7 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failNotice } from '../bar/fix'
+import { failNotice, noticeLine } from '../bar/fix'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
@@ -167,11 +167,16 @@ export function splitMarks<M extends { sentence: string }>(items: M[]): M[][] {
   return out.filter(s => s.length)
 }
 
-/** The busy line's step while a reply's forks run, until none of them does. */
-async function showRunning($: Engine, total: number, agents: string[]): Promise<void> {
-  await busyWhile($, `checking ${total} mark${total === 1 ? '' : 's'}`, async () => {
+const checkingWord = (n: number) => `checking ${n} mark${n === 1 ? '' : 's'}`
+
+/** The busy line's step while a reply's forks run, until none of them does: the marks still checked, counting down as
+ *  each fork's share settles. */
+async function showRunning($: Engine, key: string, total: number, agents: string[]): Promise<void> {
+  await busyWhile($, checkingWord(total), async () => {
     const now = await running($)
-    return agents.some(id => !!now[id])
+    if (!agents.some(id => !!now[id])) return false
+    const left = ((await replyOf($, key))?.items ?? []).filter(m => m.status === 'checking').length
+    return left ? checkingWord(left) : true
   })
 }
 
@@ -218,7 +223,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...c, agentId, spawnedAt } }))
     started.push(agentId)
   }
-  if (started.length) await showRunning($, items.length, started)
+  if (started.length) await showRunning($, key, items.length, started)
 }
 
 /** The real Bash calls of a conversation, with their output as the model read it: a call that ended with an error
@@ -253,21 +258,15 @@ function citedOutputs(answer: string): string[][] {
 }
 
 
-/** The output holds the parts, in order. */
+/** The output holds each of the parts, in any order, as evidence.py `printed` reads it. */
 function holdsParts(output: string, parts: string[]): boolean {
   const text = flat(output)
-  let at = 0
-  for (const p of parts) {
-    const i = text.indexOf(p, at)
-    if (i < 0) return false
-    at = i + p.length
-  }
-  return true
+  return parts.every(p => text.includes(p))
 }
 
 /** The person's line when a check gave no answer, by why its turn ended. */
 function giveUpLine(reason: string): string {
-  if (reason === 'refusal') return "The model's safeguards refused the check of the marks, so they are not checked. /model can switch to another model."
+  if (reason === 'refusal') return "The model's safeguards refused the check of the marks, so they are not checked. Another model may check them: /model."
   if (reason === 'aborted') return 'The check of the marks was stopped, so they are not checked.'
   return 'The check of the marks stopped on an error, so they are not checked. The next reply is checked again.'
 }
@@ -296,7 +295,9 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
   try {
     if (e.reason !== 'answer') {
       await giveUp($, c, e.reason === 'refusal' ? 'safeguards refused the check' : `the check ended: ${e.reason}`, forkEnd)
-      failNotice($, giveUpLine(e.reason))
+      // a refusal is no failure of thimble's, so its line offers no fix of thimble
+      if (e.reason === 'refusal') noticeLine($, giveUpLine(e.reason))
+      else failNotice($, giveUpLine(e.reason))
       return
     }
     const mine = new Set(c.marks)
@@ -350,5 +351,5 @@ export async function resumeChecks($: Engine): Promise<void> {
   }
   const byReply = new Map<string, string[]>()
   for (const c of Object.values(now).filter(c => alive(c.agentId))) byReply.set(c.key, [...(byReply.get(c.key) ?? []), c.agentId])
-  for (const [key, ids] of byReply) await showRunning($, (await replyOf($, key))?.items.length ?? ids.length, ids)
+  for (const [key, ids] of byReply) await showRunning($, key, (await replyOf($, key))?.items.length ?? ids.length, ids)
 }
