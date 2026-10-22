@@ -84,7 +84,8 @@ test("a turn keeps its prompt and who sent it, its text rows, its answer, and th
   const t = await turnOf(s.$, 't1')
   expect(t).toMatchObject({ n: 1, prompt: { text: 'How many test runs failed?', by: 'composer', row: 'prompt-t1' }, rows: ['t1-row-0', 't1-row-1'], answer: 't1-row-1', reason: 'answer' })
   expect(t!.labels.map(l => [l.name, l.seq, l.ok])).toEqual([['failed', 1, true], ['failed', 1, true]])
-  expect(t!.cards).toEqual([{ id: 'c0000000000001', toolUseId: 'card-t1-1', seq: 2 }])
+  // the card stands after the first text row (`after`: the rows above its call), where ] steps to it
+  expect(t!.cards).toEqual([{ id: 'c0000000000001', toolUseId: 'card-t1-1', seq: 2, after: 1 }])
   // the labels a card's call came after, each once
   expect((await labelsOf(s.$, 't1', 2)).map(l => l.name)).toEqual(['failed'])
   expect(await labelsOf(s.$, 't1', 1)).toEqual([])
@@ -148,6 +149,22 @@ test("a typed prompt is the person's though its turn starts while its prompt.sub
   await s.call('turn.start', { text: 'And by agent?', turnId: 't5' })
   await s.call('prompt.submit', { text: 'And by agent?', origin: { kind: 'composer' } })
   expect((await turnOf(s.$, 't5'))!.prompt.by).toBe('composer')
+})
+
+test("two prompts waiting at once: each turn takes its own, so a typed prompt is the person's", async () => {
+  const s = setup()
+  await turn(s, { id: 't1', prompt: 'Why was pr/118 reverted?', rows: ['It broke the build.'] })
+  // a prompt typed over the running turn waits; a task's report arrives before its turn starts
+  await s.call('prompt.submit', { text: 'And pr/119?', origin: { kind: 'composer' }, turnId: 't1' })
+  await s.call('prompt.submit', { text: '<task-notification>done</task-notification>', origin: { kind: 'task-notification' } })
+  await s.call('turn.start', { text: 'And pr/119?', turnId: 't2' })
+  await s.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text: 'It was flaky.' }] } }, async () => ({ uuid: 't2-row-0' }))
+  await s.call('turn.complete', { turnId: 't2', reason: 'answer', answer: 'It was flaky.' }, async () => ({ text: '' }))
+  await s.call('turn.start', { text: '<task-notification>done</task-notification>', turnId: 't3' })
+  await settle()
+  expect((await turnOf(s.$, 't2'))!.prompt.by).toBe('composer')
+  expect((await turnOf(s.$, 't3'))!.prompt.by).toBe('task-notification')
+  expect((await sinceLast(s.$)).replies).toEqual(['t2-row-0'])
 })
 
 test("each feature keeps its own part of a message, and a resumed session reads the turns and their parts back", async () => {

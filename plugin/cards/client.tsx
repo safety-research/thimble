@@ -8,8 +8,11 @@
 //                                   drawing in a resumed session, or the drawing at a new width
 //   {rows: n}                       the rows its region takes, when they change: where the card stands in its row,
 //                                   so the hooks know whether the screen shows it
-//   {press: n}                      a Button, by the number the runner gave its onPress
-//   {pointer: {down, up, button}}   a click, sent when the button comes up
+//   {press: n, width}               a Button, by the number the runner gave its onPress, in the drawing at `width`
+//   {pointer: {down, up, button}, width}   a click, sent when the button comes up
+//
+// Each post carries the width the instance draws at, so the answer's props are the drawing at that width (a card
+// shows at two widths at once when a side pane holds its copy).
 //
 // A drawing hook may not write the session's state, so the card's frame asks through its Client, whose posts reach a
 // hook that may.
@@ -61,7 +64,7 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   if (ack) me.queue = me.queue.filter(x => Number(x.n) > ack)
   const send = (ev: Record<string, unknown>) => {
     me.queue = [...me.queue, { n: ++me.n, ...ev }].slice(-20)
-    surface.post({ client: me.id, events: me.queue })
+    surface.post({ client: me.id, width, events: me.queue })
   }
   if (fresh) send({ seen: true })
   if (surface.rows && surface.rows !== me.rows) {
@@ -69,6 +72,9 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     send({ rows: surface.rows })
   }
   const need = typeof props?.need === 'string' ? props.need : ''
+  // a drawing at its width came: a later need of the same width (a key changed the card while this one showed its
+  // drawing at another width) is asked again
+  if (!need) me.asked = ''
   if (need && me.asked !== need) {
     me.asked = need
     send({ draw: need })
@@ -79,7 +85,7 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     if (ev.type !== 'up' || !me.down) return
     const d = me.down
     me.down = null
-    send({ pointer: { down: { x: d.x, y: d.y }, up: { x: ev.x, y: ev.y }, button: d.button } })
+    send({ pointer: { down: { x: d.x, y: d.y }, up: { x: ev.x, y: ev.y }, button: d.button }, width })
   })
 
   const kids = (c: Node[] | undefined, inText: boolean): Any[] => (Array.isArray(c) ? c : []).map(k => draw(k, inText)).filter(x => x != null)
@@ -93,7 +99,7 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
       const key = typeof n.p?.key === 'string' ? `k${n.p.key}` : `b${String(press)}`
       return E.Button({
         ...pick(n.p, BUTTON), key,
-        onPress: () => { if (typeof press === 'number') send({ press }) },
+        onPress: () => { if (typeof press === 'number') send({ press, width }) },
         children: kids(n.c, true),
       })
     }
@@ -102,8 +108,8 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   }
 
   // the region the card's tree is laid out in, as layout.js's cardRoot lays it out for the text copy: what is wider is
-  // cut at its edge, as the copy says, so a view laid out for a wider card never draws over the frame (a side pane
-  // that opens narrows the card before the view draws again)
+  // cut at its edge, as the copy says, so a view never draws over the frame. The frame hands only a drawing laid out at
+  // this width (draw.ts), and none while that drawing comes
   const tree = props?.tree ? draw(props.tree, false) : E.Text({ dimColor: true, children: 'drawing…' })
   return E.Box({ flexDirection: 'column', width, overflow: 'hidden', children: [tree] })
 }

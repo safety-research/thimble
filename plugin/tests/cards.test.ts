@@ -32,11 +32,16 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; refused?: boolean } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; refused?: boolean; wide?: boolean } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
   const asked: string[] = []
+  // with `wide`, the runner's drawings say the width they are laid out at and whether a key sorted them
+  let runnerWidth = 0
+  let sorted = false
+  let seq = 0
+  const laidOut = () => ({ t: 'Text', p: {}, c: [`${sorted ? 'sorted' : 'rows'} at ${runnerWidth}`] })
   on('session.id', () => ({ value: 's-cards' }))
   on('session.cwd', () => ({ value: DATA }))
   on('session.root', () => ({ value: DATA }))
@@ -86,6 +91,9 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     // a view that does not parse, and one that throws at a narrow width
     if (op === 'load' && String(body.view).includes('BROKEN')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' }) } }
     if (op === 'draw' && body.width < 30) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'draw', error: 'line 4: Invalid count value: -1' }) } }
+    if (o.wide && (op === 'load' || op === 'draw') && body.width) runnerWidth = body.width
+    if (o.wide && op === 'key' && body.key === 'o') sorted = true
+    if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, handled: body.key === 'o', tree: laidOut(), state: 'null', seq: ++seq }) } }
     // a view whose tree the terminal refuses: a Text whose bold is not a boolean
     const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : TREE
     const answers: Record<string, unknown> = {
@@ -96,7 +104,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
       undo: { ok: true, tree: TREE, state: 'null' },
     }
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answers[op] ?? { ok: false, error: 'no such request' }) } }
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ...(answers[op] ?? { ok: false, error: 'no such request' }) as object, ...(o.wide ? { seq: ++seq } : {}) }) } }
   })
   // the person's permission rules: a deny rule for reading `secret.json`; with `ask`, the mode asks about every file
   // outside the folder, and a rule of the person's asks about made-up/tmp/mine
@@ -233,6 +241,49 @@ test('a drawing that fails at a narrow width holds only there: the card keeps it
   expect(w.asked.filter(x => x === 'draw').length).toBe(drawsBefore + 1)
   const wide = textOf(await $.ui.render(at(100)))
   expect(wide).not.toContain('failed')
+})
+
+test('a side pane opens: the card in the conversation and its copy in the pane each draw at their own width, and never show a drawing laid out for another', async ($, on) => {
+  const w = world(on, { wide: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11', ...input } as never)
+  // the pane's copy is a second instance of the card's frame, at the pane's width
+  const at = (columns: number) => ({ ...(callRow('toolu_made_up_11', input) as Any), ...(columns < 50 ? { requestId: 'pane-copy' } : {}), viewport: { columns, rows: 40, isFullscreen: true } })
+  const client = async (columns: number) => elements(await $.ui.render(at(columns))).find(n => n.type === 'Client')?.props
+  // the pane opens and the conversation narrows to 70 columns: the drawing at 92 columns is not drawn at 62
+  const narrowed = await client(70)
+  expect(narrowed.props.tree).toBe(null)
+  expect(narrowed.props.need).toBe('1:62')
+  expect(narrowed.width).toBe(62)
+  // the conversation's Client and the pane's copy (40 columns) both on screen: each draws at its own width
+  const main = await shown($, at(70))
+  const pane = await shown($, at(40))
+  expect((await client(70)).props.tree).toEqual({ t: 'Text', p: {}, c: ['rows at 62'] })
+  expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['rows at 32'] })
+  // what each Client draws, and a post from either answering the drawing at that Client's width
+  const key = (await client(70)).key ?? elements(await $.ui.render(at(70))).find(n => n.type === 'Client')?.key
+  const drawnIn = async (m: Any) => textOf(await m.drawn({ in: key }))
+  expect(await drawnIn(main)).toContain('rows at 62')
+  expect(await drawnIn(pane)).toContain('rows at 32')
+  await main.post({ client: 'made-up', width: 62, events: [{ n: 1, rows: 4 }] }, { in: key })
+  await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 1, rows: 4 }] }, { in: key })
+  expect(await drawnIn(main)).toContain('rows at 62')
+  expect(await drawnIn(pane)).toContain('rows at 32')
+  // a key changes the card: the drawing at the other width is gone, and that width draws again
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
+  expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 32'] })
+  expect((await client(70)).props.tree).toBe(null)
+  await main.unmount()
+  await (await shown($, at(70))).unmount()
+  expect((await client(70)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 62'] })
+  expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 32'] })
+  // a Button pressed in the pane's copy: the runner holds the card at the pane's width first, so the press is the one
+  // of the drawing the person saw
+  await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 2, press: 0, width: 32 }] }, { in: key })
+  expect(w.asked.slice(-2)).toEqual(['draw', 'press'])
+  await pane.unmount()
 })
 
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {

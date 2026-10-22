@@ -17,6 +17,7 @@
 //   nextMessage({text, scope, last})            a later question: what it is about named again when that changed
 //   forkDirective(guide, sent)    what the fork is told: the thread's instructions, its place, the question
 //   turnsOf(messages)             the fork's transcript ($.session.messages, as: 'api') as the thread's turns
+//   stepWords(step, root)         a step without the folders it ran in, for the pane's `N steps` row
 //   display(thread, turns)        those turns as the person reads them: each question as they asked it
 //   answerOf(messages)            its last answer
 //   rowsOf(list, now)             the thread list's rows: key, name, status, questions, last question, how long ago
@@ -136,6 +137,21 @@ export function callWords(b) {
   const i = b?.input || {}
   if (b?.name === 'Bash') return String(i.command || '').split('\n')[0].slice(0, 120)
   return `${b?.name || 'tool'} ${String(i.file_path || i.pattern || i.path || i.title || i.description || '').slice(0, 100)}`.trim()
+}
+
+const escRe = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+// a leading `cd <folder> &&` (or `;`), quoted or not
+const LEAD_CD = /^\s*cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/
+
+/** A step as the pane shows it (`N steps · <step>`), without the folders it ran in, since a folder's path can be
+ *  private: no leading `cd <folder> &&`, a path in the data folder `root` relative to it, any other absolute path by
+ *  its last name (`…/todo.txt`). */
+export function stepWords(step, root = '') {
+  let s = String(step ?? '')
+  while (LEAD_CD.test(s) && s.replace(LEAD_CD, '').trim()) s = s.replace(LEAD_CD, '')
+  const r = String(root || '').replace(/\/+$/, '')
+  if (r) s = s.replace(new RegExp(`${escRe(r)}/(?=[^\\s'"])`, 'g'), '').replace(new RegExp(`${escRe(r)}(?=$|[\\s'"/])`, 'g'), '.')
+  return s.replace(/(^|[\s='"(])\/(?:[^\s'"/]+\/)+([^\s'"/]+)/g, '$1…/$2')
 }
 
 /**
