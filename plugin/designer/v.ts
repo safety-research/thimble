@@ -17,7 +17,8 @@
 //   designNow($)           the design that runs now, or null
 //   vReady($)              whether v would start a design now (the bar names v only then)
 //
-//   state: designs (each design, by key), designNow (the key of the design that runs), answerRow (main's last answer row)
+//   state: designs (each design, by key), designNow (the key of the design that runs), answerRow (main's last answer
+//   row, kept on disk too, so v works in a resumed session)
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -25,8 +26,10 @@ import { failNotice } from '../bar/fix'
 import { WORD_MS } from '../bar/register'
 import { cardsUnder, cardText } from '../cards/draw'
 import { type CardMeta, metaOf } from '../cards/store'
+import { readKept, writeKept } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { tellAtNextPrompt } from '../core/tell'
+import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 
@@ -53,6 +56,7 @@ const TELL_CHARS = 3000
 const DESIGNS = { plugin: 'thimble', key: 'designs' } as const
 const NOW = { plugin: 'thimble', key: 'designNow' } as const
 const ANSWER = { plugin: 'thimble', key: 'answerRow' } as const
+const ANSWER_FILE = 'answer.json'
 
 /** Main's last answer row, and whether main works now. */
 let answerRow: string | null = null
@@ -99,6 +103,16 @@ async function end($: Engine, d: Design, status: Design['status'], error?: strin
   if (status === 'failed' && error) failNotice($, error)
 }
 
+/** What the check of the answer's marks changed since main wrote it, for the fork, whose copy of the conversation
+ *  ends at that answer: a card must not repeat a value the check corrected or flagged. */
+async function checkedSince($: Engine, row: string): Promise<string> {
+  const reply = await replyOf($, row)
+  const changed = (reply?.items ?? []).filter(m => m.status === 'corrected' || m.status === 'failed')
+  if (!changed.length) return ''
+  const lines = changed.map(m => (m.status === 'corrected' ? `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
+  return `\n\nSince that answer, thimble checked its marks against the data and found:\n${lines.join('\n')}\nThe card shows the corrected values, computed from the records.`
+}
+
 /** v's fork, spawned while the key's own hook runs (the agent.spawn hook below holds it for the word window). */
 async function start($: Engine, d: Design, prompt: string): Promise<void> {
   try {
@@ -117,7 +131,7 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
 /** The fork ended: main reads the cards it drew, or the person reads why it drew none. */
 async function finish($: Engine, d: Design, e: { reason: string; answer: string }): Promise<void> {
   if (e.reason === 'aborted') return end($, d, 'cancelled')
-  if (e.reason === 'refusal') return end($, d, 'failed', "× The model's safeguards refused to draw this card. /model can switch to Opus 4.8.")
+  if (e.reason === 'refusal') return end($, d, 'failed', "× The model's safeguards refused to draw this card. /model can switch to another model.")
   const said = cut(firstLine(e.answer), 160)
   if (e.reason === 'error') return end($, d, 'failed', `× v could not draw a card: the model call failed${said ? ` (${said})` : ''}.`)
   const drawn: CardMeta[] = []
@@ -140,6 +154,11 @@ export const registerDesigner: Register = on => {
     const r = await next(e)
     try {
       answerRow = ((await $.state.get(ANSWER)).value ?? null) as string | null
+      if (!answerRow) {
+        // a resumed session: the conversation's last answer, as the session that wrote it kept it
+        answerRow = (await readKept<{ row?: string }>($, ANSWER_FILE))?.row ?? null
+        if (answerRow) await $.state.set(ANSWER, answerRow)
+      }
       const d = await designNow($)
       if (d && (d.status === 'held' || d.status === 'running')) {
         current = d
@@ -159,6 +178,7 @@ export const registerDesigner: Register = on => {
     if (e.agentId === undefined && !synthetic && r.uuid && e.message.content.some(b => b.type === 'text' && String(b.text || '').trim())) {
       answerRow = r.uuid
       void $.state.set(ANSWER, r.uuid).catch(() => undefined)
+      void writeKept($, ANSWER_FILE, { row: r.uuid }).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -198,7 +218,7 @@ export const registerDesigner: Register = on => {
     const d: Design = { key: `d${now.toString(36)}`, anchorRow: answerRow, agentId: null, status: 'held', at: now, cards: [] }
     current = d
     wordWindow = { at: now, cancelled: false }
-    const prompt = await promptText($, 'designer')
+    const prompt = `${await promptText($, 'designer')}${await checkedSince($, d.anchorRow)}`
     await save($, d)
     await $.state.set(NOW, d.key)
     void start($, d, prompt)

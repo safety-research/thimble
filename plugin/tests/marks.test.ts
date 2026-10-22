@@ -5,8 +5,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import { fixLineNow } from '../bar/fix'
-import { allowedTool, endCheck, marksOf, noteRow, PER_FORK, splitMarks, startCheck } from '../marks/checker'
+import { allowedTool, endCheck, noteRow, PER_FORK, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
+import { restoreMarks, rowMarks } from '../marks/store'
 import { footerEl, messageEl } from '../marks/view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,9 +21,10 @@ const VALIDATED = { parsed: true, results: [
   { n: 3, status: 'failed', shown: '"ship it"', reason: 'no record holds these words' },
 ] }
 
-/** An engine with versioned state, a fork that starts, and a validator that answers `validated`. */
-function engine(validated: Any) {
+/** An engine with versioned state, files, forks that start, and a validator that answers `validated`. */
+function engine(validated: Any, files = new Map<string, string>()) {
   const state = new Map<string, { value: unknown; version: number }>()
+  let forks = 0
   const seen = { spawned: [] as Any[], stdin: [] as string[] }
   let now = 1000
   const $: Any = {
@@ -35,8 +37,17 @@ function engine(validated: Any) {
         ? [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u1', tool: 'Bash', input: { command: "python3 - <<'PY'\nprint('12 of 40')\nPY" }, text: '12 of 40' }] }]
         : []),
     },
-    fs: { read: async (p: string) => (p.endsWith('/prompts/checker.md') ? 'CHECK\n{marks}\nIN {cwd}' : ''), exists: async () => false },
-    agent: { spawn: async (a: Any) => { seen.spawned.push(a); return { model: 'claude-opus-5-5', agentId: FORK } } },
+    fs: {
+      read: async (p: string) => {
+        if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{marks}\nIN {cwd}'
+        if (files.has(p)) return files.get(p)
+        throw new Error(`no file ${p}`)
+      },
+      write: async (p: string, text: string) => { files.set(p, text) },
+      list: async (dir: string) => [...files.keys()].filter(p => p.startsWith(`${dir}/`)).map(p => ({ name: p.slice(dir.length + 1), kind: 'file' })),
+      exists: async () => false,
+    },
+    agent: { spawn: async (a: Any) => { seen.spawned.push(a); const agentId = forks ? `${FORK}${forks}` : FORK; forks++; return { model: 'claude-opus-5-5', agentId } } },
     process: { run: async (_argv: string[], init: Any) => { seen.stdin.push(String(init?.stdin ?? '')); return { exitCode: 0, stdout: JSON.stringify(validated), stderr: '' } } },
     state: {
       get: async (k: Any) => state.get(JSON.stringify(k)) ?? { value: undefined, version: 0 },
@@ -50,7 +61,7 @@ function engine(validated: Any) {
     },
     clock: { now: async () => (now += 100), after: () => ({ cancel() {} }), every: () => ({ cancel() {} }) },
   }
-  return { $, seen }
+  return { $, seen, files }
 }
 
 /** Elements as plain objects, and their words. */
@@ -65,7 +76,7 @@ function textOf(n: Any): string {
 
 /** The reply's row as the renderer draws it from the state. */
 async function drawn($: Any): Promise<string> {
-  const reply = await marksOf($, 'row-1')
+  const reply = await rowMarks($, 'row-1')
   const marks = marksIn(REPLY)
   const looks = marks.map((_m: Any, k: number) => ({ n: k + 1, status: reply!.items[k]!.status, shown: reply!.items[k]!.shown }))
   const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
@@ -95,7 +106,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(settled).not.toContain('checking')
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('"15 of 40" is corrected to "12 of 40"')
-  expect(told).toContain('failed: no record holds these words')
+  expect(told).toContain('"ship it" is flagged as wrong: no record holds these words')
   expect(await fixLineNow($)).toBe(null)
 })
 
@@ -109,7 +120,7 @@ test('a refused check leaves the marks unchecked, says so once, and nothing spin
   expect(out).not.toContain('checking')
   expect(out).not.toContain('×')
   const line = String((await fixLineNow($))?.text ?? '')
-  expect(line).toContain('Safeguards refused the check of the marks')
+  expect(line).toContain("safeguards refused the check of the marks")
   expect(line).toContain('/model')
 })
 
@@ -125,4 +136,34 @@ test('a reply with many marks is split between forks, a sentence never across tw
   expect(shares.flat().map(m => m.n)).toEqual(items.map(m => m.n))
   for (let k = 1; k < shares.length; k++) expect(shares[k]![0]!.sentence).not.toBe(shares[k - 1]!.at(-1)!.sentence)
   expect(splitMarks(items.slice(0, PER_FORK)).length).toBe(1)
+})
+
+test('two checker forks that end at the same moment both settle their marks', async () => {
+  const many = Array.from({ length: 12 }, (_, i) => `Sentence ${i} has [${i + 10}](#).`).join(' ')
+  const results = Array.from({ length: 12 }, (_, i) => ({ n: i + 1, status: 'verified', shown: String(i + 10), reason: 'counted' }))
+  const { $ } = engine({ parsed: true, results })
+  await noteRow($, 'row-1', many)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await Promise.all([FORK, `${FORK}1`].map(agentId => endCheck($, { agentId, reason: 'answer', answer: '```json\n[]\n```' })))
+  const reply = await rowMarks($, 'row-1')
+  expect(reply!.checking).toBe(false)
+  expect(reply!.items.map(m => m.status)).toEqual(Array(12).fill('verified'))
+})
+
+test('a resumed session draws the marks as their check left them; a check the session ended is not checked', async () => {
+  const { $, files } = engine(VALIDATED)
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  await noteRow($, 'row-2', 'Then [7](#) more.')
+  await startCheck($, { turnId: 't-2', reason: 'answer' })
+  // a new process: the same files, a fresh state
+  const { $: resumed } = engine(VALIDATED, files)
+  await restoreMarks(resumed)
+  const first = await rowMarks(resumed, 'row-1')
+  expect(first!.items.map(m => [m.status, m.shown])).toEqual([['verified', '40'], ['corrected', '12 of 40'], ['failed', '"ship it"']])
+  expect(first!.failed).toBe(1)
+  const second = await rowMarks(resumed, 'row-2')
+  expect(second!.items[0]!.status).toBe('unchecked')
+  expect(second!.checking).toBe(false)
 })

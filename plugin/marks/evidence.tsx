@@ -9,7 +9,7 @@
 // it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
-import { marksOf, type Evidence, type MarkItem } from './checker'
+import { type Evidence, type MarkItem, rowMarks } from './store'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -89,7 +89,7 @@ function evidenceRows(els: Any, ev: Evidence): Any[] {
 export async function drawEvidence($: EngineInterface, _e: Any, args: unknown, els: Any): Promise<unknown> {
   const { Box, Text } = els
   const { row, n } = (args ?? {}) as { row?: string; n?: number }
-  const reply = row ? await marksOf($, row) : null
+  const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This mark is no longer in the session.' })
   const st = STATUS[m.status] ?? STATUS.unchecked!

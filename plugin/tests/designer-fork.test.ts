@@ -82,7 +82,7 @@ test("a refused design says that the model's safeguards refused it, and how to s
   const s = setup()
   await pressV(s)
   await s.call('turn.complete', end('refusal', '', { refusal: { category: null, explanation: null } }), async () => ({ text: '' }))
-  expect(await s.failLine()).toContain("The model's safeguards refused to draw this card. /model can switch to Opus 4.8")
+  expect(await s.failLine()).toContain("The model's safeguards refused to draw this card. /model can switch to another model")
   expect(designAnchor('agent-1')).toBe(null)
 })
 

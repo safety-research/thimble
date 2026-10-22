@@ -5,16 +5,17 @@ declare module 'claude-code' {
   interface PluginState {
     'thimble': {
       // ---- L1 marks
-      /** a reply's marks and their checks, by the reply's row (the session.append uuid of a main text row; the
-       *  AssistantMessage's requestId): { row, turnId, last (the reply's last text row: it holds the reply's counts and
-       *  draws the footer), total, checking, startedAt, settledAt, failed, unchecked, items: [{ n, words, start,
-       *  end, sentence, status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, was?, reason?,
-       *  evidence? }] } (marks/checker.ts ReplyMarks) */
+      /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
+       *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
+       *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, was?, reason?,
+       *  failedBy?, evidence? }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
+      /** the reply each text row with marks belongs to, by the row: the reply's key */
+      marksRow: StateFamily<string>
       /** main's text rows of the turn that runs: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
-      /** the checks that run, by the checker fork's agent: the reply's rows and the marks this fork checks */
-      marksRunning: Record<string, { agentId: string; turnId: string; rows: string[]; marks: number[]; cwd: string; replyEnd: number; spawnedAt: number }>
+      /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks */
+      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number }>
 
       // ---- L2 cards
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,

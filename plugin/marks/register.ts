@@ -5,6 +5,7 @@
 // marks failed. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
+//   session.start    the marks a resumed session's replies hold, as their check left them (store.ts)
 //   session.append   main's text rows, as they are stored
 //   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others)
 //   turn.complete    the checker's turn ended: validate, write the statuses, tell main
@@ -16,8 +17,9 @@ import { SPIN } from '../bar/busy'
 import { forkOf } from '../core/forks'
 import { openPane } from '../core/pane'
 import { featureOn } from '../settings/features.mjs'
-import { allowedTool, DENIED, endCheck, marksOf, noteRow, startCheck } from './checker'
+import { allowedTool, DENIED, endCheck, noteRow, startCheck } from './checker'
 import { marksIn, withoutMarks } from './message.js'
+import { restoreMarks, rowMarks } from './store'
 import { footerEl, messageEl, type MarkLook } from './view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,7 +27,17 @@ type Any = any
 
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
 
+// main's turn runs: its marks are not yet in the store, and draw as pending. A mark with no record after that (marks
+// were off, or the reply is older than thimble) draws unchecked.
+let turnRuns = false
+
 export const registerMarks: Register = on => {
+  on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
+    const r = await next(e)
+    try { await restoreMarks($) } catch { /* the marks of earlier replies draw unchecked */ }
+    return r
+  }).catch(($, e, next) => next(e))
+
   on('session.append', { door: 'response' }, async ($, e, next) => {
     const stored = await next(e)
     try {
@@ -40,9 +52,15 @@ export const registerMarks: Register = on => {
     return stored
   }).catch(($, e, next) => next(e))
 
+  on('turn.start', { turnId: /./ }, async ($, e, next) => {
+    if (e.agentId === undefined) turnRuns = true
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('turn.complete', { reason: /^(answer|aborted|refusal|error)$/ }, async ($, e, next) => {
     const r = await next(e)
     if (e.agentId === undefined) {
+      turnRuns = false
       try { await startCheck($, e) } catch { /* the reply stands; its marks stay drawn as written */ }
     }
     return r
@@ -65,7 +83,7 @@ export const registerMarks: Register = on => {
     if (e.props.isSummary) return next(e)
     const text = String(e.props.text ?? '')
     const marks = marksIn(text)
-    const reply = await marksOf($, e.requestId)
+    const reply = await rowMarks($, e.requestId)
     if (!marks.length && !reply?.last) return next(e)
     if (!featureOn('marks')) return marks.length ? next({ ...e, props: { ...e.props, text: withoutMarks(text) } }) : next(e)
     const els = $.ui.resolve(e) as Any
@@ -74,7 +92,7 @@ export const registerMarks: Register = on => {
     const spin = SPIN[frame % SPIN.length]!
     const looks: MarkLook[] = marks.map((_m: Any, k: number) => {
       const it = reply?.items[k]
-      return it ? { n: it.n, status: it.status, shown: it.shown } : { n: k + 1, status: 'pending' }
+      return it ? { n: it.n, status: it.status, shown: it.shown } : { n: k + 1, status: turnRuns ? 'pending' : 'unchecked' }
     })
     const body = marks.length
       ? messageEl(els, {

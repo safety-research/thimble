@@ -1,6 +1,7 @@
 // env.ts: where thimble's records are, and how the plugin runs its own `thimble` calls.
 //
 //   thimbleHome($)          $THIMBLE_HOME, else ~/.thimble
+//   keptDir($), readKept, writeKept  what thimble keeps of this conversation for a resumed session, as JSON files
 //   startDir($)             the folder the session started in, which a shell `cd` does not move
 //   rootHere($)             the folder under analysis as the kernel finds it (engine/kernel/store.py find_root), or null
 //   labelsDir($, root)      the folder that holds a root's labels, or null (engine/kernel/store.py records_dir)
@@ -14,6 +15,26 @@ type Engine = EngineInterface
 
 export async function thimbleHome($: Engine): Promise<string> {
   return String((await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`).replace(/\/+$/, '')
+}
+
+/** The folder of what thimble keeps of this conversation for a resumed session: the marks' checks, the texts Claude
+ *  reads with the next prompt, the answer v draws under. Its name is the conversation's key (hooks/conversation.ts). */
+export async function keptDir($: Engine): Promise<string> {
+  return `${await thimbleHome($)}/kept/${(await sessionKey($)).replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 80) || 'none'}`
+}
+
+/** A JSON value kept in the conversation's folder, or null when there is none or it cannot be read. */
+export async function readKept<T>($: Engine, name: string): Promise<T | null> {
+  try {
+    return JSON.parse(String(await $.fs.read(`${await keptDir($)}/${name}`))) as T
+  } catch {
+    return null
+  }
+}
+
+/** Keep a JSON value in the conversation's folder. */
+export async function writeKept($: Engine, name: string, value: unknown): Promise<void> {
+  await $.fs.write(`${await keptDir($)}/${name}`, JSON.stringify(value))
 }
 
 /** The folder the session started in: THIMBLE_START, which hooks/watch.ts sets from $.session.root(); that root when
