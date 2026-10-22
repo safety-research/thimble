@@ -106,6 +106,12 @@ export function failNotice($: Engine, text: string, about?: string): void {
   void $.state.set(LINE, { kind: 'failed', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
 }
 
+/** A notice the person should read, with no keys: one line above the prompt, until the person's next prompt. */
+export function noticeLine($: Engine, text: string): void {
+  const t = String(text || '').trim()
+  if (t) void $.state.set(LINE, { kind: 'notice', text: t }).catch(() => undefined)
+}
+
 /** What a failure line was about works again: the line goes, when it is still about that. */
 export async function failCleared($: Engine, about: string): Promise<void> {
   const l = await fixLineNow($)

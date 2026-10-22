@@ -52,7 +52,7 @@ async function countItems($: Engine, on: (key: string) => boolean, presses: BarP
 async function leftItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<Item[]> {
   const out: Item[] = []
   const b = preview ? null : await busyNow($)
-  if (b) out.push({ id: 'busy', glyph: b.glyph, words: `${b.word}${b.secs != null ? ` ${b.secs}s` : ''}` })
+  if (b) out.push({ id: 'busy', glyph: b.glyph, words: [`${b.word}${b.secs != null ? ` ${b.secs}s` : ''}`, ...b.more].join(' · ') })
   if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card' })
   return out
 }
@@ -71,11 +71,12 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   if (!preview) needCounts($)
   const left = await leftItems($, on, preview)
   let right = await countItems($, on, presses, preview)
-  // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage
+  // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
+  // item the switches leave on, its right part on a line of its own when it does not fit
   const room = () => width - 9 - left.reduce((n, x) => n + itemLen(x) + 3, 0) - right.reduce((n, x) => n + itemLen(x) + 3, 0)
-  if (room() < 0) right = right.filter(x => x.id !== 'labels')
-  if (room() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
-  if (room() < 0) right = []
+  if (!preview && room() < 0) right = right.filter(x => x.id !== 'labels')
+  if (!preview && room() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
+  if (!preview && room() < 0) right = []
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: NAME_COLOR, children: `${x.glyph} ` })] : []),
@@ -88,7 +89,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 
   const name = Text({ key: 'name', color: NAME_COLOR, bold: true, children: 'thimble' })
   const label = presses ? Button({ key: 'bar-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name
-  const bar = Box({ key: 'bar', flexDirection: 'row', justifyContent: 'space-between', width, children: [
+  const bar = Box({ key: 'bar', flexDirection: 'row', justifyContent: 'space-between', width, ...(preview ? { flexWrap: 'wrap' } : {}), children: [
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
     ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
   ] })

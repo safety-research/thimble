@@ -46,8 +46,8 @@ export function placeOf(ref: string): string {
 
 const titleOf = (args: LabelsArgs) => (args.label ? `Label ${args.label}` : 'Labels')
 
-export async function openLabels($: Engine, args: LabelsArgs = {}): Promise<void> {
-  await openPane($, 'labels', args, titleOf(args), { focus: true, rows: 28 })
+export async function openLabels($: Engine, args: LabelsArgs = {}): Promise<boolean> {
+  return openPane($, 'labels', args, titleOf(args), { focus: true, rows: 28 })
 }
 
 export async function showLabels($: Engine, args: LabelsArgs): Promise<void> {

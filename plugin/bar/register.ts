@@ -18,7 +18,7 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { recount } from './counts'
-import { failNotice, fixCommand, fixKeyOf, pressFix, promptTyped, refreshFixes } from './fix'
+import { failNotice, fixCommand, fixKeyOf, noticeLine, pressFix, promptTyped, refreshFixes } from './fix'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,17 +60,19 @@ async function paneShows($: Engine, kind: string): Promise<boolean> {
 }
 
 /** Coverage or the labels: open, or closed when the pane shows it. Coverage leaves the keys at the prompt, so the same
- *  key closes it; a click inside it presses its rows. The labels pane takes the keys (labels/pane.tsx). */
+ *  key closes it; a click inside it presses its rows. The labels pane takes the keys (labels/pane.tsx). A pane a key
+ *  opened that Claude Code did not place (a narrow terminal, core/pane.ts) is said in the bar, with the click that
+ *  opens it. */
 async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void> {
   if (await paneShows($, kind)) { await closePane($); return }
-  if (kind === 'labels') { await openLabels($); return }
-  void recount($).catch(() => undefined)
-  await openPane($, kind, {}, TITLES[kind])
+  if (kind === 'coverage') void recount($).catch(() => undefined)
+  const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind])
+  if (!placed) noticeLine($, `Claude Code opens the ${kind === 'labels' ? 'labels' : 'coverage'} pane from a key only in a wider terminal. Click “${kind === 'labels' ? 'labels' : 'coverage'}” below to open it here.`)
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
 export async function openSettings($: Engine): Promise<void> {
-  await openPane($, 'settings', {}, TITLES.settings, { focus: true })
+  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) noticeLine($, 'Claude Code did not open the settings pane here. Type /thimble-settings to open it.')
 }
 
 export const registerFixKeys: Register = on => {

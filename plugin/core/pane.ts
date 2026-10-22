@@ -24,10 +24,16 @@ type Any = any
 export const PANE_ID = 'thimble'
 const NOW = { plugin: 'thimble', key: 'pane' } as const
 
-/** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. */
-export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number } = {}): Promise<void> {
+/** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. Answers
+ *  whether the pane is on screen. Claude Code places a pane at any width only when the person's own command, prompt
+ *  or click opened it; a key at the prompt is none of these, so below 144 columns (110 once the person opened the
+ *  pane before) the pane would wait unseen until the terminal grows. Such a pane is closed, and the caller says why. */
+export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number } = {}): Promise<boolean> {
   await $.state.set(NOW, { kind, args })
-  await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true, closeOnEscape: true } : {}), ...(o.rows ? { rows: o.rows } : {}) })
+  const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true, closeOnEscape: true } : {}), ...(o.rows ? { rows: o.rows } : {}) })
+  if (r.isPlaced) return true
+  await closePane($)
+  return false
 }
 
 export async function closePane($: Engine): Promise<void> {

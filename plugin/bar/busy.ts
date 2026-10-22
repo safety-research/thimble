@@ -15,9 +15,9 @@
 //   busyWhile($, word, alive) a job that ends when `alive()` says false (checked at each tick): work that another
 //                             hook ends, such as a fork, whose turn ends in turn.complete.
 //   busyNow($)                what the bar shows: the newest job that has run SHOW_MS or more (the step the person
-//                             most likely just started), as a turning glyph and its words, `+1` when another job runs
-//                             beside it, and its seconds from SECS_MS on. Reading it makes the drawing draw again at
-//                             each tick.
+//                             most likely just started), as a turning glyph and its words, its seconds from SECS_MS
+//                             on, and the other steps that run beside it, by their words. Reading it makes the drawing
+//                             draw again at each tick.
 //   busySteps()               the steps running now, by their words, the oldest first (fix.ts starts a fix's step once).
 //
 // A job shorter than SHOW_MS never shows, so quick work does not flicker. A failure says itself where it happened
@@ -94,15 +94,15 @@ function tick($: Engine): void {
   void step()
 }
 
-/** The newest job that has run long enough to show, with how many other shown jobs run beside it; or null. */
-async function shown($: Engine): Promise<{ word: string; ms: number; more: number } | null> {
+/** The newest job that has run long enough to show, with the other shown steps that run beside it; or null. */
+async function shown($: Engine): Promise<{ word: string; ms: number; more: string[] } | null> {
   if (!jobs.size) return null
   const now = Number(await $.clock.now())
   const on = [...jobs.values()].filter(j => now - j.t0 >= SHOW_MS)
   let best: { word: string; t0: number } | null = null
   for (const j of on) if (!best || j.t0 > best.t0) best = j
-  // the same step twice (two checks of marks) counts once
-  const more = new Set(on.map(j => j.word)).size - 1
+  // the same step twice (two checks of marks) is one step
+  const more = [...new Set(on.map(j => j.word))].filter(w => w !== best?.word)
   return best ? { word: best.word, ms: now - best.t0, more } : null
 }
 
@@ -111,14 +111,13 @@ function spinFrame(): string {
   return SPIN[frame % SPIN.length]!
 }
 
-/** What the bar shows now: the glyph, the step's words (with `+1` when another step runs beside it), and the seconds
- *  once they help (from 3 s); null when nothing runs. */
-export async function busyNow($: Engine): Promise<{ glyph: string; word: string; secs: number | null } | null> {
+/** What the bar shows now: the glyph, the newest step's words, the seconds once they help (from 3 s), and the other
+ *  steps that run beside it; null when nothing runs. */
+export async function busyNow($: Engine): Promise<{ glyph: string; word: string; secs: number | null; more: string[] } | null> {
   await $.state.get(BUSY)
   const j = await shown($)
   if (!j) return null
-  const more = j.more ? ` +${j.more}` : ''
-  return { glyph: spinFrame(), word: `${j.word}${more}`, secs: j.ms >= SECS_MS ? Math.floor(j.ms / 1000) : null }
+  return { glyph: spinFrame(), word: j.word, secs: j.ms >= SECS_MS ? Math.floor(j.ms / 1000) : null, more: j.more }
 }
 
 /** The steps running now, by their words, the oldest first. */
