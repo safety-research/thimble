@@ -94,10 +94,19 @@ function groupCalls(rows: readonly (Row | BranchRow)[]): (Exclude<Row, ToolRowT>
   return out
 }
 
-/** The index of the newest call that drew each card: the card draws there, and an earlier call of it points to it. */
-function newestCalls(rows: readonly ShownRow[]): Map<string, number> {
-  const out = new Map<string, number>()
-  for (const r of rows) if (r.kind === 'cardcall' && r.tool.result?.card) out.set(r.tool.result.card, r.index)
+/** Where each card draws, and its newest version. A card has one place, as in the terminal: under the answer v was
+ * pressed on when v drew it, else under the first call that drew it; each new version replaces it there, and every
+ * other call of it points to that place. */
+type CardPlace = { at: number | 'v'; version: number }
+function cardPlaces(rows: readonly ShownRow[]): Map<string, CardPlace> {
+  const out = new Map<string, CardPlace>()
+  for (const r of rows) if (r.kind === 'text') for (const id of r.cards ?? []) out.set(id, { at: 'v', version: 0 })
+  for (const r of rows) {
+    const got = r.kind === 'cardcall' ? r.tool.result : undefined
+    if (!got?.card) continue
+    const was = out.get(got.card)
+    out.set(got.card, { at: was?.at ?? r.index, version: Math.max(was?.version ?? 0, got.version ?? 0) })
+  }
   return out
 }
 
@@ -115,7 +124,7 @@ export function Rows({ rows, ws, chat, streaming = false, live = false, retry }:
   // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them,
   // or the last text before the last call when nothing follows it
   const notes = midTurnTexts(shown, streaming || live)
-  const newest = newestCalls(shown)
+  const places = cardPlaces(shown)
   const cardsOn = useFeature('cards')
   // v draws a card of the chat's last reply, once it is whole
   const lastTurn = shown.reduce((at, r, i) => (r.kind === 'user' ? i : at), -1)
@@ -150,7 +159,7 @@ export function Rows({ rows, ws, chat, streaming = false, live = false, retry }:
               </div>
             )
           case 'cardcall':
-            return <CardCall key={r.index} tool={r.tool} ws={ws} running={streaming && i === shown.length - 1 && !r.tool.result} newest={newest.get(r.tool.result?.card ?? '') === r.index} />
+            return <CardCall key={r.index} tool={r.tool} ws={ws} running={streaming && i === shown.length - 1 && !r.tool.result} place={places.get(r.tool.result?.card ?? '')} />
           case 'tools':
             return <ToolGroupCard key={r.index} group={r} ws={ws} pending={streaming && i === shown.length - 1} />
           case 'calls':
@@ -417,16 +426,23 @@ function CallLine({ tool, ws, running, startOpen = false }: { tool: ToolRowT; ws
   )
 }
 
-/** A call of the card tool: its line, then the card when this call drew its newest version, else a line that points to
- * that version further down. */
-function CardCall({ tool, ws, running, newest }: { tool: ToolRowT; ws: string; running: boolean; newest: boolean }) {
+/** A call of the card tool: its line, then the card when the card's place is this call, else a line that points to its
+ * place (cardPlaces). */
+function CardCall({ tool, ws, running, place }: { tool: ToolRowT; ws: string; running: boolean; place?: CardPlace }) {
   const card = tool.result?.card
-  const title = typeof (tool.input as { title?: unknown })?.title === 'string' ? (tool.input as { title: string }).title : 'the card'
+  const version = tool.result?.version ?? 0
+  const here = place?.at === tool.index
+  const now = place && version < place.version ? `, now version ${place.version}` : ''
   return (
     <div className="chat-msg chat-cardcall">
       <CallLine tool={tool} ws={ws} running={running} />
-      {card && newest && <Card ws={ws} id={card} version={tool.result?.version} />}
-      {card && !newest && <div className="chat-card-moved">↓ version {tool.result?.version} of “{title}”: a newer version is drawn further down</div>}
+      {card && here && <Card ws={ws} id={card} version={place.version} />}
+      {card && place && !here && (
+        <div className="chat-card-moved">
+          ↑ version {version} · “{tool.result?.title ?? 'the card'}” is drawn in its place {place.at === 'v' ? 'under the answer v was pressed on' : 'above'}
+          {now}
+        </div>
+      )}
     </div>
   )
 }

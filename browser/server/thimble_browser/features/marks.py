@@ -5,9 +5,9 @@ guidance, section Marking claims). They are checked after the reply, as the term
 1. After a turn of the chat's agent that ended normally, the marks of its texts (marks_of.mjs, with the terminal's
    message.js) are kept, all `checking`, and the page draws each with a spinner.
 2. The checker: copies of the chat (agent.Sessions.spawn, agent `checker`), up to MAX_FORKS at once, each with a share
-   of the marks, read the terminal's checker.md and give one JSON item per mark: verified, corrected or failed, with
-   its evidence. A copy runs main's prompt and tools, so its requests read main's cached conversation, and it may only
-   read and run Python.
+   of the marks, read the terminal's checker.md and give one JSON item per mark: verified, corrected, wrong or
+   unconfirmed, with its evidence. A copy runs main's prompt and tools, so its requests read main's cached
+   conversation, and it may only read and run Python.
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py, through kernel.py), checks that evidence with
    no model call and no code run: a quote must stand in the file's line, and computed evidence names one of the
    conversation's real run_python calls (the checker's or main's) by a part of its output, and that call's real output

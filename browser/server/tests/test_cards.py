@@ -2,6 +2,7 @@
 file must be in the folder or the temp folder; v starts a copy of the chat whose card stands under the answer, and main
 hears of it with the analyst's next message."""
 import json
+import re
 import shutil
 import time
 
@@ -54,10 +55,31 @@ async def test_a_new_version_may_keep_the_rows_and_edit_the_view_on_screen(folde
     first = await cards.card(t, {"title": "Runs", "data": "$TMPDIR/runs.json", "view": VIEW})
     cid = first.extra["card"]
     bad = await cards.card(t, {"title": "Runs", "id": cid, "edits": [{"old": "no such text", "new": "x"}]})
-    assert bad.is_error and "is not in the view on screen" in bad.text
+    assert bad.is_error and "is not in the view of your last call" in bad.text
     r = await cards.card(t, {"title": "Runs", "id": cid, "edits": [{"old": "runs`", "new": "runs kept`"}]})
     assert not r.is_error and r.extra["version"] == 2, r.text
     assert "It read 2 rows from runs.json" in r.text and "2 runs kept" in r.text
+    await cardrunner.close_all()
+
+
+@node
+async def test_a_version_keeps_its_title_and_place_and_edits_fix_a_view_that_did_not_draw(folder):
+    ws = home.open_folder(folder)
+    (home.temp_dir(ws) / "runs.json").write_text(json.dumps([{"run": "a"}, {"run": "b"}]))
+    t = tools.Tools(ws, "main", folder, unsandboxed=True)
+    untitled = await cards.card(t, {"data": "$TMPDIR/runs.json", "view": VIEW})
+    assert untitled.is_error and "`title` is empty" in untitled.text
+    # a new card whose view does not parse: the error names its id, and edits by that id fix it
+    broken = await cards.card(t, {"title": "Runs", "data": "$TMPDIR/runs.json", "view": VIEW + ")"})
+    assert broken.is_error and "`edits` change the view of this call" in broken.text
+    cid = re.search(r'id "(c[0-9a-f]{8})"', broken.text)[1]
+    first = await cards.card(t, {"id": cid, "edits": [{"old": "}) })", "new": "}) }"}]})
+    assert not first.is_error and first.extra["title"] == "Runs", first.text
+    assert "“Runs” is drawn where this call stands" in first.text
+    # a later version with no title keeps it, and takes the card's place
+    again = await cards.card(t, {"id": cid, "edits": [{"old": "runs`", "new": "runs kept`"}]})
+    assert not again.is_error and again.extra["title"] == "Runs" and again.extra["version"] == 2, again.text
+    assert "is drawn in place of version 1, under the call that first drew the card" in again.text
     await cardrunner.close_all()
 
 

@@ -13,10 +13,11 @@ One call:
   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, and the copy after
      each action, in the terminal's words (plugin/cards/tool.ts)
 
-A call with `id` draws a new version of that card where this call stands; the page shows the earlier call as a line
-that points to it. A new version may keep the rows of the version on screen (no `data`) and give `edits` to its view in
-place of the whole view, as the terminal's card tool takes them. A version that fails leaves the one on screen, and the
-view's error goes back to Claude.
+A call with `id` draws a new version of that card in the card's place, under the call that first drew it or under the
+answer v was pressed on, and keeps its title unless the call gives one; the page shows the later call as a line that
+points to it. A new version may keep the rows of the card's last call (no `data`) and give `edits` to that call's view
+in place of the whole view, as the terminal's card tool takes them. A version that fails leaves the one on screen; its
+view and rows are kept for the next call's `edits`, and the view's error goes back to Claude.
 
 The page draws the tree (frontend cards/), and sends the analyst's keys and clicks to the routes below, which pass them
 to the runner and answer the new tree. A card's state is kept beside its copy, so it draws the same after a restart.
@@ -167,7 +168,7 @@ def failed(cid: str, r: dict[str, Any], update: bool) -> str:
     if r.get("down"):
         return (f"The card did not draw: {error}. The view is not the cause, and cards cannot draw in this workspace "
                 "until the analyst fixes it; answer in words.")
-    fix = "Fix the data file" if r.get("phase") == "rows" else "Fix the view"
+    fix = "Fix the data file" if r.get("phase") == "rows" else "Fix the view (`edits` change the view of this call)"
     kept = " The version on screen stays." if update else ""
     return f"The card did not draw: {error}.{kept}\n{fix} and call card again with id \"{cid}\"."
 
@@ -196,95 +197,107 @@ def notice(ws: str, chat: str, text: str) -> None:
     chats.append(ws, chat, {"type": "notice", "kind": "cards", "text": text})
 
 
-def view_of(args: dict[str, Any], on_screen: Path | None) -> tuple[str, str | None]:
-    """(the view of a call, why there is none): the whole `view` it gives, or, for a new version, the view on screen
-    (`on_screen`, its version's folder) with the call's `edits` made in order, each `old` text standing once in it (the
-    terminal's viewOf)."""
+def view_of(args: dict[str, Any], last: Path | None) -> tuple[str, str | None]:
+    """(the view of a call, why there is none): the whole `view` it gives, or the view of the card's last call (`last`,
+    that call's folder, also when its version did not draw) with the call's `edits` made in order, each `old` text
+    standing once in it (the terminal's viewOf)."""
     if str(args.get("view") or "").strip():
         return str(args["view"]), None
     edits = args.get("edits") if isinstance(args.get("edits"), list) else []
     if not edits:
-        return "", ("give the whole `view`, or `edits` to the view on screen" if on_screen else
+        return "", ("give the whole `view`, or `edits` to the view of your last call" if last else
                     "`view` is empty: give the JavaScript that defines function view(props, surface)")
-    if on_screen is None:
-        return "", "`edits` change a card you drew: give its `id`, or the whole `view` for a new card"
+    if last is None:
+        return "", "`edits` change a card you called card for: give its `id`, or the whole `view` for a new card"
     try:
-        text = (on_screen / "view.js").read_text()
+        text = (last / "view.js").read_text()
     except OSError:
-        return "", "the view on screen cannot be read; give the whole `view`"
+        return "", "the view of your last call cannot be read; give the whole `view`"
     for k, e in enumerate(edits, 1):
         old = str((e or {}).get("old") or "")
         n = text.count(old) if old else 0
         if n > 1:
-            return "", f"edit {k}: its `old` text stands {n} times in the view on screen, not once; give more of the text around it"
+            return "", f"edit {k}: its `old` text stands {n} times in the view, not once; give more of the text around it"
         if not n:
             # where its first line stands, so the next try copies the view's own text
             first = old.split("\n")[0].strip()
             at = text.find(first) if first else -1
             here = f", which has here: {json.dumps(text[at:at + len(old) + 20])}" if at >= 0 else ""
-            return "", f"edit {k}: its `old` text is not in the view on screen{here}"
+            return "", f"edit {k}: its `old` text is not in the view of your last call{here}"
         text = text.replace(old, str((e or {}).get("new") or ""), 1)
     return text, None
 
 
 async def card(t: Any, args: dict[str, Any]) -> Result:
     t0 = time.monotonic()
-    title = one_line(args.get("title"), 120) or "Card"
     given = str(args.get("id") or "").strip()
     design = (t.session.meta.get("design") if t.session is not None else None) or None
     before = meta_of(t.ws, given) if given else None
     if given and not before:
         return Result(f"There is no card \"{one_line(given, 40)}\" to replace. Leave out `id` to draw a new card.", True)
+    # a version keeps the card's title unless the call gives a new one
+    title = one_line(args.get("title"), 120) or (before or {}).get("title") or ""
+    if not title:
+        return Result("The card did not draw: `title` is empty: give the card's title, what it shows in a few words.", True)
     cid = given or f"c{secrets.token_hex(4)}"
     meta = before or {"id": cid, "version": 0, "title": title, "at": home.now()}
-    # a new version may keep the view on screen with a few edits, and its rows: writing the whole view again takes the
-    # model half a minute
-    on_screen = version_dir(t.ws, cid, int(before["version"])) if before else None
-    view, bad = view_of(args, on_screen)
+    shown = int(meta["version"])  # the version on screen; 0 while none has drawn
+    # a new version may keep the view of the card's last call with a few edits, and its rows: writing the whole view
+    # again takes the model half a minute. The last call's folder is the version on screen, or the version after it
+    # when that call did not draw (its view did not parse, say), so `edits` fix the view the error was about
+    last_no = int(meta.get("last") or meta["version"])
+    last = version_dir(t.ws, cid, last_no) if last_no > 0 else None
+    view, bad = view_of(args, last)
     if bad:
         return Result(f"The card did not draw: {bad}.", True)
-    keep = on_screen is not None and not str(args.get("data") or "").strip()
-    path, bad = (on_screen / "rows.json", "") if keep else data_file(t, args.get("data"))
+    keep = last is not None and not str(args.get("data") or "").strip()
+    path, bad = (last / "rows.json", "") if keep else data_file(t, args.get("data"))
     if path is None:
         return Result(f"The card did not draw: {bad}.", True)
-    file = str(meta.get("file") or "") if keep else str(args.get("data"))
+    file = str(meta.get("last_file") or meta.get("file") or "") if keep else str(args.get("data"))
     version = int(meta["version"]) + 1
     d = version_dir(t.ws, cid, version)
     d.mkdir(parents=True, exist_ok=True)
     (d / "view.js").write_text(view)
-    shutil.copyfile(path, d / "rows.json")
+    if path != d / "rows.json":
+        shutil.copyfile(path, d / "rows.json")
     width = int(meta.get("width") or width_of(t.ws))
     r = await cardrunner.ask(t.ws, "load", {"id": cid, "version": version, "title": title, "view": view,
                                             "rows": str(d / "rows.json"), "state": None, "width": width},
                              unsandboxed=t.unsandboxed)
     if not r.get("ok"):
-        shutil.rmtree(d, ignore_errors=True)
+        # the folder stays as the last call's, for the next call's `edits`; the version on screen stays
+        save_meta(t.ws, {**meta, "last": version, "last_file": file})
         if r.get("down"):
             notice(t.ws, design["chat"] if design else t.chat, f"Cards cannot draw: {str(r.get('error'))[:300]}")
-        return Result(failed(cid, r, bool(before)), True)
+        return Result(failed(cid, r, shown > 0), True)
 
     summary = r["summary"]
     asked = list(dict.fromkeys(k for k in str(r.get("keys") or "") if not k.isspace()))
-    nxt = {**meta, "version": version, "title": title, "rows": summary["rows"], "columns": summary["columns"],
+    # a new version takes the card's place: the chat and turn of its first version (the page draws it under the call
+    # that drew that version, or under the answer v was pressed on); `design` names the v that drew this version
+    place = ({"chat": meta.get("chat"), "turn": meta.get("turn")} if shown else
+             {"chat": design["chat"] if design else t.chat, "turn": design["turn"] if design else None})
+    nxt = {**meta, **place, "version": version, "last": version, "last_file": file, "title": title,
+           "rows": summary["rows"], "columns": summary["columns"],
            "keys": [k for k in asked if k.isalpha() and len(k) == 1 and k not in OWN_KEYS],
-           "file": file, "width": width, "at": home.now(),
-           "chat": design["chat"] if design else t.chat, "turn": design["turn"] if design else None,
-           "design": design["id"] if design else None}
+           "file": file, "width": width, "at": home.now(), "design": design["id"] if design else None}
     save_meta(t.ws, nxt)
     save_state(t.ws, nxt, r.get("state"))
-    if before:
-        shutil.rmtree(version_dir(t.ws, cid, int(before["version"])), ignore_errors=True)
-    if design and not before:
+    if shown:
+        shutil.rmtree(version_dir(t.ws, cid, shown), ignore_errors=True)
+    if design and not shown:
         # a v card stands under the answer v was pressed on, in the chat that answer is in
         chats.append(t.ws, design["chat"], {"type": "card", "card": cid, "turn": design["turn"]})
     hub.publish(t.ws, {"type": "card", "card": cid, "version": version})
     drawn_ms = round((time.monotonic() - t0) * 1000)
 
-    where = "under the answer v was pressed on" if design else "where this call stands, above the words you write after it"
-    if before:
-        pointer = "" if design else "; the earlier call shows one line that points here"
-        out = [f"Version {version} of “{title}” is drawn {where}{pointer}."]
+    under_v = bool(nxt["turn"])
+    if shown:
+        out = [f"Version {version} of “{title}” is drawn in place of version {shown}, "
+               f"{'under the answer v was pressed on' if under_v else 'under the call that first drew the card'}."]
     else:
+        where = "under the answer v was pressed on" if under_v else "where this call stands, above the words you write after it"
         out = [f"“{title}” is drawn {where}. Its id is \"{cid}\": to change it, call card again with this id."]
     rows, columns = summary["rows"], summary["columns"]
     out.append(f"It read {rows} row{'' if rows == 1 else 's'} from {Path(file).name}"
@@ -311,7 +324,7 @@ async def card(t: Any, args: dict[str, Any]) -> Result:
             save_state(t.ws, nxt, a.get("state"))
         else:
             out += ["", f"The actions did not run: {a.get('error') or 'no answer'}"]
-    return Result("\n".join(out), extra={"card": cid, "version": version, "drawn_ms": drawn_ms,
+    return Result("\n".join(out), extra={"card": cid, "version": version, "title": title, "drawn_ms": drawn_ms,
                                          "ms": round((time.monotonic() - t0) * 1000)})
 
 

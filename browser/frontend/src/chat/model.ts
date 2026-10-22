@@ -32,9 +32,10 @@ export interface ToolResult {
   is_error?: boolean
   /** the card an apply_label call left, which its result names (backend labels/chat.py) */
   label_card?: string
-  /** the card a `card` call drew, and its version (backend features/cards.py) */
+  /** the card a `card` call drew, its version and its title (backend features/cards.py) */
   card?: string
   version?: number
+  title?: string
 }
 export interface ToolRow {
   kind: 'tool'
@@ -107,7 +108,10 @@ export function foldRecords(records: readonly ChatRecord[]): Row[] {
       }
       case 'tool_result': {
         const call = calls.get(e.id)
-        if (call) call.result = { summary: e.summary, ts: e.ts, is_error: e.is_error, ...(e.label_card ? { label_card: e.label_card } : {}), ...(e.card ? { card: e.card, version: e.version } : {}) }
+        if (!call) return
+        call.result = { summary: e.summary, ts: e.ts, is_error: e.is_error, ...(e.label_card ? { label_card: e.label_card } : {}), ...(e.card ? { card: e.card, version: e.version, title: e.title } : {}) }
+        // a version that keeps its card's title shows that title on its call, as the terminal's call row does
+        if (e.title && call.input && typeof call.input === 'object' && !(call.input as { title?: unknown }).title) call.input = { ...call.input, title: e.title }
         return
       }
       case 'chip':

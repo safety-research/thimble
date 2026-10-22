@@ -52,7 +52,7 @@ export type ChatRecord =
   | { type: 'user'; ts?: string; text: string; by?: string; turn?: string }
   | { type: 'text'; ts?: string; delta: string }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; n?: number }
-  | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; cell_id?: string; label_card?: string; card?: string; version?: number }
+  | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; cell_id?: string; label_card?: string; card?: string; version?: number; title?: string }
   | { type: 'done'; ts?: string; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
   | { type: 'error'; ts?: string; message: string; kind?: string }
   | { type: 'marks'; ts?: string; turn: string; items: import('../marks/marks').MarkItem[] }

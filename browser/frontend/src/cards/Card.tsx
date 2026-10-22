@@ -1,8 +1,8 @@
-// A card Claude drew (backend features/cards.py), in the chat under the call that drew its newest version, or under the
-// answer v was pressed on: its title, the card runner's tree (tree.tsx) at the chat's width in cells, and a line that
-// names its keys. A click on a Button presses it; a click elsewhere goes to the view's onPointer, as the cell it fell
-// in; a key goes to the card while it has the focus, or from an empty message box (keys.ts). Each answer draws the card
-// anew. A new version (the stream's `card` record) draws as soon as it is made.
+// A card Claude drew (backend features/cards.py), in the chat under the call that drew its first version, or under the
+// answer v was pressed on, where each new version replaces it: its title, the card runner's tree (tree.tsx) at the
+// chat's width in cells, and a line that names its keys. A click on a Button presses it; a click elsewhere goes to the
+// view's onPointer, as the cell it fell in; a key goes to the card while it has the focus, or from an empty message box
+// (keys.ts). Each answer draws the card anew. A new version (the stream's `card` record) draws as soon as it is made.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { cardsApi, type CardDrawing } from '../lib/api'
 import { bus } from '../lib/bus'

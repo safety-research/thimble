@@ -102,4 +102,26 @@ describe('chat rows', () => {
     expect(mark?.textContent).toBe('"merged"')
     expect(errors).toEqual([])
   })
+
+  test('a new version of a card replaces it in its place; the later call points up to it and shows the kept title', async () => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ id: 'c0000aaaa', title: 'Runs', version: 2, keys: [], tree: { t: 'Text', p: {}, c: ['2 runs'] } }), { headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    const el = await rows([
+      { type: 'user', text: 'How many runs?', turn: 't1' },
+      { type: 'tool_use', id: 'u1', name: 'card', input: { title: 'Runs', data: '$TMPDIR/runs.json', view: 'function view() {}' } },
+      { type: 'tool_result', id: 'u1', summary: 'drawn', card: 'c0000aaaa', version: 1, title: 'Runs' },
+      { type: 'text', delta: 'Two runs.' },
+      { type: 'user', text: 'Only the failed ones.', turn: 't2' },
+      { type: 'tool_use', id: 'u2', name: 'card', input: { id: 'c0000aaaa', edits: [{ old: 'a', new: 'b' }] } },
+      { type: 'tool_result', id: 'u2', summary: 'drawn', card: 'c0000aaaa', version: 2, title: 'Runs' },
+      { type: 'text', delta: 'None failed.' },
+    ] as unknown as ChatRecord[])
+    const calls = [...el.querySelectorAll('.chat-cardcall')]
+    expect(calls).toHaveLength(2)
+    expect(calls[0].querySelector('.drawn-frame[data-card="c0000aaaa"]')).not.toBeNull()
+    expect(calls[1].querySelector('.drawn-frame')).toBeNull()
+    expect(calls[1].querySelector('.chat-card-moved')?.textContent).toBe('↑ version 2 · “Runs” is drawn in its place above')
+    expect(calls[1].querySelector('.chat-call-target')?.textContent).toBe('Runs')
+    expect(errors).toEqual([])
+  })
 })
