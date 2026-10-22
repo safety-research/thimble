@@ -649,9 +649,6 @@ body[data-cmd] .board-stage * {
 .bcell-check-mark.is-problem .mark {
   font-size: 12px;
 }
-.bcell-take-none::before {
-  visibility: hidden;
-}
 .bcell-check-pop {
   z-index: var(--z-popover);
   display: flex;
@@ -670,29 +667,11 @@ body[data-cmd] .board-stage * {
 .bcell-check-what {
   color: var(--text-primary);
 }
-.bcell-check-before {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-hairline);
-  color: var(--text-secondary);
-}
 .bcell-check-label {
   font: var(--type-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   color: var(--text-tertiary);
-}
-.bcell-check-before .chat-text {
-  font: inherit;
-}
-.bcell-check-before .chat-text p {
-  margin: 0;
-}
-/* the question before the check replaced it, above the takeaway before it */
-.bcell-check-q {
-  color: var(--text-primary);
 }
 .bcell-check-acts {
   display: flex;
@@ -1224,10 +1203,6 @@ button.plan-run-name:hover {
 .rec-fact-text.hl {
   padding: 0 2px;
 }
-.bcell-quote-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 /* a box that shows its content up to a height, faded at the bottom while there is more, with Show all under it
    (bodies.tsx Clamp): a quoted record, a label's code */
 .bcell-clamp {
@@ -1352,11 +1327,6 @@ audio.bcell-media {
   line-height: var(--h-chip);
   color: var(--text-tertiary);
 }
-.bcell-quotes-text {
-  font: var(--type-ui-sm);
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
 /* a label: its label row (the Label tag, the label's square and name or its tag, then how it is defined and what it ran
    on), the value table, and the foot: the Rule disclosure, which opens how it is computed on the inset paper, and
    Definition and records */
@@ -1446,10 +1416,6 @@ audio.bcell-media {
   padding: 8px 10px;
   border-radius: var(--radius-ui);
   background: var(--bg-sunken);
-}
-.bcell-label-kind {
-  font: 400 10.5px / 1.5 var(--font-mono);
-  color: var(--text-tertiary);
 }
 .bcell-label-prompt {
   font: var(--type-body-sm);
@@ -1781,20 +1747,6 @@ audio.bcell-media {
 }
 .bfilter-check.is-off {
   visibility: hidden;
-}
-/* the card check's part of the search menu (CheckStatus): while checks run, their count with Stop */
-.bfilter-running {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 28px;
-  padding: 0 8px;
-  font: var(--type-body-sm);
-  color: var(--text-primary);
-}
-.bfilter-running {
-  color: var(--text-secondary);
 }
 /* the Filter menu's search field, the report sidebar's .wu-search at the menu's inset */
 .bfilter-search {
@@ -2199,52 +2151,6 @@ audio.bcell-media {
 }
 .bdetail-take-empty {
   color: var(--text-placeholder);
-}
-/* the card check in the details (CheckDetails): its line, the problem with its red ✕, the fix with what the card said
-   before, then Undo and Check again */
-.bdetail-check-line,
-.bdetail-check-note,
-.bdetail-check-fix {
-  font: var(--type-body-sm);
-  color: var(--text-secondary);
-}
-.bdetail-check-problem {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font: var(--type-body-sm);
-  color: var(--text-primary);
-}
-.bdetail-check-fix {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--text-primary);
-}
-.bdetail-check-before {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-left: 10px;
-  border-left: 2px solid var(--border-hairline);
-  color: var(--text-secondary);
-}
-.bdetail-check-before .chat-text {
-  font: inherit;
-}
-.bdetail-check-before .chat-text p {
-  margin: 0;
-}
-.bdetail-check-q {
-  color: var(--text-primary);
-}
-.bdetail-check-acts {
-  display: flex;
-  gap: 4px;
-  margin-left: -8px;
-}
-.bdetail-check-acts:empty {
-  display: none;
 }
 /* the card's history (DetailPanel HistoryList): a row per edit, newest first, then its making; an edit whose version
    was kept is a button that opens the card as it was before it */
@@ -2929,49 +2835,5 @@ button.bdetail-hist:hover {
 }
 .bcell-type-view {
   margin-left: auto;
-}
-
-/* Comments in the top bar: its count of the comments shown, in the secondary ink */
-.bctl-comments-count {
-  font: 400 var(--text-xs) / 1 var(--font-mono);
-  color: var(--text-secondary);
-}
-.bctl-btn.bctl-comments.is-open {
-  background: var(--surface-tonal-hover);
-}
-/* its menu: the rows of the Report's Comments pane, on the menu's own paper */
-.bcomments-pane.wu-checks {
-  padding: 4px 6px 6px;
-  border-top: 0;
-  background: transparent;
-}
-.bcomments-head {
-  padding: 0 2px 0 6px;
-}
-.bcomments-head .wu-sec-name {
-  flex: 1;
-}
-
-/* a commented step's text or card's question is highlighted as the Report highlights a commented passage (report.css
-   .wu-flag, .wu-flag-active, its check's color as --flag); a click on it does what a click on that text does */
-.wu-flag.ccm-flag {
-  cursor: inherit;
-}
-/* a comment beside the cards is the margin's comment card (report.css .wu-cm), placed on the plane: its own left, top
-   and width, with a shadow that lifts it off the board. No line joins it to its card (CommentLayer.tsx): hovered,
-   focused or open, it comes to the front with a little more shadow, and its step's highlight darkens */
-.wu-cm.ccm {
-  right: auto;
-  z-index: 6;
-  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1), 0 10px 28px -18px rgba(var(--ink-rgb), 0.35);
-  transition:
-    top var(--dur-base) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
-}
-.wu-cm.ccm:hover,
-.wu-cm.ccm:focus-within,
-.wu-cm.ccm.wu-cm-active {
-  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16), 0 14px 32px -12px rgba(0, 0, 0, 0.3);
-  z-index: 7;
 }
 

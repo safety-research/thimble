@@ -113,7 +113,6 @@ interface RowProps {
 
 function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEdit, onRetry, onFilter, filter, onDelete }: RowProps) {
   const classes = classesOf(k)
-  const running = status?.state === 'running'
   const files = isFilesLabel(k)
   const byHand = k.n_marked ?? k.n_reviewed ?? 0
   const colour = mainColour(k)

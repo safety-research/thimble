@@ -100,7 +100,6 @@ pre,
 .chat-text code,
 .reader-md code,
 .wu-cm code,
-.ccm code,
 .wu-root .wu-editor .bn-inline-content code {
   padding: 0 4px;
   border-radius: calc(var(--radius-ui) / 2);

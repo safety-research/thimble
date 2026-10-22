@@ -446,39 +446,12 @@
 .settings-effort {
   justify-self: start;
 }
-/* a cell that cannot be changed here (SettingsPopover's lockedWhy): dimmed as a menu's disabled item, still focusable,
-   its reason in the tooltip; no wash on hover, since a click does nothing */
-.settings-locked {
-  justify-self: start;
-  opacity: 0.4;
-  cursor: default;
-}
-.chip.settings-locked.chip-act:hover,
-.btn.settings-locked:hover {
-  border-color: transparent;
-  background: transparent;
-}
-/* fast mode's lightning bolt in the table (ModelLine's FastBolt; its accent while on is components.css .fast-bolt) */
-.settings-fast {
-  justify-self: start;
-}
 /* each agent's permission mode under the table (SettingsPopover's MODE_ROWS): its name, then the mode's menu */
 .settings-modes {
   border-top: 1px solid var(--border-subtle);
 }
 .settings-modes .settings-row {
   grid-template-columns: 132px minmax(0, 1fr);
-}
-.settings-mode {
-  justify-self: start;
-}
-/* the Ask key choice (SettingsPopover's ASK_KEY_LABEL): ⌘-click or ⌥-click */
-.settings-ask-key {
-  justify-self: start;
-}
-/* labels' and the card check's cell where the others have their mode's menu (SettingsPopover's CALL_ROWS) */
-.chip.settings-mode-none {
-  color: var(--text-secondary);
 }
 /* under an agent's mode: who runs it and what it may do (SettingsPopover's agentLine) */
 .settings-agent-line {
@@ -491,156 +464,6 @@
   margin: 6px 6px 0;
   color: var(--text-secondary);
   font: var(--type-body-sm);
-}
-.settings-modes-warn {
-  margin: 6px 6px 0;
-  color: var(--status-warning);
-  font: var(--type-body-sm);
-}
-/* the Extensions section under the tables (ExtensionsSettings): a group under each heading, each row its name and one
-   line on the left and its switch at the right, every switch in one column; headings and hairlines as the tables' */
-.settings-switches {
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border-subtle);
-}
-.settings-ext-group {
-  display: flex;
-  flex-direction: column;
-}
-.settings-ext-group + .settings-ext-group {
-  border-top: 1px solid var(--border-subtle);
-}
-.settings-ext-head {
-  display: flex;
-  align-items: center;
-  min-height: 24px;
-  margin: 0;
-  padding: 0 6px 2px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.settings-ext-group > .settings-ext-row,
-.settings-ext {
-  border-bottom: 1px solid var(--border-hairline);
-}
-.settings-ext-group > :last-child {
-  border-bottom: 0;
-}
-.settings-ext-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 16px;
-  align-items: center;
-  min-height: 30px;
-  padding: 6px;
-}
-.settings-ext-name {
-  display: inline-flex;
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: start;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  min-width: 0;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--text-primary);
-  font: var(--type-ui-sm);
-  text-align: left;
-  white-space: nowrap;
-}
-button.settings-ext-name:hover,
-button.settings-ext-name:active {
-  background: none;
-  color: var(--text-primary);
-}
-.settings-ext-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.settings-ext-version {
-  flex: none;
-  color: var(--text-tertiary);
-}
-.settings-ext-caret {
-  flex: none;
-  color: var(--text-tertiary);
-  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-}
-button.settings-ext-name:hover .settings-ext-caret {
-  color: var(--text-secondary);
-}
-.settings-ext-name.open .settings-ext-caret {
-  transform: rotate(180deg);
-}
-.settings-ext-switch {
-  display: flex;
-  grid-column: 2;
-  grid-row: 1;
-  align-items: center;
-}
-.settings-ext-line,
-.settings-ext-more,
-.settings-ext-ask {
-  grid-column: 1;
-  min-width: 0;
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-}
-/* the line under a name, cut to one line until its details open; a reason it shows in full */
-.settings-ext-line {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.settings-ext-line.open,
-.settings-ext-line.wrap {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-/* an extension's details: its description, then each fact beside its key in the tertiary ink, the keys in one column */
-.settings-ext-more {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
-}
-.settings-ext-more p {
-  margin: 0;
-}
-.settings-ext-facts {
-  display: grid;
-  grid-template-columns: minmax(52px, max-content) minmax(0, 1fr);
-  gap: 4px 12px;
-  margin: 0;
-}
-.settings-ext-facts div {
-  display: contents;
-}
-.settings-ext-facts dt {
-  color: var(--text-tertiary);
-}
-.settings-ext-facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-/* the question whether to run an extension's orientation now, under its line */
-.settings-ext-ask {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-/* a view of the extension above it: its name set in under the extension's, its switch in the same column */
-.settings-ext-row-extension-view {
-  padding-top: 0;
-  padding-left: 20px;
 }
 .settings-error {
   color: var(--status-negative);
@@ -660,7 +483,6 @@ button.settings-ext-name:hover .settings-ext-caret {
   background: var(--overlay-bg);
   border-top: 1px solid var(--border-subtle);
 }
-.settings-foot .settings-tour,
 .settings-foot .settings-check {
   margin-right: auto;
   margin-left: -6px;
@@ -689,77 +511,12 @@ button.settings-ext-name:hover .settings-ext-caret {
 .settings-check-failed {
   color: var(--status-negative);
 }
-
-/* -------- Report a problem (shell/ProblemReport, inside a glass Popover): the form, then where the bundle is and where
-   to send it. While the tab is captured the dialog is transparent, so the picture shows the page. -------- */
-.problem-pop {
-  padding: 10px;
-  max-width: calc(100vw - 16px);
-}
-.problem-pop.is-capturing {
-  opacity: 0 !important;
-}
 .problem {
   display: flex;
   flex-direction: column;
   gap: 8px;
   font: var(--type-ui-sm);
   color: var(--text-primary);
-}
-.problem-label {
-  color: var(--text-secondary);
-}
-.problem-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-.problem-note {
-  margin: -4px 0 0 21px;
-  color: var(--text-tertiary);
-  font: var(--type-body-sm);
-}
-.problem-ready {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.problem-path {
-  padding: 6px 8px;
-  border-radius: var(--radius-ui);
-  background: var(--track-bg);
-  font: var(--type-mono-sm);
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-.problem-actions {
-  display: flex;
-  gap: 6px;
-}
-.problem-send {
-  margin: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-.problem-send a {
-  color: var(--text-accent);
-}
-.problem-error {
-  color: var(--status-negative);
-  font: var(--type-body-sm);
-}
-.problem-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 2px;
-}
-/* Report a problem where something failed (ReportProblemButton): a small quiet button after the failure's own words or
-   controls; in a view chip, the bug alone at the chip's height */
-.chat-landing-report.btn {
-  margin-left: 6px;
-  vertical-align: middle;
 }
 .view-chip-report.btn {
   flex: none;
@@ -899,110 +656,9 @@ button.settings-ext-name:hover .settings-ext-caret {
 .shell[data-session='gone'] {
   filter: grayscale(1);
 }
-.shell-gone {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-scrim);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-content: center;
-  justify-items: center;
-  gap: 12px;
-  padding: 16px;
-  overflow-y: auto;
-  background: var(--scrim);
-  -webkit-backdrop-filter: grayscale(1);
-  backdrop-filter: grayscale(1);
-}
-/* the permission requests of the sessions that go on without main, under the reconnect card */
-.shell-gone-asks {
-  width: min(560px, 100%);
-}
-.shell-gone-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: min(560px, 100%);
-  box-sizing: border-box;
-  padding: 28px;
-  border-radius: var(--radius-card);
-}
-.shell-gone-title {
-  margin: 0 0 4px;
-  color: var(--text-primary);
-  font: var(--type-title);
-  letter-spacing: var(--tracking-title);
-}
-.shell-gone-text {
-  margin: 0;
-  color: var(--text-secondary);
-  font: var(--type-body-lg);
-}
-.shell-gone code {
-  font-family: var(--font-mono);
-}
-.shell-gone-command {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 8px 8px 12px;
-  border-radius: var(--radius-ui);
-  background: var(--track-bg);
-}
-.shell-gone-command code {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--text-primary);
-  font: var(--type-mono);
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-
-/* the model table's notes and switches: a row's note under its name, an agent's web switch, the refusal row's switch */
-.settings-row-noted {
-  padding-bottom: 4px;
-}
-/* the dev row's fast switch, for code tickets alone, after its note */
-.settings-ticket-fast {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  white-space: nowrap;
-}
-.settings-role-note {
-  grid-column: 1 / -1;
-  margin-top: -6px;
-  color: var(--text-tertiary);
-  font: var(--type-body-sm);
-}
-.settings-row-off .settings-model,
-.settings-row-off .settings-effort {
-  opacity: 0.4;
-}
 .settings-web {
   justify-self: start;
   display: inline-flex;
-}
-.settings-next-start,
-.settings-main-mode,
-.settings-ignored {
-  color: var(--text-tertiary);
-}
-.settings-mode-cell {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-}
-.settings-card-wait {
-  color: var(--text-tertiary);
-  font: var(--type-body-sm);
-}
-.settings-fence-note {
-  color: var(--text-tertiary);
-}
-.shell-gone-agents {
-  color: var(--text-secondary);
 }
 
 /* the one line a browser that is not signed in sees in place of the app (SignIn), where the start page's title stands */
@@ -1263,10 +919,6 @@ button.settings-ext-name:hover .settings-ext-caret {
   margin: 0;
   color: var(--text-secondary);
   font: var(--type-body);
-}
-.share-head .share-fixline {
-  margin-top: 6px;
-  color: var(--text-primary);
 }
 .share-body {
   display: flex;

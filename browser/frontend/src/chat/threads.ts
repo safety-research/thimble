@@ -199,7 +199,3 @@ export function threadLabels(items: readonly PickItem[]): Map<string, string> {
   return new Map(items.map((it) => [it.id, it.label]))
 }
 
-/** The document a writer's chat wrote, which the report's own bar still reads. Pure. */
-export function writerDoc(m: Pick<ChatMeta, 'title'> & { doc?: string | null }): string {
-  return m.doc || (m.title || '').replace(/^write\s+/i, '').trim().toLowerCase() || 'document'
-}

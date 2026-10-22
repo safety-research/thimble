@@ -98,14 +98,6 @@ export function ensureRefName(ws: string, ref: string): void {
   if (p.kind === 'concept' && !hasConceptName(p.conceptId)) void ensureConceptName(ws, p.conceptId)
 }
 
-/** A ref's chip name (chipLabel), redrawn when the name it shows becomes known. */
-export function useRefLabel(ref: string, workspace?: string): string {
-  const ws = workspace ?? workspaceFromUrl() ?? ''
-  useEffect(() => ensureRefName(ws, ref), [ws, ref])
-  const name = () => chipLabel(ref, null, ws)
-  return useSyncExternalStore(onNames, name, name)
-}
-
 /** Where inside its cell or view a ref points, for the hover label: an output's lines, a view's record key. A table's
  * cell is shown in its table instead, never named by its column and row. */
 export function spanWhere(ref: string): string | undefined {
@@ -564,20 +556,6 @@ function LinesPreview({ lines, from, to, value }: CitedLines & { value?: string 
       })}
     </div>
   )
-}
-
-/** A card's takeaway as one short plain line for a hover: its citations as their words, no Markdown, the first
- * sentence, cut at `max` characters. Pure. */
-export function plainLine(text: string | undefined, max = 140): string {
-  const t = (text ?? '')
-    .replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')
-    .replace(/\[\[[^\]]*\]\]/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`#>]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const first = /^(.+?[.!?])(\s|$)/.exec(t)?.[1] ?? t
-  return first.length > max ? first.slice(0, max - 1).trimEnd() + '…' : first
 }
 
 /** The cell's question over its primary artifact. */

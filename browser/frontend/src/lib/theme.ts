@@ -66,7 +66,6 @@ function write(key: string, value: string): void {
 
 export const getPaper = (): Paper => readPaper(read(PAPER_KEY), read(LEGACY_THEME_KEY))
 export const getAccent = (): Accent => readAccent(read(ACCENT_KEY))
-export const getResolved = (): Resolved => paperScheme(getPaper())
 
 /** Write the attributes tokens.css reads. */
 export function applyTheme(paper: Paper = getPaper(), accent: Accent = getAccent()): void {

@@ -26,7 +26,6 @@ caches of a bounded size; a PDF's page texts are read and kept by pdfs.page_text
 """
 from __future__ import annotations
 
-import bisect
 import contextlib
 import csv
 import json
@@ -106,10 +105,6 @@ def split(ref: str) -> tuple[str, str] | None:
 
 
 REF_MAX = 2000  # characters of a string read as a ref at most
-
-
-def is_record_ref(ref: str) -> bool:
-    return isinstance(ref, str) and "#" in ref and len(ref) <= REF_MAX and split(ref) is not None
 
 
 def pointer_escape(key: str) -> str:
@@ -567,18 +562,6 @@ def csv_index(path: Path, rel: str) -> _CsvIndex:
         return idx
 
 
-def row_starts(path: Path, rel: str, first: int, last: int) -> list[list[int]]:
-    """[[line, n], ...]: the rows of a CSV or TSV file that start on lines first..last, each with its number (`#row=<n>`)."""
-    idx = csv_index(path, rel)
-    lines = idx.lines
-    out: list[list[int]] = []
-    for i in range(bisect.bisect_left(lines, first), len(lines)):
-        if lines[i] > last:
-            break
-        out.append([int(lines[i]), i + 1])
-    return out
-
-
 def _row_record(header: list[str], cells: list[str]) -> dict[str, str]:
     out = {}
     for i, v in enumerate(cells):
@@ -811,52 +794,6 @@ def count(path: Path, rel: str, under: Under = None) -> int:
     if reader == "pdf":
         return pdf_count(path)
     return 0
-
-
-def records_at(path: Path, rel: str, places: list[int], kind: str | None = None, under: Under = None) -> list[dict[str, Any]]:
-    """The records at these places (1-based, as `n` counts them among those iter_records gives) in place order; places
-    past the end are left out."""
-    want = sorted({int(n) for n in places if int(n) >= 1})
-    if not want:
-        return []
-    kind = kind or corpus.source_kind(rel)
-    wants = _wants(rel, under)
-    reader = reader_of(path, rel)
-    if reader == "json" and json_index(path) is None:
-        reader = "lines"
-    if wants and not (reader == "json" or (reader == "sqlite" and _whole_tables(wants))):
-        picked = set(want)
-        return [r for i, r in enumerate(iter_records(path, rel, kind, wants), 1) if i in picked]
-    if reader == "lines":
-        total = len(corpus.line_offsets(path))
-        return [r for n in want if n <= total for r in _lines(path, rel, kind, n, n)]
-    if reader == "json":
-        idx = json_index(path)
-        kept = [i for i, p in enumerate(idx.pointers) if _under(p, wants)]
-        return [_json_record(path, rel, idx, kept[n - 1]) for n in want if n <= len(kept)]
-    if reader == "csv":
-        idx = csv_index(path, rel)
-        return [_csv_record(path, rel, idx, n - 1) for n in want if n <= len(idx.offsets)]
-    if reader == "pdf":
-        return [_pdf_record(rel, text, n) for n in want if (text := _pdf_page(path, n)) is not None]
-    if reader == "sqlite":
-        out: list[dict[str, Any]] = []
-        try:
-            con = corpus.open_database(path)
-        except sqlite3.Error:
-            return out
-        with closing(con):
-            base = 0
-            for table, key, columns in list(_tables(con, _tables_of(wants))):
-                size = _db_size(con, table)
-                for n in want:
-                    if base < n <= base + size:
-                        with contextlib.suppress(sqlite3.Error):
-                            for k, record in _db_rows(con, table, key, columns, n - base - 1, 1):
-                                out.append(_db_record(rel, table, k, record, n))
-                base += size
-        return out
-    return []
 
 
 def read(path: Path, rel: str, fragment: str, kind: str | None = None) -> dict[str, Any] | None:

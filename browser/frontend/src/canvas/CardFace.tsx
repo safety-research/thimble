@@ -2,17 +2,15 @@
 // (bodies.tsx) and its takeaway, in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it,
 // and the card harness (render.tsx) mounts it alone. The body shimmers while the card's code runs, as when an edit_card
 // call is changing it, and the card shimmers while thimble runs it again because a label it read changed.
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
-import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
-import { placeTip, useTooltip } from '../components/Tooltip'
+import { useTooltip } from '../components/Tooltip'
 import { LabelSheet } from '../files/LabelCard'
 import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
 import { addAgentZone, tintElement } from '../lib/agentKey'

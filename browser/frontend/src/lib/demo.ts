@@ -8,13 +8,10 @@
 // demoStop() first: on a demo page that shows the same note in the chat (chat/DemoNote), opens the chat column when
 // it is folded, and the action stops there and keeps what was typed.
 import { useSyncExternalStore } from 'react'
-import type { ChatMeta } from './types'
 
 /** The top bar's tag on a demo page, and its tooltip. */
 export const DEMO_TAG = 'Demo'
 export const DEMO_TIP = "Example data and a finished analysis; Claude isn't connected here"
-/** What hovering the disabled composer shows on a demo page, and the chat's note when an action needs Claude there. */
-export const DEMO_NOTE = "This is a demo and thimble isn't connected to a live Claude Code session."
 /** The line under the top bar on a demo page (shell/DemoLine), and the first line of the tour's welcome there
  * (tour/steps): example data, not the analyst's files, and how to open a folder of their own. A span in backticks is
  * drawn as code (DemoWords). */
@@ -29,20 +26,6 @@ const subs = new Set<() => void>()
 const noteSubs = new Set<() => void>()
 const changed = () => subs.forEach((f) => f())
 
-/** Whether the workspace is a demo page: `readable` without a session (a pre-cache's or a worked example's), main's meta
- * loaded, and no session attached to it now or before (one that ended shows shell/SessionGone's card instead). Pure. */
-export function isDemoPage(main: Pick<ChatMeta, 'attached' | 'ended'> | null | undefined, readable: boolean): boolean {
-  return readable && !!main && !main.attached && !main.ended
-}
-
-/** Record whether the page shown is a demo page; leaving one hides its note. */
-export function setDemo(on: boolean): void {
-  if (demo === on) return
-  demo = on
-  if (!on) note = 0
-  changed()
-}
-
 /** Whether the page shown is a demo page. */
 export const isDemo = (): boolean => demo
 
@@ -54,13 +37,6 @@ export function demoStop(): boolean {
   changed()
   noteSubs.forEach((f) => f())
   return true
-}
-
-/** The note's ×: it goes until the next action asks for it. */
-export function dismissDemoNote(): void {
-  if (!note) return
-  note = 0
-  changed()
 }
 
 /** Calls `fn` each time an action stops on a demo page (the shell opens a folded chat column, so the note shows).
@@ -80,11 +56,3 @@ export function useDemo(): boolean {
   return useSyncExternalStore(subscribe, isDemo, () => false)
 }
 
-/** The note's count as a component reads it: 0 while hidden. */
-export function useDemoNote(): number {
-  return useSyncExternalStore(
-    subscribe,
-    () => note,
-    () => 0,
-  )
-}

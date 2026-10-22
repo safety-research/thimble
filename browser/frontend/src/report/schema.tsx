@@ -49,5 +49,4 @@ export const schema = BlockNoteSchema.create({
   styleSpecs: { bold: defaultStyleSpecs.bold, italic: defaultStyleSpecs.italic, code: defaultStyleSpecs.code },
 })
 
-export type ReportEditor = typeof schema.BlockNoteEditor
 export type ReportPartialBlock = typeof schema.PartialBlock

@@ -16,7 +16,7 @@ import { track } from '../lib/telemetry'
 import type { Concept, LabelsForPath, SourceKind, SourcePage, SourceRecord, TimeHint, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
-import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
+import { clearMatches, firstMatchFrom, lineAsked, markMatches, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
 import { countsOf, FindBar, useSourceFind } from './FindBar'
 import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './labels'
 import { useScrollAnchor } from './anchor'
@@ -75,7 +75,6 @@ const LINES_POLL_MS = 1000
 const ORDER = ['transcript', 'text', 'raw', 'table', 'timeline', 'forge']
 const BINARY_REASON = 'A binary file, with no text to show here.'
 const NO_MATCH: MatchAt = { i: -1, k: 0 }
-const NO_SPOTS: ReadonlyMap<number, number[]> = new Map()
 /** the built-in views whose records carry the label gutter (views/common.tsx RecordCard and LineRow) */
 const GUTTERED = new Set(['transcript', 'text', 'raw'])
 
@@ -1187,19 +1186,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // once marked after a move, is scrolled into view
   const markText = found && found.total > 0 ? findText : ''
   const shownK = cursor.k
-  // where the marks stand in their records, for the thumb's find lane
-  const [spots, setSpots] = useState<ReadonlyMap<number, number[]>>(NO_SPOTS)
   useEffect(() => {
     const root = bodyRef.current
-    if (!markText || !root) {
-      setSpots(NO_SPOTS)
-      return clearMatches()
-    }
+    if (!markText || !root) return clearMatches()
     let frameId = 0
     const mark = () => {
       frameId = 0
       const range = markMatches(root, markText, shownMatch, shownK)
-      setSpots(markSpots())
       const want = scrollToMatch.current
       if (!want || found?.lines[want.i] !== shownMatch || want.k !== shownK) return
       // a record that is shown without the words (a view that leaves that part out) keeps the view's own scroll

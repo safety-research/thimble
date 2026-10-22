@@ -1,10 +1,9 @@
 """A table card's DataFrame kept as data rather than as pandas' html.
 
-notebook._execute_cell asks the kernel for a table card's final DataFrame in the same execute request (CAPTURE, via
-`user_expressions`) and stores it in place of the DataFrame's display as a FRAME_MIME bundle: typed rows (at most
-ROWS_MAX), columns and types, the column that names each row in a ref (`label`), and the `view` (shown columns and
-number formats). The canvas draws it (canvas/FrameTable.tsx), the model reads its text/plain and the citation check
-reads frame_cells, so all three see the same values in the same format.
+The runner (runner.py) stores the DataFrame a card's code ends in, in place of the DataFrame's display, as a FRAME_MIME
+bundle: typed rows (at most ROWS_MAX), columns and types, the column that names each row in a ref (`label`), and the
+`view` (shown columns and number formats). The canvas draws it (canvas/FrameTable.tsx) and the model reads its
+text/plain, so both see the same values in the same format.
 
 Row names: the index when the code set one, else the first column of distinct text, else the position. An unnamed index
 keeps pandas' name (`index`, `level_0`) and has no header over it.
@@ -27,20 +26,11 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Iterable
 
 FRAME_MIME = "application/vnd.thimble.frame+json"
-KIND = "table"  # the one kind whose DataFrame is kept (captures)
-EXPR_KEY = "thimble_frame"  # the user expression's key in the execute request (notebook._execute)
-# by import, so it works whether or not the card imported thimble
-CAPTURE = "__import__('thimble')._frame()"
 ROWS_MAX = 500  # kernel_thimble.FRAME_ROWS: the rows a card keeps and shows
 TEXT_ROWS = 60  # the rows of a frame a tool result shows the model, then pandas' own `[n rows x m columns]` line
 TEXT_WIDTH = 30  # the widest a column is padded to in that text (cite.CHART_TEXT_WIDTH)
 TYPES = ("quantitative", "temporal", "nominal", "ordinal")
 MINUS = "−"  # d3-format's default locale writes a negative number with the minus sign; cite._norm reads both
-
-
-def captures(kind: str | None) -> bool:
-    """Whether a card of `kind` keeps the DataFrame its code ends in."""
-    return kind == KIND
 
 
 # number formats
@@ -120,26 +110,6 @@ def show(value: Any, fmt: str | None = None) -> str:
 
 _MIDNIGHT_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.0+)?(?:Z|[+-]00:?00)?$")
 _ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$")
-
-
-def read_reply(reply: Any) -> tuple[dict | None, str | None]:
-    """(the frame, why there is none when the kernel said why) from the execute reply's user expression
-    (kernel_thimble._frame). A code that ends in something other than a DataFrame gives (None, None)."""
-    if not isinstance(reply, dict):
-        return None, "the kernel sent no frame"
-    if reply.get("status") != "ok":
-        return None, f"{reply.get('ename') or 'Error'}: {reply.get('evalue') or ''}".strip()
-    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
-    try:
-        got = json.loads(data.get("text/plain")) if isinstance(data.get("text/plain"), str) else None
-    except ValueError:
-        got = None
-    if not isinstance(got, dict):
-        return None, "the kernel's frame could not be read"
-    raw = got.get("frame")
-    if not isinstance(raw, dict):
-        return None, str(got["problem"]) if got.get("problem") else None
-    return normalize(raw), None
 
 
 def _guess_type(values: list) -> str:
@@ -291,32 +261,9 @@ def frame_in(outputs: Any) -> dict | None:
     return None
 
 
-def apply_run(outputs: list[dict], status: str, reply: Any, result_index: int | None) -> list[dict]:
-    """A table card's outputs after a run, with its DataFrame kept (notebook._execute_cell): the frame's bundle in place
-    of the DataFrame's own display, the execute_result at `result_index`. A run that errored, and one whose code ends
-    in no DataFrame, keep their outputs as they are, so the kind check says what the card shows instead."""
-    if status != "ok" or result_index is None or not 0 <= result_index < len(outputs):
-        return outputs
-    frame, _ = read_reply(reply)
-    if frame is None:
-        return outputs
-    out = list(outputs)
-    out[result_index] = bundle(frame)
-    return out
-
-
 # ----------------------------------------------------------------------------------------------------------
 # the frame as a table of citable values (cite.table_html, cite.find_td and cite._output_sources read these)
 # ----------------------------------------------------------------------------------------------------------
-
-
-def frame_cells(b: Any) -> list[tuple[str, str, str]] | None:
-    """(column, row name, value as shown) for every value the card shows of a frame bundle; None for any other bundle."""
-    f = frame_of(b)
-    if f is None:
-        return None
-    cols, names, cells = frame_grid(f)
-    return [(c, n, v) for n, r in zip(names, cells) for c, v in zip(cols, r)]
 
 
 def frame_html(b: Any, around: str | None = None, window: int = 8) -> str:

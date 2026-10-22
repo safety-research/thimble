@@ -25,9 +25,6 @@ export interface FeatureRow {
   on: boolean
 }
 
-/** The features in the order the server registers them. */
-export const FEATURES: readonly FeatureName[] = ['marks', 'cards', 'labels', 'report', 'views']
-
 let rows: readonly FeatureRow[] = []
 let readFor: string | null = null
 const listeners = new Set<() => void>()
@@ -50,15 +47,6 @@ export async function loadFeatures(ws: string): Promise<readonly FeatureRow[]> {
   return rows
 }
 
-/** The rows as last read; for a test, set them. */
-export function featureRows(): readonly FeatureRow[] {
-  return rows
-}
-export function setFeatureRows(next: readonly FeatureRow[]): void {
-  rows = next
-  changed()
-}
-
 /** Whether `name` is on now: on until the server says it is off. Pure but for the rows read. */
 export function featureOn(name: FeatureName): boolean {
   return rows.find((r) => r.name === name)?.on ?? true
@@ -74,11 +62,6 @@ const subscribe = (fn: () => void) => {
 /** Whether `name` is on, drawn again when that changes. */
 export function useFeature(name: FeatureName): boolean {
   return useSyncExternalStore(subscribe, () => featureOn(name), () => true)
-}
-
-/** Every feature's row, drawn again when they change. */
-export function useFeatureRows(): readonly FeatureRow[] {
-  return useSyncExternalStore(subscribe, () => rows, () => rows)
 }
 
 // the stream says the switches changed (settings_api.put_settings): read them again
