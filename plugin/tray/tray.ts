@@ -316,7 +316,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
     next = (dir > 0 ? pool[0] : pool[pool.length - 1]) ?? null
   }
-  if (!next) { noticeLine($, "Nothing to step to yet: each citation, explainer, heads-up and card in Claude's replies opens here.", 'tray'); return }
+  if (!next) { noticeLine($, 'Nothing to step to yet.', 'tray'); return }
   if (next.card) await standOn($, next.row, next.card)
   else await openMark($, refOf(next) as Frame, { reveal: true })
 }

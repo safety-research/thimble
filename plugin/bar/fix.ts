@@ -203,15 +203,15 @@ export async function fixCommand($: Engine, args: string): Promise<{ text?: stri
   if (v.verb === 'change') return null
   const { fixes, active } = await listFixes($)
   if (v.verb === 'status') {
-    if (!fixes.length) return { text: 'No fixes yet. Say what you want changed: /thimble:fix <what you want changed>' }
+    if (!fixes.length) return { text: 'No fixes yet: /thimble:fix <what you want changed>' }
     const r = await kernel($, ['status'])
-    return { text: `${r.out}\n/thimble:fix submit shares the newest · /thimble:fix undo goes back to the release` }
+    return { text: r.out }
   }
   const on = active || (await ownFix($))
   // removing deletes the copy: with no name, only the fix that is on
   if (v.verb === 'remove' && !v.slug && !fixes.some(x => x.slug === on)) return { text: 'Name the fix to remove: /thimble:fix remove <name>. /thimble:fix lists them.' }
   const f = v.slug ? fixes.find(x => x.slug === v.slug) ?? null : await currentFix($, fixes, active, v.verb)
-  if (!f) return { text: v.slug ? `There is no fix ${v.slug}. /thimble:fix lists them.` : 'No fix yet. Say what you want changed: /thimble:fix <what you want changed>' }
+  if (!f) return { text: v.slug ? `There is no fix ${v.slug}. /thimble:fix lists them.` : 'No fix yet: /thimble:fix <what you want changed>' }
   if (v.verb === 'undo') return { text: await undoFix($, f.slug, f.title) }
   if (v.verb === 'remove') return { text: await removeFix($, f.slug, f.title) }
   if (v.verb === 'try') {

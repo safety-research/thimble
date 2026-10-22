@@ -136,7 +136,7 @@ function listView($: Engine, els: Any, list: Any[], W: number): unknown {
     ] })
   })
   return Box({ flexDirection: 'column', children: [
-    Text({ key: 'head', dimColor: true, children: `${list.length} label${list.length === 1 ? '' : 's'} in this folder · a number opens one` }),
+    Text({ key: 'head', dimColor: true, children: `${list.length} label${list.length === 1 ? '' : 's'}` }),
     Text({ key: 'gap', children: ' ' }),
     ...rows,
   ] })
@@ -148,7 +148,7 @@ function listView($: Engine, els: Any, list: Any[], W: number): unknown {
 function definition(els: Any, lab: Any): unknown[] {
   const { Code, Text } = els
   const rule = String(lab.rule || '').trim()
-  if (!rule) return [Text({ key: 'def', dimColor: true, children: 'Claude gave these values itself, after reading the records.' })]
+  if (!rule) return [Text({ key: 'def', dimColor: true, children: 'no rule: Claude read each record' })]
   if (lab.kind === 'code') return [Code({ key: 'def', source: rule, language: 'python' })]
   return [Text({ key: 'def', wrap: 'wrap', children: rule })]
 }
@@ -253,7 +253,7 @@ async function labelView($: Engine, els: Any, root: string, a: LabelsArgs, lab: 
   else if (!Array.isArray(page?.records)) body.push(Text({ key: 'err', color: 'error', wrap: 'wrap', children: `× The records could not be read: ${String(page?.error || 'no answer')}` }))
   else {
     const vname = parts.find(p => p.v === value)?.name ?? value
-    body.push(Text({ key: 'rhead', dimColor: true, children: `${vname} · ${n(pageAt + 1)}–${n(pageAt + recs.length)} of ${n(count)}, the ones you have not checked first` }))
+    body.push(Text({ key: 'rhead', dimColor: true, children: `${vname} · ${n(pageAt + 1)}–${n(pageAt + recs.length)} of ${n(count)}` }))
     recs.forEach((r, i) => {
       const on = i === cur
       const status = r.checked ? `✓ you: ${r.value}` : r.waiting ? 'waits for the model' : r.error ? `× ${r.error}` : r.by === 'model' && r.confidence != null ? `confidence ${Math.round(100 * r.confidence)}%` : ''

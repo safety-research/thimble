@@ -11,6 +11,8 @@
 //                                 'passage-<row>-<its words, hashed>', 'card-<id>', 'pane-<kind>-<its arguments>' (a pane
 //                                 of one citation's evidence is that citation's)
 //   aboutOf(scope)                the words "about …" the thread shows under a question
+//   shownAbout(scope)             what the person reads it is about, under a question: a few words, never a model's
+//   askWords(scope)               what the input bar's placeholder names: `Ask about <this>`, in a few words
 //   subjectOf(thread)             what it is on, in a few words
 //   nameOf(thread)                its name in the list: 'main/<what it is on>'
 //   firstMessage({text, scope, detail, root})   the fork's first question: the question, then what it is about
@@ -59,6 +61,18 @@ export function threadKey(scope = {}) {
 export function aboutOf(scope = {}) {
   return String(scope.about || (scope.card ? 'this card' : markOf(scope) ? 'this mark' : scope.passage ? 'this passage' : scope.pane ? scope.pane.kind : 'this'))
 }
+
+/** What the person reads a thread is about, in a few words (under a question): `aboutOf`, but never the words a model
+ *  reads about a pane (the claims pane's `about` is a sentence). */
+export function shownAbout(scope = {}) {
+  const pane = scope.pane
+  if (pane?.kind !== 'claims') return aboutOf(scope)
+  const a = pane.args || {}
+  return a.claim ? 'this claim' : a.group != null ? 'this cluster' : a.source ? 'this source' : 'the claims'
+}
+
+/** What the input bar's placeholder names, `Ask about <it>`: the thing itself in a few words. */
+export const askWords = (scope = {}) => (scope.card ? 'this card' : shownAbout(scope))
 
 /** What a thread is on, in a few words. */
 export function subjectOf(thread) {
@@ -223,7 +237,7 @@ export function display(thread, turns, now = '') {
       const ask = asks[j]
       if (first < 0) first = j
       a = j + 1
-      return { role: 'person', text: ask.text, about: aboutOf(ask.scope), at: ask.at }
+      return { role: 'person', text: ask.text, about: shownAbout(ask.scope), at: ask.at }
     }
     return { ...x, at }
   })

@@ -315,7 +315,7 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   if (open.typing != null) { say('sq-typing', `+ ${open.typing}▏ ↵ adds it · tab lets it go`, 'warning'); return out }
   if (open.hint) {
     const dims = await ownEarlier($)
-    say('sq-hint', `type what to squeeze for, such as "for my manager", then ↵${dims.length ? `; earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, 'warning')
+    say('sq-hint', `squeeze for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, 'warning')
     return out
   }
   // s close comes first, so leaving is the first thing the bar names while the chips hold the keys

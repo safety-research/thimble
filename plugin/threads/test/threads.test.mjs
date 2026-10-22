@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ago, display, firstMessage, forkDirective, nameOf, nextMessage, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
+import { ago, askWords, display, shownAbout, firstMessage, forkDirective, nameOf, nextMessage, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
 
 test('one thread per citation, explainer, card or pane; a citation\'s evidence pane is that citation\'s thread', () => {
   const cite = threadKey({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } })
@@ -87,4 +87,17 @@ test('the list: the newest first, how many questions, the last one, how long ago
     { key: 'a', name: 'main/coverage', status: 'done', asks: 1, last: 'what is left?', ago: '4m' },
   ])
   assert.equal(ago('2026-10-20T12:00:00Z', now), '2d')
+})
+
+test('the input bar names its thing in a few words: never the sentence a model reads about a pane', () => {
+  const about = 'the claims of this session, with a long description'
+  assert.equal(askWords({ about, pane: { kind: 'claims', args: {} } }), 'the claims')
+  assert.equal(askWords({ about, pane: { kind: 'claims', args: { claim: 'k1' } } }), 'this claim')
+  assert.equal(askWords({ about, pane: { kind: 'claims', args: { group: '2' } } }), 'this cluster')
+  assert.equal(askWords({ about: 'the card "Runs per day"', card: 'c0123456789ab' }), 'this card')
+  assert.equal(askWords({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } }), '41 of the 44')
+  assert.equal(askWords({ about: 'coverage', pane: { kind: 'coverage', args: {} } }), 'coverage')
+  // under a question: the same few words, but a card keeps its title
+  assert.equal(shownAbout({ about, pane: { kind: 'claims', args: { claim: 'k1' } } }), 'this claim')
+  assert.equal(shownAbout({ about: 'Runs', card: 'c1' }), 'Runs')
 })

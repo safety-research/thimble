@@ -10,7 +10,7 @@
 // the page at once.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ASK_KEY_LABEL, BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyNote, askKeyOptions, changedAskKey, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { ASK_KEY_LABEL, BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyOptions, changedAskKey, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { getAskKey, setAskKey } from '../../src/lib/platform.ts'
 import type { Attached, Settings } from '../../src/lib/types.ts'
@@ -107,9 +107,6 @@ describe('the rules', () => {
       { value: 'alt', label: '⌥-click' },
     ])
     expect(askKeyOptions(false).map((o) => o.label)).toEqual(['Ctrl-click', 'Alt-click'])
-    expect(askKeyNote(true, 'meta')).toBe('⌘-click asks about anything in thimble; ⌥-drag places a card freely on the canvas.')
-    expect(askKeyNote(true, 'alt')).toBe('⌥-click asks about anything in thimble; ⌘-drag places a card freely on the canvas.')
-    expect(askKeyNote(false, 'alt')).toBe('Alt-click asks about anything in thimble; Ctrl-drag places a card freely on the canvas.')
     expect(changedAskKey(SETTINGS, 'meta')).toEqual({})
     expect(changedAskKey(SETTINGS, 'alt')).toEqual({ ask_key: 'alt' })
     expect(changedAskKey({ ...SETTINGS, ask_key: 'alt' }, 'alt')).toEqual({})
@@ -142,7 +139,7 @@ describe('the popover', () => {
     expect(doc.querySelector('.settings-next-start')?.textContent).toMatch(/applies to its next start/)
     expect(doc.querySelector('.settings-fence-line')?.textContent).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
     expect(doc.querySelector('.settings-fence .settings-headrow')?.textContent).toMatch(/^thimble's rules/)
-    expect(doc.querySelector('.settings-fence-note')?.textContent).toBe("Your Claude Code session and thimble's agents, its subagents.")
+    expect(doc.querySelector('.settings-fence-note')).toBeNull()
     expect(doc.textContent).not.toMatch(/fence/i)
     expect(doc.querySelectorAll('[data-mode-agent]')).toHaveLength(0)
     expect(doc.querySelector('.settings-main-mode')?.textContent).toBe(MAIN_MODE_LINE)
@@ -193,9 +190,9 @@ describe('the popover', () => {
         ['Ctrl-click', 'true'],
         ['Alt-click', 'false'],
       ])
-      expect(row.querySelector('.settings-agent-line')?.textContent).toBe(askKeyNote(false, 'meta'))
+      expect(row.querySelector('.settings-agent-line')).toBeNull()
       await act(async () => options[1].click())
-      expect(row.querySelector('.settings-agent-line')?.textContent).toBe(askKeyNote(false, 'alt'))
+      expect(options[1].getAttribute('aria-checked')).toBe('true')
       expect(getAskKey()).toBe('meta')
       await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
       await settle()

@@ -156,7 +156,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   rows.push(Text({ key: 'sent', dimColor: true, italic: true, wrap: 'wrap', children: at < 0 ? sentence : [
     sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + m.words.replace(/`/g, '').length) }), sentence.slice(at + m.words.replace(/`/g, '').length),
   ] }))
-  if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'The check is running; its evidence shows here when it ends.' }))
+  if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'checking…' }))
   if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60, await themeNow($)) }))
   return Box({ flexDirection: 'column', children: rows })
 }
