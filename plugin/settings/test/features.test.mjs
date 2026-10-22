@@ -5,12 +5,20 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { SWITCHES } from '../features.mjs'
+import { SWITCHES, featureOn, setOptions } from '../features.mjs'
 
 test("the manifest's userConfig is the features: one boolean each, with its name, its words and its default", () => {
   const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
   assert.deepEqual(Object.keys(manifest.userConfig), SWITCHES.map(s => s.key))
-  for (const s of SWITCHES) assert.deepEqual(manifest.userConfig[s.key], { type: 'boolean', title: s.label ?? s.title, description: `${s.does} ${s.costs}`, default: s.default })
-  // no Observer parent, and no feature under another
-  assert.ok(!SWITCHES.some(s => s.key === 'observer' || 'under' in s))
+  assert.deepEqual(SWITCHES.map(s => s.key), ['marks', 'cards', 'counts'])
+  for (const s of SWITCHES) assert.deepEqual(manifest.userConfig[s.key], { type: 'boolean', title: s.title, description: s.does, default: s.default })
+})
+
+test('a feature is on by default, and an option turns it off', () => {
+  setOptions({})
+  assert.equal(featureOn('marks'), true)
+  setOptions({ marks: false, cards: 'yes' })
+  assert.equal(featureOn('marks'), false)
+  assert.equal(featureOn('cards'), true)
+  setOptions({})
 })

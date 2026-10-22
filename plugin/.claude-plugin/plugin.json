@@ -1,58 +1,31 @@
 {
   "name": "thimble",
-  "version": "0.10.0",
-  "description": "thimble for Claude Code: the `thimble` command reads and queries any files and keeps the code, inputs and source rows behind every value. Each card Claude saves is drawn under its reply and opens in a detail view that keeps the chat going; each citation opens the rows it cites. After each of Claude's messages an observer reads it with the whole session: it lights v when another view would help, marks the terms the person may not know, and keeps the session's claims. A click on `thimble` in the bar, or /thimble-settings, turns each feature on or off.",
+  "version": "0.11.0",
+  "description": "thimble for Claude Code: Claude marks the claims you would check in its replies, and a second Claude checks each one against the files after the reply; a click on a mark opens its evidence. Claude draws interactive cards of the data, and v draws one of the last answer. Labels sort records into values, coverage says what Claude read, and /thimble:fix changes thimble itself.",
   "author": {
     "name": "Matthew Joerke"
   },
   "homepage": "https://github.com/safety-research/thimble",
   "repository": "https://github.com/safety-research/thimble",
   "license": "Apache-2.0",
-  "skills": [
-    "./skills/"
-  ],
   "types": "./types/index.d.ts",
   "userConfig": {
+    "marks": {
+      "type": "boolean",
+      "title": "Marks",
+      "description": "Claude marks the claims you would check, and a second Claude checks each one after the reply.",
+      "default": true
+    },
     "cards": {
       "type": "boolean",
       "title": "Cards",
-      "description": "v makes a chart or a table of an answer, and lights up when one would show more. A small part of the call after each reply; then one card each time you ask.",
-      "default": true
-    },
-    "squeeze": {
-      "type": "boolean",
-      "title": "Squeeze and catch-up",
-      "description": "s makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.",
-      "default": true
-    },
-    "explain": {
-      "type": "boolean",
-      "title": "Explainers",
-      "description": "Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.",
-      "default": true
-    },
-    "details": {
-      "type": "boolean",
-      "title": "Important details",
-      "description": "Marks the details of an answer that are easy to miss and change what it means. A small part of the call after each reply.",
-      "default": true
-    },
-    "claims": {
-      "type": "boolean",
-      "title": "Claims",
-      "description": "c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.",
+      "description": "Claude draws interactive cards, and v draws one of the last answer.",
       "default": true
     },
     "counts": {
       "type": "boolean",
       "title": "Labels and coverage on the bar",
-      "description": "The bar shows how much of the data Claude has seen (r coverage) and how many labels there are (l). No model call: thimble counts the files after each turn.",
-      "default": true
-    },
-    "squeezeCards": {
-      "type": "boolean",
-      "title": "Squeeze changes cards (experimental)",
-      "description": "When s makes an answer much shorter or longer, or writes it for another reader, it may edit, add or leave out a card with the text. 0 brings the cards back as they were. Each rewrite also reads the cards and the outputs they draw on.",
+      "description": "The bar shows how much of the data Claude has seen and how many labels there are. No model call: thimble counts the files after each turn.",
       "default": true
     }
   }
