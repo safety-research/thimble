@@ -1,5 +1,5 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
-import type { Mark } from '../lib/marks'
+import type { MarkItem } from '../marks/marks'
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
 import type { ChatRecord, LabelRunState } from '../lib/types'
@@ -20,13 +20,19 @@ export interface UserRow {
   run?: number
   /** with `by` extension: the extension whose orientation instructions the message is */
   extension?: string
+  /** the turn the message started (backend agent.Session.send), which its marks and v's cards name */
+  turn?: string
 }
 export interface TextRow {
   kind: 'text'
   index: number
   text: string
-  /** the lenses' marks on this row's words (lib/marks.ts) */
-  marks?: Mark[]
+  /** the check of this row's marks, by their order in its text (backend features/marks.py) */
+  checks?: (MarkItem | undefined)[]
+  /** the turn's marks, on the turn's last text row (its reply), for the footer under it */
+  turnMarks?: MarkItem[]
+  /** the cards v drew of this reply, which draw under it */
+  cards?: string[]
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
@@ -43,6 +49,9 @@ export interface ToolResult {
   /** the card an apply_label call left, which its result names (backend session.LABEL_TOOL) */
   label_card?: string
   notebook?: string
+  /** the card a `card` call drew, and its version (backend features/cards.py) */
+  card?: string
+  version?: number
 }
 export interface ToolRow {
   kind: 'tool'
@@ -181,13 +190,15 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     if (e.type === 'tool_use' && !skip?.has(index) && typeof e.parent_tool_use_id !== 'string') calls.set(e.id, index)
   })
   const held = new Map<string, AgentRow[]>() // the agent rows that wait for their call's row
+  const marks = new Map<string, MarkItem[]>() // each turn's marks, the newest record of each
+  const cards = new Map<string, string[]>() // each turn's v cards
   records.forEach((e, index) => {
     if (skip?.has(index)) return
     const parent = 'parent_tool_use_id' in e && typeof e.parent_tool_use_id === 'string' ? findTool(rows, e.parent_tool_use_id) : undefined
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event, run: e.run, extension: e.extension })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event, run: e.run, extension: e.extension, ...(e.turn ? { turn: e.turn } : {}) })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
@@ -216,7 +227,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       case 'tool_result': {
         const tool = findTool(rows, e.id)
-        if (tool) tool.result = { summary: e.summary, ts: e.ts, is_error: e.is_error, cell_id: e.cell_id, notebook: e.notebook, ...(e.not_run ? { not_run: true } : {}), ...(e.label_card ? { label_card: e.label_card } : {}) }
+        if (tool) tool.result = { summary: e.summary, ts: e.ts, is_error: e.is_error, cell_id: e.cell_id, notebook: e.notebook, ...(e.not_run ? { not_run: true } : {}), ...(e.label_card ? { label_card: e.label_card } : {}), ...(e.card ? { card: e.card, version: e.version } : {}) }
         return
       }
       case 'chip': {
@@ -238,20 +249,11 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         // and the composer's model line shows the model
         return
       case 'marks':
-      case 'glosses': {
-        // a lens's marks after an answer (`glosses`: an explainers' record of an earlier version): each goes to the
-        // first text row of the turn that holds its words
-        let from = rows.length
-        while (from > 0 && rows[from - 1].kind !== 'user') from--
-        const texts = rows.slice(from).filter((r): r is TextRow => r.kind === 'text')
-        const got: Mark[] = e.type === 'marks' ? (e.marks ?? []) : (e.glosses ?? []).map((g, i) => ({ ...g, id: `g${index}-${i}`, lens: 'explain', surface: 'chat' as const }))
-        for (const m of got) {
-          if (!m || typeof m.term !== 'string' || !m.term) continue
-          const row = texts.find((r) => r.text.includes(m.term))
-          if (row) row.marks = [...(row.marks ?? []), m]
-        }
+        marks.set(e.turn, e.items)
         return
-      }
+      case 'card':
+        cards.set(e.turn, [...new Set([...(cards.get(e.turn) ?? []), e.card])])
+        return
       case 'label_run': {
         const { type: _t, ts, ...state } = e
         const row = labelRuns.get(e.id)
@@ -293,7 +295,39 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
     }
   })
+  withTurns(rows, marks, cards)
   return rows
+}
+
+/** Each turn's marks and v cards on its text rows: a turn is the rows after the `user` row that names it, and its texts
+ * are its top-level text rows in order, as the server reads them (backend agent.texts_of): a mark of text `piece` goes
+ * to that row, at its order `k` among the row's marks. The turn's last text row, its reply, gets the turn's marks for
+ * its footer and the cards v drew of it. */
+function withTurns(rows: Row[], marks: ReadonlyMap<string, MarkItem[]>, cards: ReadonlyMap<string, string[]>): void {
+  if (!marks.size && !cards.size) return
+  let turn: string | undefined
+  let texts: TextRow[] = []
+  const end = () => {
+    if (!turn) return
+    const items = marks.get(turn) ?? []
+    for (const m of items) {
+      const row = texts[m.piece]
+      if (!row) continue
+      row.checks = row.checks ?? []
+      row.checks[m.k] = m
+    }
+    const reply = texts[texts.length - 1]
+    if (reply && items.length) reply.turnMarks = items
+    if (reply && cards.has(turn)) reply.cards = cards.get(turn)
+  }
+  for (const r of rows) {
+    if (r.kind === 'user') {
+      end()
+      turn = r.turn
+      texts = []
+    } else if (r.kind === 'text' && !r.apiError) texts.push(r)
+  }
+  end()
 }
 
 /** Every tool call in `rows`, nested ones included. */
@@ -452,17 +486,10 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'Grep':
     case 'Glob':
       return [str(inp.pattern), inp.path ? `in ${corpusRelative(str(inp.path))}` : ''].filter(Boolean).join(' ')
-    case 'add_card':
-      return oneLine(str(inp.question ?? inp.title)) || firstLine(str(inp.code))
-    case 'edit_card':
-      return (
-        oneLine(str(inp.question ?? inp.title)) ||
-        firstLine(str(inp.code)) ||
-        oneLine(str(inp.takeaway ?? '').replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')) ||
-        str(inp.card ?? inp.cell ?? '')
-      )
-    case 'delete_card':
-      return str(inp.card ?? inp.cell ?? '')
+    case 'card':
+      return oneLine(str(inp.title))
+    case 'run_python':
+      return firstLine(str(inp.code))
     case 'apply_label':
       return [str(inp.name), inp.scope ? `on ${str(inp.scope)}` : ''].filter(Boolean).join(' ')
     case 'show_label':
@@ -551,11 +578,8 @@ export const TOOL_WORDS: Record<string, string> = {
   Agent: 'Subagent',
   WebFetch: 'Fetch page',
   WebSearch: 'Web search',
-  add_card: 'Add card',
-  edit_card: 'Edit card',
-  delete_card: 'Delete card',
-  read_ref: 'Look up',
-  list_cards: 'List cards',
+  card: 'Draw card',
+  run_python: 'Run Python',
   apply_label: 'Apply label',
   show_label: 'Show label',
   delete_label: 'Delete label',
@@ -587,10 +611,6 @@ export function toolWord(name: string): string {
 
 /** The name a card of calls carries: what the calls did, as a kind of work (Cards, Label, Views, Read, …). */
 export const TOOL_GROUPS: Record<string, string> = {
-  add_card: 'Cards',
-  edit_card: 'Cards',
-  delete_card: 'Cards',
-  list_cards: 'Cards',
   apply_label: 'Label',
   show_label: 'Label',
   delete_label: 'Label',
@@ -604,7 +624,6 @@ export const TOOL_GROUPS: Record<string, string> = {
   edit_document: 'Report',
   add_comment: 'Report',
   resolve_comment: 'Report',
-  read_ref: 'Look up',
   Read: 'Read',
   Grep: 'Read',
   Glob: 'Read',

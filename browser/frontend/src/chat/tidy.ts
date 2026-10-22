@@ -73,7 +73,7 @@ export function midTurnTexts(rows: readonly { kind: string; index: number; text?
   for (const r of rows) {
     if (r.kind === 'text') {
       if (r.text === undefined || r.text.trim()) after.push(r.index)
-    } else if (r.kind === 'tool' || r.kind === 'tools' || r.kind === 'calls') {
+    } else if (r.kind === 'tool' || r.kind === 'tools' || r.kind === 'calls' || r.kind === 'cardcall') {
       if (after.length) {
         for (const i of after) out.add(i)
         before = after

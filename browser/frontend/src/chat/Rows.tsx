@@ -17,7 +17,10 @@ import { api, docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isDropped, useProposals } from '../lib/proposals'
 import { parseRef } from '../lib/refs'
-import { shownMarks, useLenses } from '../lib/marks'
+import { Card } from '../cards/Card'
+import { startV } from '../cards/keys'
+import { useFeature } from '../features'
+import { MarksFooter } from '../marks/MarksFooter'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
@@ -41,7 +44,14 @@ export interface ViewsRow {
   chips: ChipRowT[]
 }
 
-export type ShownRow = Exclude<Row, ToolRowT> | ToolGroup | CallsRow | BranchRow | ViewsRow
+/** A call of the card tool: its line, and the card it drew under it (Card.tsx). */
+export interface CardCallRow {
+  kind: 'cardcall'
+  index: number
+  tool: ToolRowT
+}
+
+export type ShownRow = Exclude<Row, ToolRowT> | ToolGroup | CallsRow | BranchRow | ViewsRow | CardCallRow
 
 /** The rows as the transcript shows them: consecutive raw calls (model.isRawCall) as one run of chip lines, other calls
  * of one kind folded into one card, consecutive view chips into one note (duplicates dropped), consecutive saves of one
@@ -53,9 +63,13 @@ export function shownRows(rows: readonly (Row | BranchRow)[], each = false): Sho
   const proposedHere = new Set(madeBy(rows.filter((r): r is ToolRowT => r.kind === 'tool')).views)
   // a proposal's later chips (built, failed) are the first chip's state, which it reads for itself
   const viewsSeen = new Set<string>()
-  for (const r of groupTools(rows as Row[]) as (Exclude<Row, ToolRowT> | ToolGroup | BranchRow)[]) {
+  for (const r of groupCalls(rows as Row[])) {
     const before = out[out.length - 1]
     if (before?.kind === 'note' && QUIET_RE.test(before.text)) out.pop()
+    if (r.kind === 'cardcall') {
+      out.push(r)
+      continue
+    }
     if (r.kind === 'tools' && (each || r.tools.every((t) => isRawCall(t.name)))) {
       const last = out[out.length - 1]
       if (last && last.kind === 'calls') last.tools.push(...r.tools)
@@ -93,6 +107,31 @@ export function shownRows(rows: readonly (Row | BranchRow)[], each = false): Sho
   return out
 }
 
+/** The rows with each card call as a row of its own, the other calls grouped (model.groupTools). Pure. */
+function groupCalls(rows: readonly Row[]): (Exclude<Row, ToolRowT> | ToolGroup | BranchRow | CardCallRow)[] {
+  const out: (Exclude<Row, ToolRowT> | ToolGroup | BranchRow | CardCallRow)[] = []
+  let run: Row[] = []
+  const flush = () => {
+    out.push(...(groupTools(run) as (Exclude<Row, ToolRowT> | ToolGroup | BranchRow)[]))
+    run = []
+  }
+  for (const r of rows) {
+    if (r.kind === 'tool' && toolDisplayName(r.name) === 'card') {
+      flush()
+      out.push({ kind: 'cardcall', index: r.index, tool: r })
+    } else run.push(r)
+  }
+  flush()
+  return out
+}
+
+/** The index of the newest call that drew each card: the card draws there, and an earlier call of it points to it. */
+function newestCalls(rows: readonly ShownRow[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const r of rows) if (r.kind === 'cardcall' && r.tool.result?.card) out.set(r.tool.result.card, r.index)
+  return out
+}
+
 /**
  * The rows of one log level. `streaming` marks the last text row as still growing. `chat` is the log's chat id: every
  * message body carries `data-anchor="chat:<id>#<index>"`, so a ⌘-click starts a thread there. `live` marks the calls of
@@ -107,8 +146,11 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them,
   // or the last text before the last call when nothing follows it
   const notes = nested ? EMPTY_SET : midTurnTexts(shown, streaming || live)
-  // the lenses whose marks show in the chat (lib/marks.ts): a lens turned off for the chat hides its marks at once
-  const lenses = useLenses(ws)
+  const newest = newestCalls(shown)
+  const cardsOn = useFeature('cards')
+  // v draws a card of the chat's last reply, once it is whole
+  const lastTurn = shown.reduce((at, r, i) => (r.kind === 'user' ? i : at), -1)
+  const reply = streaming || live || nested ? -1 : shown.reduce((at, r, i) => (i > lastTurn && r.kind === 'text' && !notes.has(r.index) && r.text.trim() ? i : at), -1)
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
       {shown.map((r, i) => {
@@ -126,10 +168,21 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}${notes.has(r.index) ? ' chat-step-note' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} marks={shownMarks(r.marks, lenses, 'chat')} lenses={lenses} />
+                  <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} />
                 </div>
+                {r.turnMarks && <MarksFooter items={r.turnMarks} />}
+                {(r.cards ?? []).map((id) => (
+                  <Card key={id} ws={ws} id={id} />
+                ))}
+                {i === reply && cardsOn && chat && (
+                  <button type="button" className="chat-v" title="A copy of this chat draws a card of this answer" onClick={() => startV(ws, chat)}>
+                    <kbd>v</kbd> draw a card of this answer
+                  </button>
+                )}
               </div>
             )
+          case 'cardcall':
+            return <CardCall key={r.index} tool={r.tool} ws={ws} running={streaming && i === shown.length - 1 && !r.tool.result} newest={newest.get(r.tool.result?.card ?? '') === r.index} />
           case 'tools':
             return <ToolGroupCard key={r.index} group={r} ws={ws} pending={streaming && i === shown.length - 1} />
           case 'calls':
@@ -473,6 +526,20 @@ export function CallLine({ tool, ws, running, startOpen = false }: { tool: ToolR
           <CallBody tool={tool} ws={ws} summary={summary} />
         </div>
       )}
+    </div>
+  )
+}
+
+/** A call of the card tool: its line, then the card when this call drew its newest version, else a line that points to
+ * that version further down. */
+function CardCall({ tool, ws, running, newest }: { tool: ToolRowT; ws: string; running: boolean; newest: boolean }) {
+  const card = tool.result?.card
+  const title = typeof (tool.input as { title?: unknown })?.title === 'string' ? (tool.input as { title: string }).title : 'the card'
+  return (
+    <div className="chat-msg chat-cardcall">
+      <CallLine tool={tool} ws={ws} running={running} />
+      {card && newest && <Card ws={ws} id={card} version={tool.result?.version} />}
+      {card && !newest && <div className="chat-card-moved">↓ version {tool.result?.version} of “{title}”: a newer version is drawn further down</div>}
     </div>
   )
 }

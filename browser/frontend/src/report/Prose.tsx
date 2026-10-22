@@ -3,7 +3,6 @@
 // shown comment's check (checkComments.ts passageFlags).
 import type { ReactNode } from 'react'
 import { GlyphCites, RefChip } from '../components/RefChip'
-import { HealScope } from '../lib/heal'
 import type { WriteupSentence } from '../lib/types'
 import type { Flag } from './decorations'
 import { parseInline, type InlineNode } from './inlineParse'
@@ -57,11 +56,10 @@ export interface ProseProps {
 }
 
 /** Sentences run together as one paragraph, a space between them; a bare citation in them is its target's glyph alone
- * (components/RefChip GlyphCites). Its citations of card values are checked by the healing pass (lib/heal). */
+ * (components/RefChip GlyphCites). */
 export function Prose({ ws, slug, sentences, flags, className, anchors = true }: ProseProps) {
   return (
     <GlyphCites.Provider value={true}>
-      <HealScope text={sentences.map((s) => s.text).join('\n')} workspace={ws}>
       <p className={`wu-prose${className ? ` ${className}` : ''}`}>
         {sentences.map((s, i) => {
           const flag = flags?.get(s.id)
@@ -82,7 +80,6 @@ export function Prose({ ws, slug, sentences, flags, className, anchors = true }:
           )
         })}
       </p>
-      </HealScope>
     </GlyphCites.Provider>
   )
 }

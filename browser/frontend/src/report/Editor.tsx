@@ -28,7 +28,6 @@ import { Icon, type IconName } from '../components/Icon'
 import { Menu } from '../components/Menu'
 import { api, reportApi } from '../lib/api'
 import { bus } from '../lib/bus'
-import { HealScope } from '../lib/heal'
 import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import { useTheme } from '../lib/theme'
@@ -38,7 +37,7 @@ import { CARD_MIME } from './cards'
 import { ReportContext, type ReportCtx } from './context'
 import { marksExtension, refreshMarks, type Flag, type MarksCtx, type TermMark } from './decorations'
 import { mergeUnsaved } from './merge'
-import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, docText, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, lastChanged, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
+import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, lastChanged, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
 import { schema, type ReportPartialBlock } from './schema'
 
 export const SAVE_DEBOUNCE_MS = 800
@@ -371,7 +370,6 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
   const editor = useCreateBlockNote({ schema, initialContent: initial, dictionary: DICTIONARY as typeof en, extensions: [marksExtension(ctx.current), pointerPressExtension()], trailingBlock: true, dropCursor: { color: false, width: 3 }, domAttributes: { editor: { spellcheck: 'false' } } }, [])
 
   // the words the citations in the text are checked against: the document as last stored
-  const healText = useMemo(() => docText(doc), [doc])
   const lastSaved = useRef<DocBlocks>(blocksFromDoc(doc))
   const orig = useRef<Map<string, string>>(origTexts(lastSaved.current))
   const own = useRef<Writeup | null>(null)
@@ -797,7 +795,6 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
         onDropCapture={onDrop}
       >
         {line && <div className="wu-dropline" style={{ top: line.top }} />}
-        <HealScope text={healText} workspace={ws}>
         <BlockNoteView
           editor={editor}
           editable={!doc.drafting}
@@ -826,7 +823,6 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
             <SideMenuController floatingUIOptions={ACTS_FLOATING} sideMenu={BlockActions} />
           </ActsContext.Provider>
         </BlockNoteView>
-        </HealScope>
       </div>
     </ReportContext.Provider>
   )

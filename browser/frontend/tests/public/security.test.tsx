@@ -169,9 +169,8 @@ describe('the source', () => {
     // only its own strings and the examples bundled with it (tour/examples.json), through its one sink, setMarkup, and
     // nothing under src/tour reads the API; its example view is the app's own file (public/tour/timeline). A new sink
     // needs the same review, and then a line here.
-    // A program card (kit/KitBody) inlines the drawing svg.js makes of a program's output, through purifySvg.
-    expect(sinks).toEqual(['components/Outputs.tsx', 'kit/KitBody.tsx', 'tour/engine.ts'])
-    expect(readFileSync(path.join(SRC, 'kit/KitBody.tsx'), 'utf8')).toMatch(/const svg = purifySvg\(/)
+    // A card Claude drew (cards/tree.tsx) is React elements of the runner's plain tree: no sink.
+    expect(sinks).toEqual(['components/Outputs.tsx', 'tour/engine.ts'])
     expect(readFileSync(path.join(SRC, 'tour/engine.ts'), 'utf8').match(/\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML/g)).toHaveLength(1)
     for (const f of sources(path.join(SRC, 'tour'))) expect(readFileSync(f, 'utf8'), f).not.toMatch(/lib\/api|fetch\(|EventSource/)
     expect(readFileSync(path.join(SRC, 'components/Outputs.tsx'), 'utf8')).toMatch(/purifyHtml\(html\)/)

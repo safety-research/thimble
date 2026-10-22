@@ -5,8 +5,8 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   esbuild: { jsx: 'automatic' },
-  // the drawing toolkit, which a program card draws with (src/kit), read from browser/kit
-  server: { fs: { allow: ['.', '../kit'] } },
+  // the terminal plugin's modules the page reads as they are (src/marks: plugin/marks/message.js)
+  server: { fs: { allow: ['.', '../../plugin'] } },
   test: {
     include: ['tests/public/**/*.test.{ts,tsx}'],
     exclude: ['**/node_modules/**'],

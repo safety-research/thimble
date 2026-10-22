@@ -18,6 +18,8 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { ChatMeta, ChatRecord, MainEffort } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
+import { useChatColumns } from '../cards/Card'
+import { setVTarget } from '../cards/keys'
 import { ChatBusy } from './ChatBusy'
 import { Composer } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
@@ -333,6 +335,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const curPath = labels.get(current) ?? current
 
   const mainRows = useMemo(() => withApiErrors(foldRecords(main.records)), [main.records])
+  useChatColumns(ws, flowRef)
+  // v at an empty message box draws a card of the last answer of the chat shown (cards/keys.ts), while it does not run
+  useEffect(() => {
+    setVTarget((kind === 'main' || kind === 'thread') && !chat.running && !chat.loading ? { ws, chat: current } : null)
+    return () => setVTarget(null)
+  }, [ws, kind, current, chat.running, chat.loading])
   // the API error that ended main's last turn: its Retry sends the analyst's message again
   const failed = useMemo(() => apiRetry(main.records, new Set()), [main.records])
   const mainRetry = useMemo(() => (failed && !main.running ? { index: failed.index, onRetry: () => {

@@ -52,15 +52,15 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string }
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string; turn?: string }
   | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
-  | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
+  | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string; card?: string; version?: number }
   | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
   | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
-  | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
-  | { type: 'marks'; ts?: string; marks: import('./marks').Mark[] }
+  | { type: 'marks'; ts?: string; turn: string; items: import('../marks/marks').MarkItem[] }
+  | { type: 'card'; ts?: string; card: string; turn: string }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }

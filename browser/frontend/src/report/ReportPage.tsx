@@ -1,52 +1,23 @@
 // The report: the card sidebar (Sidebar.tsx; over the page when the pane is narrow), then the page: the block editor in
-// a card-wide column, the margin of the lenses' marks (Margin.tsx), and at the right the ruler and scrollbar
-// (files/Ruler PageRuler). The page is the analyst's from the start: an empty report is a document they type into and
-// place cards in. A mark highlights its words in its lens's color; a click on the highlight opens its card, as a click
-// on the card does.
-import { shownMarks, useLenses as useLensList } from '../lib/marks'
+// a card-wide column, and at the right the ruler and scrollbar (files/Ruler PageRuler). The page is the analyst's from
+// the start: an empty report is a document they type into and place cards in.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PageRuler, type Passage } from '../files/Ruler'
 import { api, reportApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import type { Cell, Group, ReportMark, Writeup } from '../lib/types'
+import type { Cell, Group, Writeup } from '../lib/types'
 import { ReadProbe, useDock } from '../shell/dock'
 import { usedCells } from './cards'
 import type { Flag, TermMark } from './decorations'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
-import { fillOf, lookOf, marginMarks, type LensLook } from './lensMarks'
-import { Margin, RAIL_ROOM } from './Margin'
 import { readableText } from './model'
 import { Sidebar, SidebarShow, useSidebar } from './Sidebar'
 
 const CANVAS_DEBOUNCE_MS = 400
-/** The tints the editor draws over whole passages, by sentence id: none (the lenses' marks highlight their words). */
+/** The tints the editor draws over whole passages, by sentence id, and the words it marks: none. */
 const NO_FLAGS: ReadonlyMap<string, Flag> = new Map()
-const NO_MARKS: readonly ReportMark[] = []
-
-/** The lenses by id, with their names and colors (GET /lenses), read again when a lens changes. */
-export function useLenses(ws: string): ReadonlyMap<string, LensLook> {
-  const [lenses, setLenses] = useState<ReadonlyMap<string, LensLook>>(new Map())
-  useEffect(() => {
-    let live = true
-    const read = () =>
-      reportApi
-        .lenses(ws)
-        .then((ls) => live && setLenses(new Map(ls.map((l) => [l.id, { name: l.name, color: l.color }]))))
-        .catch(() => {
-          /* marks keep a quiet gray until the lenses are read */
-        })
-    void read()
-    const off = bus.on('wsEvent', (ev) => {
-      if (ev.type === 'lenses') void read()
-    })
-    return () => {
-      live = false
-      off()
-    }
-  }, [ws])
-  return lenses
-}
+const NO_TERMS: TermMark[] = []
 
 export interface ReportPageProps {
   ws: string
@@ -93,26 +64,6 @@ export function useCanvas(ws: string): { cells: Cell[]; groups: Group[] } {
 
 export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPageProps) {
   const side = useSidebar(ws)
-  const lenses = useLenses(ws)
-  // the mark whose card is open: a click on its highlight or its card
-  const [active, setActive] = useState<string | null>(null)
-  const [done, setDone] = useState<ReadonlySet<string>>(new Set())
-  // a lens turned off, or with the report out of its scope, hides its marks at once (lib/marks shownMarks), before the
-  // document is read again
-  const lensList = useLensList(ws)
-  const marks = useMemo(() => shownMarks(doc.marks ?? NO_MARKS, lensList, 'report').filter((m) => !done.has(m.id)), [doc.marks, lensList, done])
-  useEffect(() => {
-    if (active && !marks.some((m) => m.id === active)) setActive(null)
-  }, [active, marks])
-  const terms = useMemo<TermMark[]>(() => marks.map((m) => ({ id: m.id, term: m.term, fill: fillOf(lookOf(lenses, m.lens).color), active: m.id === active })), [marks, lenses, active])
-  const margin = useMemo(() => marginMarks(marks, active), [marks, active])
-  // the margin stands wherever the page has room beside the text column, so the text does not reflow
-  const rail = useDock(RAIL_ROOM)
-  const dismiss = (m: ReportMark) => {
-    setDone((d) => new Set([...d, m.id]))
-    track('ui-click', { target: `mark:${m.id}`, detail: { action: 'mark-done', lens: m.lens } })
-    reportApi.dismissMark(ws, m.id).catch((e: Error) => bus.emit('toast', { text: `Could not hide the mark. ${e.message}`, kind: 'error' }))
-  }
   const [figures, setFigures] = useState<string[]>([])
   const { cells, groups } = useCanvas(ws)
   const editor = useRef<EditorHandle | null>(null)
@@ -173,24 +124,11 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
       ) : (
         <SidebarShow onShow={side.show} />
       )}
-      <div
-        className="wu-page"
-        ref={(el) => {
-          scroller.current = el
-          rail.row(el)
-        }}
-        onClick={(e) => {
-          // a click on a mark's highlight opens its card; a click elsewhere on the page closes the open one
-          const hit = (e.target as Element).closest('[data-mark]')?.getAttribute('data-mark') ?? null
-          if (hit || active) setActive(hit)
-        }}
-      >
-        <ReadProbe probe={rail.probe} />
+      <div className="wu-page" ref={scroller}>
         <div className="wu-page-row">
           <div className="wu-page-col" ref={column}>
-            <ReportEditor ref={editor} ws={ws} slug={slug} doc={doc} flags={NO_FLAGS} marks={terms} filter={filter} client={client} onSaved={onSaved} onFigures={setFigures} captionOf={captionOf} />
+            <ReportEditor ref={editor} ws={ws} slug={slug} doc={doc} flags={NO_FLAGS} marks={NO_TERMS} filter={filter} client={client} onSaved={onSaved} onFigures={setFigures} captionOf={captionOf} />
           </div>
-          {margin.length > 0 && <Margin ws={ws} marks={margin} lenses={lenses} active={active} onActivate={setActive} onDone={dismiss} column={column} />}
         </div>
       </div>
       <PageRuler scroller={scroller} columns={[]} onJump={jump} onMark={() => undefined} tipOf={(col) => col.name} passages={passages} />

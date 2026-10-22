@@ -5,7 +5,7 @@ import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown, ChipContext } from '../../src/chat/markdown.tsx'
 import { bus } from '../../src/lib/bus.ts'
-import { plainDetail, refFailure } from '../../src/lib/heal.ts'
+import { plainDetail, refFailure } from '../../src/lib/refPlaces.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {

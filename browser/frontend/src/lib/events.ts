@@ -62,14 +62,6 @@ function fanOut(ev: WsEvent): void {
       // Settings turned a feature on or off (features.ts reads the switches again)
       bus.emit('features', {})
       return
-    case 'lenses':
-      // a lens's switch or scope changed, or a check of the analyst's own came or went (lib/marks.ts)
-      bus.emit('lenses', {})
-      return
-    case 'marks':
-      // a lens's reading made marks (lib/marks.ts)
-      bus.emit('marks', {})
-      return
     case 'concepts':
       bus.emit('concepts', { concept: String(rest.concept ?? ''), what: String(rest.what ?? ''), rows: rest.rows !== false })
       return
