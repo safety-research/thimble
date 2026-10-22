@@ -6,26 +6,22 @@
 //
 //   {v: 1, session, updated,
 //    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?,
-//              links?: [{to, how: supports | contradicts | same topic, folder?}], folder?: {card, id}}],
-//    clusters: [{id, name, turn, named, from?, folder?}],
-//    gaps: [{turn, why}],
-//    folder?: {card, v, at, claims, clusters}}
+//              links?: [{to, how: supports | contradicts | same topic}]}],
+//    clusters: [{id, name, turn, named}],
+//    gaps: [{turn, why}]}
 //
 //   a place  {row, by, turn, quote, sentence, start, end}: where a claim was said, the message row, who said it
-//            (claude | person), the words matched and their sentence, as offsets into the row's markdown. A claim of
-//            the folder's map has {by: 'folder', quote, ref}: the words of its first evidence row.
+//            (claude | person), the words matched and their sentence, as offsets into the row's markdown.
 //   ×N       a claim's said.length: each distinct place it was said.
 //   a source {ref, label, row?, at?, quote?}: a citation `[words](#)` near the claim's words, {ref: `<row>@<offset>`,
 //            row, at: the citation's offset in the row's markdown, label: its words}, which the reply's marks
-//            (marks/store.ts) give a check and evidence; or a record of the folder's map, {ref: `path#L12`, label:
-//            `path:12`, quote}.
+//            (marks/store.ts) give a check and evidence.
 //
 // After a turn of work the observer's pass lists the turn's claims ({quote, claim, by, cluster, same, revises, links});
 // applyTurn places each by its quote in the turn's messages, takes the citations in or near its sentence as its
 // sources, merges a restatement into the claim it repeats (a new place, so ×N grows), links a correction both ways
 // (revises / revised_by), keeps the links a claim names to others, and puts each new claim in a cluster: one named so
-// far, or a new one. The folder's map (a subagent's map that `thimble claims save` checked and kept, mergeFolder) adds
-// its claims beside the session's.
+// far, or a new one.
 import { blocks, marksIn } from '../marks/message.js'
 
 /** Each markdown link of a text, `[words](target)`, as a match: index, [0] the whole link, [1] its words. */
@@ -46,7 +42,8 @@ export function emptyStore(session = '') {
   return { v: 1, session: String(session || ''), updated: null, claims: [], clusters: [], gaps: [] }
 }
 
-/** A store read from its file's text (or parsed JSON): whatever holds is kept, the rest starts empty. */
+/** A store read from its file's text (or parsed JSON): whatever holds is kept, the rest starts empty. A map of the
+ *  whole folder an earlier version kept (claims by `folder`, clusters from `folder`) is left out. */
 export function readStore(text, session = '') {
   let d = text
   if (typeof text === 'string') {
@@ -55,21 +52,24 @@ export function readStore(text, session = '') {
   const s = emptyStore(session || d?.session)
   if (!d || typeof d !== 'object') return s
   s.updated = d.updated || null
-  s.claims = (Array.isArray(d.claims) ? d.claims : []).filter(c => c && c.id && c.text).map(c => ({ ...c, said: Array.isArray(c.said) ? c.said : [], sources: (Array.isArray(c.sources) ? c.sources : []).map(sourceOf).filter(Boolean) }))
-  s.clusters = (Array.isArray(d.clusters) ? d.clusters : []).filter(c => c && c.id)
+  s.claims = (Array.isArray(d.claims) ? d.claims : []).filter(c => c && c.id && c.text && c.by !== 'folder').map(c => {
+    const { folder: _, ...rest } = c
+    return { ...rest, said: (Array.isArray(c.said) ? c.said : []).filter(p => p?.by !== 'folder'), ...(Array.isArray(c.links) ? { links: c.links.filter(l => !l?.folder) } : {}) }
+  }).map(c => ({ ...c, said: Array.isArray(c.said) ? c.said : [], sources: (Array.isArray(c.sources) ? c.sources : []).map(sourceOf).filter(Boolean) }))
+  s.clusters = (Array.isArray(d.clusters) ? d.clusters : []).filter(c => c && c.id && c.from !== 'folder')
   s.gaps = Array.isArray(d.gaps) ? d.gaps : []
-  for (const [k, v] of Object.entries(d)) if (!(k in s)) s[k] = v
+  for (const [k, v] of Object.entries(d)) if (!(k in s) && k !== 'folder' && k !== 'folderAsked') s[k] = v
   return oneNameOneCluster(s)
 }
 
-/** Two clusters of the same name (the session's own, or the folder's) are one: the later one's claims move to the
+/** Two clusters of the same name are one: the later one's claims move to the
  *  earlier, and the later one goes. A turn can make the second, when its claims name a cluster the same turn's split
  *  then names too. */
 export function oneNameOneCluster(store) {
   const seen = new Map()
   const gone = new Set()
   for (const c of store.clusters) {
-    const key = `${c.from === 'folder' ? 'f' : 's'}|${String(c.name || '').toLowerCase().trim()}`
+    const key = String(c.name || '').toLowerCase().trim()
     const first = seen.get(key)
     if (!first) { seen.set(key, c); continue }
     for (const x of store.claims) if (x.cluster === c.id) x.cluster = first.id
@@ -260,14 +260,13 @@ export function sourcesNear(md, start, end, text = '') {
   return out.slice(0, 4)
 }
 
-/** Sources as {ref, label, ...}: a bare ref (the folder's evidence) is read as its own label; a citation keeps its row
- *  and offset. */
+/** Sources as {ref, label, ...}: a bare ref is read as its own label; a citation keeps its row and offset. */
 export const sourceOf = x => (typeof x === 'string' ? { ref: x, label: shortRef(x) } : x && typeof x.ref === 'string' ? { ref: x.ref, label: x.label || shortRef(x.ref), ...(typeof x.row === 'string' ? { row: x.row } : {}), ...(typeof x.at === 'number' ? { at: x.at } : {}), ...(x.quote ? { quote: String(x.quote) } : {}) } : null)
 
 /** A citation near a claim as a source: its row and its offset there, which name it among the reply's marks. */
 export const citationSource = (row, s) => ({ ref: `${row}@${s.at}`, row: String(row), at: s.at, label: s.label })
 
-/** A ref of the folder's map as a person reads it: a line of a file as `file:line`. */
+/** A ref as a person reads it: a line of a file as `file:line`. */
 export function shortRef(ref) {
   const r = String(ref || '')
   const [path, loc] = r.split('#')
@@ -348,7 +347,6 @@ export function clusterFor(store, ref, turn = null) {
 export function grownClusters(store) {
   const out = []
   for (const c of store.clusters) {
-    if (c.from === 'folder') continue
     const n = sizeOf(store, c.id)
     const named = Math.max(1, Number(c.named) || 1)
     if (n >= GROWN.least && n >= named * GROWN.factor) out.push({ id: c.id, name: c.name, from: named, to: n })
@@ -392,7 +390,7 @@ function applyClusters(store, list, grown, turn) {
 const capital = t => (t ? t[0].toUpperCase() + t.slice(1) : t)
 
 /** The lens's claims, held to what the store needs; anything else is dropped. */
-/** How one claim bears on another, as the lens or the folder's map names it: supports, contradicts or same topic, or
+/** How one claim bears on another, as the lens names it: supports, contradicts or same topic, or
  *  null. */
 export function howOf(v) {
   const s = String(v ?? '').toLowerCase()
@@ -527,10 +525,10 @@ export function noteFor(res) {
 export function promptLines(store, max = 120) {
   const claims = store.claims.slice(-max)
   const lines = claims.map(c => {
-    const flags = [c.by === 'person' ? 'the analyst' : c.by === 'folder' ? 'the folder' : '', c.revised_by ? `corrected by ${c.revised_by}` : '', c.said.length > 1 ? `×${c.said.length}` : ''].filter(Boolean)
+    const flags = [c.by === 'person' ? 'the analyst' : '', c.revised_by ? `corrected by ${c.revised_by}` : '', c.said.length > 1 ? `×${c.said.length}` : ''].filter(Boolean)
     return `- ${c.id} · ${c.cluster || '-'} · ${c.text}${flags.length ? ` (${flags.join(', ')})` : ''}`
   })
-  const clusters = store.clusters.filter(k => sizeOf(store, k.id)).map(k => `- ${k.id} · ${k.name} · ${sizeOf(store, k.id)} claim${sizeOf(store, k.id) === 1 ? '' : 's'}${k.from === 'folder' ? ' (the folder)' : ''}`)
+  const clusters = store.clusters.filter(k => sizeOf(store, k.id)).map(k => `- ${k.id} · ${k.name} · ${sizeOf(store, k.id)} claim${sizeOf(store, k.id) === 1 ? '' : 's'}`)
   return {
     claims: lines.length ? (store.claims.length > claims.length ? `(${store.claims.length - claims.length} older claims not shown)\n` : '') + lines.join('\n') : '(none yet)',
     clusters: clusters.length ? clusters.join('\n') : '(none yet)',
@@ -543,93 +541,14 @@ export function grownLines(grown) {
   return grown.map(g => `Cluster ${g.id} "${g.name}" grew from ${g.from} to ${g.to} claims since it was named.`).join('\n')
 }
 
-// ------------------------------------------------------------------------------------------------ the folder's map
-
-/**
- * The folder's map (the data `thimble claims save` kept: {scope, clusters: [{id, name, lead}], claims: [{id, name, cluster,
- * evidence: [{ref, quote}], n, of}]}) into the store, each claim marked
- * `by: folder`, its evidence as its sources and its first quote as where it was said. Saved again (a fixed version),
- * the map's claims are matched by their ids in the map and changed in place; a claim the new version left out goes,
- * unless the session said it too. A claim the session already holds word for word is said again, not added.
- * Returns {store, added, restated, dropped}.
- */
-export function mergeFolder(store, data, { card = 'folder-claims', v = null, at = null, turn = null } = {}) {
-  const d = data && data.data && Array.isArray(data.data.claims) ? data.data : data || {}
-  const res = { store, added: [], restated: [], dropped: [] }
-  const ids = new Map()
-  for (const k of Array.isArray(d.clusters) ? d.clusters : []) {
-    if (!k || k.id == null) continue
-    const name = str(k.name || String(k.id), 60)
-    let c = store.clusters.find(x => x.from === 'folder' && (x.folder === String(k.id) || String(x.name).toLowerCase() === name.toLowerCase()))
-    if (!c) {
-      c = { id: nextId(store.clusters, 'k'), name, turn, named: 0, from: 'folder', folder: String(k.id) }
-      store.clusters.push(c)
-    } else { c.name = name; c.folder = String(k.id) }
-    ids.set(String(k.id), c.id)
-  }
-  const seen = new Map()
-  for (const x of Array.isArray(d.claims) ? d.claims : []) {
-    const text = str(x?.name ?? x?.text, MAX_TEXT)
-    if (!text) continue
-    const fid = String(x.id ?? text)
-    const ev = (Array.isArray(x.evidence) ? x.evidence : []).map(e => (typeof e === 'string' ? { ref: e } : e)).filter(e => e && typeof e.ref === 'string')
-    const sources = ev.slice(0, 6).map(e => ({ ref: e.ref, label: shortRef(e.ref), ...(e.quote ? { quote: str(e.quote, MAX_QUOTE) } : {}) }))
-    const q = ev.find(e => e.quote)
-    const place = { by: 'folder', turn, at, quote: q ? cutTo(str(q.quote, MAX_QUOTE), MAX_QUOTE) : '', sentence: '', ref: ev[0]?.ref || null }
-    const extra = { ...(typeof x.n === 'number' ? { n_of: x.n } : {}), ...(typeof x.of === 'number' ? { of: x.of } : {}) }
-    let c = store.claims.find(y => y.folder && y.folder.card === card && y.folder.id === fid)
-    if (c) {
-      Object.assign(c, { text, cluster: ids.get(String(x.cluster)) ?? null, sources, ...extra })
-      c.said = [place, ...c.said.filter(p => p.by !== 'folder')]
-      seen.set(fid, c.id)
-      continue
-    }
-    const same = restates(store, text)
-    if (same) {
-      if (!same.said.some(p => p.by === 'folder')) { same.said.push(place); res.restated.push(same.id) }
-      addSources(same, sources)
-      same.folder = { card, id: fid }
-      seen.set(fid, same.id)
-      continue
-    }
-    const id = nextId(store.claims, 'c')
-    store.claims.push({ id, text, by: 'folder', cluster: ids.get(String(x.cluster)) ?? null, turn, at, said: [place], sources, folder: { card, id: fid }, ...extra })
-    res.added.push(id)
-    seen.set(fid, id)
-  }
-  // the map's relations, as links on its claims (a save of the map again replaces them)
-  for (const c of store.claims) if (c.links && [...seen.values()].includes(c.id)) c.links = c.links.filter(l => !l.folder)
-  for (const r of Array.isArray(d.relations) ? d.relations : []) {
-    const a = store.claims.find(c => c.id === seen.get(String(r?.from)))
-    const to = seen.get(String(r?.to))
-    const how = howOf(r?.type ?? r?.how)
-    if (!a || !to || to === a.id || !how) continue
-    a.links = [...(a.links || []).filter(x => x.to !== to), { to, how, folder: true }]
-  }
-  // a claim an earlier version of the map held and this one does not: gone, unless the session said it too
-  const keep = new Set(seen.values())
-  store.claims = store.claims.filter(c => {
-    if (!c.folder || c.folder.card !== card || keep.has(c.id)) return true
-    if (c.said.some(p => p.by !== 'folder')) { delete c.folder; c.said = c.said.filter(p => p.by !== 'folder'); return true }
-    res.dropped.push(c.id)
-    return false
-  })
-  store.clusters = store.clusters.filter(k => k.from !== 'folder' || store.claims.some(c => c.cluster === k.id))
-  for (const c of store.clusters) if (!c.named) c.named = Math.max(1, sizeOf(store, c.id))
-  store.folder = { card, v, at, claims: [...keep].length, clusters: ids.size, scope: d.scope && typeof d.scope === 'object' ? { unit: str(d.scope.unit, 20), n: typeof d.scope.n === 'number' ? d.scope.n : null, what: str(d.scope.what, 200) } : null }
-  store.updated = at || store.updated
-  return res
-}
-
 // ------------------------------------------------------------------------------------------------ the view
 
 /**
- * The store as the pane shows it: the clusters in the order their work began (the session's first, the folder's
- * after), each with its claims in the order said, and the claims between clusters last. Each claim carries `n` (×N).
+ * The store as the pane shows it: the clusters in the order their work began, each with its claims in the order said, and the claims between clusters last. Each claim carries `n` (×N).
  */
 export function viewOf(store) {
   const groups = store.clusters.map(k => ({ ...k, claims: store.claims.filter(c => c.cluster === k.id) })).filter(g => g.claims.length)
-  const rank = g => (g.from === 'folder' ? 1e6 : 0) + (g.turn ?? Math.min(...g.claims.map(c => c.turn ?? 0)))
+  const rank = g => g.turn ?? Math.min(...g.claims.map(c => c.turn ?? 0))
   groups.sort((a, b) => rank(a) - rank(b) || String(a.id).localeCompare(String(b.id), 'en', { numeric: true }))
   const loose = store.claims.filter(c => !c.cluster || !store.clusters.some(k => k.id === c.cluster))
   if (loose.length) groups.push({ id: null, name: 'between clusters', claims: loose })
@@ -662,7 +581,7 @@ export function edgesOf(flat) {
   }
   for (const c of flat) if (c.revises) add(c.id, c.revises, 'corrects')
   for (const c of flat) for (const l of c.links || []) add(c.id, l.to, 'relates', null, l.how)
-  // the same place of a file: what the citations' evidence showed, else the folder's ref
+  // the same place of a file: what the citations' evidence showed, else the source's ref
   const first = new Map()
   for (const c of flat) {
     for (const s of c.sources || []) {

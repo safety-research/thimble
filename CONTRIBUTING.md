@@ -49,7 +49,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | What | Where |
 |---|---|
 | the manifest: name, the switches (Citations, Cards, Squeeze and catch-up, Explainers, Important details, Claims, Labels and coverage on the bar, Squeeze changes cards); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
-| the `thimble` command (`label`, `coverage`, `claims save`, `fix`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
+| the `thimble` command (`label`, `coverage`, `fix`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, the command hook that lets Claude read thimble's temp folder without a dialog (`temp_allow.py`), which files Claude read (for coverage), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
 | shared parts: where thimble keeps its records (`layout.mjs`, the same names as `engine/kernel/store.py`), a text's width, whether main's turn runs, the forks (checker, designer, side thread), what thimble tells Claude with the next prompt (`tell.ts`, the one way a report reaches Claude; `engaged.ts`, what the person opened and asked), the change feed, the one side pane, the record of main's turns and answers (`answers.ts`), and where the features that act on answers draw and take keys (`answerview.ts`) | `plugin/core/` |
@@ -99,7 +99,6 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 | lenses | `prompts/lens-explain.md`, `prompts/lens-heads.md`, `prompts/lens-claims.md` | `observer/observer.ts` | the sections of the look's prompt, one per switch that is on |
 | longer explainer | `prompts/explain-expand.md` | `explain/expand.ts` | one model call when the person asks for a longer explainer |
 | squeeze | `prompts/squeeze.md` | `squeeze/term.ts` | one model call per change of an answer's chips |
-| claims folder | `prompts/claims-folder.md` | `claims/term.ts` | the guide of the subagent that maps the claims of the whole folder |
 | side thread | `prompts/thread.md` | `threads/thread.ts` | the prompt of the fork that answers a side thread |
 
 To change a text, edit its file; git keeps the earlier wording, so compare with `git diff` or `git log -p`.

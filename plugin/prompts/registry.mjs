@@ -67,11 +67,6 @@ export const TEXTS = {
     reader: 'squeeze/term.ts',
     use: 'one model call per change of the chips',
   },
-  'claims-folder': {
-    about: 'the guide of the subagent that maps the claims of the whole folder',
-    reader: 'claims/term.ts',
-    use: "the brief main hands the subagent when the person asks for the folder's map",
-  },
   thread: {
     about: "a side thread's instructions",
     reader: 'threads/thread.ts',

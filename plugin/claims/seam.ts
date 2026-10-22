@@ -1,8 +1,7 @@
-// seam.ts: where Claims meet the rest of thimble (core/answerview.ts, core/pane.ts, core/feed.ts and observer/observer.ts
+// seam.ts: where Claims meet the rest of thimble (core/answerview.ts, core/pane.ts and observer/observer.ts
 // call each function by name, since Claude Code follows `$` only into functions a file declares or imports). The
-// feature's modules stand beside this file: term.ts (the store, a look's claims, c, /claims, the folder's map),
-// store.js (the claims as pure functions), graph.js and pane.tsx (the pane), estimate.mjs (the folder's size for the
-// map's estimate), lens.mjs (the observer's claims lens); prompts/lens-claims.md, prompts/claims-folder.md.
+// feature's modules stand beside this file: term.ts (the store, a look's claims, c, /claims), store.js (the claims as
+// pure functions), graph.js and pane.tsx (the pane), lens.mjs (the observer's claims lens); prompts/lens-claims.md.
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   claimsKey($, key, until)           c: the Claims pane, once the word window closed (a taker as hooks/keys.ts takes it)
@@ -15,8 +14,6 @@
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
 //   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, or
 //                                      where it was said (threads/pane.tsx)
-//   folderClaimsFromFeed($, ev)        a `folder_claims` line of the change feed: the folder's map kept by
-//                                      `thimble claims save`, brought into the claims
 //   registerClaims                     its own hooks (/claims)
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -25,7 +22,7 @@ import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { claimsThreadScope as threadScope, drawClaims } from './pane'
-import { claimsBarWords, claimsBright, claimsDigest, folderClaimsFromFeed as fromFeed, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
+import { claimsBarWords, claimsBright, claimsDigest, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,10 +63,6 @@ export async function drawClaimsPane($: Engine, e: Any, args: unknown, els: Any)
 
 export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: unknown }> {
   return threadScope($, args)
-}
-
-export async function folderClaimsFromFeed($: Engine, ev: Any): Promise<void> {
-  await fromFeed($, ev)
 }
 
 export const registerClaims: Register = (on, options) => {

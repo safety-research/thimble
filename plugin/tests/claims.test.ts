@@ -1,7 +1,6 @@
 // Claims (claims/): the observer's claims lens places each answer's claims by their words, with the citations near them,
 // in the conversation's kept folder; c on the bar counts them and lights when a claim was corrected; a look that fails
-// leaves a gap the pane names; c opens the pane, where a click selects a claim; the folder's map is asked of main and comes
-// in from the change feed. All data is made up. `claude plugin test plugin`.
+// leaves a gap the pane names; c opens the pane, where a click selects a claim. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { registerAnswers, resetAnswers } from '../core/answers'
@@ -9,8 +8,8 @@ import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
-import { claimsBar, claimsKey, drawClaimsPane, folderClaimsFromFeed, registerClaims } from '../claims/seam'
-import { askFolder, claimsStore } from '../claims/term'
+import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
+import { claimsStore } from '../claims/term'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,7 +53,6 @@ function setup(replies: Any[]) {
     },
     process: {
       run: async (argv: string[]) => {
-        if (String(argv.at(-2) ?? '').endsWith('/claims/estimate.mjs')) return { exitCode: 0, stdout: JSON.stringify({ offer: { what: '4 files', detail: '42 MB', minutes: 4 } }), stderr: '' }
         return tempRun(argv) ?? (argv.includes('coverage') ? { exitCode: 0, stdout: 'Claude read 3 of 7 files.', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' })
       },
     },
@@ -184,25 +182,4 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a c
   const said = await drawClaimsPane(s.$, { props: { bodyColumns: 100 } }, src.args, els)
   expect(textOf(said)).toContain("Where it was said  Claude's message")
   expect(buttons(said).map(b => b.hotkey)).toContain('b')
-})
-
-test("the folder's map: asked of main with the guide as a file, then its claims come in from the change feed", async () => {
-  setOptions({})
-  const s = setup([])
-  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
-  expect(await askFolder(s.$)).toBeUndefined()
-  expect(s.submitted).toEqual(['map the claims of this folder (4 files, about 4 min)'])
-  const guide = [...s.files.keys()].find(p => p.endsWith('/claims-folder.md'))!
-  expect(s.files.get(guide)).toBe('PROMPT claims-folder')
-  const told = JSON.parse(s.files.get(`${KEPT}/tell.json`)!)
-  expect(told['claims-folder']).toContain(`First read ${guide} and follow it.`)
-  expect(told['claims-folder']).toContain('thimble claims save --from ')
-  expect((await claimsStore(s.$)).folderAsked).toBeDefined()
-  // the save's feed line brings the map in
-  s.files.set('/made-up/.thimble/folders/data/claims/folder.json', JSON.stringify({ data: { clusters: [{ id: 'tz', name: 'timezone detour' }], claims: [{ id: 'a', name: 'Agents blame a timezone bug', cluster: 'tz', evidence: [{ ref: 'runs/r1.jsonl#L12', quote: 'a timezone mismatch' }] }] }, holds: 1, total: 1 }))
-  await folderClaimsFromFeed(s.$, { kind: 'folder_claims', path: '/made-up/.thimble/folders/data/claims/folder.json' })
-  const store = await claimsStore(s.$)
-  expect(store.claims.map((c: Any) => [c.text, c.by])).toEqual([['Agents blame a timezone bug', 'folder']])
-  expect(store.folderAsked).toBeUndefined()
-  expect(store.folder).toMatchObject({ claims: 1, clusters: 1 })
 })
