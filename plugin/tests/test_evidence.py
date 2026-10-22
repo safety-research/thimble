@@ -83,6 +83,33 @@ def test_a_correction_is_checked_on_its_new_words():
     assert bad["status"] == "failed" and bad["shown"] == "15 of 40"
 
 
+def test_a_correction_is_confirmed_only_when_the_evidence_shows_the_words_it_puts_in(tmp_path: Path):
+    out = "15:53:00 git diff main..review/118 --stat -> 3 files changed\n15:54:10 pytest -k weekly -> 9 passed, 69 deselected"
+    was = 'reading the diff and running only the "weekly" tests'
+
+    def corrected(words: str) -> dict:
+        return check_mark(mark(was), computed(out, status="corrected", correction={"words": words}), [call(CODE, out)], "/data")
+
+    # a free description of what the output means: its quoted part is in the output, the words it puts in are not
+    r = corrected('looking only at the file summary (git diff --stat) and running only the "weekly" tests')
+    assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", was) and "was" not in r
+    assert r["reason"].startswith("Not confirmed: the check found these words wrong") and "looking only at" in r["reason"]
+    # words the output holds as words, a changed count, and words only left out are confirmed
+    assert corrected('reading the diff --stat and running only the "weekly" tests')["status"] == "corrected"
+    assert corrected('running 9 "weekly" tests')["status"] == "corrected"
+    assert corrected('running only the "weekly" tests')["status"] == "corrected"
+    # a word inside a longer word is not the word
+    assert corrected('running only the "weekly" select tests')["status"] == "failed"
+    # the same for a quote of a record: the cited line shows the words the correction puts in
+    (tmp_path / "board.md").write_text("agent-03: rebase pr/<n> onto current main and force-push\n")
+    item = {"kind": "quote", "status": "corrected", "evidence": {"file": "board.md", "line": 1, "substring": "rebase pr/<n>"},
+            "reason": "the post says otherwise"}
+    ok = check_mark(mark("rebase any old branch"), {**item, "correction": {"words": "rebase pr/<n> onto current main"}}, [], str(tmp_path))
+    assert (ok["status"], ok["was"]) == ("corrected", "rebase any old branch")
+    gone = check_mark(mark("rebase any old branch"), {**item, "correction": {"words": "rebase a stale branch"}}, [], str(tmp_path))
+    assert gone["status"] == "failed" and "a stale" in gone["reason"]
+
+
 def test_quote_hit_and_miss(tmp_path: Path):
     (tmp_path / "board.md").write_text("intro\nagent-07: yes, that was me\nbye\n")
     hit = check_mark(mark('"yes, that was me"'), quote("board.md", 2, "yes, that was me"), [], str(tmp_path))

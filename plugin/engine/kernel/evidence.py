@@ -16,7 +16,10 @@ shows the words, so a mark is never verified on evidence the checker made up:
             never matches inside 2,301 or sweep3; number words read as digits; a number in a name, such as agent-11,
             Opus 4.8 or 127.0.0.1, is no value), and for words with no number each
             record name, in either case. Words with none of these ("passed when run
-            alone") are the checker's reading of the output it cites, as a paraphrase of a quote is. The check reads
+            alone") are the checker's reading of the output it cites, as a paraphrase of a quote is. A correction is
+            no such reading: each run of words it puts in place of the marked ones stands in those lines as words, or
+            by its parts that compare (a changed count), so a free description of what the output means ("looking
+            only at the file summary") is not confirmed. The check reads
             the output the call really printed, never the output the checker wrote down, and it runs nothing.
             The call's code does not type in a number of the words as the printed value: given to print as is,
             assigned alone to a name, or returned; a number inside a text the code prints counts as typed only when
@@ -37,7 +40,8 @@ shows the words, so a mark is never verified on evidence the checker made up:
             and backticks as formatting, and every quote mark as the same mark (a quote inside a quote may be written
             with the other kind). The quoted words of a direct quote (the case of their first letter aside), and the
             days and numbers of the words, are in the cited lines too; a quote of what code prints may fill the
-            fields of the code's template (in_code).
+            fields of the code's template (in_code). A correction of a quote also puts in only words the cited lines
+            show, as for computed evidence.
             Not checked: that a substring means what a paraphrase of it says ("agent-3 deleted the page" on a line that
             holds "page"). That is the checker's judgment; the person sees the line next to the claim.
 
@@ -62,6 +66,7 @@ module cannot judge, stays unchecked. A checker's note on the rest of the senten
 from __future__ import annotations
 
 import ast
+import difflib
 import io
 import json
 import keyword
@@ -410,6 +415,42 @@ def unescaped(out: str) -> str:
     prints a record's text with repr() to show its line breaks, and a reply may quote it so. Both the words and the
     output are read so, so a real backslash (`C:\\new`) changes in both alike."""
     return re.sub(r"\\([nrt'\"])", lambda m: m.group(1) if m.group(1) in "'\"" else " ", out)
+
+
+def says(words: str, text: str) -> bool:
+    """The words stand in the text as words, the case aside: `diff` in "git diff", never in "diffs"; formatting, quote
+    marks, white space and the punctuation at their ends compared as shows() compares them."""
+    w = norm_ws(one_quote(unmark(unescaped(words)))).strip(' "().,;:!?').lower()
+    if not w:
+        return True
+    t = norm_ws(one_quote(unmark(unescaped(text)))).lower()
+    rx = (r"(?<!\w)" if w[0].isalnum() else "") + re.escape(w) + (r"(?!\w)" if w[-1].isalnum() else "")
+    return bool(re.search(rx, t) or re.search(rx, wordnums(t)))
+
+
+def comparable(words: str) -> bool:
+    """The words hold a part that compares without reading meaning: a quoted part, a day, a number or a record name."""
+    w = wordnums(words, counts=True)
+    return bool(quote_fragments(words) or calendar_days(words) or marked_numbers(w) or NAME.search(words))
+
+
+def put_in(was: str, new: str) -> list[str]:
+    """The runs of a correction's words that it puts in place of the marked words ("254" for 256, "looking only at the
+    file summary" for "reading the diff"): the words the marked ones do not hold at that place, compared as words, the
+    case, formatting, quote marks and the punctuation at their ends aside. Words it only leaves out put nothing in."""
+    a, b = unmark(was).split(), unmark(new).split()
+    key = lambda x: one_quote(x).strip(' "().,;:!?').lower()  # noqa: E731
+    sm = difflib.SequenceMatcher(None, [key(x) for x in a], [key(x) for x in b], autojunk=False)
+    return [" ".join(b[j1:j2]) for op, _, _, j1, j2 in sm.get_opcodes() if op in ("replace", "insert")]
+
+
+def unshown_change(was: str, new: str, text: str, approx: bool = False) -> list[str]:
+    """The runs a correction puts in that the evidence does not show. A correction says the data show other words than
+    the marked ones, so each run it puts in must stand in the evidence: as words of it, or by its parts that compare
+    without reading meaning (a changed count, a day, a name), as shows() reads them. A run with none of these and not
+    in the evidence as words ("looking only at the file summary" for a call that printed `--stat` output) is the
+    checker's own description, which the evidence does not confirm."""
+    return [r for r in put_in(was, new) if not says(r, text) and not (comparable(r) and shows(r, text, approx))]
 
 
 def approx_numbers(words: str) -> set[str]:
@@ -799,11 +840,12 @@ def window(text: str, spans: list[list[int]], size: int) -> tuple[str, list[list
     return lead + text[a:b] + ("…" if b < len(text) else ""), [[x - a + len(lead), y - a + len(lead)] for x, y in spans if x >= a and y <= b]
 
 
-def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False) -> tuple[list[str], dict[str, Any] | None]:
+def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of computed evidence, and the evidence to show. The check names a call by the output it printed;
     the calls of the session whose real output holds that text are the candidates, and the first whose output shows
     the words, and whose code types none of them in, is the evidence: its code and its whole output, the words
-    highlighted from the cited place on. When no call printed that output, the check's own last call is shown."""
+    highlighted from the cited place on. When no call printed that output, the check's own last call is shown. For a
+    correction, `was` is the marked words: the output also shows each run of words the correction puts in."""
     if not output_parts(given):
         return ["the check gave no output of a call"], None
     runs = [(c, at) for c in calls for at in [printed(given, str(c.get("output") or ""))] if at is not None]
@@ -837,6 +879,10 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
         elif quoted:
             problem = problem or f"its code writes the quoted words “{quoted[0]}” itself instead of reading them from the records"
         elif shows(target, out, approx):
+            missing = unshown_change(was, target, out, approx) if was else []
+            if missing:
+                problem = problem or f"the output of that call does not show “{short(' … '.join(missing), 80)}”, which the correction puts in"
+                continue
             # the words in the cited lines, else the cited lines themselves
             spans = [[a + at[0], b + at[0]] for a, b in spans_of(target, out)] or [at]
             return [], shown(c, spans)
@@ -1078,12 +1124,13 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 
-def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None]:
+def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, calls: list[dict[str, Any]] = (), was: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of quote or code evidence, and the cited places to show. The evidence is one place, or several when
     the claim joins places (a value set on one line and used on another): each place holds the words the check gave
     for it, and the places together hold the quoted words of a direct quote and the numbers of the words. A claim about
     what code does may cite Claude's own code in `tmp`; a quote of a record may not, since a file there holds what
-    Claude derived, not the records."""
+    Claude derived, not the records. For a correction of a quote of a record, `was` is the marked words: the cited lines
+    also show each run of words the correction puts in."""
     problems: list[str] = []
     shown: list[dict[str, Any]] = []
     hay: list[str] = []
@@ -1106,6 +1153,10 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     for v, in_date in (marked_numbers(unmark(target)) if kind != "code" else []):
         if not any(has_number(v, h, dates=in_date) or (v in pct and has_number(fraction(v), h)) for h in hay):
             problems.append(f"{where} does not show {v}")
+    if was and kind != "code" and not problems:
+        missing = unshown_change(was, target, "\n".join(hay))
+        if missing:
+            problems.append(f"{where} does not show “{short(' … '.join(missing), 80)}”, which the correction puts in")
     return problems, {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
 
 
@@ -1134,13 +1185,14 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
-    """The problems of one mark's evidence for `target`, and the evidence to show."""
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+    """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
+    new words and `was` the marked words."""
     if kind == "computed":
-        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx)
+        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
-        return check_quote(target, kind, evs, cwd, root, tmp, calls) if evs else (["the check gave no place"], None)
+        return check_quote(target, kind, evs, cwd, root, tmp, calls, was) if evs else (["the check gave no place"], None)
     return [f"the check gave evidence of no known kind ({kind!r})"], None
 
 
@@ -1252,7 +1304,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return judged("evidence", reason or "the check could not show this claim from the data")
     if status not in ("verified", "corrected"):
         return {**out, "reason": f"the check gave the status {status!r}"}
-    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp)
+    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if new else "")
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
