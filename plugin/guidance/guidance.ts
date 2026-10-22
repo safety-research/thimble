@@ -3,12 +3,14 @@
 // the conversation holds none: with the first request, and again after a compaction. A resumed session keeps its one
 // copy, and a fork of the conversation inherits it.
 //
-// The `## ` section of a switched-off feature is left out; with marks off, the marks in the other sections' examples
+// The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a
+// switched-off feature is left out; with marks off, the marks in the other sections' examples
 // read as plain words. The block is made when the conversation starts, so a switch changed later counts from the next
 // conversation or compaction.
 import type { Register } from 'claude-code'
 
 import { promptText } from '../prompts/prompts'
+import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 
 /** The `## ` section of guidance.md that teaches each feature a person can switch off. */
@@ -27,7 +29,8 @@ export function guidanceFor(text: string, on: (feature: string) => boolean): str
 export const registerGuidance: Register = on => {
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    const text = guidanceFor(await promptText($, 'guidance'), featureOn)
+    const tmp = String((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')
+    const text = guidanceFor(fill(await promptText($, 'guidance'), { TMPDIR: tmp }), featureOn)
     return { ...r, blocks: [...r.blocks.filter(b => b.name !== 'thimble'), { name: 'thimble', text }] }
   }).catch(($, e, next) => next(e))
 }
