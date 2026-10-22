@@ -126,3 +126,19 @@ async def test_a_large_output_is_unpacked_off_the_event_loop(corpus, monkeypatch
     assert status == "ok" and len(outputs[0]["text/plain"]) == 80_000_000
     large = [on_loop for size, on_loop in seen if size > notebook.MSG_INLINE_BYTES]
     assert large and not any(large), "a large message was unpacked on the event loop"
+
+
+async def test_a_card_made_is_announced_with_who_made_it_and_an_edit_is_not(corpus, monkeypatch):
+    """The workspace record of a card made names its maker (`by`), so the page goes to a card Claude made and leaves a
+    card the person made where it is (frontend lib/follow.ts); later records of the card carry no maker."""
+    from app import investigation
+
+    sent: list[dict] = []
+    monkeypatch.setattr(investigation, "emit", lambda c, inv, ev: sent.append(ev))
+    mine = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "user", code="1"))
+    claude = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "main", code="2"))
+    notebook.edit_cell(corpus, claude["id"], title="Two")
+    made = {e["cell"]: e for e in sent if e.get("op") == "created"}
+    assert made[mine["id"]]["by"] == "user" and made[claude["id"]]["by"] == "main"
+    later = [e for e in sent if e.get("cell") == claude["id"] and e.get("op") != "created"]
+    assert later and all("by" not in e for e in later)

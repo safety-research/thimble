@@ -109,10 +109,20 @@ def _emit(c: str, event: dict) -> None:
 
 
 def _notify(c: str, concept_id: str, what: str, rows: bool = True) -> None:
-    """`concepts {concept, what, rows}` on the workspace stream after a label is defined, changed, applied or deleted;
-    `rows` False when its rows stay as they were (turned on or off, recoloured, a filter set), so the marks read from
-    them need not be read again."""
-    _emit(c, {"type": "concepts", "concept": concept_id, "what": what, "rows": rows})
+    """`concepts {concept, what, rows, scope, shown}` on the workspace stream after a label is defined, changed, applied
+    or deleted; `rows` False when its rows stay as they were (turned on or off, recoloured, a filter set), so the marks
+    read from them need not be read again. `scope` (files, canvas or report) and `shown` (on in Files) say where the
+    label shows, so the Files tab's dot lights only for marks that appear in Files; both are left out once the label is
+    gone."""
+    event: dict[str, Any] = {"type": "concepts", "concept": concept_id, "what": what, "rows": rows}
+    try:
+        concept = read_concept(_ws(c), concept_id)
+    except Exception:  # noqa: BLE001 — the event goes out without them
+        concept = None
+    if concept is not None:
+        event["scope"] = SCOPE_OF_UNIT.get(concept["unit"], "files")
+        event["shown"] = bool(concept.get("shown"))
+    _emit(c, event)
 
 
 KINDS = ("prompt", "regex", "code")

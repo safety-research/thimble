@@ -23,6 +23,7 @@ import { onDemoNote, useDemo } from '../lib/demo'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
+import { showsCanvas, watchInput } from '../lib/follow'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
@@ -267,6 +268,18 @@ export function Shell({ ws }: { ws: string }) {
   const shown = useMemo(() => shownSurfaces(panes, narrow), [panes, narrow])
   useLayoutEffect(() => setShownSurfaces(shown), [shown])
   const read = readSurface(panes, geometry.panes.length === 1)
+  // a card Claude made during a turn shows the canvas when no pane shows it, unless the person is busy (lib/follow.ts);
+  // the canvas then goes to the card (Canvas.tsx, its landing)
+  const shownNow = useRef(shown)
+  shownNow.current = shown
+  useEffect(() => {
+    watchInput()
+    return bus.on('wsEvent', (ev) => {
+      if (!showsCanvas(ev as Record<string, unknown>, shownNow.current)) return
+      track('tab-activate', { target: 'panel:canvas', detail: { via: 'card-made' } })
+      setPanes((p) => show(p, 'canvas', null, recent.current))
+    })
+  }, [setPanes])
 
   const labelOf = useCallback((s: SurfaceId) => BASE.find((b) => b.id === s)?.label ?? views.find((v) => v.slug === slugOfSurface(s))?.name ?? s, [views])
   const { drag, start: startDrag } = usePaneDrag({

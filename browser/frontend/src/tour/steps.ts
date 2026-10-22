@@ -11,8 +11,7 @@ const filesPanel = '[data-panel="files"].shell-panel'
 const reportPanel = '[data-panel="report"].shell-panel'
 const chatSel = '.chat[data-panel="chat"]'
 
-// ---------- the chat and the terminal: an example exchange in main's chat, and on the next step the same exchange in a
-// Claude Code terminal that slides in from the right edge as a window of its own
+// ---------- the chat: an example exchange in main's chat
 const cite = (v: string) => `<span class="refchip refchip-value refchip-citation">${v}</span>`
 const QUESTION = 'When did payments 4.12.0 go out, and was it still live when INC-312 opened?'
 const ANSWER = (c: (v: string) => string) =>
@@ -22,28 +21,6 @@ const chatHtml = `<div class="chat-flow" style="min-height:0">
   <div class="chat-msg chat-calls"><div class="chat-callrun" data-calls="2" data-state="done"><span class="chat-callrun-head"><button type="button" class="chat-callchip chat-callrun-chip" aria-expanded="false"><span class="chat-callrun-tools"><span class="chat-callrun-tool"><span class="chat-callrun-name">Bash</span><span class="chat-callrun-n">2</span></span></span><svg class="icon icon-chevron-right chat-callchip-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button></span></div></div>
   <div class="chat-msg chat-assistant"><div class="chat-text"><p>${ANSWER(cite)}</p></div></div>
 </div>`
-const termHtml = `<div class="tour-term-bar"><i></i><i></i><i></i><span>Your Claude Code terminal</span></div>
-<div class="tour-term-body">
-  <div class="t-line"><span class="t-logo"> ▐▛███▛█</span>   <b>Claude Code</b></div>
-  <div class="t-line"><span class="t-logo">▝▜██████▀</span>  <span class="t-dim">Opus 5.5</span></div>
-  <div class="t-line"><span class="t-logo"> ▝▝   ▝▝</span>   <span class="t-dim">~/incident-timeline</span></div>
-  <div class="t-gap"></div>
-  <div class="t-line t-you"><span class="t-caret">❯</span> ${QUESTION}</div>
-  <div class="t-gap"></div>
-  <div class="t-line t-hang">● <b>Bash</b>(grep -n "4.12.0" deploys.csv)</div>
-  <div class="t-line t-out t-dim">⎿  4:2026-05-16T03:06:02+01:00,dep-19,started,payments,4.12.0,…<br>   5:2026-05-16T03:11:31+01:00,dep-19,finished,payments,4.12.0,…<br>   … +2 lines (ctrl+o to expand)</div>
-  <div class="t-gap"></div>
-  <div class="t-line t-hang">● <b>Bash</b>(grep -m1 -n "INC-312" agents.log)</div>
-  <div class="t-line t-out t-dim">⎿  7:2026-05-16T08:02:04Z INFO pagerbot action=open incident=INC-312 …</div>
-  <div class="t-gap"></div>
-  <div class="t-line t-hang">● ${ANSWER((v) => v)}</div>
-  <div class="t-gap"></div>
-  <div class="t-line t-dim">✻ Worked for 9s</div>
-  <div class="t-rule"></div>
-  <div class="t-line"><span class="t-caret2">❯</span> <span class="t-cursor"></span></div>
-  <div class="t-rule"></div>
-</div>`
-
 const sessionExample = (api: Api): Example => {
   const list = api.q(`${chatSel} .chat-list`) || api.q(chatSel)
   // the example is the real chat's markup in a column of the chat panel's own width (real chat-list, chat-flow and
@@ -60,32 +37,15 @@ const sessionExample = (api: Api): Example => {
   setMarkup(inner, chatHtml)
   inner.prepend(api.tag(inner))
   ex.append(inner)
-  const term = document.createElement('div')
-  term.className = 'tour-term'
-  setMarkup(term, termHtml)
-  api.tag(term.querySelector<HTMLElement>('.tour-term-bar')!)
-  Object.assign(term.style, { visibility: 'hidden', opacity: '0' })
-  api.ex.append(ex, term)
-  let shown = false
+  api.ex.append(ex)
   const layout = () => {
     const C = api.rectOf(api.q(chatSel)),
       L = api.rectOf(list),
       F = api.rectOf(api.q(`${chatSel} .chat-foot`))
     if (!C || !L) return
     Object.assign(ex.style, { left: `${C.x}px`, top: `${L.y}px`, width: `${C.width}px`, height: `${(F ? F.y : C.y + C.height) - L.y}px` })
-    const width = Math.round(Math.max(440, Math.min(720, innerWidth * 0.4)))
-    Object.assign(term.style, { left: `${innerWidth - width - 28}px`, top: `${C.y + 28}px`, width: `${width}px` })
-    const want = !!api.step()?.terminal
-    if (want !== shown) {
-      shown = want
-      if (want) {
-        Object.assign(term.style, { transition: 'none', transform: `translateX(${width + 60}px)`, visibility: 'visible', opacity: '1' })
-        term.getBoundingClientRect()
-        Object.assign(term.style, { transition: '', transform: 'translateX(0)' })
-      } else Object.assign(term.style, { transform: `translateX(${width + 60}px)`, opacity: '0', visibility: 'hidden' })
-    }
   }
-  return { els: { chat: ex, flow: inner, term }, layout }
+  return { els: { chat: ex, flow: inner }, layout }
 }
 // the chat as the step shows it: the chat panel's own width, from its head to 14px past the end of the example exchange
 const chatContent = (api: Api) => {
@@ -475,17 +435,15 @@ const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undef
 /** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that thimble isn't
  * connected to a live Claude Code session there, so the chat takes no typing, and what the chat is in a live
  * session. */
-export function sessionTexts(demo: boolean): { chat: [string, string]; terminal: [string, string]; ask: string } {
+export function sessionTexts(demo: boolean): { chat: [string, string]; ask: string } {
   if (!demo) {
     return {
       chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
-      terminal: ['Your terminal', 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.'],
       ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
     }
   }
   return {
     chat: ['The chat', "This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files."],
-    terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
     ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
   }
 }
@@ -509,12 +467,6 @@ export function tourSteps(key: string, chat = true, demo = false): Step[] {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
       title: said.chat[0],
       body: said.chat[1],
-    },
-    {
-      tab: 'files', needsChat: true, terminal: true, example: sessionExample, place: ['left', 'bottom'], align: 'start', pad: 0, radius: 10,
-      anchor: (api) => [api.els.term, chatContent(api)],
-      title: said.terminal[0],
-      body: said.terminal[1],
     },
     {
       tab: 'files', example: filesExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,

@@ -1,6 +1,8 @@
 // A tab shows a dot when something new landed on its surface while no pane showed it; the history the stream replays
 // on load is not new. On the canvas only a card made or deleted counts, not the many updates to an existing card. In
-// Files only a view built counts: a view proposal, a build under way or one that failed has nothing to open there.
+// Files only what changes Files counts: a view built (a view proposal, a build under way or one that failed has nothing
+// to open there), a filter set on the files, or a label over files that is on there finishing its run, so its marks
+// appear. A label defined, starting its run, changed or deleted, and any label over cards or the report, light no dot.
 // While a writer writes a document, the Report tab shows a spinner in the dot's place, and the dot once it ends.
 import { useEffect, useState } from 'react'
 import { bus, type Tab } from '../lib/bus'
@@ -21,7 +23,7 @@ export function tabOfEvent(type: string, payload: Record<string, unknown>): Tab 
     case 'view':
       return payload.status === 'built' && !payload.held ? 'files' : null
     case 'concepts':
-      return 'files'
+      return payload.what === 'applied' && payload.scope === 'files' && payload.shown === true ? 'files' : null
     case 'filter':
       return payload.scope === 'canvas' || payload.scope === 'report' || payload.scope === 'files' ? (payload.scope as Tab) : null
     default:

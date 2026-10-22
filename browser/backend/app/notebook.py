@@ -1881,6 +1881,9 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
                "kind": what or ("ran" if runnable(cell) else "note")}
         if op:  # the history's op (created, edited, ran, deleted, ...): the Canvas tab's dot lights for a card made or gone
             rec["op"] = op
+        if op == "created" and cell.get("created_by"):
+            # who made it (user or analyst for the person): the page goes to a card Claude made (frontend lib/follow.ts)
+            rec["by"] = str(cell["created_by"])
         investigation.emit(workspace, investigation.MAIN, rec)
     except RuntimeError:  # no running loop: a worker thread; the group's SSE carried it
         pass
