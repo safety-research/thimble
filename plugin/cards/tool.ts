@@ -21,7 +21,7 @@ import { record } from '../telemetry/telemetry'
 import { fill } from '../prompts/registry.mjs'
 import { askCard, applyAnswer, cardWidth } from './draw'
 import { ask } from './ask'
-import { type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, searchNow, setFocus, setSearch, setTree, treeOf, versionDir } from './store'
+import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, searchNow, setFocus, setSearch, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,6 +29,11 @@ type Any = any
 
 const MAX_ROWS_BYTES = 64 * 1024 * 1024
 const COPY_LINES = 60
+/** The width the card is also drawn at for its text copy: the conversation's width beside a side pane. */
+const NARROW = 64
+/** thimble's own keys at an empty prompt, which a card never gets: v (designer/v.ts), r and l (bar/register.ts), f F
+ *  on a failure and p u on a fix in use (bar/fix.ts). */
+export const KEPT_KEYS = ['v', 'r', 'l', 'f', 'F', 'p', 'u']
 
 const SCHEMA = {
   type: 'object',
@@ -41,7 +46,7 @@ const SCHEMA = {
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
-      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'the words on a Button, or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
+      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'the words on a Button, or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] }, search: { type: 'string', description: 'words typed after /' } } },
     },
   },
 }
@@ -53,7 +58,8 @@ async function tempDir($: Engine): Promise<string> {
 /** The tool, as the model reads it: card-tool.md with the temp folder filled in. */
 export async function registerCardTool($: Engine): Promise<void> {
   const text = await promptText($, 'card-tool')
-  await $.tool.register({ name: 'card', isDeferred: false, description: fill(text, { TMPDIR: await tempDir($) }).trim(), inputSchema: SCHEMA })
+  const kept = `${KEPT_KEYS.slice(0, -1).join(', ')} or ${KEPT_KEYS[KEPT_KEYS.length - 1]}`
+  await $.tool.register({ name: 'card', isDeferred: false, description: fill(text, { TMPDIR: await tempDir($), KEPT: kept }).trim(), inputSchema: SCHEMA })
 }
 
 /** The folders a data file may be in, each as its real path: the session's folders and the temp folder. */
@@ -122,7 +128,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     id, version: 0, title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
     keys: [], rows: 0, columns: [], file: '', gen: 0, error: null, calls: {}, at: Date.now(),
   }
-  const remember = (m: CardMeta, call: { version: number; error?: string }) => saveMeta($, { ...m, calls: { ...m.calls, [toolUseId]: call } })
+  const remember = (m: CardMeta, call: CardCall) => saveMeta($, { ...m, calls: { ...m.calls, [toolUseId]: call } })
 
   const data = await dataFile($, input.data)
   if (data.bad) {
@@ -148,14 +154,15 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     return { result: failed(id, r, update && meta.version > 0) }
   }
 
-  const keys = [...new Set([...String(r.keys || '')].filter(k => /^[\p{L}\p{N}\p{P}\p{S}]$/u.test(k) && k !== 'v'))]
+  const asked = [...new Set([...String(r.keys || '')].filter(k => /^[\p{L}\p{N}\p{P}\p{S}]$/u.test(k)))]
+  const keys = asked.filter(k => !KEPT_KEYS.includes(k))
   // a card draws under the call that drew its first version (when the first call failed, the call that fixed it)
   const next: CardMeta = {
     ...meta, version, title, keys, rows: r.summary.rows, columns: r.summary.columns, file: String(input.data),
     gen: meta.gen + 1, error: null, anchorRow: meta.anchorRow ?? anchorRow, at: Date.now(),
     toolUseId: meta.version === 0 ? toolUseId : meta.toolUseId,
   }
-  await remember(next, { version })
+  await remember(next, { version, title, file: String(input.data), rows: next.rows })
   await setTree($, id, { gen: next.gen, width, tree: r.tree, pointer: !!r.pointer })
   await setFocus($, id)
   if ((await searchNow($))?.id === id) await setSearch($, null)
@@ -172,7 +179,15 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   ]
   if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
   for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
+  const taken = asked.filter(k => KEPT_KEYS.includes(k))
+  if (taken.length) out.push(`Note: ${taken.join(' ')} ${taken.length > 1 ? 'are' : 'is'} thimble's, so the card does not get ${taken.length > 1 ? 'them' : 'it'}; use other keys.`)
+  if (/\bquery\b/.test(view) && !keys.includes('/')) out.push('Note: the view reads props.query, but keys has no "/", so the analyst cannot type a search.')
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
+  if (width > NARROW) {
+    const narrow = await askCard($, next, 'draw', { width: NARROW, text: true })
+    await askCard($, next, 'draw', { width })
+    if (narrow?.ok && narrow.cut?.length) out.push('', `At ${NARROW} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, NARROW))
+  }
 
   const actions = Array.isArray(input.actions) ? input.actions : []
   if (actions.length) {

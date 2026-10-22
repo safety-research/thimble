@@ -5,7 +5,9 @@
 //
 //   {press: n}                      a Button, by the number the runner gave its onPress
 //   {pointer: {down, up, button}}   a click, sent when the button comes up
-//   {key}                           a key, while a click has given the card the keyboard
+//
+// It sets no key listener: the card's keys reach it at an empty prompt (draw.ts cardKey), so a click on the card never
+// takes the keyboard from the prompt box.
 //
 // A frame carries one post, and a later post in the same frame takes the place of one not yet delivered (a click on a
 // Button makes both a press and a pointer event). So each post carries every event the hooks have not yet answered,
@@ -59,9 +61,6 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     const d = me.down
     me.down = null
     send({ pointer: { down: { x: d.x, y: d.y }, up: { x: ev.x, y: ev.y }, button: d.button } })
-  })
-  surface.onKey(ev => {
-    if (!ev.ctrl && !ev.meta && [...ev.key].length === 1) send({ key: ev.key })
   })
 
   const kids = (c: Node[] | undefined, inText: boolean): Any[] => (Array.isArray(c) ? c : []).map(k => draw(k, inText)).filter(x => x != null)

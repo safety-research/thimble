@@ -20,7 +20,7 @@
 //   press    {id, button}             a Button's onPress, by the number the tree gives it
 //   pointer  {id, down, up}           a click: the onPointer listener gets the down, then the up
 //   query    {id, text}               the `/` search: props.query (null ends it)
-//   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was
+//   act      {id, actions, width}     keys, clicks and searches in order, a text copy after each, then the card as it was
 //   unload   {id}
 //   ping
 // Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), and the state
@@ -34,7 +34,9 @@ import { buttonText, layoutLines } from './layout.js'
 
 const LOAD_MS = 5000
 const EVENT_MS = 1000
-const MAX_TREE = 95000 // Claude Code draws a card's props up to 100000 characters
+// Claude Code takes a Client's props, and the tree the Client draws, up to 100000 characters each; the Client's tree
+// spells each node out (type, props, children), so the cap is measured on that form (drawnSize)
+const MAX_TREE = 95000
 const MAX_VIEW = 60000
 
 // ------------------------------------------------------------------------------------------------- static check
@@ -290,8 +292,17 @@ function inContext(card, op, args, ms) {
   }
   if (typeof out !== 'string' || out.length > 4 * MAX_TREE) return { ok: false, phase: op, error: 'the view gave no drawing thimble can read' }
   const r = JSON.parse(out)
-  if (r.ok && JSON.stringify(r.tree).length > MAX_TREE) return { ok: false, phase: op, error: `the drawing is more than ${MAX_TREE} characters, which Claude Code does not draw; draw fewer rows (show a page of them)` }
+  if (r.ok && drawnSize(r.tree) > MAX_TREE) return { ok: false, phase: op, error: `the drawing is more than ${MAX_TREE} characters as Claude Code holds it, which it does not draw; draw fewer elements: group the rows, or show a page of them` }
   return r
+}
+
+/** The characters a plain tree takes as the Client draws it (client.tsx): each node as {type, props: {...p, key?,
+ *  children}}, a Button with its key. */
+export function drawnSize(tree) {
+  const el = n => (typeof n === 'string' ? n : n && typeof n === 'object'
+    ? { type: n.t, props: { ...(n.p || {}), ...(n.t === 'Button' ? { key: `b${n.p?.onPress ?? ''}` } : {}), children: (n.c || []).map(el) } }
+    : null)
+  return JSON.stringify({ type: 'Box', props: { flexDirection: 'column', width: 0, children: [el(tree)] } }).length
 }
 
 // ------------------------------------------------------------------------------------------------- the cards
@@ -326,7 +337,7 @@ function load(a) {
     const line = /view\.js:(\d+)/.exec(String(e.stack))?.[1]
     return { ok: false, phase: 'view', error: `the view does not parse${line ? ` (line ${line})` : ''}: ${e.message}` }
   }
-  const card = { ctx, version: a.version, width: a.width, tree: null }
+  const card = { ctx, version: a.version, width: a.width, tree: null, view }
   const r = inContext(card, 'init', { title: a.title, state: a.state ?? null, query: a.query ?? null, width: a.width }, LOAD_MS)
   if (!r.ok) return r
   card.tree = r.tree
@@ -371,6 +382,10 @@ function act(a) {
       what = `click on "${x.click.slice(0, 60)}"`
       const button = buttonWith(card.tree, x.click)
       r = button === null ? { ok: true, tree: card.tree, note: `no Button shows "${x.click.slice(0, 60)}"` } : inContext(card, 'press', { button }, EVENT_MS)
+    } else if (x && typeof x.search === 'string') {
+      what = `the search "${x.search.slice(0, 60)}"`
+      r = inContext(card, 'query', { text: x.search }, EVENT_MS)
+      if (r.ok && !/\bquery\b/.test(card.view)) r.note = 'the view does not read props.query'
     } else if (x && Array.isArray(x.click) && x.click.length === 2) {
       const at = { x: Math.trunc(Number(x.click[0]) || 0), y: Math.trunc(Number(x.click[1]) || 0) }
       what = `click at ${at.x},${at.y}`

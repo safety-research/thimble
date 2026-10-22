@@ -87,7 +87,8 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(text).toContain('“Scores” is drawn where this call stands')
   expect(text).toContain('It read 2 rows from runs.json, with the columns name, score.')
   expect(text).toContain('ada 3\nbram 5')
-  expect(w.asked).toEqual(['ping', 'load'])
+  // the copy is also drawn at a narrow width, then the card is drawn at its own width again
+  expect(w.asked).toEqual(['ping', 'load', 'draw', 'draw'])
   const meta = Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))
   expect(JSON.parse(meta![1]).keys).toEqual(['s'])
   expect(Object.keys(w.files).filter(p => /\/v1\/view\.js$/.test(p))).toEqual([expect.any(String)])

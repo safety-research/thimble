@@ -1,6 +1,9 @@
 // ask.ts: the card runner (runner.mjs) from the hooks. One runner per session, started the first time a card needs it,
-// reached over a Unix socket in <THIMBLE_HOME>/run/ ($.http.fetch with socketPath: a round trip takes a millisecond or
-// two). A runner that is not there (it never started, it stopped, the session was resumed) is started again, and a
+// reached over a Unix socket ($.http.fetch with socketPath: a round trip takes a millisecond or two). A socket's path
+// holds at most about 100 bytes (108 on Linux, 104 on macOS), so the socket goes in the first of these folders whose
+// path fits: <THIMBLE_HOME>/run, $XDG_RUNTIME_DIR/thimble, <temp folder>/thimble-<user>, /tmp/thimble-<user>; each is
+// made with mode 700 and used only when this user owns it. Its name is a hash of THIMBLE_HOME and the conversation, so
+// a reload of the module finds the runner again, and two homes or two conversations never share one. A runner that is not there (it never started, it stopped, the session was resumed) is started again, and a
 // card it does not hold is loaded again from its copy on disk (draw.ts).
 //
 //   ask($, op, body)   the runner's answer to one request (runner.mjs lists them); {ok: false, error} when the runner
@@ -20,11 +23,41 @@ type Engine = EngineInterface
 type Any = any
 
 const START_MS = 5000
+const SOCKET_MAX = 100
 const runner = { up: false, starting: null as Promise<string | null> | null, exit: '', sock: '', stop: null as null | (() => void), current: null as object | null }
 
-async function socketPath($: Engine): Promise<string> {
-  const key = (await sessionKey($)).replace(/[^A-Za-z0-9]/g, '').slice(0, 12) || 'session'
-  return `${await thimbleHome($)}/run/cards-${key}.sock`
+function hash(s: string): string {
+  let h1 = 0x811c9dc5
+  let h2 = 0x9747b28c
+  for (let i = 0; i < s.length; i++) {
+    h1 = Math.imul(h1 ^ s.charCodeAt(i), 0x01000193) >>> 0
+    h2 = Math.imul(h2 ^ s.charCodeAt(i), 0x5bd1e995) >>> 0
+  }
+  return `${h1.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0').slice(0, 4)}`
+}
+
+// the socket's path, once found for a home and conversation
+const found = new Map<string, string>()
+
+/** The runner's socket: its path, or why no folder can hold it. */
+async function socketPath($: Engine): Promise<{ sock?: string; error?: string }> {
+  const home = await thimbleHome($)
+  const id = `${home}\0${await sessionKey($)}`
+  const known = found.get(id)
+  if (known) return { sock: known }
+  const name = `cards-${hash(id)}.sock`
+  const user = String((await $.env.get('USER')) || (await $.env.get('LOGNAME')) || 'user').replace(/[^A-Za-z0-9_-]/g, '')
+  const tmp = String((await $.env.get('TMPDIR')) || '').replace(/\/+$/, '')
+  const xdg = String((await $.env.get('XDG_RUNTIME_DIR')) || '').replace(/\/+$/, '')
+  const dirs = [`${home}/run`, xdg && `${xdg}/thimble`, tmp && `${tmp}/thimble-${user}`, `/tmp/thimble-${user}`].filter(Boolean) as string[]
+  for (const dir of dirs) {
+    if (`${dir}/${name}`.length > SOCKET_MAX) continue
+    const made = await $.process.run(['sh', '-c', 'mkdir -p -m 700 "$1" && test -O "$1" && chmod 700 "$1"', 'sh', dir])
+    if (made.exitCode !== 0) continue
+    found.set(id, `${dir}/${name}`)
+    return { sock: `${dir}/${name}` }
+  }
+  return { error: `no folder this user owns has a path short enough for the card runner's socket (tried ${dirs.join(', ')})` }
 }
 
 async function post($: Engine, sock: string, op: string, body: unknown): Promise<Any> {
@@ -34,16 +67,15 @@ async function post($: Engine, sock: string, op: string, body: unknown): Promise
 
 /** Start the runner and wait until it answers; null when it answers, else why it did not. */
 async function start($: Engine, sock: string): Promise<string | null> {
-  const home = await thimbleHome($)
   const cards = await cardsDir($)
   const here = `${$.plugin.root.replace(/\/+$/, '')}/cards`
-  if (sock.length > 100) return `the runner's socket path is longer than 100 characters (${sock.length}); set THIMBLE_HOME to a shorter folder`
-  const made = await $.process.run(['mkdir', '-p', '-m', '700', `${home}/run`, cards])
-  if (made.exitCode !== 0) return `thimble could not make its folders under ${home} (${String(made.stderr).trim().slice(0, 160)})`
+  const dir = sock.slice(0, sock.lastIndexOf('/'))
+  const made = await $.process.run(['mkdir', '-p', '-m', '700', cards])
+  if (made.exitCode !== 0) return `thimble could not make its folder ${cards} (${String(made.stderr).trim().slice(0, 160)})`
   runner.exit = ''
   runner.stop?.()
   runner.sock = sock
-  const argv = ['node', '--permission', `--allow-fs-read=${here}`, `--allow-fs-read=${cards}`, `--allow-fs-write=${home}/run`, '--max-old-space-size=1024', `${here}/runner.mjs`, sock]
+  const argv = ['node', '--permission', `--allow-fs-read=${here}`, `--allow-fs-read=${cards}`, `--allow-fs-write=${dir}`, '--max-old-space-size=1024', `${here}/runner.mjs`, sock]
   const mine = {}
   runner.current = mine
   $.clock.after(0, () => {
@@ -79,7 +111,9 @@ async function start($: Engine, sock: string): Promise<string | null> {
 
 /** One request to the runner, starting it when it is not there. */
 export async function ask($: Engine, op: string, body: unknown): Promise<Any> {
-  const sock = await socketPath($)
+  const where = await socketPath($)
+  if (!where.sock) return { ok: false, error: where.error, down: true }
+  const sock = where.sock
   if (runner.sock && runner.sock !== sock) runner.up = false
   if (runner.up) {
     try { return await post($, sock, op, body) } catch { runner.up = false }

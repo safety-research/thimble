@@ -37,6 +37,7 @@ function setup() {
     clock: { now: async () => (now += 1000), sleep: async () => undefined, after: () => ({ cancel() {} }) },
     agent: { spawn: async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-${spawns.length}` } } },
     session: { id: async () => 's-made-up' },
+    process: { run: async () => ({ exitCode: 0, stdout: '', stderr: '' }) },
     // the card runner, as far as a text copy goes
     http: { fetch: async () => ({ text: JSON.stringify({ ok: true, lines: ['Who ran the failing test', '✕ ✕ ● ✕'] }) }) },
   }

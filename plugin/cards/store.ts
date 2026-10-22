@@ -19,7 +19,8 @@ import { sessionKey } from '../hooks/conversation'
 
 type Engine = EngineInterface
 
-export type CardCall = { version: number; error?: string }
+/** One call of the card tool: the version it drew, with that version's title, data file and rows, or why it drew none. */
+export type CardCall = { version: number; title?: string; file?: string; rows?: number; error?: string }
 export type CardMeta = {
   id: string
   version: number // the version on screen; 0 while no version has drawn
