@@ -547,7 +547,9 @@ def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
         shown = [g for g in cov["groups"] if g["files"] > 1 or set(g["by_status"]) != {"untouched"}][:12]
         for g in shown:
             parts = [f"{n:,} {SAID[k]}" for k, n in sorted(g["by_status"].items(), key=lambda kv: ORDER.index(kv[0]))]
-            lines.append(f"  {g['group']}  {g['files']:,} file{'s' if g['files'] != 1 else ''}, {_sizes(g.get('units') or [])}: {', '.join(parts)}")
+            units = g.get("units") or []
+            sizes = "" if [u["unit"] for u in units] == ["file"] else f", {_sizes(units)}"  # whole files: no size but their number
+            lines.append(f"  {g['group']}  {g['files']:,} file{'s' if g['files'] != 1 else ''}{sizes}: {', '.join(parts)}")
         others = [g for g in cov["groups"] if g not in shown]
         if others:
             lines.append(f"  {sum(g['files'] for g in others):,} other files: "
