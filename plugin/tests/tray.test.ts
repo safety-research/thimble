@@ -33,10 +33,11 @@ const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, tex
 
 /** A resumed session with one answer, TEXT, whose citation the check left as `item`; `more`: the turn's cards, the
  *  message's parts and kept files to add (a card's meta.json under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string> } = {}): Promise<{ submitted: Any[]; clock: Any }> {
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string> } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
+  const spawns: Any[] = []
   on('session.id', () => ({ value: session }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
@@ -61,14 +62,17 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('ui.panes', () => ({ value: [] }))
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-made-up', agentId: `agent-repair-${spawns.length}` } as never })
+  on('agent.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('prompt.submit', (_$: unknown, e: Any) => { submitted.push(e); return { text: e.text } })
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  return { submitted, clock }
+  return { submitted, clock, spawns }
 }
+
 
 // the check verified the citation, with a quote of the file it read: the reply's marks as a resumed session finds them
 const QUOTED = {
@@ -175,8 +179,8 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('failed: 11')
 })
 
-test('a wrong citation: × wrong in the header, why in one dim sentence under it, x repair, then its evidence; x asks main to repair it', async ($, on) => {
-  const { submitted, clock } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed, but 3 were retried. The rest passed.' }, 's-tray-5')
+test('a wrong citation: × wrong in the header, why in one dim sentence under it, x repair, then its evidence; x starts a check of it again in the background, no turn of main', async ($, on) => {
+  const { submitted, clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed, but 3 were retried. The rest passed.' }, 's-tray-5')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
@@ -191,26 +195,52 @@ test('a wrong citation: × wrong in the header, why in one dim sentence under it
   // x repair: in the bar and in the card
   expect(band).toContain('x repair')
   expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'repair this citation')).toBe(true)
-  // x: a turn of main, with the claim, the check's reason and the task beside the prompt; the tray closes
+  // x: a checker fork for this one citation, once the word window has passed; no turn of main
   await clock.advance(2000)
   expect(await $.prompt.edit(key('x'))).toEqual({ text: '', cursor: 0 })
-  await clock.advance(2000)
-  const sent = submitted.at(-1)
-  expect(sent?.origin).toMatchObject({ kind: 'plugin' })
-  // the request is the prompt itself, under the words the person reads first: Claude Code runs no hook of the plugin's
-  // own for a prompt it submits
-  expect(String(sent?.text).split('\n')[0]).toBe('Repair citation 1: "12 of 40"')
-  const told = String(sent?.text)
-  expect(told).toContain('pressed x (repair) on citation 1')
-  expect(told).toContain('The check found it wrong: Line 4 counts 12 failed, but 3 were retried.')
-  expect(told).toContain('Its evidence is runs/summary.txt:4.')
-  expect(told).toContain('Check this one claim again against the records.')
-  expect(told).not.toContain('open in the tray')
-  expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
+  expect(spawns.length).toBe(0)
+  await clock.advance(1000)
+  expect(spawns.length).toBe(1)
+  expect(spawns[0].description).toBe('checking a citation again (x)')
+  expect(spawns[0].prompt).toContain('PROMPT checker')
+  expect(spawns[0].prompt).toContain('The analyst pressed x to repair citation 1.')
+  expect(spawns[0].prompt).toContain('The first check found it wrong: "Line 4 counts 12 failed, but 3 were retried. The rest passed."')
+  expect(submitted.length).toBe(0)
+  // (the test kit names no agent it starts, so the fork's run and end are marks.test.ts's)
 })
 
-test('a citation not confirmed: ? in the warning color, underlined; a click on x repair in its card asks main to repair it', async ($, on) => {
-  const { submitted, clock } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'evidence', reason: 'The quote is not in runs/summary.txt.' }, 's-tray-6')
+const WRONG = { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed.' }
+
+test('a repair that corrected the citation: its card says repaired and what it was', async ($, on) => {
+  await resumed($, on, { ...WRONG, status: 'corrected', repair: true, shown: '9 of 40', was: '12 of 40' }, 's-tray-10')
+  await $.prompt.edit(key(']'))
+  const card = textOf(await $.ui.render(above()))
+  expect(card).toContain('repaired; was 12 of 40')
+  expect(card).not.toContain('x repair')
+})
+
+test('a repair that still could not confirm it: its card says not repaired and why, and offers x again', async ($, on) => {
+  await resumed($, on, { ...WRONG, failedBy: 'evidence', repair: true, reason: 'No file holds a count of failed runs.' }, 's-tray-11')
+  await $.prompt.edit(key(']'))
+  const card = textOf(await $.ui.render(above()))
+  expect(card).toContain('not repaired: No file holds a count of failed runs.')
+  expect(card).toContain('x repair')
+})
+
+test('x and then a letter in the word window types the word and starts no repair', async ($, on) => {
+  const { clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed.' }, 's-tray-8')
+  await $.prompt.edit(key(']'))
+  await clock.advance(2000)
+  await $.prompt.edit(key('x'))
+  await clock.advance(100)
+  expect(((await $.prompt.edit(key('y'))) as Any).text).toBe('xy')
+  await clock.advance(2000)
+  expect(spawns.length).toBe(0)
+  expect(textOf(await $.ui.render(above()))).toContain('× wrong')
+})
+
+test('a citation not confirmed: ? in the warning color, underlined; a click on x repair in its card checks it again at once', async ($, on) => {
+  const { submitted, clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'evidence', reason: 'The quote is not in runs/summary.txt.' }, 's-tray-6')
   const reply = all(await $.ui.render(answer('row-t1', TEXT)))
   expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
   expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
@@ -221,8 +251,9 @@ test('a citation not confirmed: ? in the warning color, underlined; a click on x
   await ui.press({ key: btn.props.key })
   await ui.unmount()
   await clock.advance(10)
-  expect(String(submitted.at(-1)?.text).split('\n')[0]).toBe('Repair citation 1: "12 of 40"')
-  expect(String(submitted.at(-1)?.text)).toContain('The check could not confirm it: it did not find these words in the evidence it read (The quote is not in runs/summary.txt.).')
+  expect(spawns.length).toBe(1)
+  expect(spawns[0].prompt).toContain('The first check could not confirm it: "The quote is not in runs/summary.txt."')
+  expect(submitted.length).toBe(0)
 })
 
 test('a verified citation offers no repair', async ($, on) => {

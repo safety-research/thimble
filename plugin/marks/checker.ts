@@ -12,9 +12,15 @@
 //   resumeChecks($)           at session start: the checks a reload of the plugin left running, on the busy line again;
 //                             a check whose fork is gone gives up, and says so
 //   checkerDenial(e)          why the checker may not make a call: it reads files, and runs code only as one Python script
+//   repairOf($, row, n)       x on a wrong or not-confirmed citation (tray): what a check of that one mark again needs
+//   launchRepair($, r, hold)  that check's fork, with a request to find the right value and correct the cited words;
+//                             its mark is `checking` while it runs, and its end is endCheck's as any check's. Call it
+//                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
+//                             (`hold`, marks/register.ts holds it) and is refused when the person typed a word
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
-// mark of its share `checking`. When a reply's last mark settles, main is told what changed (tellText), once.
+// mark of its share `checking`. When a reply's last mark settles, main is told what changed (tellText), once; when a
+// repair ends, main is told how that one mark ended (repairTellText).
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent);
 // the marks themselves are in store.ts
@@ -32,7 +38,7 @@ import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
 import { marksIn, sentenceOf } from './message.js'
-import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, type Reply, replyOf } from './store'
+import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, type Reply, replyKeyOf, replyOf } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,7 +47,7 @@ type Any = any
 /** One fork's check: the reply, and the numbers of the marks this fork checks. `cwd` is the shell's folder, where the
  *  fork's code runs; `root` the folder the session started in, which the pane's paths start from. A relative path of
  *  the evidence is read from either. */
-type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number }
+type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean }
 
 const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
 const ROWS = { plugin: 'thimble', key: 'marksRows' } as const
@@ -108,9 +114,10 @@ function settle(r: Reply, now: number, items: MarkItem[]): Reply {
  *  the reply (so main uses it from now on and need not say it again), and each note, which the person does not see. A
  *  mark whose evidence did not hold is not shown to be wrong, and main hears it that way. The check's own words (its
  *  reason, its note) are quoted, since they may quote the records. */
+const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
+const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
+
 export function tellText(items: MarkItem[]): string {
-  const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
-  const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
   const said = items.filter(m => m.status === 'corrected' || m.status === 'failed').map(m => {
     if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`
     if (m.failedBy === 'evidence') return `- ${q(m.words)} is flagged as not confirmed${why(m)}`
@@ -125,17 +132,36 @@ export function tellText(items: MarkItem[]): string {
   return parts.join('\n')
 }
 
-/** A change of the reply's marks; when it settled the reply's last mark, main is told what the check changed. Two forks
- *  that end at once edit in turn (store.ts editReply), so exactly one of them settles the reply. */
+/** What main reads with the person's next prompt when a repair (x) ended: how its mark ended, as the person reads it. */
+export function repairTellText(items: MarkItem[]): string {
+  const lines = items.map(m => {
+    if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`
+    if (m.status === 'verified') return `- ${q(m.words)} is verified as written${why(m)}`
+    if (m.status === 'failed') return `- ${q(m.words)} is still flagged as ${m.failedBy === 'evidence' ? 'not confirmed' : 'wrong'}${why(m)}`
+    return `- ${q(m.words)} could not be checked again${why(m)}`
+  })
+  const notes = notesOf(items).map(n => `- ${q(n)}`)
+  if (!lines.length) return ''
+  const parts = [`The analyst pressed x (repair) on a citation of yours, and thimble checked it again against the data. Its words in the block below may quote the records.\n${fenced(lines.join('\n'))}`]
+  if (notes.length) parts.push(`The check also found these uncited statements false. The analyst does not see these:\n${fenced(notes.join('\n'))}`)
+  parts.push('The analyst sees the result in the reply. Use it from now on.')
+  return parts.join('\n')
+}
+
+/** A change of the reply's marks; when it settled the last mark this check tells of, main is told what changed: a
+ *  reply's check tells of every mark no repair checks, a repair of its own mark. Two forks that end at once edit in
+ *  turn (store.ts editReply), so exactly one of them settles the reply. */
 async function edit($: Engine, c: Check, change: (r: Reply) => Reply): Promise<Reply | null> {
+  const mine = new Set(c.marks)
+  const counted = (m: MarkItem) => m.status === 'checking' && (c.repair ? mine.has(m.n) : !m.repair)
   let open = false
   const reply = await editReply($, c.key, r => {
-    open = r.items.some(m => m.status === 'checking')
+    open = r.items.some(counted)
     return change(r)
   })
-  if (reply && open && reply.settledAt != null) {
-    const text = tellText(reply.items)
-    if (text) await tellAtNextPrompt($, `marks:${c.key}`, text)
+  if (reply && open && !reply.items.some(counted)) {
+    const text = c.repair ? repairTellText(reply.items.filter(m => mine.has(m.n))) : tellText(reply.items)
+    if (text) await tellAtNextPrompt($, c.repair ? `marks:${c.key}:repair:${c.marks.join(',')}` : `marks:${c.key}`, text)
   }
   return reply
 }
@@ -227,6 +253,86 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   if (started.length) await showRunning($, key, items.length, started)
 }
 
+// ------------------------------------------------------------------------------------------------ repair (x)
+
+/** The words the fork shows as in /tasks, and how marks/register.ts's agent.spawn hook knows a repair's spawn. */
+export const REPAIR_DESCRIPTION = 'checking a citation again (x)'
+
+/** A repair's spawn held for a key's word window: it waits until `until`, and is refused once `cancelled`. */
+export type RepairHold = { until: number; cancelled: boolean }
+/** What a check of one mark again needs: its reply, its mark, and the checker's text with the request. */
+export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string }
+
+let held: RepairHold | null = null
+const starting = new Set<string>()
+
+/** The repair whose spawn runs now (marks/register.ts holds it for its word window). */
+export function heldRepair(): RepairHold | null {
+  return held
+}
+
+/** The request under the checker's text for a repair: which mark, what the first check found, and the task. The check's
+ *  reason is quoted, since it may quote the records. */
+export function repairRequest(m: MarkItem): string {
+  const found = m.failedBy === 'evidence' ? 'could not confirm it' : 'found it wrong'
+  return [
+    `The analyst pressed x to repair citation ${m.n}. It may stand in an earlier reply than your last. The first check ${found}${m.reason ? `: ${q(m.reason)}` : '.'}`,
+    'Check it again from the start, and look in the records for the right value. When you find it, answer `corrected` with the true words and the evidence that shows them.',
+  ].join('\n')
+}
+
+/** x on citation `n` of `row`: what a check of it again needs; null when there is nothing to repair (it is not wrong
+ *  or not confirmed, or a repair of it runs), or why none can start. */
+export async function repairOf($: Engine, row: string, n: number): Promise<Repair | string | null> {
+  const key = await replyKeyOf($, row)
+  const r = key ? await replyOf($, key) : null
+  const m = r?.items.find(x => x.n === n)
+  if (!key || !r || !m || m.status !== 'failed' || starting.has(`${key}:${n}`)) return null
+  if (Object.values(await running($)).some(c => c.key === key && c.marks.includes(n))) return null
+  let template = ''
+  try {
+    template = await promptText($, 'checker')
+  } catch (err) {
+    return `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}). Reinstall thimble.`
+  }
+  const cwd = String(await $.session.cwd())
+  const root = await startDir($)
+  return { key, turnId: r.turnId, n, cwd, root, prompt: `${checkerPrompt(template, [m], cwd, root)}\n\n${repairRequest(m)}` }
+}
+
+/** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
+ *  press's): the plugin's other hooks then serve the fork as they serve a reply's check. Answers why it did not start,
+ *  or '' (it started, or the person typed a word and the spawn was refused). */
+export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Promise<string> {
+  const id = `${r.key}:${r.n}`
+  starting.add(id)
+  held = hold
+  try {
+    const fork = await spawnFork($, { kind: 'checker', prompt: r.prompt, description: REPAIR_DESCRIPTION })
+    if (held === hold) held = null
+    if (hold.cancelled) return ''
+    if (!fork.agentId) return `The repair did not start (${String(fork.deny || 'no reason given').slice(0, 80)}). Press x on the citation to try again.`
+    const agentId = fork.agentId
+    const now = Number(await $.clock.now())
+    // the mark is checked again: its earlier result goes, its place and words stay
+    await editReply($, r.key, rep => ({
+      ...rep, settledAt: null,
+      items: rep.items.map(m => {
+        if (m.n !== r.n) return m
+        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, ...base } = m
+        return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
+      }),
+    }))
+    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true }
+    await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
+    await showRunning($, r.key, 1, [agentId])
+    return ''
+  } finally {
+    if (held === hold) held = null
+    starting.delete(id)
+  }
+}
+
 /** The real Bash calls of a conversation, with their output as the model read it: a call that ended with an error
  *  counts too, since what it printed before the error is real output. */
 function bashCalls(msgs: Any, by: 'checker' | 'main'): { command: string; output: string; by: string }[] {
@@ -303,7 +409,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       kind: 'marks', feature: 'checker', marks: c.marks.length, reply_marks: reply.items.length, verified: count('verified'), corrected: count('corrected'),
       wrong: count('failed', 'check'), unconfirmed: count('failed', 'evidence'), unchecked: count('unchecked'),
       reply_end: c.replyEnd, spawned_ms: c.spawnedAt - c.replyEnd, fork_ms: forkEnd - c.spawnedAt, validate_ms: settled - forkEnd, settled_ms: settled - c.replyEnd,
-      reply_settled: !counts(reply).checking, usage: e.usage ?? null,
+      reply_settled: !counts(reply).checking, usage: e.usage ?? null, repair: !!c.repair,
     })
   } finally {
     // whatever ended the check, none of its marks stays checked

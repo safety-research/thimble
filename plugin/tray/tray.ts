@@ -13,9 +13,10 @@
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
-//   x repair    on a wrong or not-confirmed citation: a turn of main that checks that one claim again against the
-//               records and writes its sentence again if needed (core/tell.ts askMain); a click on `x repair` in the
-//               card too
+//   x repair    on a wrong or not-confirmed citation: a check of that one claim again in the background, which looks in
+//               the records for the right value and corrects the cited words (marks/checker.ts launchRepair); the
+//               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
+//               card or the bar too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
 //   m more      a tray taller than the rows above the bar: its next lines, then from the top (the line under it says)
 //   ] [         the next mark or card, and the one before
@@ -36,9 +37,10 @@ import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type Tur
 import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
-import { askMain, tellAtNextPrompt } from '../core/tell'
+import { tellAtNextPrompt } from '../core/tell'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
+import { launchRepair, repairOf } from '../marks/checker'
 import { highlighted, wrapCode } from '../marks/evidence'
 import { marksIn, withoutMarks } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
@@ -49,7 +51,7 @@ import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
-  moreLines, open, pageOf, printLine, push, refOf, repairAsk, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  moreLines, open, pageOf, printLine, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -336,19 +338,18 @@ async function askCard($: Engine, stand: NonNullable<Stand>): Promise<void> {
   await openThread($, { about: `the card "${meta?.title ?? stand.card}"`, card: stand.card })
 }
 
-/** x on a wrong or not-confirmed citation: a turn of main that checks that one claim again and writes its sentence
- *  again if needed. The tray closes first, so the prompt carries the repair alone. */
-async function repair($: Engine, f: Frame): Promise<void> {
-  if (f.kind !== 'citation') return
-  const info = await infoOf($, f)
-  if (!canRepair(info.item)) return
-  const { request, words } = repairAsk(f, info)
-  await setTray($, null)
-  try {
-    await askMain($, words, request)
-  } catch (err) {
-    failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Open the citation and press x to try again.`, 'tray:repair')
-  }
+/** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
+const REPAIR_KEYS = new Set(['repair', 'bar-tray-x'])
+
+/** x, or a click on `x repair`, on the citation the tray shows: a check of it again in the background
+ *  (marks/checker.ts). The repair starts inside the hook that calls this; `hold` waits out a key's word window. */
+async function repair($: Engine, f: Frame, hold: { until: number; cancelled: boolean }): Promise<boolean> {
+  if (f.kind !== 'citation') return false
+  const r = await repairOf($, f.row, f.n)
+  if (r === null) return false
+  const why = typeof r === 'string' ? r : await launchRepair($, r, hold)
+  if (why) failNotice($, why, 'tray:repair')
+  return true
 }
 
 /** x in the Claims pane on a citation of a picked claim: the same repair as x in the tray. */
@@ -371,7 +372,7 @@ async function chipsOpen($: Engine): Promise<boolean> {
 
 /** The tray's keys at an empty prompt (hooks/keys.ts takes them as a Take): ] and [ always (but while the squeeze chips
  *  are open at rest), its own while it is open, a's and 0 on a card ] reached. */
-export async function trayKey($: Engine, key: string): Promise<Any | null> {
+export async function trayKey($: Engine, key: string, until = 0): Promise<Any | null> {
   const tray = await trayNow($)
   const stand = tray ? null : await standNow($)
   if (key === ']' || key === '[') {
@@ -396,7 +397,19 @@ export async function trayKey($: Engine, key: string): Promise<Any | null> {
   if (f.kind === 'citation') {
     const ev = (await itemOf($, f.row, f.n))?.evidence
     if (key === 'c' && ev?.kind === 'computed') return { now: () => toggleCode($), undo: () => toggleCode($) }
-    if (key === 'x' && canRepair(await itemOf($, f.row, f.n))) return { later: () => repair($, f) }
+    if (key === 'x' && canRepair(await itemOf($, f.row, f.n))) {
+      const r = await repairOf($, f.row, f.n)
+      if (r === null) return null
+      if (typeof r === 'string') return { later: async () => failNotice($, r, 'tray:repair') }
+      // the spawn is made while this key's hook runs (launchRepair's first call), and waits out the word window
+      // (marks/register.ts); a word refuses it
+      const hold = { until, cancelled: false }
+      const failed = (err: unknown) => failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'tray:repair')
+      return {
+        now: async () => { void launchRepair($, r, hold).then(why => { if (why) failNotice($, why, 'tray:repair') }, failed) },
+        undo: async () => { hold.cancelled = true },
+      }
+    }
     if (key === 'h') {
       const inner = await innerOf($, f)
       if (inner) return { later: () => pushMark($, inner) }
@@ -437,7 +450,8 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   if (f.kind === 'citation') {
     const m = await itemOf($, f.row, f.n)
     out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) })
-    if (canRepair(m)) out.push({ id: 'tray-x', key: 'x', words: 'repair', focus: true, press: () => repair($, f) })
+    // a click is the ui.press hook's (registerTray), which starts the repair inside a hook
+    if (canRepair(m)) out.push({ id: 'tray-x', key: 'x', words: 'repair', focus: true, press: () => undefined })
     if (m?.evidence?.kind === 'computed') out.push({ id: 'tray-c', key: 'c', words: f.open === 'code' ? 'one line' : 'all code and output', focus: true, press: () => toggleCode($) })
     out.push(zero, ...(await steps()))
     const inner = await innerOf($, f)
@@ -522,23 +536,27 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
 }
 
 /** A citation's card under its header (the status is in the header). A corrected one says what it was; a wrong one,
- *  or one the check could not confirm, why in one sentence; all dim, and under it `x repair`, a press that asks main
- *  to repair it (`onRepair`, as x does). Then its evidence. For a value code computed: the
+ *  or one the check could not confirm, why in one sentence; after a repair (x), what it did; all dim, and under it
+ *  `x repair`, a press that checks it again (the ui.press hook, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
  *  block, ended by a dim count of the output lines it leaves out; with c, all the code (as code), then all the output
  *  in the ruled block. For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
  *  block. The cited words in the soft tint. */
-function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: Any | null, onRepair: () => unknown): Unit[] {
+function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: Any | null): Unit[] {
   const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  if (m.status === 'corrected' && m.was) dim('was', `was ${m.was.replace(/\*\*|`/g, '')}`)
-  else if (m.status === 'failed' && m.reason) dim('why', firstSentence(m.reason))
-  else if (m.status === 'checking') dim('why', 'The check is running.')
-  if (canRepair(m)) rows.push({ h: 1, el: els.Button({ key: 'repair', plain: true, label: 'repair this citation', hover: { bold: true }, onPress: () => onRepair(), children: [
-    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: 'suggestion', children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: ': check it again and rewrite the sentence' })] }),
+  const fixed = m.repair ? 'repaired; ' : ''
+  const notFixed = m.repair ? 'not repaired: ' : ''
+  if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${m.was.replace(/\*\*|`/g, '')}`)
+  else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
+  else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
+  else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
+  else if (m.repair && m.status === 'unchecked') dim('why', `${notFixed}${m.reason || 'the check gave no answer'}`)
+  if (canRepair(m)) rows.push({ h: 1, el: els.Button({ key: 'repair', plain: true, label: 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
+    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: 'suggestion', children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: ': check it again and correct the cited words' })] }),
   ] }) })
   if (!ev) {
     if (m.status !== 'checking') dim('none', 'The check gave no evidence for it.')
@@ -633,7 +651,7 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     const m = await itemOf($, f.row, f.n)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
-    units = citationBody(els, f, m, inner, await fileLinkEl($, els, f, m), () => repair($, f))
+    units = citationBody(els, f, m, inner, await fileLinkEl($, els, f, m))
   } else {
     const g = await glossOf($, f.row, f.id)
     const heads = f.kind === 'heads'
@@ -723,6 +741,20 @@ export const registerTray: Register = on => {
       try { await $.state.set({ ...ASKED, id: e.turnId } as never, about as never) } catch { /* the prompt shows as typed */ }
     }
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // a click on `x repair` (the card's or the bar's): the repair starts in this hook, so the plugin's other hooks serve
+  // its fork (core/forks.ts)
+  on('ui.press', { element: /^(repair|bar-tray-x)$/ }, async ($, e, next) => {
+    try {
+      if (e.plugin !== 'thimble' || !REPAIR_KEYS.has(String(e.element))) return next(e)
+      const f = top(await trayNow($)) as Frame | null
+      if (!f || !(await repair($, f, { until: 0, cancelled: false }))) return next(e)
+      return { element: e.element }
+    } catch (err) {
+      failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'tray:repair')
+      return { element: e.element }
+    }
   }).catch(($, e, next) => next(e))
 
   // a prompt asked with the tray open: under it, `▸ about the citation "…"`

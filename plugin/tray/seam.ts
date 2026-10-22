@@ -27,8 +27,8 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export async function trayKey($: Engine, k: string, _until: number): Promise<Take | null> {
-  return key($, k)
+export async function trayKey($: Engine, k: string, until: number): Promise<Take | null> {
+  return key($, k, until)
 }
 
 export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
