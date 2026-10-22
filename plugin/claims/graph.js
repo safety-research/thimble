@@ -2,8 +2,7 @@
 // the panel under it (the claim selected and its cluster), and where a claim was said. No `$`, no DOM: pane.tsx draws what this
 // returns with Claude Code's own elements, and the tests read it as text.
 //
-//   the head        how many claims the conversation holds, and one action while the folder has no map yet: a press
-//                   that asks Claude to add the claims of the whole folder (never a key, since it starts a turn)
+//   the head        how many claims the conversation holds, and in how many clusters
 //   the graph       the whole pane wide: each cluster a loose group of dots in its own color, its name in plain gray
 //                   among them, the clusters spread over the pane, linked claims near each other; a hollow dot is a
 //                   claim a later one corrected, a heavier one a claim said twice or more. A line means one thing: the
@@ -56,9 +55,8 @@ export const toneOf = i => `c${(Math.max(0, i) % 6) + 1}`
 /** A claim's dot: hollow once corrected, heavier when said twice or more. */
 export const dotOf = c => (c.revised_by ? '○' : (c.n || 1) >= 2 ? '◉' : '●')
 
-/** Who said a claim and when, in a few words, for a side thread: `turn 2`, `turn 2 · you`, `the folder`. */
+/** Who said a claim and when, in a few words, for a side thread: `turn 2`, `turn 2 · you`. */
 export function whenOf(c) {
-  if (c.by === 'folder') return 'the folder'
   return [c.turn != null ? `turn ${c.turn}` : '', c.by === 'person' ? 'you' : ''].filter(Boolean).join(' · ')
 }
 
@@ -66,7 +64,6 @@ export function whenOf(c) {
 export function saidWords(c) {
   const n = c.n || 1
   if (c.by === 'person') return n >= 2 ? `you said this ${n} times` : 'you said this'
-  if (c.by === 'folder') return "from the folder's map"
   return n >= 2 ? `said ${n} times` : ''
 }
 
@@ -338,7 +335,7 @@ export function historyOf(claim, byId) {
 const slim = c => ({
   id: c.id, text: c.text, by: c.by, cluster: c.cluster ?? null, turn: c.turn ?? null, n: c.n || 1,
   ...(c.revised_by ? { revised_by: c.revised_by } : {}), ...(c.revises ? { revises: c.revises } : {}),
-  ...(c.folder ? { folder: true } : {}), ...(c.links && c.links.length ? { links: c.links.map(l => ({ to: l.to, how: l.how })) } : {}),
+  ...(c.links && c.links.length ? { links: c.links.map(l => ({ to: l.to, how: l.how })) } : {}),
   sources: (c.sources || []).slice(0, 8),
   said: (c.said || []).slice(0, 6).map(s => ({ row: s.row ?? null, by: s.by, turn: s.turn ?? null, quote: s.quote || '', sentence: s.sentence || '', ...(s.start != null ? { start: s.start, end: s.end } : {}), ...(s.ref ? { ref: s.ref } : {}) })),
 })
@@ -348,11 +345,10 @@ const slim = c => ({
 export function paneData(store) {
   const view = viewOf({ clusters: [], gaps: [], ...(store || {}), claims: Array.isArray(store?.claims) ? store.claims : [] })
   const claims = view.flat.map(slim)
-  const groups = view.groups.map((g, i) => ({ id: g.id ?? null, name: g.name, folder: g.from === 'folder', i }))
+  const groups = view.groups.map((g, i) => ({ id: g.id ?? null, name: g.name, i }))
   return {
     total: view.total, clusters: view.clusters, last: view.last, gaps: (view.gaps || []).slice(-3),
     claims, groups, edges: edgesOf(view.flat),
-    offer: store?.offer || null, folder: store?.folder || null, asked: store?.folderAsked || null,
   }
 }
 
@@ -414,9 +410,8 @@ function layOf(claims, groups, edges, W, h) {
 }
 
 /** The words of a source in the panel, as runs: a citation's check, its words, the cited place, and with `full` (e) the
- *  cited line; the folder's evidence as its quote and place. */
+ *  cited line. */
 export function evidenceRuns(s, full = true) {
-  if (s.quote && !s.row) return [{ s: `“${one(s.quote)}”`, tone: 'cite' }, { s: ` ${s.label || s.ref}`, tone: 'dim' }]
   // the check's words, as the evidence pane says them (marks/evidence.tsx)
   const status = s.status || 'unchecked'
   const unconfirmed = status === 'failed' && s.failedBy === 'evidence'
@@ -434,7 +429,7 @@ function historyRows(history, claim, tone) {
   const out = []
   for (const c of history) {
     const said = (c.said || []).find(x => x.sentence || x.quote)
-    const who = c.by === 'person' ? 'you said' : c.by === 'folder' ? "the folder's map" : 'Claude said'
+    const who = c.by === 'person' ? 'you said' : 'Claude said'
     const part = c.id === claim.id ? null : `was-${c.id}`
     out.push({ runs: [{ s: dotOf(c), tone: tone(c) }, { s: ' ' }, { s: sentenceOf(c.text), bold: c.id === claim.id }], part })
     out.push({ runs: said ? [{ s: '  ' }, { s: who, tone: 'dim' }, { s: ` “${one(said.sentence || said.quote)}”` }] : [{ s: '  ' }, { s: who, tone: 'dim' }], part })
@@ -503,7 +498,7 @@ export function clusterWords(cs, groups, edges, claims) {
     `${n} claim${n === 1 ? '' : 's'}`,
     cited ? `${cited} cite${cited === 1 ? 's' : ''} the files` : '',
     fixed ? `${fixed} corrected` : '',
-    lo == null ? (cs.some(c => c.by === 'folder') ? "from the folder's map" : '') : lo === hi ? `turn ${lo}` : `turns ${lo}–${hi}`,
+    lo == null ? '' : lo === hi ? `turn ${lo}` : `turns ${lo}–${hi}`,
     names.length ? `linked to ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}` : '',
   ].filter(Boolean).join(' · ')
 }
@@ -554,11 +549,11 @@ export function panelOf({ data, claim, open, evidence, history, tone, W, maxSubs
 
 /**
  * The Claims pane as rows of runs, w × h cells (the rows the pane has; the keys' row under it takes two): the head,
- * then the graphs (the session's clusters, then the folder's map under its own line), then the panel under them (the
+ * then the graph, then the panel under it (the
  * claim selected and its cluster: panelOf). `st` = {claim, open, at}: the claim selected, what e or h opened ('ev' |
  * 'hist'), the last turn when it was selected. Returns {head, graph, panel, claim, history, chosen, open}; head, graph
  * and panel are rows of runs, a run's `part` what a press on it does (`n:<id>` a dot or a claim of the cluster, `said`,
- * `ev-N`, `was-<id>`, `folder`).
+ * `ev-N`, `was-<id>`).
  */
 export function graphView(data, st = {}, { w = 90, h = 40 } = {}) {
   const W = Math.max(40, w)
@@ -588,31 +583,16 @@ export function graphView(data, st = {}, { w = 90, h = 40 } = {}) {
   const chosen = (!fresh && byId.has(st.claim)) || !!open
   const edges = data.edges || []
   const near = new Set(edges.filter(e => e.kind !== 'corrects' && (e.a === claim.id || e.b === claim.id)).map(e => (e.a === claim.id ? e.b : e.a)))
-  const mine = groups.filter(g => !g.folder)
-  const theirs = groups.filter(g => g.folder)
-  const inGroups = gs => { const ids = new Set(gs.map(g => String(g.id))); return claims.filter(c => ids.has(String(c.cluster)) || (gs === mine && !groups.some(g => String(g.id) === String(c.cluster)))) }
-  const parts = [[mine, inGroups(mine)], [theirs, inGroups(theirs)]].filter(([gs, cs]) => gs.length && cs.length)
-  const leads = parts.map(([gs], pi) => (pi ? 1 : 0) + (gs === theirs ? 1 : 0))
-  const free = room - leads.reduce((a, b) => a + b, 0)
-  const rows = parts.length > 1 ? parts.map(([, cs], pi) => (pi ? free - Math.max(4, Math.round((free * parts[0][1].length) / claims.length)) : Math.max(4, Math.round((free * cs.length) / claims.length)))) : [free]
-  const graph = []
-  parts.forEach(([gs, cs], pi) => {
-    if (pi) graph.push([])
-    if (gs === theirs) graph.push([{ s: `the whole folder's map · ${cs.length} claim${cs.length === 1 ? '' : 's'}`, tone: 'dim' }])
-    graph.push(...graphOf({ claims: cs, groups: gs, edges, W, h: rows[pi], claim, near, tone, chosen }).rows())
-  })
+  const graph = graphOf({ claims, groups, edges, W, h: room, claim, near, tone, chosen }).rows()
   return { head, graph, panel, claim, history, chosen, open }
 }
 
-/** The head: Claims, how many and in how many clusters, then the folder's action (a press), or that Claude reads it. */
+/** The head: Claims, how many and in how many clusters. */
 function headRuns(data) {
   const n = data.total || 0
   const groups = (data.groups || []).length
   const out = [{ s: 'Claims', tone: 'c2', bold: true }]
   if (n) out.push({ s: `   ${n.toLocaleString('en-US')}${groups > 1 ? ` · ${groups} clusters` : ''}`, tone: 'dim' })
-  if (data.folder) return out
-  if (data.asked) out.push({ s: '   ' }, { s: 'Claude is reading the whole folder for its claims…', tone: 'dim' })
-  else if (data.offer) out.push({ s: '   ' }, { s: "add the whole folder's claims", tone: 'accent', part: 'folder' })
   return out
 }
 
@@ -680,18 +660,13 @@ export function markWrap(plain, marked, n) {
 export function sourceView(c, text, w = 90) {
   const W = Math.max(40, w)
   if (!c) return [[{ s: 'That claim is not in this session any more.', tone: 'dim' }]]
-  const said = (c.said || []).filter(x => x.by !== 'folder')
+  const said = c.said || []
   const first = said[0] || null
   const who = first ? (first.by === 'person' ? 'your message' : "Claude's message") : ''
   const lines = [[{ s: 'Where it was said', tone: 'c2', bold: true }, { s: `  ${who}`, tone: 'dim' }], []]
   const msg = first && text ? messageRows(text, first, W - 1) : null
   if (msg) msg.rows.forEach(r => lines.push(r.map(x => (x.on ? { s: x.s, tone: 'accent', bold: true } : { s: x.s }))))
   else if (first) lines.push([{ s: `“${cut(first.sentence || first.quote, W - 4)}”`, tone: 'accent', bold: true }])
-  else {
-    // a claim of the folder's map: said by its evidence, each a quote of a record of the folder
-    lines[0] = [{ s: 'Where it was said', tone: 'c2', bold: true }, { s: "  the folder's map", tone: 'dim' }]
-    for (const s of (c.sources || []).slice(0, MAX_EVIDENCE)) lines.push([{ s: s.quote ? `“${cut(s.quote, W - 24)}”` : '', tone: 'accent', bold: true }, { s: ` ${s.label || s.ref}`, tone: 'dim' }])
-  }
   const again = said.slice(1)
   if (again.length) {
     lines.push([], [{ s: 'also said', tone: 'dim' }])

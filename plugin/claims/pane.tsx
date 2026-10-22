@@ -1,5 +1,5 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
-// out: the head (how many claims, the folder's action), the graph of clusters, the panel under it (the claim selected,
+// out: the head (how many claims), the graph of clusters, the panel under it (the claim selected,
 // its citations, its cluster and the cluster's claims), and the keys. A click is the main way to move: each dot is a
 // Button (on the claim selected it opens where the claim was said; on another it selects that one), as is each claim
 // of the cluster in the panel, the claim's sentence (where it was said), a citation (its evidence pane) and a version
@@ -19,7 +19,7 @@ import { openPane } from '../core/pane'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { openThread } from '../threads/seam'
 import { graphView, hopCluster, paneData, sourceView, threadAbout } from './graph.js'
-import { askFolderLater, claimsPaneStore, placeText, showClaims, type ClaimsArgs } from './term'
+import { claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,7 +90,7 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
  *  the claim selected. The arguments keep only what names the thing (not the e and h toggles). */
 export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: ClaimsArgs }> {
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
-  const data = paneData(await claimsPaneStore($))
+  const data = paneData(await claimsStore($))
   if (a.source) {
     const c = data.claims.find((x: Any) => x.id === a.source) ?? null
     return { about: threadAbout(c, true), args: { source: a.source, ...(a.row ? { row: a.row } : {}) } }
@@ -104,7 +104,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const W = Math.max(40, Number(e?.props?.bodyColumns) || 90)
   const H = Math.max(14, Number(e?.props?.scroll?.bodyRows) || 36)
   const { Box, Button, Text } = els
-  const data = await withMarks($, paneData(await claimsPaneStore($)))
+  const data = await withMarks($, paneData(await claimsStore($)))
   const keys: unknown[] = []
   const key = (k: string, label: string, onPress: () => unknown) => keys.push(Button({ key: `key-${k}`, plain: true, hotkey: k, label, onPress }))
   const keep = { claim: a.claim ?? null, open: a.open ?? null, at: a.at ?? null }
@@ -131,7 +131,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const claim = view.claim as Any
   const pick = (id: string | null, open: ClaimsArgs['open'] = a.open ?? null) => (id ? showClaims($, { claim: id, open, at: data.last }) : undefined)
   const openSource = (c: Any) => {
-    const said = (c.said || []).find((x: Any) => x.by !== 'folder' && x.row)
+    const said = (c.said || []).find((x: Any) => x.row)
     return showClaims($, { ...keep, claim: c.id, source: c.id, ...(said ? { row: said.row } : {}) })
   }
   const openEvidence = async (s: Any) => {
@@ -141,7 +141,6 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     await tellOpened($, { kind: 'citation', row: s.row, n: s.n, words: s.label, status: s.status }, m?.text ?? '')
   }
   const press = (part: string) => {
-    if (part === 'folder') { askFolderLater($); return }
     if (!claim) return
     if (part.startsWith('n:')) {
       const id = part.slice(2)

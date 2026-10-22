@@ -37,14 +37,6 @@ export async function tellLine($: Engine, key: string, head: string, line: strin
   await writeKept($, FILE, next ?? {}).catch(() => undefined)
 }
 
-/** A turn of main's that a press of the person's starts (0.10's shell.tsx ask): `request` reaches Claude as thimble's
- *  report beside the prompt, kept under `key`, and `words` stand as the prompt, as the person would type them (the
- *  claims folder's map). */
-export async function askMain($: Engine, key: string, request: string, words: string): Promise<void> {
-  await tellAtNextPrompt($, key, request)
-  await $.prompt.submit({ text: words })
-}
-
 /** The texts that wait, in the order they were first kept, taken out of the state. */
 async function take($: Engine): Promise<string[]> {
   let texts: string[] = []

@@ -1,5 +1,5 @@
 // Claims (claims/store.js, graph.js, lens.mjs): the lens's claims as the observer's reply gives them, placed by their
-// words with the citations near them, the folder's map, and the Claims pane as graph.js lays it out, whose count stays
+// words with the citations near them, and the Claims pane as graph.js lays it out, whose count stays
 // on screen however many claims a session has. Made-up data only.
 //   node --test plugin/claims/test/
 import '../../test-home.mjs'
@@ -7,9 +7,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { graphView, paneData, rowText, sourceView } from '../graph.js'
+import { graphView, paneData, rowText } from '../graph.js'
 import lens from '../lens.mjs'
-import { applyTurn, edgesOf, emptyStore, mergeFolder, parseClaims, promptLines, viewOf } from '../store.js'
+import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
 test("the lens's claims are read as given: a quote names a claim that gives no words of its own; a same, a correction, who said it", () => {
   const got = parseClaims([
@@ -65,22 +65,15 @@ test("a claim's sources are the citations [words](#) in or near its words, by ro
   assert.ok(edgesOf(flat).some(e => e.kind === 'rows'))
 })
 
-test("the folder's map joins the claims, each with its evidence as sources, and a fixed map replaces its claims", () => {
-  const st = emptyStore('s')
-  const map = { scope: { unit: 'runs', n: 4, what: 'every run' }, clusters: [{ id: 'tz', name: 'timezone detour' }],
-    claims: [{ id: 'a', name: 'Agents blame a timezone bug', cluster: 'tz', n: 3, of: 4, evidence: [{ ref: 'runs/r1.jsonl#L12', quote: 'a timezone mismatch' }] },
-      { id: 'b', name: 'The cart fixture is shared', cluster: 'tz', evidence: [{ ref: 'runs/r2.jsonl#L7', quote: 'scope=module' }] }],
-    relations: [{ from: 'b', to: 'a', type: 'contradicts' }] }
-  const res = mergeFolder(st, map, { at: 't' })
-  assert.deepEqual(res.added, ['c1', 'c2'])
-  assert.deepEqual(st.claims[0].sources, [{ ref: 'runs/r1.jsonl#L12', label: 'r1.jsonl:12', quote: 'a timezone mismatch' }])
-  assert.deepEqual(st.claims[1].links, [{ to: 'c1', how: 'contradicts', folder: true }])
-  assert.equal(st.folder.claims, 2)
-  const again = mergeFolder(st, { ...map, claims: map.claims.slice(0, 1) }, { at: 't2' })
-  assert.deepEqual(again.dropped, ['c2'])
-  // where a claim of the map was said: its evidence's quotes
-  const said = sourceView({ ...st.claims[0], said: st.claims[0].said }, null).map(rowText).join('\n')
-  assert.match(said, /the folder's map[\s\S]*“a timezone mismatch” r1\.jsonl:12/)
+test("a store an earlier version kept leaves out the whole folder's map it held", () => {
+  const st = readStore({ claims: [
+    { id: 'c1', text: 'The run failed at step 4.', by: 'claude', cluster: 'k1', said: [{ row: 'r1', by: 'claude', quote: 'failed at step 4' }, { by: 'folder', quote: 'step 4' }], folder: { card: 'folder-claims', id: 'a' }, links: [{ to: 'c2', how: 'supports', folder: true }] },
+    { id: 'c2', text: 'Agents blame a timezone bug', by: 'folder', cluster: 'k2', said: [{ by: 'folder', quote: 'a timezone mismatch' }] }],
+  clusters: [{ id: 'k1', name: 'failures', turn: 1, named: 1 }, { id: 'k2', name: 'timezone detour', from: 'folder', named: 1 }],
+  folder: { card: 'folder-claims', claims: 1 }, folderAsked: 't' }, 's')
+  assert.deepEqual(st.claims.map(c => [c.id, c.said.length, c.links, c.folder]), [['c1', 1, [], undefined]])
+  assert.deepEqual(st.clusters.map(k => k.id), ['k1'])
+  assert.ok(!('folder' in st) && !('folderAsked' in st))
 })
 
 /** A store of many claims in uneven clusters with links, as a long session makes them. */
@@ -176,10 +169,7 @@ test("the claims graph's lines join their dots: no line in pieces", () => {
   }
 })
 
-test('with no claims the pane says what comes there; the folder action shows while the folder has no map', () => {
-  const none = graphView(paneData({ ...emptyStore('s'), offer: { what: '4 files', minutes: 4 } }), {}, { w: 90, h: 30 })
-  assert.match(text(none), /^Claims {3}add the whole folder's claims\n\nNo claims yet\. After each answer, the statements in it come here\./)
-  assert.ok(none.head[0].some(r => r.part === 'folder'))
-  const asked = graphView(paneData({ ...emptyStore('s'), folderAsked: 't' }), {}, { w: 90, h: 30 })
-  assert.match(text(asked), /Claude is reading the whole folder for its claims…/)
+test('with no claims the pane says what comes there', () => {
+  const none = graphView(paneData(emptyStore('s')), {}, { w: 90, h: 30 })
+  assert.match(text(none), /^Claims\n\nNo claims yet\. After each answer, the statements in it come here\./)
 })
