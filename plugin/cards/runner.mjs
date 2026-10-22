@@ -328,9 +328,11 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     columns = width
     try { return draw() } finally { columns = was; handlers = kept }
   }
-  // an event the view fails on is undone: the card keeps the state it had before it
+  // an event the view fails on is undone: the card keeps the state, the width and the handlers it had before it, so
+  // it draws and takes keys as before (a drawing that fails at a narrow width leaves the card at its last width)
   function call(op, json) {
     let before = null
+    const was = columns, kept = handlers
     try {
       if (op === 'key' || op === 'press' || op === 'pointer') before = saved()
       const a = parse(json)
@@ -342,6 +344,8 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       return stringify(Object.assign({ ok: true }, r, { tree: d.tree, notes: d.notes, state: saved() }))
     } catch (e) {
       try {
+        columns = was
+        handlers = kept
         if (before) state = before === 'null' ? undefined : parse(before)
         return stringify({ ok: false, phase: op === 'init' ? 'view' : op, error: errorOf(e) })
       } catch (_) { return '{"ok":false,"error":"the view failed"}' }
@@ -499,9 +503,9 @@ const OPS = {
   ping: () => ({ ok: true }),
   load,
   draw: a => {
-    const card = cards.get(a.id)
-    if (card && a.width) card.width = a.width
-    return event(a, 'draw', { width: a.width })
+    const r = event(a, 'draw', { width: a.width })
+    if (r.ok && a.width) cards.get(a.id).width = a.width
+    return r
   },
   copy: textCopy,
   key: a => event(a, 'key', { key: String(a.key ?? '').slice(0, 1) }),

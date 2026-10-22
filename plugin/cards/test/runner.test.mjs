@@ -193,6 +193,27 @@ function view(p, s) { if (s.state && s.state.broken) return p.rows[99].name; ret
   assert.equal((await ask('draw', { id, width: 20 })).state, 'null')
 })
 
+test('a drawing that fails at a narrow width leaves the card at its width, with its keys and Buttons', async () => {
+  const { id } = await load(`const keys = "+"
+function onKey(k, s) { s.setState({ n: ((s.state || {}).n || 0) + 1 }) }
+function view(p, s) {
+  const { Box, Text, Button } = s.elements
+  return Box({ flexDirection: 'column', children: [
+    Text({ children: 'n ' + ((s.state || {}).n || 0) + ' ' + '-'.repeat(s.columns - 13) }),
+    Button({ onPress: () => s.setState({ n: 100 }), children: 'hundred' }),
+  ] })
+}`)
+  const narrow = await ask('draw', { id, width: 12 })
+  assert.equal(narrow.ok, false)
+  assert.match(narrow.error, /Invalid count value/)
+  // the card still draws at its width, takes its key, and its Button still presses
+  const k = await ask('key', { id, key: '+' })
+  assert.equal(k.ok, true)
+  assert.equal(k.tree.c[0].c[0], `n 1 ${'-'.repeat(27)}`)
+  assert.equal((await ask('press', { id, button: 0 })).ok, true)
+  assert.equal((await ask('draw', { id, width: 40 })).ok, true)
+})
+
 test('the sandbox: no process, require, import, fetch or timers, and no code from strings by any path', async () => {
   const probe = `function view(p, s) {
   const out = []

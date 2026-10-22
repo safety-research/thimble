@@ -39,6 +39,12 @@ const FRAME_ROWS = 5
 
 let columnsSeen = 0
 let rowsSeen = 0
+// whether the terminal draws the conversation in its fullscreen layout, where every row can be drawn again; on the main
+// screen a row that has scrolled into the terminal's own scrollback stays as it was printed
+let fullscreen: boolean | undefined
+// main's turn now, from its turn.start: on the main screen, a card drawn in this turn still stands where Claude Code
+// draws again (the turn's rows are printed for good after it)
+let turnNow = ''
 // the rows each card's Client takes, as it last reported them, and whether the screen shows each card now (a surface
 // that does not say where its rows are leaves a card out: then every card drawn takes keys)
 const heights = new Map<string, number>()
@@ -47,10 +53,26 @@ const shown = new Map<string, boolean>()
 // says why in the card's place until the card has a newer tree, which is drawn again.
 const faulted = new Map<string, { seq: number; reason: string }>()
 
-/** The screen's size, as the last drawing of a message or a card saw it. */
-export function noteViewport(v: { columns?: number; rows?: number } | undefined): void {
+/** The screen's size and layout, as the last drawing of a message or a card saw it. */
+export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?: boolean } | undefined): void {
   if (v?.columns && v.columns > 0) columnsSeen = v.columns
   if (v?.rows && v.rows > 0) rowsSeen = v.rows
+  if (typeof v?.isFullscreen === 'boolean') fullscreen = v.isFullscreen
+}
+
+export function noteTurn(turnId: string): void {
+  turnNow = turnId
+}
+
+/** Main's turn now ('' when not known). */
+export function mainTurn(): string {
+  return turnNow
+}
+
+/** Whether Claude Code can still draw a card again that main drew in `turn`: always in the fullscreen layout; on the
+ *  main screen only while that turn runs, since the main screen says nothing of which rows have scrolled away. */
+export function canRedraw(turn: string | undefined): boolean {
+  return fullscreen !== false || (!!turn && turn === turnNow)
 }
 
 /** The screen's rows, or 0 while no drawing said. */
@@ -83,19 +105,24 @@ export async function askCard($: Engine, meta: CardMeta, op: string, body: Recor
   return op === 'draw' ? loaded : ask($, op, { id: meta.id, ...body })
 }
 
-/** The runner's answer to an event of the person's: the new tree drawn, the state kept, and a failure line about the
- *  card gone; a failure on the card and in the failure line, since the person sees the card stop. */
-export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: number): Promise<void> {
+/** The runner's answer to an event of the person's, or to a drawing at a new `width`: the new tree drawn, the state
+ *  kept, and a failure line about the card gone; a failure on the card and in the failure line, since the person sees
+ *  the card stop. The runner keeps the card as it was before a failure (its state, width and keys), so a drawing that
+ *  failed at one width holds only there: at another width the card draws again (frame). */
+export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: number, drawing = false): Promise<void> {
   if (r?.ok) {
     const before = await treeOf($, meta.id)
     await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0 })
     if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state).catch(() => undefined)
-    if (meta.error) await saveMeta($, { ...meta, error: null })
+    if (meta.error) await saveMeta($, { ...meta, error: null, errorWidth: null })
     await failCleared($, about(meta.id))
     return
   }
-  const error = String(r?.error || 'the card did not answer')
-  await saveMeta($, { ...meta, error })
+  const shown = (await treeOf($, meta.id))?.width
+  const error = drawing && width
+    ? `at ${width} columns the view failed (${String(r?.error || 'no answer')}); the card shows its drawing at ${shown ?? 'its last'} columns, and draws again when its width changes`
+    : String(r?.error || 'the card did not answer')
+  await saveMeta($, { ...meta, error, errorWidth: drawing && width ? width : null })
   failNotice($, `The card “${cut(meta.title, 40)}” failed: ${error}`, about(meta.id))
 }
 
@@ -144,6 +171,8 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
   const current = t && t.gen === meta.gen ? t : null
   const f = faulted.get(meta.id)
   const fault = f && current && f.seq === current.seq ? f.reason : null
+  // a drawing that failed at another width: the card draws again at this one
+  const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
   // the title on a line of its own; under it, dim, where the card comes from when that is not plain from its place
   const from = [note, meta.version > 1 ? `version ${meta.version}` : ''].filter(Boolean).join(' · ')
   const rows: Any[] = [
@@ -151,11 +180,11 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
     ...(from ? [E.Text({ key: 'about', dimColor: true, wrap: 'truncate-end', children: from })] : []),
     ...(fault ? [] : [E.Client({
       key: `card-${meta.id}`, module: './client.tsx', width: current?.width ?? width,
-      props: { tree: current?.tree ?? null, width: current?.width ?? width, need: current?.width === width ? '' : `${meta.gen}:${width}` },
+      props: { tree: current?.tree ?? null, width: current?.width ?? width, need: current?.width === width && !failedElsewhere ? '' : `${meta.gen}:${width}` },
     })]),
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
-  if (meta.error) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
+  if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   const mine: string[] = []
   for (const k of meta.keys) if ((await keyOwner($, k))?.id === meta.id) mine.push(k)
   if (mine.length) rows.push(E.Text({ key: 'keys', dimColor: true, wrap: 'truncate-end', children: `keys ${mine.join(' ')} at an empty prompt` }))
@@ -255,7 +284,7 @@ export async function cardPost($: Engine, id: string, data: Any): Promise<Any> {
     handled.set(from, n)
     if (typeof ev?.press === 'number' || ev?.pointer) await setFocus($, id)
     const r = await clientEvent($, meta, ev)
-    if (r?.r) await applyAnswer($, meta, r.r, r.width)
+    if (r?.r) await applyAnswer($, meta, r.r, r.width, true)
     else if (r) await applyAnswer($, meta, r)
   }
   const t = await treeOf($, id)

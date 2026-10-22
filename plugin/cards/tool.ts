@@ -15,9 +15,10 @@
 //      each action
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
-// card where this call stands (its view whole, or the view on screen with `edits`; its rows new, or kept), and the earlier call shows one line that points to it, so the card the reply talks
-// about is always the one right above it; a version that fails leaves the one on screen, and the view's error goes back
-// to Claude.
+// card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
+// the view of the last call with `edits`; its rows new, or kept), and keeps the title unless the call gives a new one;
+// the later call shows one line that points to it. A version that fails leaves the one on screen, its view and rows are
+// kept for the next call's `edits`, and the view's error goes back to Claude.
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/fix'
@@ -30,7 +31,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask } from './ask'
-import { applyAnswer, askCard, cardWidth, screenRows } from './draw'
+import { applyAnswer, askCard, canRedraw, cardWidth, mainTurn, screenRows } from './draw'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
@@ -44,14 +45,13 @@ const AROUND_ROWS = 14
 
 const SCHEMA = {
   type: 'object',
-  required: ['title'],
   properties: {
-    title: { type: 'string', description: 'the card\'s title: what it shows, in a few words' },
-    data: { type: 'string', description: 'the path of the JSON file of rows you wrote, in this folder or in $TMPDIR (a path may start with $TMPDIR/); with `id`, leave it out to keep the rows of the version on screen' },
-    view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, leave it out and give `edits` to change the view of the version on screen' },
+    title: { type: 'string', description: 'the card\'s title: what it shows, in a few words; with `id`, leave it out to keep the title' },
+    data: { type: 'string', description: 'the path of the JSON file of rows you wrote, in this folder or in $TMPDIR (a path may start with $TMPDIR/); with `id`, leave it out to keep the rows of your last call of that card' },
+    view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, leave it out and give `edits` to change the view of your last call of that card' },
     edits: {
       type: 'array',
-      description: 'with `id`: changes to the view of the version on screen, in order; each `old` stands once in it',
+      description: 'with `id`: changes to the view of your last call of that card (also one that did not draw), in order; each `old` stands once in it',
       items: { type: 'object', required: ['old', 'new'], properties: { old: { type: 'string' }, new: { type: 'string' } } },
     },
     id: { type: 'string', description: 'the id of a card you drew, to draw a new version of it here; leave it out for a new card' },
@@ -105,24 +105,25 @@ async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: 
   return { path: real }
 }
 
-/** The view of a call: the whole `view` it gives, or, for a new version, the view on screen (in `onScreen`, its
- *  version's folder) with the call's `edits` made in order, each `old` text standing once in it. */
-async function viewOf($: Engine, input: Any, onScreen: string | null): Promise<{ text?: string; bad?: string }> {
+/** The view of a call: the whole `view` it gives, or the view of the card's last call (in `last`, that call's
+ *  folder, also when its version did not draw) with the call's `edits` made in order, each `old` text standing once
+ *  in it. */
+async function viewOf($: Engine, input: Any, last: string | null): Promise<{ text?: string; bad?: string }> {
   if (typeof input.view === 'string' && input.view.trim()) return { text: input.view }
   const edits = Array.isArray(input.edits) ? input.edits : []
-  if (!edits.length) return { bad: onScreen ? 'give the whole `view`, or `edits` to the view on screen' : '`view` is empty: give the JavaScript that defines function view(props, surface)' }
-  if (!onScreen) return { bad: '`edits` change a card you drew: give its `id`, or the whole `view` for a new card' }
+  if (!edits.length) return { bad: last ? 'give the whole `view`, or `edits` to the view of your last call' : '`view` is empty: give the JavaScript that defines function view(props, surface)' }
+  if (!last) return { bad: '`edits` change a card you called card for: give its `id`, or the whole `view` for a new card' }
   let text = ''
-  try { text = String(await $.fs.read(`${onScreen}/view.js`)) } catch { return { bad: 'the view on screen cannot be read; give the whole `view`' } }
+  try { text = String(await $.fs.read(`${last}/view.js`)) } catch { return { bad: 'the view of your last call cannot be read; give the whole `view`' } }
   for (const [k, x] of edits.entries()) {
     const old = String(x?.old ?? '')
     const n = old ? text.split(old).length - 1 : 0
-    if (n > 1) return { bad: `edit ${k + 1}: its \`old\` text stands ${n} times in the view on screen, not once; give more of the text around it` }
+    if (n > 1) return { bad: `edit ${k + 1}: its \`old\` text stands ${n} times in the view, not once; give more of the text around it` }
     if (!n) {
       // where its first line stands, so the next try copies the view's own text
       const first = old.split('\n')[0]!.trim()
       const at = first ? text.indexOf(first) : -1
-      return { bad: `edit ${k + 1}: its \`old\` text is not in the view on screen${at >= 0 ? `, which has here: ${JSON.stringify(text.slice(at, at + old.length + 20))}` : ''}` }
+      return { bad: `edit ${k + 1}: its \`old\` text is not in the view of your last call${at >= 0 ? `, which has here: ${JSON.stringify(text.slice(at, at + old.length + 20))}` : ''}` }
     }
     text = text.replace(old, () => String(x?.new ?? ''))
   }
@@ -145,7 +146,7 @@ function copyText(lines: string[], cut: number[], width: number): string[] {
 function failed(id: string, r: Any, update: boolean): string {
   const error = String(r?.error || 'no answer').slice(0, 800)
   if (r?.down) return `The card did not draw: ${error}. The view is not the cause, and cards cannot draw in this session until the analyst fixes it; answer in words.`
-  const fix = r?.phase === 'rows' ? 'Fix the data file' : 'Fix the view'
+  const fix = r?.phase === 'rows' ? 'Fix the data file' : 'Fix the view (`edits` change the view of this call)'
   const kept = update ? ' The version on screen stays.' : ''
   return `The card did not draw: ${error}.${kept}\n${fix} and call card again with id "${id}".`
 }
@@ -156,12 +157,14 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const t0 = Date.now()
   const input = e ?? {}
   const toolUseId = String(input.tool_use_id ?? '')
-  const title = oneLine(String(input.title ?? ''), 120) || 'Card'
   const given = String(input.id ?? '').trim()
   const update = !!given
   const id = update ? given : cardIdOf(toolUseId)
   const before = isCardId(id) ? await metaOf($, id) : null
   if (update && !before) return { result: `There is no card "${oneLine(given, 40)}" to replace. Leave out \`id\` to draw a new card.` }
+  // a version keeps the card's title unless the call gives a new one
+  const title = oneLine(String(input.title ?? ''), 120) || before?.title || ''
+  if (!title) return { result: 'The card did not draw: `title` is empty: give the card\'s title, what it shows in a few words.' }
 
   // a card stands at a call of main's, or under the answer the running designer fork draws for; another agent's call
   // stands in that agent's own transcript, where the person never sees a card
@@ -169,8 +172,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : null
   if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation and the copy that v starts draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
   const meta: CardMeta = before ?? {
-    id, version: 0, title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
-    keys: [], read: '', columns: [], file: '', gen: 0, error: null, calls: {}, at: Date.now(),
+    id, version: 0, last: 0, lastFile: '', title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
+    keys: [], read: '', columns: [], file: '', gen: 0, error: null, errorWidth: null, calls: {}, at: Date.now(),
   }
   const remember = (m: CardMeta, call: CardCall) => saveMeta($, { ...m, calls: { ...m.calls, [toolUseId]: call } })
   const refuse = async (why: string) => {
@@ -178,23 +181,25 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     return { result: `The card did not draw: ${why}.` }
   }
 
-  // a new version may keep the view of the version on screen with a few edits, and its rows: writing the whole view
-  // again takes the model half a minute
-  const onScreen = meta.version > 0 ? await versionDir($, id, meta.version) : null
-  const view = await viewOf($, input, onScreen)
+  // a new version may keep the view of the card's last call with a few edits, and its rows: writing the whole view
+  // again takes the model half a minute. The last call's folder is the version on screen, or the version after it
+  // when that call did not draw (its view did not parse, say), so `edits` fix the view the error was about
+  const lastNo = meta.last ?? meta.version
+  const last = lastNo > 0 ? await versionDir($, id, lastNo) : null
+  const view = await viewOf($, input, last)
   if (view.bad) return refuse(view.bad)
-  const keep = !String(input.data ?? '').trim() && onScreen
-  const data = keep ? { path: `${onScreen}/rows.json` } : await dataFile($, input.data)
+  const keep = !String(input.data ?? '').trim() && last
+  const data = keep ? { path: `${last}/rows.json` } : await dataFile($, input.data)
   if (data.bad) return refuse(data.bad)
   if (!keep) {
-    const no = await refused($, { title: input.title, data: input.data, view: view.text, ...(input.id ? { id: input.id } : {}) }, data.path!)
+    const no = await refused($, { title, data: input.data, view: view.text, ...(input.id ? { id: input.id } : {}) }, data.path!)
     if (no) return refuse(no)
   }
-  const file = keep ? meta.file : String(input.data)
+  const file = keep ? (meta.lastFile ?? meta.file) : String(input.data)
   const version = meta.version + 1
   const dir = await versionDir($, id, version)
   await $.fs.write(`${dir}/view.js`, view.text!)
-  const copied = await $.process.run(['cp', '--', data.path!, `${dir}/rows.json`])
+  const copied = data.path === `${dir}/rows.json` ? { exitCode: 0, stderr: '' } : await $.process.run(['cp', '--', data.path!, `${dir}/rows.json`])
   if (copied.exitCode !== 0) {
     const error = `thimble could not copy ${file} (${String(copied.stderr).trim().slice(0, 200)})`
     await remember(meta, { version: meta.version, error })
@@ -204,21 +209,22 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const width = (await treeOf($, id))?.width ?? cardWidth()
   const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width })
   if (!r?.ok) {
-    await $.process.run(['rm', '-rf', '--', dir])
-    await remember(meta, { version: meta.version, error: String(r?.error || 'no answer') })
+    // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
+    await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer') })
     if (r?.down) failNotice($, `Cards cannot draw: ${String(r.error).slice(0, 200)}`)
     return { result: failed(id, r, update && meta.version > 0) }
   }
 
   const asked = [...new Set([...String(r.keys || '')].filter(k => !/\s/.test(k)))]
   const keys = asked.filter(k => /^\p{L}$/u.test(k) && !OWN_KEYS.includes(k))
-  // a card draws under the call of main's that drew this version, or under the answer v was pressed on when the
-  // designer fork drew it
+  // a new version takes the card's place: under the call of main's that drew its first version, or under the answer v
+  // was pressed on when the designer fork drew it. Where Claude Code cannot draw that place again (the main screen,
+  // once main's turn that drew it ended), main's version stands at its own call
+  const stays = meta.version > 0 && (!!fork || canRedraw(meta.turn))
+  const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn } : { toolUseId, anchorRow, turn: fork ? meta.turn : mainTurn() }
   const next: CardMeta = {
-    ...meta, version, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
-    gen: meta.gen + 1, error: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
-    anchorRow,
-    toolUseId: fork?.kind === 'designer' ? meta.toolUseId : toolUseId,
+    ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
+    gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
   }
   await remember(next, { version, title, file, read: next.read })
   await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
@@ -228,11 +234,12 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   await saveState($, id, version, r.state)
   if (meta.version > 0) void $.process.run(['rm', '-rf', '--', await versionDir($, id, meta.version)]).catch(() => undefined)
 
-  const where = next.anchorRow ? 'under the answer v was pressed on' : 'where this call stands, above the words you write after it'
   const out: string[] = [
-    update && meta.version > 0
-      ? `Version ${version} of “${title}” is drawn ${where}${next.anchorRow ? '' : '; the earlier call shows one line that points here'}.`
-      : `“${title}” is drawn ${where}. Its id is "${id}": to change it, call card again with this id.`,
+    stays
+      ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? 'under the answer v was pressed on' : 'under the call that first drew the card'}.`
+      : meta.version > 0
+        ? `Version ${version} of “${title}” is drawn where this call stands, since the terminal cannot draw the earlier place again; the earlier call shows one line that points here.`
+        : `“${title}” is drawn ${next.anchorRow ? 'under the answer v was pressed on' : 'where this call stands, above the words you write after it'}. Its id is "${id}": to change it, call card again with this id.`,
     `It read ${r.summary.read} from ${baseName(file)}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
   if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)

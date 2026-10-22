@@ -16,9 +16,10 @@ import type { Register } from 'claude-code'
 
 import { failNotice } from '../bar/fix'
 import { cut } from '../core/text.js'
+import { forkOf } from '../core/forks'
 import { featureOn } from '../settings/features.mjs'
-import { cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
-import { callOf, cardIdOf, metaOf, restoreCards } from './store'
+import { cardPost, clientFault, frame, framesUnder, noteShown, noteTurn, noteViewport } from './draw'
+import { callOf, cardIdOf, inTemp, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,20 +39,37 @@ export const registerCards: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
+  on('turn.start', { turnId: /\S/ }, async ($, e, next) => {
+    if (e.agentId === undefined) noteTurn(e.turnId)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('tool.call', { tool: 'mcp__thimble__card' }, async ($, e) => {
     if (!featureOn('cards')) return { deny: 'Cards are off in thimble\'s settings (/thimble-settings).' }
     return cardCall($, e)
   }).catch(() => ({ result: 'The card did not draw: thimble failed while it drew the card. Call card again; if it fails again, tell the analyst that cards do not work here.' }))
 
+  // the rows of a card: thimble asks Claude to write them in the temp folder ($TMPDIR), which is outside the working
+  // folder, so Claude Code would ask the person before Claude reads them back. A read there needs no dialog; so does a
+  // write by v's fork, which works in the background, where a dialog would stop it until the person answers. Only an
+  // ask that the mode makes is let through: a rule or a hook of the person's still decides
+  on('tool.check', { tool: /^(Read|Grep|Glob|Write|Edit)$/ }, async ($, e, next) => {
+    const v = await next(e)
+    if (v.decision !== 'ask' || v.rule || v.hook || v.plugin || !featureOn('cards')) return v
+    if ((e.tool === 'Write' || e.tool === 'Edit') && forkOf(e.agentId)?.kind !== 'designer') return v
+    const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown }
+    return (await inTemp($, input.file_path ?? input.path)) ? { decision: 'allow' } : v
+  }).catch(($, e, next) => next(e))
+
   // the call's row: the call in short (the view's code only in ctrl+o), then the card under the call that drew its
-  // version on screen; an earlier call's result line says where the card stands now
+  // first version; a later call's result line says where the card stands
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__thimble__card' } }, async ($, e, next) => {
     noteViewport(e.viewport)
     if (!featureOn('cards')) return next(e)
     const input = (e.props.input ?? {}) as Any
-    const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title ?? ''), ...(input.data ? { data: String(input.data) } : {}) } } })
     const id = (await callOf($, e.props.tool_use_id)) ?? (input.id ? String(input.id) : cardIdOf(e.props.tool_use_id))
     const meta = await metaOf($, id)
+    const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title || meta?.title || ''), ...(input.data ? { data: String(input.data) } : {}) } } })
     if (!meta || meta.version < 1) return own
     if (meta.anchorRow || meta.toolUseId !== e.props.tool_use_id) return own
     const E = $.ui.resolve(e) as Any
@@ -60,19 +78,25 @@ export const registerCards: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // the call's result: the person reads the card, not the text copy Claude got; one line in its place: what the card
-  // read, or, for a call whose version a newer one replaced, where the card stands now
+  // read, or, for a call that drew a version elsewhere (in the card's place), where the card stands
   on('ui.render', { component: 'ToolResult', props: { tool: 'mcp__thimble__card' } }, async ($, e, next) => {
     if (!featureOn('cards') || e.props.isExpanded) return next(e)
     const id = await callOf($, e.props.tool_use_id)
     const meta = id ? await metaOf($, id) : null
     const call = meta?.calls[e.props.tool_use_id]
     if (!meta || !call) return next(e)
-    const moved = !call.error && meta.version > 0 && (meta.anchorRow || meta.toolUseId !== e.props.tool_use_id)
+    const away = meta.anchorRow || meta.toolUseId !== e.props.tool_use_id
+    // the card stands at a later call when the screen could not draw it again in its place (canRedraw)
+    const order = Object.keys(meta.calls)
+    const below = !meta.anchorRow && order.indexOf(meta.toolUseId) > order.indexOf(e.props.tool_use_id)
+    const now = call.version < meta.version ? `, now version ${meta.version}` : ''
     const line = call.error
       ? `did not draw: ${call.error.slice(0, 160)} · Claude got the error`
-      : moved
-        ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn ${meta.anchorRow ? 'under the answer v was pressed on' : 'further down'}, as version ${meta.version}`
-        : `${call.version > 1 ? `version ${call.version} · ` : ''}${call.read ?? meta.read ?? ''} from ${(call.file ?? meta.file).split('/').pop()}`
+      : !away
+        ? `${meta.version > 1 ? `version ${meta.version} · ` : ''}${meta.read} from ${meta.file.split('/').pop()}`
+        : below
+          ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn further down${now}`
+          : `↑ version ${call.version} · “${cut(meta.title, 60)}” is drawn in its place ${meta.anchorRow ? 'under the answer v was pressed on' : 'above'}${now}`
     return next({ ...e, props: { ...e.props, output: line } })
   }).catch(($, e, next) => next(e))
 

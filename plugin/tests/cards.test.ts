@@ -1,5 +1,5 @@
 // Cards' hooks (cards/): a card call keeps the card and answers what it read and its text copy; the call's row draws
-// the one Client with the runner's tree; a new version draws at the newer call; a key at an empty prompt, and a burst
+// the one Client with the runner's tree; a new version draws in the card's place; a key at an empty prompt, and a burst
 // of keys, reach the card on screen that takes them; a card a designer fork drew draws under its answer. The runner is answered here, at http.fetch (cards/test/runner.test.mjs tests the real one).
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
@@ -31,7 +31,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -64,6 +64,9 @@ function world(on: Any, o: { crash?: string } = {}) {
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
+    // a view that does not parse, and one that throws at a narrow width
+    if (op === 'load' && String(body.view).includes('BROKEN')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' }) } }
+    if (op === 'draw' && body.width < 30) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'draw', error: 'line 4: Invalid count value: -1' }) } }
     const answers: Record<string, unknown> = {
       ping: { ok: true },
       load: { ok: true, tree: TREE, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
@@ -74,8 +77,11 @@ function world(on: Any, o: { crash?: string } = {}) {
     }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answers[op] ?? { ok: false, error: 'no such request' }) } }
   })
-  // the person's permission rules: a deny rule for reading `secret.json`
-  on('tool.check', (_$: unknown, e: Any) => (e.tool === 'Read' && String(e.input?.file_path).endsWith('secret.json') ? { decision: 'deny', reason: 'a made-up deny rule', rule: 'Read(./secret.json)' } : { decision: 'allow' }) as never)
+  // the person's permission rules: a deny rule for reading `secret.json`; with `ask`, the mode asks about every file
+  // outside the folder, and a rule of the person's asks about made-up/tmp/mine
+  on('tool.check', (_$: unknown, e: Any) => (e.tool === 'Read' && String(e.input?.file_path).endsWith('secret.json') ? { decision: 'deny', reason: 'a made-up deny rule', rule: 'Read(./secret.json)' }
+    : o.ask && String(e.input?.file_path).startsWith('/made-up/tmp/mine') ? { decision: 'ask', rule: 'Read(/made-up/tmp/mine/**)' }
+      : o.ask && !String(e.input?.file_path).startsWith(DATA) ? { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' } : { decision: 'allow' }) as never)
   on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   return { files, asked, dirs, clock }
@@ -114,25 +120,105 @@ test('a card call keeps the card and answers what it read and what it draws; its
   await shown($, callRow('toolu_made_up_1', input))
   expect(textOf(await $.ui.render(callRow('toolu_made_up_1', input)))).toContain('keys s at an empty prompt')
 
-  // a new version stands at the newer call; the first call points to it
+  // a new version takes the card's place, under the first call; the newer call points to it
   const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1b', ...input, id } as never)) as Any
-  expect(String(r2.result)).toContain('Version 2 of “Scores” is drawn where this call stands')
+  expect(String(r2.result)).toContain('Version 2 of “Scores” is drawn in place of version 1, under the call that first drew the card')
   const second = await $.ui.render(callRow('toolu_made_up_1b', input))
-  expect(elements(second).some(n => n.type === 'Client')).toBe(true)
+  expect(elements(second).some(n => n.type === 'Client')).toBe(false)
   const first = await $.ui.render(callRow('toolu_made_up_1', input))
-  expect(elements(first).some(n => n.type === 'Client')).toBe(false)
-  // the earlier call's result line says where the card is now, in place of what it read
-  const result = await $.ui.render({ ...(callRow('toolu_made_up_1', input) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_1', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
-  expect(textOf(result)).toBe('↓ version 1 · “Scores” is drawn further down, as version 2')
+  expect(textOf(first)).toContain('version 2')
+  const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
+  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above')
+  expect(textOf(await resultOf('toolu_made_up_1'))).toBe('version 2 · 2 rows from runs.json')
 
-  // a small change: edits to the view on screen, its rows kept (no `view`, no `data`)
-  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1c', title: 'Scores', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
+  // a small change: edits to the view, its rows and title kept (no `view`, no `data`, no `title`)
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1c', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
   expect(String(r3.result)).toContain('Version 3 of “Scores” is drawn')
   expect(String(r3.result)).toContain('It read 2 rows from runs.json')
   expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "y"'))
+  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above, now version 3')
   // an edit whose text is not in the view draws nothing, and says why
-  const r4 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1d', title: 'Scores', id, edits: [{ old: 'no such text', new: 'z' }] } as never)) as Any
-  expect(String(r4.result)).toContain('edit 1: its `old` text is not in the view on screen')
+  const r4 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1d', id, edits: [{ old: 'no such text', new: 'z' }] } as never)) as Any
+  expect(String(r4.result)).toContain('edit 1: its `old` text is not in the view of your last call')
+  // a new card needs a title
+  const r5 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1e', data: 'runs.json', view: VIEW } as never)) as Any
+  expect(String(r5.result)).toContain('`title` is empty')
+})
+
+test("on the main screen a later turn's version stands at its own call, since rows in the scrollback stay as printed", async ($, on) => {
+  world(on)
+  on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }) as never)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const row = (toolUseId: string) => ({ ...(callRow(toolUseId, input) as Any), viewport: { columns: 100, rows: 40, isFullscreen: false } })
+  const turn = (turnId: string) => ($ as Any).turn.start({ text: 'a made-up prompt', turnId })
+  await turn('t-1')
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11', ...input } as never)) as Any
+  const id = /"(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  await $.ui.render(row('toolu_made_up_11'))
+  // in the same turn, the place is still drawn again
+  const same = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11b', id, edits: [{ old: '"x"', new: '"y"' }] } as never)) as Any
+  expect(String(same.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
+  await turn('t-2')
+  const later = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11c', id, edits: [{ old: '"y"', new: '"z"' }] } as never)) as Any
+  expect(String(later.result)).toContain('Version 3 of “Scores” is drawn where this call stands')
+  expect(elements(await $.ui.render(row('toolu_made_up_11c'))).some(n => n.type === 'Client')).toBe(true)
+  expect(elements(await $.ui.render(row('toolu_made_up_11'))).some(n => n.type === 'Client')).toBe(false)
+  const result = await $.ui.render({ ...row('toolu_made_up_11'), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_11', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
+  expect(textOf(result)).toBe('↓ version 1 · “Scores” is drawn further down, now version 3')
+})
+
+test('a view that did not parse is fixed with edits, its rows kept; the card on screen stays meanwhile', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const broken = VIEW.replace('children: "x"', 'children: "x" BROKEN')
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_9', title: 'Scores', data: 'runs.json', view: broken } as never)) as Any
+  expect(String(r.result)).toContain('the view does not parse')
+  const id = /id "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const fixed = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_9b', id, edits: [{ old: ' BROKEN', new: '' }] } as never)) as Any
+  expect(String(fixed.result)).toContain('“Scores” is drawn where this call stands')
+  expect(Object.entries(w.files).find(([p]) => /\/v1\/view\.js$/.test(p))?.[1]).toBe(VIEW)
+  // the card stands under the call that drew it; the call that failed says so
+  expect(elements(await $.ui.render(callRow('toolu_made_up_9b', {}))).some(n => n.type === 'Client')).toBe(true)
+  // a version that fails after one drew leaves that one on screen, and edits go to the view that failed
+  const again = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_9c', id, edits: [{ old: 'children: "x"', new: 'children: "x" BROKEN' }] } as never)) as Any
+  expect(String(again.result)).toContain('The version on screen stays.')
+  const fixed2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_9d', id, edits: [{ old: ' BROKEN', new: ' ' }] } as never)) as Any
+  expect(String(fixed2.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
+})
+
+test('a drawing that fails at a narrow width holds only there: the card keeps its drawing and keys, and draws again at a new width', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_10', ...input } as never)
+  const at = (columns: number) => ({ ...(callRow('toolu_made_up_10', input) as Any), viewport: { columns, rows: 40, isFullscreen: true } })
+  // the row as the terminal draws it at a width (a resize draws the row again, with its Client)
+  const drawn = async (columns: number) => (await shown($, at(columns))).unmount()
+  await drawn(100)
+  // a side pane narrows the card: the drawing at 20 columns fails, and the card says so
+  await drawn(28)
+  const narrow = textOf(await $.ui.render(at(28)))
+  expect(narrow).toContain('at 20 columns the view failed (line 4: Invalid count value: -1)')
+  expect(narrow).toContain('keys s at an empty prompt')
+  // the pane closes: the card draws again at its width, with no failure
+  const drawsBefore = w.asked.filter(x => x === 'draw').length
+  await drawn(100)
+  expect(w.asked.filter(x => x === 'draw').length).toBe(drawsBefore + 1)
+  const wide = textOf(await $.ui.render(at(100)))
+  expect(wide).not.toContain('failed')
+  expect(wide).toContain('keys s at an empty prompt')
+})
+
+test("main reads a card's rows in the temp folder without a dialog; a person's rule still decides; only v's fork writes there freely", async ($, on) => {
+  world(on, { ask: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const check = (tool: string, file_path: string) => ($.tool as Any).check({ tool, input: { file_path } }) as Promise<Any>
+  expect((await check('Read', '/made-up/tmp/rows.json')).decision).toBe('allow')
+  expect((await check('Read', '/made-up/elsewhere/rows.json')).decision).toBe('ask')
+  expect((await check('Read', '/made-up/tmp/../elsewhere/rows.json')).decision).toBe('ask')
+  expect((await check('Read', '/made-up/tmp/mine/rows.json')).decision).toBe('ask')
+  expect((await check('Write', '/made-up/tmp/rows.json')).decision).toBe('ask')
 })
 
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {
