@@ -44,7 +44,7 @@ def release_server() -> Path:
 
 def running_slug(server: Path = SERVER) -> str | None:
     """The fix whose copy this server runs from, or None for the release."""
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     home = Path(os.path.realpath(fix.fixes_home()))
     here = Path(os.path.realpath(server))
@@ -132,7 +132,7 @@ def schedule(server: Path, changes: dict[str, str | None], delay: float = 0.5) -
 
 def try_fix(slug: str) -> dict[str, Any]:
     """Prepare the restart from the fix's copy: {server, changes, said}."""
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     fx = fix.load(slug)
     wt = fx.get("worktree")

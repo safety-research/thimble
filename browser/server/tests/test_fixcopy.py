@@ -13,7 +13,7 @@ import pytest
 
 from thimble_browser import agent, fixcopy, issues
 from thimble_browser.fixcopy import OutsideCopy, inside
-from thimble_browser.kernel_fix import fix
+from thimble_browser.kernel import fix
 
 
 # ---- the confinement, alone

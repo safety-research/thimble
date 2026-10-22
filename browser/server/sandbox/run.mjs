@@ -7,8 +7,9 @@
 // The rules are srt's configuration (sandbox.rules): filesystem rules, and a network rule that allows no domain, so
 // the command has no network at all; on Linux also bwrapPath, the bwrap.sh beside this file. --print prints the
 // wrapped command (on macOS, with the Seatbelt profile srt made of the rules) instead of running it. This process
-// stays the command's parent, passes SIGTERM and SIGHUP on, and exits with the command's status, or with 3 when the
-// sandbox could not be set up.
+// stays the command's parent, passes SIGTERM and SIGHUP on, stops the command when the server that started it is gone
+// (a long-lived command, such as the card runner, would stay otherwise), and exits with the command's status, or with 3
+// when the sandbox could not be set up.
 import { spawn } from 'node:child_process';
 import { constants } from 'node:os';
 import { dirname } from 'node:path';
@@ -59,6 +60,8 @@ const child = spawn('/bin/sh', ['-c', `exec ${wrapped}`], { cwd, stdio: 'inherit
 for (const sig of ['SIGTERM', 'SIGHUP']) {
   process.on(sig, () => child.kill(sig));
 }
+const server = process.ppid;
+setInterval(() => { if (process.ppid !== server) child.kill('SIGTERM'); }, 2000).unref();
 child.on('error', (e) => {
   console.error(`the sandbox could not be started: ${e.message}`);
   process.exit(3);

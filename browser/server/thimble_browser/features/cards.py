@@ -1,195 +1,454 @@
-"""Cards: what Claude draws to show the evidence of an answer, a table, a chart, a diagram, a timeline, records or a
-note, each with its question and its takeaway. The Canvas tab lays them out in groups, and the page opens it on the
-first card a turn makes (the stream's `open-card` record). The chat links to a card and draws none.
+"""Cards: what Claude draws when an answer is faster to see than to read, as the terminal plugin draws them.
 
-It owns the canvas's routes (canvas.py keeps the cards, canvas_layout.py their groups and places, history.py their
-versions and Undo), the card tools, the `Cards` part of the chat agent's prompt (prompts/cards.md) and, on the page,
-the Canvas tab.
+The card tool (prompts/tools-cards.md, the terminal's card-tool.md). Claude writes its rows as a JSON file in the
+workspace's temp folder with its own code, and calls `card` with the file's path, a title and a short JavaScript view.
+One call:
+
+  1. checks the file is in the folder or the temp folder, and copies it into the card's folder (`cards/<id>/v<n>/`)
+  2. loads the view and the copy into the card runner (cardrunner.py, the terminal's runner.mjs), which draws the card
+     as a plain tree of Box, Text and Button nodes and makes its text copy
+  3. keeps the card and tells the page, which draws it under the call, or under the answer v was pressed on when the
+     designer drew it
+  4. tries the call's actions, keys and clicks in order, then puts the card back as it was
+  5. answers what the card read (rows, columns, the first row), the text copy at the card's width, and the copy after
+     each action, in the terminal's words (plugin/cards/tool.ts)
+
+A call with `id` draws a new version of that card where this call stands; the page shows the earlier call as a line
+that points to it. A version that fails leaves the one on screen, and the view's error goes back to Claude.
+
+The page draws the tree (frontend cards/), and sends the analyst's keys and clicks to the routes below, which pass them
+to the runner and answer the new tree. A card's state is kept beside its copy, so it draws the same after a restart.
+
+v. Under the last answer, or typed at an empty message box, v starts the designer: a copy of the chat
+(agent.Sessions.spawn) that reads the terminal's designer.md, lists forms for the answer, picks one and draws it with
+the card tool. Its cards draw under that answer. The chat's agent reads them with the analyst's next message.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import re
+import secrets
+import shutil
+import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import Body, HTTPException
-from fastapi.responses import Response
 
-from .. import canvas, canvas_layout, history
+from .. import agent, cardrunner, chats, home, prompts
 from ..hub import hub
 from ..tools import Result
 from . import Feature
 
-
-def describe(cell: dict[str, Any]) -> str:
-    """A card as Claude reads it: its ref, kind, question, takeaway, and what it shows."""
-    head = f"card:{cell['id']} ({cell['kind']}) {cell['title']}"
-    if cell.get("takeaway"):
-        head += f"\ntakeaway: {cell['takeaway']}"
-    if cell["kind"] in canvas.CODE_KINDS:
-        head += f"\nstatus: {cell.get('status')}\n\n{canvas.outputs_text(cell)}"
-    elif cell["kind"] == "note":
-        head += f"\n{cell.get('text', '')}"
-    elif cell["kind"] == "example":
-        head += "\nrefs: " + json.dumps(cell.get("payload", {}).get("refs", []), ensure_ascii=False)
-    return head
+MAX_ROWS_BYTES = 64 * 1024 * 1024
+COPY_LINES = 60
+WIDTH = 92  # a card's columns until the page says how wide the chat is
+MIN_WIDTH = 20
+OWN_KEYS = ("v",)  # the letters the page keeps at an empty message box (v), which a card never gets
+TELL_CHARS = 3000  # the most of a v card's text copy the chat's agent reads
+DESIGNER_TOOLS = ("Read", "Grep", "Glob", "run_python", "card")
 
 
-# ---- the tools
+# ---- the store: cards/<id>/meta.json, v<n>/view.js and v<n>/rows.json, state.json
 
-async def _run_and_describe(t: Any, cell: dict[str, Any]) -> Result:
-    if cell["kind"] in canvas.CODE_KINDS:
-        cell = await canvas.run_card(t.ws, cell["id"], t.folder, unsandboxed=t.unsandboxed)
-    t.on_card(cell["id"])
-    text = describe(cell)
-    if cell.get("status") == "error":
-        text += "\n\nThe code failed. Fix it with edit_card on this card rather than adding a new one."
-    elif not cell.get("takeaway"):
-        text += "\n\nRead the output, then give the card its takeaway with edit_card."
-    return Result(text, cell_id=cell["id"])
+def card_dir(ws: str, cid: str) -> Path:
+    if not re.fullmatch(r"c[0-9a-f]{8}", cid):
+        raise KeyError(cid)
+    return cardrunner.cards_dir(ws) / cid
 
 
-async def list_cards(t: Any, args: dict[str, Any]) -> Result:
-    group = str(args.get("group") or "all")
-    lines = []
-    for nb in canvas.notebooks(t.ws):
-        if group not in ("all", nb["id"], nb.get("title")):
+def meta_of(ws: str, cid: str) -> dict[str, Any] | None:
+    try:
+        got = home.read_json(card_dir(ws, cid) / "meta.json")
+    except KeyError:
+        return None
+    return got if isinstance(got, dict) else None
+
+
+def save_meta(ws: str, meta: dict[str, Any]) -> None:
+    home.write_json(card_dir(ws, meta["id"]) / "meta.json", meta)
+
+
+def version_dir(ws: str, cid: str, version: int) -> Path:
+    return card_dir(ws, cid) / f"v{version}"
+
+
+def read_state(ws: str, meta: dict[str, Any]) -> Any:
+    got = home.read_json(card_dir(ws, meta["id"]) / "state.json", {}) or {}
+    return got.get("state") if got.get("version") == meta["version"] else None
+
+
+def save_state(ws: str, meta: dict[str, Any], state: Any) -> None:
+    """The view's state as the runner gives it (JSON text, "null" for none)."""
+    try:
+        value = json.loads(state) if isinstance(state, str) else state
+    except ValueError:
+        return
+    home.write_json(card_dir(ws, meta["id"]) / "state.json", {"version": meta["version"], "state": value})
+
+
+def width_of(ws: str) -> int:
+    """The columns a card draws at: the chat's width as the page last said it (PUT cards/width)."""
+    got = (home.read_json(home.workspace_dir(ws) / "session.json", {}) or {}).get("card_cols")
+    return max(MIN_WIDTH, got) if isinstance(got, int) else WIDTH
+
+
+# ---- the runner, with a card loaded again from its copy when the runner does not hold it
+
+async def load(ws: str, meta: dict[str, Any], width: int, unsandboxed: bool) -> dict[str, Any]:
+    d = version_dir(ws, meta["id"], meta["version"])
+    try:
+        view = (d / "view.js").read_text()
+    except OSError:
+        return {"ok": False, "error": f"the copy of “{meta['title']}” is gone"}
+    return await cardrunner.ask(ws, "load", {"id": meta["id"], "version": meta["version"], "title": meta["title"],
+                                             "view": view, "rows": str(d / "rows.json"),
+                                             "state": read_state(ws, meta), "width": width}, unsandboxed=unsandboxed)
+
+
+async def ask_card(ws: str, meta: dict[str, Any], op: str, body: dict[str, Any], unsandboxed: bool) -> dict[str, Any]:
+    """A request about a card; a card the runner does not hold (it started again) is loaded from its copy first."""
+    r = await cardrunner.ask(ws, op, {"id": meta["id"], **body}, unsandboxed=unsandboxed)
+    if not r.get("missing"):
+        return r
+    loaded = await load(ws, meta, int(body.get("width") or meta.get("width") or width_of(ws)), unsandboxed)
+    if not loaded.get("ok"):
+        return loaded
+    return await cardrunner.ask(ws, op, {"id": meta["id"], **body}, unsandboxed=unsandboxed)
+
+
+# ---- the tool
+
+def one_line(s: Any, n: int) -> str:
+    t = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", re.sub(r"\s+", " ", str(s or ""))).strip()
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def data_file(t: Any, raw: Any) -> tuple[Path | None, str]:
+    """The data file's real path, or why it cannot be read."""
+    p = str(raw or "").strip()
+    if not p:
+        return None, "`data` is empty: give the path of the JSON file of rows you wrote"
+    tmp = home.temp_dir(t.ws).resolve()
+    expanded = re.sub(r"^\$\{?TMPDIR\}?(?=/)", str(tmp), p)
+    try:
+        real = (Path(expanded) if expanded.startswith("/") else t.folder / expanded).resolve(strict=True)
+    except OSError:
+        return None, f"there is no file at {p}"
+    if not real.is_file():
+        return None, f"there is no file at {p}"
+    if not any(real == r or r in real.parents for r in (t.folder, tmp)):
+        return None, f"{p} is outside this folder and the temp folder ($TMPDIR); write the data file in $TMPDIR"
+    if real.stat().st_size > MAX_ROWS_BYTES:
+        return None, (f"{p} is {real.stat().st_size // 1048576} MB; a card reads at most 64 MB, so write only the rows "
+                      "it shows")
+    return real, ""
+
+
+def copy_text(lines: list[str], cut: list[int], width: int) -> list[str]:
+    """A text copy for Claude: at most COPY_LINES lines, and a note on the lines cut at the card's width."""
+    out = lines[:COPY_LINES]
+    if len(lines) > COPY_LINES:
+        out.append(f"({len(lines) - COPY_LINES} more lines)")
+    if cut:
+        many = len(cut) > 1
+        out.append(f"(line{'s' if many else ''} {', '.join(map(str, cut[:8]))} {'are' if many else 'is'} wider than "
+                   f"the card's {width} columns and cut there)")
+    return out
+
+
+def failed(cid: str, r: dict[str, Any], update: bool) -> str:
+    """What a call answers when the version did not draw: what to fix, or, when the runner cannot start, that the
+    view is not the cause."""
+    error = str(r.get("error") or "no answer")[:800]
+    if r.get("down"):
+        return (f"The card did not draw: {error}. The view is not the cause, and cards cannot draw in this workspace "
+                "until the analyst fixes it; answer in words.")
+    fix = "Fix the data file" if r.get("phase") == "rows" else "Fix the view"
+    kept = " The version on screen stays." if update else ""
+    return f"The card did not draw: {error}.{kept}\n{fix} and call card again with id \"{cid}\"."
+
+
+def key_notes(asked: list[str]) -> list[str]:
+    """What the call says of the keys the view asked for that a card never gets: thimble's own, and all but letters."""
+    out = []
+    for keys, why in (([k for k in asked if k in OWN_KEYS], "own"),
+                      ([k for k in asked if not (k.isalpha() and len(k) == 1)], "letters")):
+        if not keys:
             continue
-        lines.append(f"## {nb.get('title')} ({nb['id']})")
-        for c in nb["cells"]:
-            lines.append(f"card:{c['id']}  {c['kind']}  {c['title']}  |  {(c.get('takeaway') or '')[:120]}")
-    return Result("\n".join(lines) or "no cards yet")
+        many = len(keys) > 1
+        these = "these keys" if many else "this key"
+        if why == "own":
+            out.append(f"Note on the view: {' '.join(keys)} {'are' if many else 'is'} thimble's own, so the card does "
+                       f"not get {'them' if many else 'it'}; give the card other keys. The analyst has not seen {these} "
+                       "on the card.")
+        else:
+            out.append(f"Note on the view: a card takes letters only, so it does not get {' '.join(keys)}. The analyst "
+                       f"has not seen {these} on the card.")
+    return out
 
 
-def _open_canvas(t: Any, cell: dict[str, Any]) -> None:
-    """Tell the page to open the Canvas tab on `cell`, selected, when it is the first card the turn made; the turn's
-    later cards are placed on the canvas without moving it (agent.Session.opened)."""
-    s = t.session
-    if s is not None:
-        if s.opened:
-            return
-        s.opened = cell["id"]
-    hub.publish(t.ws, {"type": "open-card", "card": cell["id"], "chat": t.chat})
+def notice(ws: str, chat: str, text: str) -> None:
+    """A failure the analyst should know of, as a line in the chat."""
+    chats.append(ws, chat, {"type": "notice", "kind": "cards", "text": text})
 
 
-def _turn_group(t: Any, args: dict[str, Any]) -> dict[str, Any]:
-    """`args` with a group when they name none: the group of the card this turn added before, else a new group named
-    after the card's question, as Claude names the groups it makes. Without it the card went to a group titled Canvas."""
-    if str(args.get("group") or "").strip():
-        return args
-    s = t.session
-    if s is not None and getattr(s, "group", None) and any(nb["id"] == s.group for nb in canvas.notebooks(t.ws)):
-        return {**args, "group": s.group}
-    title = str(args.get("question") or "").strip()
-    return {**args, "group": title} if title else args
+async def card(t: Any, args: dict[str, Any]) -> Result:
+    t0 = time.monotonic()
+    title = one_line(args.get("title"), 120) or "Card"
+    view = str(args.get("view") or "")
+    given = str(args.get("id") or "").strip()
+    design = (t.session.meta.get("design") if t.session is not None else None) or None
+    before = meta_of(t.ws, given) if given else None
+    if given and not before:
+        return Result(f"There is no card \"{one_line(given, 40)}\" to replace. Leave out `id` to draw a new card.", True)
+    cid = given or f"c{secrets.token_hex(4)}"
+    meta = before or {"id": cid, "version": 0, "title": title, "at": home.now()}
+    path, bad = data_file(t, args.get("data"))
+    if path is None:
+        return Result(f"The card did not draw: {bad}.", True)
+    version = int(meta["version"]) + 1
+    d = version_dir(t.ws, cid, version)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "view.js").write_text(view)
+    shutil.copyfile(path, d / "rows.json")
+    width = int(meta.get("width") or width_of(t.ws))
+    r = await cardrunner.ask(t.ws, "load", {"id": cid, "version": version, "title": title, "view": view,
+                                            "rows": str(d / "rows.json"), "state": None, "width": width},
+                             unsandboxed=t.unsandboxed)
+    if not r.get("ok"):
+        shutil.rmtree(d, ignore_errors=True)
+        if r.get("down"):
+            notice(t.ws, design["chat"] if design else t.chat, f"Cards cannot draw: {str(r.get('error'))[:300]}")
+        return Result(failed(cid, r, bool(before)), True)
+
+    summary = r["summary"]
+    asked = list(dict.fromkeys(k for k in str(r.get("keys") or "") if not k.isspace()))
+    nxt = {**meta, "version": version, "title": title, "rows": summary["rows"], "columns": summary["columns"],
+           "keys": [k for k in asked if k.isalpha() and len(k) == 1 and k not in OWN_KEYS],
+           "file": str(args.get("data")), "width": width, "at": home.now(),
+           "chat": design["chat"] if design else t.chat, "turn": design["turn"] if design else None,
+           "design": design["id"] if design else None}
+    save_meta(t.ws, nxt)
+    save_state(t.ws, nxt, r.get("state"))
+    if before:
+        shutil.rmtree(version_dir(t.ws, cid, int(before["version"])), ignore_errors=True)
+    if design and not before:
+        # a v card stands under the answer v was pressed on, in the chat that answer is in
+        chats.append(t.ws, design["chat"], {"type": "card", "card": cid, "turn": design["turn"]})
+    hub.publish(t.ws, {"type": "card", "card": cid, "version": version})
+    drawn_ms = round((time.monotonic() - t0) * 1000)
+
+    where = "under the answer v was pressed on" if design else "where this call stands, above the words you write after it"
+    if before:
+        pointer = "" if design else "; the earlier call shows one line that points here"
+        out = [f"Version {version} of “{title}” is drawn {where}{pointer}."]
+    else:
+        out = [f"“{title}” is drawn {where}. Its id is \"{cid}\": to change it, call card again with this id."]
+    rows, columns = summary["rows"], summary["columns"]
+    out.append(f"It read {rows} row{'' if rows == 1 else 's'} from {Path(str(args.get('data'))).name}"
+               + (f", with the columns {', '.join(columns)}" if columns else "") + ".")
+    if summary.get("other"):
+        out.append("The file is an object: props.rows is its \"rows\" list, and props.data the whole object, with "
+                   f"{', '.join(summary['other'])} too.")
+    if summary.get("first"):
+        out.append(f"The first row: {summary['first']}")
+    out += [f"Note: {n}." for n in r.get("notes") or []]
+    out += key_notes(asked)
+    out += ["", f"What it draws, {width} columns wide:", *copy_text(r["lines"], r["cut"], width)]
+    actions = args.get("actions") if isinstance(args.get("actions"), list) else []
+    if actions:
+        a = await ask_card(t.ws, nxt, "act", {"actions": actions, "width": width}, t.unsandboxed)
+        if a.get("ok"):
+            for c in a["copies"]:
+                if c.get("error"):
+                    out += ["", f"After {c['what']}, the view FAILED: {c['error']}"]
+                    continue
+                note = f" ({c['note']})" if c.get("note") else ""
+                out += ["", f"After {c['what']}{note}:", *copy_text(c["lines"], c["cut"], width)]
+            out += ["", "The card is back as it was before these actions."]
+            save_state(t.ws, nxt, a.get("state"))
+        else:
+            out += ["", f"The actions did not run: {a.get('error') or 'no answer'}"]
+    return Result("\n".join(out), extra={"card": cid, "version": version, "drawn_ms": drawn_ms,
+                                         "ms": round((time.monotonic() - t0) * 1000)})
 
 
-async def add_card(t: Any, args: dict[str, Any]) -> Result:
-    try:
-        cell = canvas.new_card(t.ws, _turn_group(t, args), by=t.maker(), chat=t.chat)
-    except ValueError as e:
-        return Result(str(e), True)
-    if t.session is not None and not str(args.get("group") or "").strip():
-        t.session.group = cell["notebook"]
-    _open_canvas(t, cell)
-    return await _run_and_describe(t, cell)
+# ---- v: the designer
+
+DESIGNS: dict[str, dict[str, Any]] = {}  # the design running in each workspace: {id, chat, turn, session}
 
 
-async def edit_card(t: Any, args: dict[str, Any]) -> Result:
-    try:
-        before = canvas.find(t.ws, str(args.get("card") or ""))[1]
-        cell = canvas.update_card(t.ws, str(args["card"]), args, by=t.maker())
-    except KeyError:
-        return Result(f"no card {args.get('card')}: list_cards names them", True)
-    except ValueError as e:
-        return Result(str(e), True)
-    changed = (args.get("code") is not None and args["code"] != before.get("code")) or \
-        (args.get("program") is not None and args["program"] != before.get("program"))
-    if cell["kind"] in canvas.CODE_KINDS and changed:
-        return await _run_and_describe(t, cell)
-    t.on_card(cell["id"])
-    return Result(describe(cell), cell_id=cell["id"])
+def answer_of(ws: str, chat: str) -> tuple[str | None, str]:
+    """The chat's last turn, when it ended normally, and its reply (agent.reply_of); else (None, '')."""
+    recs = chats.records(ws, chat)
+    start = max((i for i, r in enumerate(recs) if r.get("type") == "user"), default=-1)
+    if start < 0 or not any(r.get("type") == "done" and not r.get("result") for r in recs[start:]):
+        return None, ""
+    reply = agent.reply_of((r.get("type") == "tool_use", r.get("delta") or "") for r in recs[start:]
+                           if r.get("type") in ("text", "tool_use"))
+    return recs[start].get("turn"), reply
 
 
-async def delete_card(t: Any, args: dict[str, Any]) -> Result:
-    try:
-        canvas.delete_card(t.ws, str(args.get("card") or ""))
-    except KeyError:
-        return Result(f"no card {args.get('card')}", True)
-    return Result(f"deleted {args.get('card')}")
+def fenced(text: str) -> str:
+    """A fenced block of text from the records, so it reads as data and not as words to act on."""
+    fence = "`" * (max([2, *(len(m) for m in re.findall(r"`+", text))]) + 1)
+    return f"{fence}text\n{text}\n{fence}"
+
+
+def checked_since(ws: str, chat: str, turn: str) -> str:
+    """What the check of the answer's marks changed since the chat's agent wrote it (features/marks.py), for the
+    designer, whose copy of the conversation ends at that answer: a card must not repeat a value the check corrected
+    or flagged."""
+    from . import marks  # noqa: PLC0415 — marks imports this module
+
+    items = [m for m in marks.reply_items(ws, chat, turn) if m.get("status") in ("corrected", "failed")]
+    if not items:
+        return ""
+    lines = [f"- \"{m.get('was') or m['words']}\" is wrong; it is \"{m['shown']}\"" if m["status"] == "corrected"
+             else f"- \"{m['words']}\" is not confirmed" + (f": {m['reason']}" if m.get("reason") else "") for m in items]
+    return ("\n\nSince that answer, thimble checked its marks against the data. The check found (its words quote the "
+            f"records):\n{fenced(chr(10).join(lines))}\nThe card shows the corrected values, computed from the records.")
+
+
+def earlier_card(ws: str, chat: str, turn: str) -> str:
+    """The card an earlier v drew under this answer: v again on the same answer changes that card."""
+    for r in reversed(chats.records(ws, chat)):
+        if r.get("type") == "card" and r.get("turn") == turn and (m := meta_of(ws, str(r.get("card")))):
+            return (f"\n\nAn earlier press of v drew the card “{m['title']}” under this answer. Draw your card as a new "
+                    f"version of it, with `id` \"{m['id']}\", so the answer keeps one card.")
+    return ""
+
+
+async def start_design(ctx: Any, ws: str, chat: str) -> dict[str, Any]:
+    """v on the chat's last answer: the designer's copy of the chat starts; an HTTPException says why it cannot."""
+    if chat in ctx.sessions.running(ws):
+        raise HTTPException(409, "Claude is still answering; v draws a card of the answer once it is done")
+    now = DESIGNS.get(ws)
+    if now and now["session"].running:
+        raise HTTPException(409, "v is already drawing a card")
+    turn, reply = answer_of(ws, chat)
+    if not turn or not reply.strip():
+        raise HTTPException(409, "there is no answer to draw yet")
+    prompt = (prompts.fill(prompts.shared("designer"), agent.slots(ws, ctx.folder_of(ws)))
+              + checked_since(ws, chat, turn) + earlier_card(ws, chat, turn))
+    design = {"id": f"d{secrets.token_hex(4)}", "chat": chat, "turn": turn, "busy": secrets.token_hex(4)}
+    hub.publish(ws, {"type": "busy", "id": design["busy"], "word": "drawing a card", "on": True})
+    s = await ctx.sessions.spawn(ws, "designer", chat, prompt, title="card of the last answer (v)",
+                                 meta={"design": design})
+    DESIGNS[ws] = {**design, "session": s}
+    return {k: design[k] for k in ("id", "chat", "turn")}
+
+
+def design_finished(s: Any, result: str | None) -> None:
+    """The designer ended: the chat's agent reads the cards it drew, or the analyst reads why it drew none."""
+    design, ws = s.meta.get("design") or {}, s.ws
+    if not design:
+        return
+    hub.publish(ws, {"type": "busy", "id": design["busy"], "word": "drawing a card", "on": False})
+    if DESIGNS.get(ws, {}).get("id") == design["id"]:
+        DESIGNS.pop(ws, None)
+    chat = design["chat"]
+    if result == "stopped":
+        return
+    if result == "refused":
+        notice(ws, chat, "v drew no card: the model's safeguards refused it. Settings can switch to another model.")
+        return
+    if result == "failed":
+        notice(ws, chat, "v could not draw a card: the model call failed. Press v again to try once more.")
+        return
+    drawn = [m for m in (meta_of(ws, p.name) for p in sorted(cardrunner.cards_dir(ws).iterdir()))
+             if m and m.get("design") == design["id"]]
+    if not drawn:
+        said = " ".join(s.texts[-1].split())[:160] if s.texts else ""
+        notice(ws, chat, "v drew no card." + (f" The copy that drew it ended with: “{said}”" if said else ""))
+        return
+    asyncio.get_running_loop().create_task(tell_drawn(s, chat, drawn))
+
+
+async def tell_drawn(s: Any, chat: str, drawn: list[dict[str, Any]]) -> None:
+    """The chat's agent reads the v cards with the analyst's next message: each one's title, id and text copy."""
+    copies = []
+    for m in drawn:
+        r = await ask_card(s.ws, m, "copy", {"width": int(m.get("width") or width_of(s.ws))}, s.unsandboxed)
+        text = "\n".join(r.get("lines") or []) if r.get("ok") else f"(no copy: {r.get('error')})"
+        copies.append(f"“{m['title']}” (id \"{m['id']}\"), as drawn now:\n{fenced(text[:TELL_CHARS])}")
+    what = "a card" if len(drawn) == 1 else f"{len(drawn)} cards"
+    agent.tell(s.ws, chat, f"The analyst pressed v on your last answer, and a copy of you drew {what} under it. To "
+                           "change one, call card with its id. The text of a card shows the records' own words.\n\n"
+               + "\n\n".join(copies))
+
+
+agent.AGENTS["designer"] = agent.AgentDef(
+    agent.main_prompt, agent.main_tools, finished=design_finished, allowed=DESIGNER_TOOLS,
+    denied="The copy that draws a card reads files, runs Python and draws cards with the card tool, nothing more.")
 
 
 # ---- the routes
 
+EVENTS = {"key": lambda b: {"key": str(b.get("key") or "")[:1]},
+          "press": lambda b: {"button": int(b.get("button") or 0)},
+          "pointer": lambda b: {"down": b.get("down"), "up": b.get("up") or b.get("down")},
+          "undo": lambda b: {"n": int(b.get("n") or 1)}}
+
+
+def drawing(meta: dict[str, Any], r: dict[str, Any]) -> dict[str, Any]:
+    """A card as the page draws it: its title, keys and version, and its tree or why there is none."""
+    head = {"id": meta["id"], "title": meta["title"], "version": meta["version"], "keys": meta.get("keys") or [],
+            "chat": meta.get("chat"), "turn": meta.get("turn")}
+    if not r.get("ok"):
+        return {**head, "error": str(r.get("error") or "no answer")}
+    return {**head, "tree": r.get("tree"), "handled": r.get("handled", True)}
+
+
 def register(ctx: Any) -> None:
     app = ctx.app
-    canvas_layout.register(ctx)
-    history.register(ctx)
 
-    @app.get("/api/ws/{c}/canvas")
-    def get_canvas(c: str) -> dict[str, Any]:
-        return canvas.canvas(ctx.ws_of(c))
+    def meta_or_404(c: str, cid: str) -> dict[str, Any]:
+        ctx.ws_of(c)
+        meta = meta_of(c, cid)
+        if not meta:
+            raise HTTPException(404, f"no card {cid!r}")
+        return meta
 
-    @app.get("/api/ws/{c}/cells/names")
-    def cell_names(c: str) -> list[dict[str, Any]]:
-        return [{"id": x["id"], "notebook": x["notebook"], "title": x["title"], "slug": x.get("slug"),
-                 "exec_count": x.get("exec_count"), "ts": x.get("ts"), "status": x.get("status")}
-                for x in canvas.canvas(ctx.ws_of(c))["cells"]]
+    @app.put("/api/ws/{c}/cards/width")
+    def card_width(c: str, body: dict = Body(...)) -> dict[str, int]:
+        cols = body.get("cols")
+        if not isinstance(cols, int) or cols < MIN_WIDTH:
+            raise HTTPException(400, f"cols: a whole number of at least {MIN_WIDTH}")
+        p = home.workspace_dir(ctx.ws_of(c)) / "session.json"
+        home.write_json(p, {**(home.read_json(p, {}) or {}), "card_cols": cols})
+        return {"cols": cols}
 
-    @app.get("/api/ws/{c}/cells/{cid}")
-    def cell_get(c: str, cid: str) -> dict[str, Any]:
-        try:
-            return canvas.find(ctx.ws_of(c), cid)[1]
-        except KeyError:
-            raise HTTPException(404, cid) from None
+    @app.get("/api/ws/{c}/cards/{cid}")
+    async def card_get(c: str, cid: str, width: int = 0) -> dict[str, Any]:
+        meta = meta_or_404(c, cid)
+        w = max(MIN_WIDTH, width) if width else int(meta.get("width") or width_of(c))
+        return drawing(meta, await ask_card(c, meta, "draw", {"width": w}, ctx.sessions.unsandboxed))
 
-    @app.put("/api/ws/{c}/cells/{cid}")
-    def cell_put(c: str, cid: str, body: dict = Body(...)) -> dict[str, Any]:
-        args = dict(body)
-        if "title" in args:
-            args["question"] = args.pop("title")
-        if isinstance(args.get("payload"), dict):
-            args.update(args.pop("payload"))
-        try:
-            return canvas.update_card(ctx.ws_of(c), cid, args, by="analyst")
-        except Exception as e:  # noqa: BLE001
-            raise ctx.bad(e) from None
+    @app.post("/api/ws/{c}/cards/{cid}/{op}")
+    async def card_event(c: str, cid: str, op: str, body: dict = Body(...)) -> dict[str, Any]:
+        meta = meta_or_404(c, cid)
+        if op not in EVENTS:
+            raise HTTPException(404, f"no card event {op!r}")
+        r = await ask_card(c, meta, op, EVENTS[op](body), ctx.sessions.unsandboxed)
+        if r.get("ok"):
+            save_state(c, meta, r.get("state"))
+        return drawing(meta, r)
 
-    @app.delete("/api/ws/{c}/cells/{cid}")
-    def cell_delete(c: str, cid: str) -> dict[str, bool]:
-        try:
-            canvas.delete_card(ctx.ws_of(c), cid, by="analyst")
-        except Exception as e:  # noqa: BLE001
-            raise ctx.bad(e) from None
-        return {"ok": True}
-
-    @app.post("/api/ws/{c}/cells/{cid}/run")
-    async def cell_run(c: str, cid: str) -> dict[str, Any]:
-        try:
-            return await canvas.run_card(ctx.ws_of(c), cid, ctx.folder_of(c), unsandboxed=ctx.sessions.unsandboxed)
-        except KeyError:
-            raise HTTPException(404, cid) from None
-
-    @app.get("/api/ws/{c}/notebooks/{nb}/cells/{cid}/outputs/{i}/full")
-    def output_full(c: str, nb: str, cid: str, i: int) -> Response:
-        _, cell = canvas.find(ctx.ws_of(c), cid)
-        outs = cell.get("outputs") or []
-        if not 0 <= i < len(outs):
-            raise HTTPException(404, "no such output")
-        return Response(str(outs[i].get("text/plain", "")), media_type="text/plain")
-
-    @app.put("/api/ws/{c}/canvas/active-group")
-    def active_group(c: str) -> Response:
-        return Response(status_code=204)
+    @app.post("/api/ws/{c}/v")
+    async def v(c: str, body: dict = Body(...)) -> dict[str, Any]:
+        ctx.ws_of(c)
+        return await start_design(ctx, c, str(body.get("chat") or "main"))
 
 
 FEATURE = Feature(
     name="cards",
     title="Cards",
-    does="Claude draws a card on the Canvas tab when a picture shows the evidence better than words, and the page "
-         "opens the canvas on it.",
+    does="Claude draws interactive cards under its answers, and v draws one of the last answer.",
     register=register,
-    tools={"list_cards": list_cards, "add_card": add_card, "edit_card": edit_card, "delete_card": delete_card},
-    main_tools=("list_cards", "add_card", "edit_card", "delete_card"),
+    tools={"card": card},
+    main_tools=("card",),
     prompt="cards.md",
-    page=("canvas",),
 )

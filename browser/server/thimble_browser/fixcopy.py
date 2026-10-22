@@ -55,7 +55,7 @@ def inside(copy_root: str | Path, path: str | Path) -> Path:
 
 
 def _copy(slug: str) -> Path:
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     if not isinstance(slug, str) or not SLUG.fullmatch(slug):
         raise OutsideCopy(f"{slug!r} is not the name of a fix")
@@ -73,7 +73,7 @@ def _rel(root: Path, p: Path) -> str:
 # ---- the tools
 
 async def fix_start(t: Any, args: dict[str, Any]) -> Result:
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     fx = fix.new(str(args.get("title") or ""), "fix")
     fx["workspace"] = t.ws  # the page's fix line shows this workspace's fixes (issues.fixes_of)
@@ -159,7 +159,7 @@ async def fix_test(t: Any, args: dict[str, Any]) -> Result:
 async def fix_use(t: Any, args: dict[str, Any]) -> Result:
     """Marks the copy ready. It changes neither the terminal plugin nor this server: the page's Try it restarts the
     browser from the copy (restart.py), which would stop this agent's own turn if the tool did it."""
-    from .kernel_fix import fix  # noqa: PLC0415
+    from .kernel import fix  # noqa: PLC0415
 
     slug = str(args.get("slug"))
     _copy(slug)

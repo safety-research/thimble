@@ -15,6 +15,9 @@ from . import home
 from .hub import hub
 
 _lock = threading.Lock()
+# the kinds of chat the thread list does not show: the copies of a conversation that check a reply's marks or draw a
+# card when v is pressed (agent.Sessions.spawn)
+HIDDEN = ("checker", "designer")
 
 
 def _dir(ws: str) -> Path:
@@ -104,7 +107,7 @@ def listing(ws: str, running: set[str]) -> list[dict[str, Any]]:
     rows = []
     for p in sorted(_dir(ws).glob("*.meta.json")):
         m = home.read_json(p)
-        if not isinstance(m, dict):
+        if not isinstance(m, dict) or m.get("kind") in HIDDEN:
             continue
         recs = records(ws, m["id"])
         rows.append({**m, "n_messages": sum(1 for r in recs if r.get("type") == "user"),

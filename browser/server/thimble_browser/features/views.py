@@ -47,8 +47,8 @@ def _builder_finished(session: Any, result: str | None) -> None:
                               "view": slug, "status": "built" if built else "failed"})
 
 
-agent.AGENTS["dev"] = AgentDef(lambda f: views.builder_prompt(f, BUILD_ATTEMPTS),
-                               READ + ("read_ref", "write_view_file", "view_check", "finish_view"),
+agent.AGENTS["dev"] = AgentDef(lambda s: views.builder_prompt(s.folder, BUILD_ATTEMPTS),
+                               READ + ("write_view_file", "view_check", "finish_view"),
                                extra_roots=(views.REPO / "docs", views.REPO / "samples" / "views"),
                                finished=_builder_finished)
 

@@ -22,7 +22,7 @@ import importlib
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-MODULES: tuple[str, ...] = ("cards", "citations", "lenses", "labels", "report", "views")
+MODULES: tuple[str, ...] = ("marks", "cards", "labels", "report", "views")
 
 
 @dataclass
