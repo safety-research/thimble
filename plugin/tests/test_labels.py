@@ -196,6 +196,22 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert LB.status(LB.load(st, "apology"))["waiting"] == 2
 
 
+def test_the_model_reads_every_field_of_a_long_record_and_the_named_field_whole(root: Path):
+    # a closed ticket whose long body comes before the field the definition asks about: the record is cut field by
+    # field, so the late field reaches the model, and whole since the definition names it
+    reason = "Closed as a duplicate of ticket 12. " + "x" * 1500
+    (root / "tickets.jsonl").write_text(json.dumps({"id": 7, "body": "word " * 2000, "close_reason": reason,
+                                                    "state": "closed"}) + "\n")
+    assert run(root, "label", "dup", "--in", "tickets.jsonl", "--prompt", "yes if close_reason says it is a duplicate").returncode == 0
+    text = LB.waiting(Store(root), "dup")["units"][0]["text"]
+    rec = json.loads(text)
+    assert rec["close_reason"] == reason and rec["state"] == "closed" and rec["id"] == 7
+    assert rec["body"].endswith("characters)") and len(text) < LB.UNIT_CHARS + 200
+    # the same record under a definition that names no field: each long value is cut to the same length
+    rec = json.loads(LB._fields_cut(json.loads((root / "tickets.jsonl").read_text()), 1000, "is it a duplicate?"))
+    assert rec["close_reason"].startswith("Closed as a duplicate") and len(rec["body"]) == len(rec["close_reason"])
+
+
 def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: Path):
     run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     r = run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")

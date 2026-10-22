@@ -345,9 +345,11 @@ def rows_of(st: Store, refs: list[str]) -> dict[str, S.Row]:
     return out
 
 
-def unit_text(row: S.Row, cut: int = UNIT_CHARS) -> str:
+def unit_text(row: S.Row, cut: int = UNIT_CHARS, definition: str = "") -> str:
     """A record as the model reads it: a transcript record's blocks (its words, tool calls, results), a record's JSON,
-    or a line of text; cut at `cut` characters."""
+    or a line of text, cut to about `cut` characters. A record's fields are cut one by one, the longest first, so each
+    field keeps its start and a field late in the record is never lost; a field the definition names is cut last.
+    A cut part ends with how many characters it left out."""
     v = row.value
     if isinstance(v, dict) and v.get("type") in ("assistant", "user") and isinstance(v.get("message"), dict):
         parts = []
@@ -356,11 +358,47 @@ def unit_text(row: S.Row, cut: int = UNIT_CHARS) -> str:
             if t:
                 parts.append(t if b["kind"] == "text" else f"[{b['kind']}] {t}")
         text = f"({v['type']}) " + "\n".join(parts)
+    elif isinstance(v, dict) and len(row.raw) > cut:
+        return _fields_cut(v, cut, definition)
     elif isinstance(v, str):
         text = v
     else:
         text = row.raw
-    return text if len(text) <= cut else text[:cut] + f" … (+{len(text) - cut} characters)"
+    return _cut(text, cut)
+
+
+def _cut(text: str, n: int) -> str:
+    return text if len(text) <= n else text[:n] + f" … (+{len(text) - n} characters)"
+
+
+def _fields_cut(v: dict[str, Any], cut: int, definition: str) -> str:
+    """A record's JSON with each value cut to one length, the largest that keeps the record within `cut` characters;
+    the values of the fields the definition names count first and are cut only when they alone pass `cut`. A record
+    whose keys leave less than 20 characters for each value (a short excerpt) is cut at its end."""
+    texts = {k: x if isinstance(x, str) else json.dumps(x, ensure_ascii=False) for k, x in v.items()}
+    named = {k for k in texts if re.search(r"(?<![\w.])" + re.escape(k) + r"(?![\w])", definition)}
+    room = cut - sum(len(k) + 8 for k in texts)  # (a key, its quotes and its separators)
+    if room < 20 * len(texts):
+        return _cut(json.dumps(v, ensure_ascii=False), cut)
+    rest = room - sum(len(texts[k]) for k in named)
+    if rest < 0:
+        each = _fair_share([len(t) for t in texts.values()], room)
+        named = set()
+    else:
+        each = _fair_share([len(t) for k, t in texts.items() if k not in named], rest)
+    return json.dumps({k: x if k in named or len(texts[k]) <= each else _cut(texts[k], each) for k, x in v.items()},
+                      ensure_ascii=False)
+
+
+def _fair_share(lengths: list[int], room: int) -> int:
+    """The largest length `n` such that the lengths, each cut to `n`, add up to `room` at most."""
+    left = max(0, room)
+    for i, n in enumerate(sorted(lengths)):
+        share = left // (len(lengths) - i)
+        if n > share:
+            return share
+        left -= n
+    return max(lengths, default=0)
 
 
 def _unit_of(row: S.Row) -> dict[str, Any]:
@@ -570,7 +608,7 @@ def waiting(st: Store, name: str, cut: int = UNIT_CHARS, first: int | None = Non
         raise LabelError(f"no label {name!r}")
     refs = [r for r, u in (lab.get("units") or {}).items() if u.get("wait")]
     rows = rows_of(st, refs)
-    units = [{"ref": r, "text": unit_text(rows[r], cut)} for r in refs if r in rows]
+    units = [{"ref": r, "text": unit_text(rows[r], cut, lab.get("rule") or "")} for r in refs if r in rows]
     gone = [r for r in refs if r not in rows]
     total = len(units)
     bs = batches(units)
