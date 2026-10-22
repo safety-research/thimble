@@ -101,8 +101,9 @@ function placeRows(els: Any, p: Place, key: string): Any[] {
   return [
     Text({ key: `${key}at`, wrap: 'wrap', children: [Text({ key: 'a', bold: true, children: at }), ...(at.endsWith(`:${p.line}`) ? [] : [Text({ key: 'r', dimColor: true, children: `  (cited lines ${p.line})` })])] }),
     ...p.lines.map(l => Box({ key: `${key}l${l.n}`, flexDirection: 'row', children: [
-      Text({ dimColor: true, children: `${String(l.n).padStart(gutter)} ${l.decoded ? '›' : '│'} ` }),
-      Box({ flexShrink: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't') : Text({ wrap: 'wrap', dimColor: !inRange(l.n, p.line), children: l.text || ' ' })] }),
+      // the gap after the gutter is the box's margin: a trailing space of a Text is lost when the line beside it wraps
+      Text({ dimColor: true, children: `${String(l.n).padStart(gutter)} ${l.decoded ? '›' : '│'}` }),
+      Box({ flexShrink: 1, marginLeft: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't') : Text({ wrap: 'wrap', dimColor: !inRange(l.n, p.line), children: l.text || ' ' })] }),
     ] })),
   ]
 }

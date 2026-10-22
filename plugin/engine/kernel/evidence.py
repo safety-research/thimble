@@ -147,6 +147,12 @@ def norm_ws(s: Any) -> str:
     return " ".join(str(s).split())
 
 
+def short(s: str, n: int) -> str:
+    """At most about n characters of the text for a reason, cut at the end of a word, with "…" where it is cut."""
+    s = norm_ws(s)
+    return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + "…"
+
+
 QUOTES = str.maketrans({c: '"' for c in "“”‘’'"})
 
 
@@ -999,7 +1005,7 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     first, last = max(top, a - 1), min(top + len(texts) - 1, b + 1)
     rows = [{"n": n, "text": t} for n, t in zip(range(first, last + 1), at(first, last))]
     hay = hay_of(at(a, b))
-    problems = [] if holds(str(sub), hay) else [f"line {line} of {file} does not hold “{norm_ws(sub)[:80]}”, the words the check gave"]
+    problems = [] if holds(str(sub), hay) else [f"line {line} of {file} does not hold “{short(sub, 80)}”, the words the check gave"]
     # for the pane: each cited line in the form that holds the substring, cut around it; the lines around cut short
     for r in rows:
         if not (a <= r["n"] <= b):
@@ -1039,7 +1045,7 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     where = " or ".join(f"line {s['line']} of {s['file']}" for s in shown)
     for frag in quote_fragments(target):
         if not any(in_text(frag, h) for h in hay) and not (kind == "code" and in_code(frag, hay)):
-            problems.append(f"{where} does not hold the quoted words “{frag[:60]}”")
+            problems.append(f"{where} does not hold the quoted words “{short(frag, 60)}”")
     # a quote of a record shows its days and numbers; a claim about what code does may compute them from it (`2 ** k`)
     if kind != "code" and calendar_days(unmark(target)) and not days_shown(unmark(target), " ".join(hay)):
         problems.append(f"{where} does not show the day the words name")
