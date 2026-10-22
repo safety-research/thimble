@@ -3,7 +3,7 @@
 // one doing nothing; the feature fills them in, with its own modules beside this file (0.10: claims/term.ts, store.js,
 // graph.js, estimate.mjs, folder.program.js, prompts/lens-claims.md, claims-folder.md).
 //
-//   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts OWN_KEYS)
+//   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   claimsKey($, key, until)           c: the Claims pane (a taker as hooks/keys.ts takes it)
 //   claimsBar($, on, preview)          its items at the bar's left (`c 11 claims`, lit when a claim was corrected)
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the

@@ -24,7 +24,7 @@ import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { explainKey, explainSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelAskBand, labelAskBar, labelAskKey, labelsUnderAnswer, labelsUnderCard } from '../labels/use'
-import { SQUEEZE_KEYS, squeezeBar, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
+import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayKey } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
@@ -118,6 +118,12 @@ export async function underAll($: Engine, els: Any, row: string, cols: number): 
   return els0(await safe(squeezeUnder($, els, row, cols), []))
 }
 
+/** Whether a card is left out of what its answer shows now (a squeeze's version that leaves it out): its frame draws
+ *  nothing then. */
+export async function cardHidden($: Engine, id: string): Promise<boolean> {
+  return safe(squeezeHidesCard($, id), false)
+}
+
 /** The lines under one card's frame: what a squeeze changed of it, the labels it used. */
 export async function underCard($: Engine, els: Any, id: string, cols: number): Promise<Any[]> {
   return [...els0(await safe(squeezeUnderCard($, els, id, cols), [])), ...els0(await safe(labelsUnderCard($, els, id, cols), []))]
@@ -151,11 +157,13 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
   return items(await safe(threadsBar($, on, preview), []), preview)
 }
 
-/** A key at an empty prompt, to the first feature that takes it now: the tray while open (and ] [ at rest), a large
- *  label run's ask while it waits, the squeeze chips while open (and s), { } over the answers, the explainers' keys,
- *  c, then t. */
+/** A key at an empty prompt, to the first feature that takes it now: the squeeze chips while open (their keys came
+ *  first in 0.10 too), the tray while open (and ] [ at rest), a large label run's ask while it waits, s, { } over the
+ *  answers, the explainers' keys, c, then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
-  return (await safe(trayKey($, key, until), null))
+  const chips = await safe(squeezeHolds($), false)
+  return (chips ? await safe(squeezeKey($, key, until), null) : null)
+    ?? (await safe(trayKey($, key, until), null))
     ?? (await safe(labelAskKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))

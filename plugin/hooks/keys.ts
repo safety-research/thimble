@@ -7,7 +7,7 @@
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
 //
-// Anything no one takes is typed as usual. A card never gets thimble's own keys (OWN_KEYS); the card tool says so.
+// Anything no one takes is typed as usual. A card never gets thimble's own keys (ownKeys); the card tool says so.
 //
 // The word window. Each of these keys is a letter, and a letter also starts a word. So a letter typed within WORD_MS
 // after keys thimble took means the person types a word: the keys are undone and the word goes into the box whole, the
@@ -34,8 +34,12 @@ type Engine = EngineInterface
 /** How long after a key thimble took a letter means the person is typing a word that starts with it. */
 export const WORD_MS = 350
 
-/** thimble's own keys at an empty prompt. */
-export const OWN_KEYS = ['v', ...FIX_KEYS, ...RESTORED_KEYS, ...BAR_KEYS]
+/** thimble's own keys at an empty prompt. (Read when asked: the features' modules, which this one imports through
+ *  core/answerview.ts, import the card tool, which reads them, so a list made as this module loads would read the
+ *  features' keys before their modules set them.) */
+export function ownKeys(): string[] {
+  return ['v', ...FIX_KEYS, ...RESTORED_KEYS, ...BAR_KEYS]
+}
 
 /** How a taker takes a key: `card` (a card's own key: its keys typed quickly are not a word), `now` with its `undo`
  *  (done at once, undone when a letter follows within the word window), or `later` (done once the window closed with

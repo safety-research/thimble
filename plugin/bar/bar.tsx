@@ -37,12 +37,14 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
 
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
  *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
- *  the busy step. */
-type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown; focus?: boolean }
+ *  the busy step. `color` and `bold`: words drawn lit (`s ● short`, `s catch up`) or as a failure, not dim. */
+type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
 /** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
 export type BarItem = Item
 
 const len = textWidth
+/** How an item's words are drawn: dim, or in the item's own color. */
+const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
 const itemLen = (x: Item) => (x.key ? len(x.key) + 1 : 0) + len(x.words)
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood. */
@@ -91,7 +93,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: NAME_COLOR, children: `${x.glyph} ` })] : []),
-    ...(x.key ? [Text({ key: `k${i}`, color: KEY_COLOR, bold: true, children: x.key }), Text({ key: `w${i}`, dimColor: true, children: ` ${x.words}` })] : [Text({ key: `w${i}`, dimColor: true, children: x.words })]),
+    ...(x.key ? [Text({ key: `k${i}`, color: KEY_COLOR, bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
   ]
   const drawn = (x: Item, i: number): Any => (x.press
     ? Button({ key: `bar-${x.id}`, plain: true, label: `${x.key ? `${x.key} ` : ''}${x.words}`, onPress: x.press, children: words(x, i) })

@@ -4,7 +4,7 @@
 // list, a thread, the thread under a pane). A thread's agent is a fork of main (core/forks.ts spawnFork, kind `thread`);
 // what the person asks reaches main through core/engaged.ts, an answer they send with m through core/tell.ts.
 //
-//   THREADS_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts OWN_KEYS)
+//   THREADS_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   threadsKey($, key, until)          t: the thread list in the side pane (a taker as hooks/keys.ts takes it)
 //   threadsBar($, on, preview)         its items at the bar's right (`t 2 threads`)
 //   drawThreadsPane($, e, kind, args, els)   the side pane of kind `threads` (the list) or `thread` (one thread: what
