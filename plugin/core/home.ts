@@ -18,7 +18,7 @@ const TEMP = { plugin: 'thimble', key: 'tempDir' } as const
 
 /** The session's temp folder, as a real path: `thimble/` in the person's TMPDIR, else the home's tmp/, a folder this
  *  user owns, mode 700, and no link, so another user cannot read it or plant a link in it. The session's commands get it
- *  as their TMPDIR (hooks/path.ts), and reads there need no dialog (cards/register.ts), so it is found once per session
+ *  as their TMPDIR (hooks/path.ts), and reads there need no dialog (hooks/temp_allow.py), so it is found once per session
  *  and kept in $.state, where a reload of the plugin finds it. */
 export async function tempDir($: Engine): Promise<string> {
   const kept = (await $.state.get(TEMP)).value

@@ -266,6 +266,31 @@ export async function answerStepKey($: Engine, key: string): Promise<{ now: () =
 
 // ------------------------------------------------------------------------------------------------ hooks
 
+// main's rows as they are stored: the prompt's row, and each text row of Claude's. Its hooks take each door by name: where an
+// organization manages Claude Code, its security default sends some doors (a hook's context, an attachment) past the
+// plugins a person installs, and a hook whose door is a pattern would be counted as skipped there, with a notice
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function keepRow($: Engine, e: any, next: (e: any) => Promise<any>): Promise<any> {
+  const stored = await next(e)
+  try {
+    if (e.agentId !== undefined) return stored
+    const msg = e.message as { type?: string; content?: unknown; isMeta?: boolean }
+    const blocks = Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]) : typeof msg.content === 'string' ? [{ type: 'text', text: msg.content }] : []
+    const text = blocks.filter(b => b.type === 'text').map(b => String(b.text || '')).join('\n')
+    const row = String(stored?.uuid || e.uuid || '')
+    if (!row || !text.trim()) return stored
+    if (e.door === 'response' && msg.type === 'assistant') await noteText($, row, text)
+    else if (e.door === 'prompt' && msg.type === 'user' && !msg.isMeta) {
+      if (pending && !pending.row) pending.row = row
+      const now = await mainTurn($)
+      if (now) await editTurn($, now, t => (t.prompt.row ? t : { ...t, prompt: { ...t.prompt, row } }))
+    }
+  } catch {
+    // the row is stored whatever the record makes of it
+  }
+  return stored
+}
+
 export const registerAnswers: Register = on => {
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
@@ -303,27 +328,9 @@ export const registerAnswers: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // main's rows as they are stored: the prompt's row, and each text row of Claude's
-  on('session.append', { door: /^(prompt|response)$/ }, async ($, e, next) => {
-    const stored = await next(e)
-    try {
-      if (e.agentId !== undefined) return stored
-      const msg = e.message as { type?: string; content?: unknown; isMeta?: boolean }
-      const blocks = Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]) : typeof msg.content === 'string' ? [{ type: 'text', text: msg.content }] : []
-      const text = blocks.filter(b => b.type === 'text').map(b => String(b.text || '')).join('\n')
-      const row = String(stored?.uuid || e.uuid || '')
-      if (!row || !text.trim()) return stored
-      if (e.door === 'response' && msg.type === 'assistant') await noteText($, row, text)
-      else if (e.door === 'prompt' && msg.type === 'user' && !msg.isMeta) {
-        if (pending && !pending.row) pending.row = row
-        const now = await mainTurn($)
-        if (now) await editTurn($, now, t => (t.prompt.row ? t : { ...t, prompt: { ...t.prompt, row } }))
-      }
-    } catch {
-      // the row is stored whatever the record makes of it
-    }
-    return stored
-  }).catch(($, e, next) => next(e))
+  // main's rows as they are stored: the prompt's row, and each text row of Claude's, each door by its name (keepRow)
+  on('session.append', { door: 'prompt' }, keepRow).catch(($, e, next) => next(e))
+  on('session.append', { door: 'response' }, keepRow).catch(($, e, next) => next(e))
 
   // main's Bash calls that ran `thimble label`, and its card calls: each with its place in the turn
   on('tool.call', { tool: /^(Bash|mcp__thimble__card)$/ }, async ($, e, next) => {
