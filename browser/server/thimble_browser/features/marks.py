@@ -33,7 +33,7 @@ from typing import Any
 from .. import agent, chats, home, prompts
 from ..hub import hub
 from . import Feature
-from .cards import notice
+from .cards import fenced, notice
 
 log = logging.getLogger("thimble_browser.marks")
 
@@ -116,18 +116,19 @@ def tell_text(items: list[dict[str, Any]]) -> str:
         if m["status"] == "corrected":
             said.append(f"- {q(m.get('was') or m['words'])} is corrected to {q(m['shown'])}{why(m)}")
         elif m["status"] == "failed" and m.get("failedBy") == "evidence":
-            said.append(f"- {q(m['words'])} is marked as not confirmed: the check could not show it from the data")
+            said.append(f"- {q(m['words'])} is marked as not confirmed{why(m)}")
         elif m["status"] == "failed":
             said.append(f"- {q(m['words'])} is marked as wrong{why(m)}")
     notes = [f"- {q(n)}" for n in dict.fromkeys(m["note"] for m in items if m.get("note"))]
     if not said and not notes:
         return ""
-    parts = ["thimble checked the marks of your last reply against the data."]
+    parts = ["thimble checked the marks of your last reply against the data. Its words in the blocks below may quote "
+             "the records."]
     if said:
-        parts.append("The analyst sees these changes in the reply:\n" + "\n".join(said))
+        parts.append("The analyst sees these changes in the reply:\n" + fenced("\n".join(said)))
     if notes:
         parts.append("Under the reply, the analyst also reads what the check found false in its unmarked statements:\n"
-                     + "\n".join(notes))
+                     + fenced("\n".join(notes)))
     parts.append("Use the corrected facts from now on. The analyst has read these where they stand, so a correction of "
                  "them in your next reply would tell them twice. A claim the check could not confirm may still be "
                  "true: when you need it again, check it first.")

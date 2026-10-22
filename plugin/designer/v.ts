@@ -35,7 +35,7 @@ import { readKept, writeKept } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
-import { cut } from '../core/text.js'
+import { cut, fenced } from '../core/text.js'
 import { mainRuns } from '../core/turn'
 import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
@@ -123,20 +123,14 @@ async function forkAlive($: Engine, d: Design): Promise<boolean> {
   return !!a && !['completed', 'failed', 'killed'].includes(a.status)
 }
 
-/** A fenced block of text from the records, so it reads as data and not as words to act on. */
-function fenced(text: string): string {
-  const longest = Math.max(2, ...[...String(text).matchAll(/`+/g)].map(m => m[0].length))
-  const fence = '`'.repeat(longest + 1)
-  return `${fence}text\n${text}\n${fence}`
-}
-
 /** What the check of the answer's marks changed since main wrote it, for the fork, whose copy of the conversation
  *  ends at that answer: a card must not repeat a value the check corrected or flagged. */
 async function checkedSince($: Engine, row: string): Promise<string> {
   const reply = await replyOf($, row)
   const changed = (reply?.items ?? []).filter(m => m.status === 'corrected' || m.status === 'failed')
   if (!changed.length) return ''
-  const lines = changed.map(m => (m.status === 'corrected' ? `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
+  const lines = changed.map(m => (m.status === 'corrected' ? `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"`
+    : m.failedBy === 'check' ? `- "${m.words}" is wrong${m.reason ? `: ${m.reason}` : ''}` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
   return `\n\nSince that answer, thimble checked its marks against the data. The check found (its words quote the records):\n${fenced(lines.join('\n'))}\nThe card shows the corrected values, computed from the records.`
 }
 

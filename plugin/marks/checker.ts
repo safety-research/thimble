@@ -26,6 +26,7 @@ import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
+import { fenced } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
@@ -112,14 +113,14 @@ export function tellText(items: MarkItem[]): string {
   const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
   const said = items.filter(m => m.status === 'corrected' || m.status === 'failed').map(m => {
     if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`
-    if (m.failedBy === 'evidence') return `- ${q(m.words)} is marked as not confirmed: the check could not show it from the data`
+    if (m.failedBy === 'evidence') return `- ${q(m.words)} is marked as not confirmed${why(m)}`
     return `- ${q(m.words)} is marked as wrong${why(m)}`
   })
   const notes = notesOf(items).map(n => `- ${q(n)}`)
   if (!said.length && !notes.length) return ''
-  const parts = ['thimble checked the marks of your last reply against the data.']
-  if (said.length) parts.push(`The analyst sees these changes in the reply:\n${said.join('\n')}`)
-  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its unmarked statements:\n${notes.join('\n')}`)
+  const parts = ['thimble checked the marks of your last reply against the data. Its words in the blocks below may quote the records.']
+  if (said.length) parts.push(`The analyst sees these changes in the reply:\n${fenced(said.join('\n'))}`)
+  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its unmarked statements:\n${fenced(notes.join('\n'))}`)
   parts.push('Use the corrected facts from now on. The analyst has read these where they stand, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
   return parts.join('\n')
 }
@@ -297,9 +298,10 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       return { ...m, ...rest, shown: String(res.shown ?? m.words) }
     })))
     if (!reply) return
-    const count = (s: string) => reply.items.filter(m => mine.has(m.n) && m.status === s).length
+    const count = (s: string, by?: string) => reply.items.filter(m => mine.has(m.n) && m.status === s && (!by || m.failedBy === by)).length
     await record($, {
-      kind: 'marks', feature: 'checker', marks: c.marks.length, reply_marks: reply.items.length, verified: count('verified'), corrected: count('corrected'), failed: count('failed'), unchecked: count('unchecked'),
+      kind: 'marks', feature: 'checker', marks: c.marks.length, reply_marks: reply.items.length, verified: count('verified'), corrected: count('corrected'),
+      wrong: count('failed', 'check'), unconfirmed: count('failed', 'evidence'), unchecked: count('unchecked'),
       reply_end: c.replyEnd, spawned_ms: c.spawnedAt - c.replyEnd, fork_ms: forkEnd - c.spawnedAt, validate_ms: settled - forkEnd, settled_ms: settled - c.replyEnd,
       reply_settled: !counts(reply).checking, usage: e.usage ?? null,
     })

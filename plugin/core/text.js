@@ -4,6 +4,7 @@
 //   textWidth(s)   the cells a string takes: 2 for a wide character (CJK, most emoji), 0 for a combining mark or a
 //                  zero-width character, 1 for the rest
 //   cut(s, n, middle)  s in at most n cells, with `…` where it was cut: at its end, or in its middle
+//   fenced(text)   text in a fenced block, so a model reads text from the records as data, not as words to act on
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
 function charWidth(cp) {
@@ -53,4 +54,12 @@ export function cut(s, n, middle = false) {
   if (!middle) return `${fit(t, n - 1)}…`
   const left = Math.floor((n - 1) / 3)
   return `${fit(t, left)}…${[...fit([...t].reverse(), n - 1 - left)].reverse().join('')}`
+}
+
+/** Text in a fenced block, its fence longer than any run of backticks in it, so a model reads text from the records
+ *  as data, not as words to act on. */
+export function fenced(text) {
+  const longest = Math.max(2, ...[...String(text).matchAll(/`+/g)].map(m => m[0].length))
+  const fence = '`'.repeat(longest + 1)
+  return `${fence}text\n${text}\n${fence}`
 }

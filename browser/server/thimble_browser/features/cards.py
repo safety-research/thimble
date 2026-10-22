@@ -359,8 +359,12 @@ def checked_since(ws: str, chat: str, turn: str) -> str:
     items = [m for m in marks.reply_items(ws, chat, turn) if m.get("status") in ("corrected", "failed")]
     if not items:
         return ""
-    lines = [f"- \"{m.get('was') or m['words']}\" is wrong; it is \"{m['shown']}\"" if m["status"] == "corrected"
-             else f"- \"{m['words']}\" is not confirmed" + (f": {m['reason']}" if m.get("reason") else "") for m in items]
+    def line(m: dict[str, Any]) -> str:
+        if m["status"] == "corrected":
+            return f"- \"{m.get('was') or m['words']}\" is wrong; it is \"{m['shown']}\""
+        said = "is wrong" if m.get("failedBy") == "check" else "is not confirmed"
+        return f"- \"{m['words']}\" {said}" + (f": {m['reason']}" if m.get("reason") else "")
+    lines = [line(m) for m in items]
     return ("\n\nSince that answer, thimble checked its marks against the data. The check found (its words quote the "
             f"records):\n{fenced(chr(10).join(lines))}\nThe card shows the corrected values, computed from the records.")
 
