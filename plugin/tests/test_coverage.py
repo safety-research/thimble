@@ -399,3 +399,18 @@ def test_a_search_into_a_folder_goes_over_its_text_files(tmp_path: Path, monkeyp
     cov = CV.coverage(Store(d))
     assert {o["path"]: o["status"] for o in cov["files"]} == {f: "searched" for f in ("agents.jsonl", "events.jsonl", "notes.md", "spare.jsonl")}
     assert cov["total"]["listed_files"] == 0
+
+
+def test_heredoc_code_with_its_output_in_a_file_and_a_script_from_stdin_go_over_the_files_their_code_names(tmp_path: Path) -> None:
+    from kernel import shellcmd as SH
+
+    files = ["runs/a.jsonl", "data.jsonl"]
+    got = SH.shows("python3 - <<'PY' > $TMPDIR/rows.json\nfor l in open('runs/a.jsonl'): pass\nPY", files, "/data", "/data", lambda f: 10)
+    assert ("runs/a.jsonl", "computed", None, "python3") in got
+    # `-` is the script from stdin: the file after it is the script's argument, never read as code
+    assert SH.script_of("python3", ["-", "data.jsonl"]) is None and SH.script_of("perl", ["-ne", "print", "data.jsonl"]) is None
+    # a script path that is no regular file (a pipe, /dev/stdin) is not opened: it would wait for input
+    fifo = tmp_path / "pipe.py"
+    import os
+    os.mkfifo(fifo)
+    assert SH._script_text(str(fifo), {}) == ""

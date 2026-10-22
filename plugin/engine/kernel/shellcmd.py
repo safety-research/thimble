@@ -323,13 +323,14 @@ def stage_shows(prog: str, args: list[str]) -> tuple[str, Range | None]:
 
 def script_of(prog: str, args: list[str]) -> str | None:
     """The script file a program runs: an interpreter's first word that is no option (`python3 -I scan.py x.jsonl`),
-    or the file after `-f` (`awk -f count.awk`, `jq -f q.jq`); None for code given inline (`-c`, `-e`, `-m`)."""
+    or the file after `-f` (`awk -f count.awk`, `jq -f q.jq`); None for code given inline (`-c`, `-e`, `-m`, a cluster
+    that ends in e such as perl's `-ne`) or read from stdin (`python3 - x.jsonl <<'PY'`)."""
     if SCRIPTED.match(prog):
         skip = False
         for a in args:
             if skip:
                 skip = False
-            elif a in ("-c", "-e", "-E", "-m", "--eval", "--print", "-p"):
+            elif a in ("-", "-c", "-e", "-E", "-m", "--eval", "--print", "-p") or re.fullmatch(r"-[A-Za-z]+e", a):
                 return None
             elif a in ("-X", "-W", "-r", "--require"):
                 skip = True
@@ -632,10 +633,11 @@ def _script_key(word: str, cwd: str | None, root: str) -> str:
 
 def _script_text(key: str, scripts: dict[str, str]) -> str:
     """A script's text: as a command of the session wrote it with a here-document, else as the file holds it now (a
-    script Claude wrote with its Write tool), up to SCRIPT_MAX_BYTES; "" when neither is known."""
+    script Claude wrote with its Write tool), up to SCRIPT_MAX_BYTES; "" when neither is known, or when the path is no
+    regular file (a pipe or /dev/stdin would wait for input that never comes)."""
     if key in scripts:
         return scripts[key]
-    if key[:1] != "/":
+    if key[:1] != "/" or not os.path.isfile(key):
         return ""
     try:
         with open(key, "rb") as f:
@@ -673,12 +675,13 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, 
             computes = bool(COMPUTES.match(prog or ""))
             written = st["to"] + ([a for a in args if not a.startswith("-")] if prog == "tee" else [])
             for body in st["bodies"]:
-                if written:
+                if computes:
+                    # code the program runs, also when its output goes to a file (`python3 - <<'PY' > rows.json`)
+                    code(body, prog)
+                elif written:
                     # a here-document written to a file (`cat > scan.py <<'PY'`): a script for a later command to run
                     for to in written:
                         scripts[_script_key(to, cwd, root)] = body
-                elif computes:
-                    code(body, prog)
                 else:
                     files, folders = named(body, known, root, None)
                     out.extend((p, "listed", None, prog or "a heredoc") for p in sorted(files) + [d + "/" for d in sorted(folders)])

@@ -183,9 +183,8 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
 
     def searchable(folder: str) -> list[str]:
         """The files a search into a folder (`runs/`, `./`) goes over: its text files, since a search skips a binary
-        file, an image or a PDF."""
-        pre = "" if folder == "./" else folder
-        return [f for f in cnt if f.startswith(pre) and unit_of(f) not in ("pages", "file")]
+        file, an image or a PDF. The folder's files are one range of the sorted names (Known.under)."""
+        return [f for f in known.under("." if folder == "./" else folder.rstrip("/")) if f in cnt and unit_of(f) not in ("pages", "file")]
 
     per: dict[str, dict[str, Any]] = {}  # the touched files
 
@@ -194,7 +193,7 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
         if x is None:
             x = per[f] = {"lines": [], "hits": set(), "pages": [], "whole": False, "model": 0, "labels": set(),
                           "model_labels": set(), "searched": False, "searched_by": set(), "computed": 0,
-                          "computed_by": set()}
+                          "computed_by": set(), "named": set()}
         return x
 
     def computed(f: str, span: tuple[int, int] | None, by: str) -> None:
@@ -203,7 +202,8 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
         rows, lines = c.get("rows") or 1, c.get("lines") or 0
         part = rows
         if span and lines:
-            part = round(rows * max(0, min(span[1], lines) - span[0] + 1) / lines)
+            # at least one row: the program went over some of its lines
+            part = max(1, round(rows * max(0, min(span[1], lines) - span[0] + 1) / lines))
         x = at(f)
         x["computed"] = max(x["computed"], part)
         x["computed_by"].add(by)
@@ -244,6 +244,7 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                 if a is None or b is None:
                     a, b = 1, max(1, count(f).get("lines") or 1)
                 at(f)["lines"].append((int(a), int(b)))
+                at(f)["named"].add("Read")
         elif tool == "Grep":
             scope = st.rel(s.get("path") or s.get("cwd") or root)
             if scope is None:
@@ -266,6 +267,7 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                 if f in known.set:
                     at(f)["hits"].update(f"L{n}" for n in ns)
                     at(f)["lines"].extend((int(n), int(n)) for n in ns)
+                    at(f)["named"].add("Grep")
         elif tool == "Bash":
             cmd = str(s.get("command") or "")
             if re.match(r"^\s*thimble(\s|$)", cmd):
@@ -307,6 +309,12 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                         listed[f].add(prog)  # the output was cut before its lines
                 else:
                     listed[f].add(prog)
+
+    # a file a call named but showed nothing of (a Read past its end, a search that showed none of its lines) is only
+    # named, not touched
+    for f in [f for f, x in per.items() if not (_ranges_len(x["lines"]) or x["pages"] or x["whole"] or x["model"] or x["searched"] or x["computed"])]:
+        del per[f]
+        listed[f] |= x["named"]
 
     # the files not touched, the most of a large folder: one pass over their names, by extension, counted by (folder,
     # type, unit) as [files, units, rows, listed], and the first few of each folder named
@@ -527,7 +535,10 @@ def quiet_line(by: str) -> str:
 
 
 def _few(paths: list[str], n: int = 4, total: int | None = None) -> str:
+    """At most n of the paths, and how many more of `total` there are; "" when no path is known to name."""
     total = len(paths) if total is None else total
+    if not paths:
+        return ""
     return ", ".join(paths[:n]) + (f" and {total - min(n, len(paths)):,} more" if total > min(n, len(paths)) else "")
 
 
@@ -620,7 +631,7 @@ def coverage_sentence(cov: dict[str, Any]) -> str:
         n_of = {"listed": t["listed_files"], "untouched": t["untouched_files"]}
         words = {"model": "read only by a label's model", "searched": "searched, which lines a search showed is not known",
                  "computed": "only computed over", "listed": "only listed by name", "untouched": "untouched"}
-        parts = [f"{n_of.get(k, len(by[k])):,} {words[k]} ({_few(by[k], total=n_of.get(k))})"
+        parts = [f"{n_of.get(k, len(by[k])):,} {words[k]}" + (f" ({_few(by[k], total=n_of.get(k))})" if by[k] else "")
                  for k in ("untouched", "listed", "computed", "model", "searched") if n_of.get(k, len(by[k]))]
         n = t["not_seen_files"]
         sizes = _sizes(t.get("not_seen_units") or [])
