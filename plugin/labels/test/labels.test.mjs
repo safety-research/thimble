@@ -23,10 +23,10 @@ test('a reply gives each record its value; one it leaves out, or gives a value o
   assert.equal(got.failed['a.jsonl#L2'], 'the reply gave this record no value')
   assert.match(got.failed['a.jsonl#L3'], /"maybe", which is not one of yes, no/)
   assert.deepEqual(Object.keys(answersOf('no json here', UNITS, LABEL.values).failed), UNITS.map(u => u.ref))
-  assert.equal(failedCall({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error' }, UNITS).failed['a.jsonl#L2'], 'the call failed: api-error 529 (overloaded_error)')
-  assert.equal(failedCall({ isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed' }, UNITS).failed['a.jsonl#L2'], 'the call failed: the sign-in failed or expired; sign in again with /login')
-  assert.equal(summary('apology', { valued: 1, records: 3, counts: { yes: 1 }, waiting: 0, failed: 2, why: '1 call failed: api-error 529' }),
-    'apology: 1 of 3 records have a value (1 yes). 2 have no value (1 call failed: api-error 529): `thimble label apology --again` asks the model again.')
+  assert.equal(failedCall({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded' }, UNITS).failed['a.jsonl#L2'], 'the call failed: the API is overloaded')
+  assert.equal(failedCall({ isAnswered: false, reason: 'api-error', status: 401, error: 'authentication_failed' }, UNITS).failed['a.jsonl#L2'], 'the call failed: the sign-in failed or expired. Sign in again with /login')
+  assert.equal(summary('apology', { valued: 1, records: 3, counts: { yes: 1 }, waiting: 0, failed: 2, why: '1 call failed: the API is overloaded' }),
+    'apology: 1 of 3 records have a value (1 yes). 2 have no value (1 call failed: the API is overloaded): `thimble label apology --again` asks the model again.')
 })
 
 /** A Python for the kernel, or null. */
@@ -68,17 +68,18 @@ test('reads: the calls of a wave go out together; with their answers the values 
   assert.equal(waves[0][0].units, 4)
   assert.deepEqual(seen, [{ done: 0, of: 4, failed: 0 }, { done: 4, of: 4, failed: 0 }])
   assert.equal(out.text, 'apology: 4 of 4 records have a value (2 yes, 2 no).')
-  assert.equal(out.failed, undefined)
+  assert.equal(out.failedCalls, 0)
   const s = JSON.parse(spawnSync(LEAN, ['label', 'apology', '--json'], { cwd: root, env, encoding: 'utf8' }).stdout)
   assert.deepEqual(s.counts, { yes: 2, no: 2 })
   // again, with the call failing: its records have no value, and the reads say so
   spawnSync(LEAN, ['label', 'apology', '--in', 'chat/*.jsonl', '--prompt', 'The message apologizes to a person.'], { cwd: root, env, encoding: 'utf8' })
   const busy = async (reqs, each) => {
-    const out = reqs.map(() => ({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded_error' }))
+    const out = reqs.map(() => ({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded' }))
     for (const [i, r] of out.entries()) await each(i, r)
     return out
   }
   const failed = await readLabel({ name: 'apology', kernel, callAll: busy, template: '{{RECORDS}}' })
-  assert.equal(failed.failed, true)
-  assert.match(failed.text, /^apology: 0 of 4 records have a value\. 4 have no value \(1 call failed: api-error 529 \(overloaded_error\)\): `thimble label apology --again` asks the model again\.$/)
+  assert.equal(failed.failedCalls, 1)
+  assert.equal(failed.why, 'the API is overloaded')
+  assert.match(failed.text, /^apology: 0 of 4 records have a value\. 4 have no value \(1 call failed: the API is overloaded\): `thimble label apology --again` asks the model again\.$/)
 })

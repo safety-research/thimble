@@ -4,7 +4,8 @@
 // Claude nor the person waits on them (`thimble label NAME --wait` waits, when Claude wants the counts in the same
 // turn). No `$` here: the plugin hands in the kernel and the model, and the tests a stand-in for each.
 //
-//   readLabel({name, kernel, callAll, template, promptId, settings, progress}) -> {text, note, failed?} | {error}
+//   readLabel({name, kernel, callAll, template, promptId, settings, progress}) -> {text, note, failedCalls, calls, why}
+//                                                                                   | {error}
 //   requestFor(template, label, units, settings) -> a $.model.complete request for one batch (units: [{ref, text}])
 //   answersOf(reply, units, values)              -> {values: {ref: {value, confidence, reason}}, failed: {ref: why}}
 //   failedCall(reply, units)                     -> {failed: {ref: why}} for a call that brought no text
@@ -15,7 +16,7 @@
 // reply that is not JSON, or a value off the label's list leaves those records with no value and says why; they never
 // wait again by themselves (`--again` asks once more).
 import { fill } from '../prompts/registry.mjs'
-import { SIGN_IN_AGAIN, signInFailed } from '../core/why.js'
+import { modelWhy } from '../core/why.js'
 
 const REASON = ', "reason": one short sentence naming the words in the record that decided the value'
 
@@ -87,18 +88,9 @@ export function answersOf(reply, units, values) {
   return out
 }
 
-/** Why a call brought no text, in a few plain words: "api-error 529 (overloaded_error)", "aborted", "refused: …". */
-export function whyNot(reply) {
-  if (!reply) return 'no reply'
-  if (signInFailed(reply)) return `the sign-in failed or expired; ${SIGN_IN_AGAIN.toLowerCase()}`
-  if (reply.reason === 'api-error') return `api-error${reply.status ? ' ' + reply.status : ''}${reply.error ? ` (${String(reply.error).slice(0, 80)})` : ''}`
-  if (reply.reason === 'refused') return `refused: ${String(reply.error || '').slice(0, 120)}`
-  return String(reply.reason || 'no text')
-}
-
-/** Every record of a call that brought no text, with why. */
+/** Every record of a call that brought no text, with why in the person's words (core/why.js). */
 export function failedCall(reply, units) {
-  const why = `the call failed: ${whyNot(reply)}`
+  const why = `the call failed: ${modelWhy(reply)}`
   return { values: {}, failed: Object.fromEntries(units.map(u => [u.ref, why])) }
 }
 
@@ -174,10 +166,10 @@ export async function readLabel({ name, kernel, callAll, template, promptId = nu
   }
   const s = last || await json(['label', name])
   if (s.error) return { error: s.error }
-  const text = summary(name, { ...s, why: failedCalls ? `${failedCalls} call${failedCalls === 1 ? '' : 's'} failed: ${why.replace(/^the call failed: /, '')}` : '' })
+  why = why.replace(/^the call failed: /, '')
+  const text = summary(name, { ...s, why: failedCalls ? `${failedCalls} call${failedCalls === 1 ? '' : 's'} failed: ${why}` : '' })
   return {
-    text,
+    text, calls, failedCalls, why,
     note: `The model finished reading the records of the label ${name} (${calls} call${calls === 1 ? '' : 's'}). ${text} \`thimble label ${name}\` prints its counts.`,
-    ...(failedCalls || s.failed ? { failed: true } : {}),
   }
 }

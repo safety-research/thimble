@@ -5,7 +5,7 @@
 // pane (lastCoverage).
 import type { EngineInterface } from 'claude-code'
 
-import { rootHere, runThimble, startDir, type Ran } from '../core/env'
+import { labelsDir, rootHere, runThimble, startDir, type Ran } from '../core/env'
 import { featureOn } from '../settings/features.mjs'
 import { sessionKey } from '../hooks/conversation'
 import { busy } from './busy'
@@ -65,7 +65,7 @@ export function percent(part: number): string {
 async function countLabels($: Engine, root: string | null): Promise<number> {
   if (!root) return 0
   try {
-    const xs = await $.fs.list(`${root.replace(/\/+$/, '')}/thimble/labels`)
+    const xs = await $.fs.list((await labelsDir($, root)) ?? `${root.replace(/\/+$/, '')}/thimble/labels`)
     return xs.filter(x => x.name.endsWith('.json') && !x.name.startsWith('.')).length
   } catch {
     return 0

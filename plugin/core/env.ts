@@ -3,6 +3,7 @@
 //   thimbleHome($)          $THIMBLE_HOME, else ~/.thimble
 //   startDir($)             the folder the session started in, which a shell `cd` does not move
 //   rootHere($)             the folder under analysis as the kernel finds it (engine/kernel/store.py find_root), or null
+//   labelsDir($, root)      the folder that holds a root's labels, or null (engine/kernel/store.py records_dir)
 //   runThimble($, root, args, o)  `thimble …` as the person's own command: its records go under a session of the
 //                           person's (`person-…`), so nothing it reads counts as what Claude read
 import type { EngineInterface } from 'claude-code'
@@ -30,6 +31,16 @@ export async function startDir($: Engine): Promise<string> {
   return start.replace(/\/+$/, '')
 }
 
+/** The folder that holds the labels of `root`: <root>/thimble/labels, or, for a folder thimble may not write in, the
+ *  one kept under $THIMBLE_HOME/lean/folders/, named by the end of the folder's real path. Null when neither is there. */
+export async function labelsDir($: Engine, root: string): Promise<string | null> {
+  const real = (await $.fs.stat(root, { resolve: true }).catch(() => null))?.realPath ?? root
+  const kept = `${await thimbleHome($)}/lean/folders/${real.replace(/[^A-Za-z0-9_-]/g, '-').slice(-120)}/thimble/labels`
+  if (await $.fs.exists(kept)) return kept
+  const own = `${root.replace(/\/+$/, '')}/thimble/labels`
+  return (await $.fs.exists(own)) ? own : null
+}
+
 /** The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above the session's start folder that holds
  *  a thimble/ record folder (so a `cd` does not move it); with none there, the nearest at or above a working folder
  *  inside the start folder, or at or above a working folder outside it. Null when no folder holds records. */
@@ -38,7 +49,7 @@ export async function rootHere($: Engine): Promise<string | null> {
   if (env) return env
   const holding = async (from: string): Promise<string | null> => {
     for (let d = from; d; d = d.slice(0, d.lastIndexOf('/'))) {
-      if (await $.fs.exists(`${d}/thimble/labels`)) return d
+      if (await labelsDir($, d)) return d
     }
     return null
   }
