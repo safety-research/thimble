@@ -265,7 +265,8 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
   }
   function summary() {
     const cols = []
-    for (const r of rows.slice(0, 50)) if (r && typeof r === 'object' && !isArray(r)) for (const k of keysOf(r)) if (cols.indexOf(k) < 0) cols.push(k)
+    const seen = Object.create(null)
+    for (const r of rows) if (r && typeof r === 'object' && !isArray(r)) for (const k of keysOf(r)) if (seen[k] !== 1) { seen[k] = 1; cols.push(k) }
     let first = ''
     try { first = rows.length ? stringify(rows[0]) : '' } catch (_) { first = '' }
     const other = data ? keysOf(data).filter(k => k !== 'rows') : []

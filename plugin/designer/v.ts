@@ -96,10 +96,10 @@ export async function designAnchor($: Engine, agentId: string | undefined): Prom
   return agentId && d?.agentId === agentId && d.status === 'running' ? d.anchorRow : null
 }
 
-/** Whether v would draw a card now: an answer exists and no design runs (the bar's `v card`). Read from the state, so a
+/** Whether v would draw a card now: an answer exists, main is not working, and no design runs (the bar's `v card`). Read from the state, so a
  *  drawing that asks draws again when it changes. */
 export async function vReady($: Engine): Promise<boolean> {
-  if (!(await answerNow($))) return false
+  if (!(await answerNow($)) || (await mainRuns($))) return false
   const d = await designNow($)
   return d?.status !== 'held' && d?.status !== 'running'
 }

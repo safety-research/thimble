@@ -75,7 +75,8 @@ export const registerCards: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // the call's result: the person reads the card, not the text copy Claude got; one line in its place: what the card
-  // read, or, for a call that drew a version elsewhere (in the card's place), where the card stands
+  // read (its version stands under the card's title), or, for a call that drew a version elsewhere (in the card's
+  // place), where the card stands
   on('ui.render', { component: 'ToolResult', props: { tool: 'mcp__thimble__card' } }, async ($, e, next) => {
     if (!featureOn('cards') || e.props.isExpanded) return next(e)
     const id = await callOf($, e.props.tool_use_id)
@@ -90,7 +91,7 @@ export const registerCards: Register = on => {
     const line = call.error
       ? `did not draw: ${call.error.slice(0, 160)} · Claude got the error`
       : !away
-        ? `${meta.version > 1 ? `version ${meta.version} · ` : ''}${meta.read} from ${meta.file.split('/').pop()}`
+        ? `${meta.read} from ${meta.file.split('/').pop()}`
         : below
           ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn further down${now}`
           : `↑ version ${call.version} · “${cut(meta.title, 60)}” is drawn in its place ${meta.anchorRow ? 'under the answer v was pressed on' : 'above'}${now}`
