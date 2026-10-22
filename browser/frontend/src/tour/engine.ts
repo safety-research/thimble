@@ -93,8 +93,6 @@ export interface Step {
   gateNext?: boolean
   /** run when the tour moves off the step */
   leave?: (api: Api) => void
-  /** the terminal window of the session example slides in on this step */
-  terminal?: boolean
   /** the step shows the chat column, so the tour leaves it out while the column is folded */
   needsChat?: boolean
   /** a cue shown once the demo is over and until the analyst's first try */

@@ -16,6 +16,7 @@ import { TipButton } from '../components/Tooltip'
 import { api, canvasApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isReplay } from '../lib/events'
+import { cardClaudeMade, mayFollow } from '../lib/follow'
 import { CHECK_WORDS, checkState, type CheckFilterState } from '../lib/cardCheck'
 import { freeKeyHeld, pointKeyHeld } from '../lib/platform'
 import { takesSideways } from '../lib/scrolls'
@@ -37,7 +38,7 @@ import { Controls, type CanvasLabel } from './Controls'
 import { labelValues } from './details'
 import { DetailPanel, LabelPanel, type OutputCite } from './DetailPanel'
 import { Focus } from './Focus'
-import { addSeen, canvasLanding } from './landing'
+import { addSeen, canvasLanding, type Landing } from './landing'
 import {
   DEFAULT_VIEW,
   DOUBLE_MS,
@@ -500,6 +501,20 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     track('ui-click', { target: drop.map((g) => `group:${g}`).join(','), detail: { action: 'collapse', via: 'outside' } })
     setOpen((cur) => new Set([...cur].filter((g) => !drop.includes(g))))
   }
+  // a deck Claude is writing opens while it is written: each card Claude makes opens the collapsed frames it is in once
+  // the re-read board holds it, as a click on the deck would (peek), so it collapses again at a click outside it
+  const written = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!board || !written.current.size) return
+    const shut: string[] = []
+    for (const id of [...written.current]) {
+      if (!board.cellById.has(id)) continue
+      written.current.delete(id)
+      for (const g of framesAbove(board, id)) if (!open.has(g) && !shut.includes(g)) shut.push(g)
+    }
+    if (shut.length) peek(shut)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board, open])
   const planeAt = (clientX: number, clientY: number): Pos => {
     const r = vp.current!.getBoundingClientRect()
     return toPlane(live.current.view, clientX - r.left, clientY - r.top)
@@ -1273,8 +1288,9 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     }
   })
 
-  // ---- the landing on a switch to the tab while it has its dot (landing.ts). A card is seen once it has been in the
-  // viewport while the tab is shown ----
+  // ---- the landing on a switch to the tab while it has its dot (landing.ts), and on a card Claude made while the person
+  // is not busy (lib/follow.ts): the canvas goes to that card, whether the tab was shown or the shell just showed it. A
+  // card is seen once it has been in the viewport while the tab is shown ----
 
   const seenKey = storageKey(ws, 'canvas-seen')
   const seen = useRef<readonly string[]>(readStorage<string[]>(seenKey, []))
@@ -1282,13 +1298,23 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     seen.current = readStorage<string[]>(seenKey, [])
   }, [seenKey])
   const arrived = useRef<string[]>([])
+  const follow = useRef<string | null>(null)
   const activeNow = useRef(active)
   activeNow.current = active
   useEffect(
     () =>
       bus.on('wsEvent', (ev) => {
         const e = ev as Record<string, unknown>
-        if (activeNow.current || isReplay() || e.type !== 'cell' || e.op !== 'created' || typeof e.cell !== 'string') return
+        if (isReplay()) return
+        const made = cardClaudeMade(e)
+        if (made) {
+          written.current.add(made)
+          if (mayFollow()) {
+            follow.current = made
+            if (activeNow.current) bump((n) => n + 1)
+          }
+        }
+        if (activeNow.current || e.type !== 'cell' || e.op !== 'created' || typeof e.cell !== 'string') return
         arrived.current.push(e.cell)
       }),
     [],
@@ -1303,12 +1329,16 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     wasActive.current = active
   }, [active])
   useEffect(() => {
-    const got = landing.current
-    if (!got || !active || !vpReady || !board || !lay) return
+    const got = landing.current,
+      followed = follow.current
+    if ((!got && !followed) || !active || !vpReady || !board || !lay) return
     landing.current = null
+    follow.current = null
     // a teleport that brought the analyst here (a chip, a citation) says where to go
-    if (pendingRef.current || !got.length) return
-    const to = canvasLanding({ seen: new Set(seen.current), cards: board.cellById.keys(), arrived: got, start: openingFrame(board, lay) })
+    if (pendingRef.current || (!got?.length && !followed)) return
+    const to: Landing = followed
+      ? { kind: 'card', id: followed }
+      : canvasLanding({ seen: new Set(seen.current), cards: board.cellById.keys(), arrived: got ?? [], start: openingFrame(board, lay) })
     if (to.kind === 'stay') return
     // the deck opens, so its cards read from the first (a frame so opened collapses again at a click outside it)
     if (to.kind === 'frame' && !open.has(to.id)) peek([to.id])
