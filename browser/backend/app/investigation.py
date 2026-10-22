@@ -226,6 +226,15 @@ def emit(c: str, inv_id: str, event: dict) -> None:
         q.put_nowait(ev)
 
 
+def push(c: str, inv_id: str, event: dict) -> None:
+    """Push the event to the live SSE subscribers only: no seq, nothing written, no replay. For what is out of date
+    once the log has it, such as the words of a reply while Claude writes them (runtime.Conv.live_text). Event-loop
+    thread only."""
+    asyncio.get_running_loop()
+    for q in _subscribers.get((c, inv_id), ()):
+        q.put_nowait(event)
+
+
 # ----------------------------------------------------------------------------------------------------------
 # routes
 # ----------------------------------------------------------------------------------------------------------
@@ -295,7 +304,9 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
                         yield rec
                     last = _top(fresh)
                     continue
-                if isinstance(ev.get("seq"), int) and ev["seq"] > last:  # already replayed events are skipped
+                if "seq" not in ev:  # a pushed event (push): live only, with no id, so a reconnect never asks for it
+                    yield {"data": json.dumps(ev, ensure_ascii=False)}
+                elif isinstance(ev.get("seq"), int) and ev["seq"] > last:  # already replayed events are skipped
                     last = ev["seq"]
                     yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
         finally:

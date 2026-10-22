@@ -34,8 +34,18 @@ export const ORIENT_DEFAULT_EFFORT: OrientEffort = 'xhigh'
 /** Main's model's tip: a running session's model changes only by /model in its terminal. */
 export const MODEL_TIP = 'Run /model in the Claude Code terminal to change the model'
 
-/** What a change to main's effort or fast mode does: it is kept for main's next launch (backend events.effort_route). */
-export const NEXT_LAUNCH = 'Main runs with it from your next `thimble` launch'
+/** What a change to main's model, effort or fast mode does: the server runs main, and its next turn reads them
+ * (backend runtime.Space.spec_of). */
+export const NEXT_LAUNCH = 'Main uses it from your next message'
+
+/** The model main runs on when neither its menu nor the settings chose one (backend runtime.MAIN_MODEL). */
+export const MAIN_DEFAULT_MODEL = 'claude-opus-5-5'
+
+/** Main's model as its line shows it: the menu's choice; else the one the settings keep for main (models.main); else
+ * the model its replies came from; else the default. Pure. */
+export function mainModel(a: Attached | null | undefined, kept?: string | null): string {
+  return a?.model_choice || kept || a?.model || MAIN_DEFAULT_MODEL
+}
 
 /** Why a model's bolt cannot switch: it has no fast mode. */
 export const noFastTip = (model: string): string => `${modelLabel(model)} has no fast mode`

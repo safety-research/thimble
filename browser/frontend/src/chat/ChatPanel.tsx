@@ -29,13 +29,14 @@ import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
-import type { ChatMeta, ChatRecord, MainEffort, Proposal, SessionAlert, StartAnswer, ThreadComment, Ticket } from '../lib/types'
+import type { ChatMeta, ChatRecord, MainEffort, Proposal, SessionAlert, Settings, StartAnswer, ThreadComment, Ticket } from '../lib/types'
+import { invalidateSettings, loadSettings, modelChoices, modelLabel, onSettingsChange } from '../lib/models'
 import { colourVar } from '../files/labels'
 import { NOTE_COLOR } from '../report/checkComments'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
-import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
+import { mainEffort, mainFast, mainModel, NEXT_LAUNCH } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
@@ -55,6 +56,7 @@ import { useChat, type ChatState } from './useChat'
 import { pendingAsks, TERMINAL_WAIT, terminalWaits, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
+import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
 import { DemoNote } from './DemoNote'
 import { DEMO_NOTE, demoStop, useDemo } from '../lib/demo'
@@ -509,7 +511,22 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   )
 
   // main and every thread run on the session's model, which main's meta carries once the mirror has read it
-  const mainModel = main.meta?.attached?.model ?? null
+  // the model main keeps in the settings (models.main), which its line shows until the menu picks one (mainModel)
+  const [mainKept, setMainKept] = useState<Settings | null>(null)
+  useEffect(() => {
+    let alive = true
+    const read = () =>
+      loadSettings(ws)
+        .then((s) => alive && setMainKept(s))
+        .catch(() => undefined)
+    void read()
+    const off = onSettingsChange((w) => w === ws && void read())
+    return () => {
+      alive = false
+      off()
+    }
+  }, [ws])
+  const mainModelNow = mainModel(main.meta?.attached, mainKept?.models?.main?.model)
   const curMeta = (chat.meta?.id === current ? chat.meta : null) ?? chats.find((m) => m.id === current) ?? null
   const kind: ThreadKind | null = current === 'main' ? 'main' : curMeta ? threadKind(curMeta) : null
   const agent = kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'dev' || kind === 'step'
@@ -613,6 +630,20 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           bus.emit('toast', { text: `Effort ${e}: ${NEXT_LAUNCH}.`, kind: 'info' })
         })
         .catch((err: Error) => bus.emit('toast', { text: `Could not set the effort: ${err.message}`, kind: 'error' }))
+    },
+    [ws, main.reload],
+  )
+  const pickModel = useCallback(
+    (m: string) => {
+      track('chat-settings', { target: 'chat:main', detail: { model: m } })
+      api
+        .setModel(ws, m)
+        .then(() => {
+          invalidateSettings(ws)
+          main.reload()
+          bus.emit('toast', { text: `${modelLabel(m)}: ${NEXT_LAUNCH}.`, kind: 'info' })
+        })
+        .catch((err: Error) => bus.emit('toast', { text: `Could not set the model: ${err.message}`, kind: 'error' }))
     },
     [ws, main.reload],
   )
@@ -784,7 +815,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {chat.error && <div className="chat-error">{chat.error}</div>}
             {!chat.loading && !chat.error && kind === 'main' && (
               <>
-                <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming} retry={mainRetry} />
+                <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming || main.writing} retry={mainRetry} />
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
@@ -800,6 +831,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           <Holds className="chat-main-holds" alert={main.meta?.alert} />
           {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
           {!touring && !demo && <ProposalCard ws={ws} />}
+          {!demo && <LabelAsks ws={ws} />}
           <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           <DemoNote />
@@ -810,7 +842,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             </div>
           ) : (
             <Composer
-              model={mainModel}
+              model={mainChip ? mainModelNow : null}
+              models={mainChip ? modelChoices(mainKept, mainModelNow) : undefined}
+              onModel={mainChip ? pickModel : undefined}
               effort={mainChip ? mainEffort(attached) : null}
               onEffort={mainChip ? pickEffort : undefined}
               fast={mainChip ? mainFast(attached) : null}

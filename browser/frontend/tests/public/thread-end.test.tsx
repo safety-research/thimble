@@ -29,7 +29,7 @@ const answered: ChatRecord[] = [
 const meta = (id: string): ChatMeta =>
   ({ id, kind: 'thread', role: 'thread', title: 'runs-per-agent', created_at: '2026-10-07T10:00:00+00:00', parent: 'main', anchor: null, anchor_text: 'Runs per agent', model: null, effort: null, group: null }) as ChatMeta
 const chat = (m: ChatMeta, records: ChatRecord[]): ChatState => ({
-  meta: m, records, rows: foldRecords(records), loading: false, error: null, streaming: false, running: false,
+  meta: m, records, rows: foldRecords(records), loading: false, error: null, streaming: false, writing: false, running: false,
   send: async () => true, interrupt: async () => undefined, reload: async () => undefined,
 })
 

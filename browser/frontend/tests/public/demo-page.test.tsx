@@ -176,9 +176,17 @@ describe('what the page shows', () => {
     expect(demo[0].title).toBe('The chat')
     expect(demo[0].body).toBe("This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files.")
     expect(demo[0].body).not.toMatch(/folder of your own|run thimble/)
-    expect(demo[1].body).not.toContain('where you started thimble.')
     expect(demo.some((s) => s.body === sessionTexts(true).ask)).toBe(true)
     expect(demo.length).toBe(live.length)
+  })
+
+  test('the tour shows no terminal: the browser runs its own session, so no step says the terminal mirrors the chat', () => {
+    for (const demo of [false, true])
+      for (const s of tourSteps('⌘', true, demo)) {
+        expect(`${s.title} ${typeof s.body === 'string' ? s.body : ''}`).not.toMatch(/terminal/i)
+        expect((s as unknown as Record<string, unknown>).terminal).toBeUndefined()
+      }
+    expect(tourSteps('⌘', true, false).map((s) => s.title).slice(0, 2)).toEqual(['Your Claude Code session', 'Files'])
   })
 
   test("the tour's welcome says the line first on a demo page, then asks; elsewhere it asks and says the tour uses example data", () => {

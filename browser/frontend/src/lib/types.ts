@@ -1791,6 +1791,25 @@ export interface ReadCut {
 }
 
 /** The live run record GET /concepts/{id} carries as `run` while and after an apply on this server. */
+/** A big prompt label's run waiting for the person's choice (backend label_asks.py): what it reads, in one line, and the
+ * estimate of its model calls under the choices. */
+export interface LabelAsk {
+  id: string
+  concept: string
+  name: string
+  units: number
+  sample: number
+  calls: number
+  model: string
+  model_words: string
+  /** "Read 14,591 records of revisions.jsonl with Opus 5.5" */
+  text: string
+  /** "about 292 model calls" */
+  meta: string
+}
+
+export type LabelAskChoice = 'all' | 'sample' | 'cancel'
+
 export interface ConceptRun {
   run_id?: string | null
   status: 'running' | 'done' | 'error' | string
@@ -2061,6 +2080,8 @@ export interface Attached {
   effort?: string
   /** what the composer's chip chose for main's next launch, while this session runs */
   effort_choice?: MainEffort
+  /** the model the composer's menu chose for main's next turn (events.model_route) */
+  model_choice?: string
   /** the effort the analyst's own Claude Code settings choose (cc_settings.analyst_effort), where main's effort menu opens */
   settings_effort?: MainEffort
   /** whether the session's last reply ran in fast mode, as the mirror read it */

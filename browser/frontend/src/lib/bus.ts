@@ -15,6 +15,9 @@ export type Events = {
   /** every record of the workspace stream */
   wsEvent: WsEvent
   chat: { chat: string; deleted?: boolean }
+  /** a reply's words while Claude writes them (the stream's `chat-live` record, backend runtime Conv.live_text): the
+   * message's text so far under its `piece`, or `end` once the message is complete and its log will hold it */
+  chatLive: { chat: string; piece: string; text?: string; end?: boolean }
   cell: { notebook: string; cell: string; kind: string }
   orient: { status: string; [k: string]: unknown }
   report: { slug: string; status: string; span?: string }

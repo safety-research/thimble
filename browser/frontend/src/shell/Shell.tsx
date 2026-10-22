@@ -23,6 +23,7 @@ import { onDemoNote, useDemo } from '../lib/demo'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
+import { showsCanvas, watchInput } from '../lib/follow'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
@@ -61,7 +62,7 @@ import { ServerDown } from './ServerDown'
 import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
 import { TopBar } from './TopBar'
-import { LabelsSidebar } from './LabelsSidebar'
+import { LabelsSidebar, type SideTab } from './LabelsSidebar'
 import { TourHost } from './TourHost'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
@@ -243,10 +244,10 @@ export function Shell({ ws }: { ws: string }) {
     }
   }, [ws, firstOpen])
   const gone = useSessionGone(ws)
-  // the Labels sidebar (LabelsSidebar.tsx): open or not; it pushes the panes, or the chat when it is the only thing
+  // the Labels and Comments sidebar (LabelsSidebar.tsx): its list while open; it pushes the panes, or the chat when it is the only thing
   // open, rather than covering them
-  const [side, setSide] = useState(false)
-  useEffect(() => bus.on('openLabels', () => setSide(true)), [])
+  const [side, setSide] = useState<SideTab | null>(null)
+  useEffect(() => bus.on('openLabels', () => setSide('labels')), [])
   const demo = useDemo()
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
@@ -267,6 +268,18 @@ export function Shell({ ws }: { ws: string }) {
   const shown = useMemo(() => shownSurfaces(panes, narrow), [panes, narrow])
   useLayoutEffect(() => setShownSurfaces(shown), [shown])
   const read = readSurface(panes, geometry.panes.length === 1)
+  // a card Claude made during a turn shows the canvas when no pane shows it, unless the person is busy (lib/follow.ts);
+  // the canvas then goes to the card (Canvas.tsx, its landing)
+  const shownNow = useRef(shown)
+  shownNow.current = shown
+  useEffect(() => {
+    watchInput()
+    return bus.on('wsEvent', (ev) => {
+      if (!showsCanvas(ev as Record<string, unknown>, shownNow.current)) return
+      track('tab-activate', { target: 'panel:canvas', detail: { via: 'card-made' } })
+      setPanes((p) => show(p, 'canvas', null, recent.current))
+    })
+  }, [setPanes])
 
   const labelOf = useCallback((s: SurfaceId) => BASE.find((b) => b.id === s)?.label ?? views.find((v) => v.slug === slugOfSurface(s))?.name ?? s, [views])
   const { drag, start: startDrag } = usePaneDrag({
@@ -375,7 +388,7 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
-        {side && <LabelsSidebar ws={ws} onClose={() => setSide(false)} />}
+        {side && <LabelsSidebar ws={ws} tab={side} onClose={() => setSide(null)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />

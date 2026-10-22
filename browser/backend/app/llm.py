@@ -42,6 +42,17 @@ def forget() -> None:
         _cache.clear()
 
 
+def warm() -> None:
+    """Import the SDK and build the client for the way chosen, in a worker thread at the server's start, so the first
+    message does not wait for them. Never raises: a choice that cannot be used says so at its first turn."""
+    try:
+        import anthropic  # noqa: F401, PLC0415
+
+        client()
+    except Exception:  # noqa: BLE001
+        log.debug("the client was not built ahead", exc_info=True)
+
+
 def client() -> Any:
     """The AsyncAnthropic client for the way chosen (api-key or wif); NoCredentials when it cannot be built."""
     from anthropic import AsyncAnthropic  # noqa: PLC0415

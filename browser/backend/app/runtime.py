@@ -198,6 +198,26 @@ class Conv:
                                                      "role": "assistant", "model": model, "content": shown,
                                                      "usage": usage or {}}})
 
+    def live_text(self, piece: str, text: str | None) -> None:
+        """Main's words while Claude writes them, to the pages that are open (investigation.push, a `chat-live`
+        record): `text` is the message's text so far, as the chat will show it (session.visible), and None says the
+        message is complete, so the page drops the words once its log holds the message (emit_assistant). Only main's
+        reply streams: a thread's fork answers with reply_in_thread, and an agent's steps show as they end. Never
+        raises."""
+        if self.kind != "main":
+            return
+        from . import agents, investigation, session  # noqa: PLC0415
+
+        rec: dict[str, Any] = {"type": "chat-live", "chat": agents.MAIN_ID, "piece": piece}
+        if text is None:
+            rec["end"] = True
+        else:
+            rec["text"] = _live_shown(session.visible(text))
+        try:
+            investigation.push(self.c, investigation.MAIN, rec)
+        except Exception:  # noqa: BLE001 — the words still arrive with the message
+            log.debug("%s: live text not pushed", self.c, exc_info=True)
+
     def emit_results(self, results: list[dict[str, Any]]) -> None:
         if results:
             self.emit({"type": "user", "message": {"role": "user", "content": results}})
@@ -350,6 +370,18 @@ def _read_json(p: Path) -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
+
+
+def _live_shown(text: str) -> str:
+    """A text that is still being written, without a last line that may be the start of the end token (main's
+    `(shown in the dashboard)`, which the chat never shows), so it does not flash before the token is complete."""
+    from . import session  # noqa: PLC0415
+
+    head, _, tail = text.rpartition("\n")
+    t = tail.strip().strip("*_").lower()
+    if t.startswith("(") and session.END_TOKEN.lower().startswith(t.rstrip(".")):
+        return head.rstrip()
+    return text
 
 
 def _main_choice(ws: Path) -> dict[str, Any]:
@@ -706,6 +738,7 @@ async def _lifespan(app: Any):
         for p in sorted(config.WORKSPACES_DIR.glob(f"*/{DIR}/main.json")):
             with contextlib.suppress(Exception):
                 ensure(p.parent.parent.name)
+        _loop.run_in_executor(None, llm.warm)  # so the first message does not wait for the SDK's import
     yield
     for sp in list(_spaces.values()):
         for conv in [sp.main, *sp.convs.values()]:

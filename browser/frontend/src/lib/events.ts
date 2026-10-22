@@ -32,8 +32,14 @@ export function dispatch(ev: WsEvent, replay = false): void {
 }
 
 function fanOut(ev: WsEvent): void {
-  bus.emit('wsEvent', ev)
   const rest = ev as Record<string, unknown>
+  // a reply's words while Claude writes them: many a second, live only, so they go to the chat alone
+  if (ev.type === 'chat-live') {
+    if (typeof rest.chat === 'string' && typeof rest.piece === 'string')
+      bus.emit('chatLive', { chat: rest.chat, piece: rest.piece, text: typeof rest.text === 'string' ? rest.text : undefined, end: rest.end === true })
+    return
+  }
+  bus.emit('wsEvent', ev)
   switch (ev.type) {
     case 'chat':
       if (typeof rest.chat === 'string') bus.emit('chat', { chat: rest.chat, deleted: rest.deleted === true })

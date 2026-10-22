@@ -23,7 +23,8 @@ export interface DescribeHooks {
   /** the files a label over records applies to: the file open in the reader, or the files the view in front claims */
   appliesTo: string[]
   /** a run started for a new label (the pane polls its progress) */
-  onRun: (id: string, run: ConceptRun) => void
+  /** a run started (null: it waits for the person's choice first, chat/LabelAsk.tsx) */
+  onRun: (id: string, run: ConceptRun | null) => void
   /** fill the new-label card from a draft */
   onManual: (draft: LabelDraft) => void
   /** open the edit card of a label that exists */

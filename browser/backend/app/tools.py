@@ -2689,6 +2689,16 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if s.get("filter"):
             line += f" It is the {scope} filter now."
         return ok(line)
+    if s.get("asked"):
+        # a big prompt label waits for the analyst's choice in the page (concepts.ask_first, label_asks.py)
+        a = s["asked"]
+        line = (f"defined label {s.get('name', name)} [[concept:{s.get('concept')}]]; it has not run. "
+                f"It would read {a['units']:,} units with {a['model_words']} ({a['meta']}), so the page asks the analyst "
+                f"to run it on all of them, on a sample of {a['sample']:,}, or not at all. Do not apply it again or wait "
+                f"for it: a `label_ask` event brings their choice, and a `label_done` event the counts of a run they chose.")
+        if s.get("cell"):
+            line += f" The label's card is [[card:{s['cell']}]]."
+        return ok(line)
     if s.get("partial") and not orienting and ctx.session is None:
         concepts.tell_when_done(ctx.c, str(s["concept"]))
     # the counts as thimble.labels() and the label's panel read the rows: each record the analyst set to another value

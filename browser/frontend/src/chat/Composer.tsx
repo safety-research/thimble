@@ -1,6 +1,6 @@
-// The chat's composer: the shared composer (components/Composer) with main's model line at its foot (ModelLine). Main
-// runs in the analyst's Claude Code session, so its model is chosen in the terminal with /model. Its effort and fast mode
-// are kept for its next launch (events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
+// The chat's composer: the shared composer (components/Composer) with main's model line at its foot (ModelLine): its
+// model as a menu (`models`, `onModel`), its effort and its fast mode, which main's next turn runs with
+// (events.model_route, events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
 // (`chip`, RoleChip). A thread whose run the browser can stop (main's turn, a side thread's fork, the orientation, a
 // writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the send square is
 // its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft.
@@ -10,8 +10,11 @@ import type { MainEffort } from '../lib/types'
 import { MODEL_TIP, ModelLine } from './ModelLine'
 
 export interface ComposerProps {
-  /** the model main runs, as the mirror read it from the session's transcript; nothing while it is unknown */
+  /** the model main runs (ModelLine.mainModel); nothing while it is unknown */
   model?: string | null
+  /** with `onModel`, the model is a menu of these (lib/models modelChoices) */
+  models?: readonly string[]
+  onModel?: (model: string) => void
   /** main's effort as the line shows it (ModelLine.mainEffort) */
   effort?: MainEffort | null
   /** picks main's effort; without it the foot only names the model */
@@ -47,7 +50,7 @@ export function withDraft(drafts: Readonly<Record<string, string>>, thread: stri
   return next
 }
 
-export function Composer({ model, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, tip, stop, thread = 'main' }: ComposerProps) {
+export function Composer({ model, models, onModel, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, tip, stop, thread = 'main' }: ComposerProps) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
   const input = drafts[thread] ?? ''
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -67,6 +70,8 @@ export function Composer({ model, effort, onEffort, fast = null, onFast, chip: o
     <ModelLine
       model={model}
       modelTip={MODEL_TIP}
+      models={onModel ? models : undefined}
+      onModel={onModel}
       effort={onEffort ? effort : null}
       onEffort={(e) => onEffort?.(e as MainEffort)}
       fast={fast ?? false}

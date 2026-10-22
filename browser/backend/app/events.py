@@ -260,7 +260,7 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
 
 # the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
 # MEANWHILE (prompts/main.md)
-QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types", "citations"})
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "label_ask", "view", "card_types", "citations"})
 MEANWHILE = "meanwhile:"
 HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts
 _held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notes, once read
@@ -291,6 +291,8 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"view built: {fields.get('view') or ''}"
     elif kind == "card_types":
         line = f"card types: {fields.get('types') or ''}"
+    elif kind == "label_ask":
+        line = f"label {fields.get('name') or ''}: the analyst chose {fields.get('choice') or ''}"
     elif kind == "label_done":
         line = f"label finished: {fields.get('name') or ''}"
     elif kind == "rerun":
@@ -765,6 +767,10 @@ def _setup(c: str, body: SessionBody) -> None:
 class MainChoice(BaseModel):
     effort: str | None = None
     fast: bool | None = None
+    model: str | None = None
+
+
+MODEL_ID = re.compile(r"claude-[a-z0-9][a-z0-9.-]{1,62}")  # a model id as the API takes it, without a `[1m]` tag
 
 
 def _choose(c: str, choice: dict[str, Any]) -> None:
@@ -796,6 +802,17 @@ async def effort_route(c: str, body: MainChoice) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from e
     _choose(c, {"effort": choice})
     return {"effort": level, "choice": choice}
+
+
+@router.put("/ws/{c}/session/model")
+async def model_route(c: str, body: MainChoice) -> dict[str, Any]:
+    """The composer's model menu: the model main's next turn runs on (_choose; runtime.Space.spec_of reads it at each
+    turn). 400 for what is no model id."""
+    model = config.base_model(str(body.model or "")).lower()
+    if not MODEL_ID.fullmatch(model):
+        raise HTTPException(400, "choose a model by its id, such as claude-opus-5-5")
+    _choose(c, {"model": model})
+    return {"model": model}
 
 
 @router.put("/ws/{c}/session/fast")
