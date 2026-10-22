@@ -108,7 +108,7 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
 /** The fork ended: main reads the cards it drew, or the person reads why it drew none. */
 async function finish($: Engine, d: Design, e: { reason: string; answer: string }): Promise<void> {
   if (e.reason === 'aborted') return end($, d, 'cancelled')
-  if (e.reason === 'refusal') return end($, d, 'failed', "× The model's safeguards refused to draw this card. /model can switch to Opus 4.8, which may draw it.")
+  if (e.reason === 'refusal') return end($, d, 'failed', "× The model's safeguards refused to draw this card. /model can switch to Opus 4.8.")
   const said = cut(firstLine(e.answer), 160)
   if (e.reason === 'error') return end($, d, 'failed', `× v could not draw a card: the model call failed${said ? ` (${said})` : ''}.`)
   const drawn: CardMeta[] = []
