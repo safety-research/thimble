@@ -245,8 +245,8 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       return out
     }
     if (isArray(v)) return v
-    if (v && typeof v === 'object' && isArray(v.rows)) { data = v; return v.rows }
-    throw new Error('the file is JSON but not a list of rows, or an object with a "rows" list')
+    if (v && typeof v === 'object') { data = v; return isArray(v.rows) ? v.rows : [] }
+    throw new Error('the file is JSON but neither a list of rows nor an object')
   }
   function summary() {
     const cols = []
@@ -254,7 +254,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     let first = ''
     try { first = rows.length ? stringify(rows[0]) : '' } catch (_) { first = '' }
     const other = data ? keysOf(data).filter(k => k !== 'rows') : []
-    return { rows: rows.length, columns: cols.slice(0, 40), first: first.length > 200 ? first.slice(0, 199) + '…' : first, ...(other.length ? { other: other.slice(0, 20) } : {}) }
+    return { rows: rows.length, columns: cols.slice(0, 40), first: first.length > 200 ? first.slice(0, 199) + '…' : first, ...(other.length ? { other: other.slice(0, 20), hasRows: isArray(data.rows) } : {}) }
   }
   const OPS = {
     init(a) {

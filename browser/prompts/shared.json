@@ -78,16 +78,16 @@
           "write the rows as a JSON file in `$TMPDIR` ({{TMPDIR}})"
         ],
         [
-          "which changes when a side pane opens.",
-          "which changes when the analyst makes the chat wider or narrower."
+          "which changes when a side pane opens:",
+          "which changes when the analyst makes the chat wider or narrower:"
         ],
         [
           "the letters the card takes at an empty prompt",
           "the letters the card takes at an empty message box"
         ],
         [
-          "a text copy of the card at its width and, when it differs, beside a side pane;",
-          "a text copy of the card at its width;"
+          "(not {{KEPT}}: they open thimble's designer, fixes and panes)",
+          "(not {{KEPT}}, which are thimble's)"
         ]
       ]
     },

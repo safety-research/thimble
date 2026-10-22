@@ -11,8 +11,8 @@
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
-//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width and, when it
-//      differs, at the width beside a side pane, and the copy after each action
+//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, and the copy after
+//      each action
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card where this call stands, and the earlier call shows one line that points to it, so the card the reply talks
@@ -41,9 +41,6 @@ const MAX_ROWS_BYTES = 64 * 1024 * 1024
 const COPY_LINES = 60
 /** Rows of the screen the card's frame, the prompt box and the bar above it take, besides the card's own. */
 const AROUND_ROWS = 14
-/** The conversation's width beside a side pane on a terminal of 120 columns, which the card is also drawn at for its
- *  text copy. */
-const NARROW_COLUMNS = 68
 
 const SCHEMA = {
   type: 'object',
@@ -203,7 +200,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
       : `“${title}” is drawn ${where}. Its id is "${id}": to change it, call card again with this id.`,
     `It read ${r.summary.rows} row${r.summary.rows === 1 ? '' : 's'} from ${baseName(String(input.data))}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
-  if (r.summary.other) out.push(`The file is an object: props.rows is its "rows" list, and props.data the whole object, with ${(r.summary.other as string[]).join(', ')} too.`)
+  if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
   if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
   for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
   const own = asked.filter(k => OWN_KEYS.includes(k))
@@ -211,12 +208,6 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const other = asked.filter(k => !/^\p{L}$/u.test(k))
   if (other.length) out.push(`Note on the view: a card takes letters only, so it does not get ${other.join(' ')}. The analyst has not seen ${other.length > 1 ? 'these keys' : 'this key'} on the card.`)
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
-  const narrowWidth = cardWidth(NARROW_COLUMNS)
-  if (width > narrowWidth) {
-    const narrow = await askCard($, next, 'copy', { width: narrowWidth })
-    // shown when the narrow drawing cuts or wraps lines (it has more lines), so Claude sees what the person would
-    if (narrow?.ok && (narrow.cut?.length || narrow.lines.length > r.lines.length)) out.push('', `At ${narrowWidth} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, narrowWidth))
-  }
 
   let tallest = r.lines.length
   const actions = Array.isArray(input.actions) ? input.actions : []

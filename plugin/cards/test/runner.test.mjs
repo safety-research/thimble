@@ -124,6 +124,11 @@ test('a file that is an object gives its rows as props.rows and the whole object
   assert.deepEqual([r.lines, r.summary.other], [['1 of 9'], ['meta']])
   const again = await ask('draw', { id: 'c0000aaaa', width: 40 })
   assert.ok(again.seq > r.seq)
+  // an object of parts with no "rows" list draws from props.data, and props.rows is empty
+  writeFileSync(join(dir, 'parts.json'), JSON.stringify({ hist: [1, 2], growth: [3] }))
+  const parts = 'function view(p, s) { return s.elements.Text({ children: p.rows.length + " " + p.data.hist.length + " " + p.data.growth.length }) }'
+  const r2 = await ask('load', { id: 'c0000aaab', version: 1, title: 'T', view: parts, rows: join(dir, 'parts.json'), width: 40 })
+  assert.deepEqual([r2.ok, r2.lines, r2.summary.other, r2.summary.hasRows], [true, ['0 2 1'], ['hist', 'growth'], false])
 })
 
 test('a card loads again with the state it kept', async () => {

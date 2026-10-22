@@ -99,8 +99,8 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(text).toContain('“Scores” is drawn where this call stands')
   expect(text).toContain('It read 2 rows from runs.json, with the columns name, score.')
   expect(text).toContain('ada 3\nbram 5')
-  // the copy is also made at a narrow width, in one request that leaves the card as it is
-  expect(w.asked).toEqual(['ping', 'load', 'copy'])
+  // one request draws the card and makes its copy
+  expect(w.asked).toEqual(['ping', 'load'])
   const meta = Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))
   expect(JSON.parse(meta![1]).keys).toEqual(['s'])
   expect(Object.keys(w.files).filter(p => /\/v1\/view\.js$/.test(p))).toEqual([expect.any(String)])
