@@ -95,6 +95,29 @@ test("the view gets the palette of the request's theme as surface.colors, and dr
   await ask('ping', { theme: 'dark' })
 })
 
+test('on the light theme shade glyphs draw as █ in mixes whose lightest keeps 2:1 on white, in order; dark keeps them', async () => {
+  const view = `function view(p, s) { const { Box, Text } = s.elements, c = s.colors
+  return Box({ flexDirection: 'column', children: [
+    Text({ color: c.gray, children: ['a ░░▒▓ b', Text({ children: '░' }), Text({ backgroundColor: '#eeeeee', children: '░' })] }),
+    '░▒▓',
+  ] }) }`
+  const { id, r } = await load(view, { theme: 'dark' })
+  assert.deepEqual(r.lines, ['a ░░▒▓ b░░', '░▒▓'])
+  const light = await ask('draw', { id, width: 40, theme: 'light' })
+  assert.deepEqual((await ask('copy', { id, width: 40 })).lines, ['a ████ b█░', '███'])
+  const runs = []
+  const walk = n => { if (n && typeof n === 'object') { if (/^█+$/.test((n.c || []).join(''))) runs.push([n.p.color, n.c[0].length]); (n.c || []).forEach(walk) } }
+  walk(light.tree)
+  const lum = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0)
+  const onWhite = h => 1.05 / (lum(h) + 0.05)
+  const gray = runs.slice(0, 4).map(([c]) => c)
+  assert.deepEqual(runs.map(([, n]) => n), [2, 1, 1, 1, 1, 1, 1])
+  assert.equal(runs[3][0], gray[0], 'a Text inside the gray Text inherits its color')
+  assert.ok(onWhite(gray[0]) >= 2 && onWhite(gray[0]) < onWhite(gray[1]) && onWhite(gray[1]) < onWhite(gray[2]) && onWhite(gray[2]) < onWhite(light.tree.c[0].p.color), gray.join(' '))
+  assert.ok(onWhite(runs[4][0]) >= 2 && onWhite(runs[4][0]) < onWhite(runs[5][0]) && onWhite(runs[5][0]) < onWhite(runs[6][0]))
+  await ask('ping', { theme: 'dark' })
+})
+
 test('a text copy at another width leaves the card as it was: its width and its Buttons', async () => {
   const wide = `function view(p, s) { const { Box, Text, Button } = s.elements
   const st = s.state || { n: 0 }
