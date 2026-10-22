@@ -78,22 +78,25 @@ async function coverageRoot($: Engine): Promise<string | null> {
   return start && start !== String((await $.env.get('HOME')) || '').replace(/\/+$/, '') ? start : null
 }
 
-/** The last line a failed command said, for a notice. */
-const lastLine = (r: Ran) => (r.stderr || r.stdout).trim().split('\n').slice(-1)[0]?.slice(0, 200) || ''
-
-/** The folder's labels, as the kernel lists them. */
-async function countLabels($: Engine, root: string): Promise<number> {
-  const r = await runThimble($, root, ['label', '--json'])
+/** A command's record read as JSON, or an error that says in words why there is none: the last line of its errors,
+ *  else its exit. Its output itself is never the reason, since it is the record cut short. */
+function record(r: Ran, what: string): Any {
   try {
-    const v = JSON.parse(r.stdout)
-    return Array.isArray(v) ? v.length : 0
+    return JSON.parse(r.stdout)
   } catch {
-    throw new Error(lastLine(r) || 'thimble label gave nothing')
+    const said = r.stderr.trim().split('\n').slice(-1)[0]?.slice(0, 160)
+    throw new Error(said || (r.code ? `${what} stopped with exit code ${r.code}` : `${what} gave no record thimble could read`))
   }
 }
 
-/** Count again: the bar's coverage and labels, while Labels and coverage is on. A count that fails says so on the
- *  failure line, and the pane shows its reason until a count works. */
+/** The folder's labels, as the kernel lists them. */
+async function countLabels($: Engine, root: string): Promise<number> {
+  const v = record(await runThimble($, root, ['label', '--json']), 'thimble label')
+  return Array.isArray(v) ? v.length : 0
+}
+
+/** Count again: the bar's coverage and labels, while Labels and coverage is on, each on its own. A count that fails
+ *  says so on the failure line, and the pane shows its reason above the last count until a count works. */
 export async function recount($: Engine): Promise<void> {
   if (!featureOn('counts')) return
   asked = true
@@ -103,23 +106,22 @@ export async function recount($: Engine): Promise<void> {
   let coverage = was?.coverage ?? null
   let labels = was?.labels ?? 0
   let error: string | null = null
+  const why = (err: unknown) => String((err as Error)?.message || err).slice(0, 200)
   try {
     const session = await sessionKey($)
-    const r = await busy($, 'counting coverage', () => coverageOf($, root, session))
-    let got: Any
-    try {
-      got = JSON.parse(r.stdout)
-    } catch {
-      throw new Error(lastLine(r) || 'thimble coverage gave nothing')
-    }
+    const got = record(await busy($, 'counting coverage', () => coverageOf($, root, session)), 'thimble coverage')
     last = got
     const files = Number(got.total?.files) || 0
     coverage = files ? shareOfFiles(Number(got.total?.touched_files) || 0, files) : null
+  } catch (err) {
+    error = `Coverage could not be counted: ${why(err)}.`
+  }
+  try {
     labels = await countLabels($, root)
   } catch (err) {
-    error = String((err as Error)?.message || err).slice(0, 200)
-    failNotice($, `Coverage could not be counted: ${error}`, 'coverage')
+    error ??= `The labels could not be counted: ${why(err)}.`
   }
+  if (error) failNotice($, error, 'coverage')
   await $.state.set(COUNTS, { coverage, labels, gen: (was?.gen ?? 0) + 1, error })
   if (!error) await failCleared($, 'coverage')
 }

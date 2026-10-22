@@ -238,6 +238,48 @@ def counts_only(args: list[str]) -> bool:
     return False
 
 
+# a search's long options whose value is the next word, unless written with "="
+SEARCH_VALUED = {"--regexp", "--file", "--max-count", "--context", "--after-context", "--before-context", "--glob",
+                 "--iglob", "--type", "--type-not", "--include", "--exclude", "--exclude-dir", "--max-depth", "--threads",
+                 "--max-columns", "--encoding", "--devices", "--directories", "--label"}
+
+
+def search_operands(args: list[str]) -> list[str]:
+    """A search's words that name what it searches: its operands after the pattern (`grep -o '"cost":[0-9.]*' a.jsonl`
+    searches a.jsonl; its pattern is no file and no glob). The pattern is the value of -e or -f when given, else the
+    first word that is no option; a short flag whose value follows (`-A 3`, `-g '*.py'`, `-m5`) and a long one in
+    SEARCH_VALUED take that value; `--` ends the options."""
+    out: list[str] = []
+    pattern_given = False
+    pattern_seen = False
+    i, opts = 0, True
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if opts and a == "--":
+            opts = False
+            continue
+        if opts and a.startswith("--"):
+            name = a.split("=", 1)[0]
+            if name in ("--regexp", "--file"):
+                pattern_given = True
+            if name in SEARCH_VALUED and "=" not in a:
+                i += 1
+            continue
+        if opts and a.startswith("-") and len(a) > 1 and not a[1].isdigit():
+            for k, ch in enumerate(a[1:], 1):
+                if ch in "ABCmefgtTMd":  # a flag whose value follows, in this word or the next
+                    pattern_given = pattern_given or ch in "ef"
+                    i += 0 if k + 1 < len(a) else 1
+                    break
+            continue
+        if not pattern_given and not pattern_seen:
+            pattern_seen = True
+            continue
+        out.append(a)
+    return out
+
+
 def stage_shows(prog: str, args: list[str]) -> tuple[str, Range | None]:
     """What one stage does with the lines it gets: ("read", the lines it prints as a function of their range, None for
     all of them), ("searched", None) or ("named", None)."""
@@ -488,7 +530,7 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
         else:
             rel = os.path.normpath(os.path.join(here, t))
         if "*" in t or "?" in t:
-            hit |= K.glob(rel) or K.glob("**/" + t.lstrip("./"))
+            hit |= K.glob(rel) or K.glob("**/" + re.sub(r"^(?:\./)+", "", t))
         elif "." in t or "/" in t:
             if rel in K.set:
                 hit.add(rel)
@@ -532,7 +574,7 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None,
                 continue
             for body in st["bodies"]:
                 out.extend((f, "named", None, prog or "a heredoc") for f in sorted(named(body, known, root, None)))
-            files = named(" ".join(args), known, root, cwd, values) if prog else set()
+            files = named(" ".join(search_operands(args) if prog in SEARCHES else args), known, root, cwd, values) if prog else set()
             if not files:
                 continue
             how, rng = stage_shows(prog, args)

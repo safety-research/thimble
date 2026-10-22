@@ -130,6 +130,17 @@ test('a failure shows its line with f and F, and f asks Claude for the fix', asy
   expect(textOf(await $.ui.render(BAND))).not.toContain('f fix this')
 })
 
+test('a coverage record that cannot be read is named in words, and the labels still count', async ($, on) => {
+  const w = world(on, { ok: true, out: '{"root":"/made-up/data","files":[{"path":"a.tx' })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.ui.render(BAND)
+  await w.clock.advance(100)
+  const line = textOf(await $.ui.render(BAND))
+  expect(line).toContain('Coverage could not be counted: thimble coverage gave no record thimble could read.')
+  expect(line).not.toContain('"root"')
+  expect(line).toContain('2 labels')
+})
+
 /** Elements as plain data, for drawing the bar without a surface. */
 const ELS = { Box: (p: Any) => ({ type: 'Box', props: p }), Text: (p: Any) => ({ type: 'Text', props: p }), Button: (p: Any) => ({ type: 'Button', props: p }) }
 

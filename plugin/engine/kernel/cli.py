@@ -52,9 +52,9 @@ def out_json(v: Any) -> None:
 
 # ------------------------------------------------------------------ coverage
 
-COVER_FILES_MAX = 5000  # touched files listed one by one in --json
-COVER_UNTOUCHED_MAX = 20000  # untouched files listed in --json, at most COVER_PER_FOLDER of each folder
-COVER_PER_FOLDER = 200
+# Claude Code reads the first 4 MiB of a command's output, so the --json record keeps to COVER_BYTES
+COVER_BYTES = 3 << 20
+COVER_PER_FOLDER = 200  # untouched files listed of each folder, at most
 
 
 def cmd_coverage(a: argparse.Namespace) -> int:
@@ -67,26 +67,32 @@ def cmd_coverage(a: argparse.Namespace) -> int:
         rest = [o for o in cov["files"] if o["status"] == "not read" and not o["touched"]]
         rest += [{"path": p, "unit": u, "units": n} for p, u, n in zip(quiet["path"], quiet["unit"], quiet["units"])]
         cov["files"] = [o for o in cov["files"] if not (o["status"] == "not read" and not o["touched"])]
-        # a folder of a million files (a dataset of screenshots) would print about 100 MB, more than the shell reads of
-        # a command's output (4 MB), so its count would fail: each folder lists its first files, the touched files the
-        # first few thousand, and `cut` says how many more there are. The totals, groups and types count every file.
-        cut = {"files": 0, "untouched": 0}
-        if len(cov["files"]) > COVER_FILES_MAX:
-            cut["files"] = len(cov["files"]) - COVER_FILES_MAX
-            cov["files"] = sorted(cov["files"], key=lambda o: CV.ORDER.index(o["status"]))[:COVER_FILES_MAX]
-        if len(rest) > COVER_UNTOUCHED_MAX:
-            per: dict[str, int] = {}
-            kept = []
-            for o in rest:
-                d = o["path"].rpartition("/")[0]
-                per[d] = per.get(d, 0) + 1
-                if per[d] <= COVER_PER_FOLDER and len(kept) < COVER_UNTOUCHED_MAX:
-                    kept.append(o)
-            cut["untouched"] = len(rest) - len(kept)
-            rest = kept
+        # a folder of a million files (a dataset of screenshots) would print about 100 MB, more than Claude Code reads
+        # of a command's output, so its count would fail. The totals, groups and types count every file and always
+        # print; then the touched files by status, then each folder's first untouched files, while the record keeps to
+        # COVER_BYTES. `cut` says how many of each are left out.
+        size = lambda v: len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1  # noqa: E731
+        most = {"files": len(cov["files"]), "untouched": len(rest)}  # `cut` at its longest
+        room = COVER_BYTES - size({**cov, "files": [], "untouched": {"path": [], "unit": [], "units": []}, "cut": most})
+        files, per, kept = [], {}, []
+        for o in sorted(cov["files"], key=lambda o: CV.ORDER.index(o["status"])):
+            room -= size(o)
+            if room < 0:
+                break
+            files.append(o)
+        for o in rest:
+            d = o["path"].rpartition("/")[0]
+            per[d] = per.get(d, 0) + 1
+            if per[d] <= COVER_PER_FOLDER:
+                room -= size(o["path"]) + size(o["unit"]) + size(o["units"])
+                if room < 0:
+                    break
+                kept.append(o)
+        cut = {"files": len(cov["files"]) - len(files), "untouched": len(rest) - len(kept)}
         if cut["files"] or cut["untouched"]:
             cov["cut"] = cut
-        cov["untouched"] = {"path": [o["path"] for o in rest], "unit": [o["unit"] for o in rest], "units": [o["units"] for o in rest]}
+        cov["files"] = files
+        cov["untouched"] = {"path": [o["path"] for o in kept], "unit": [o["unit"] for o in kept], "units": [o["units"] for o in kept]}
         print(json.dumps(cov, ensure_ascii=False, separators=(",", ":"), default=str))
         return 0
     print(CV.coverage_text(cov))

@@ -264,7 +264,6 @@ def test_the_json_of_a_folder_of_many_files_stays_small(tmp_path: Path, monkeypa
     monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
     monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     monkeypatch.chdir(d)
-    monkeypatch.setattr(CLI, "COVER_UNTOUCHED_MAX", 50)
     monkeypatch.setattr(CLI, "COVER_PER_FOLDER", 10)
     import contextlib
     import io
@@ -276,6 +275,14 @@ def test_the_json_of_a_folder_of_many_files_stays_small(tmp_path: Path, monkeypa
     assert got["total"]["files"] == 120
     assert len(got["untouched"]["path"]) == 30 and got["cut"] == {"files": 0, "untouched": 90}
     assert {p.split("/")[0] for p in got["untouched"]["path"]} == {"d1", "d2", "d3"}
+    # the record keeps to what Claude Code reads of an output: the totals always, then as many files as fit
+    monkeypatch.setattr(CLI, "COVER_BYTES", len(out.getvalue()) - 200)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert CLI.main(["coverage", "--json"]) == 0
+    small = json.loads(out.getvalue())
+    assert len(out.getvalue()) <= CLI.COVER_BYTES and small["total"]["files"] == 120
+    assert 0 < len(small["untouched"]["path"]) < 30 and small["cut"]["untouched"] == 120 - len(small["untouched"]["path"])
 
 
 def test_a_glob_and_a_path_by_its_end_are_looked_up_folder_by_folder() -> None:
@@ -299,3 +306,15 @@ def test_a_glob_and_a_path_by_its_end_are_looked_up_folder_by_folder() -> None:
     assert K.ending("/work/link/runs/a/log.txt") == {"runs/a/log.txt"}
     assert SH.named("cat runs/*/meta.json; head -3 /elsewhere/runs/c.json", K, "/data", "/data") == {
         "runs/a/meta.json", "runs/b/meta.json", "runs/c.json"}
+    # only a leading "./" goes from a word: `.9*` in code names no file that starts with 9
+    assert SH.named("r = .9* x", ["9a.png", "b/9c.png", ".9d"], "/data") == {".9d"}
+
+
+def test_a_search_names_the_files_it_searches_not_its_pattern() -> None:
+    from kernel import shellcmd as SH
+
+    files = ["claude.jsonl", "images/1a.png", "images/9b.png", "src/a.py"]
+    got = SH.shows("grep -o '\"cost\":[0-9.]*' claude.jsonl", files, "/data", "/data", lambda f: 10)
+    assert [(f, how) for f, how, _, _ in got] == [("claude.jsonl", "searched")]
+    got = SH.shows("grep -rn -e '[0-9]*.png' -A 2 src/a.py", files, "/data", "/data", lambda f: 10)
+    assert [f for f, *_ in got] == ["src/a.py"]
