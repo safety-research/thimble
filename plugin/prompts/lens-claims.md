@@ -7,7 +7,7 @@ Write each claim as a full sentence that reads alone, in the message's own words
 ```
 So far    c2 · k2 · The edits after June 18 favor one side.
 Analyst   I'll tell my manager the edits were biased after June 18 and bots drove it. Is that right?
-Answer    The tilt is one editor: without Alice's [212 edits](r7#user=Alice@n), the two sides are
+Answer    The tilt is one editor: without Alice's [212 edits](#), the two sides are
           even.
 Good      "claims": [
             {"same": "c2", "quote": "the edits were biased after June 18", "by": "analyst"},

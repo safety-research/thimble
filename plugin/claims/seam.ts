@@ -1,10 +1,11 @@
-// seam.ts: where Claims meet the rest of thimble (core/answerview.ts, core/pane.ts and observer/observer.ts call each
-// function by name, since Claude Code follows `$` only into functions a file declares or imports). The base leaves each
-// one doing nothing; the feature fills them in, with its own modules beside this file (0.10: claims/term.ts, store.js,
-// graph.js, estimate.mjs, folder.program.js, prompts/lens-claims.md, claims-folder.md).
+// seam.ts: where Claims meet the rest of thimble (core/answerview.ts, core/pane.ts, core/feed.ts and observer/observer.ts
+// call each function by name, since Claude Code follows `$` only into functions a file declares or imports). The
+// feature's modules stand beside this file: term.ts (the store, a look's claims, c, /claims, the folder's map),
+// store.js (the claims as pure functions), graph.js and pane.tsx (the pane), estimate.mjs (the folder's size for the
+// map's estimate), lens.mjs (the observer's claims lens); prompts/lens-claims.md, prompts/claims-folder.md.
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
-//   claimsKey($, key, until)           c: the Claims pane (a taker as hooks/keys.ts takes it)
+//   claimsKey($, key, until)           c: the Claims pane, once the word window closed (a taker as hooks/keys.ts takes it)
 //   claimsBar($, on, preview)          its items at the bar's left (`c 11 claims`, lit when a claim was corrected)
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the
 //                                      clusters, as its {{CLAIMS}}, {{CLUSTERS}} and {{GROWN}} lines
@@ -12,12 +13,17 @@
 //                                      look.out.clusters), placed by their words in the look's messages
 //   claimsLookFailed($, look, why)     a look that gave nothing: the turn's claims are missing, and why
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
-//   registerClaims                     its own hooks (/claims, ...)
+//   folderClaimsFromFeed($, ev)        a `folder_claims` line of the change feed: the folder's map kept by
+//                                      `thimble claims save`, brought into the claims
+//   registerClaims                     its own hooks (/claims)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
+import { featureOn } from '../settings/features.mjs'
+import { drawClaims } from './pane'
+import { claimsBarWords, claimsDigest, folderClaimsFromFeed as fromFeed, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,28 +31,38 @@ type Any = any
 
 export const CLAIMS_KEYS = ['c']
 
-export async function claimsKey(_$: Engine, _key: string, _until: number): Promise<Take | null> {
-  return null
+export async function claimsKey($: Engine, key: string, _until: number): Promise<Take | null> {
+  if (key !== 'c' || !featureOn('claims')) return null
+  // after the word window, as 0.10 did: `c` that starts a word is typed
+  return { later: () => openClaims($) }
 }
 
-export async function claimsBar(_$: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
-  return []
+export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  if (!on('claims')) return []
+  if (preview) return [{ id: 'claims', key: 'c', words: 'claims' }]
+  return [{ id: 'claims', key: 'c', words: await claimsBarWords($), press: () => openClaims($) }]
 }
 
-export async function claimsState(_$: Engine): Promise<Record<string, unknown>> {
-  return {}
+export async function claimsState($: Engine): Promise<Record<string, unknown>> {
+  return claimsDigest($)
 }
 
-export async function claimsMerge(_$: Engine, _look: Look): Promise<void> {
-  return undefined
+export async function claimsMerge($: Engine, look: Look): Promise<void> {
+  await lookClaims($, look)
 }
 
-export async function claimsLookFailed(_$: Engine, _look: Look, _why: string): Promise<void> {
-  return undefined
+export async function claimsLookFailed($: Engine, look: Look, why: string): Promise<void> {
+  await lookFailed($, look, why)
 }
 
-export async function drawClaimsPane(_$: Engine, _e: Any, _args: unknown, els: Any): Promise<unknown> {
-  return els.Text({ dimColor: true, children: 'No claims yet.' })
+export async function drawClaimsPane($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
+  return drawClaims($, e, args, els)
 }
 
-export const registerClaims: Register = () => undefined
+export async function folderClaimsFromFeed($: Engine, ev: Any): Promise<void> {
+  await fromFeed($, ev)
+}
+
+export const registerClaims: Register = (on, options) => {
+  registerClaimsTerm(on, options)
+}

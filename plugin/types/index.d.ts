@@ -119,6 +119,12 @@ declare module 'claude-code' {
       /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
        *  shown, what the version shown did to each (squeeze/cards.ts) */
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
+
+      // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
+      /** { v, session, updated, claims, clusters, gaps, folder?, folderAsked? } (claims/store.js) */
+      claims: unknown
+      /** the folder's estimate for its map, read again after a few minutes: { root, at, value } (claims/estimate.mjs) */
+      claimsOffer: { root: string; at: number; value: unknown } | null
     }
   }
 }

@@ -13,6 +13,8 @@ session's permission mode and sandbox like any other command.
     thimble fix new "TITLE" [--kind fix|feature|report] | status | use SLUG | undo | draft SLUG --from FILE
                                                change or report thimble itself, in a copy of its code, and share it
                                                only after the person reads the exact text (thimble fix --help)
+    thimble claims save --from FILE            check every citation of a map of the folder's claims and keep it for
+                                               the Claims pane (the guide the request names says its shape)
 
 Add --json to label or coverage for the whole record.
 """
@@ -26,6 +28,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import claims as CL
 from . import coverage as CV
 from . import estimate as EST
 from . import fix as FX
@@ -55,6 +58,27 @@ def out_json(v: Any) -> None:
 # Claude Code reads the first 4 MiB of a command's output, so the --json record keeps to COVER_BYTES
 COVER_BYTES = 3 << 20
 COVER_PER_FOLDER = 200  # untouched files named of each folder, at most
+
+
+def cmd_claims(a: argparse.Namespace) -> int:
+    if a.verb != "save" or not a.from_file:
+        print("thimble claims save --from FILE: check every citation of the folder's map of claims and keep it", file=sys.stderr)
+        return 2
+    try:
+        got = CL.save(Store(), Path(a.from_file))
+    except CL.ClaimsError as err:
+        print(f"thimble claims: {err}", file=sys.stderr)
+        return 1
+    if a.json:
+        out_json(got)
+        return 0
+    print(f"saved the folder's claims: {got['claims']} claims in {got['clusters']} clusters")
+    print(f"  {got['holds']} of {got['total']} citations hold")
+    for line in got["problems"][:40]:
+        print(f"  problem: {line}")
+    if len(got["problems"]) > 40:
+        print(f"  and {len(got['problems']) - 40} more problems")
+    return 0
 
 
 def cmd_coverage(a: argparse.Namespace) -> int:
@@ -469,7 +493,7 @@ def cmd_fix(a: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{label,coverage,fix}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{label,coverage,claims,fix}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -502,6 +526,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
+    p = sub.add_parser("claims", help="check and keep a map of the folder's claims, for the Claims pane")
+    p.add_argument("verb", choices=("save",))
+    p.add_argument("--from", dest="from_file", metavar="FILE", help="the map, as JSON")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_claims)
     p = sub.add_parser("fix", help="change or report thimble itself", description=FIX_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter,
                        usage="thimble fix {new,status,use,title,undo,remove,draft} ...")
@@ -520,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__.strip())
         return 0
     if not args[0].startswith("-") and args[0] not in sub.choices:
-        ap.error(f"no command {args[0]!r}: the commands are label, coverage and fix")
+        ap.error(f"no command {args[0]!r}: the commands are label, coverage, claims and fix")
     a = ap.parse_args(args)
     if not getattr(a, "fn", None):
         print(__doc__.strip())
