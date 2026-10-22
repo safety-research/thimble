@@ -15,7 +15,7 @@ import type { Register } from 'claude-code'
 
 import { failNotice } from '../bar/fix'
 import { featureOn } from '../settings/features.mjs'
-import { cardKey, cardPost, frame, framesUnder, keepSearch, keptSearchEdit, noteColumns, searchTyped } from './draw'
+import { cardKey, cardPost, clientFault, frame, framesUnder, keepSearch, keptSearchEdit, noteColumns, searchTyped } from './draw'
 import { callOf, cardIdOf, metaOf, restoreCards, searchNow } from './store'
 import { cardCall, registerCardTool } from './tool'
 
@@ -88,6 +88,12 @@ export const registerCards: Register = on => {
   // a card's Client posted: a Button, a click, or a key while the card holds the keyboard
   on('ui.message', { element: /^card-c[0-9a-f]+$/ }, async ($, e) => cardPost($, String(e.element).slice(5), e.data))
     .catch(() => ({}))
+
+  // a card's Client failed on screen: the card says why where it stood
+  on('ui.fault', { element: /^card-c[0-9a-f]+$/ }, async ($, e, next) => {
+    await clientFault($, String(e.element).slice(5), String(e.reason ?? ''))
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // keys at an empty prompt reach the focused card when it lists them (v and the failure line's keys come first); while
   // a `/` search runs, what the prompt box holds is the search

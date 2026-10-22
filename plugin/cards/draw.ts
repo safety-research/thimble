@@ -34,6 +34,9 @@ let columnsSeen = 0
 // until the card changes or the screen's width does
 const pending = new Set<string>()
 const failed = new Set<string>()
+// the cards whose Client failed on screen, by card and version: their frame says why in its place (for this load of the
+// module: a resumed session tries again)
+const faulted = new Map<string, string>()
 
 /** The screen's width, as the last drawing of a message or a card saw it. */
 export function noteColumns(columns: number | undefined): void {
@@ -107,21 +110,37 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
   const focused = (await focusNow($)) === meta.id
   const search = await searchNow($)
   if (!t || t.gen !== meta.gen || t.width !== width) redrawLater($, meta, width)
-  const drawn = t && t.gen === meta.gen
+  const fault = faulted.get(`${meta.id}:${meta.gen}`)
+  const drawn = t && t.gen === meta.gen && !fault
   const rows: Any[] = [
     E.Text({ key: 'title', children: [E.Text({ bold: true, children: meta.title }), meta.version > 1 ? E.Text({ dimColor: true, children: `  version ${meta.version}` }) : '', note ? E.Text({ dimColor: true, children: `  ${note}` }) : ''] }),
     drawn
       ? E.Client({ key: `card-${meta.id}`, module: './client.tsx', props: { tree: t!.tree, width: t!.width }, width: t!.width })
-      : E.Text({ key: 'wait', dimColor: true, children: meta.error ? '' : 'drawing…' }),
+      : E.Text({ key: 'wait', dimColor: true, children: meta.error || fault ? '' : 'drawing…' }),
   ]
+  if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   if (focused && (meta.keys.length || search?.id === meta.id)) {
     const words = search?.id === meta.id && !search.kept
       ? `searching “${search.text}” · Enter keeps it · an empty prompt ends it`
-      : `keys ${meta.keys.join(' ')} at an empty prompt${meta.keys.includes('/') ? ' · / searches' : ''}${search?.id === meta.id ? ` · kept: “${search.text}”` : ''}`
+      : [
+          meta.keys.some(k => k !== '/') ? `keys ${meta.keys.filter(k => k !== '/').join(' ')} at an empty prompt` : '',
+          meta.keys.includes('/') ? '/ searches' : '',
+          search?.id === meta.id ? `kept: “${search.text}”` : '',
+        ].filter(Boolean).join(' · ')
     rows.push(E.Text({ key: 'keys', dimColor: true, wrap: 'truncate-end', children: words }))
   }
   return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'claude' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: width + 4, children: rows })
+}
+
+/** The card's Client failed on screen (Claude Code's ui.fault): its frame draws the reason in its place from now on,
+ *  and the failure line says it. A new version of the card is drawn again. */
+export async function clientFault($: Engine, id: string, reason: string): Promise<void> {
+  const meta = await metaOf($, id)
+  if (!meta) return
+  faulted.set(`${id}:${meta.gen}`, reason.slice(0, 200))
+  $.ui.invalidate('ui.render')
+  failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`)
 }
 
 /** The cards drawn under an answer, by the answer's row, oldest first. */

@@ -124,6 +124,18 @@ function view(p, s) { return s.elements.Text({ children: 'ok' }) }`)
   assert.equal((await ask('draw', { id: 'c0000ffff', width: 20 })).missing, true)
 })
 
+test('a key the view fails on is undone: the card keeps the state it had; a border style Claude Code lacks is noted', async () => {
+  const { id, r } = await load(`const keys = "x"
+function onKey(k, s) { s.setState({ broken: true }) }
+function view(p, s) { if (s.state && s.state.broken) return p.rows[99].name; return s.elements.Box({ borderStyle: 'wavy', children: [s.elements.Text({ children: 'whole' })] }) }`)
+  assert.deepEqual(r.notes, ['borderStyle "wavy" is not a border style (single, double, round, bold, singleDouble, doubleSingle, classic, arrow, dashed, quote), so that Box has no border'])
+  const k = await ask('key', { id, key: 'x' })
+  assert.equal(k.ok, false)
+  const d = await ask('draw', { id, width: 20, text: true })
+  assert.deepEqual(d.lines, ['whole'])
+  assert.equal(d.state, 'null')
+})
+
 test('the sandbox: no process, require, import, fetch or timers, and no code from strings by any path', async () => {
   const probe = `function view(p, s) {
   const out = []

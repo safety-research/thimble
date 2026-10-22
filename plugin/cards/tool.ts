@@ -149,9 +149,11 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   }
 
   const keys = [...new Set([...String(r.keys || '')].filter(k => /^[\p{L}\p{N}\p{P}\p{S}]$/u.test(k) && k !== 'v'))]
+  // a card draws under the call that drew its first version (when the first call failed, the call that fixed it)
   const next: CardMeta = {
     ...meta, version, title, keys, rows: r.summary.rows, columns: r.summary.columns, file: String(input.data),
     gen: meta.gen + 1, error: null, anchorRow: meta.anchorRow ?? anchorRow, at: Date.now(),
+    toolUseId: meta.version === 0 ? toolUseId : meta.toolUseId,
   }
   await remember(next, { version })
   await setTree($, id, { gen: next.gen, width, tree: r.tree, pointer: !!r.pointer })
@@ -169,6 +171,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     `It read ${r.summary.rows} row${r.summary.rows === 1 ? '' : 's'} from ${baseName(String(input.data))}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
   if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
+  for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
 
   const actions = Array.isArray(input.actions) ? input.actions : []

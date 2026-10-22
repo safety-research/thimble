@@ -24,7 +24,7 @@ export type CardMeta = {
   id: string
   version: number // the version on screen; 0 while no version has drawn
   title: string
-  toolUseId: string // the call that drew it first: it draws under that call
+  toolUseId: string // the call that drew its first version: it draws under that call
   agentId: string | null
   anchorRow: string | null // the answer a designer fork's card draws under
   keys: string[]

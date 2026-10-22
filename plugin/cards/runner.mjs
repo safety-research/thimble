@@ -103,8 +103,9 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     Text: ['color', 'backgroundColor', 'dimColor', 'bold', 'italic', 'underline', 'strikethrough', 'inverse', 'wrap'],
     Button: ['label', 'plain', 'dimColor', 'variant'],
   }
+  const BORDERS = ['single', 'double', 'round', 'bold', 'singleDouble', 'doubleSingle', 'classic', 'arrow', 'dashed', 'quote']
   let rows = [], title = '', state, query = null, columns = 80
-  let fns = null, pointer = null, keyListener = null, handlers = [], dirty = false, nodes = 0
+  let fns = null, pointer = null, keyListener = null, handlers = [], dirty = false, nodes = 0, notes = []
   const element = t => function (props) {
     const p = props && typeof props === 'object' ? props : {}
     if (arguments.length > 1) {
@@ -150,6 +151,11 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       const v = src[k]
       if (typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && v === v && v !== Infinity && v !== -Infinity)) p[k] = v
     }
+    if (t === 'Box' && 'borderStyle' in p && BORDERS.indexOf(p.borderStyle) < 0) {
+      const note = 'borderStyle "' + Str(p.borderStyle).slice(0, 40) + '" is not a border style (' + BORDERS.join(', ') + '), so that Box has no border'
+      if (notes.indexOf(note) < 0) notes.push(note)
+      delete p.borderStyle
+    }
     if (t === 'Button') {
       if (typeof src.onPress === 'function') { handlers.push(src.onPress); p.onPress = handlers.length - 1 }
       if (typeof src.key === 'string' || typeof src.key === 'number') p.key = Str(src.key)
@@ -165,9 +171,10 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       pass++
     } while (dirty && pass < 3)
     nodes = 0
+    notes = []
     const c = kids(tree, 0, false, [])
     const root = c.length === 1 && c[0].t === 'Box' ? c[0] : { t: 'Box', p: { flexDirection: 'column' }, c }
-    return { tree: root, pointer: pointer !== null }
+    return { tree: root, pointer: pointer !== null, notes }
   }
   function saved() {
     try { return stringify(state === undefined ? null : state) } catch (e) { throw new Error('the state is not plain JSON: ' + Str(e && e.message)) }
@@ -244,15 +251,21 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     save() { return { saved: saved(), query } },
     restore(a) { state = a.saved == null ? undefined : parse(a.saved); query = a.query; return {} },
   }
+  // an event the view fails on is undone: the card keeps the state and search it had before it
   function call(op, json) {
+    let before = null
     try {
+      if (op === 'key' || op === 'press' || op === 'pointer' || op === 'query') before = { state: saved(), query }
       const a = parse(json)
       const r = OPS[op](a)
       if (r.ok === false) return stringify(r)
       const d = draw()
-      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, pointer: d.pointer, state: saved(), query }))
+      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, pointer: d.pointer, notes: d.notes, state: saved(), query }))
     } catch (e) {
-      try { return stringify({ ok: false, phase: op === 'init' ? 'view' : op, error: said(e) }) } catch (_) { return '{"ok":false,"error":"the view failed"}' }
+      try {
+        if (before) { state = before.state === 'null' ? undefined : parse(before.state); query = before.query }
+        return stringify({ ok: false, phase: op === 'init' ? 'view' : op, error: said(e) })
+      } catch (_) { return '{"ok":false,"error":"the view failed"}' }
     }
   }
   return freeze({ call })
