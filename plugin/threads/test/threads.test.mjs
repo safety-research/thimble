@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ago, display, firstMessage, forkDirective, nameOf, nextMessage, rowsOf, sentNote, threadKey, turnsOf } from '../threads.mjs'
+import { ago, display, firstMessage, forkDirective, nameOf, nextMessage, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
 
 test('one thread per citation, explainer, card or pane; a citation\'s evidence pane is that citation\'s thread', () => {
   const cite = threadKey({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } })
@@ -61,6 +61,19 @@ test("a fork's transcript is the thread's turns: the question after its directiv
     ['person', 'and the 3?', 'Runs', null], ['claude', 'They used the old config.', null, null],
   ])
   assert.match(sentNote({ subject: 'Runs', turns: shown }), /^The analyst sent you the answer of a side thread about Runs\. They asked there: "and the 3\?"\nThe side agent answered:\nThey used the old config\.$/)
+})
+
+test('a step reads without the folders it ran in: no leading cd, paths in the data folder relative, others by name', () => {
+  const root = '/made-up/data'
+  assert.equal(stepWords('cd /made-up/data/runs/r1 && python3 count.py', root), 'python3 count.py')
+  assert.equal(stepWords('cd "/made-up/data" ; cd runs && wc -l events.jsonl', root), 'wc -l events.jsonl')
+  assert.equal(stepWords('python3 /made-up/data/tools/count.py /made-up/data/runs/r1/events.jsonl', root), 'python3 tools/count.py runs/r1/events.jsonl')
+  assert.equal(stepWords('Read /made-up/data/harness/config.yaml', root), 'Read harness/config.yaml')
+  assert.equal(stepWords('ls /made-up/data', root), 'ls .')
+  assert.equal(stepWords('cat /home/someone/notes/todo.txt | head', root), 'cat …/todo.txt | head')
+  assert.equal(stepWords('cd /made-up/data/runs/r1', root), 'cd runs/r1')
+  assert.equal(stepWords('Let me count.', root), 'Let me count.')
+  assert.equal(stepWords('grep -c merged forge.db', ''), 'grep -c merged forge.db')
 })
 
 test('the list: the newest first, how many questions, the last one, how long ago', () => {
