@@ -276,3 +276,26 @@ def test_the_json_of_a_folder_of_many_files_stays_small(tmp_path: Path, monkeypa
     assert got["total"]["files"] == 120
     assert len(got["untouched"]["path"]) == 30 and got["cut"] == {"files": 0, "untouched": 90}
     assert {p.split("/")[0] for p in got["untouched"]["path"]} == {"d1", "d2", "d3"}
+
+
+def test_a_glob_and_a_path_by_its_end_are_looked_up_folder_by_folder() -> None:
+    # the sorted list of files is the only index: a glob is matched one part of the path at a time, and a path that
+    # does not resolve from the command's folder matches by its end (after a `cd`, or through a link to the folder)
+    from kernel import shellcmd as SH
+
+    files = ["README.md", "notes.txt", "runs/a/log.txt", "runs/a/meta.json", "runs/b/meta.json", "runs/b/x/meta.json",
+             "runs/c.json", "shots/d1/1.png", "shots/d1/2.png", "shots/d2/3.png"]
+    K = SH.Known(files)
+    assert K.glob("*") == {"README.md", "notes.txt"}
+    assert K.glob("runs/*/meta.json") == {"runs/a/meta.json", "runs/b/meta.json"}
+    assert K.glob("runs/*.json") == {"runs/c.json"}
+    assert K.glob("**/meta.json") == {"runs/a/meta.json", "runs/b/meta.json", "runs/b/x/meta.json"}
+    assert K.glob("**/*.png") == {"shots/d1/1.png", "shots/d1/2.png", "shots/d2/3.png"}
+    assert K.glob("runs/**/*.txt") == {"runs/a/log.txt"}
+    assert K.glob("shots/d?/[13].png") == {"shots/d1/1.png", "shots/d2/3.png"}
+    assert K.glob("**/x*2") == set() and K.glob("runs/*") == {"runs/c.json"}
+    assert K.ending("meta.json") == {"runs/a/meta.json", "runs/b/meta.json", "runs/b/x/meta.json"}
+    assert K.ending("b/meta.json") == {"runs/b/meta.json"}
+    assert K.ending("/work/link/runs/a/log.txt") == {"runs/a/log.txt"}
+    assert SH.named("cat runs/*/meta.json; head -3 /elsewhere/runs/c.json", K, "/data", "/data") == {
+        "runs/a/meta.json", "runs/b/meta.json", "runs/c.json"}

@@ -55,6 +55,26 @@ def feed(tmp: Path) -> list[dict]:
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
 
+def test_coverage_reads_a_label_from_its_summary_and_not_its_records(root: Path, monkeypatch: pytest.MonkeyPatch):
+    # a label of millions of records is a file of hundreds of megabytes: the label keeps a summary per file as it
+    # writes, and coverage reads the label file again only when it changed in another way
+    assert run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog").returncode == 0
+    st = Store(root)
+    read, read_json = [], Store.read_json
+    monkeypatch.setattr(Store, "read_json", staticmethod(lambda p: read.append(p.name) or read_json(p)))
+    got = LB.summaries(st)
+    assert [(s["name"], s["sessions"], s["files"]) for s in got] == [("sorry", ["s-test"], {"chat/room.jsonl": [0, 6]})]
+    assert CV.coverage(st)["total"]["computed_rows"] == 6 and "sorry.json" not in read
+    # a label file another tool changed is read again
+    p = LB.path(st, "sorry")
+    lab = json.loads(p.read_text())
+    lab["units"] = {k: {**u, "by": "model"} for k, u in lab["units"].items()}
+    p.write_text(json.dumps(lab))
+    assert LB.summaries(st)[0]["files"] == {"chat/room.jsonl": [6, 0]}
+    p.unlink()
+    assert LB.summaries(st) == []
+
+
 def test_a_regex_label_gives_each_record_a_value_and_prints_its_counts(root: Path):
     r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     assert r.returncode == 0, r.stdout + r.stderr

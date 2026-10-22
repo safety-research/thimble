@@ -158,11 +158,19 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     from . import labels as LB
 
     files = S.list_files(st.root)
-    cnt = S.counts(st.root, files, st.cache / "counts.json")
-    unit_of = {f: S.UNIT_OF_KIND.get(cnt.get(f, {}).get("kind") or "", "file") for f in files}
     # the files, indexed once for the commands' paths (shellcmd.Known); what happened to each file is kept only for the
     # files something touched, since in a folder of a million files nearly every file is untouched
     known = SH.Known(files)
+    # rows are counted only for the sources and PDFs: one test per extension, and a name with none tested alone
+    cnt = S.counts(st.root, [f for ext, fs in known.by_ext.items() if not ext or S.counted("x" + ext) for f in fs],
+                   st.cache / "counts.json")
+
+    def count(f: str) -> dict[str, Any]:
+        return cnt.get(f) or S.whole_file(f)
+
+    def unit_of(f: str) -> str:
+        c = cnt.get(f)
+        return S.UNIT_OF_KIND.get(c["kind"] or "", "file") if c else "file"
     per: dict[str, dict[str, Any]] = {}
 
     def at(f: str) -> dict[str, Any]:
@@ -173,46 +181,36 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                           "pages": [], "whole": False}
         return x
     # the labels this session applied (each label keeps the sessions that defined it): a model's reads of a --prompt
-    # label's records, a rule's pass over the others
+    # label's records, a rule's pass over the others (labels.summaries: per file, never the label's records)
     want = st.session if session == "" else session
-    label_names = [n for n in LB.names(st) if want is None or want in ((LB.load(st, n) or {}).get("sessions") or [])]
-    for name in sorted(label_names):
-        lab = LB.load(st, name)
-        if not lab:
+    for lab in LB.summaries(st):
+        if want is not None and want not in lab["sessions"]:
             continue
-        model: dict[str, int] = defaultdict(int)
-        ruled: dict[str, int] = defaultdict(int)
-        for ref, u in (lab.get("units") or {}).items():
-            f = ref.split("#")[0]
+        for f, (model, ruled) in lab["files"].items():
             if f not in known.set:
                 continue
-            if u.get("by") == "model":
-                model[f] += 1
-            elif u.get("by") in ("regex", "code"):
-                ruled[f] += 1
-        for f, n in model.items():
-            at(f)["model"] += n
-            at(f)["labels"].add(name)
-            # (only a model's labels read rows: a code or regex label over the same file computed over it)
-            at(f)["model_labels"].add(name)
-        for f, n in ruled.items():
-            at(f)["computed"] = max(at(f)["computed"], n)
-            at(f)["labels"].add(name)
+            at(f)["labels"].add(lab["name"])
+            if model:
+                at(f)["model"] += model
+                # (only a model's labels read rows: a code or regex label over the same file computed over it)
+                at(f)["model_labels"].add(lab["name"])
+            if ruled:
+                at(f)["computed"] = max(at(f)["computed"], ruled)
     root = str(st.root)
     for s in st.seen(session):
         tool = s.get("tool")
         if tool == "Read":
             f = st.rel(s.get("file") or "")
-            if f in known.set and unit_of[f] == "pages":
+            if f in known.set and unit_of(f) == "pages":
                 # the pages it read (`pages: "1-5"`), else all of them
-                at(f)["pages"].extend(_page_ranges(s.get("pages"), cnt.get(f, {}).get("rows") or 1))
-            elif f in known.set and unit_of[f] == "file":
+                at(f)["pages"].extend(_page_ranges(s.get("pages"), count(f).get("rows") or 1))
+            elif f in known.set and unit_of(f) == "file":
                 # an image (or any other file) viewed with Read is seen whole
                 at(f)["whole"] = True
             elif f in known.set:
                 a, b = s.get("from"), s.get("to")
                 if a is None or b is None:
-                    a, b = 1, max(1, cnt.get(f, {}).get("lines") or 1)
+                    a, b = 1, max(1, count(f).get("lines") or 1)
                 at(f)["lines"].append((int(a), int(b)))
         elif tool == "Grep":
             scope = st.rel(s.get("path") or s.get("cwd") or root)
@@ -222,9 +220,11 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             # a search that showed lines leaves its files searched (the lines it showed are seen); one that showed only
             # names or counts, named
             lines = s.get("mode") == "content" or (s.get("mode") is None and bool(s.get("lines")))
-            for f in ([scope] if scope in known.set else known.under(scope.rstrip("/"))):
-                if unit_of[f] in ("pages", "file"):
-                    continue  # a search skips a binary file
+            # a search skips a binary file, so it goes over the sources only (those `cnt` counted)
+            under = scope.rstrip("/")
+            for f in [scope] if scope in known.set else [f for f in cnt if under == "." or f.startswith(under + "/")]:
+                if unit_of(f) in ("pages", "file"):
+                    continue
                 if not glob or fnmatch.fnmatch(Path(f).name, glob) or fnmatch.fnmatch(f, glob):
                     at(f)["searched" if lines else "named"] = True
                     if not lines:
@@ -252,11 +252,11 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                     at(f)["by"].add(_program(cmd))
             # what reached Claude is at most the lines the command printed (a long output is cut)
             left = s.get("out_lines")
-            for f, how, span, prog in SH.shows(cmd, known, root, s.get("cwd"), lambda f: cnt.get(f, {}).get("lines") or 0):
+            for f, how, span, prog in SH.shows(cmd, known, root, s.get("cwd"), lambda f: count(f).get("lines") or 0):
                 if f not in known.set:
                     continue
                 x = at(f)
-                if how == "read" and unit_of[f] in ("pages", "file"):
+                if how == "read" and unit_of(f) in ("pages", "file"):
                     # a file with no lines printed whole (cat of an image or a PDF)
                     x["whole"] = True
                     continue
@@ -271,27 +271,37 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                     how = "named"
                 x["searched" if how == "searched" else "named"] = True
                 x["searched_by" if how == "searched" else "by"].add(prog)
-    out_files = []
+
+    def size_of(f: str) -> tuple[str, int, int]:
+        """A file's unit, its size in that unit, and its rows."""
+        c = cnt.get(f)
+        if c is None:
+            return "file", 1, 1
+        unit = S.UNIT_OF_KIND.get(c["kind"] or "", "file")
+        return unit, 1 if unit == "file" else c["lines"] if unit == "lines" else c["rows"], c["rows"]
+
+    done = {f for f, x in per.items() if x["computed"] or x["lines"] or x["searched"] or x["matched"] or x["named"]
+            or x["hits"] or x["model"] or x["labels"] or x["pages"] or x["whole"]}
     # a file nothing touched, the most of a large folder: its path, unit and size in columns, and its part of its
     # folder's and its type's sizes, added up by (folder, type, unit) as [files, units, rows]
-    untouched: dict[str, list[Any]] = {"path": [], "unit": [], "units": []}
+    paths = [f for f in files if f not in done]
+    sizes = [size_of(f) for f in paths]
+    untouched = {"path": paths, "unit": [u for u, _, _ in sizes], "units": [n for _, n, _ in sizes]}
     quiet: dict[tuple[str, str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
-    for f in files:
-        c, x = cnt.get(f, {}), per.get(f)
+    for ext, fs in known.by_ext.items():
+        typ = ext[1:] or "no extension"
+        for f in fs:
+            if f not in done:
+                unit, units, rows = size_of(f)
+                q = quiet[(folder_of(f), typ, unit)]
+                q[0] += 1
+                q[1] += units
+                q[2] += rows
+    out_files = []
+    for f in sorted(done):
+        c, x = count(f), per[f]
         rows, lines = c.get("rows", 0), c.get("lines", 0)
-        if x is None or not (x["computed"] or x["lines"] or x["searched"] or x["matched"] or x["named"] or x["hits"]
-                             or x["model"] or x["labels"] or x["pages"] or x["whole"]):
-            unit = unit_of[f]
-            units = 1 if unit == "file" else lines if unit == "lines" else rows
-            untouched["path"].append(f)
-            untouched["unit"].append(unit)
-            untouched["units"].append(units)
-            q = quiet[(folder_of(f), type_of(f), unit)]
-            q[0] += 1
-            q[1] += units
-            q[2] += rows
-            continue
-        unit = unit_of[f]
+        unit = unit_of(f)
         seen_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
         pages = _merged(x["pages"]) if unit == "pages" and not x["whole"] else ([[1, max(1, rows)]] if unit == "pages" else [])
         units = 1 if unit == "file" else lines if unit == "lines" else rows
