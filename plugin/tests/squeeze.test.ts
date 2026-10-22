@@ -1,7 +1,8 @@
 // Squeeze and catch-up in the terminal (squeeze/): s at an empty prompt opens the chips under the answer, ] asks one
 // rewrite and the new text shows in place of Claude's words, Claude hears the version with the next prompt, 0 brings
-// the original back with no call; with two replies since the person's last prompt, s writes one catch-up in their
-// place, and 0 dismisses it. All data is made up. `claude plugin test plugin`.
+// the original back with no call; with two replies since the person's last prompt, s writes one catch-up of them,
+// drawn last under the newest message it covers, which keeps its look at every chip level, and 0 dismisses it. All
+// data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { resetSqueeze } from '../squeeze/term'
@@ -22,7 +23,7 @@ const answer = (requestId: string, text: string) => ({ plugin: 'thimble', compon
 const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: VIEW } as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
-async function setup($: Any, on: Any, replies: string[]) {
+async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   resetSqueeze()
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
@@ -44,7 +45,7 @@ async function setup($: Any, on: Any, replies: string[]) {
   on('ui.scroll', () => ({ value: undefined }))
   on('prompt.fill', () => ({ value: undefined }))
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
-  on('model.complete', (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: `<text>\n${replies.shift() ?? 'Short.'}\n</text>`, usage: {} } } })
+  on('model.complete', async (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: `<text>\n${(await replies.shift()) ?? 'Short.'}\n</text>`, usage: {} } } })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
@@ -53,16 +54,17 @@ async function setup($: Any, on: Any, replies: string[]) {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const ask = (text: string, by = 'composer') => $.prompt.submit({ text, origin: { kind: by } } as never) as Promise<Any>
+  const say = (uuid: string, text: string) => $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid } as never)
   const turn = async (id: string, text: string, prompt: { text: string; by: string } | null = { text: `question ${id}`, by: 'composer' }) => {
     if (prompt) await ask(prompt.text, prompt.by)
     await $.turn.start({ text: prompt?.text ?? '', turnId: id } as never)
-    await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: `row-${id}` } as never)
+    await say(`row-${id}`, text)
     await $.turn.complete({ turnId: id, reason: 'answer', answer: text, durationMs: 10, isAborted: false } as never)
     await clock.advance(100)
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, ask, turn, press, bar }
+  return { clock, asked, ask, say, turn, press, bar }
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
@@ -99,7 +101,7 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(back).not.toContain('fresh fetch')
 })
 
-test('with two replies since the last prompt, s writes one catch-up in their place; 0 brings the replies back', async ($, on) => {
+test('with two replies since the last prompt, s writes one catch-up of them under the newest; 0 brings the replies back', async ($, on) => {
   const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
@@ -118,4 +120,70 @@ test('with two replies since the last prompt, s writes one catch-up in their pla
   expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
   // a catch-up the person read counts: s now opens the chips on the newest reply
   expect(await t.bar()).not.toContain('catch up')
+})
+
+const HEAD = 'thimble  catch-up of the 2 replies since your last message'
+const RULE = '▎'
+
+test('the catch-up draws last, under the newest message it covers, and the replies it covers draw nothing while it shows', async ($, on) => {
+  const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'Looking at the retry.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  // a text row of the newest turn kept after its answer: the newest message the catch-up covers
+  await t.say('row-t3-last', 'The retry passed on all runs.')
+  await t.press('s')
+  await t.clock.advance(5000)
+  const at = (row: string, text: string) => $.ui.render(answer(row, text)).then(textOf)
+  expect(await at('row-t2', 'The build failed on three runs.')).toBe('')
+  expect(await at('row-t3', 'Looking at the retry.')).toBe('')
+  const last = await at('row-t3-last', 'The retry passed on all runs.')
+  expect(last).toContain(HEAD)
+  expect(last).not.toContain('in their place')
+  expect(last).toContain('Both: the build failed, and the retry passed.')
+  // the chips stand under it, not under the reply that keeps it
+  const chips = (row: string, text: string) => $.ui.render(answer(row, text)).then((n: Any) => JSON.stringify(n).includes('sqchips-row-t3#cu'))
+  expect(await chips('row-t3-last', 'The retry passed on all runs.')).toBe(true)
+  expect(await chips('row-t3', 'Looking at the retry.')).toBe(false)
+  // 0: the replies again, each in its place
+  await t.press('0')
+  expect(await at('row-t3', 'Looking at the retry.')).toBe('the engine')
+  expect(await at('row-t3-last', 'The retry passed on all runs.')).toBe('the engine')
+})
+
+test('a catch-up keeps its look at every chip: Length, Interpretation, Background and the person\'s own, while each is written and after', async ($, on) => {
+  const gates: ((v: string) => void)[] = []
+  const later = () => new Promise<string>(r => { gates.push(r) })
+  const t = await setup($, on, ['Both: the build failed, and the retry passed.', later(), later(), later(), later()])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('s')
+  await t.clock.advance(5000)
+  const host = () => $.ui.render(answer('row-t3', 'The retry passed on all runs.')).then(textOf)
+  const framed = async (words: string) => {
+    const now = await host()
+    expect(now).toContain(HEAD)
+    expect(now).toContain(RULE)
+    expect(now).toContain(words)
+    expect(await $.ui.render(answer('row-t2', 'The build failed on three runs.')).then(textOf)).toBe('')
+  }
+  await framed('Both: the build failed')
+  const change = async (keys: string[], reply: string, words = reply) => {
+    for (const k of keys) await t.press(k)
+    // while it is written: the catch-up as it was, dim, in its frame
+    await framed('')
+    gates.shift()!(reply)
+    await t.clock.advance(20)
+    await framed('')
+    await t.clock.advance(5000)
+    await framed(words)
+  }
+  await change([']'], '## Longer\n\n- the build failed on [3 of 12](#) runs\n- the retry passed on all runs', 'the retry passed on all runs')
+  await change(['2', ']'], 'Read together, the failures came from the cache key.')
+  await change(['3', ']'], 'For an expert: the lockfile moved, so the cache key changed.')
+  await t.ask('/squeeze for my manager', 'composer')
+  await $.command.run({ command: 'squeeze', args: 'for my manager' } as never).catch(() => undefined)
+  await change(['4', ']'], 'For your manager: the build is fixed.')
+  expect(t.asked.length).toBe(5)
 })
