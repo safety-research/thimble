@@ -9,6 +9,7 @@
 // ends in "+ New label".
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
+import { LabelAsks } from '../chat/LabelAsk'
 import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
@@ -195,6 +196,8 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
         <span className="lside-title">{k.name}</span>
         <Switch checked={!!k.shown} onChange={(on) => void setLabel(ws, k.id, { shown: on })} label={`${k.name}: ${k.shown ? 'on' : 'off'}`} />
       </div>
+      {/* a big run of this label that waits for the person's choice, as above the chat's composer */}
+      <LabelAsks ws={ws} concept={k.id} />
       <h4 className="lside-label">Definition</h4>
       {k.kind === 'prompt' ? (
         <TextArea className="lside-ask" value={question} onChange={setQuestion} onBlur={() => question.trim() !== said && void setLabel(ws, k.id, { description: question.trim() })} autoGrow rows={2} aria-label="The label's definition" />

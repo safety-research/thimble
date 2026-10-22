@@ -1973,3 +1973,9 @@ button.view-chip-values:hover,
 button.view-chip-values[aria-expanded='true'] {
   color: var(--text-secondary);
 }
+
+/* -------- the ask before a big label run (LabelAsk): the view proposal's card, its choices wrapping on a narrow chat,
+   and the estimate under them, dim -------- */
+.label-ask-acts { flex-wrap: wrap; }
+.label-ask-meta { color: var(--text-tertiary, var(--text-secondary)); font: var(--type-ui-sm); }
+.lside-detail .label-ask { margin: 4px 0 8px; box-shadow: none; }

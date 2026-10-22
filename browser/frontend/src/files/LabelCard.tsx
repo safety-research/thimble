@@ -44,7 +44,8 @@ interface Props {
   inPopover?: boolean
   onClose: () => void
   /** an apply started for this label, with the run record the server answered (the Labels pane shows its progress) */
-  onRun: (id: string, run: ConceptRun) => void
+  /** a run started (null: it waits for the person's choice first, chat/LabelAsk.tsx) */
+  onRun: (id: string, run: ConceptRun | null) => void
 }
 
 /** A label's definition as its edit card holds it while the analyst edits it. */

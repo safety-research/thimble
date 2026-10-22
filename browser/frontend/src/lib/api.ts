@@ -736,7 +736,7 @@ export const feedbackApi = {
 }
 
 // --- label cards: the details drawer (canvas/LabelDetails.tsx) ---
-import type { ApplyBody, ConceptCoverage, ConceptDetail, ConceptPatch, ConceptRun, ConceptUnit, LabelDraft, LabelPresence, LabelRowText, LabelRuler, VerdictResult } from './types'
+import type { ApplyBody, ConceptCoverage, ConceptDetail, ConceptPatch, ConceptRun, ConceptUnit, LabelAsk, LabelAskChoice, LabelDraft, LabelPresence, LabelRowText, LabelRuler, VerdictResult } from './types'
 
 export const labelApi = {
   /** `GET /concepts/{id}`: the concept with its kept runs and the live run record. */
@@ -766,8 +766,19 @@ export const labelApi = {
   /** `POST /concepts/{id}/labels`: the analyst's verdict on one unit. */
   verdict: (c: string, id: string, ref: string, label: string, note?: string) =>
     j<VerdictResult>(`${ws(c)}/concepts/${enc(id)}/labels`, { method: 'POST', body: JSON.stringify({ ref, label, note }) }),
-  /** `POST /concepts/{id}/apply`: start a run (202 with the run record); a prompt label's carries the analyst's values as examples. */
-  apply: (c: string, id: string, body: ApplyBody) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }),
+  /** `POST /concepts/{id}/apply`: start a run (202 with the run record); a prompt label's carries the analyst's values as
+   * examples. null when the run waits for the person's choice first (a big prompt label: `asked`, chat/LabelAsk.tsx). */
+  apply: (c: string, id: string, body: ApplyBody) =>
+    j<ConceptRun | { asked: LabelAsk }>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }).then((r) => {
+      if (!r || !('asked' in r)) return r as ConceptRun
+      const a = (r as { asked: LabelAsk }).asked
+      bus.emit('toast', { text: `The label ${a.name} waits for your choice: ${a.text}?` })
+      return null
+    }),
+  /** `GET /label-asks`: the big prompt label runs that wait for the person's choice, oldest first. */
+  asks: (c: string) => j<LabelAsk[]>(`${ws(c)}/label-asks`),
+  /** `POST /label-asks/{id}`: the person's choice: run all, run on a sample, or cancel. */
+  answerAsk: (c: string, id: string, choice: LabelAskChoice) => j<{ ok: boolean }>(`${ws(c)}/label-asks/${enc(id)}`, { method: 'POST', body: JSON.stringify({ choice }) }),
 }
 
 // --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---

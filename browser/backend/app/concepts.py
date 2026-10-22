@@ -29,6 +29,8 @@ the analyst's last correction of it (rerun_after_verdicts), thimble runs every c
 and main hears which of them it should write a takeaway for again
 (`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
 card runs on POST .../regenerate.
+The ask: a prompt label over more than label_asks.SAMPLE units does not start until the person chooses, in the page, to
+run it on all of them, on a sample, or not at all (ask_first, label_asks.py), whoever started it.
 Notices: a run that fails, or that leaves units it could not label, is told in the foreground (notices.post, under
 `label:<id>`), and so are classifier calls Claude's safeguards switched to the fallback model; a run with no failure
 clears the first (_label_notice).
@@ -64,7 +66,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import capture, cite, concept_scan, config, corpus, labels_store, ledger, records, refs
+from . import capture, cite, concept_scan, config, corpus, label_asks, labels_store, ledger, records, refs
 from .kernel_thimble import LABEL_ORDER, palette_from
 from .ledger import append_jsonl, append_jsonl_many, atomic_write_text, read_json
 
@@ -3895,6 +3897,75 @@ def stale_in(cell: dict, concepts_by_id: dict[str, dict]) -> dict[str, str]:
     return out
 
 
+def units_to_read(c: str, concept: dict, paths: list[str], limit: int | None, sources: list[dict] | None = None) -> int:
+    """How many units a run of the label over `paths` (file units) or its scope reads: the records, files or runs
+    matched (counted up to PROMPT_APPLY_MAX + 1), the records `within` keeps, or the cards or sentences; at most
+    `limit`. Blocking (a thread)."""
+    unit = concept["unit"]
+    if unit in FILE_UNITS:
+        corpus_dir = config.corpus_dir(c)
+        srcs = sources if sources is not None else match_paths(corpus_dir, _patterns(paths))
+        within = concept.get("within") if unit == "record" else None
+        if within:
+            n = sum(len(v) for v in within_refs(_ws(c), srcs, within, PROMPT_APPLY_MAX + 1).values())
+        else:
+            n = units_at_least(corpus_dir, srcs, unit, PROMPT_APPLY_MAX + 1)[0]
+    else:
+        n = len(scope_units(c, unit))
+    return min(n, limit) if limit else n
+
+
+async def ask_first(c: str, concept: dict, paths: list[str], limit: int | None, *, sources: list[dict] | None = None,
+                    comment: bool = True, created_by: str = "user", from_main: bool = False) -> dict | None:
+    """The ask a run of this prompt label waits on (label_asks.hold), or None when it may start now: another kind, a
+    run over SAMPLE units or fewer, or a scope the person already said to read whole. The page hears of the ask on the
+    stream (`concepts`, what `asked`)."""
+    if concept["kind"] != "prompt" or (limit and not label_asks.needs_asking(limit)):
+        return None
+    paths = _patterns(paths) if concept["unit"] in FILE_UNITS else []
+    if label_asks.approved(c, concept, paths, limit):
+        return None
+    units = await asyncio.to_thread(units_to_read, c, concept, paths, limit, sources)
+    if not label_asks.needs_asking(units):
+        return None
+    words = UNIT_NAMES.get(concept["unit"], (concept["unit"], concept["unit"] + "s"))
+    ask = label_asks.hold(c, concept, units=units, unit_word=words[1], where=", ".join(paths) if narrowing(paths) else "",
+                          model=label_model(c, concept), per_call=BATCH_ITEMS, paths=paths, limit=limit, comment=comment,
+                          created_by=created_by, from_main=from_main)
+    _notify(c, concept["id"], "asked", rows=False)
+    return ask
+
+
+async def answer_ask(c: str, ask_id: str, choice: str) -> dict:
+    """The person's choice for a waiting ask: `all` starts the run over every unit, `sample` over label_asks.SAMPLE of
+    them, `cancel` starts nothing. Main hears the choice (`label_ask`, quiet) when it asked for the run, and `label_done`
+    when the run it chose ends. 404 when no such ask waits, 400 for another choice, 409 while the label runs."""
+    try:
+        ask = label_asks.take(c, ask_id, choice)
+    except KeyError:
+        raise HTTPException(404, "no such ask waits: it was answered, or the server restarted") from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    cid = ask["concept"]
+    record: dict | None = None
+    if choice != "cancel":
+        load_concept(c, cid)
+        limit = label_asks.SAMPLE if choice == "sample" else ask["limit"]
+        record = await start_apply(c, cid, ask["paths"], limit, ask["created_by"], comment=ask["comment"])
+        if ask["from_main"]:
+            tell_when_done(c, cid)
+    _notify(c, cid, "answered" if choice != "cancel" else "cancelled", rows=False)
+    if ask["from_main"]:
+        from . import events  # noqa: PLC0415
+
+        try:
+            events.post(c, LABEL_ASK_KIND, {"text": label_asks.choice_note(ask, choice), "name": ask["name"],
+                                            "ref": f"concept:{cid}", "choice": choice})
+        except HTTPException as e:
+            log.info("%s: the %s event for concept:%s was not posted: %s", c, LABEL_ASK_KIND, cid, e.detail)
+    return {"ok": True, "choice": choice, "concept": cid, "run": record}
+
+
 async def bring_current(c: str, concept_ids: list[str], created_by: str = "user") -> list[str]:
     """Start a run of each label in `concept_ids` whose rows do not answer its definition as it stands (covered), so a card
     run after them counts by each label as now defined (notebook.regenerate_cell). A running label is waited for; one that
@@ -3915,6 +3986,8 @@ async def bring_current(c: str, concept_ids: list[str], created_by: str = "user"
             continue
         if await asyncio.to_thread(covered, c, concept, paths, limit):
             continue
+        if await ask_first(c, concept, paths, limit, created_by=created_by) is not None:
+            continue  # the run waits for the person's choice, and the card runs on the rows the label has
         await start_apply(c, cid, paths, limit, created_by)
         cards = await asyncio.to_thread(_label_cards, ws, cid)
         tell_main(c, concept, dict(cards[0][1]) if cards else None)
@@ -4254,6 +4327,16 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
                 "partial": False, "cell": made["id"] if made else None, "filter": chosen_now,
                 "labels_path": str(labels_file(ws, concept["id"])), "unchanged": False, "deferred": True,
                 "stale": [x["id"] for x in stale]}
+    asked = None if joined or unchanged else await ask_first(c, concept, paths or [], limit, sources=sources,
+                                                             comment=comment, created_by=author, from_main=True)
+    if asked is not None:
+        chosen_now = _filter_to(c, scope, concept) if filter else None
+        stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
+        return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": None,
+                "counts": await asyncio.to_thread(_live_counts, ws, concept["id"]), "failed": 0, "message": None,
+                "partial": False, "cell": made["id"] if made else None, "filter": chosen_now,
+                "labels_path": str(labels_file(ws, concept["id"])), "unchanged": False, "asked": asked,
+                "stale": [x["id"] for x in stale]}
     if not joined and not unchanged:
         await start_apply(c, concept["id"], paths or [], limit, author, comment=comment, sources=sources)
         from . import cardrun  # noqa: PLC0415
@@ -4347,6 +4430,7 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
 
 
 LABELED_KIND = "labeled"  # the browser event that tells main of a label the analyst ran from the browser (prompts/main.md)
+LABEL_ASK_KIND = "label_ask"  # the browser event that tells main what the analyst chose when a label it ran asked first
 LABEL_DONE_KIND = "label_done"  # the browser event that tells main a label it ran finished after its call returned
 RERUN_KIND = "rerun"  # the browser event that tells main which cards thimble ran again because a label they read changed
 _watching: set[asyncio.Task] = set()  # the tasks of tell_when_done, held until they end
@@ -4811,6 +4895,7 @@ async def delete_concept_route(c: str, concept_id: str) -> dict:
     filters = {scope: f for scope, f in read_filters(ws).items() if f.get("concept") == concept_id}
     trash = undo.new_trash(c)
     _forget_concept(c, ws, concept_id, trash)
+    label_asks.drop(c, concept_id)
     await asyncio.to_thread(_drop_label_cards, c, concept_id)
     _notify(c, concept_id, "deleted")
     if trash is not None:
@@ -4905,6 +4990,10 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
     if concept["unit"] in FILE_UNITS and not paths:
         raise HTTPException(400, "paths is required: corpus-relative globs or a directory (e.g. ['*/board.jsonl'], 'agents'; '*' is the whole dataset)")
     ran_before = bool(concept["applications"])
+    if running_apply(c, concept_id) is None and (
+            asked := await ask_first(c, concept, paths, body.limit, comment=body.comment, created_by=body.created_by)):
+        response.status_code = 202
+        return {"asked": asked}
     record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment)
     # the browser is the analyst: their label gets its card and main hears of it; a label that ran before without a card
     # keeps having none
@@ -4939,6 +5028,22 @@ def cancel_apply_route(c: str, concept_id: str) -> dict:
     if running:
         _cancel_event(c, concept_id).set()
     return {"ok": True, "cancelling": running}
+
+
+class AskAnswerBody(BaseModel):
+    choice: str  # all, sample or cancel
+
+
+@router.get("/ws/{c}/label-asks")
+def label_asks_route(c: str) -> list[dict]:
+    """The asks that wait for the person's choice before a big prompt label runs (label_asks.py), oldest first."""
+    return label_asks.waiting(c)
+
+
+@router.post("/ws/{c}/label-asks/{ask_id}")
+async def answer_ask_route(c: str, ask_id: str, body: AskAnswerBody) -> dict:
+    """The person's choice for an ask: all, sample or cancel (answer_ask)."""
+    return await answer_ask(c, ask_id, body.choice)
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/events")

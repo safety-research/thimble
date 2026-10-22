@@ -55,6 +55,7 @@ import { useChat, type ChatState } from './useChat'
 import { pendingAsks, TERMINAL_WAIT, terminalWaits, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
+import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
 import { DemoNote } from './DemoNote'
 import { DEMO_NOTE, demoStop, useDemo } from '../lib/demo'
@@ -800,6 +801,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           <Holds className="chat-main-holds" alert={main.meta?.alert} />
           {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
           {!touring && !demo && <ProposalCard ws={ws} />}
+          {!demo && <LabelAsks ws={ws} />}
           <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           <DemoNote />
