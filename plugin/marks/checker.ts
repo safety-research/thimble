@@ -2,9 +2,9 @@
 // session (core/forks.ts, kind `checker`; for a reply with many marks, up to MAX_FORKS forks at once, each with a share
 // of the marks) reads prompts/checker.md with its marks filled in and gives one answer per mark: verified, corrected or
 // failed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
-// without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence must be
-// code that one of the session's real Bash calls ran, whose real output shows the words. Its result is what the person
-// sees.
+// without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence names one
+// of the session's real Bash calls (the checker's or main's) by a part of its output, and that call's real output must
+// show the words. Its result is what the person sees.
 //
 //   noteRow($, row, text)     a text row of main's reply, as session.append stored it
 //   startCheck($, e)          at the end of main's turn: the reply's marks (store.ts, all `checking`), the forks
@@ -38,7 +38,8 @@ type Engine = EngineInterface
 type Any = any
 
 /** One fork's check: the reply, and the numbers of the marks this fork checks. `cwd` is the shell's folder, where the
- *  fork's code runs and its paths start; `root` the folder the session started in, which the pane's paths start from. */
+ *  fork's code runs; `root` the folder the session started in, which the pane's paths start from. A relative path of
+ *  the evidence is read from either. */
 type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number }
 
 const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
@@ -91,9 +92,10 @@ function itemsOf(reply: { row: string; text: string }[]): MarkItem[] {
   })))
 }
 
-/** The checker's prompt: checker.md with the marks (`n. [words] in: <sentence>`) and the working folder filled in. */
-export function checkerPrompt(template: string, items: MarkItem[], cwd: string): string {
-  return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd })
+/** The checker's prompt: checker.md with the marks (`n. [words] in: <sentence>`), the shell's folder and the folder
+ *  the session started in filled in. */
+export function checkerPrompt(template: string, items: MarkItem[], cwd: string, root: string): string {
+  return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd, ROOT: root })
 }
 
 /** The reply with its items changed, and the time it settled once no mark is checked. */
@@ -188,7 +190,8 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const rows = [...new Set([...items.map(m => m.row), key])]
   await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: null, items })
   const cwd = String(await $.session.cwd())
-  const whole: Check = { agentId: '', key, turnId: e.turnId, marks: items.map(m => m.n), cwd, root: await startDir($), replyEnd: reply[reply.length - 1]!.at, spawnedAt: now }
+  const root = await startDir($)
+  const whole: Check = { agentId: '', key, turnId: e.turnId, marks: items.map(m => m.n), cwd, root, replyEnd: reply[reply.length - 1]!.at, spawnedAt: now }
   if (e.reason !== 'answer') {
     await giveUp($, whole, 'the reply was interrupted before its marks were checked', now)
     return
@@ -204,7 +207,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const started: string[] = []
   for (const share of splitMarks(items)) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
-    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd), description: 'checking marks' })
+    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd, root), description: 'checking marks' })
     if (!fork.agentId) {
       await giveUp($, c, 'the check could not start', now)
       failNotice($, `The check of the marks could not start (${String(fork.deny || 'no reason given').slice(0, 80)}), so they are not checked.`)
@@ -231,19 +234,35 @@ function bashCalls(msgs: Any, by: 'checker' | 'main'): { command: string; output
   return out
 }
 
-/** The first line of each code the checker's answer gives as evidence (`"code": "…"`), white space as one space: a
- *  call of main's whose command holds none of them cannot be a mark's evidence, so the validator is not sent it. */
-function codeHeads(answer: string): string[] {
-  const out = new Set<string>()
-  for (const m of String(answer).matchAll(/"code"\s*:\s*("(?:[^"\\]|\\.)*")/g)) {
+const flat = (s: string) => s.replace(/\s+/g, ' ').trim()
+
+/** The outputs the checker's answer cites as evidence (`"output": "…"`), each as its parts: its lines, cut at "…",
+ *  white space as one space. A call of main's whose output holds none of them cannot be a mark's evidence, so the validator is not
+ *  sent it; evidence.py `printed` reads a cited output the same way. */
+function citedOutputs(answer: string): string[][] {
+  const out: string[][] = []
+  for (const m of String(answer).matchAll(/"output"\s*:\s*("(?:[^"\\]|\\.)*")/g)) {
     try {
-      const head = String(JSON.parse(m[1]!)).split('\n').map(l => l.trim().replace(/\s+/g, ' ')).find(Boolean)
-      if (head) out.add(head)
+      const parts = String(JSON.parse(m[1]!)).split(/…|\.\.\.|\n/).map(flat).filter(Boolean)
+      if (parts.length) out.push(parts)
     } catch {
-      // not a JSON string: no code
+      // not a JSON string: no output
     }
   }
-  return [...out]
+  return out
+}
+
+
+/** The output holds the parts, in order. */
+function holdsParts(output: string, parts: string[]): boolean {
+  const text = flat(output)
+  let at = 0
+  for (const p of parts) {
+    const i = text.indexOf(p, at)
+    if (i < 0) return false
+    at = i + p.length
+  }
+  return true
 }
 
 /** The person's line when a check gave no answer, by why its turn ended. */
@@ -255,9 +274,8 @@ function giveUpLine(reason: string): string {
 
 /** The validator's result for a fork's answer, or why there is none. */
 async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
-  const heads = codeHeads(e.answer)
-  const flat = (s: string) => s.replace(/\s+/g, ' ')
-  const main = bashCalls(await $.session.messages(), 'main').filter(x => heads.some(h => flat(x.command).includes(h)))
+  const cited = citedOutputs(e.answer)
+  const main = bashCalls(await $.session.messages(), 'main').filter(x => cited.some(parts => holdsParts(x.output, parts)))
   const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...main]
   const ran = await $.process.run([`${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`, 'dev', 'validate'], {
     cwd: c.cwd, timeoutMs: 120000,
