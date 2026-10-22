@@ -1,8 +1,8 @@
-// The watching hook (hooks/kernel.ts): what it keeps of a Read, a Grep and a Bash call, and that it never changes a
+// The watching hook (hooks/watch.ts): what it keeps of a Read, a Grep and a Bash call, and that it never changes a
 // call's result. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { grepHits, readRange } from '../hooks/kernel'
+import { grepHits, readRange } from '../hooks/watch'
 
 test('readRange reads the first and last line a Read result shows', () => {
   expect(readRange('     3\t{"a": 1}\n     4\t{"a": 2}\n')).toEqual({ from: 3, to: 4 })

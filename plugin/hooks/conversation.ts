@@ -1,8 +1,7 @@
 // conversation.ts: the key thimble keeps a session's records under. Claude Code can continue a conversation in a new
 // session, with a new id and the transcript copied there (a session moved to the background, `--fork-session`). What
-// thimble kept for it (the cards drawn under replies, the message records with their squeezes, the
-// observer's memory, the change feed and what Claude read) belongs to the conversation, so a continuation finds it
-// again under the same key: the id of the conversation's first session.
+// thimble kept for it (the change feed, the events and what Claude read) belongs to the conversation, so a
+// continuation finds it again under the same key: the id of the conversation's first session.
 //
 // The link is the conversation's first launch ($.session.usage().startedAt), which Claude Code keeps the same in every
 // continuation. $THIMBLE_HOME/lean/conversations/<startedAt>.json holds {key, sessions}: written at the first turn of a
@@ -89,12 +88,4 @@ export async function noteConversation($: Engine): Promise<void> {
   } catch {
     // a continuation then starts its own records
   }
-}
-
-/** For tests: the module's memory, cleared. */
-export function resetConversation(): void {
-  C.id = ''
-  C.key = ''
-  C.pending = null
-  C.noted = ''
 }

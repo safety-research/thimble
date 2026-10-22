@@ -1,8 +1,0 @@
-{
-  "model": "sonnet",
-  "effort": "low",
-  "cardsEffort": "medium",
-  "maxTokens": 6000,
-  "timeoutMs": 90000,
-  "settleMs": 300
-}

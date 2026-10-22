@@ -13,14 +13,12 @@
 Coverage also counts the files that have no rows, each in its own unit: a PDF by its pages, and an image, a sound, a
 video or any other file as one whole file (`file_kind`, `list_files`).
 
-A ref stays the same when the analysis runs again on the same file. Each row also has a content hash (`row_hash`), so a
-citation can tell when its row changed or moved. Files under the thimble/ record folder, version control and
-dependency folders are never sources.
+A ref stays the same when the analysis runs again on the same file. Files under the thimble/ record folder, version
+control and dependency folders are never sources.
 """
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import os
 import re
@@ -61,10 +59,6 @@ class Row:
     ref: str
     raw: str  # the row's text as the file holds it (a JSON value as JSON)
     value: Any  # the row as a dict (records), or its text (lines, sections, hunks)
-
-
-def row_hash(raw: str) -> str:
-    return hashlib.sha1(raw.encode("utf-8", "surrogatepass")).hexdigest()[:12]
 
 
 def kind_of(path: Path) -> str | None:

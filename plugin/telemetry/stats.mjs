@@ -43,15 +43,12 @@ export function report(events, { plain = null, file = '' } = {}) {
   const rows = Object.values(s.features)
   const main = rows.filter(r => r.main)
   const side = rows.filter(r => !r.main)
-  const order = ['card', 'observer', 'question', 'squeeze', 'thread']
+  const order = ['checker', 'designer', 'labels']
   side.sort((a, b) => (order.indexOf(a.feature) + 1 || 99) - (order.indexOf(b.feature) + 1 || 99) || b.w - a.w)
   const session = events.find(e => e.session)?.session || ''
   const lines = []
   lines.push(`thimble · session ${session.slice(0, 8) || '?'}${file ? ` · ${file}` : ''}`)
-  if (s.prompts) {
-    const off = Array.isArray(s.prompts.off) && s.prompts.off.length ? `turned off: ${s.prompts.off.join(', ')}` : 'all on'
-    lines.push(`prompts: ${s.prompts.plugin ? `thimble ${s.prompts.plugin} · ` : ''}${off}${s.prompts.problems?.length ? ` · ${s.prompts.problems.length} problem(s): ${s.prompts.problems[0]}` : ''}`)
-  }
+  if (s.prompts?.plugin) lines.push(`thimble ${s.prompts.plugin}`)
   lines.push('')
   lines.push(`${pad('feature', 30)}${lpad('calls', 6)}${lpad('tokens (price-weighted)', 25)}${lpad('time', 9)}  blocked the main turn`)
   let totalW = 0
@@ -67,26 +64,12 @@ export function report(events, { plain = null, file = '' } = {}) {
     const blocked = r.turn ? '-' : `${r.blocked} of ${r.calls}`
     line(r.feature, r, `${blocked}${r.failed ? ` · ${r.failed} failed` : ''}${r.prompts?.size ? ` · ${[...r.prompts].join(', ')}` : ''}`)
     totalW += r.w
-    if (r.lenses) {
-      const ls = Object.entries(r.lenses).sort((a, b) => b[1].w - a[1].w)
-      for (const [name, L] of ls) lines.push(`${pad(`  lens ${name}`, 30)}${lpad('', 6)}${lpad(`${k(L.w)} (${Math.round((100 * L.w) / (r.w || 1))}%)`, 25)}${lpad(sec(L.ms), 9)}  ${L.prompts?.size ? [...L.prompts].join(', ') : ''}`)
-    }
   }
-  lines.push(`${pad('all', 30)}${lpad('', 6)}${lpad(k(totalW), 25)}${lpad(sec(totalMs), 9)}  (time: the main turns; side calls run after them)`)
-  // per main turn: all of thimble's cost, and the observer's pass (its share of all)
+  lines.push(`${pad('all', 30)}${lpad('', 6)}${lpad(k(totalW), 25)}${lpad(sec(totalMs), 9)}  (time: the main turns; forks and label reads run beside them)`)
+  // per main turn: all of thimble's cost
   const turnsN = main.reduce((n, r) => n + (r.calls || 0), 0)
-  const pass = side.find(r => r.feature === 'observer')
-  if (turnsN && totalW) lines.push(`${pad('per main turn', 30)}${k(totalW / turnsN)} in all${pass ? ` · the pass ${k(pass.w / turnsN)} (${Math.round((100 * pass.w) / totalW)}% of all)` : ''}`)
-  const L = s.looks
-  if (L && (L.looks || L.skipped || L.pressed_lit || L.pressed_dim)) {
-    const lit = L.looks ? `v lit on ${L.v_lit} of ${L.looks} look${L.looks === 1 ? '' : 's'}` : 'no look ran'
-    const pressed = L.v_lit || L.pressed_lit || L.pressed_dim ? ` · v pressed ${L.pressed_lit} of ${L.v_lit} times lit${L.pressed_dim ? `, ${L.pressed_dim} while dim` : ''}` : ''
-    lines.push(`${pad('looks', 30)}${lit}${L.skipped ? ` (${L.skipped} skipped)` : ''}${pressed}`)
-  }
-  const C = s.checks
-  if (C) lines.push(`${pad('saves checked', 30)}${C.saves} save${C.saves === 1 ? '' : 's'} · ${C.tried} interaction${C.tried === 1 ? '' : 's'} tried · ${C.failed} with a failure${C.cut ? ` · ${C.cut} cut` : ''} · ${C.median_ms} ms median, ${C.max_ms} ms most · ${C.chars} characters to Claude`)
-  if (s.reads.length) lines.push(`read on demand: ${s.reads.map(r => `${r.prompt || r.feature} (${r.via})`).join(', ')}`)
-  const out = { session, looks: s.looks, checks: s.checks, features: rows.map(r => ({ ...r, prompts: [...(r.prompts || [])], lenses: r.lenses ? Object.fromEntries(Object.entries(r.lenses).map(([n, L]) => [n, { ...L, prompts: [...(L.prompts || [])] }])) : null })), total_w: totalW, main_ms: totalMs }
+  if (turnsN && totalW) lines.push(`${pad('per main turn', 30)}${k(totalW / turnsN)} in all`)
+  const out = { session, features: rows.map(r => ({ ...r, prompts: [...(r.prompts || [])] })), total_w: totalW, main_ms: totalMs }
   if (plain) {
     const pt = plainTurns(plain)
     const mainTurns = s.turns.filter(t => !t.agent)
@@ -132,5 +115,5 @@ function main(argv) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  try { process.exitCode = main(process.argv.slice(2)) } catch (err) { console.error(`thimble stats: ${err.message}`); process.exitCode = 1 }
+  try { process.exitCode = main(process.argv.slice(2)) } catch (err) { console.error(`thimble dev stats: ${err.message}`); process.exitCode = 1 }
 }

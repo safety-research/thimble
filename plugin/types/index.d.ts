@@ -1,197 +1,58 @@
-// The shell's values in $.state (the session's, kept across a reload of the hooks module).
-
-/** One object as the shell points at it: its id, its version (null: the latest) and the folder that holds it. */
-export type ObjRef = { id: string; v: number | null; root: string }
-
-/** What the detail view shows: the object, the selected region (its part), which example, and whether `? all` is open;
- *  the knobs' values the person set (`state`) and the knob turned last; `prog` while the program is laid over the card
- *  (`p`); or, with `cite`, one citation of Claude's words and the rows behind it; or, with `cites`, the values a reply
- *  cites, each a press from its rows. */
-export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null; prog?: boolean; pages?: 'all' | 'one' }
-
-/** Work running on a card (the row under it says `<verb>… <text>`, its progress: the model's reads of a label), or
- *  what it said last. */
-export type Said = { verb: string; text?: string; error?: string; running?: boolean }
-
-
-/** One mark in a message (CONTRACT 1): a citation, a gloss or a sparkline, as offsets into the shown markdown. */
-export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; inLink?: boolean; code?: boolean; anchor?: 'form' | 'word' }
-
-/** A gloss the observer wrote for a message: the term as it stands in the text, what it is, where it mattered here. */
-/** A term explained (an explain mark), or, of kind 'heads', an important detail the analyst should know (its title, its
- *  bullets with citations, what to do). `expanded`: written again at more length (e), the short one kept in `short`. */
-export type Gloss = { term: string; kind?: 'heads'; title?: string; body?: string; here?: string; program?: string; data?: Record<string, unknown>; refs?: string[]; bullets?: string[]; todo?: string; expanded?: boolean; short?: { body: string; here: string; program: string } }
-
-/** The record of one of Claude's messages (CONTRACT 1), kept in thimble/messages/<session>/<row>.json. */
-export type MsgRecord = {
-  v: 1
-  row: string
-  /** the row's whole id, as the transcript's drawing names it (e.requestId) */
-  uuid?: string
-  session: string
-  at?: string | null
-  text: string
-  shown: string | null
-  marks: Mark[]
-  glosses: Record<string, Gloss>
-  verbs: Record<string, { lit?: boolean; note?: string; proposals?: string[]; chips?: unknown[]; offer?: unknown }>
-  objects: string[]
-  /** the turn's answer: the row its verb row is drawn under */
-  final?: boolean
-  /** the squeeze chips' state (squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
-  squeeze?: Squeeze
-  /** a catch-up's own record (it is no row of the transcript): what it covers, drawn in place of them at `host` */
-  catchup?: CatchUp
-  /** the catch-up drawn in this answer's place: the newest written when this was the newest reply */
-  caughtUp?: string
-  /** the catch-up this message is one of: while its version shows, this message draws no text of its own */
-  inCatchUp?: string
-  /** the version of the check that placed its marks (shell.tsx checkVersion); each result in `heals` names its own */
-  marked?: string
-}
-
-/** A catch-up: one message the squeeze chips write of Claude's messages since the person's last prompt (`rows`, in
- *  order; `replies` of them ended a turn), drawn in their place: at the newest reply (`host`), the others drawing no
- *  text while its version shows. `question` is the person's prompt,
- *  `prompt` its row. A dismissed one is drawn no more; one that showed a version counts as read. */
-export type CatchUp = { host: string; rows: string[]; replies: number; question: string; prompt: string | null; dismissed?: boolean }
-
-/** A message's squeeze: where its chips are, every version written by its levels, the
- *  original's marks, whether it arrived squeezed, what a rewrite said that the original does not, and each call made. */
-export type Squeeze = {
-  at?: Record<string, number>
-  versions?: Record<string, string>
-  orig?: { marks: Mark[] }
-  auto?: boolean
-  problems?: string[]
-  made?: { key: string; ms: number; model: string; usage?: unknown; at?: string }[]
-}
-
-/** The chips' line of one message as the person works it: the picked chip, a call running (and the frame of its turning glyph), a call that failed, and the new text writing
- *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
-export type SqzUi = { focus: string; running: { since: number } | null; error: string | null; tick: number; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null; asked?: number | null }
-
-/** Work a key asked of Claude beside the conversation (shell/aside.ts): a fork of main making v's card, by the message
- *  the key was pressed on. Its line under the message says how far it is (`steps`, `secs`); `cmds` are its commands,
- *  which tell its saves from main's; `saves` the cards it saved, drawn under the message. */
-export type Aside = {
-  row: string; verb: string; what: string; about: string; agentId: string; status: 'running' | 'done' | 'failed'
-  at: number; secs: number; steps: number; last?: string; cmds: string[]; saves: ObjRef[]; error?: string; told?: boolean
-}
-
-/** The bar's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
- *  changed (it brightens for a moment). */
-/** The bar's counts: the session's claims, the side threads, the coverage share with its small type bar (shell/side.ts),
- *  the labels. */
-export type LineCounts = { claims?: number; threads: number; cov: number; covFiles?: number; covTouched?: number; covState?: 'counting' | 'failed'; labels?: number; at: number; changed: Record<string, number> }
-
-/** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
- *  inside a card (panes/tray.js frameOf). */
-export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss' | 'passage'; gloss?: Record<string, unknown>; open?: string | null; expanding?: boolean; full?: boolean; inner?: TrayFrame[]; part?: string; text?: string }
-
-/** The tray: the stack of cards it shows, the top one drawn. */
-export type Tray = { stack: TrayFrame[]; asking?: boolean }
-/** What the side panel shows (shell/side.ts): a card's detail, or a pane of thimble's with its arguments. */
-export type SideView = { kind: 'card'; id: string; v: number | null; root: string; region?: string | null } | { kind: 'pane'; pane: string; args: Record<string, unknown>; title?: string }
-
+// thimble's values in $.state (the session's, kept across a reload of the hooks module), one block per module. Each
+// lane edits only its own block.
 
 declare module 'claude-code' {
   interface PluginState {
     'thimble': {
-      /** the objects drawn under a row of the transcript, by the row's id (its first 24 characters) */
-      under: StateFamily<ObjRef[]>
-      /** the detail view's selection */
-      sel: Sel | null
-      /** the latest card drawn, which /card opens with no argument */
-      last: ObjRef | null
-      /** the object and region a prompt was asked about, by the prompt row's id */
-      asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string }>
-      /** work running on a card (a label's reads), or what it said last, by the card's id */
-      said: StateFamily<Said | null>
-      /** words for Claude alone, given with the next prompt */
-      notes: string[]
-      /** the row an object is drawn under, by the object's id */
-      where: StateFamily<string>
-      /** `thimble resolve --json` of a ref, by root and ref */
-      rows: StateFamily<unknown>
-      /** when an object's drawing at a width became ready, by root, id, version and width: a drawing waiting on it redraws */
-      ready: StateFamily<number>
-      /** the observer's line above the prompt, or none */
-      /** each message's record, by its row key */
-      msg: StateFamily<MsgRecord | null>
-      /** the rows of Claude's messages in this session, oldest first */
-      msgrows: string[]
-      /** the tray above the prompt, or none */
-      tray: Tray | null
-      /** the line a key of the row opened under a message (v's proposals, s's chips), or none */
-      pick: { row: string; verb: string; open?: string | null } | null
-      /** the message the keys act on, when the person picked one other than the latest */
-      selrow: string | null
-      /** the row of the latest turn's answer */
-      answer: string | null
-      /** the rows of the session's answers (each turn's last words, a turn that ended in an error left out), oldest first */
-      answers: string[]
-      /** the card under a reply that has the keys (] reached it): its own keys win over the verbs until 0 */
-      cardfocus: (ObjRef & { row: string }) | null
-      /** the squeeze chips' line of a message, by its row */
-      sqz: StateFamily<SqzUi | null>
-      /** the pane drawn as a Client that holds the keyboard (a click on it gave it), by its id (shell.tsx heldEl), or none */
-      held: string | null
-      /** the feature the settings panel changed last: it stays selected while the plugin loads again (settings/term.ts) */
-      setlast: string | null
-      /** the chips the person typed after + this session, newest last */
-      owndims: string[]
-      /** v's card landed under a message off screen: the bar says so for a few seconds (shell.tsx cardLanded) */
-      cardnote: { row: string; id: string; about: string; at: number } | null
-      /** work a key asked of Claude beside the conversation (shell/aside.ts), by the message it was asked on */
-      aside: StateFamily<Aside | null>
-      /** the message each such agent works for, by the agent's id */
-      asideof: Record<string, string>
-      /** the rows whose shown version changed since Claude was told of it (squeeze/term.ts tellSettled) */
-      sqznote: Record<string, true>
-      /** the version of each row Claude was last told of (chips.mjs shownKey) */
-      sqztold: Record<string, string>
-      /** the healing pass's tick: set when a pass has run long enough to show its spinner (shell.tsx healNow) */
-      healtick: string
-      /** thimble's own work while it runs: the glyph's frame and how many jobs run (shell/busy.ts) */
+      // ---- L1 marks
+      /** a reply's marks and their checks, by the reply's row (the session.append uuid of a main text row):
+       *  { row, turnId, checking, agentId, startedAt, settledAt, failed, items: [{ n, words, start, end, sentence,
+       *  status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, reason?, evidence? }] } */
+      marks: StateFamily<unknown>
+
+      // ---- L2 cards
+      /** a card, by its id: { id, version, title, toolUseId, agentId, anchorRow, keys, rows, gen, error } */
+      card: StateFamily<unknown>
+      /** a card's drawing as the runner made it, by the card's id: { gen, width, tree } */
+      cardTree: StateFamily<unknown>
+      /** the card that takes keys */
+      cardFocus: string | null
+      /** the card a `/` search types into, and its words */
+      cardSearch: { id: string; text: string } | null
+
+      // ---- L4 v
+      /** a design v started, by its key: { key, anchorRow, agentId, status, at, error?, cards } */
+      designs: StateFamily<unknown>
+      /** the design key the bar names */
+      designNow: string | null
+
+      // ---- L5 bar
+      /** thimble's own work while it runs: the glyph's frame and how many jobs run (bar/busy.ts) */
       busy: { frame: number; n: number }
-      /** the bar's counts above the prompt */
-      counts: LineCounts | null
-      /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */
-      facts: StateFamily<unknown>
-      /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
-      thread: StateFamily<unknown>
-      /** what the side panel shows now, and what it showed before (esc goes back to it), newest last */
-      side: { now: SideView | null; back: SideView[] } | null
-      /** the detail's ask line drawn again (shell/detail.tsx): a count the pane and the bar read, so a letter of a
-       *  question redraws them alone */
-      askline: number
-      /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
-      events: { file: string; n: number; bytes?: number }
-      /** what takes the keys, newest last (the shell's focus stack): the bar says the keys of the top one */
-      focus: ('detail' | 'chips' | 'proposals' | 'tray' | 'card')[]
-      /** when a card's state file last changed, by root and id: a drawing that reads the card's state draws again */
-      cardver: StateFamily<number>
-      /** how many times a pane was asked to draw again, by the pane's instance: its drawings read it */
-      panever: StateFamily<number>
-      /** how many checks of label values the person has made (shell/labels.ts): the examples read their labels again */
-      labelgen: number
-      /** a big label's ask that waits for the person's choice (shell/labels.ts): the run's sentence, its model calls, its card */
-      labelask: { root: string; name: string; ask: string; card: string | null; text: string; meta: string; units: number; sample: number } | null
-      /** the line whose fix keys the bar names (shell/fix.ts): a failure (f F) or a fix now in use (p u) */
-      fixline: { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | null
-      /** the fixes that work now (shell/fix.ts), for the bar's note */
+      /** the bar's counts: the share of the folder's files Claude touched, in words, and the labels (bar/counts.ts) */
+      counts: { coverage: string | null; labels: number } | null
+      /** the line whose fix keys the bar names (bar/fix.ts): a failure (f F), a fix in use (p u), or a notice */
+      fixLine: { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string } | null
+      /** the fixes that work now (bar/fix.ts), for the busy line */
       fixes: { slug: string; title: string; kind: string }[]
-      /** each fix as refreshFixes last saw it, and the one that was on (shell/fix.ts), kept across a reload of the plugin */
-      fixseen: { fixes: Record<string, { status: string; used: number; title: string }>; active: string | null }
-      /** a fix's share as its preview reads it, by slug (shell/fix.ts); never the ask's id */
-      fixshare: StateFamily<unknown>
-      /** the labels of a set of records, by folder, generation and refs (`thimble label --of`) */
-      labelsof: StateFamily<unknown>
-      /** the labels a card or an answer rests on, by its key (shell/labeluse.ts) */
-      labeluse: StateFamily<{ labels: { name: string; values: string[] }[] }>
-      /** this session's claims (claims/store.js), as held for the drawing; thimble/claims/<session>.json on disk */
-      claims: Record<string, unknown> | null
+      /** each fix as refreshFixes last saw it, and the one that was on (bar/fix.ts), kept across a reload of the plugin */
+      fixSeen: { fixes: Record<string, { status: string; used: number; title: string }>; active: string | null }
+      /** a fix's share as its preview reads it, by slug (bar/fix.ts); never the ask's id */
+      fixShare: StateFamily<unknown>
+
+      // ---- L6 labels
+      /** bumps when a label changes here (its reads ended, the person checked a record): what shows labels redraws */
+      labelGen: number
+
+      // ---- core (L0)
+      /** what the side pane shows (core/pane.ts) */
+      pane: { kind: string; args: unknown } | null
+      /** which agents are thimble's forks, and their kind (core/forks.ts) */
+      forks: Record<string, 'checker' | 'designer'>
+      /** what Claude reads with the person's next prompt, by key (core/tell.ts) */
+      tell: Record<string, string>
+      /** how far the session's change feed has been read (core/feed.ts) */
+      feed: { file: string; bytes: number } | null
     }
   }
 }

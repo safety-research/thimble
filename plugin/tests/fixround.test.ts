@@ -1,9 +1,9 @@
-// A fix's rounds in the terminal (shell/fix.ts refreshFixes): each `thimble fix use` of the same fix loads the plugins
+// A fix's rounds in the terminal (bar/fix.ts refreshFixes): each `thimble fix use` of the same fix loads the plugins
 // again and says the fix once, and a new title from a later round reaches the toast and the bar's line. All data is
 // made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { fixCommand, fixLineNow, forgetFixes, refreshFixes } from '../shell/fix'
+import { fixCommand, fixLineNow, forgetFixes, refreshFixes } from '../bar/fix'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

@@ -1,11 +1,9 @@
 // path.ts: the plugin's bin/ first on the PATH of the session's commands. Claude Code adds a plugin's bin/ folder at the
 // end of the Bash tool's PATH, so another `thimble` earlier on it (thimble 0.9's launcher in ~/.local/bin) would run in
 // its place. At session start this module puts bin/ first, keeps the rest of the PATH in its order, and never adds the
-// folder twice (a reload of the module, or a session started from inside another one, finds it there already). Then
-// it makes thimble's own Python when this machine has none (python.ts).
+// folder twice (a reload of the module, or a session started from inside another one, finds it there already).
 import type { EngineInterface, Register } from 'claude-code'
 
-import { ensurePython } from './python'
 
 type Engine = EngineInterface
 
@@ -44,7 +42,7 @@ async function putBinFirst($: Engine): Promise<void> {
 }
 
 export const registerPath: Register = on => {
-  // the cwd matcher keeps this hook apart from kernel.ts's (one hook per event and matcher in a module)
+  // the cwd matcher keeps this hook apart from the other modules' (one hook per event and matcher in a module)
   on('session.start', { cwd: /^\// }, async ($, e, next) => {
     const r = await next(e)
     try {
@@ -52,9 +50,6 @@ export const registerPath: Register = on => {
     } catch {
       // the PATH stays as Claude Code made it
     }
-    // thimble's own Python, when this machine has none (python.ts): it runs on after the hook returns, so the session
-    // never waits on it
-    void ensurePython($).catch(() => {})
     return r
   })
 }

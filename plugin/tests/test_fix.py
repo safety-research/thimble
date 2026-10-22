@@ -341,7 +341,7 @@ def test_a_caller_that_is_no_session_says_so_and_uses_the_marketplace(env: Path,
 
 
 def test_in_a_session_that_runs_the_install_the_line_says_the_session_loads_the_switch_itself(env: Path, tmp_path: Path, monkeypatch):
-    # the terminal loads the plugins again at each switch (shell/fix.ts refreshFixes): Claude reads that it is loaded,
+    # the terminal loads the plugins again at each switch (bar/fix.ts refreshFixes): Claude reads that it is loaded,
     # so it has no /reload-plugins to pass on to the person
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     stub = tmp_path / "claude-stub"
