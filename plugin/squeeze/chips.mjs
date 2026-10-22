@@ -5,8 +5,10 @@
 //   Length              short · as written · longer · much longer. The original is always "as written": a shorter
 //                       version leaves parts out, a longer one explains more and adds detail.
 //   Interpretation      facts only · as written · expert reading: how much the text says beyond what the facts
-//                       literally say, from the facts alone to an expert's reading of them, with the background a
-//                       reader needs to follow it. The original is always "as written".
+//                       literally say, from the facts alone to an expert's reading of them. The original is always
+//                       "as written".
+//   Background          new · learning · working · expert: the reader's background, how much of the field the text
+//                       explains and how much it takes as known. The original stands at working, and reads "as written".
 //   a chip the person typed, after +: their own words ("for my manager", "more skeptical", "as a timeline",
 //                       "engineer → manager"), as written · a little · more · fully. The original stands at as written.
 // Each level is defined once, here (MEANS), and the request carries only the definition of the level picked (pickLine).
@@ -32,9 +34,10 @@
 //   squeeze: {
 //     at:       {chipId: level}       the levels set now; a chip not named stands where the original does
 //     own:      [{id, words}]         the chips the person typed for this message (at most three)
-//     scale:    4                     the chips' scales now: Length short · as written · longer · much longer, no
-//                                     Background chip (records before scale 4 had one line first and a Background
-//                                     chip; before scale 2, one line · short · medium · full): levelsAt reads them
+//     scale:    5                     the chips' scales now: Length short · as written · longer · much longer, and
+//                                     the Background chip (records of scale 4 had none; before scale 4, Length had one
+//                                     line first; before scale 3, Background had five levels; before scale 2, Length
+//                                     was one line · short · medium · full): levelsAt reads them
 //     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
 //     cards:    {key: {rows, did}}    the cards of each version that changed one: rows {row: [{id, copy}]} as drawn
 //                                     (`copy`: the copy of the card that version shows, cards.ts), did [{id, did:
@@ -91,14 +94,15 @@ export function mapLinks(text, fn) {
 /** The chips every message has, in the order drawn. `level0` is where the original stands: "as written". */
 export const CHIPS = Object.freeze([
   Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed' }),
-  // (the id is the records' since before the chip was renamed)
+  // (the ids are the records' since before the chips were renamed)
   Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'expert reading']), level0: 1, kind: 'fixed' }),
+  Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed' }),
 ])
 export const LENGTH = CHIPS[0]
 /** The level of Length a catch-up arrives at: short. */
 export const ARRIVE = 0
-/** The chips' scales now (the record's `scale`): Length without one line, and no Background chip. */
-export const SCALE = 4
+/** The chips' scales now (the record's `scale`): Length without one line, and the Background chip's four levels. */
+export const SCALE = 5
 
 /** The levels of a chip the person typed: from the original (0) to all the way their words ask. */
 export const OWN_LEVELS = Object.freeze(['as written', 'a little', 'more', 'fully'])
@@ -124,16 +128,19 @@ export function setWords(rec) {
   return chipsOf(rec).filter(c => c.level !== c.level0).map(c => c.levels[c.level]).join(' · ')
 }
 
-/** `at` as the chips' scales read it now. Length's one line is gone (scale 4): a record from before reads one line
- *  and short as short, and its longer levels one lower. A record written before Length had its original in the middle
+/** `at` as the chips' scales read it now. A record of scale 4 had no Background chip, so it stands where the original
+ *  does, and the rest reads as written. Length's one line went at scale 4: a record from before reads one line and
+ *  short as short, and its longer levels one lower. A record written before Length had its original in the middle
  *  (scale 2) had one line · short · medium · full with the original at full, so full is the original and the rest reads
- *  as short. The Background chip is gone, and its level with it. */
+ *  as short. Background had the same four levels at scale 3, so its level reads as it was; before scale 3 it had five,
+ *  and its level reads as the original's. */
 function levelsAt(s) {
   let at = s.at && typeof s.at === 'object' ? s.at : {}
   // (a record of before has versions written; a new one has none until its first rewrite, which sets the scale)
   const scale = Number(s.scale) || 1
-  if (scale >= SCALE || !Object.keys(s.versions || {}).length) return at
-  const { length, familiarity: _gone, ...rest } = at
+  if (scale >= 4 || !Object.keys(s.versions || {}).length) return at
+  const { length, familiarity, ...others } = at
+  const rest = scale >= 3 && Number.isInteger(familiarity) ? { ...others, familiarity } : others
   if (!Number.isInteger(length)) return rest
   const was = scale < 2 ? (length >= 3 ? null : 0) : length === 2 ? null : Math.max(0, length - 1)
   return was == null ? rest : { ...rest, length: was }
@@ -252,7 +259,14 @@ export const MEANS = Object.freeze({
   interpret: Object.freeze([
     () => 'State what was found: counts, values, what happened, and sentences that sum them up or rank them. Leave out why it happened, what follows from it and what to do.',
     () => '',
-    () => "Lead with Claude's reading of the facts, as an expert in the field reads them: the likely cause, what is usual and what is not, what follows, and what to do. Add the background a reader needs to follow that reading. Say where the reading starts, as in \"My read:\", so the analyst can tell it from what was found.",
+    () => "Lead with Claude's reading of the facts, as an expert in the field reads them: the likely cause, what is usual and what is not, what follows, and what to do. Say where the reading starts, as in \"My read:\", so the analyst can tell it from what was found.",
+  ]),
+  // (working, where the original stands, asks nothing)
+  familiarity: Object.freeze([
+    m => `Write for a reader new to the field. Explain each term and each step in plain words, and take nothing of the field as known.${m.data ? ' Give a card a plainer title where its title uses a term such a reader does not know.' : ''}`,
+    () => 'Write for a reader learning the field. Explain the terms and steps a newcomer would not know, and take the basics as known.',
+    () => '',
+    () => 'Write for an expert in the field. Take its terms and usual steps as known, and leave out what explains them.',
   ]),
   own: Object.freeze([
     () => '',
@@ -709,13 +723,15 @@ export function applyRewrite(rec, { text, at, made = null, problems = [], cards 
   return isOriginal(chips) ? { ...rec, shown: null, squeeze: s } : { ...rec, shown: text, squeeze: s }
 }
 
-/** The versions kept, keyed by the chips' scales now: a record from before them drops the ones Length or the
- *  Background chip wrote, whose keys no level names now, and keeps the ones of Interpretation alone. */
+/** The versions kept, keyed by the chips' scales now: a record of scale 4 keeps them all (its keys name no
+ *  Background level, so each reads at the original's). One from before drops the ones Length wrote, whose keys no level
+ *  names now, and before scale 3 the ones Background's five levels wrote. */
 function scaledVersions(s) {
   const v = { ...(s.versions || {}) }
   const scale = Number(s.scale) || 1
-  if (scale >= SCALE) return v
-  for (const k of Object.keys(v)) if (/(^|&)(length|familiarity)=/.test(k)) delete v[k]
+  if (scale >= 4) return v
+  const gone = scale >= 3 ? /(^|&)length=/ : /(^|&)(length|familiarity)=/
+  for (const k of Object.keys(v)) if (gone.test(k)) delete v[k]
   return v
 }
 

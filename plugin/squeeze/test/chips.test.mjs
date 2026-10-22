@@ -4,7 +4,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, cardsBlock, catchUpText, checkRewrite, chipsOf, fromVersions, levelWords, mapLinks, readReply, request, restore, revealCut, settledNote, shownKey, termsOf } from '../chips.mjs'
+import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, cardsBlock, catchUpText, checkRewrite, chipsOf, fromVersions, levelWords, mapLinks, readReply, request, restore, revealCut, settledNote, shownKey, stepAt, termsOf } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -98,9 +98,45 @@ test('the request carries only the definition of each level picked, and Length a
   const one = request({ text: TEXT, squeeze: { at: { length: 0 }, scale: 4 } }, { system: 'S' }).prompt[1].text
   assert.match(one, /- Length: short\./)
   assert.ok(!one.includes('Interpretation'))
-  // a record of before (one line first, a Background chip) reads on the scales now
+  // a record of scale 3 (one line first, Background's four levels) reads on the scales now, its Background level kept
   const old = chipsOf({ text: TEXT, squeeze: { at: { length: 4, familiarity: 0 }, scale: 3, versions: { 'length=4': 'x' } } })
-  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'interpret=as written'])
+  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'interpret=as written', 'familiarity=new'])
+})
+
+test('Background is back: new · learning · working · expert, the original at working, each level its own definition', () => {
+  const chips = chipsOf({ text: TEXT })
+  assert.deepEqual(chips.map(c => c.name), ['Length', 'Interpretation', 'Background'])
+  const bg = chips[2]
+  assert.deepEqual(bg.levels, ['new', 'learning', 'working', 'expert'])
+  assert.equal(bg.level, 2)
+  assert.equal(levelWords(bg), 'as written')
+  assert.equal(MEANS.familiarity[2](), '')
+  const at = n => request({ text: TEXT, squeeze: { at: { familiarity: n }, scale: 5 } }, { system: 'S' }).prompt[1].text
+  assert.match(at(0), /- Background: new\. Write for a reader new to the field\./)
+  assert.match(at(1), /- Background: learning\. Write for a reader learning the field\./)
+  assert.match(at(3), /- Background: expert\. Write for an expert in the field\./)
+  assert.ok(!at(2).includes('Background'))
+  // Interpretation's expert reading no longer brings the background with it
+  assert.ok(!MEANS.interpret[2]().includes('background'))
+  // a step on it is one key, and a version is kept by it
+  assert.deepEqual(stepAt({ text: TEXT }, 'familiarity', 1), { familiarity: 3 })
+  const rec = applyRewrite({ text: TEXT, shown: null, squeeze: {} }, { text: 'For a newcomer.', at: { familiarity: 0 } })
+  assert.equal(rec.squeeze.scale, 5)
+  assert.deepEqual(Object.keys(rec.squeeze.versions), ['familiarity=0'])
+})
+
+test('older records still read after the scale went to 5 (levelsAt)', () => {
+  const read = squeeze => chipsOf({ text: TEXT, squeeze }).map(c => `${c.id}=${c.levels[c.level]}`)
+  // scale 4, no Background chip: its levels read as they were, and Background stands at the original's
+  const four = { at: { length: 0, interpret: 2 }, scale: 4, versions: { 'length=0&interpret=2': 'Short, read.' } }
+  assert.deepEqual(read(four), ['length=short', 'interpret=expert reading', 'familiarity=working'])
+  // its versions come back with no call
+  assert.equal(fromVersions({ text: TEXT, squeeze: four }, { length: 0, interpret: 2 }).shown, 'Short, read.')
+  // scale 2, when Background had five levels: its level reads as the original's, and the versions it wrote go
+  assert.deepEqual(read({ at: { familiarity: 4 }, scale: 2, versions: { 'familiarity=4': 'x' } }), ['length=as written', 'interpret=as written', 'familiarity=working'])
+  assert.equal(fromVersions({ text: TEXT, squeeze: { at: {}, scale: 2, versions: { 'familiarity=0': 'x' } } }, { familiarity: 0 }), null)
+  // scale 3 kept Background's four levels: a version of it alone comes back
+  assert.equal(fromVersions({ text: TEXT, squeeze: { at: {}, scale: 3, versions: { 'familiarity=0': 'New.' } } }, { familiarity: 0 }).shown, 'New.')
 })
 
 test('Interpretation starts at the original, as written, in its middle, and adds nothing to the request there', () => {

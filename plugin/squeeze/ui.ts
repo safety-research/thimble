@@ -40,7 +40,7 @@ type Open = { id: string; focus: string; edge: string | null; typing: string | n
 const OPEN = { plugin: 'thimble', key: 'squeezeOpen' } as const
 const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
 /** What [ and ] do to each chip, in its words: the way down, then the way up. */
-const WAYS: Record<string, string> = { length: 'shorter / longer', interpret: 'facts / interpretation' }
+const WAYS: Record<string, string> = { length: 'shorter / longer', interpret: 'facts / interpretation', familiarity: 'newer / more expert' }
 /** thimble's color, as the rule down a catch-up's side and its name in its head line. */
 const RULE = 'permission'
 /** The color of a key the bar names, lit (as bar.tsx's keys). */
