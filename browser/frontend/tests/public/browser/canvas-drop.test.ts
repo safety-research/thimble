@@ -56,7 +56,7 @@ beforeAll(async () => {
   await page.goto(`${ORIGIN}/`)
   // Your work open and Notes collapsed, the board at 50% from its origin
   await page.evaluate(() => {
-    localStorage.setItem('thimble:w:canvas-open', JSON.stringify(['g']))
+    localStorage.setItem('thimble:w:canvas-shut', JSON.stringify(['h']))
     localStorage.setItem('thimble:w:canvas-view', JSON.stringify({ x: 0, y: 0, scale: 0.5 }))
   })
   await page.addScriptTag({ path: script })

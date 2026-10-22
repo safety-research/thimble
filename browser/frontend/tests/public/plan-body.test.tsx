@@ -6,7 +6,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { CardFace } from '../../src/canvas/CardFace.tsx'
 import { CanvasContext } from '../../src/canvas/context.ts'
-import { durationWords, isCompact, newPlans, planEdit, planSteps, statusWords, stepRef, stepTime } from '../../src/canvas/plan.ts'
+import { durationWords, isCompact, planEdit, planSteps, statusWords, stepRef, stepTime } from '../../src/canvas/plan.ts'
 import { plainStep, toolGroupName, toolSummary } from '../../src/chat/model.ts'
 import { cardPartLabel, parseRef, refLabel } from '../../src/lib/refs.ts'
 import type { Cell, PlanStep } from '../../src/lib/types.ts'
@@ -262,15 +262,5 @@ describe('plan steps, times and refs', () => {
     expect(toolGroupName(call)).toBe('Cards')
     const row = { kind: 'tool', name: call, input, children: [] } as never
     expect(plainStep(row, new Map([['p1an0001', 'Plan: build it']]))).toBe('Edited card · Plan: build it')
-  })
-})
-
-describe("a plan main adds opens the frames it is in", () => {
-  // live check plan-cards: the next phase's plan sat under the finished plan in a collapsed frame, its comments hidden
-  test('the plans new since the last read, none on the first read', () => {
-    const cells = [{ id: 'old', kind: 'plan' }, { id: 'note', kind: 'note' }, { id: 'next', kind: 'plan' }] as Pick<Cell, 'id' | 'kind'>[]
-    expect(newPlans(cells, null)).toEqual([])
-    expect(newPlans(cells, new Set(['old']))).toEqual(['next'])
-    expect(newPlans(cells, new Set(['old', 'next']))).toEqual([])
   })
 })

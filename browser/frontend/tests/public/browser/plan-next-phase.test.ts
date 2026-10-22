@@ -1,9 +1,9 @@
 // The next phase's plan and a comment with long details, in a real browser with thimble's own stylesheets and the real
-// Canvas. The frame "Your work" starts collapsed (the analyst shut it, so the browser keeps it shut), holding the
-// finished build plan and a check's comment on it. The comment shows its statement at rest, with its code spans as
+// Canvas. The frame "Your work" is open (frames are open by default), holding the finished build plan and a check's
+// comment on it. The comment shows its statement at rest, with its code spans as
 // code, and its details once a click makes it active; Fit takes the comment in with the cards; and when main adds the
-// run plan that follows the build plan (a `cell` record, then GET /canvas again), the frame opens so the run plan shows
-// below it. Live check plan-cards: the next plan sat under the finished one in a collapsed frame, long comments stood far
+// run plan that follows the build plan (a `cell` record, then GET /canvas again), the frame stays open and the run plan
+// shows below it. Live check plan-cards: the next plan sat under the finished one in a collapsed frame, long comments stood far
 // below their steps, Fit cut them off, and the comments showed their backticks.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -62,8 +62,6 @@ beforeAll(async () => {
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
-  // every frame shut, as the analyst left them (with nothing kept, Your work would open on the first read)
-  await page.evaluate(() => localStorage.setItem('thimble:w:canvas-open', JSON.stringify([])))
   await page.addScriptTag({ path: script })
   await page.waitForSelector('[data-cell="build1"] [data-anchor="card:build1#step-1"]')
   await page.waitForSelector('[data-canvas-comment="k1"]')
@@ -109,8 +107,8 @@ test('Fit takes the comment in with the cards', async () => {
   await page.setViewportSize({ width: 1400, height: 900 })
 })
 
-test('the run plan main adds after the finished build plan opens the collapsed frame and shows below it', async () => {
-  assert.equal(await page.locator('[data-group="g"] .frame-chev.is-open').count(), 0, 'the frame starts collapsed')
+test('the run plan main adds after the finished build plan shows below it in the open frame', async () => {
+  assert.equal(await page.locator('[data-group="g"] .frame-chev.is-open').count(), 1, 'the frame starts open')
   canvas.cells = [BUILD, RUN]
   await page.evaluate(() => (window as unknown as { __dispatch: (e: unknown) => void }).__dispatch({ type: 'cell', notebook: 'g', cell: 'run1', kind: 'note' }))
   await page.waitForSelector('[data-cell="run1"] [data-anchor="card:run1#step-2"]')
@@ -118,6 +116,5 @@ test('the run plan main adds after the finished build plan opens the collapsed f
   await page.waitForTimeout(300)
   const [build, run] = await page.evaluate(() => ['build1', 'run1'].map((id) => document.querySelector(`[data-cell="${id}"]`)!.getBoundingClientRect().toJSON()))
   assert.ok(build.bottom <= run.top, `the run plan stands below the build plan: ${build.bottom} vs ${run.top}`)
-  const kept = await page.evaluate(() => localStorage.getItem('thimble:w:canvas-open'))
-  assert.deepEqual(JSON.parse(kept!), ['g'], 'the frame stays open')
+  assert.equal(await page.locator('[data-group="g"] .frame-chev.is-open').count(), 1, 'the frame stays open')
 })

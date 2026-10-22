@@ -103,7 +103,6 @@ beforeAll(async () => {
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
-  await page.evaluate(() => localStorage.setItem('thimble:w:canvas-open', JSON.stringify(['g'])))
   await page.addScriptTag({ path: script })
   await page.waitForSelector('[data-cell="run1"] [data-anchor="card:run1#step-2"]')
   await page.waitForSelector('[data-canvas-comment="k1"]')
