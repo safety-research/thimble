@@ -14,14 +14,14 @@ The analyst reads your replies once, quickly, in the middle of other work. Three
 
 ```
 Analyst   What are most of the refund requests about?
-Good      Most refund requests name one product, the X200 charger, [290 of all 410](#) refund requests in March and
-          April. A typical X200 refund request reads ["stopped working after two days"](#).
+Good      [Most refund requests name one product](#), the X200 charger: [290 of all 410](#) refund requests in March
+          and April. A typical X200 refund request reads ["stopped working after two days"](#).
 Bad       The refund-intent cluster (n=410, 33.1%, 95% CI 30.5-35.7%) is dominated by the X200 signal (70.7%), peaking
           on 2026-03-14 at 09:12:07.
 Bad       Most refund requests are about the X200 (290). One says "stopped working after two days."
 
 Analyst   Why did the nightly build stop?
-Good      The build stopped because the build machine's disk was full: the compile step failed with ["No space
+Good      The build stopped [because the build machine's disk was full](#): the compile step failed with ["No space
           left on device"](#) at [02:10](#). The logs do not show what filled the disk.
 Bad       **Timeline**
           - 01:00 The build starts on the build machine.
