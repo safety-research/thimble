@@ -103,7 +103,7 @@ def test_coverage_merges_what_the_hook_saw(root: Path, tmp_path: Path) -> None:
     (seen / "s-test.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     cov = CV.coverage(st)
     status = {o["path"]: o["status"] for o in cov["files"]}
-    assert status == {"saves.jsonl": "seen", "notes.md": "seen", "change.diff": "seen", "agent.jsonl": "named"}
+    assert status == {"saves.jsonl": "seen", "notes.md": "seen", "change.diff": "seen", "agent.jsonl": "computed"}
     assert sorted(cov["untouched"]["path"]) == ["forge.db", "report.json", "runs.csv"]
     saves = next(o for o in cov["files"] if o["path"] == "saves.jsonl")
     assert saves["seen_lines"] == 4

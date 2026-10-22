@@ -13,12 +13,12 @@ type Any = any
 const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Coverage', isFocused: false, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } } as never
 
-/** A made-up folder of 7 files: Claude read one and searched two more. */
+/** A made-up folder of 7 files: Claude read one and searched two more; an `ls` listed one of the others. */
 const COVERAGE = {
   root: '/made-up/data',
   total: { files: 7, touched_files: 3, seen_files: 1 },
   groups: [
-    { folder: 'runs/', files: 4, touched: 2, read_share: 0.25, counted_share: 0.5, units: [{ unit: 'records', units: 40, seen: 5, model: 0, computed: 10 }] },
+    { folder: 'runs/', files: 4, touched: 2, read_share: 0.25, counted_share: 0.5, by_status: { seen: 1, searched: 1, listed: 1, untouched: 1 }, units: [{ unit: 'records', units: 40, seen: 5, model: 0, searched: 10, computed: 0 }] },
     { folder: './', files: 3, touched: 1, read_share: 0, counted_share: 0.2, units: [{ unit: 'lines', units: 30, seen: 0, model: 0, computed: 6 }] },
   ],
   files: [
@@ -93,7 +93,7 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   expect(await pane.find({ type: 'Text', text: /r1\.jsonl/ })).toBeUndefined()
   await pane.press({ key: 'dir:runs/' })
   expect(await pane.find({ type: 'Text', text: /r1\.jsonl/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /2 files, none touched/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /2 files, none touched \(1 only listed by name\)/ })).toBeDefined()
   // a file shows its path, from its first line read
   await pane.press({ key: 'file:runs/r1.jsonl' })
   expect(await pane.find({ type: 'Text', text: '/made-up/data/runs/r1.jsonl:1' })).toBeDefined()

@@ -1,5 +1,5 @@
 // counts.ts: the bar's counts, counted after each of main's turns, beside the conversation (the prompt never waits on
-// them): how much of the folder's files Claude touched (`thimble coverage --json`: read, searched, counted or computed
+// them): how much of the folder's files Claude touched (`thimble coverage --json`: read, searched or computed
 // over; a file only listed by name is not touched), and how many labels the folder has (`thimble label --json`). No
 // model call. Both run as the person's command (core/env.ts runThimble), so nothing they read counts as Claude's; the
 // coverage is of Claude's own session. One count runs at a time per folder. The last coverage is kept for the coverage
