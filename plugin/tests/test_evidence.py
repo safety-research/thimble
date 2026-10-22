@@ -266,3 +266,47 @@ def test_a_note_on_the_rest_of_the_sentence_stays_beside_a_verified_mark():
     item = {**computed(), "note": "per-agent chat also rose, from 21.2 to 31.7"}
     r = check_mark(mark("12 of 40"), item, [call(CODE, "12 of 40")], "/data")
     assert r["status"] == "verified" and r["note"].startswith("per-agent")
+
+
+def test_a_comma_between_fields_is_no_digit_separator(tmp_path: Path):
+    (tmp_path / "people.csv").write_text('id,name,sex,age,sibsp,parch,ticket,fare\n7,"Rowe, Miss. Ada May",female,2,1,2,113781,151.55\n')
+    r = check_mark(mark("Ada Rowe, age 2"), quote("people.csv", 2, 'Rowe, Miss. Ada May",female,2'), [], str(tmp_path))
+    assert r["status"] == "verified"
+
+
+def test_a_range_of_days_matches_the_same_days_written_another_way():
+    code = 'import json\nrows = [json.loads(l) for l in open("e.jsonl")]\nprint(sorted({r["day"] for r in rows}))'
+    days = call(code, "['2026-06-08', '2026-06-09', '2026-06-12']")
+    assert check_mark(mark("8–12 June 2026"), computed(code), [days], "/data")["status"] == "verified"
+    assert check_mark(mark("10–11 May"), computed(code), [call(code, "10 May 2025 (Sat), 11 May 2025 (Sun)")], "/data")["status"] == "verified"
+    # a day is a day: the 5 of 5pm is not 5 April
+    assert check_mark(mark("5–6 April"), computed(code), [call(code, "posted at 5pm, 6 in all")], "/data")["status"] == "failed"
+    assert check_mark(mark("7–12 June 2026"), computed(code), [days], "/data")["status"] == "failed"
+
+
+def test_a_number_in_an_f_strings_fixed_text_is_typed_only_when_no_field_printed_it():
+    code = 'n = sum(1 for e in ev if e == "ended after 10 minutes")\nprint(f"In {n} of {len(ev)} sessions: ended after 10 minutes")'
+    assert check_mark(mark("10"), computed(code), [call(code, "In 10 of 37 sessions: ended after 10 minutes")], "/data")["status"] == "verified"
+    typed = 'n = sum(p["merged"] for p in prs)\nprint(f"{n} of 40")'
+    assert "40 in by hand" in check_mark(mark("12 of 40"), computed(typed), [call(typed, "12 of 40")], "/data")["reason"]
+
+
+def test_a_file_name_in_a_typed_sentence_does_not_excuse_its_numbers():
+    code = 'print("cv_detect.py and solve.py (3 touches each)")'
+    assert "3 in by hand" in check_mark(mark("cv_detect.py and solve.py (3 touches each)"), computed(code), [call(code, "cv_detect.py and solve.py (3 touches each)")], "/data")["reason"]
+
+
+def test_what_code_does_may_cite_claudes_own_code_in_the_temp_folder_a_quote_may_not(tmp_path: Path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "rule.py").write_text("def label(r):\n    return len(r['authors']) >= 10\n")
+    code = check_mark(mark("at least 10 accounts"), quote(str(tmp_path / "tmp" / "rule.py"), 2, "len(r['authors']) >= 10", kind="code"), [], str(tmp_path / "data"), None, str(tmp_path / "tmp"))
+    assert code["status"] == "verified" and code["evidence"]["file"] == str(tmp_path / "tmp" / "rule.py")
+    said = check_mark(mark("at least 10 accounts"), quote(str(tmp_path / "tmp" / "rule.py"), 2, "len(r['authors']) >= 10"), [], str(tmp_path / "data"), None, str(tmp_path / "tmp"))
+    assert said["status"] == "failed" and "outside the folder" in said["reason"]
+
+
+def test_emphasis_in_the_output_is_formatting():
+    code = 'import sqlite3\nprint(sqlite3.connect("f").execute("select body from r where id=605").fetchone()[0])'
+    r = check_mark(mark('"one token away from an approval"'), computed(code), [call(code, "It is **one token away from an approval**.")], "/data")
+    assert r["status"] == "verified"

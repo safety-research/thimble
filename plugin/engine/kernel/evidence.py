@@ -8,22 +8,24 @@ check_mark() decides what the person sees of that mark; its result wins over the
   computed  the evidence is code. One of the real calls of the session (the checker's or main's Bash calls, as the
             transcript stored their output) ran that code: the call's command holds the code's lines, in order. That
             call's output shows the marked words (or the corrected words): the words whole, the same words with number
-            words as digits ("five" is 5), each quoted part of the words, or every number of the words, each a whole
-            number of the output (a 3 never matches inside 2,301). The code does not type in a number of the words
-            where it can be the printed value (assigned, printed or returned). A bound in a comparison, a key, an
-            index, an operand of arithmetic, an argument of another call and the words of a line printed only when a
-            condition holds are conditions. The check reads the output the call really printed, never the output the
-            checker wrote down.
-  quote     one place or several: the file is inside the working folder (or the folder the session started in), the
-  code      line (or a range of at most 50 lines) exists, and the place's substring is in it: in the raw line or in the
-            line's JSON strings decoded, runs of white space as one space (or as none: JSON written with no space
-            after its colons), and `**` and backticks as formatting. The quoted words of a direct quote (the case of
-            their first letter aside), and the numbers of the words, are in the cited lines too. Big files are read
-            line by line.
+            words as digits ("five" is 5), each quoted part of the words, or every day and every number of the words,
+            each number a whole number of the output (a 3 never matches inside 2,301). The code does not type in a
+            number of the words where it can be the printed value (assigned, printed or returned); a number in the
+            fixed text of an f-string counts as typed only when the output shows it nowhere else. A bound in a
+            comparison, a key, an index, an operand of arithmetic, an argument of another call and the words of a line
+            printed only when a condition holds are conditions. The check reads the output the call really printed,
+            never the output the checker wrote down.
+  quote     one place or several: the file is inside the working folder or the folder the session started in (for
+  code      what code does, also the temp folder, where Claude keeps its own code), the line (or a range of at most 50
+            lines) exists, and the place's substring is in it: in the raw line or in the line's JSON strings decoded,
+            runs of white space as one space (or as none: JSON written with no space after its colons), and `**` and
+            backticks as formatting. The quoted words of a direct quote (the case of their first letter aside), and the
+            days and numbers of the words, are in the cited lines too. Big files are read line by line.
 
 A number with a scale (8k) matches the values it rounds from, and after "about" a whole number matches the values that
-round to its zeros (about 250 is 248); a number inside a date matches only a number of the words' own dates, and a
-time to the second matches its fractions. A cited line a few lines off from the one that holds the words is moved to
+round to its zeros (about 250 is 248). A calendar day or a range of days ("8–12 June 2026") matches the same days
+however they are written (2026-06-08 … 2026-06-12); another number inside a date matches only a number of the words'
+own dates, and a time to the second matches its fractions. A cited line a few lines off from the one that holds the words is moved to
 it. A correction is the words that replace the mark: words of the sentence the checker repeated around them go.
 
 A mark the checker verified or corrected whose evidence does not hold here fails as not confirmed, with the reason; a
@@ -48,19 +50,60 @@ from typing import Any
 MONTHS = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
 DATE_PARTS = [re.compile(p) for p in (
     r"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?Z?)?\b",
+    rf"\b\d{{1,2}}\s*[–-]\s*\d{{1,2}}\s+{MONTHS}\b(?:,?\s+\d{{4}})?",
+    rf"\b{MONTHS}\.?\s+\d{{1,2}}\s*[–-]\s*\d{{1,2}}\b(?:,?\s+\d{{4}})?",
     rf"\b\d{{1,2}}\s+{MONTHS}\b(?:,?\s+\d{{4}})?",
     rf"\b{MONTHS}\.?\s+\d{{1,2}}\b(?:,?\s+\d{{4}})?",
     rf"\b{MONTHS}\s+\d{{4}}\b",
     r"\b\d{4}-\d{2}\b(?!-\d)",
     r"\b\d{1,2}:\d{2}(?::\d{2})?\b",
 )]
-# A number as written: its digits, with `,` or `_` between groups (1,714 and 4_000), then a scale (8k, 1.2M, 3bn,
-# 6.5 billion), or
-# an ordinal ending (3rd), which names a place in an order, not a value. In the marked words and in code a number right
-# after a letter or a `.` is part of a name or of another number; in an output or a file's line it may follow a letter
-# (`T14:29`).
-NUM = re.compile(r"(?<![\w.])[-−]?\$?(\d[\d,_]*(?:\.\d+)?)(?:(st|nd|rd|th)\b|([kKMB]|bn|\sthousand|\smillion|\sbillion)\b)?")
-NUM_IN_TEXT = re.compile(r"(?<![\d.])[-−]?\$?(\d[\d,_]*(?:\.\d+)?)(?:(st|nd|rd|th)\b|([kKMB]|bn|\sthousand|\smillion|\sbillion)\b)?")
+# A calendar day as people write it, one day or a range of days of one month: 2026-06-08, 8 June 2026, June 8, 2026,
+# 8–12 June 2026, June 8–12. Each reads as the days it names (a range as its first and last day), so "8–12 June 2026"
+# and an output that lists 2026-06-08 … 2026-06-12 name the same days.
+MONTH_NO = {m: i + 1 for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split())}
+DAYS = [re.compile(p) for p in (
+    r"\b(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})(?!\d)",
+    rf"\b(?P<d>\d{{1,2}})(?:\s*[–-]\s*(?P<d2>\d{{1,2}}))?(?:st|nd|rd|th)?\s+(?:of\s+)?(?P<mn>{MONTHS})\b\.?(?:,?\s+(?P<y>\d{{4}})\b)?",
+    rf"\b(?P<mn>{MONTHS})\.?\s+(?P<d>\d{{1,2}})(?:st|nd|rd|th)?(?:\s*[–-]\s*(?P<d2>\d{{1,2}})(?:st|nd|rd|th)?)?\b(?:,?\s+(?P<y>\d{{4}})\b)?",
+)]
+
+
+def calendar_days(text: str) -> list[tuple[tuple[int, int], list[tuple[int | None, int, int]]]]:
+    """Each calendar day or range of days the text names: its span, and its days as (year or None, month, day), a range
+    as its first and last day. Spans of the forms overlap at most once: the first form that reads a place wins."""
+    out: list[tuple[tuple[int, int], list[tuple[int | None, int, int]]]] = []
+    taken: list[tuple[int, int]] = []
+    for rx in DAYS:
+        for m in rx.finditer(text):
+            if any(a < m.end() and m.start() < b for a, b in taken):
+                continue
+            g = m.groupdict()
+            month = int(g["m"]) if g.get("m") else MONTH_NO.get(str(g.get("mn") or "")[:3].lower(), 0)
+            year = int(g["y"]) if g.get("y") else None
+            days = [int(g["d"])] + ([int(g["d2"])] if g.get("d2") else [])
+            if not (1 <= month <= 12 and all(1 <= d <= 31 for d in days)):
+                continue
+            taken.append(m.span())
+            out.append((m.span(), [(year, month, d) for d in days]))
+    return out
+
+
+def days_shown(words: str, text: str) -> bool:
+    """Each day the words name is a day the text names: the same month and day, and the same year when both give one."""
+    have = [day for _, ds in calendar_days(text) for day in ds]
+    return all(any(m == hm and d == hd and (y is None or hy is None or y == hy) for hy, hm, hd in have)
+               for _, ds in calendar_days(words) for y, m, d in ds)
+
+
+# A number as written: its digits, with `,` between groups of three (1,714) or `_` between groups (4_000), then a scale
+# (8k, 1.2M, 3bn, 6.5 billion), or an ordinal ending (3rd), which names a place in an order, not a value. A comma with
+# other than three digits after it separates two numbers, as in a CSV row (`2,1,2,113781`) or a list (`3,4`). In the
+# marked words and in code a number right after a letter or a `.` is part of a name or of another number; in an output
+# or a file's line it may follow a letter (`T14:29`).
+DIGITS = r"((?:\d{1,3}(?:,\d{3})+(?!\d)|\d+(?:_\d+)*)(?:\.\d+)?)"
+NUM = re.compile(r"(?<![\w.])[-−]?\$?" + DIGITS + r"(?:(st|nd|rd|th)\b|([kKMB]|bn|\sthousand|\smillion|\sbillion)\b)?")
+NUM_IN_TEXT = re.compile(r"(?<![\d.])[-−]?\$?" + DIGITS + r"(?:(st|nd|rd|th)\b|([kKMB]|bn|\sthousand|\smillion|\sbillion)\b)?")
 SCALE = {"k": 1e3, "m": 1e6, "b": 1e9}
 SCALE_OF = {"k": "k", "K": "k", "M": "m", "B": "b", "bn": "b", "thousand": "k", "million": "m", "billion": "b"}
 NAME = re.compile(r"#\d+\b|\b[A-Za-z][\w]*[-_]\d+\b")
@@ -149,10 +192,12 @@ def numbers(text: str) -> list[str]:
 
 
 def marked_numbers(words: str) -> list[tuple[str, bool]]:
-    """The numbers of marked words, each with whether it stands in a date or a time of the words."""
+    """The numbers of marked words, each with whether it stands in a date or a time of the words. The numbers of a
+    calendar day are left out: days_shown() compares the days themselves."""
     spans = date_spans(words)
+    days = [span for span, _ in calendar_days(words)]
     return [(v, any(a <= m.start(1) < b for a, b in spans)) for m in NUM.finditer(words)
-            if not names_record(words, m) for v in [number_at(m)] if v is not None]
+            if not names_record(words, m) and not any(a <= m.start(1) < b for a, b in days) for v in [number_at(m)] if v is not None]
 
 
 def wordnums(s: str, counts: bool = False) -> str:
@@ -242,21 +287,27 @@ def unlabeled(out: str) -> str:
 
 def shows(target: str, out: str, approx: bool = False) -> bool:
     """The output holds the marked words: whole, or with number words as digits, or each quoted part of the words
-    (`"added", "context" or "removed"`), or every number of the words, each as a whole number of the output, or, for
-    words with no number, every record name of the words (`#102, #125 and #130`). A label that opens a line (`9: `) is
-    no part of the output."""
+    (`"added", "context" or "removed"`), or every day and every number of the words, each day as a day of the output
+    and each number as a whole number of it, or, for words with no number, every record name of the words (`#102, #125
+    and #130`). A label that opens a line (`9: `) is no part of the output, and `**` and backticks in it are
+    formatting."""
     out = unlabeled(out)
-    if bounded_in(target, out):
+    plain = unmark(out)
+    if bounded_in(target, out) or bounded_in(target, plain):
         return True
     bare = target.strip(QUOTE_CHARS + " ")
-    if bounded_in(bare, out) or bounded_in(wordnums(target), wordnums(out)):
+    if bounded_in(bare, out) or bounded_in(bare, plain) or bounded_in(wordnums(target), wordnums(out)):
         return True
     frags = quote_fragments(target)
-    if frags and all(bounded_in(f, out) or bounded_in(f[:1].swapcase() + f[1:], out) for f in frags):
+    if frags and all(any(bounded_in(g, o) for g in (f, f[:1].swapcase() + f[1:]) for o in (out, plain)) for f in frags):
         return True
+    if calendar_days(target) and not days_shown(target, out):
+        return False
     nums = marked_numbers(wordnums(target, counts=True))
     if nums:
         return all(has_number(v, out, dates=d, approx=approx) for v, d in nums)
+    if calendar_days(target):
+        return True
     names = NAME.findall(target)
     return bool(names) and all(has_name(x, out) for x in names)
 
@@ -362,19 +413,24 @@ def fstring_parts(s: str) -> tuple[list[str], list[str]] | None:
     return parts, fields
 
 
-def literals(code: str) -> list[tuple[str, str]]:
-    """(kind, value) of each number the code types where it can be the printed value: a NUMBER token or a number inside
-    a string, assigned to a name, given to print() or a format as the innermost call (not to round() inside it), or
-    returned. A bound in a comparison, a key, an index, an operand of arithmetic (`len(rates) // 2`) or an argument of
-    another call is a condition, not a value; so are the words of a string printed only when a condition holds
-    (`"no gap exceeds 5 minutes" if worst <= 300 else …`). A number inside a string is left out in a format spec, in a
-    string that names a path or a file, as a part of a name (agent-02), as a bound of a range ("teen 13-17") and as a
-    label that opens a string (`"9: "`). The fields of an f-string are read as code of their own."""
-    out: list[tuple[str, str]] = []
+# a path or a file's name in a string (`runs/a.jsonl`, `cv_detect.py`): its digits name the file, they are no value
+PATHLIKE = re.compile(r"[^\s\"'(),;]*/[^\s\"'(),;]*|[\w.-]*\w\.[A-Za-z][A-Za-z0-9]{0,5}\b(?!\.\d)")
+
+
+def literals(code: str) -> list[tuple[str, str, str]]:
+    """(kind, value, text) of each number the code types where it can be the printed value: a NUMBER token (kind
+    `number`), or a number inside a string (`string`), or inside the fixed text of an f-string that prints a field too
+    (`fixed`, with that text), assigned to a name, given to print() or a format as the innermost call (not to round()
+    inside it), or returned. A bound in a comparison, a key, an index, an operand of arithmetic (`len(rates) // 2`) or an
+    argument of another call is a condition, not a value; so are the words of a string printed only when a condition
+    holds (`"no gap exceeds 5 minutes" if worst <= 300 else …`). A number inside a string is left out in a format spec,
+    in a path or a file's name, as a part of a name (agent-02), as a bound of a range ("teen 13-17") and as a label that
+    opens a string (`"9: "`). The fields of an f-string are read as code of their own."""
+    out: list[tuple[str, str, str]] = []
     try:
         toks = tokens(code)
     except (tokenize.TokenError, SyntaxError, IndentationError):
-        return [("number", v) for v in numbers(code)]
+        return [("number", v, "") for v in numbers(code)]
     prev = None
     stack: list[str] = []
     for i, t in enumerate(toks):
@@ -392,7 +448,7 @@ def literals(code: str) -> list[tuple[str, str]]:
             bound = prev is not None and prev.type == tokenize.OP and prev.string in ("<", ">", "<=", ">=", "==", "!=", "[", ":")
             returned = prev is not None and prev.type == tokenize.NAME and prev.string in ("return", "yield")
             if (assigned or (printed and not bound) or returned) and not operand(toks, i):
-                out.append(("number", v))
+                out.append(("number", v, ""))
         elif t.type == tokenize.STRING:
             s = t.string
             assigned = prev is not None and prev.type == tokenize.OP and prev.string in ("=", "+=") and not stack
@@ -401,10 +457,10 @@ def literals(code: str) -> list[tuple[str, str]]:
             if (printed or assigned or returned) and not chosen and not is_comparison(prev):
                 fs = fstring_parts(s)
                 texts = fs[0] if fs else [s]
-                for k, text in enumerate(texts):
-                    if "/" in text or re.search(r"\.[A-Za-z]{1,6}[\"']?$", text.strip()) or re.search(r"\.(jsonl?|csv|db|md|txt|py|ya?ml)\b", text):
-                        continue
-                    out += [("string", v) for m in NUM.finditer(text) if not re.search(r"[A-Za-z][-_]$", text[:m.start()]) and not in_range(text, m) and not (k == 0 and label(text, m))
+                kind = "fixed" if fs and fs[1] else "string"
+                for k, raw in enumerate(texts):
+                    text = PATHLIKE.sub(lambda m: " " * len(m.group(0)), raw)
+                    out += [(kind, v, raw) for m in NUM.finditer(text) if not re.search(r"[A-Za-z][-_]$", text[:m.start()]) and not in_range(text, m) and not (k == 0 and label(text, m))
                             for v in [number_at(m)] if v is not None]
                 for expr in fs[1] if fs else []:
                     out += literals(f"print({expr})")
@@ -473,7 +529,7 @@ def conditions(code: str) -> set[str]:
         every = all_numbers(code)
     except (tokenize.TokenError, SyntaxError, IndentationError):
         return set()
-    return every - {v for kind, v in literals(code) if kind == "number"}
+    return every - {v for kind, v, _ in literals(code) if kind == "number"}
 
 
 def string_values(code: str) -> tuple[list[str], list[str]]:
@@ -523,11 +579,31 @@ def typed_quote(words: str, code: str) -> list[str]:
     return [f for f in quote_fragments(words) if len(f.split()) > 1 and has(f, printed) and not has(f, tested)]
 
 
-def typed_values(words: str, code: str) -> list[str]:
-    """The numbers of the words that the code types in (0 and 1 as numbers are never a typed value). A number the code
-    uses as a condition may stand in its printed words too: `print(f"{n} children under 12")` after `age < 12`."""
+def typed_values(words: str, code: str) -> tuple[list[str], dict[str, list[str]]]:
+    """The numbers of the words that the code types in (0 and 1 as numbers are never a typed value), and those it types
+    only in the fixed text of an f-string that prints a field too, with those texts: such a number is typed only when
+    the output shows it nowhere but in that text (`f"In {n} sessions that ended after 10 minutes"` prints 10 twice
+    when n is 10). A number the code uses as a condition may stand in its printed words too: `print(f"{n} children
+    under 12")` after `age < 12`."""
     nums = cited_numbers(words) - conditions(code)
-    return sorted({v for kind, v in literals(code) if v in nums and not (kind == "number" and v in ("0", "1"))})
+    hard: set[str] = set()
+    fixed: dict[str, list[str]] = {}
+    for kind, v, text in literals(code):
+        if v not in nums or (kind == "number" and v in ("0", "1")):
+            continue
+        if kind == "fixed":
+            fixed.setdefault(v, []).append(text)
+        else:
+            hard.add(v)
+    return sorted(hard), {v: t for v, t in fixed.items() if v not in hard}
+
+
+def without_texts(out: str, texts: list[str]) -> str:
+    """The output with each of the code's fixed texts taken out where it stands whole, white space read loosely."""
+    out = norm_ws(out)
+    for t in sorted({norm_ws(x.replace("\\n", "\n").replace("\\t", "\t")) for x in texts} - {""}, key=len, reverse=True):
+        out = out.replace(t, " | ")
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ computed evidence
@@ -542,6 +618,18 @@ HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=
 def scripts(command: str) -> list[str]:
     """The scripts a shell command runs: each here-document's body (`python3 - <<'PY' … PY`), then the command."""
     return [m.group(3) for m in HEREDOC.finditer(command)] + [command]
+
+
+RUNS_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;)\s*)?\S*python[\d.]*\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\1[ \t]*")
+
+
+def only_script(command: str, script: str) -> bool:
+    """The command does nothing but run the script: `python3 - <<'PY'`, the script, `PY` (after a `cd` at most)."""
+    m = HEREDOC.search(command)
+    if not m or m.group(3) != script or command[m.end():].strip():
+        return False
+    head = (command[:m.start()] + m.group(0).split("\n", 1)[0]).strip()
+    return RUNS_SCRIPT.fullmatch(head) is not None
 
 
 def computes(line: str) -> str:
@@ -592,7 +680,11 @@ def check_computed(target: str, code: str, calls: list[dict[str, Any]], approx: 
 
     def shown(c: dict[str, Any] | None, script: str, spans: list[list[int]]) -> dict[str, Any]:
         text, hl = window(str((c or {}).get("output") or ""), spans, OUTPUT_MAX)
-        return {"kind": "computed", "code": script.strip("\n"), "output": text, "highlight": hl, "by": (c or {}).get("by") or "checker"}
+        command = str((c or {}).get("command") or "")
+        # the code whose output the pane shows: the script alone when the call ran only it, else the whole command,
+        # since its other parts printed into the same output
+        code = script if not command or only_script(command, script) else command
+        return {"kind": "computed", "code": code.strip("\n"), "output": text, "highlight": hl, "by": (c or {}).get("by") or "checker"}
 
     if not runs:
         return ["no command of the session ran the code the check gave"], shown(None, code, [])
@@ -601,11 +693,15 @@ def check_computed(target: str, code: str, calls: list[dict[str, Any]], approx: 
         # the whole script that ran, not only the lines the checker gave, types in no value (a script that is the
         # command itself, not a here-document, is read by the lines given)
         body = code if script == c.get("command") else script
-        typed = typed_values(target, body)
+        typed, fixed = typed_values(target, body)
         quoted = typed_quote(target, body)
         out = str(c.get("output") or "")
+        if fixed and shows(target, out, approx):
+            # a number of the words the code also types in the fixed text of an f-string: the output must show it
+            # outside that text, where a field printed it
+            typed += [v for v in fixed if not has_number(v, without_texts(out, fixed[v]), dates=False, approx=approx)]
         if typed:
-            problem = problem or f"its code writes {', '.join(typed)} in by hand instead of computing it"
+            problem = problem or f"its code writes {', '.join(sorted(typed))} in by hand instead of computing it"
         elif quoted:
             problem = problem or f"its code writes the quoted words “{quoted[0]}” itself instead of reading them from the records"
         elif shows(target, out, approx):
@@ -716,11 +812,12 @@ def find_loose(sub: str, text: str) -> list[int] | None:
     return [m.start(), m.end()] if m else None
 
 
-def inside(cwd: str, file: str, root: str | None = None) -> str | None:
-    """The file's path, from the working folder, when it lies inside the working folder or the folder the session
-    started in (no symbolic link is followed, so a folder of links reads as the person sees it), else None."""
+def inside(cwd: str, file: str, root: str | None = None, tmp: str | None = None) -> str | None:
+    """The file's path, from the working folder, when it lies inside the working folder, the folder the session
+    started in, or `tmp` when given (no symbolic link is followed, so a folder of links reads as the person sees it),
+    else None."""
     p = os.path.abspath(file if os.path.isabs(file) else os.path.join(cwd, file))
-    for r in {os.path.abspath(cwd), os.path.abspath(root or cwd)}:
+    for r in {os.path.abspath(cwd), os.path.abspath(root or cwd)} | ({os.path.abspath(tmp)} if tmp else set()):
         if p == r or p.startswith(r + os.sep):
             return p
     return None
@@ -739,14 +836,15 @@ def holds(sub: str, hay: list[str]) -> bool:
     return any(norm_ws(sub) in h or unmark(sub) in h or tight in re.sub(r"\s+", "", h) for h in hay)
 
 
-def place(ev: dict[str, Any], cwd: str, root: str | None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
+def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
     """One cited place: its problems, the place to show (`file`, `line`, the cited lines with a line around them, the
     substring highlighted) and the texts the cited lines hold. A line number is where to look: when the cited lines do
-    not hold the substring and lines up to SHIFT_MAX away do, the nearest such lines are cited in their place."""
+    not hold the substring and lines up to SHIFT_MAX away do, the nearest such lines are cited in their place. A file
+    in `tmp` counts too (Claude's own code, such as a label's rule); its path shows whole."""
     file, line, sub = ev.get("file"), ev.get("line", ev.get("lines")), ev.get("substring")
     if not file or line is None or not sub:
         return ["the check gave no file, line or words to find there"], None, []
-    path = inside(cwd, str(file), root)
+    path = inside(cwd, str(file), root, tmp)
     if not path:
         return [f"{file} is outside the folder of this session"], None, []
     span = line_span(line)
@@ -782,19 +880,21 @@ def place(ev: dict[str, Any], cwd: str, root: str | None) -> tuple[list[str], di
                 break
         else:
             r["text"] = window(r["text"], [], LINE_MAX)[0]
-    rel = os.path.relpath(path, os.path.abspath(root or cwd))
+    rel = path if not inside(cwd, path, root) else os.path.relpath(path, os.path.abspath(root or cwd))
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 
-def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of quote or code evidence, and the cited places to show. The evidence is one place, or several when
     the claim joins places (a value set on one line and used on another): each place holds the words the check gave
-    for it, and the places together hold the quoted words of a direct quote and the numbers of the words."""
+    for it, and the places together hold the quoted words of a direct quote and the numbers of the words. A claim about
+    what code does may cite Claude's own code in `tmp`; a quote of a record may not, since a file there holds what
+    Claude derived, not the records."""
     problems: list[str] = []
     shown: list[dict[str, Any]] = []
     hay: list[str] = []
     for ev in evs:
-        p, s, h = place(ev, cwd, root)
+        p, s, h = place(ev, cwd, root, tmp if kind == "code" else None)
         problems += p
         hay += h
         if s:
@@ -805,7 +905,9 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     for frag in quote_fragments(target):
         if not any(in_text(frag, h) for h in hay):
             problems.append(f"{where} does not hold the quoted words “{frag[:60]}”")
-    # a quote of a record shows its numbers; a claim about what code does may compute them from it (`2 ** k`)
+    # a quote of a record shows its days and numbers; a claim about what code does may compute them from it (`2 ** k`)
+    if kind != "code" and calendar_days(unmark(target)) and not days_shown(unmark(target), " ".join(hay)):
+        problems.append(f"{where} does not show the day the words name")
     for v, in_date in (marked_numbers(unmark(target)) if kind != "code" else []):
         if not any(has_number(v, h, dates=in_date) for h in hay):
             problems.append(f"{where} does not show {v}")
@@ -837,14 +939,14 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False) -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show."""
     if kind == "computed":
         code = ev.get("code") if isinstance(ev, dict) else None
         return check_computed(target, str(code or ""), calls, approx)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
-        return check_quote(target, kind, evs, cwd, root) if evs else (["the check gave no place"], None)
+        return check_quote(target, kind, evs, cwd, root, tmp) if evs else (["the check gave no place"], None)
     return [f"the check gave evidence of no known kind ({kind!r})"], None
 
 
@@ -907,7 +1009,7 @@ def own_words(new: str, mark: dict[str, Any]) -> str:
     return norm_ws(new[at[start]:at[end - 1] + 1])
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?}. `mark` is {n, words,
     sentence?}; `item` the checker's object for it (or None); `calls` the real Bash calls of the session ({command,
     output, by}).
@@ -937,15 +1039,15 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if status == "failed":
         failed = {**out, "status": "failed", "reason": reason or "no source supports this claim", "failedBy": "check", **extra}
         if ev:
-            _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx)
+            _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp)
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
                 failed["evidence"] = evidence
         return failed
     if status not in ("verified", "corrected"):
         return {**out, "reason": f"the check gave the status {status!r}"}
-    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx)
+    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp)
     if problems and new:
-        kept, kept_ev = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx)
+        kept, kept_ev = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp)
         if not kept:
             return {"n": n, "status": "verified", "shown": words, "reason": reason, **extra, **({"evidence": kept_ev} if kept_ev else {})}
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
@@ -959,8 +1061,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     return res
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None) -> dict[str, Any]:
-    """Every mark of a reply: {parsed, results}. `answer` is the checker's last message."""
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> dict[str, Any]:
+    """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
+    folder."""
     items = parse_answer(answer)
     by_n: dict[int, dict[str, Any]] = {}
     for it in items or []:
@@ -968,4 +1071,4 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
             by_n.setdefault(int(it.get("mark")), it)
         except (TypeError, ValueError):
             continue
-    return {"parsed": items is not None, "results": [check_mark(m, by_n.get(int(m["n"])), calls, cwd, root) for m in marks]}
+    return {"parsed": items is not None, "results": [check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp) for m in marks]}
