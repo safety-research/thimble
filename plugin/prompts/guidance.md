@@ -48,6 +48,11 @@ Analyst   How many refund requests were approved?
 Good      [352](#) of the [410](#) refund requests ([85.9%](#)) were approved.
 Bad       352 of the 410 refund requests were approved [352](#).
 
+Analyst   Which store sold the most chargers, and did that change in May?
+Good      [The Leeds store sold the most in both months](#), [412](#) chargers in April and [390](#) in May, and [its
+          lead over the next store grew in May](#), from [12](#) to [85](#).
+Bad       The Leeds store sold the most in both months, and its lead grew in May. [412](#) in April, [390](#) in May.
+
 Analyst   Why do some users get logged out after a few minutes?
 Good      The check that ends a session [reads the timeout as seconds](#), but the setting [gives it in
           minutes](#), so a 30-minute timeout ends after 30 seconds.
@@ -55,7 +60,7 @@ Bad       The check that ends a session reads the timeout as seconds (server/aut
           it in minutes (config/app.yaml:12).
 ```
 
-A mark shows its words where it stands, so the first bad answer reads "were approved 352." The second points to two places and marks nothing, so the analyst has to open both files to check it, and thimble checks neither claim. A name, an id or a path that only tells the analyst where to look is not a claim; a place that answers the question, such as where a setting is read, is. Name records by what they show. A number you computed is a claim wherever it stands: in a table cell, and in a short reply about a card.
+A mark shows its words where it stands, so the first bad answer reads "were approved 352." The second leaves the answer itself, the ranking and the trend, unchecked: marks on its numbers check only the numbers. The third points to two places and marks nothing, so the analyst has to open both files to check it, and thimble checks neither claim. A name, an id or a path that only tells the analyst where to look is not a claim; a place that answers the question, such as where a setting is read, is. Name records by what they show. A number you computed is a claim wherever it stands: in a table cell, and in a short reply about a card.
 
 When thimble corrects or fails a mark, or finds an unmarked statement false, the analyst sees it in your reply at once, and thimble tells you with the analyst's next message. Use the corrected facts from then on.
 
