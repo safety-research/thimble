@@ -320,7 +320,7 @@ def test_a_value_printed_as_is_or_assigned_alone_is_typed_a_list_of_keys_and_an_
     assert check_mark(mark("352 rows"), computed("352"), [call(code, "352")], "/data")["status"] == "verified"
     # a list of the keys the code looks up prints them next to computed counts
     keys = 'import json\nfrom collections import Counter\nc = Counter(json.loads(l)["t"] for l in open("t.jsonl"))\nfor v in [175, 60]:\n    print(f"{v} s x{c[v]}")'
-    assert check_mark(mark("175 s x3, 60 s x2"), computed("175 s x3"), [call(keys, "175 s x3\n60 s x2")], "/data")["status"] == "verified"
+    assert check_mark(mark("175 s x3, 60 s x2"), computed("175 s x3\n60 s x2"), [call(keys, "175 s x3\n60 s x2")], "/data")["status"] == "verified"
 
 
 def test_a_number_in_a_printed_text_is_typed_only_when_the_output_shows_it_nowhere_else():
@@ -435,3 +435,55 @@ def test_a_quote_over_more_lines_than_cited_widens_to_them(tmp_path: Path):
     r = check_mark(mark('"Agreement numbers may be inflated relative to human gold, shared blind spots."'),
                    quote("report.md", "3-4", "Agreement numbers may be inflated relative to human gold, shared blind spots."), [], str(tmp_path))
     assert r["status"] == "verified" and r["evidence"]["line"] == "2-4"
+
+
+def test_a_digit_inside_a_name_is_no_number_and_a_decimal_keeps_its_places():
+    from kernel.evidence import has_number, shows
+    assert not shows("the median was 2.0 min", "sweep2-fable: median 9.9 min")
+    assert not has_number("3", "run sweep3 had 9") and not has_number("3", "run_3 had 9")
+    # a time after the T of a date is still a time
+    assert has_number("14", "2026-08-30T14:29:00Z")
+    # 3.0 says one place: 3.1 is not 3.0, and 1 is the same value as 1.0
+    assert not shows("17 → 3.0 min", "median 16.9 min, then 3.1 min") and shows("1.0", "p = 1")
+
+
+def test_record_names_compare_in_either_case_and_cited_lines_in_any_order():
+    out = "opus-5: 71.5\nsonnet-5: 20.8\nfable-5: 23.2"
+    assert check_mark(mark("Opus-5 is slowest"), computed("opus-5: 71.5"), [call(CODE, out)], "/data")["status"] == "verified"
+    assert check_mark(mark("20.8 and 71.5"), computed("sonnet-5: 20.8\nopus-5: 71.5"), [call(CODE, out)], "/data")["status"] == "verified"
+
+
+def test_the_words_stand_in_the_lines_the_check_copied():
+    # a 3 of another row does not show the words' 3.0
+    out = "a: median 3.1 min, n=315\nb: median 38.0 min, n=3"
+    r = check_mark(mark("3.0 min"), computed("a: median 3.1 min"), [call(CODE, out)], "/data")
+    assert r["status"] == "failed" and "does not show" in r["reason"]
+
+
+def test_a_year_that_opens_a_line_is_its_subject_not_a_label():
+    out = "2025: 1–4%\n2026: 3–12% (min 2.9, max 12.4)"
+    assert check_mark(mark("3–12% in every month of 2026"), computed("2026: 3–12%"), [call(CODE, out)], "/data")["status"] == "verified"
+
+
+def test_about_rounds_each_number_it_stands_before_and_these_two_counts_nothing():
+    out = "Gmail 4,087 times and every other mail client 114 times"
+    assert check_mark(mark("Gmail about 4,000 times and every other mail client about 100 times"), computed(out), [call(CODE, out)], "/data")["status"] == "verified"
+    out = "A removed B's text in 82 saves; B removed A's in 82"
+    assert check_mark(mark("These two removed each other's text 82 times each"), computed(out), [call(CODE, out)], "/data")["status"] == "verified"
+
+
+def test_a_condition_the_code_tests_in_another_form_may_stand_in_its_printed_words():
+    days = 'import json\nfirst = json.load(open("first.json"))\nn = sum("2026-06-16" <= d <= "2026-06-17" for d in first.values())\nprint(f"{n} accounts started between 16 and 17 June")'
+    out = "6 accounts started between 16 and 17 June"
+    assert check_mark(mark("Six accounts started between 16 and 17 June"), computed(out), [call(days, out)], "/data")["status"] == "verified"
+    said = 'import json\nrs = [json.loads(l) for l in open("r.jsonl")]\nok = sum(r["result"].startswith(("Wrapping up", "Shift complete")) for r in rs)\nprint(f"{ok} sessions ended with a \\"Wrapping up\\" or \\"Shift complete\\" summary")'
+    out = '12 sessions ended with a "Wrapping up" or "Shift complete" summary'
+    assert check_mark(mark('ended with a "Wrapping up" or "Shift complete" summary'), computed(out), [call(said, out)], "/data")["status"] == "verified"
+    # a number the code holds nowhere but in the printed text is still typed
+    typed = 'import json\nfirst = json.load(open("first.json"))\nprint(f"{len(first)} accounts started between 16 and 17 June")'
+    assert "16" in check_mark(mark("6 accounts started between 16 and 17 June"), computed(out := "6 accounts started between 16 and 17 June"), [call(typed, out)], "/data")["reason"]
+
+
+def test_when_no_call_printed_the_cited_output_the_pane_shows_what_the_check_ran():
+    r = check_mark(mark("72 min"), computed("opus: 72"), [call(CODE, "opus: 71.5")], "/data")
+    assert r["status"] == "failed" and r["evidence"]["output"] == "opus: 71.5"

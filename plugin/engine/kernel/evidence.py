@@ -9,11 +9,12 @@ What it guarantees. The checker judges what a claim means; this module makes sur
 shows the words, so a mark is never verified on evidence the checker made up:
 
   computed  the evidence is a real call of the session: one of the checker's or main's Bash calls, as the transcript
-            stored it. The checker names the call by a part of its output; the call's real output holds that text
-            (white space read loosely, "…" for left-out text) and shows the marked words (or the corrected words):
-            the words whole, or each part of them that compares without reading meaning: each quoted part, each day,
-            each number as a whole number of the output (a 3 never matches inside 2,301; number words read as
-            digits), and for words with no number each record name. Words with none of these ("passed when run
+            stored it. The checker names the call by the lines of its output it copies; the call's real output holds
+            each of them (white space read loosely, "…" for left-out text, in any order), and the lines that hold
+            them show the marked words (or the corrected words): the words whole, or each part of them that compares
+            without reading meaning: each quoted part, each day, each number as a whole number of those lines (a 3
+            never matches inside 2,301 or sweep3; number words read as digits), and for words with no number each
+            record name, in either case. Words with none of these ("passed when run
             alone") are the checker's reading of the output it cites, as a paraphrase of a quote is. The check reads
             the output the call really printed, never the output the checker wrote down, and it runs nothing.
             The call's code does not type in a number of the words as the printed value: given to print as is,
@@ -21,7 +22,9 @@ shows the words, so a mark is never verified on evidence the checker made up:
             the output shows it nowhere else. A number the code computes with may also stand in the printed words
             (`age < 12` and "children under 12"): a bound of a comparison, an index or a slice, an operand of
             arithmetic, an argument of another call (`head(5)`, `round(x, 2)`), a value in a list or a dict (the keys
-            the code looks up), and the words of a line printed only when a condition holds. Not caught: a value
+            the code looks up), the digits of a text the code tests the records with (`"2026-06-16" <= day` and "16
+            June"; `startswith("Wrapping up")` and the quoted words), and the words of a line printed only when a
+            condition holds. Not caught: a value
             computed from typed numbers alone (`print(350 + 2)`), a typed list printed back, and code the call ran
             from a file.
   quote     one place or several: the file is inside the folder the session started in or the shell's folder (a
@@ -64,7 +67,7 @@ import os
 import re
 import shlex
 import tokenize
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 MONTHS = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
@@ -118,12 +121,12 @@ def days_shown(words: str, text: str) -> bool:
 
 # A number as written: its digits, with `,` between groups of three (1,714) or `_` between groups (4_000), then a scale
 # (8k, 1.2M, 3bn, 6.5 billion), or an ordinal ending (3rd), which names a place in an order, not a value. A comma with
-# other than three digits after it separates two numbers, as in a CSV row (`2,1,2,113781`) or a list (`3,4`). In the
-# marked words and in code a number right after a letter or a `.` is part of a name or of another number; in an output
-# or a file's line it may follow a letter (`T14:29`).
+# other than three digits after it separates two numbers, as in a CSV row (`2,1,2,113781`) or a list (`3,4`). A number
+# right after a letter, a `_` or a `.` is part of a name (sweep3, run_2) or of another number; in an output or a file's
+# line a time may follow the `T` of a date (`2026-08-30T14:29`), and a count the `x` of a multiple (`x3`).
 DIGITS = r"((?:\d{1,3}(?:,\d{3})+(?!\d)|\d+(?:_\d+)*)(?:\.\d+)?)"
 NUM = re.compile(r"(?<![\w.])[-−]?\$?" + DIGITS + r"(?:(st|nd|rd|th)\b|([kKMB]|bn|\sthousand|\smillion|\sbillion)\b)?")
-NUM_IN_TEXT = re.compile(r"(?<![\d.])[-−]?\$?" + DIGITS + r"(?:(st|nd|rd|th)\b|([kKMB]|bn|\sthousand|\smillion|\sbillion)\b)?")
+NUM_IN_TEXT = re.compile(r"(?<![\d.])(?:(?<![A-Za-z_])|(?<=\dT)|(?<=\bx))[-−]?\$?" + DIGITS + r"(?:(st|nd|rd|th)\b|([kKMB]|bn|\sthousand|\smillion|\sbillion)\b)?")
 SCALE = {"k": 1e3, "m": 1e6, "b": 1e9}
 SCALE_OF = {"k": "k", "K": "k", "M": "m", "B": "b", "bn": "b", "thousand": "k", "million": "m", "billion": "b"}
 NAME = re.compile(r"#\d+\b|\b[A-Za-z][\w]*[-_]\d+\b")
@@ -168,17 +171,17 @@ def unmark(s: Any) -> str:
 
 
 def num_value(tok: str, scale: str | None = None) -> str:
-    """A number token as one form: 1,714 and 4_000 are 1714 and 4000, 6.0 is 6, $40 is 40; with a scale, the digits
-    and the scale's letter (`8k`; `1.2M` and `1.2 million` are `1.2m`)."""
+    """A number token as one form: 1,714 and 4_000 are 1714 and 4000, 09 is 9, $40 is 40; a decimal keeps the places
+    it is written with, since they say how exact it is (3.0 is 3.0: 3.1 is not 3.0); with a scale, the digits and the
+    scale's letter (`8k`; `1.2M` and `1.2 million` are `1.2m`)."""
     t = tok.replace(",", "").replace("_", "").replace("$", "").replace("−", "-")
     try:
-        v = float(t)
-    except ValueError:
+        d = Decimal(t)
+    except InvalidOperation:
         return t
-    if not math.isfinite(v):
-        # more digits than a float holds: the digits as written are its one form
+    if not d.is_finite():
         return t
-    one = str(int(v)) if v == int(v) and "." not in t.rstrip("0").rstrip(".") else repr(v)
+    one = str(d) if "." in t else str(int(d))
     return one + SCALE_OF[scale.strip()] if scale else one
 
 
@@ -216,7 +219,8 @@ def same_number(v: str, w: str, approx: bool = False) -> bool:
         return False
     places = len(digits.split(".")[1]) if "." in digits else 0
     if not scale and len(w.split(".")[1] if "." in w else "") <= places:
-        return False
+        # an output as exact as the words, or less, shows them only when it is the same value (1 is 1.0)
+        return x == want
     return rounds_to(x / (SCALE[scale] if scale else 1), places) == want
 
 
@@ -242,9 +246,10 @@ def marked_numbers(words: str) -> list[tuple[str, bool]]:
 
 def wordnums(s: str, counts: bool = False) -> str:
     """Number words as digits: "five of the twelve" is "5 of the 12", and "half" is 50 (a share in percent). With
-    `counts`, "one" stays a word: it is more often an article ("one page every 9 seconds") than a count."""
+    `counts`, "one" stays a word: it is more often an article ("one page every 9 seconds") than a count. A number word
+    after "these" or "those" points back to things already named ("these two removed …"): it counts nothing."""
     words = [w for w in WORDNUM if not (counts and w == "one")]
-    return re.sub(r"\b(" + "|".join(words) + r"|half)\b", lambda m: WORDNUM.get(m.group(1).lower(), "50"), s, flags=re.I)
+    return re.sub(r"(?<!these )(?<!those )\b(" + "|".join(words) + r"|half)\b", lambda m: WORDNUM.get(m.group(1).lower(), "50"), s, flags=re.I)
 
 
 def date_spans(text: str) -> list[tuple[int, int]]:
@@ -337,18 +342,19 @@ def in_text(frag: str, hay: str) -> bool:
 
 
 def has_name(name: str, text: str) -> bool:
-    """A record's name (`#118`, `agent-11`) stands in the text as a whole word; a number name (`#118`) also as its
-    number (118), as a table or a list prints it."""
-    if re.search(r"(?<![\w#-])" + re.escape(name) + r"(?![\w-])", text):
+    """A record's name (`#118`, `agent-11`) stands in the text as a whole word, in either case (Opus-5 and opus-5); a
+    number name (`#118`) also as its number (118), as a table or a list prints it."""
+    if re.search(r"(?<![\w#-])" + re.escape(name) + r"(?![\w-])", text, re.I):
         return True
     return name.startswith("#") and has_number(name[1:], text, dates=False)
 
 
-LABEL = re.compile(r"^([ \t]*)\d+:[ \t]+", re.M)
+LABEL = re.compile(r"^([ \t]*)\d{1,3}:[ \t]+", re.M)
 
 
 def unlabeled(out: str) -> str:
-    """The output without the labels that open its lines (`9: 2 of 21` is `2 of 21`)."""
+    """The output without the labels that open its lines (`9: 2 of 21` is `2 of 21`): a number of up to three digits,
+    as code numbers the rows it prints. A longer number, such as a year (`2026: 3–12%`), is the line's subject."""
     return LABEL.sub(r"\1", out)
 
 
@@ -374,9 +380,15 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
     nums = marked_numbers(wordnums(target, counts=True))
     if nums:
         pct = percents(target)
+        rough = approx_numbers(wordnums(target, counts=True))
         out = wordnums(out, counts=True)
-        return all(has_number(v, out, dates=d, approx=approx) or (v in pct and has_number(fraction(v), out, approx=approx)) for v, d in nums)
+        return all(has_number(v, out, dates=d, approx=approx or v in rough) or (v in pct and has_number(fraction(v), out, approx=approx or v in rough)) for v, d in nums)
     return bool(frags or calendar_days(target)) or all(has_name(x, out) for x in NAME.findall(target))
+
+
+def approx_numbers(words: str) -> set[str]:
+    """The numbers of the words that "about" (or ~, roughly …) comes right before: "about 4,000 times and about 100"."""
+    return {v for m in NUM.finditer(words) if APPROX.search(words[:m.start()]) for v in [number_at(m)] if v is not None}
 
 
 def percents(words: str) -> set[str]:
@@ -616,18 +628,22 @@ def all_numbers(code: str) -> set[str]:
 
 
 def conditions(code: str) -> set[str]:
-    """The numbers the code uses as conditions: number tokens in a comparison or an argument (`age < 12`, `head(5)`)."""
+    """The numbers the code uses as conditions: number tokens in a comparison or an argument (`age < 12`, `head(5)`),
+    and the digits of each text it tests the records with (`r["Ticket"] == "239853"`, `"2026-06-16" <= day`,
+    `glob("runs/sweep[23]*")`), since printed words often name such a condition in their own form ("16 June")."""
     try:
         every = all_numbers(code)
     except (tokenize.TokenError, SyntaxError, IndentationError):
         return set()
-    return every - {v for kind, v, _ in literals(code) if kind == "number"}
+    tested = {num_value(d) for text in string_values(code)[1] for d in re.findall(r"\d+", text)}
+    return (every - {v for kind, v, _ in literals(code) if kind == "number"}) | tested
 
 
 def string_values(code: str) -> tuple[list[str], list[str]]:
     """The text of each string the code prints or assigns (a plain string's value, an f-string's text between its
-    fields), as literals() reads a number's place, and of each string it compares with something (`r["v"] == "yes"`,
-    `"words" in body`). A key or an argument of another call is neither."""
+    fields), as literals() reads a number's place, and of each string it tests the records with: compared with
+    something (`r["v"] == "yes"`, `"words" in body`) or given to a call that is no print (`s.startswith("Wrapping
+    up")`, `re.search("fail", s)`, `open("runs/a.jsonl")`). A key (`r["v"]`) is neither."""
     out: list[str] = []
     tested: list[str] = []
     try:
@@ -651,7 +667,7 @@ def string_values(code: str) -> tuple[list[str], list[str]]:
             if not fs:
                 texts = [string_value(t.string)]
             for text in texts:
-                if isinstance(text, str) and compared:
+                if isinstance(text, str) and (compared or (call is not None and call not in PRINTERS and call != "sub")):
                     tested.append(text)
                 elif isinstance(text, str) and (call in PRINTERS or assigned):
                     out.append(text)
@@ -731,19 +747,18 @@ def output_parts(given: Any) -> list[str]:
 
 
 def printed(given: Any, output: str) -> list[int] | None:
-    """Where a call's output holds the output the check gave (its parts in that order, white space read loosely): the
-    span of the first part in the output, or None."""
+    """Where a call's output holds the output the check gave (each of its parts, white space read loosely, in any
+    order: the check may copy lines in the order the claim names them): the span of the whole lines that hold its
+    parts, from the first to the last, or None."""
     parts = output_parts(given)
-    out, at = norm_ws(output), 0
-    for p in parts:
-        i = out.find(p, at)
-        if i < 0:
-            return None
-        at = i + len(p)
-    if not parts:
+    if not parts or any(p not in norm_ws(output) for p in parts):
         return None
-    m = re.search(r"\s+".join(re.escape(w) for w in parts[0].split(" ")), output)
-    return [m.start(), m.end()] if m else [0, 0]
+    found = [m.span() for p in parts for m in [re.search(r"\s+".join(re.escape(w) for w in p.split(" ")), output)] if m]
+    if not found:
+        return [0, len(output)]
+    a, b = min(x for x, _ in found), max(y for _, y in found)
+    end = output.find("\n", b)
+    return [output.rfind("\n", 0, a) + 1, len(output) if end < 0 else end]
 
 
 def window(text: str, spans: list[list[int]], size: int) -> tuple[str, list[list[int]]]:
@@ -760,7 +775,7 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
     """The problems of computed evidence, and the evidence to show. The check names a call by the output it printed;
     the calls of the session whose real output holds that text are the candidates, and the first whose output shows
     the words, and whose code types none of them in, is the evidence: its code and its whole output, the words
-    highlighted from the cited place on."""
+    highlighted from the cited place on. When no call printed that output, the check's own last call is shown."""
     if not output_parts(given):
         return ["the check gave no output of a call"], None
     runs = [(c, at) for c in calls for at in [printed(given, str(c.get("output") or ""))] if at is not None]
@@ -770,10 +785,15 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
         return {"kind": "computed", "code": shown_code(str(c.get("command") or "")).strip("\n"), "output": text, "highlight": hl, "by": c.get("by") or "checker"}
 
     if not runs:
-        return ["no call of the session printed the output the check gave"], None
+        # what the check itself ran, so the person sees what it found
+        own = [c for c in calls if c.get("by") == "checker"]
+        return ["no call of the session printed the output the check gave"], shown(own[-1], []) if own else None
     problem = ""
     for c, at in runs:
-        out = str(c.get("output") or "")
+        # the words must stand in the lines the check copied, not anywhere in a long output, where another value
+        # (an `n=3` of another row) could match them
+        whole = str(c.get("output") or "")
+        out = whole[at[0]:at[1]]
         typed, texts, quoted = [], {}, []
         for code in scripts(str(c.get("command") or "")):
             t, f = typed_values(target, code)
@@ -789,8 +809,8 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
         elif quoted:
             problem = problem or f"its code writes the quoted words “{quoted[0]}” itself instead of reading them from the records"
         elif shows(target, out, approx):
-            # the words where the cited output stands, else anywhere, else the cited output itself
-            spans = [[a + at[0], b + at[0]] for a, b in spans_of(target, out[at[0]:])] or spans_of(target, out) or [at]
+            # the words in the cited lines, else the cited lines themselves
+            spans = [[a + at[0], b + at[0]] for a, b in spans_of(target, out)] or [at]
             return [], shown(c, spans)
         else:
             problem = problem or f"the output of that call does not show “{target}”"
