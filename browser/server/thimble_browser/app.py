@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 
 from . import canvas, cardrunner, chats, corpus, features, files, fixcopy, home, issues, settings, settings_api, tools
 from .agent import Sessions
+from .cards import sandbox
 from .auth import Auth, Guard
 from .hub import hub
 
@@ -68,6 +69,7 @@ def resolve(ws: str, folder: Path, ref: str, value: str | None = None) -> dict[s
 def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]:
     @asynccontextmanager
     async def lifespan(_app: Any) -> Any:
+        asyncio.get_running_loop().run_in_executor(None, sandbox.write_bytecode)
         yield
         await cardrunner.close_all()  # the card runners stop with the server
 
