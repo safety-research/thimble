@@ -133,7 +133,7 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(textOf(first)).toContain('version 2')
   const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
   expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above')
-  expect(textOf(await resultOf('toolu_made_up_1'))).toBe('version 2 · 2 rows from runs.json')
+  expect(textOf(await resultOf('toolu_made_up_1'))).toBe('2 rows from runs.json')
 
   // a small change: edits to the view, its rows and title kept (no `view`, no `data`, no `title`)
   const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1c', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
@@ -189,6 +189,10 @@ test('a view that did not parse is fixed with edits, its rows kept; the card on 
   expect(String(again.result)).toContain('The version on screen stays.')
   const fixed2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_9d', id, edits: [{ old: ' BROKEN', new: ' ' }] } as never)) as Any
   expect(String(fixed2.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
+  // new rows alone keep the view of the last call
+  const rows = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_9e', id, data: 'runs.json' } as never)) as Any
+  expect(String(rows.result)).toContain('Version 3 of “Scores” is drawn in place of version 2')
+  expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "x" '))
 })
 
 test('a drawing that fails at a narrow width holds only there: the card keeps its drawing and keys, and draws again at a new width', async ($, on) => {
