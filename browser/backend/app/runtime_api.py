@@ -94,10 +94,32 @@ def request(spec: Any, messages: list[dict[str, Any]]) -> dict[str, Any]:
     return body
 
 
-async def _stream(client: Any, body: dict[str, Any]) -> Any:
+LIVE_EVERY_S = 0.05  # the page gets a reply's words at most this often while Claude writes them
+
+
+async def _stream(client: Any, body: dict[str, Any], on_text: Any = None) -> Any:
+    """The streamed reply's final message. `on_text(text)` gets the message's text so far as it grows, at most every
+    LIVE_EVERY_S and once more at its end, so the chat shows the words as they are written (Conv.live_text)."""
     async with client.beta.messages.stream(**body) as stream:
-        async for _ in stream:
-            pass
+        parts: list[str] = []
+        sent, at = "", 0.0
+        loop = asyncio.get_running_loop()
+        async for event in stream:
+            if on_text is None:
+                continue
+            kind = getattr(event, "type", "")
+            if kind == "content_block_start" and getattr(getattr(event, "content_block", None), "type", "") == "text":
+                parts.append(str(getattr(event.content_block, "text", "") or ""))
+            elif kind == "content_block_delta" and getattr(getattr(event, "delta", None), "type", "") == "text_delta":
+                if not parts:
+                    parts.append("")
+                parts[-1] += str(getattr(event.delta, "text", "") or "")
+                now = loop.time()
+                if now - at >= LIVE_EVERY_S:
+                    sent, at = "".join(parts), now
+                    on_text(sent)
+        if on_text is not None and "".join(parts) != sent:
+            on_text("".join(parts))
         return await stream.get_final_message()
 
 
@@ -143,7 +165,7 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
     messages.append({"role": "user", "content": prompt})
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
                             write_roots=spec.write_roots, private=spec.private, home=spec.home)
-    client = llm.client()
+    client = await asyncio.to_thread(llm.client)  # the SDK's first import and the credentials take seconds
     out: list[str] = []
     texts: list[str] = []
     while True:
@@ -201,15 +223,21 @@ async def turn(conv: Any, text: str) -> Any:
     _save(path, messages)
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
                             write_roots=spec.write_roots, private=spec.private, home=spec.home)
-    client = llm.client()
     reply = ""
+    piece, key = 0, ""
     try:
+        # off the event loop: the SDK's first import and the credentials take seconds, which would hold every page's
+        # updates (the analyst's own message among them) until they are done
+        client = await asyncio.to_thread(llm.client)
         retries = 0
         while True:
             body = request(spec, messages)
+            piece += 1
+            key = f"{conv.id}:{len(messages)}:{piece}"
             try:
-                final = await _stream(client, body)
+                final = await _stream(client, body, lambda t, key=key: conv.live_text(key, t))
             except Exception as e:  # noqa: BLE001 — a broken stream is sent again a few times
+                conv.live_text(key, None)
                 import anthropic  # noqa: PLC0415
 
                 transient = isinstance(e, (anthropic.APIConnectionError, anthropic.InternalServerError)) or (
@@ -226,6 +254,7 @@ async def turn(conv: Any, text: str) -> Any:
             blocks, server_results = runtime_tools.server_blocks_to_records(content)
             usage = final.usage.model_dump(mode="json", exclude_none=True) if getattr(final, "usage", None) else {}
             conv.emit_assistant(blocks, str(getattr(final, "model", "") or spec.model), usage)
+            conv.live_text(key, None)
             conv.emit_results(server_results)
             said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
             if said:
@@ -250,6 +279,8 @@ async def turn(conv: Any, text: str) -> Any:
             messages.append({"role": "user", "content": [m for _, m in done]})
             _save(path, messages)
     except asyncio.CancelledError:
+        if key:
+            conv.live_text(key, None)
         close_open_calls(messages)
         _save(path, messages)
         raise

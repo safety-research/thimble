@@ -432,6 +432,8 @@ export const api = {
     j<EventPosted>(`${ws(c)}/events`, { method: 'POST', body: JSON.stringify({ kind, payload }) }),
   /** The composer's effort chip: main's effort (and its threads') from its next request (events.effort_route). */
   setEffort: (c: string, effort: MainEffort) => j<{ effort: string; choice: MainEffort }>(`${ws(c)}/session/effort`, { method: 'PUT', body: JSON.stringify({ effort }) }),
+  /** The composer's model menu: the model main (and its threads) runs on from its next request (events.model_route). */
+  setModel: (c: string, model: string) => j<{ model: string }>(`${ws(c)}/session/model`, { method: 'PUT', body: JSON.stringify({ model }) }),
   /** Turn fast mode off or back on for main and its threads from main's next request (events.fast_route). */
   setFast: (c: string, fast: boolean) => j<{ fast: boolean }>(`${ws(c)}/session/fast`, { method: 'PUT', body: JSON.stringify({ fast }) }),
   /** Allow or deny a permission prompt of main's session that its hook relayed (events.permission_route); `always` also
