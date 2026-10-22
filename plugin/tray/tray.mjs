@@ -8,11 +8,13 @@
 //   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}), with `open: 'code'` while
 //             a citation's whole code and output show in place of its one line of evidence
 //   a tray    {stack: [frame, ...]} or null
-//   a stop    what ] and [ move through, in reading order: a mark of a row ({row, kind, n | id, at}) or a card drawn
-//             under a row ({row, card})
+//   a stop    what ] and [ move through, in reading order: a mark of a row ({row, kind, n | id, at}) or a card ({row,
+//             card}): drawn under a row (v's), or drawn inline at a call of Claude's, with the row next to it
 //
 //   sameRef(a, b), open(f), push(tray, f), back(tray), top(tray), base(tray)
 //   stopsOfRow(row, cites, spans, cards)   one row's stops: its citations and spans by where they stand, then its cards
+//   stopsOfTurn(rows, stopsOf, inline)     a turn's stops: its rows' and the cards Claude drew between them
+//   pageOf(heights, room, from), rowsOf(line, width)   what of a tall tray body fits above the bar, and `m` for more
 //   indexOf(list, at), stepFrom(list, k, dir)
 //   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
@@ -49,16 +51,74 @@ export const top = tray => (tray && Array.isArray(tray.stack) && tray.stack.leng
 export const base = tray => (tray && Array.isArray(tray.stack) && tray.stack.length ? tray.stack[0] : null)
 
 /**
- * One row's stops in reading order: its citations (`cites`: [{n, start}], n > 0, a citation the check knows) and the
- * features' spans on its words (`spans`: [{id, kind, start}], an explainer or a heads-up), by where each starts, then
- * the cards drawn under it (`cards`: their ids, oldest first).
+ * One row's stops in reading order: its citations (`cites`: [{n, start, words}], n > 0, a citation the check knows) and
+ * the features' spans on its words (`spans`: [{id, kind, start, end}], an explainer or a heads-up), by where each
+ * starts, then the cards drawn under it (`cards`: their ids, oldest first). A heads-up on a citation's words stops
+ * before that citation, so one ] opens it; an explainer there stops after it (the citation's tray offers it with h).
  */
 export function stopsOfRow(row, cites, spans, cards) {
+  const known = (cites || []).filter(c => c && c.n > 0)
+  const on = s => known.find(c => typeof c.words === 'string' && s.start >= c.start + 1 && s.end <= c.start + 1 + c.words.length)
   const marks = [
-    ...(cites || []).filter(c => c && c.n > 0).map(c => ({ row, kind: 'citation', n: c.n, at: c.start })),
-    ...(spans || []).filter(s => s && s.id).map(s => ({ row, kind: s.kind === 'heads' ? 'heads' : 'explain', id: s.id, at: s.start })),
+    ...known.map(c => ({ row, kind: 'citation', n: c.n, at: c.start })),
+    ...(spans || []).filter(s => s && s.id).map(s => {
+      const kind = s.kind === 'heads' ? 'heads' : 'explain'
+      const c = kind === 'heads' ? on(s) : null
+      return { row, kind, id: s.id, at: c ? c.start - 0.5 : s.start }
+    }),
   ].sort((a, b) => a.at - b.at || (a.kind === 'citation' ? -1 : 1))
+    .map(m => ({ ...m, at: Math.ceil(m.at) }))
   return [...marks, ...(cards || []).map(id => ({ row, card: id }))]
+}
+
+/**
+ * A turn's stops in reading order: each text row's stops (`stopsOf(row)`: its marks, then the cards drawn under it),
+ * with the cards Claude drew inline between them (`inline`: [{id, after}], `after` the number of the turn's text rows
+ * above the card's call). A card drawn before the first text row goes with that row, one after a row with that row.
+ */
+export function stopsOfTurn(rows, stopsOf, inline) {
+  const out = []
+  const cards = (inline || []).filter(c => c && c.id)
+  const last = (rows || []).length - 1
+  ;(rows || []).forEach((row, i) => {
+    if (i === 0) for (const c of cards) if (!(c.after > 0)) out.push({ row, card: c.id })
+    const own = stopsOf(row) || []
+    const mine = own.filter(p => !p.card)
+    const under = own.filter(p => p.card)
+    out.push(...mine)
+    for (const c of cards) if (c.after > 0 && (c.after === i + 1 || (i === last && c.after > last + 1))) out.push({ row, card: c.id })
+    out.push(...under)
+  })
+  return out
+}
+
+/**
+ * Which units of a body fit in `room` rows (`heights`: each unit's rows), from unit `from`: {start, end, more} where
+ * units start..end-1 show and `more` is how many are left out. When all fit, all show. Else one row is kept for the
+ * line that says there is more, and at least one unit shows. `next`: where `m` goes, the start again after the end.
+ */
+export function pageOf(heights, room, from = 0) {
+  const hs = (heights || []).map(h => Math.max(1, h | 0))
+  const total = hs.reduce((a, b) => a + b, 0)
+  if (!(room > 0) || total <= room) return { start: 0, end: hs.length, more: 0, next: null }
+  const start = from > 0 && from < hs.length ? from : 0
+  let end = start
+  let used = 0
+  while (end < hs.length && (end === start || used + hs[end] <= room - 1)) { used += hs[end]; end++ }
+  return { start, end, more: hs.length - end + start, next: end < hs.length ? end : 0 }
+}
+
+/** The rows a line of `width` cells takes when it wraps at words (a line is at least one row). */
+export function rowsOf(line, width) {
+  const w = Math.max(8, width | 0)
+  let rows = 1
+  let at = 0
+  for (const word of String(line ?? '').split(' ')) {
+    const n = word.length
+    if (at && at + 1 + n > w) { rows++; at = 0 }
+    if (n > w) { rows += Math.floor((n - 1) / w); at = n % w || w } else at += (at ? 1 : 0) + n
+  }
+  return rows
 }
 
 /** The index of `at` (a frame, or a card stand {row, card}) in a list of stops; -1 when it is not there. */

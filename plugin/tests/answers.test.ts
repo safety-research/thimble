@@ -84,7 +84,8 @@ test("a turn keeps its prompt and who sent it, its text rows, its answer, and th
   const t = await turnOf(s.$, 't1')
   expect(t).toMatchObject({ n: 1, prompt: { text: 'How many test runs failed?', by: 'composer', row: 'prompt-t1' }, rows: ['t1-row-0', 't1-row-1'], answer: 't1-row-1', reason: 'answer' })
   expect(t!.labels.map(l => [l.name, l.seq, l.ok])).toEqual([['failed', 1, true], ['failed', 1, true]])
-  expect(t!.cards).toEqual([{ id: 'c0000000000001', toolUseId: 'card-t1-1', seq: 2 }])
+  // the card stands after the first text row (`after`: the rows above its call), where ] steps to it
+  expect(t!.cards).toEqual([{ id: 'c0000000000001', toolUseId: 'card-t1-1', seq: 2, after: 1 }])
   // the labels a card's call came after, each once
   expect((await labelsOf(s.$, 't1', 2)).map(l => l.name)).toEqual(['failed'])
   expect(await labelsOf(s.$, 't1', 1)).toEqual([])
