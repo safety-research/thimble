@@ -1,7 +1,8 @@
 // v.ts: the designer step. At an empty prompt, v starts a fork of the conversation in the background (core/forks.ts,
 // kind `designer`, with prompts/designer.md). The fork lists a few forms for main's last answer, picks one, draws it
 // with the `card` tool and fixes it from the card's text copy. Its cards draw under the answer v was pressed on; the
-// busy line says `drawing a card` while it works; its last message never reaches main, but main reads the cards it drew
+// busy line says `drawing a card`, then `improving the card` once one is on screen; its last message never reaches
+// main, but main reads the cards it drew
 // with the person's next prompt.
 //
 // v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
@@ -26,7 +27,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failCleared, failNotice } from '../bar/fix'
+import { failCleared, failNotice, noticeLine } from '../bar/fix'
 import { cardText } from '../cards/draw'
 import { anchoredAt, type CardMeta, metaOf } from '../cards/store'
 import { readKept, writeKept } from '../core/env'
@@ -150,6 +151,14 @@ async function earlierCard($: Engine, row: string): Promise<string> {
   return ''
 }
 
+/** The busy line's step while a design runs: `drawing a card` until its first card is on screen, then `improving the
+ *  card`, since the fork reads the card's copy and may draw a new version; false once it ended. */
+async function designStep($: Engine, d: Design): Promise<string | false> {
+  if (current !== d) return false
+  for (const id of await anchoredAt($, d.anchorRow)) if ((await metaOf($, id))?.agentId === d.agentId) return 'improving the card'
+  return 'drawing a card'
+}
+
 /** v's fork, spawned while the key's own hook runs (the agent.spawn hook below holds it for the word window). */
 async function start($: Engine, d: Design, prompt: string): Promise<void> {
   try {
@@ -159,7 +168,7 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
     d.agentId = r.agentId
     d.status = 'running'
     await save($, d)
-    await busyWhile($, 'drawing a card', () => current === d)
+    await busyWhile($, 'drawing a card', () => designStep($, d))
   } catch (err) {
     await end($, d, 'failed', `× v could not start drawing a card: ${reason(err)}`)
   }
@@ -168,7 +177,11 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
 /** The fork ended: main reads the cards it drew, or the person reads why it drew none. */
 async function finish($: Engine, d: Design, e: { reason: string; answer: string }): Promise<void> {
   if (e.reason === 'aborted') return end($, d, 'cancelled')
-  if (e.reason === 'refusal') return end($, d, 'failed', "× The model's safeguards refused to draw this card. /model can switch to another model.")
+  if (e.reason === 'refusal') {
+    // not thimble's failure, so the line offers no fix of thimble: only the way out
+    await end($, d, 'failed')
+    return noticeLine($, "The model's safeguards refused to draw this card. Another model may draw it: /model.", 'v')
+  }
   const said = cut(firstLine(e.answer), 160)
   if (e.reason === 'error') return end($, d, 'failed', `× v could not draw a card: the model call failed${said ? ` (${said})` : ''}.`)
   const drawn: CardMeta[] = []
@@ -241,7 +254,7 @@ export const registerDesigner: Register = on => {
       if (d && (d.status === 'held' || d.status === 'running')) {
         current = d
         if (d.status === 'held' || !(await forkAlive($, d))) await end($, d, 'failed', '× v stopped drawing its card: thimble lost the copy that drew it. Press v to draw it again.')
-        else await busyWhile($, 'drawing a card', () => current === d)
+        else await busyWhile($, 'drawing a card', () => designStep($, d))
       }
     } catch {
       // v waits for the next answer
