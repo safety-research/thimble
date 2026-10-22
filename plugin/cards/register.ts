@@ -72,7 +72,7 @@ export const registerCards: Register = on => {
       ? `did not draw: ${call.error.slice(0, 160)} · Claude got the error`
       : moved
         ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn ${meta.anchorRow ? 'under the answer v was pressed on' : 'further down'}, as version ${meta.version}`
-        : `${call.version > 1 ? `version ${call.version} · ` : ''}${call.rows ?? meta.rows} row${(call.rows ?? meta.rows) === 1 ? '' : 's'} from ${(call.file ?? meta.file).split('/').pop()}`
+        : `${call.version > 1 ? `version ${call.version} · ` : ''}${call.read ?? meta.read ?? ''} from ${(call.file ?? meta.file).split('/').pop()}`
     return next({ ...e, props: { ...e.props, output: line } })
   }).catch(($, e, next) => next(e))
 

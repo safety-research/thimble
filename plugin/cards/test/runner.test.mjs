@@ -73,7 +73,7 @@ test('a card loads: its text copy, what it read, and its keys', async () => {
   const { r } = await load(COUNTER)
   assert.equal(r.ok, true)
   assert.deepEqual(r.lines, ['count 0', 'ada 3', 'bram 5', 'cleo 1', '[ add ten ]'])
-  assert.deepEqual(r.summary, { rows: 3, columns: ['name', 'score'], first: '{"name":"ada","score":3}' })
+  assert.deepEqual(r.summary, { rows: 3, read: '3 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' })
   assert.equal(r.keys, '+r')
 })
 
@@ -104,11 +104,30 @@ test('a text copy at another width leaves the card as it was: its width and its 
   assert.deepEqual((await ask('copy', { id })).lines, ['n 1', '[ one ]'])
 })
 
+test('a Button around lines is a Box that a click anywhere on its lines presses', async () => {
+  const group = `function view(p, s) { const { Box, Text, Button } = s.elements
+  const st = s.state || { n: 0 }
+  return Box({ flexDirection: 'column', children: [Text({ children: 'pressed ' + st.n }),
+    Button({ onPress: () => s.setState({ n: st.n + 1 }), children: [Text({ children: '2nd class' }), Box({ children: [Text({ children: 'mothers ' }), Text({ children: '13 of 14' })] })] })] }) }`
+  const { id, r } = await load(group)
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.lines, ['pressed 0', '2nd class', 'mothers 13 of 14'])
+  assert.equal(r.tree.c[1].t, 'Box')
+  // a click on the second line of the group, past its words, presses it; a click on the first line does not
+  const hit = await ask('pointer', { id, down: { x: 30, y: 2 }, up: { x: 30, y: 2 } })
+  assert.deepEqual(JSON.parse(hit.state), { n: 1 })
+  const miss = await ask('pointer', { id, down: { x: 1, y: 0 }, up: { x: 1, y: 0 } })
+  assert.equal(miss.handled, false)
+  // actions find it by its words
+  const acted = await ask('act', { id, actions: [{ click: '13 of 14' }], width: 40 })
+  assert.equal(acted.copies[0].lines[0], 'pressed 2')
+})
+
 test('the tree holds only what Claude Code draws: a Button of words, and strings with no control character', async () => {
-  const boxed = 'function view(p, s) { const { Box, Text, Button } = s.elements; return Button({ onPress: () => {}, children: Box({ children: Text({ children: "x" }) }) }) }'
+  const boxed = 'function view(p, s) { const { Box, Text, Button } = s.elements; return Text({ children: Box({ children: Text({ children: "x" }) }) }) }'
   const r1 = (await load(boxed)).r
   assert.equal(r1.ok, false)
-  assert.match(r1.error, /a Button holds <Box>/)
+  assert.match(r1.error, /a Text holds <Box>/)
   const empty = 'function view(p, s) { const { Button } = s.elements; return Button({ onPress: () => {} }) }'
   assert.match((await load(empty)).r.error, /a Button has no words/)
   const ctrl = 'function view(p, s) { const { Text } = s.elements; return Text({ children: "a\\u0080b\\u0007c\\td" }) }'
@@ -128,7 +147,7 @@ test('a file that is an object gives its rows as props.rows and the whole object
   writeFileSync(join(dir, 'parts.json'), JSON.stringify({ hist: [1, 2], growth: [3] }))
   const parts = 'function view(p, s) { return s.elements.Text({ children: p.rows.length + " " + p.data.hist.length + " " + p.data.growth.length }) }'
   const r2 = await ask('load', { id: 'c0000aaab', version: 1, title: 'T', view: parts, rows: join(dir, 'parts.json'), width: 40 })
-  assert.deepEqual([r2.ok, r2.lines, r2.summary.other, r2.summary.hasRows], [true, ['0 2 1'], ['hist', 'growth'], false])
+  assert.deepEqual([r2.ok, r2.lines, r2.summary.other, r2.summary.hasRows, r2.summary.read], [true, ['0 2 1'], ['hist', 'growth'], false, 'an object with hist (2), growth (1)'])
 })
 
 test('a card loads again with the state it kept', async () => {

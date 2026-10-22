@@ -23,7 +23,8 @@
 //   copy     {id, width}              the text copy at a width; the card stays as it is
 //   key      {id, key}                the view's onKey; `handled` says whether it has one
 //   press    {id, button}             a Button's onPress, by the number the tree gives it
-//   pointer  {id, down, up}           a click: the onPointer listener gets the down, then the up
+//   pointer  {id, down, up}           a click: on a Button that holds lines, its onPress; else the onPointer listener
+//                                     gets the down, then the up
 //   undo     {id, n}                  the state as it was before the last n keys
 //   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was
 //   ping
@@ -34,13 +35,14 @@
 //
 // The tree holds only what Claude Code's Client draws: a Button's children are strings and Text, and a Text's are
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
-// string holds no control character but a line break (the others are taken out; a tab is a space).
+// string holds no control character but a line break (the others are taken out; a tab is a space). A Button around
+// lines (a Box, or several) becomes a column Box with the Button's onPress number, and a click on its cells presses it.
 import fs from 'node:fs'
 import http from 'node:http'
 import { types } from 'node:util'
 import vm from 'node:vm'
 
-import { buttonText, layoutLines } from './layout.js'
+import { buttonText, layoutLines, pressAt } from './layout.js'
 
 const LOAD_MS = 5000
 const EVENT_MS = 1000
@@ -175,10 +177,17 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     if (n) out.push(n)
     return out
   }
+  // a Box or a Button among the children: then a Button is a group of lines (a row, a heading and its bars), which
+  // Claude Code's Button cannot hold
+  function holdsBoxes(c) {
+    if (isArray(c)) { for (const x of c) if (holdsBoxes(x)) return true; return false }
+    return !!c && typeof c === 'object' && (c.type === 'Box' || c.type === 'Button')
+  }
   function node(n, depth, inText) {
     if (!n || typeof n !== 'object' || depth > 30) return null
-    const t = n.type
+    let t = n.type
     if (t !== 'Box' && t !== 'Text' && t !== 'Button') return null
+    const group = t === 'Button' && !inText && holdsBoxes(n.props && n.props.children)
     if (inText && t !== 'Text') throw new Error('a ' + inText + ' holds ' + said(n) + ', and Claude Code draws only strings and Text inside a ' + inText + ': put the ' + inText + ' inside the Box instead')
     if (++nodes > 20000) throw new Error('the drawing has more than 20000 elements; draw fewer rows (show a page of them)')
     const src = n.props && typeof n.props === 'object' ? n.props : {}
@@ -196,6 +205,12 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       if (typeof src.onPress === 'function') { handlers.push(src.onPress); p.onPress = handlers.length - 1 }
       if (typeof src.key === 'string' || typeof src.key === 'number') p.key = Str(src.key)
       if (typeof p.label === 'string') p.label = clean(p.label)
+    }
+    if (group) {
+      // a Button around lines is a column Box that keeps the Button's onPress: a click anywhere on it presses it
+      // (pressAt in layout.js reads the click's cell)
+      const c = kids(src.children, depth + 1, false, [])
+      return { t: 'Box', p: Object.assign({ flexDirection: 'column' }, 'onPress' in p ? { onPress: p.onPress } : {}), c }
     }
     const c = kids(src.children, depth + 1, t === 'Box' ? false : t, [])
     if (t === 'Button' && !words(c) && !(typeof p.label === 'string' && p.label.trim())) throw new Error('a Button has no words: give it a label, or strings or Text as its children')
@@ -254,7 +269,12 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     let first = ''
     try { first = rows.length ? stringify(rows[0]) : '' } catch (_) { first = '' }
     const other = data ? keysOf(data).filter(k => k !== 'rows') : []
-    return { rows: rows.length, columns: cols.slice(0, 40), first: first.length > 200 ? first.slice(0, 199) + '…' : first, ...(other.length ? { other: other.slice(0, 20), hasRows: isArray(data.rows) } : {}) }
+    // what the card read, in words: its rows, or an object by its keys, each list with its length
+    const n = (k, len) => k + ' (' + len + ')'
+    const read = data && !isArray(data.rows)
+      ? 'an object with ' + keysOf(data).slice(0, 8).map(k => (isArray(data[k]) ? n(k, data[k].length) : k)).join(', ')
+      : rows.length + ' row' + (rows.length === 1 ? '' : 's')
+    return { rows: rows.length, read, columns: cols.slice(0, 40), first: first.length > 200 ? first.slice(0, 199) + '…' : first, ...(other.length ? { other: other.slice(0, 20), hasRows: isArray(data.rows) } : {}) }
   }
   const OPS = {
     init(a) {
@@ -404,6 +424,12 @@ function load(a) {
   return { ...r, ...copy(r.tree, a.width) }
 }
 
+/** A click: a Button around lines that holds the cell where it ended, else the view's onPointer listener. */
+function click(card, at) {
+  const press = pressAt(card.tree, card.width, at.up.x, at.up.y)
+  return press === null ? inContext(card, 'pointer', at, EVENT_MS) : inContext(card, 'press', { button: press }, EVENT_MS)
+}
+
 function event(a, op, args) {
   const card = cards.get(a.id)
   if (!card) return { ok: false, missing: true }
@@ -421,10 +447,10 @@ function textCopy(a) {
   return r.ok ? { ok: true, ...copy(r.tree, width) } : r
 }
 
-/** The first Button whose words hold `words`, in a plain tree: its onPress number. */
+/** The first Button whose words hold `words`, in a plain tree (a Button around lines too): its onPress number. */
 function buttonWith(n, words) {
   if (!n || typeof n !== 'object') return null
-  if (n.t === 'Button' && buttonText(n.p, n.c).includes(words) && typeof n.p.onPress === 'number') return n.p.onPress
+  if (typeof n.p?.onPress === 'number' && (n.t === 'Button' ? buttonText(n.p, n.c) : layoutLines(n, 1000).lines.join(' ')).includes(words)) return n.p.onPress
   for (const k of n.c || []) {
     const f = buttonWith(k, words)
     if (f !== null) return f
@@ -453,8 +479,8 @@ function act(a) {
     } else if (x && Array.isArray(x.click) && x.click.length === 2) {
       const at = { x: Math.trunc(Number(x.click[0]) || 0), y: Math.trunc(Number(x.click[1]) || 0) }
       what = `click at ${at.x},${at.y}`
-      r = inContext(card, 'pointer', { down: at, up: at }, EVENT_MS)
-      if (r.ok && !r.handled) r.note = 'a click at a cell reaches only an onPointer listener, and the view set none; a Button takes a click by its words'
+      r = click(card, { down: at, up: at })
+      if (r.ok && !r.handled) r.note = 'a click at a cell reaches a Button around lines or an onPointer listener, and the view has neither there'
     } else {
       copies.push({ what: JSON.stringify(x).slice(0, 80), error: 'not a key or a click' })
       continue
@@ -480,7 +506,13 @@ const OPS = {
   copy: textCopy,
   key: a => event(a, 'key', { key: String(a.key ?? '').slice(0, 1) }),
   press: a => event(a, 'press', { button: Number(a.button) }),
-  pointer: a => event(a, 'pointer', { down: a.down, up: a.up ?? a.down, button: a.button }),
+  pointer: a => {
+    const card = cards.get(a.id)
+    if (!card) return { ok: false, missing: true }
+    const r = click(card, { down: a.down, up: a.up ?? a.down, button: a.button })
+    if (r.ok) card.tree = r.tree
+    return r
+  },
   undo: a => event(a, 'undo', { n: Number(a.n) || 0 }),
   act,
 }

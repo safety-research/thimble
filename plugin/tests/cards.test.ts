@@ -66,7 +66,7 @@ function world(on: Any, o: { crash?: string } = {}) {
     const body = JSON.parse(e.init?.body || '{}')
     const answers: Record<string, unknown> = {
       ping: { ok: true },
-      load: { ok: true, tree: TREE, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
+      load: { ok: true, tree: TREE, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
       key: { ok: true, handled: body.key === 's', tree: SORTED, state: '{"sorted":true}' },
       draw: { ok: true, tree: TREE, state: 'null' },
       copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
@@ -171,7 +171,7 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   const w = world(on)
   // the card as tool.ts keeps a designer fork's call: its anchor is the answer's row
   const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
-  const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['s'], rows: 2, columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
+  const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['s'], read: '2 rows', columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
   w.files[`${dir}/meta.json`] = JSON.stringify(meta)
   w.files[`${dir}/v1/view.js`] = VIEW
   w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']

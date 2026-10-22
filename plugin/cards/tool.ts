@@ -142,7 +142,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation and the copy that v starts draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
   const meta: CardMeta = before ?? {
     id, version: 0, title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
-    keys: [], rows: 0, columns: [], file: '', gen: 0, error: null, calls: {}, at: Date.now(),
+    keys: [], read: '', columns: [], file: '', gen: 0, error: null, calls: {}, at: Date.now(),
   }
   const remember = (m: CardMeta, call: CardCall) => saveMeta($, { ...m, calls: { ...m.calls, [toolUseId]: call } })
 
@@ -180,12 +180,12 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // a card draws under the call of main's that drew this version, or under the answer v was pressed on when the
   // designer fork drew it
   const next: CardMeta = {
-    ...meta, version, title, keys, rows: r.summary.rows, columns: r.summary.columns, file: String(input.data),
+    ...meta, version, title, keys, read: String(r.summary.read), columns: r.summary.columns, file: String(input.data),
     gen: meta.gen + 1, error: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
     anchorRow,
     toolUseId: fork?.kind === 'designer' ? meta.toolUseId : toolUseId,
   }
-  await remember(next, { version, title, file: String(input.data), rows: next.rows })
+  await remember(next, { version, title, file: String(input.data), read: next.read })
   await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
   await setFocus($, id)
   await failCleared($, `card:${id}`)
@@ -198,7 +198,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     update && meta.version > 0
       ? `Version ${version} of “${title}” is drawn ${where}${next.anchorRow ? '' : '; the earlier call shows one line that points here'}.`
       : `“${title}” is drawn ${where}. Its id is "${id}": to change it, call card again with this id.`,
-    `It read ${r.summary.rows} row${r.summary.rows === 1 ? '' : 's'} from ${baseName(String(input.data))}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
+    `It read ${r.summary.read} from ${baseName(String(input.data))}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
   if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
   if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
@@ -225,6 +225,6 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   }
   const screen = screenRows()
   if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
-  void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: next.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0 })
+  void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0 })
   return { result: out.join('\n') }
 }

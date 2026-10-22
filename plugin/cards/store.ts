@@ -2,7 +2,7 @@
 // that starts again.
 //
 //   <conversation folder>/cards/<card id>/   (core/layout.mjs)
-//     meta.json           the card: id, version, title, the call that drew it first, its anchor, keys, rows, ...
+//     meta.json           the card: id, version, title, the call that drew it first, its anchor, keys, what it read, ...
 //     v<version>/view.js   the view of the version on screen
 //     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away)
 //     state.json          the person's state of that version (what the view set with setState)
@@ -19,8 +19,9 @@ import { shortHash } from '../core/layout.mjs'
 
 type Engine = EngineInterface
 
-/** One call of the card tool: the version it drew, with that version's title, data file and rows, or why it drew none. */
-export type CardCall = { version: number; title?: string; file?: string; rows?: number; error?: string }
+/** One call of the card tool: the version it drew, with that version's title, data file and what it read from it
+ *  ("412 rows", "an object with months (18), agents (44)"), or why it drew none. */
+export type CardCall = { version: number; title?: string; file?: string; read?: string; error?: string }
 export type CardMeta = {
   id: string
   version: number // the version on screen; 0 while no version has drawn
@@ -29,7 +30,7 @@ export type CardMeta = {
   agentId: string | null // the fork that drew the version on screen (a designer's), or null for main
   anchorRow: string | null // the answer a designer fork's card draws under
   keys: string[]
-  rows: number
+  read: string // what the version on screen read from its file, as CardCall says it
   columns: string[]
   file: string // the data file as Claude named it
   gen: number // bumps with each version, so a drawing of an older one is not shown

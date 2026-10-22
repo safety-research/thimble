@@ -8,6 +8,7 @@
 //                             column Box `width` cells wide, the box client.tsx draws it in.
 //   wrapText(text, cols, mode) a text's rows: wrapped at words, or cut with …
 //   buttonText(p, c)          what a Button shows: `[ label ]`, or the label alone when plain
+//   pressAt(tree, width, x, y) the Button around lines (a Box with onPress) that a click on a cell presses
 //
 // The layout is flexbox as Yoga computes it, for the props the card tool names: Box flexDirection (row by default, as
 // in Claude Code), flexGrow, flexShrink (1 by default), flexWrap, width and height as cells or percent, min sizes,
@@ -461,13 +462,35 @@ function cardRoot(tree, width) {
   return { t: 'Box', p: { flexDirection: 'column', width }, c: [tree] }
 }
 
-/** The lines a tree draws at `width` cells, as the card's region lays it out. */
-export function layoutLines(tree, width) {
-  const cols = Math.max(1, Math.floor(width))
+/** The tree laid out at `width` cells, as the card's region lays it out: the root node, each node's place in `lay`. */
+function laidOut(tree, cols) {
   const root = build(cardRoot(tree, cols))
   compute(root, cols, EXACT, 0, UNDEF, true)
   root.lay.x = 0
   root.lay.y = 0
+  return root
+}
+
+/** The onPress number of the innermost Box with one (a Button around lines, runner.mjs) that holds the cell (x, y) of
+ *  the tree laid out at `width`, or null. Places round as paint() rounds them. */
+export function pressAt(tree, width, x, y) {
+  let found = null
+  const walk = (node, x0, y0) => {
+    if (node.kind !== 'box') return
+    const bx = x0 + Math.round(node.lay.x || 0)
+    const by = y0 + Math.round(node.lay.y || 0)
+    if (x < bx || y < by || x >= bx + Math.round(node.lay.w) || y >= by + Math.round(node.lay.h)) return
+    if (typeof node.p.onPress === 'number') found = node.p.onPress
+    for (const k of node.kids) if (k.lay) walk(k, bx, by)
+  }
+  if (tree) walk(laidOut(tree, Math.max(1, Math.floor(width))), 0, 0)
+  return found
+}
+
+/** The lines a tree draws at `width` cells, as the card's region lays it out. */
+export function layoutLines(tree, width) {
+  const cols = Math.max(1, Math.floor(width))
+  const root = laidOut(tree, cols)
   const g = grid(cols)
   g.height(Math.round(root.lay.h))
   paint(root, g, 0, 0, null)
