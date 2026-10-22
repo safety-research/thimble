@@ -1,24 +1,23 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
-// out: the head (how many claims), the graph of clusters, the panel under it (the claim selected,
-// its citations, its cluster and the cluster's claims), and the keys. A click is the main way to move: each dot is a
-// Button (on the claim selected it opens where the claim was said; on another it selects that one), as is each claim
-// of the cluster in the panel, the claim's sentence (where it was said), a citation (its evidence pane) and a version
-// in its history (that claim). Tab and Enter reach the same Buttons.
+// out: the head (how many claims), the graph of clusters, the panel under it (the cluster selected and its claims, or
+// the claim selected and its cluster's name), and the keys. A click is the main way to move, a cluster first, then one
+// of its claims: a cluster's name and a dot of another cluster select the cluster; a dot of the cluster selected, or a
+// claim in the panel, selects that claim (its dot again, the cluster). Details are on demand: a claim's citations on e,
+// where it was said on m. Tab and Enter reach the same Buttons.
 //
-//   keys while the pane holds the keyboard: n p the next or previous cluster · e evidence (the cited lines) ·
-//   h history · m where it was said · a ask about it in a side thread · b back (where it was said)
+//   keys while the pane holds the keyboard, drawn as the bar draws its keys: n p the next or previous cluster ·
+//   e evidence (the claim's citations, a press on one its evidence pane) · h history · m source (where it was said) ·
+//   b back (where it was said). The input under the pane asks about what is selected (threads/pane.tsx).
 //
 // A claim's citations are the reply's marks near its words (store.js sources): their check and evidence come from
 // marks/store.ts as they stand now, so a check that ends after the look shows in the panel.
 import type { EngineInterface } from 'claude-code'
 
-import { failNotice } from '../bar/notice'
 import { messageOf } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { openPane } from '../core/pane'
 import { rowMarks, type MarkItem } from '../marks/store'
-import { openThread } from '../threads/seam'
-import { graphView, hopCluster, paneData, sourceView, threadAbout } from './graph.js'
+import { claimGroup, graphView, groupOf, hopCluster, paneData, sourceView, threadAbout } from './graph.js'
 import { claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
 
 type Engine = EngineInterface
@@ -85,9 +84,8 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
   return data
 }
 
-/** What the side thread under the claims pane is about (threads/pane.tsx): the claim selected, or where it was said,
- *  as the pane's `a` asks it, so the input under the pane and `a` share one thread, as 0.10's panel input asked about
- *  the claim selected. The arguments keep only what names the thing (not the e and h toggles). */
+/** What the side thread under the claims pane is about (threads/pane.tsx): the claim selected, the cluster selected, or
+ *  where a claim was said. The arguments keep only what names the thing (not the e and h toggles). */
 export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: ClaimsArgs }> {
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
   const data = paneData(await claimsStore($))
@@ -96,40 +94,55 @@ export async function claimsThreadScope($: Engine, args: unknown): Promise<{ abo
     return { about: threadAbout(c, true), args: { source: a.source, ...(a.row ? { row: a.row } : {}) } }
   }
   const c = a.claim ? data.claims.find((x: Any) => x.id === a.claim) ?? null : null
-  return { about: threadAbout(c), args: c ? { claim: c.id } : {} }
+  if (c) return { about: threadAbout(c), args: { claim: c.id } }
+  if (a.group != null && data.groups.some((g: Any) => (g.id == null ? '-' : String(g.id)) === String(a.group))) {
+    const { name, cs } = groupOf(data, a.group)
+    return { about: threadAbout(null, false, { name, n: cs.length }), args: { group: String(a.group) } }
+  }
+  return { about: threadAbout(null), args: {} }
+}
+
+/** The keys' row: each key as the bar draws it (its letter lit and bold, its words dim), ` · ` between them, each a
+ *  Button the key presses. */
+function keysRow(els: Any, keys: { k: string; label: string; onPress: () => unknown }[]): unknown {
+  const { Box, Button, Text } = els
+  return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
+    ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
+    Button({ key: `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, onPress: x.onPress, children: [
+      Text({ key: 'k', color: 'suggestion', bold: true, children: x.k }), Text({ key: 'w', dimColor: true, children: ` ${x.label}` }),
+    ] }),
+  ]) })
 }
 
 export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
   const W = Math.max(40, Number(e?.props?.bodyColumns) || 90)
   const H = Math.max(14, Number(e?.props?.scroll?.bodyRows) || 36)
-  const { Box, Button, Text } = els
+  const { Box } = els
   const data = await withMarks($, paneData(await claimsStore($)))
-  const keys: unknown[] = []
-  const key = (k: string, label: string, onPress: () => unknown) => keys.push(Button({ key: `key-${k}`, plain: true, hotkey: k, label, onPress }))
-  const keep = { claim: a.claim ?? null, open: a.open ?? null, at: a.at ?? null }
-  const ask = async (about: string, args2: ClaimsArgs) => {
-    if (!(await openThread($, { about, pane: { kind: 'claims', args: args2 } }))) failNotice($, 'The side thread could not open here. Ask Claude in the prompt instead.', 'claims')
-  }
+  const keys: { k: string; label: string; onPress: () => unknown }[] = []
+  const key = (k: string, label: string, onPress: () => unknown) => keys.push({ k, label, onPress })
+  const keep = { claim: a.claim ?? null, group: a.group ?? null, open: a.open ?? null, at: a.at ?? null }
 
   // ---- where a claim was said
   if (a.source) {
     const c = data.claims.find((x: Any) => x.id === a.source) ?? null
     const text = a.row ? await placeText($, a.row) : null
     const lines = sourceView(c, text, W) as Run[][]
-    key('b', 'back to the claims', () => showClaims($, keep))
-    if (c) key('a', 'ask about it', () => ask(threadAbout(c, true), { source: c.id, ...(a.row ? { row: a.row } : {}) }))
+    key('b', 'back', () => showClaims($, keep))
     return Box({ flexDirection: 'column', children: [
       ...lines.map((r, i) => rowEl(els, r, `s${i}`, () => undefined)),
       rowEl(els, [], 'gap', () => undefined),
-      Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: keys }),
+      keysRow(els, keys),
     ] })
   }
 
   // ---- the graph
   const view = graphView(data, keep, { w: W, h: H - 2 })
   const claim = view.claim as Any
-  const pick = (id: string | null, open: ClaimsArgs['open'] = a.open ?? null) => (id ? showClaims($, { claim: id, open, at: data.last }) : undefined)
+  const group = view.group as string | null
+  const pick = (id: string | null, open: ClaimsArgs['open'] = null) => (id ? showClaims($, { claim: id, open, at: data.last }) : undefined)
+  const pickGroup = (k: string | null) => (k != null ? showClaims($, { group: k, at: data.last }) : undefined)
   const openSource = (c: Any) => {
     const said = (c.said || []).find((x: Any) => x.row)
     return showClaims($, { ...keep, claim: c.id, source: c.id, ...(said ? { row: said.row } : {}) })
@@ -141,36 +154,35 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     await tellOpened($, { kind: 'citation', row: s.row, n: s.n, words: s.label, status: s.status }, m?.text ?? '')
   }
   const press = (part: string) => {
-    if (!claim) return
-    if (part.startsWith('n:')) {
-      const id = part.slice(2)
-      // a press on the claim selected (its dot, its row in the panel) opens where it was said; on another it selects that one
-      if (id === claim.id && view.chosen) return openSource(claim)
-      return pick(id)
+    if (part.startsWith('g:')) return pickGroup(part.slice(2))
+    if (part.startsWith('d:')) {
+      // a dot: its cluster first; within the cluster selected, the claim; the claim selected again, its cluster
+      const c = data.claims.find((x: Any) => x.id === part.slice(2))
+      if (!c) return
+      const k = claimGroup(data, c)
+      if (!view.chosen || k !== group) return pickGroup(k)
+      return claim?.id === c.id ? pickGroup(k) : pick(c.id)
     }
-    if (part === 'said') return openSource(claim)
+    if (part.startsWith('n:')) return pick(part.slice(2))
     const ev = /^ev-(\d+)$/.exec(part)
-    if (ev) return openEvidence((claim.sources || [])[Number(ev[1]) - 1])
+    if (ev && claim) return openEvidence((claim.sources || [])[Number(ev[1]) - 1])
     if (part.startsWith('was-')) return pick(part.slice(4), 'hist')
+  }
+  if (data.groups.length > 1 && group != null) {
+    key('n', 'next', () => pickGroup(hopCluster(data, group, 1)))
+    key('p', 'previous', () => pickGroup(hopCluster(data, group, -1)))
   }
   if (claim) {
     const toggle = (what: 'ev' | 'hist') => showClaims($, { claim: claim.id, open: view.open === what ? null : what, at: data.last })
-    if (data.groups.length > 1) {
-      key('n', 'next cluster', () => pick(hopCluster(data, claim.id, 1)))
-      key('p', 'previous cluster', () => pick(hopCluster(data, claim.id, -1)))
-    }
     if ((claim.sources || []).length) key('e', view.open === 'ev' ? 'evidence ●' : 'evidence', () => toggle('ev'))
     if (view.history.length > 1) key('h', view.open === 'hist' ? 'history ●' : 'history', () => toggle('hist'))
-    key('m', 'where it was said', () => openSource(claim))
-    key('a', 'ask about it', () => ask(threadAbout(claim), { claim: claim.id }))
+    key('m', 'source', () => openSource(claim))
   }
-  // the click is the main way: said once, dim, before the keys
-  if (claim) keys.unshift(Text({ key: 'key-click', dimColor: true, children: 'click a dot or a claim to select it' }))
   return Box({ flexDirection: 'column', children: [
     ...(view.head as Run[][]).map((r, i) => rowEl(els, r, `h${i}`, press)),
     rowEl(els, [], 'gap', press),
     ...(view.graph as Run[][]).map((r, i) => rowEl(els, r, `g${i}`, press)),
     ...(view.panel as Run[][]).map((r, i) => rowEl(els, r, `p${i}`, press)),
-    ...(keys.length ? [rowEl(els, [], 'gap2', press), Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: keys })] : []),
+    ...(keys.length ? [rowEl(els, [], 'gap2', press), keysRow(els, keys)] : []),
   ] })
 }
