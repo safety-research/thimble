@@ -51,7 +51,7 @@ const settle = () => new Promise(r => setTimeout(r, 5))
 
 /** Main answers, then the person presses v: the design runs. */
 async function pressV(s: ReturnType<typeof setup>) {
-  await s.call('session.append', { door: 'response', message: { content: [{ type: 'text', text: 'The revert undid a change.' }] } }, async () => ({ uuid: ROW }))
+  await s.call('session.append', { door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, message: { content: [{ type: 'text', text: 'The revert undid a change.' }] } }, async () => ({ uuid: ROW }))
   const r = await s.call('prompt.edit', { origin: { kind: 'composer' }, key: { key: 'v' }, text: '', inputText: 'v' })
   expect(r.text).toBe('')
   await settle()
@@ -71,7 +71,7 @@ test("the fork's cards anchor to the answer v was pressed on, and a fork that dr
   expect(designAnchor('agent-2')).toBe(null)
   expect(busySteps()).toContain('drawing a card')
   // a later answer does not move the design's anchor
-  await s.call('session.append', { door: 'response', message: { content: [{ type: 'text', text: 'A later answer.' }] } }, async () => ({ uuid: 'row-answer-2' }))
+  await s.call('session.append', { door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, message: { content: [{ type: 'text', text: 'A later answer.' }] } }, async () => ({ uuid: 'row-answer-2' }))
   expect(designAnchor('agent-1')).toBe(ROW)
   await s.call('turn.complete', end('answer', 'The records hold no times to draw.\nMore words.'), async () => ({ text: '' }))
   expect(await s.failLine()).toContain('v drew no card: The records hold no times to draw.')

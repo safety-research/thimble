@@ -12,7 +12,7 @@
 // work shows. Card keys are never named here: a focused card names its own keys under its frame.
 import type { EngineInterface } from 'claude-code'
 
-import { designNow } from '../designer/v'
+import { vReady } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, needCounts } from './counts'
@@ -27,7 +27,6 @@ type Any = any
 const NAME_COLOR = 'permission'
 const KEY_COLOR = 'suggestion'
 
-const ANSWERED = { plugin: 'thimble', key: 'answered' } as const
 
 /** What a press on a part of the bar does; register.ts gives them, so this module draws and decides nothing else. */
 export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'labels') => unknown }
@@ -37,21 +36,6 @@ type Item = { id: string; key?: string; words: string; glyph?: string; press?: (
 
 const len = (s: string) => [...s].length
 const itemLen = (x: Item) => (x.key ? len(x.key) + 1 : 0) + len(x.words)
-
-/** Whether a main answer exists to draw a card of (the v item). */
-async function answered($: Engine): Promise<boolean> {
-  return !!(await $.state.get(ANSWERED)).value
-}
-
-export async function setAnswered($: Engine, yes: boolean): Promise<void> {
-  await $.state.set(ANSWERED, yes)
-}
-
-/** Whether a design that v started runs now. */
-async function designRuns($: Engine): Promise<boolean> {
-  const d = await designNow($)
-  return d?.status === 'held' || d?.status === 'running'
-}
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood. */
 async function countItems($: Engine, on: (key: string) => boolean, presses: BarPresses | null, preview = false): Promise<Item[]> {
@@ -69,7 +53,7 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
   const out: Item[] = []
   const b = preview ? null : await busyNow($)
   if (b) out.push({ id: 'busy', glyph: b.glyph, words: `${b.word}${b.secs != null ? ` ${b.secs}s` : ''}` })
-  if (on('cards') && (preview || ((await answered($)) && !(await designRuns($))))) out.push({ id: 'v', key: 'v', words: 'card' })
+  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card' })
   return out
 }
 

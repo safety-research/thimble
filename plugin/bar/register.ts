@@ -4,10 +4,10 @@
 //                    before the cards' keys, so a failure's keys win while its line shows.
 //   registerBar      the bar (bar.tsx) in the AbovePrompt band; r and l at an empty prompt open coverage and the labels
 //                    while the bar names them. Coverage leaves the keys at the prompt, so r again closes it; the labels
-//                    pane takes the keys (its number keys check records), and esc closes it; /thimble-settings and a click on
-//                    `thimble` open the settings; the fixes' lifecycle (a `thimble fix` call, /thimble:fix, the
+//                    pane takes the keys (its number keys check records), and esc closes it. /thimble-settings and a
+//                    click on `thimble` open the settings; the fixes' lifecycle (a `thimble fix` call, /thimble:fix, the
 //                    person's next prompt; a `fix_ask` line of the change feed is core/feed.ts's); the counts after each
-//                    of main's turns (counts.ts), and whether an answer exists for v.
+//                    of main's turns (counts.ts).
 //
 // A bar key acts WORD_MS after it is pressed: a letter typed in that time means the person is typing a word that starts
 // with it, so the key and the letter go back to the prompt and nothing runs. One key waits at a time, for every key the
@@ -16,7 +16,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
-import { barKeys, barRows, setAnswered, type BarPresses } from './bar'
+import { barKeys, barRows, type BarPresses } from './bar'
 import { recount } from './counts'
 import { failNotice, fixCommand, fixKeyOf, pressFix, promptTyped, refreshFixes } from './fix'
 
@@ -87,17 +87,11 @@ export const registerFixKeys: Register = on => {
 }
 
 export const registerBar: Register = on => {
-  // the fixes as they stand: one still working shows in the bar, and its draft opens when it is written; whether the
-  // conversation (a resumed one) holds an answer v can draw; /thimble-settings
+  // the fixes as they stand: one still working shows in the bar, and its draft opens when it is written;
+  // /thimble-settings
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
     void refreshFixes($).catch(() => undefined)
-    try {
-      const rows = await $.session.messages()
-      await setAnswered($, rows.some(m => m.role === 'assistant' && !!String(m.text || '').trim()))
-    } catch {
-      // the next answer sets it
-    }
     try {
       await $.command.register({ name: 'thimble-settings', description: "thimble's settings: turn marks, cards, and the bar's coverage and labels on or off", immediate: true })
     } catch {
@@ -118,13 +112,11 @@ export const registerBar: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // the end of a turn: the fixes again (a subagent may have worked on one); after main's, the counts, and an answer
-  // for v
+  // the end of a turn: the fixes again (a subagent may have worked on one); after main's, the counts
   on('turn.complete', { turnId: /./ }, async ($, e, next) => {
     const r = await next(e)
     void refreshFixes($).catch(() => undefined)
     if (e.agentId === undefined) {
-      if (e.reason === 'answer' && e.answer.trim()) await setAnswered($, true)
       $.clock.after(0, () => { void recount($).catch(() => undefined) })
     }
     return r

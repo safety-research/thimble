@@ -15,6 +15,7 @@
 //
 //   designAnchor(agentId)  the answer row the cards of that designer fork draw under (the card tool asks it)
 //   designNow($)           the design that runs now, or null
+//   vReady($)              whether v would start a design now (the bar names v only then)
 //
 //   state: designs (each design, by key), designNow (the key of the design that runs), answerRow (main's last answer row)
 import type { EngineInterface, Register } from 'claude-code'
@@ -71,6 +72,14 @@ async function save($: Engine, d: Design): Promise<void> {
 
 export function designAnchor(agentId: string | undefined): string | null {
   return agentId && current?.agentId === agentId ? current.anchorRow : null
+}
+
+/** Whether v would draw a card now: an answer exists and no design runs (the bar's `v card`). Read from the state, so a
+ *  drawing that asks draws again when it changes. */
+export async function vReady($: Engine): Promise<boolean> {
+  if (!(await $.state.get(ANSWER)).value) return false
+  const d = await designNow($)
+  return d?.status !== 'held' && d?.status !== 'running'
 }
 
 export async function designNow($: Engine): Promise<Design | null> {
@@ -142,10 +151,12 @@ export const registerDesigner: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // main's text rows: the last one is the answer v draws under (the row ui.render AssistantMessage names)
+  // main's text rows: the last one is the answer v draws under (the row ui.render AssistantMessage names). A row the
+  // engine wrote in place of a response (an API error) names the model `<synthetic>`, and is no answer
   on('session.append', { door: 'response' }, async ($, e, next) => {
     const r = await next(e)
-    if (e.agentId === undefined && r.uuid && e.message.content.some(b => b.type === 'text' && String(b.text || '').trim())) {
+    const synthetic = e.origin.kind === 'model' && e.origin.model === '<synthetic>'
+    if (e.agentId === undefined && !synthetic && r.uuid && e.message.content.some(b => b.type === 'text' && String(b.text || '').trim())) {
       answerRow = r.uuid
       void $.state.set(ANSWER, r.uuid).catch(() => undefined)
     }

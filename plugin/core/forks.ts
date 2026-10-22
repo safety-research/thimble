@@ -14,7 +14,7 @@
 // list of handlers that take `$` cannot be called from here.)
 // A fork's end never reaches main's conversation: its task notification or hand-back is dropped at prompt.submit.
 // Each fork's turns are filed under its kind in the session's events (telemetry claimAgent). Which agent is which
-// fork is kept in $.state when the fork's turn starts, so a reload of the plugin still knows them.
+// fork is kept in $.state as soon as Claude Code names the agent, so a reload of the plugin still knows them.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { claimAgent } from '../telemetry/telemetry'
@@ -49,6 +49,7 @@ export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; 
   const agentId = String(r.agentId)
   known.set(agentId, o.kind)
   claimAgent(agentId, o.kind, o.kind)
+  try { await $.state.set(FORKS, Object.fromEntries(known)) } catch { /* known for this load of the module */ }
   return { agentId }
 }
 
@@ -71,14 +72,6 @@ export const registerForks: Register = on => {
       // the forks started from now on are known
     }
     return r
-  }).catch(($, e, next) => next(e))
-
-  // a fork's turn starts: which agent is which fork is kept for a reload of the plugin
-  on('turn.start', { agentId: /./ }, async ($, e, next) => {
-    if (forkOf(e.agentId)) {
-      try { await $.state.set(FORKS, Object.fromEntries(known)) } catch { /* known for this load of the module */ }
-    }
-    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('prompt.submit', { origin: { kind: /^(task-notification|peer)$/ } }, async ($, e, next) => {

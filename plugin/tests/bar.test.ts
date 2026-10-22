@@ -4,6 +4,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
+import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -44,7 +45,8 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
-  on('fs.read', () => ({ value: '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
+  on('tool.register', () => ({ value: undefined }))
   on('fs.write', () => ({ value: undefined }))
   on('fs.list', () => ({ value: [] }))
   on('fs.exists', () => ({ value: false }))
@@ -70,6 +72,7 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
 test('after an answer the bar names v, coverage and the labels; r opens the coverage pane, whose folders open', async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
   await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
   await w.clock.advance(100)
   const line = textOf(await $.ui.render(BAND))
@@ -139,7 +142,7 @@ function stateOnly(state: Record<string, unknown>): Any {
 }
 
 test('each switch takes its items off the bar, and v waits while a design runs', async () => {
-  const state: Record<string, unknown> = { answered: true, counts: { coverage: '43% (3/7 files)', labels: 2, gen: 1, error: null } }
+  const state: Record<string, unknown> = { answerRow: 'row-made-up', counts: { coverage: '43% (3/7 files)', labels: 2, gen: 1, error: null } }
   const all = (on: (k: string) => boolean) => barRows(stateOnly(state), ELS, 100, { on, preview: true }).then(textOf)
   expect(await all(() => true)).toContain('v card')
   expect(await all(() => true)).toContain('r coverage 43% (3/7 files) · l 2 labels')
