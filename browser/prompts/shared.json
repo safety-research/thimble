@@ -99,8 +99,8 @@
           "Run code as one run_python call, which runs in `{{CWD}}`."
         ],
         [
-          "the evidence is a Bash call whose output prints the marked words",
-          "the evidence is a run_python call whose output prints the marked words"
+          "the evidence is a Bash call whose output shows the claim",
+          "the evidence is a run_python call whose output shows the claim"
         ],
         [
           "A label's values come from `thimble label NAME --csv`, which the code can read with `subprocess`.",

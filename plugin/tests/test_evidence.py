@@ -311,13 +311,24 @@ def test_emphasis_in_the_output_is_formatting():
     assert r["status"] == "verified"
 
 
-def test_a_typed_value_in_a_list_a_dict_or_a_passing_call_is_not_evidence():
-    for code in ('d = {"a": 352}\nprint(d["a"])', "vals = [352]\nprint(vals[0])", "print(max(352, 1))"):
+def test_a_value_printed_as_is_or_assigned_alone_is_typed_a_list_of_keys_and_an_argument_are_not():
+    for code in ("print(352)", 'print("rows:", 352)', "n = 352\nprint(n)"):
         r = check_mark(mark("352 rows"), computed("352"), [call(code, "352")], "/data")
         assert r["status"] == "failed" and r["failedBy"] == "evidence" and "352 in by hand" in r["reason"], code
-    # an index, a slice and a digits argument stay conditions
-    code = 'rows = open("t.csv").read().split("\\n")[:352]\nprint(round(len(rows) / 1, 352))'
+    # an index, a slice, a digits argument and a keyword argument stay conditions
+    code = 'rows = open("t.csv").read().split("\\n")[:352]\nprint(round(len(rows) / 1, 352), int(x, base=352))'
     assert check_mark(mark("352 rows"), computed("352"), [call(code, "352")], "/data")["status"] == "verified"
+    # a list of the keys the code looks up prints them next to computed counts
+    keys = 'import json\nfrom collections import Counter\nc = Counter(json.loads(l)["t"] for l in open("t.jsonl"))\nfor v in [175, 60]:\n    print(f"{v} s x{c[v]}")'
+    assert check_mark(mark("175 s x3, 60 s x2"), computed("175 s x3"), [call(keys, "175 s x3\n60 s x2")], "/data")["status"] == "verified"
+
+
+def test_a_number_in_a_printed_text_is_typed_only_when_the_output_shows_it_nowhere_else():
+    code = 'import json\nhits = [l for l in open("t.jsonl") if "timeout" in l]\nprint("n hits:", len(hits))\nprint("all 15 had a timeout:", all(hits))'
+    out = "n hits: 15\nall 15 had a timeout: True"
+    assert check_mark(mark("15"), computed(out), [call(code, out)], "/data")["status"] == "verified"
+    alone = 'print("all 15 had a timeout:", True)'
+    assert "15 in by hand" in check_mark(mark("15"), computed("all 15 had a timeout: True"), [call(alone, "all 15 had a timeout: True")], "/data")["reason"]
 
 
 def test_one_mark_the_validator_cannot_judge_leaves_the_others_judged(monkeypatch):
@@ -373,9 +384,17 @@ def test_a_call_is_found_by_lines_of_its_output_the_others_left_out_and_a_percen
     r = check_mark(mark("59.7%"), computed("500   0.59718\n3500  0.93062"), [call(CODE, out, by="main")], "/data")
     assert r["status"] == "verified" and r["evidence"]["highlight"] == [[18, 25]]
     assert check_mark(mark("59.8%"), computed("500   0.59718"), [call(CODE, out)], "/data")["status"] == "failed"
-    # a cited output that shows no number of the words is still highlighted where it stands
+    # words with nothing to compare are the check's reading of the output it cites ("one" as 1 is highlighted)
     r = check_mark(mark("one first-class girl"), computed("1 female"), [call(CODE, "class 1 female 1")], "/data")
-    assert r["status"] == "failed" and r["evidence"]["highlight"] == [[6, 14]]
+    assert r["status"] == "verified" and r["evidence"]["highlight"] == [[6, 7]]
+    r = check_mark(mark("passed when run alone"), computed("pr/110 | run alone | passed"), [call(CODE, "pr/110 | run alone | passed")], "/data")
+    assert r["status"] == "verified"
+    # its numbers, days, quoted words and record names still must show
+    assert check_mark(mark('agent-09 said "run it alone"'), computed("pr/110 | run alone"), [call(CODE, "agent-09: pr/110 | run alone")], "/data")["status"] == "failed"
+    assert check_mark(mark("agent-09 passed when run alone"), computed("pr/110 | run alone"), [call(CODE, "agent-10: pr/110 | run alone")], "/data")["status"] == "failed"
+    # number words count in the output too
+    r = check_mark(mark("5 in the first two hours"), computed("first two hours: 5"), [call(CODE, "first two hours: 5")], "/data")
+    assert r["status"] == "verified"
 
 
 def test_a_path_named_from_the_folder_a_call_moved_to_holds(tmp_path: Path):
@@ -396,5 +415,23 @@ def test_a_number_name_shows_as_its_number():
 def test_a_dict_that_names_numbers_in_words_is_a_lookup_not_a_typed_value():
     code = 'n = len(open("t.txt").read().split())\nwords = {10: "ten", 9: "nine"}\nprint(f"asked {words.get(n, n)} times")'
     assert check_mark(mark("ten"), computed("asked ten times"), [call(code, "asked ten times")], "/data")["status"] == "verified"
-    typed = 'd = {"a": 10}\nprint(f"asked {d[\'a\']} times")'
-    assert "by hand" in check_mark(mark("ten"), computed("asked 10 times"), [call(typed, "asked 10 times")], "/data")["reason"]
+
+
+def test_a_quote_of_what_code_prints_fills_the_templates_fields(tmp_path: Path):
+    (tmp_path / "progress.mjs").write_text("const main = `${n(p.done)} of ${n(p.of)} records`\nreturn `${main} · ${n(p.failed)} calls failed`\n")
+    r = check_mark(mark('"120 of 412 records · 3 calls failed"'), quote("progress.mjs", "1-2", "records", kind="code"), [], str(tmp_path))
+    assert r["status"] == "verified"
+    (tmp_path / "why.js").write_text("const AGAIN = 'Sign in again with /login'\nif (s === 401) return `the sign-in failed or expired. ${AGAIN}`\n")
+    ev = [{"file": "why.js", "line": 2, "substring": "the sign-in failed or expired."}, {"file": "why.js", "line": 1, "substring": "Sign in again with /login"}]
+    item = {"kind": "code", "status": "verified", "evidence": ev, "reason": "joined"}
+    assert check_mark(mark('"the sign-in failed or expired. Sign in again with /login"'), item, [], str(tmp_path))["status"] == "verified"
+    # words the code does not hold are no quote of it
+    r = check_mark(mark('"120 of 412 rows · 3 calls failed"'), quote("progress.mjs", "1-2", "records", kind="code"), [], str(tmp_path))
+    assert r["status"] == "failed" and "quoted words" in r["reason"]
+
+
+def test_a_quote_over_more_lines_than_cited_widens_to_them(tmp_path: Path):
+    (tmp_path / "report.md").write_text("intro\nAgreement numbers may be\ninflated relative to human gold,\nshared blind spots.\nend\n")
+    r = check_mark(mark('"Agreement numbers may be inflated relative to human gold, shared blind spots."'),
+                   quote("report.md", "3-4", "Agreement numbers may be inflated relative to human gold, shared blind spots."), [], str(tmp_path))
+    assert r["status"] == "verified" and r["evidence"]["line"] == "2-4"
