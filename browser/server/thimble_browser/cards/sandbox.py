@@ -10,10 +10,11 @@ Each run is a new process. It sees:
 It does not see the person's home folder, thimble browser's own folder (the workspaces), the network (127.0.0.1
 included) or the server's environment: its environment is child_env's few variables. It is stopped when its time is up.
 
-The sandbox is Anthropic's sandbox runtime (srt, npm @anthropic-ai/sandbox-runtime), pinned in server/sandbox and
-installed there by scripts/install.sh and by the thimble-browser launcher. srt confines a process with Seatbelt
-(sandbox-exec) on macOS and with bubblewrap on Linux. server/sandbox/run.mjs runs one command in it, with the rules
-rules() makes:
+The sandbox is Anthropic's sandbox runtime (srt, npm @anthropic-ai/sandbox-runtime), pinned in the plugin's
+plugin/sandbox/package.json (server/sandbox's package.json and lock file link to it, so the two products run the same
+version) and installed in server/sandbox by scripts/install.sh and by the thimble-browser launcher. srt confines a
+process with Seatbelt (sandbox-exec) on macOS and with bubblewrap on Linux. The plugin's sandbox/run.mjs runs one
+command in it, with the rules rules() makes:
 
 - Linux: everything is hidden (each top folder is an empty, writable folder that is gone when the run ends, /tmp among
   them), then the system's libraries, the Python, the folder and the run's folder are shown again. bwrap.sh adds a
@@ -34,6 +35,7 @@ import functools
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -44,15 +46,16 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .. import home
+from ..prompts import PLUGIN
 
 log = logging.getLogger(__name__)
 RUNNER = Path(__file__).resolve().with_name("runner.py")
 GRACE_S = 10.0  # past the run's own timeout, before the server stops it
 STOP_S = 2.0  # between SIGTERM and SIGKILL
 
-SRT_DIR = Path(__file__).resolve().parents[2] / "sandbox"  # server/sandbox: srt's package.json, run.mjs, bwrap.sh
-LAUNCHER = SRT_DIR / "run.mjs"
-BWRAP = SRT_DIR / "bwrap.sh"
+SRT_DIR = Path(__file__).resolve().parents[2] / "sandbox"  # server/sandbox: srt's package.json and its install
+LAUNCHER = PLUGIN / "sandbox" / "run.mjs"  # the plugin's, shared: it runs one command in srt
+BWRAP = PLUGIN / "sandbox" / "bwrap.sh"
 PACKAGE = SRT_DIR / "node_modules" / "@anthropic-ai" / "sandbox-runtime"
 SECCOMP = PACKAGE / "vendor" / "seccomp"  # srt's apply-seccomp, which runs inside the sandbox on Linux
 NODE_MIN = (22, 12)  # srt's `engines`
@@ -135,12 +138,18 @@ def status() -> Status:
     failed = _probe(node)
     if failed:
         fix = "The message says what failed; browser/README.md's Sandbox section says what the sandbox needs."
-        if linux and _read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") == "1":
-            fix = ("This Linux keeps bubblewrap from making its namespaces (AppArmor). Allow it with `sudo sysctl -w "
-                   "kernel.apparmor_restrict_unprivileged_userns=0`, or give bwrap an AppArmor profile that allows "
-                   "user namespaces.")
+        # only when bubblewrap could not make its namespaces and AppArmor restricts them (srt's README gives this
+        # command); any other failure is said as it was said
+        if linux and USERNS_REFUSED.search(failed) and \
+                _read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") == "1":
+            fix = ("AppArmor keeps bubblewrap from making its namespaces. Allow them: "
+                   "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0")
         return Status(None, f"the sandbox could not run Python: {failed}", fix, node)
     return Status(f"srt {got} with {'Seatbelt' if macos else 'bubblewrap'}", node=node)
+
+
+# bubblewrap's words when the kernel refuses it a user namespace (sandbox/setup.mjs matches the same)
+USERNS_REFUSED = re.compile(r"bwrap: .*(uid map|namespace|RTM_NEWADDR|Operation not permitted|Permission denied)", re.I)
 
 
 def _read(path: str) -> str:
@@ -281,7 +290,8 @@ def launcher_env(run_dir: Path) -> dict[str, str]:
 def launcher_argv(node: str, rule: dict[str, Any], command: Sequence[str], env: dict[str, str]) -> list[str]:
     """`command` run by run.mjs in the sandbox with `rule`, and with `env` as its whole environment."""
     pairs = [f"{k}={v}" for k, v in env.items()]
-    return [node, str(LAUNCHER), json.dumps(rule, separators=(",", ":")), "--", "/usr/bin/env", "-i", *pairs, *command]
+    return [node, str(LAUNCHER), "--srt", str(SRT_DIR), json.dumps(rule, separators=(",", ":")), "--", "/usr/bin/env", "-i",
+            *pairs, *command]
 
 
 def copy_in(run_dir: Path, req: dict[str, Any], folders: Sequence[Path]) -> tuple[dict[str, Any], list[Path]]:

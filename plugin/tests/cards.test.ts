@@ -10,6 +10,7 @@ import { promptStub, tempRun } from './stubs'
 type Any = any
 
 const DATA = '/made-up/data'
+const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 200, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 200, rows: 40, isFullscreen: true } } as never
 const TOOL = 'mcp__thimble__card'
 const TREE = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['ada 3'] }, { t: 'Text', p: {}, c: ['bram 5'] }] }
 const SORTED = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['bram 5'] }, { t: 'Text', p: {}, c: ['ada 3'] }] }
@@ -31,7 +32,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -42,6 +43,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean } = {}) {
   on('session.usage', () => ({ value: {} }))
   on('session.messages', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
+  on('session.end', () => ({ sessionId: 's-cards' }) as never)
   on('tool.register', (_$: unknown, e: { name: string }) => ({ value: { tool: `mcp__thimble__${e.name}` } }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; text: string }) => { files[e.path] = e.text; return { value: undefined } })
@@ -59,12 +61,23 @@ function world(on: Any, o: { crash?: string; ask?: boolean } = {}) {
           : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
             : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
   }))
-  on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
+  const spawned: string[][] = []
+  const runs: string[][] = []
+  let setups = 0
+  on('process.run', (_$: unknown, e: { argv: string[] }) => {
+    runs.push(e.argv)
+    // the session start's setup.mjs installs srt on a slow network, and has not answered yet
+    if (String(e.argv[1] ?? '').endsWith('/sandbox/setup.mjs') && setups++ === 0 && o.firstSetupHangs) return new Promise(() => undefined) as never
+    return { value: { ...(tempRun(e.argv, o.sandbox) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('process.spawn', async function* (_$: unknown, e: { argv: string[] }) { spawned.push(e.argv); return { code: 0, signal: null } })
   on('env.set', () => ({ value: {} }))
   on('ui.toast', () => ({ value: undefined }))
   on('http.fetch', (_$: unknown, e: { url: string; init?: { body?: string } }) => {
     const op = e.url.replace('http://runner/', '')
     asked.push(op)
+    // no runner listens when the sandbox cannot start
+    if (o.sandbox?.ok === false) throw new Error('made-up: no such socket')
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
@@ -88,7 +101,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean } = {}) {
       : o.ask && !String(e.input?.file_path).startsWith(DATA) ? { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' } : { decision: 'allow' }) as never)
   on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, dirs, clock }
+  return { files, asked, dirs, clock, spawned, runs }
 }
 
 
@@ -345,4 +358,46 @@ test('a view that stops the runner is not sent again, and the call says to draw 
   expect(String(r.result)).toContain('the card stopped the card runner, most likely by using too much memory')
   expect(String(r.result)).toContain('Fix the view')
   expect(String(r.result)).not.toContain('cannot draw in this session')
+})
+
+test('when the sandbox cannot start, no card runs: the call and the failure line say why and the fix', async ($, on) => {
+  const w = world(on, { sandbox: { ok: false, why: 'this machine lacks what the sandbox needs: bubblewrap (bwrap) not installed', fix: 'Install it: sudo apt-get install bubblewrap' } })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(10)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_8', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  const text = String(r.result)
+  expect(text).toContain("cards run only in Anthropic's sandbox runtime, which cannot start here: this machine lacks what the sandbox needs: bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap")
+  expect(text).toContain('The view is not the cause')
+  const bar = textOf(await $.ui.render(BAND))
+  expect(bar).toContain('Cards cannot draw: cards run only in Anthropic')
+  expect(bar).toContain('sudo apt-get install bubblewrap')
+  expect(w.asked).not.toContain('load')
+  expect(w.spawned.length).toBe(0)
+  // the fix needs the person's sudo: a notice with no keys, not a failure that offers Claude the fix
+  expect(bar).not.toContain('fix this')
+  // no folder is made for a runner that cannot start
+  expect(w.runs.some(a => a.some(x => /\/cards-[0-9a-f]+$/.test(x)))).toBe(false)
+  // the call's result row says the whole reason and the fix
+  const result = textOf(await $.ui.render({ ...(callRow('toolu_made_up_8', {}) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_8', tool: TOOL, output: 'the copy', isExpanded: false } } as never))
+  expect(result).toContain('bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap · Claude got the error')
+})
+
+test('a card called while the session start still installs the sandbox draws: it does not wait on that install\'s answer', async ($, on) => {
+  const w = world(on, { firstSetupHangs: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(10)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_12', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  expect(String(r.result)).not.toContain('did not draw')
+  expect(w.asked).toContain('load')
+  expect(w.runs.filter(a => String(a[1] ?? '').endsWith('/sandbox/setup.mjs')).length).toBe(2)
+})
+
+test('the session ends: the runner stops and its folder goes', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_13', title: 'Scores', data: 'runs.json', view: VIEW } as never)
+  const made = w.runs.find(a => a[0] === 'sh' && /\/cards-[0-9a-f]+$/.test(String(a[a.length - 1]))) as string[]
+  expect(made).toBeTruthy()
+  await $.session.end({ reason: 'exit', sessionId: 's-cards' } as never)
+  expect(w.runs).toContainEqual(['rm', '-rf', '--', made[made.length - 1]])
 })

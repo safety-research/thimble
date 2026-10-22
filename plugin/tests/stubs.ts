@@ -12,8 +12,14 @@ export function promptStub(path: string): string | undefined {
   return STUBS[m[1]!] ?? `PROMPT ${m[1]}`
 }
 
-/** core/home.ts tempDir has the shell make its folder and print the folder's real path: that answer, the folder as
- *  named; null for any other command. */
-export function tempRun(argv: string[]): { exitCode: number; stdout: string; stderr: string } | null {
-  return argv[0] === 'sh' && String(argv[2] ?? '').includes('pwd -P') ? { exitCode: 0, stdout: `${argv[argv.length - 1]}\n`, stderr: '' } : null
+/** The commands the hooks run for their folders, answered: core/home.ts tempDir has the shell make its folder and
+ *  print the folder's real path (the folder as named), and cards/ask.ts runs sandbox/setup.mjs, whose answer is a
+ *  sandbox that works (`sandbox` gives another); null for any other command. */
+export function tempRun(argv: string[], sandbox: Record<string, unknown> = {}): { exitCode: number; stdout: string; stderr: string } | null {
+  if (argv[0] === 'sh' && String(argv[2] ?? '').includes('pwd -P')) return { exitCode: 0, stdout: `${argv[argv.length - 1]}\n`, stderr: '' }
+  if (String(argv[1] ?? '').endsWith('/sandbox/setup.mjs')) {
+    const s = { ok: true, node: '/made-up/bin/node', srt: '/made-up/.thimble/srt/0.0.79', platform: 'linux', why: '', fix: '', ...sandbox }
+    return { exitCode: s.ok ? 0 : 1, stdout: `${JSON.stringify(s)}\n`, stderr: '' }
+  }
+  return null
 }

@@ -3,12 +3,12 @@ card's view, keeps each card's state and handlers, and makes the text copy of wh
 cards/layout.js). The server talks to it over a Unix socket, as the plugin's hooks do (cards/ask.ts): POST /<op> with
 a JSON body, each answer JSON. runner.mjs lists the requests (load, draw, copy, key, press, pointer, undo, act, ping).
 
-It starts as the plugin's cards/argv.mjs starts it: an empty environment but PATH, Node's permission model (it reads
-the plugin's cards/ code, core/text.js and the workspace's card copies, and writes only its socket's folder), no code
-made from strings, at most 1 GB of memory. The boundary is the `vm` context each card version runs in, which holds only
-the JavaScript built-ins and the card's rows. Around that the browser adds its sandbox (cards/sandbox.py), as for any
-code Claude writes: the process sees only those folders and Node, and has no network. Unix sockets are allowed in it,
-since the socket is how the server reaches it.
+It starts as the plugin's cards/argv.mjs starts it (runnerCommand): Node's permission model (it reads the plugin's
+cards/ code, core/text.js and the workspace's card copies, and writes only its socket's folder), no code made from
+strings, at most 1 GB of memory, with an empty environment but PATH, in Anthropic's sandbox runtime. The sandbox is the
+boundary, here with the browser's rules (cards/sandbox.py), as for any code Claude writes: the process sees only those
+folders and Node, and has no network; Unix sockets are allowed in it, since the socket is how the server reaches it.
+The `vm` context each card version runs in keeps the cards apart.
 
     ask(ws, op, body)   the runner's answer, or {ok: False, error}: with `down` when the runner cannot start, so no
                         card can draw; without it when the runner stopped while it answered, which the request itself
@@ -48,8 +48,8 @@ def cards_dir(ws: str) -> Path:
 
 
 def argv(node: str, cards: Path, run: Path, sock: Path) -> list[str]:
-    """The runner's command, as the plugin's cards/argv.mjs makes it (tests/test_cards.py holds them equal), with the
-    Node that runs the sandbox."""
+    """The runner's command, as the plugin's cards/argv.mjs runnerCommand makes it (tests/test_cards.py holds them
+    equal), with the Node that runs the sandbox."""
     return [node, "--permission", f"--allow-fs-read={PLUGIN}/cards", f"--allow-fs-read={PLUGIN}/core/text.js",
             f"--allow-fs-read={cards}", f"--allow-fs-write={run}", "--disallow-code-generation-from-strings",
             "--max-old-space-size=1024", f"{PLUGIN}/cards/runner.mjs", str(sock)]

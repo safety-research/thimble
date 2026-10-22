@@ -4,7 +4,9 @@
 #   the terminal plugin (plugin/):
 #   validate   claude plugin validate plugin: the manifest, the hooks module and its types contract
 #   plugin     claude plugin test plugin: the hooks tests (plugin/tests/*.test.ts)
-#   node       node --test over every *.test.mjs under plugin/
+#   node       node --test over every *.test.mjs under plugin/; the card runner's tests start it in its sandbox, which
+#              they install in the step's THIMBLE_HOME (plugin/sandbox/setup.mjs; on Linux it needs bubblewrap, socat and
+#              ripgrep)
 #   python     pytest over plugin/ (the kernel)
 #
 #   the browser workbench (browser/):

@@ -37,8 +37,10 @@ scripts/check.sh page       # the page's type check, unit tests and build (brows
 ```
 
 The tests run on small made-up data and fake every model call. They cover what must not break; a test does not pin
-wording or layout. The server's sandbox tests need the sandbox runtime that `scripts/install.sh` installs, and skip
-without it.
+wording or layout. The plugin's Node tests start the card runner in its sandbox, as a session does: they install the
+sandbox runtime in the test's own `THIMBLE_HOME` (with `npm ci`, so the first run needs the npm registry) and fail
+when the sandbox does not work on the machine (on Linux it needs bubblewrap, socat and ripgrep). The server's sandbox
+tests need the sandbox runtime that `scripts/install.sh` installs, and skip without it.
 
 ## Layout
 
@@ -54,7 +56,8 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | the guidance: the `thimble` context block in every conversation | `plugin/guidance/` |
 | the texts the model reads, and their registry | `plugin/prompts/` |
 | marks: find `[words](#)` in a reply, draw them, run the checker fork and the validator, the evidence pane | `plugin/marks/` |
-| cards: the `card` tool, the runner that runs a card's view in a sandbox (`runner.mjs`), drawing, a card's keys | `plugin/cards/` |
+| cards: the `card` tool, the runner that runs the cards' views (`runner.mjs`) and the command that starts it in the sandbox (`argv.mjs`), drawing, a card's keys | `plugin/cards/` |
+| the sandbox the card runner runs in, shared with the browser workbench: Anthropic's sandbox runtime (srt) pinned (`package.json`, `package-lock.json`), the launcher that runs one command in it (`run.mjs`, `bwrap.sh`), and `setup.mjs`, which installs srt in `~/.thimble/srt` and says whether it works | `plugin/sandbox/` |
 | `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
 | the line above the prompt: busy step, failure line, fix line, counts | `plugin/bar/` |
 | the settings, coverage and fix-share panes | `plugin/panes/` |
@@ -72,7 +75,7 @@ The browser workbench, `browser/`:
 | the page (React and Vite), and its unit tests | `browser/frontend/src`, `browser/frontend/tests/public` |
 | the server: sign-in, the folder's readers, the workspace, the agents' loop and their tools | `browser/server/thimble_browser/` |
 | the features (cards, citations, lenses, labels, report, views), registered in one place, each one module with its routes, tools and prompt part | `browser/server/thimble_browser/features/` |
-| the sandbox that card code and view readers run in | `browser/server/thimble_browser/cards/sandbox.py`, `browser/server/sandbox/` |
+| the sandbox that card code and view readers run in: its rules, and srt's install (`browser/server/sandbox`, whose `package.json` and lock file link to the plugin's pin) | `browser/server/thimble_browser/cards/sandbox.py`, `browser/server/sandbox/` |
 | the card toolkit that card code draws with, in the sandbox and the page | `browser/kit/` |
 | the texts Claude reads, and the parts it reads from the plugin | `browser/prompts/`, `browser/prompts/shared.json` |
 | the view kit's guides and worked examples, which the view builder reads | `browser/docs/`, `browser/samples/views/` |

@@ -6,7 +6,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { paneNow } from '../core/pane'
 import { drawLabels, openLabels } from '../labels/pane'
-import { promptStub } from './stubs'
+import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -42,6 +42,8 @@ function world(on: Any, reply: () => Promise<Any>) {
   on('model.complete', async () => ({ value: await reply() }))
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     const a = e.argv
+    const folders = tempRun(a)
+    if (folders) return { value: { ...folders, isStdoutTruncated: false, isStderrTruncated: false } }
     const ok = (out: unknown) => ({ value: { exitCode: 0, stdout: typeof out === 'string' ? out : JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     if (a[0] === 'tail') return ok(w.feed.slice(Number(a[2]!.slice(1)) - 1))
     if (a.includes('--waiting')) {

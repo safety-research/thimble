@@ -23,7 +23,9 @@ scripts/install.sh
 
 The script installs both. It first checks what they need and says what is missing: Claude Code, Python 3.10 or later
 and Node.js 22.18 or later for the plugin; Node.js 22.12 or later and [uv](https://docs.astral.sh/uv/) for the browser
-workbench. The browser workbench takes about 600 MB of disk, most of it its page's packages and its server's Python
+workbench. Both run Claude's card code in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime),
+which the script installs; on Linux it needs bubblewrap, socat and ripgrep, and the script prints the one command that
+installs what is missing. The browser workbench takes about 600 MB of disk, most of it its page's packages and its server's Python
 packages, so install the plugin alone if that is all you need:
 
 - `scripts/install.sh --no-browser` installs the terminal plugin only. So do these two commands, with no clone:
@@ -51,7 +53,8 @@ thimble adds these to the session:
   file at its line for a quote. Claude learns of each correction with your next prompt.
 - **Cards.** When an answer is much faster to see than to read, such as the path one run took or forty runs side by
   side, Claude draws an interactive card in the conversation. A card takes clicks, and the letter keys it names while
-  the prompt is empty.
+  the prompt is empty. The code Claude writes for a card runs in Anthropic's sandbox runtime, which lets it read only
+  the card's rows and reach no network.
 - **`v`.** At an empty prompt, `v` asks for a card of the last answer. A background copy of the session lists a few
   forms that fit, picks one, draws it under that answer and fixes what it sees is unclear, while you go on. The line
   above the prompt says while it works.
@@ -82,7 +85,7 @@ one call per 50 records. All calls go through your Claude Code login and show in
 
 - `~/.thimble/` (or the folder in `THIMBLE_HOME`): per data folder, the labels, with every version of their values;
   per session, the cards with their rows and state, the marks and their checks, the files Claude read (for coverage),
-  and a log of thimble's own model calls. thimble writes nothing in your data folder (one whose `thimble/labels` an
+  and a log of thimble's own model calls; and in `srt/`, the sandbox runtime the cards run in. thimble writes nothing in your data folder (one whose `thimble/labels` an
   earlier thimble made keeps its labels there).
 
 The plugin sends nothing anywhere except through your Claude Code session, and starts no other Claude Code process.

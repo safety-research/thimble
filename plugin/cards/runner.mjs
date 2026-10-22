@@ -1,20 +1,20 @@
 // runner.mjs: the card runner. One Node process per session runs every card's view, keeps each card's state and
 // handlers, and makes the text copy of what a card draws. The hooks (ask.ts) start it and talk to it over a Unix socket.
 //
-//   env -i PATH=… node --permission --allow-fs-read=<plugin>/cards --allow-fs-read=<plugin>/core/text.js
-//        --allow-fs-read=<cards of the session> --allow-fs-write=<run dir> --disallow-code-generation-from-strings
-//        runner.mjs <socket>
+//   sandbox/run.mjs --srt <srt> <rules> -- env -i PATH=… node --permission --allow-fs-read=<plugin>/cards
+//        --allow-fs-read=<plugin>/core/text.js --allow-fs-read=<cards of the session> --allow-fs-write=<its folder>
+//        --disallow-code-generation-from-strings --max-old-space-size=1024 runner.mjs <socket>
 //
-// The boundary is the `vm` context each card version runs in: it holds only the JavaScript built-ins, the card's rows
-// (JSON text, parsed inside the context) and the view's source compiled as a function. Only strings cross between this
-// process and a context: the request goes in as JSON text, the drawing comes out as JSON text, and every exception is
-// caught inside the context and said as text. Code generation from strings is off (no eval, no Function), there are no
-// timers, and each call has a time limit. The context keeps the card's state and its handlers (a Button's onPress, the
-// onPointer and onKey listeners) between calls. Node's documentation says a `vm` context is no security mechanism on
-// its own, so the process around it holds little: it starts with an empty environment, Node's permission model lets it
-// read only the plugin's cards/ code and the session's card copies and write only its socket's folder, and it starts
-// no child process or worker. That permission model does not cover the network in Node 22; nothing in a context can
-// reach the network, since no module, `process` or `fetch` is in it.
+// The boundary is Anthropic's sandbox runtime (srt: bubblewrap on Linux, Seatbelt on macOS) the process runs in
+// (argv.mjs gives its rules): it has no network, reads only the runner's code, the card copies and the Node it runs on,
+// and writes only its own folder, which holds its socket. In it the process starts with an empty environment, and Node's
+// permission model keeps its reads to the same code and copies. Each card version runs in a `vm` context of its own,
+// which keeps the cards apart: it holds only the JavaScript built-ins, the card's rows (JSON text, parsed inside the
+// context) and the view's source compiled as a function. Only strings cross between this process and a context: the
+// request goes in as JSON text, the drawing comes out as JSON text, and every exception is caught inside the context and
+// said as text. Code generation from strings is off (no eval, no Function), there are no timers, and each call has a
+// time limit. The context keeps the card's state and its handlers (a Button's onPress, the onPointer and onKey
+// listeners) between calls.
 //
 // Requests are POST /<op> with a JSON body; each answers JSON: {ok: true, ...} or {ok: false, error}.
 //   load     {id, version, title, view, rows, state, width}  a new version from its view source and rows file;
@@ -105,7 +105,7 @@ function scrub(src) {
   return out
 }
 
-/** What the view must not hold, as a friendly early error; the vm context is the boundary, not this check. */
+/** What the view must not hold, as a friendly early error; the sandbox holds the view, not this check. */
 export function checkView(src) {
   const bad = []
   if (src.length > MAX_VIEW) bad.push(`the view is ${src.length} characters; at most ${MAX_VIEW}`)
@@ -565,6 +565,12 @@ function serve(sock) {
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ ...out, seq: ++answered }))
     })
+  })
+  // a socket the runner cannot make (its folder is not writable, say) is said, and the runner ends: the hooks then say
+  // why it did not start, where the guard below would keep it running with no socket
+  server.on('error', e => {
+    process.stderr.write(`the card runner cannot listen on ${sock}: ${e.message}\n`)
+    process.exit(1)
   })
   server.listen(sock, () => fs.chmodSync(sock, 0o600))
   // the session that started this runner is gone: so is the runner

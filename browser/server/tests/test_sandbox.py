@@ -68,7 +68,7 @@ def test_srt_makes_a_seatbelt_profile_of_the_macos_rules_with_no_network_and_the
     no network at all (not 127.0.0.1, not a Unix socket), denies reads under /Users before it allows the folder,
     denies the workspaces after that, and writes only the run's folder (srt's own temp folder denied last)."""
     macos = "data:text/javascript,Object.defineProperty(process,'platform',{value:'darwin'})"
-    got = subprocess.run([shutil.which("node"), "--import", macos, str(sandbox.LAUNCHER), "--print",
+    got = subprocess.run([shutil.which("node"), "--import", macos, str(sandbox.LAUNCHER), "--srt", str(sandbox.SRT_DIR), "--print",
                           json.dumps(mac_rules(corpus=H)), "--", "/usr/bin/env", "-i", "python3", "-I", "runner.py"],
                          capture_output=True, text=True, timeout=60, cwd="/",
                          env={"PATH": os.environ["PATH"], "HOME": RUN, "CLAUDE_CODE_TMPDIR": RUN})

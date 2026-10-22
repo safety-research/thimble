@@ -4,49 +4,30 @@
 //   node --test plugin/cards/test/layout.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { runnerArgv } from '../argv.mjs'
+import { startRunner } from './start.mjs'
 
 import { textWidth } from '../../core/text.js'
 import { layoutLines, wrapText } from '../layout.js'
 import { GALLERY, GOLDEN_WIDTHS } from './gallery.mjs'
 
-const HERE = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
 let dir
-let child
-let sock
+let runner
 
-const ask = (op, body) => new Promise((resolve, reject) => {
-  const q = http.request({ socketPath: sock, path: `/${op}`, method: 'POST' }, res => {
-    let t = ''
-    res.on('data', d => { t += d })
-    res.on('end', () => resolve(JSON.parse(t)))
-  })
-  q.on('error', reject)
-  q.end(JSON.stringify(body))
-})
+const ask = (op, body) => runner.ask(op, body)
 
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), 'thimble-layout-'))
-  sock = join(dir, 'r.sock')
-  const [cmd, ...args] = runnerArgv({ plugin: join(HERE, '..'), cards: dir, run: dir, sock, path: process.env.PATH })
-  child = spawn(cmd, args, { stdio: 'ignore' })
-  for (let i = 0; i < 100; i++) {
-    try { if ((await ask('ping', {})).ok) return } catch { /* not yet */ }
-    await new Promise(r => setTimeout(r, 20))
-  }
-  throw new Error('the runner did not start')
+  runner = await startRunner(dir)
 })
 
 after(() => {
-  child?.kill()
+  runner?.stop()
   rmSync(dir, { recursive: true, force: true })
 })
 

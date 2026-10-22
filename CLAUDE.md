@@ -31,9 +31,11 @@ check CI runs, and `scripts/check.sh STEP` one of them.
   symptom.
 - The browser workbench reads one text from `plugin/`, the label classifier, with the changes
   `browser/prompts/shared.json` lists. When that text changes, run `scripts/check.sh parity` and fix the pairs it names.
-- In the plugin, Claude's card views run only in the card runner's sandbox (`plugin/cards/runner.mjs`: Node with
-  `--permission`, a `vm` context per card, only strings in and out). The hooks never run a view themselves. Keep it that
-  way.
+- In the plugin, Claude's card views run only in the card runner (`plugin/cards/runner.mjs`), which runs only in
+  Anthropic's sandbox runtime (`plugin/cards/argv.mjs` gives its rules; `plugin/sandbox/` holds the pin and the
+  launcher): no network, reads only the runner's code and the card copies, writes only its own folder. A `vm` context
+  per card keeps the cards apart. When the sandbox cannot start, cards do not run. The hooks never run a view
+  themselves. Keep it that way.
 - The browser's server binds 127.0.0.1 only. Card code and view readers run only in its sandbox
   (`browser/server/thimble_browser/cards/sandbox.py`), and its agents get only the tools
   `browser/server/thimble_browser/agent.py` names. Keep both that way.
