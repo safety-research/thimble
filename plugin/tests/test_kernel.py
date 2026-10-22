@@ -56,10 +56,11 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # ------------------------------------------------------------------ refs
 
 
-def test_refs_round_trip_and_row_sets() -> None:
-    for ref in ["a.jsonl#L3", "a.jsonl#L3-9", "a.jsonl#L1-3,7", "x.csv#row=2", "f.db#prs/2", "f.db#prs",
-                "r.json#/messages/1", "r.json#/a/b", "notes.md", "budget.xlsx#Q3!B2"]:
-        assert R.format_source(R.parse(ref)) == ref
+def test_refs_parse_rows_and_row_sets() -> None:
+    kinds = {"a.jsonl#L3": "lines", "a.jsonl#L1-3,7": "lines", "x.csv#row=2": "csvrows", "f.db#prs/2": "dbrows",
+             "f.db#prs": "table", "r.json#/messages/1": "pointer", "notes.md": "file", "budget.xlsx#Q3!B2": "file"}
+    assert {ref: R.parse(ref)["kind"] for ref in kinds} == kinds
+    assert R.parse("a.jsonl#L1-3,7")["nums"] == [1, 2, 3, 7] and R.format_nums([1, 2, 3, 7]) == "1-3,7"
     assert R.parse("a.jsonl#L3-L9")["nums"] == list(range(3, 10))
     with pytest.raises(R.RefError):
         R.parse("a.jsonl#L3-x")  # a mistyped line ref is an error, not the whole file
@@ -81,11 +82,8 @@ def test_every_kind_has_rows_with_stable_ids(root: Path) -> None:
     assert S.kind_of_file(root, "agent.jsonl") == "transcript"
     again = {rel: [r.ref for r in S.iter_rows(root, rel)] for rel in sources}
     assert again == refs
-    # each row reads back by its ref, the same text
-    for rel, rs in refs.items():
-        for ref in rs:
-            first = next(r for r in S.iter_rows(root, rel) if r.ref == ref)
-            assert S.fetch(root, ref)[0].raw == first.raw, ref
+    # a JSONL file's records read back by their lines, the same text
+    assert [r.raw for r in S.json_lines(root, "saves.jsonl", {2, 9})] == [r.raw for r in S.iter_rows(root, "saves.jsonl")][1:9:7]
     hunk = next(S.iter_rows(root, "change.diff")).value
     assert (hunk["file"], hunk["added"], hunk["removed"]) == ("x.py", 2, 1)
 

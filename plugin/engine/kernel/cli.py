@@ -2,6 +2,7 @@
 session's permission mode and sandbox like any other command.
 
     thimble label [NAME]                       the labels, or one label's counts per value
+    thimble label NAME --csv                   each record's ref, value, confidence, by and checked, for your code
     thimble label NAME --in GLOB (--regex RE | --code [FILE] | --prompt "DEFINITION") [--values yes,no]
                   [--where EXPR] [--within LABEL=VALUE] [--limit N] [--reason]
                                                give each record of GLOB one of the values; a --prompt label's records
@@ -95,6 +96,10 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
 
     thimble label                              the labels here, with their counts
     thimble label NAME                         its counts per value; what waits; what the analyst checked
+    thimble label NAME --csv                   every record as a CSV row: ref, value, confidence, by, checked. The
+                                               analyst's check is the value where they checked one (by: analyst); a
+                                               record that waits or got no value has an empty value. Read it in your
+                                               code (csv or pandas) to count or join
     thimble label NAME --in GLOB --regex RE    the first value where the record's text matches: a JSON or JSONL
                                                record's values, decoded, one per line (a newline in a value is a real
                                                newline), not its keys or quotes; a line of text or a CSV row as the
@@ -186,7 +191,7 @@ def cmd_label(a: argparse.Namespace) -> int:
 
 def _label(st: Store, a: argparse.Namespace) -> int:
     if a.records is not None and a.name:
-        # the label viewer's page of records: the person's read
+        # a page of records for the plugin's labels pane: the person's read
         out_json(LB.page(st, a.name, None if a.records == "*" else a.records, a.at or 0, a.count or LB.PAGE))
         return 0
     if not a.name:
@@ -203,6 +208,9 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                       + (f" · {s['waiting']:,} waiting" if s["waiting"] else "") + (f" · {s['checked']:,} checked" if s["checked"] else ""))
         return 0
     name = a.name
+    if a.csv:
+        LB.write_csv(_load(st, name), sys.stdout)
+        return 0
     if a.delete:
         p = LB.path(st, name)
         if not p.exists():
@@ -478,7 +486,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="the records that wait for the model, with their text, as JSON (those of the first BATCHES calls)")
     p.add_argument("--delete", action="store_true")
     p.add_argument("--json", action="store_true")
-    # the label viewer's reads (the person's, in the terminal): a page of records, all (*), of one value, or with none (-)
+    p.add_argument("--csv", action="store_true", help="every record's ref, value, confidence, by and checked, as CSV")
+    # the labels pane's reads (the person's, in the terminal): a page of records, all (*), of one value, or with none (-)
     p.add_argument("--records", nargs="?", const="*", help=argparse.SUPPRESS)
     p.add_argument("--at", type=int, help=argparse.SUPPRESS)
     p.add_argument("--count", type=int, help=argparse.SUPPRESS)

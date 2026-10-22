@@ -1,13 +1,13 @@
 """Labels (engine/kernel/labels.py, `thimble label`): a category given to every record of a scope by a regex, code, the
-model (records that wait for its reads) or Claude's own values; counts per value as plain numbers; the person's checks;
-and what coverage counts of a label. Run: python3 -m pytest plugin/tests/test_labels.py"""
+model (records that wait for its reads) or Claude's own values; counts per value as plain numbers and as CSV; the
+person's checks; a folder thimble may not write in; and what coverage counts of a label. Run: python3 -m pytest
+plugin/tests/test_labels.py"""
 from __future__ import annotations
 
 import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -66,8 +66,10 @@ def test_a_regex_label_gives_each_record_a_value_and_prints_its_counts(root: Pat
     assert "Computed over by a rule label, none of it read: 6 of 6 records (100%)." in CV.coverage_text(cov)
     # another session did not apply it, so its coverage holds none of it
     assert CV.coverage(Store(root, session="s-other"))["total"]["touched_files"] == 0
-    # each value's records as examples, the unchecked first
-    assert {s["ref"] for s in LB.samples(st, LB.load(st, "sorry"))["yes"]} == {"chat/room.jsonl#L1", "chat/room.jsonl#L3"}
+    # the pane's page of a value: its records with their words
+    yes = LB.page(st, "sorry", "yes")
+    assert [r["ref"] for r in yes["records"]] == ["chat/room.jsonl#L1", "chat/room.jsonl#L3"] and yes["total"] == 2
+    assert yes["records"][0]["words"] == "I'm sorry, I broke the build with my last commit."
     # a rule label asks the plugin for nothing
     assert feed(root) == []
 
@@ -181,6 +183,66 @@ def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: P
     assert s["counts"] == {"yes": 3, "no": 3} and s["checked"] == 2 and s["agree"] == 1 and s["disagree"] == 1
     out = run(root, "label", "sorry").stdout
     assert "  sorry: yes 3 · no 3 of 6 records" in out and "the analyst checked 2: 1 agree, 1 disagree" in out
+    # the pane shows the records the analyst has not checked first
+    assert [r["ref"] for r in LB.page(st, "sorry", "yes")["records"]] == ["chat/room.jsonl#L3", "chat/room.jsonl#L1", "chat/room.jsonl#L5"]
+
+
+def test_csv_gives_every_record_with_the_analysts_check_in_place_of_the_labels_value(root: Path):
+    import csv
+    import io
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
+    r = run(root, "label", "sorry", "--csv")
+    assert r.returncode == 0, r.stdout + r.stderr
+    rows = list(csv.DictReader(io.StringIO(r.stdout)))
+    assert r.stdout.splitlines()[0] == "ref,value,confidence,by,checked" and len(rows) == 6
+    by = {x["ref"]: x for x in rows}
+    assert by["chat/room.jsonl#L1"] == {"ref": "chat/room.jsonl#L1", "value": "yes", "confidence": "1.0", "by": "regex", "checked": "false"}
+    assert by["chat/room.jsonl#L5"] == {"ref": "chat/room.jsonl#L5", "value": "yes", "confidence": "", "by": "analyst", "checked": "true"}
+    assert sum(x["value"] == "yes" for x in rows) == 3
+    # a record that waits for the model has no value yet
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    waiting = list(csv.DictReader(io.StringIO(run(root, "label", "apology", "--csv").stdout)))
+    assert len(waiting) == 6 and {x["value"] for x in waiting} == {""}
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
+def test_a_folder_thimble_may_not_write_in_keeps_its_labels_under_thimble_home(root: Path, tmp_path: Path):
+    # (THIMBLE_ROOT pins the root, so a folder found by its records would be the same)
+    before = sorted(p.name for p in root.rglob("*"))
+    root.chmod(0o555)
+    try:
+        r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+        assert r.returncode == 0, r.stdout + r.stderr
+        kept = tmp_path / "th" / "lean" / "folders" / str(root.resolve()).replace("/", "-").replace(".", "-") / "thimble"
+        assert (kept / "labels" / "sorry.json").is_file()
+        assert f"is read-only here, so its labels are kept in {kept}" in r.stderr
+        assert "  sorry: yes 2 · no 4 of 6 records" in r.stdout
+        # said once; the label reads back, checks and CSV work there
+        again = run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
+        assert again.returncode == 0 and "read-only" not in again.stderr
+        assert "  sorry: yes 3 · no 3 of 6 records" in run(root, "label", "sorry").stdout
+        assert run(root, "label", "sorry", "--csv").stdout.count("\n") == 7
+    finally:
+        root.chmod(0o755)
+    assert sorted(p.name for p in root.rglob("*")) == before
+
+
+def test_a_label_over_a_database_leaves_no_file_beside_it(root: Path):
+    import sqlite3
+    db = root / "app.db"
+    con = sqlite3.connect(db)
+    con.execute("pragma journal_mode=wal")
+    con.execute("create table notes (body text)")
+    con.executemany("insert into notes values (?)", [("the parser fails",), ("docs typo",)])
+    con.commit()
+    con.close()
+    assert sorted(p.name for p in root.iterdir() if p.name.startswith("app.db")) == ["app.db"]
+    r = run(root, "label", "parser", "--in", "app.db#notes", "--regex", "parser")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "  parser: yes 1 · no 1 of 2 rows" in r.stdout
+    assert LB.page(Store(root), "parser", "yes")["records"][0]["ref"] == "app.db#notes/1"
+    assert sorted(p.name for p in root.iterdir() if p.name.startswith("app.db")) == ["app.db"]
 
 
 def test_a_regex_reads_a_json_records_decoded_values_and_a_text_or_csv_row_as_the_file_holds_it(root: Path):
