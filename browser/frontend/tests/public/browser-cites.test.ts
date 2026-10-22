@@ -44,3 +44,22 @@ describe('marks', () => {
     expect(texts[2].checks).toBeUndefined()
   })
 })
+
+describe('lens marks', () => {
+  it('go to the first text row of the turn that holds the term, an earlier explainers record and a 0.10 log among them', () => {
+    const records: ChatRecord[] = [
+      { type: 'user', text: 'why?' },
+      { type: 'text', delta: 'Counting first.' },
+      { type: 'tool_use', id: 't1', name: 'Read', input: {} },
+      { type: 'text', delta: 'Most are a flaky-test, in the merge queue.' },
+      { type: 'done' },
+      { type: 'glosses', glosses: [{ term: 'flaky-test', body: 'A test that fails at random.' }] },
+      { type: 'lens_marks', marks: [{ id: 'm1', lens: 'details', term: 'Counting first', body: 'It counted one file.' }] },
+      { type: 'marks', marks: [{ id: 'm2', lens: 'explain', term: 'merge queue', body: 'Where changes wait.' }] } as unknown as ChatRecord,
+    ]
+    const rows = foldRecords(records)
+    const texts = rows.filter((r) => r.kind === 'text') as { text: string; lensMarks?: { term: string; lens: string }[] }[]
+    expect(texts[0].lensMarks?.map((m) => [m.lens, m.term])).toEqual([['details', 'Counting first']])
+    expect(texts[1].lensMarks?.map((m) => [m.lens, m.term])).toEqual([['explain', 'flaky-test'], ['explain', 'merge queue']])
+  })
+})

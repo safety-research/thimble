@@ -2,8 +2,9 @@
 // (bodies.tsx) and its takeaway, in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it,
 // and the card harness (render.tsx) mounts it alone. The body shimmers while the card's code runs, as when an edit_card
 // call is changing it, and the card shimmers while thimble runs it again because a label it read changed.
-import { useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
+import { shownMarks, useLenses, useSurfaceMarks } from '../lib/lensMarks'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
@@ -70,6 +71,10 @@ function Face(p: CardFaceProps) {
   const failed = cell.status === 'error' && !running
   // a plan has no takeaway (bodies.tsx PlanBody): its steps say where the work stands
   const takeaway = kind === 'plan' ? '' : cell.takeaway
+  // the lenses' marks on this card's takeaway (lib/lensMarks.ts), where a lens reads the cards
+  const lenses = useLenses(ctx.ws)
+  const cardMarks = useSurfaceMarks(ctx.ws, 'cards')
+  const marks = useMemo(() => shownMarks(cardMarks.filter((m) => m.where === cell.id), lenses, 'cards'), [cardMarks, lenses, cell.id])
   const cls = ['canvas-card']
   if ((cell.regenerating_for ?? []).length > 0) cls.push('is-regenerating')
   if (running) cls.push('is-running')
@@ -125,7 +130,7 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} />
+            <ChatMarkdown text={takeaway} marks={marks} lenses={lenses} />
           </div>
         </div>
       ) : null}

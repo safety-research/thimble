@@ -31,14 +31,14 @@ def api(folder):
 def test_only_the_chat_agent_and_a_view_builder_exist(api):
     assert api("GET", "/orientation").json() == {} or api("GET", "/orientation").status_code == 404
     names = [f["name"] for f in api("GET", "/features").json()]
-    assert names == ["marks", "cards", "labels", "report", "views"]
+    assert names == ["marks", "cards", "lenses", "labels", "report", "views"]
 
 
 def test_a_feature_turned_off_keeps_its_routes_and_leaves_the_others(api):
     r = api("PUT", "/settings", json={"features": {"report": False}})
     assert r.status_code == 200
     got = {f["name"]: f["on"] for f in api("GET", "/features").json()}
-    assert got == {"marks": True, "cards": True, "labels": True, "report": False, "views": True}
+    assert got == {"marks": True, "cards": True, "lenses": True, "labels": True, "report": False, "views": True}
     assert api("GET", "/investigations/main/types").status_code == 200
     assert api("GET", "/canvas").status_code == 200
     assert api("PUT", "/settings", json={"features": {"report": "no"}}).status_code == 400
