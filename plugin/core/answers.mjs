@@ -4,6 +4,8 @@
 //   labelCommands(command)        -> the labels a Bash command runs `thimble label` on: [{name, args}], in order
 //   isPersonPrompt(by)            -> whether a turn's prompt came from the person (typed, the phone, the SDK, a key
 //                                    of thimble's that asked as the person), not a task's report or an agent's message
+//   isOthersPrompt(by)            -> whether a turn's prompt is known to come from someone else (a task's report, an
+//                                    agent's message, a continuation); a sender not recorded is not known to be
 //   sinceLastPrompt(turns)        -> since the person's last prompt: that prompt, the text rows after it in order, and
 //                                    the answers among them (each turn's last text row; a turn that ended in an error
 //                                    answered nothing)
@@ -60,15 +62,23 @@ export function isPersonPrompt(by) {
   return /^(composer|bridge|sdk|plugin|auto-continuation)$/.test(String(by || ''))
 }
 
+/** Whether a turn's prompt is known to come from someone other than the person: a background task's report, a
+ *  schedule, another session or agent, a channel, or a continuation with no prompt. A sender not recorded
+ *  (`unknown`, `unclassified`, none) is not known to be someone else's. */
+export function isOthersPrompt(by) {
+  return /^(task-notification|scheduled-trigger|peer|peer-send-message|projects-relay|channel|coordinator|observer|observer-activity|continuation)$/.test(String(by || ''))
+}
+
 /**
  * Since the person's last prompt, from the turns oldest first ({prompt: {text, by, row}, rows: [row], answer: row |
  * null}): that prompt ({row, text}, or null when the person has asked nothing yet), every text row of Claude's after
- * it in order (`rows`), and the turns' answers among them (`replies`).
+ * it in order (`rows`), and the turns' answers among them (`replies`). The span goes back only over turns known to be
+ * someone else's: a turn whose sender was not recorded ends it, so it never reaches back past a prompt of the person's.
  */
 export function sinceLastPrompt(turns) {
   const list = Array.isArray(turns) ? turns : []
   let last = -1
-  for (let i = list.length - 1; i >= 0; i--) if (isPersonPrompt(list[i]?.prompt?.by)) { last = i; break }
+  for (let i = list.length - 1; i >= 0; i--) if (!isOthersPrompt(list[i]?.prompt?.by)) { last = i; break }
   const after = last < 0 ? list : list.slice(last)
   const rows = after.flatMap(t => (Array.isArray(t?.rows) ? t.rows : []))
   const replies = after.map(t => t?.answer).filter(r => typeof r === 'string' && r)

@@ -51,8 +51,28 @@ const SEL = { plugin: 'thimble', key: 'answerSel' } as const
 
 const PROMPT_MAX = 4000
 
-/** The prompt that will start main's next turn, as prompt.submit and session.append saw it. */
-let pending: Prompt | null = null
+/** The prompts submitted whose turns have not started yet, oldest first, as prompt.submit and session.append saw them.
+ *  Several can wait at once (a prompt typed over a running turn and a task's report that arrives before its turn
+ *  starts), so each turn takes the one with its words. A prompt delivered into a running turn starts none; the newest
+ *  few are kept. */
+let waiting: Prompt[] = []
+const WAITING_MAX = 8
+
+function wait(p: Prompt): void {
+  waiting = [...waiting, p].slice(-WAITING_MAX)
+}
+
+function unwait(p: Prompt): void {
+  waiting = waiting.filter(x => x !== p)
+}
+
+/** The waiting prompt a turn that starts with `text` takes: the oldest with its words; for a turn with no text (a
+ *  continuation, an image alone) the newest. */
+function takeWaiting(text: string): Prompt | null {
+  const p = text ? waiting.find(x => sameText(x.text, text)) : waiting.at(-1)
+  if (p) unwait(p)
+  return p ?? null
+}
 
 // ------------------------------------------------------------------------------------------------ reads
 
@@ -201,7 +221,7 @@ async function senderOfStarted($: Engine, prompt: Prompt): Promise<void> {
   const newest = (await turnIds($)).at(-1)
   const t = newest ? await turnOf($, newest) : null
   if (!t || t.prompt.by !== 'unknown' || !sameText(t.prompt.text, prompt.text)) return
-  if (pending === prompt) pending = null
+  unwait(prompt)
   await editTurn($, t.turnId, x => ({ ...x, prompt: { ...x.prompt, by: prompt.by } }))
 }
 
@@ -294,7 +314,8 @@ async function keepRow($: Engine, e: any, next: (e: any) => Promise<any>): Promi
     if (!row || !text.trim()) return stored
     if (e.door === 'response' && msg.type === 'assistant') await noteText($, row, text)
     else if (e.door === 'prompt' && msg.type === 'user' && !msg.isMeta) {
-      if (pending && !pending.row) pending.row = row
+      const p = waiting.find(x => !x.row && sameText(x.text, text)) ?? waiting.findLast(x => !x.row)
+      if (p) p.row = row
       const now = await mainTurn($)
       if (now) await editTurn($, now, t => (t.prompt.row ? t : { ...t, prompt: { ...t.prompt, row } }))
     }
@@ -318,15 +339,15 @@ export const registerAnswers: Register = on => {
     let mine: Prompt | null = null
     if (!e.command && !e.isMeta) {
       mine = { text: String(e.text ?? '').slice(0, PROMPT_MAX), by: String((e.origin as { kind?: string } | undefined)?.kind ?? ''), row: null }
-      pending = mine
+      wait(mine)
     }
     const r = await next(e)
     try {
       if (mine && (r as { drop?: unknown }).drop) {
-        if (pending === mine) pending = null
+        unwait(mine)
       } else if (mine) {
         mine.text = String((r as { text?: string }).text ?? mine.text).slice(0, PROMPT_MAX)
-        if (pending === mine) await senderOfStarted($, mine)
+        if (waiting.includes(mine)) await senderOfStarted($, mine)
       }
     } catch {
       // the turn keeps its own text
@@ -338,8 +359,7 @@ export const registerAnswers: Register = on => {
     if (e.agentId === undefined) {
       try {
         const text = String(e.text || '').slice(0, PROMPT_MAX)
-        const p = pending && (!text || sameText(pending.text, text)) ? pending : { text, by: text ? 'unknown' : 'continuation', row: null }
-        pending = null
+        const p = takeWaiting(text) ?? { text, by: text ? 'unknown' : 'continuation', row: null }
         await newTurn($, e.turnId, p)
         // a new turn of main's: the keys act on its answer
         await $.state.set(SEL, null)
@@ -394,6 +414,6 @@ export const registerAnswers: Register = on => {
 
 /** For tests: the module's memory, cleared. */
 export function resetAnswers(): void {
-  pending = null
+  waiting = []
   writing = Promise.resolve()
 }
