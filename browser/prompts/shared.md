@@ -153,7 +153,7 @@ A label or a card that sorts outcomes, such as which attempts worked, decides ea
 
 ## Citations
 
-In the chat, cite each claim from the data as `[words](#)`, which thimble checks after the reply (Citing claims in the chat, in main's prompt). Everywhere else, such as a takeaway or a document, a citation opens its source in one click. `[[<ref>]]` shows as a small link, and `[[<value>|<ref>]]` makes the number the link, as in `[[31|card:<id>#outcome/merged]] of the 40 runs`.
+In the chat and in a card's takeaway, cite each claim from the data as `[words](#)`, which thimble checks after the reply (Citing claims in the chat, in main's prompt). Everywhere else, such as a document, a citation opens its source in one click. `[[<ref>]]` shows as a small link, and `[[<value>|<ref>]]` makes the number the link, as in `[[31|card:<id>#outcome/merged]] of the 40 runs`.
 
     a card                                      card:<id>
     a value in a card's table or chart          card:<id>#<column>/<row>
@@ -171,7 +171,7 @@ The rows below, if there are any, come from this corpus's viewers. A viewer of o
 
 {{forms}}
 
-- In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, which shows records rather than values, link the words of each claim to the record that shows them, as in `a second run [[had the answer cached|board.jsonl#L6176]]`. A rewritten takeaway keeps every link that is right.
+- In a takeaway, mark each claim the card shows as `[words](#)`, as in the chat, with the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks it against the card's output. On an example card, which shows records rather than values, link the words of each claim to the record that shows them, as in `a second run [[had the answer cached|board.jsonl#L6176]]`. A rewritten takeaway keeps every link that is right.
 - Always use the citation notation to point at anything inside thimble, such as a card, a record, a file or a sentence. Use a markdown link only for a page outside thimble, such as a web page, and sparingly.
 - Cite even when you are unsure of the exact reference, since a later verification check repairs broken references.
 - Ids appear only inside refs. In prose, name a card by its question and a record by what it shows.

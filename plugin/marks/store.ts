@@ -21,9 +21,15 @@ export type MarkStatus = 'checking' | 'verified' | 'corrected' | 'failed' | 'unc
 /** A cited place of a file: its path from the folder the session started in, the cited line or range, and those lines
  *  with a line around them, the words found highlighted. */
 export type Place = { file: string; line: string; lines: { n: number; text: string; highlight?: [number, number]; decoded?: true }[] }
+/** A table the evidence shows (engine/kernel/evidence.py table_of): the rows around the cited one, the cited cell `at`
+ *  among them (c = -1: the row's name), and the rows left out above and below. */
+export type EvidenceTable = { corner: string; cols: string[]; rows: { label: string; values: string[] }[]; at: { r: number; c: number }; above: number; below: number }
 export type Evidence =
-  | { kind: 'computed'; code: string; output: string; highlight: [number, number][]; by: 'checker' | 'main' }
+  | { kind: 'computed'; code: string; output: string; highlight: [number, number][]; by: 'checker' | 'main'; table?: EvidenceTable }
   | ({ kind: 'quote' | 'code'; more?: Place[] } & Place)
+  /** a value a card shows: its cell (`table`), or a line of its printed output (`output`, `highlight`, and `table` when
+   *  that output is a table); `ref` names the place as a card's citation does */
+  | { kind: 'card'; card: string; title: string; ref: string; value: string; table?: EvidenceTable; output?: string; highlight?: [number, number][] }
 /** One mark: its number in the reply, its words, the row and place it stands at, its sentence, and its check. The
  *  person sees two outcomes: verified (`verified`, or `corrected`: the right words in place) and `failed`. `failedBy`
  *  says who failed it, for main alone: the checker (`check`: the claim is false and the check found no right words),

@@ -4,7 +4,7 @@ You are a copy of this session. Your task now is to check your last reply. Each 
 {{MARKS}}
 ```
 
-For each citation, find the source that supports it, or find that none does. The person waits on each citation's spinner, so reuse what this session already printed when you can. Do not change or write files.
+For each citation, find the source that supports it, or find that none does. The person waits on each citation's spinner, so reuse what this session already printed when you can. Do not change or write files. A citation in a card's takeaway is about that card: look in its output first.
 
 ## What to check
 
@@ -18,6 +18,7 @@ When other words of the sentence, such as a cause or a place ("line 29"), are fa
 
 ## Evidence (`kind`)
 
+- **card**: a value that a card of this session shows: a cell of its table or chart data, or a line of its printed output. Before you write code, grep `{{CARDS}}` for the cited words. It lists each place of the cards, one per line: the place (`card:<id>#<column>/<row>` or `card:<id>@out<i>#L<n>`), a tab, and the value. Give the place as `ref` when its value is the cited words and its card counts what the sentence claims. Else use another kind.
 - **quote**: the file, its own line number (as `grep -n` shows it), and as `substring` text copied exactly from that line, with no "…" in it. A reply's quote may cut words with "…": it is right when its parts stand in the record in that order. Straight and curly quotes count as the same. A plan ("I will …") does not show that the thing happened. A number that a file states is a quote of that file; a number that you add up or count from what a line states (12 run and 66 left out make 78) is computed.
 - **code**: the line of the code that does it, with that code as `substring`, and the line of each name that the claim quotes. For a value that the code sets, give a range of at most 50 lines that holds it; for places far apart, a list of places. A comment, a commit message or a post does not show what code does. A label's rule is code: its `--code` file or `--regex` command.
 - **computed**: for numbers, dates, and words such as "claimed and merged". The evidence is one Bash call whose output prints the words. thimble finds the call by the output lines that you copy, and shows the person its code and real output. It compares numbers, days, quoted words and record names, not meaning. So print the words as the reply writes them: compute "20 minutes later" and print it, since 23:31 and 23:50 do not show it. For words with no number ("passed when run alone"), copy the lines that show them. A Read is not computed evidence. An earlier call that prints the words can serve, but first review its code and the code of each call or label that made its input; compute again when it does not count exactly what the sentence claims.
@@ -63,5 +64,7 @@ At the end, give one JSON array in a ```json block, one object for each citation
   "note": "The words are on line 27, not line 29."},
  {"mark": 3, "kind": "code",
   "evidence": [{"file": "src/cache.py", "line": 12, "substring": "data = load(path)"}, {"file": "src/cache.py", "line": 140, "substring": "CACHE[path] = data"}],
-  "status": "verified", "correction": null, "reason": "load reads the file once and CACHE keeps the result"}]
+  "status": "verified", "correction": null, "reason": "load reads the file once and CACHE keeps the result"},
+ {"mark": 4, "kind": "card", "evidence": {"ref": "card:k3f9a1#merged/agent-07"},
+  "status": "verified", "correction": null, "reason": "the card's table shows 12 merged for agent-07"}]
 ```

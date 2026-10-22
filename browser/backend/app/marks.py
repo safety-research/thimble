@@ -17,6 +17,15 @@
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 
+The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
+a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
+validator's card_index), and the validator confirms a card's place by reading it (check_card).
+
+A card's takeaway is checked the same way: its marks, `[words](#)`, are checked with main's next reply (the takeaways
+no check has started on, notebook.takeaways_to_check), their line naming the card, so the check looks in its output
+first; what the check found is kept on the card (`takeaway_marks`, notebook.set_takeaway_marks), and the page draws the
+takeaway's marks as it draws the chat's.
+
 Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`. A reply's marks are kept in
 `<workspace>/marks/<turn>.json`, and each change is written to main's log as a `marks` record {turn, items}, which the
 page reads (the newest record of a turn wins).
@@ -70,13 +79,49 @@ _procs: set[asyncio.subprocess.Process] = set()
 
 # ---- the terminal's texts and validator
 
-def checker_prompt(marks: str, folder: str) -> str:
+def checker_prompt(marks: str, folder: str, cards: str = "") -> str:
     text = CHECKER.read_text(encoding="utf-8")
     for old, new in CHECKER_CHANGES:
         text = text.replace(old, new)
-    for slot, value in (("MARKS", marks), ("CWD", folder), ("ROOT", folder)):
+    for slot, value in (("MARKS", marks), ("CWD", folder), ("ROOT", folder), ("CARDS", cards)):
         text = text.replace("{{" + slot + "}}", value)
     return text
+
+
+def session_cards(c: str) -> list[dict[str, Any]]:
+    """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs, its
+    title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html table) or the
+    lines of its printed text, as the card's citations name them (cite.bundle_cells, cite.numbered_lines)."""
+    from . import cite, notebook  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    out: list[dict[str, Any]] = []
+    for _, nb in notebook._stored(ws):
+        for cell in nb.get("cells") or []:
+            if not notebook.runnable(cell) or not cell.get("outputs") or not cell.get("id"):
+                continue
+            outs: list[dict[str, Any]] = []
+            for i, b in cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"])):
+                if notebook.ERROR_MIME in b:
+                    continue
+                cells = cite.bundle_cells(b)
+                if cells:
+                    outs.append({"out": i, "corner": cite._row_names(b)[0], "cells": [list(x) for x in cells]})
+                elif cite.chart_spec(b) is None and not any(k.startswith("image/") for k in b):
+                    lines = [[n, t] for n, t in cite.numbered_lines(b) if t.strip()]
+                    if lines:
+                        outs.append({"out": i, "lines": lines})
+            if outs:
+                out.append({"id": str(cell["id"]), "title": str(cell.get("title") or ""), "outputs": outs})
+    return out
+
+
+def cards_index(c: str, cards: list[dict[str, Any]]) -> str:
+    """The file the checker greps for a value a card shows (the validator's card_index), in the workspace's temp
+    folder; its path."""
+    p = _temp_dir(c) / "cards-index.tsv"
+    p.write_text(evidence().card_index(cards), encoding="utf-8")
+    return str(p)
 
 
 def evidence() -> ModuleType:
@@ -234,9 +279,16 @@ def new_turn() -> str:
 def turn_ended(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: str | None) -> None:
     """Main's turn `turn` ended (session._end_turn) with these texts, at the turn_duration record `cut` (None for a turn
     that was stopped or never got one). `main` is what the fork needs of main's session: {sid, cwd, config,
-    config_known, transcript_path, model, effort, context_tokens}. Runs on the server's loop; nothing without one."""
-    if not texts or not any("](#)" in t for t in texts):
-        return
+    config_known, transcript_path, model, effort, context_tokens}. Runs on the server's loop; nothing without one.
+    A turn whose texts hold no mark still starts a check when a card's takeaway waits for one."""
+    from . import notebook  # noqa: PLC0415
+
+    if not any("](#)" in t for t in texts or []):
+        try:
+            if not notebook.takeaways_to_check(c):
+                return
+        except Exception:  # noqa: BLE001 — no takeaway to check
+            return
     coro = start_check(c, main, turn, list(texts), cut)
     try:
         asyncio.get_running_loop().create_task(coro)
@@ -254,32 +306,95 @@ def turn_ended(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: s
 
 async def start_check(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: str | None,
                       fork: Callable[..., Awaitable[dict[str, Any]]] | None = None) -> None:
+    from . import notebook  # noqa: PLC0415
+
     try:
-        found = await marks_of(texts)
+        takeaways = notebook.takeaways_to_check(c) if cut is not None else []
+    except Exception:  # noqa: BLE001 — the reply's marks are checked without the takeaways
+        log.exception("%s: the takeaways to check could not be read", c)
+        takeaways = []
+    try:
+        found = await marks_of(list(texts) + [t for _, _, t in takeaways])
     except (OSError, RuntimeError, ValueError) as e:
         _notice(c, f"thimble could not read the citations of the last reply ({str(e)[:120]}), so they are not checked.")
         return
     if not found:
         return
     items = [{**m, "n": n, "status": "checking", "shown": m["words"]} for n, m in enumerate(found, 1)]
-    _save(c, {"turn": turn, "items": items, "times": {"reply_end": time.time()}})
+    chat = [m for m in items if m["piece"] < len(texts)]
+    takes: list[dict[str, Any]] = []
+    for m in items:
+        if m["piece"] >= len(texts):
+            cid, title, text = takeaways[m["piece"] - len(texts)]
+            takes.append({**m, "card": cid, "title": title, "takeaway": text})
+    if chat or takes:
+        _save(c, {"turn": turn, "items": chat, "times": {"reply_end": time.time()}})
+    for cid, text in dict.fromkeys((m["card"], m["takeaway"]) for m in takes):
+        mine = [_takeaway_item(m) for m in takes if m["card"] == cid]
+        notebook.set_takeaway_marks(c, cid, text, lambda _old, mine=mine: mine)
     if cut is None:
-        await _give_up(c, turn, {m["n"] for m in items}, "the reply was stopped before its citations were checked")
+        await _give_up(c, turn, {m["n"] for m in chat}, "the reply was stopped before its citations were checked")
         return
     folder = str(main.get("cwd") or config.corpus_dir(c))
-    await asyncio.gather(*(_check_share(c, main, turn, cut, share, folder, fork or run_fork) for share in split_marks(items)))
+    try:
+        cards = await asyncio.to_thread(session_cards, c)
+        index = cards_index(c, cards)
+    except Exception:  # noqa: BLE001 — the check runs without the cards
+        log.exception("%s: the cards' index was not written", c)
+        cards, index = [], ""
+    await asyncio.gather(*(_check_share(c, main, turn, cut, share, folder, fork or run_fork, cards, index)
+                           for share in split_marks(chat + takes)))
+
+
+def _takeaway_item(m: dict[str, Any]) -> dict[str, Any]:
+    """A takeaway's mark as the card keeps it: its order `k` in the takeaway, its words and sentence, and its check."""
+    return {k: v for k, v in m.items() if k not in ("piece", "card", "title", "takeaway")}
+
+
+def _line(m: dict[str, Any]) -> str:
+    """A mark's line in the checker's prompt; a takeaway's names its card, whose output the check reads first."""
+    if m.get("card"):
+        title = f" ({m['title']})" if m.get("title") else ""
+        return f"{m['n']}. [{m['words']}] in the takeaway of card:{m['card']}{title}: {m['sentence']}"
+    return f"{m['n']}. [{m['words']}] in: {m['sentence']}"
+
+
+async def _takeaways_change(c: str, takes: list[dict[str, Any]], judged: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+    """Each card's takeaway marks of this share, as `judged` changes each one still checked."""
+    from . import notebook  # noqa: PLC0415
+
+    by_card: dict[tuple[str, str], dict[int, dict[str, Any]]] = {}
+    for m in takes:
+        by_card.setdefault((m["card"], m["takeaway"]), {})[m["k"]] = m
+
+    for (cid, text), mine in by_card.items():
+        def change(items: list[dict[str, Any]], mine: dict[int, dict[str, Any]] = mine) -> list[dict[str, Any]]:
+            return [judged({**it, "n": mine[it["k"]]["n"]}) if it.get("k") in mine and it.get("status") == "checking" else it
+                    for it in items]
+
+        try:
+            notebook.set_takeaway_marks(c, cid, text, change)
+        except Exception:  # noqa: BLE001 — a card gone or unwritable keeps what it had
+            log.exception("%s: the takeaway marks of card %s were not written", c, cid)
 
 
 # ---- 2, 3: a fork's check, then the validator
 
 async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share: list[dict[str, Any]], folder: str,
-                       fork: Callable[..., Awaitable[dict[str, Any]]]) -> None:
-    mine = {m["n"] for m in share}
-    lines = "\n".join(f"{m['n']}. [{m['words']}] in: {m['sentence']}" for m in share)
+                       fork: Callable[..., Awaitable[dict[str, Any]]], cards: list[dict[str, Any]] | None = None,
+                       index: str = "") -> None:
+    takes = [m for m in share if m.get("card")]
+    mine = {m["n"] for m in share if not m.get("card")}
+    lines = "\n".join(_line(m) for m in share)
+
+    async def give_up(why: str) -> None:
+        await _give_up(c, turn, mine, why)
+        await _takeaways_change(c, takes, lambda m: {**m, "status": "unchecked", "reason": why})
+
     try:
-        got = await fork(c, main, cut, checker_prompt(lines, folder))
+        got = await fork(c, main, cut, checker_prompt(lines, folder, index))
         if got.get("error"):
-            await _give_up(c, turn, mine, f"the check ended: {got['error']}")
+            await give_up(f"the check ended: {got['error']}")
             _notice(c, f"The check of the citations stopped ({str(got['error'])[:100]}), so some are not checked. The "
                        "next reply is checked again.")
             return
@@ -290,9 +405,9 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, folder, folder, str(_temp_dir(c)))
+                                         answer, calls, folder, folder, str(_temp_dir(c)), cards or [])
         if not result["parsed"]:
-            await _give_up(c, turn, mine, "the check gave no answer thimble could read")
+            await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
             return
         by_n = {int(r["n"]): r for r in result["results"]}
@@ -310,12 +425,20 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             return r
 
         await _edit(c, turn, change)
+
+        def judged_takeaway(m: dict[str, Any]) -> dict[str, Any]:
+            res = by_n.get(m["n"])
+            if res is None:
+                return {**m, "status": "unchecked", "reason": "the check gave no answer for this citation"}
+            return {**m, **{k: v for k, v in res.items() if k != "n"}, "shown": str(res.get("shown") or m["words"])}
+
+        await _takeaways_change(c, takes, judged_takeaway)
     except Exception as e:  # noqa: BLE001 — a check that cannot be validated leaves its marks unchecked, and says so
         log.exception("%s: the check of the marks failed", c)
         _notice(c, f"thimble could not check the citations ({type(e).__name__}: {str(e)[:80]}), so some are not "
                    "checked.")
     finally:
-        await _give_up(c, turn, mine, "the check ended before it judged this citation")
+        await give_up("the check ended before it judged this citation")
 
 
 def _temp_dir(c: str) -> Path:

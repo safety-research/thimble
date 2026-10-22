@@ -8,6 +8,7 @@
 // LabelPanel is the same panel for a label with no card of its own.
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
+import { takeawayChecks } from '../marks/marks'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { CodeArea, CodeText } from '../components/Code'
@@ -259,7 +260,7 @@ export function DetailPanel({ cell, cite = null, history = 0, onClose }: { cell:
                 >
                   {cell.takeaway?.trim() ? (
                     <GlyphCites.Provider value={true}>
-                      <ChatMarkdown text={cell.takeaway} />
+                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} />
                     </GlyphCites.Provider>
                   ) : (
                     <span className="bdetail-take-empty">Add a takeaway</span>

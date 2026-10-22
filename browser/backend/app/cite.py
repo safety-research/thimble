@@ -33,6 +33,8 @@ from .kernel_thimble import CHART_ROWS_NAME
 _NUM_RE = re.compile(r"(?<![\w:./#\-\u2212])[-\u2212]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?![\w%:])")
 # existing [[ref]] / [[display|ref]] markup (same shape as refs._BRACKETS and the frontend's splitValueRef)
 _SPAN_RE = re.compile(r"\[\[([^\[\]]+?)\]\]")
+# a mark, `[words](#)`: words Claude marked for the citation check (marks.py); resolve links nothing inside one
+MARK_RE = re.compile(r"(?<![\[!])\[[^\[\]\n]+\]\(#\)")
 # the unit word right after a number ("16 runs", "3 agents"): one alphabetic word, so the pair can be looked up as one
 # token when the bare number is too small or too common to link alone
 _UNIT_RE = re.compile(r"[ \t]+([A-Za-z][A-Za-z_-]{1,30})\b")
@@ -325,7 +327,9 @@ _DECREASE_AFTER_RE = re.compile(r"^[\s)]*(?:(?:by|of|a|an)\s+)?([A-Za-z]+)")
 
 
 def _prose(s: str) -> str:
-    """`s` with its [[…]] markup read as prose: a value-ref as its display, a bare ref as nothing."""
+    """`s` with its [[…]] markup read as prose: a value-ref as its display, a bare ref as nothing, a mark (`[words](#)`)
+    as its words."""
+    s = MARK_RE.sub(lambda m: m.group()[1:-4], s) if "](#)" in s else s
     return _SPAN_RE.sub(lambda m: m.group(1).partition("|")[0].strip() if "|" in m.group(1) else "", s)
 
 
@@ -1356,6 +1360,20 @@ def _specific(tok: str) -> bool:
 
 
 def _annotate(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> str:
+    """_annotate_plain over the parts of the segment outside its marks; a mark's words are the check's to cite."""
+    if "](#)" not in seg:
+        return _annotate_plain(seg, src, res, seen)
+    out: list[str] = []
+    pos = 0
+    for m in MARK_RE.finditer(seg):
+        out.append(_annotate_plain(seg[pos:m.start()], src, res, seen))
+        out.append(m.group())
+        pos = m.end()
+    out.append(_annotate_plain(seg[pos:], src, res, seen))
+    return "".join(out)
+
+
+def _annotate_plain(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> str:
     """Wrap every number in a plain-text segment (no [[...]] inside) that has a unique source. A day and a month in words
     (`On 23 June`) is one value: linked whole to the one line or cell that writes that date in digits (date_in), else
     left plain, never its day linked as a number with the month as its unit (live check term-fix8, quirk 4: `23` was

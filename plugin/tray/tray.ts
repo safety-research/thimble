@@ -42,6 +42,7 @@ import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
 import { launchRepair, repairOf } from '../marks/checker'
 import { highlighted, wrapCode } from '../marks/evidence'
+import { tableLines } from '../marks/table.mjs'
 import { marksIn, withoutMarks } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
@@ -535,7 +536,8 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
  *  block, ended by a dim count of the output lines it leaves out; with c, all the code (as code), then all the output
  *  in the ruled block. For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
- *  block. The cited words in the soft tint. */
+ *  block. For a card's value: the card's title, then the header over the cited row in the ruled block; printed output
+ *  that is a table shows so too. The cited words in the soft tint. */
 function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: Any | null): Unit[] {
   const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
@@ -569,8 +571,21 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
     })
     return rows
   }
+  const table = ev.kind === 'card' || ev.kind === 'computed' ? ev.table : undefined
+  const tl = table ? tableLines(table, w - 2) : null
+  if (ev.kind === 'card') rows.push({ h: 1, el: Text({ key: 'card', wrap: 'truncate-end', children: [Text({ key: 'k', dimColor: true, children: 'card ' }), Text({ key: 't', bold: true, children: ev.title || ev.card })] }) })
+  if (ev.kind === 'card' && tl) {
+    rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ruled(els, tl[1]!.text, tl[1]!.spans as [number, number][], w, 'tr'))
+    return rows
+  }
   const line = evidenceLine(ev)
   if (!line) return rows
+  if (ev.kind === 'computed' && tl) {
+    const said = printLine(ev.code, line.text)
+    if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
+    rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ruled(els, tl[1]!.text, tl[1]!.spans as [number, number][], w, 'tr'))
+    return rows
+  }
   if (ev.kind === 'computed') {
     const said = printLine(ev.code, line.text)
     if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
@@ -610,7 +625,7 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
  *  which a ctrl or cmd click opens on this machine. */
 async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Promise<Any | null> {
   const ev = m?.evidence
-  if (!ev || ev.kind === 'computed' || f.kind !== 'citation') return null
+  if (!ev || ev.kind === 'computed' || ev.kind === 'card' || f.kind !== 'citation') return null
   const label = `${ev.file}:${evidenceLine(ev)?.n ?? ev.line}`
   const openIt = () => {
     void openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).then(placed => {

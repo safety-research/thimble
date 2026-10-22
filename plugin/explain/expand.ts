@@ -62,7 +62,7 @@ async function evidencePlaces($: Engine, row: string): Promise<Place[]> {
   const out: Place[] = []
   for (const it of (await rowMarks($, row).catch(() => null))?.items ?? []) {
     const ev = it.evidence as Any
-    if (!ev || ev.kind === 'computed') continue
+    if (!ev || ev.kind === 'computed' || ev.kind === 'card') continue
     for (const pl of [ev, ...(Array.isArray(ev.more) ? ev.more : [])]) {
       if (typeof pl?.file !== 'string') continue
       const m = /^(\d+)(?:\D+(\d+))?/.exec(String(pl.line ?? ''))

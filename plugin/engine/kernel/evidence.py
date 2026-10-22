@@ -44,6 +44,17 @@ shows the words, so a mark is never verified on evidence the checker made up:
             show, as for computed evidence.
             Not checked: that a substring means what a paraphrase of it says ("agent-3 deleted the page" on a line that
             holds "page"). That is the checker's judgment; the person sees the line next to the claim.
+  card      a value a card of the session shows: a cell of one of its tables (a chart's data rows are a table) or a
+            line of its printed output, named by the place a card's citation names it with, `card:<id>#<col>/<row>` or
+            `card:<id>@out<i>#L<n>` (labels percent-encoded as encode_label writes them). The host gives the cards'
+            outputs (`cards`: [{id, title, outputs: [{out, corner?, cells: [[col, row, value]]} | {out, lines: [[n,
+            text]]}]}]); the place must exist there and show the words as shows() reads them: the cell's value (with
+            its row's label, which names what the value is of), or the line. The person sees the card's title and the
+            table around the cell, the cell tinted.
+
+Printed output that is a table (a printed DataFrame, aligned columns) is also read as one (text_table): computed
+evidence and a card's printed line carry `table`, the header and the rows around the one that holds the words, so
+the browser draws it as a small table and the terminal as its header and that row, the cited cell tinted.
 
 A number with a scale (8k) matches the values it rounds from, a percent matches the share it is too (59.7% is 0.59718),
 and after "about" a whole number matches the values that round to its zeros (about 250 is 248). A calendar day or a
@@ -60,8 +71,10 @@ new words is not confirmed: its evidence confirms neither the new words nor the 
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, stays unchecked. A checker's note on the rest of the sentence stays beside the mark.
 
-  check_all(marks, answer, calls, cwd, root, tmp)  -> {parsed, results}: every mark of a reply
-  check_mark(mark, item, calls, cwd, root, tmp)    -> {n, status, shown, reason, failedBy?, evidence?, note?}
+  check_all(marks, answer, calls, cwd, root, tmp, cards)  -> {parsed, results}: every mark of a reply
+  check_mark(mark, item, calls, cwd, root, tmp, cards)    -> {n, status, shown, reason, failedBy?, evidence?, note?}
+  card_index(cards)                                       -> the cards' places and values, one per line, for the checker
+  terminal_cards(folder)                                  -> the terminal's cards (cards/<id>/meta.json, rows.json) as `cards`
   parse_answer(text)                               -> the last ```json array of the checker's answer, or None
 """
 from __future__ import annotations
@@ -78,6 +91,7 @@ import shlex
 import tokenize
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import unquote
 
 MONTHS = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
 DATE_PARTS = [re.compile(p) for p in (
@@ -853,7 +867,9 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
 
     def shown(c: dict[str, Any], spans: list[list[int]]) -> dict[str, Any]:
         text, hl = window(str(c.get("output") or ""), spans, OUTPUT_MAX)
-        return {"kind": "computed", "code": shown_code(str(c.get("command") or "")).strip("\n"), "output": text, "highlight": hl, "by": c.get("by") or "checker"}
+        out = {"kind": "computed", "code": shown_code(str(c.get("command") or "")).strip("\n"), "output": text, "highlight": hl, "by": c.get("by") or "checker"}
+        table = text_table(text, hl)
+        return {**out, "table": table} if table else out
 
     if not runs:
         # what the check itself ran, so the person sees what it found
@@ -1161,6 +1177,267 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     return problems, {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
 
 
+# ------------------------------------------------------------------------------------------------ tables and cards
+
+TABLE_AROUND = 2  # rows of a table shown on each side of the cited one
+TABLE_LINES_MAX = 400  # lines of a printed block read as a table
+CARD_PLACES_MAX = 20000  # places of the session's cards the checker's index lists
+
+
+def _window(rows: list[dict[str, Any]], r: int) -> tuple[list[dict[str, Any]], int, int, int]:
+    """The rows around row r: (those rows, r among them, rows left out above, rows left out below)."""
+    lo = max(0, min(r - TABLE_AROUND, len(rows) - (2 * TABLE_AROUND + 1)))
+    hi = min(len(rows), lo + 2 * TABLE_AROUND + 1)
+    return rows[lo:hi], r - lo, lo, len(rows) - hi
+
+
+def table_of(corner: str, cols: list[str], rows: list[dict[str, Any]], r: int, c: int) -> dict[str, Any]:
+    """A table as the evidence shows it: its corner (the row names' header), columns, the rows around row r, and the cited
+    cell `at` among them (c = -1: the row's name). `above`/`below` count the rows left out."""
+    shown, at, above, below = _window(rows, r)
+    return {"corner": corner, "cols": cols, "rows": shown, "at": {"r": at, "c": c}, "above": above, "below": below}
+
+
+def _segments(block: list[str], gap: int) -> list[tuple[int, int]]:
+    """The columns of aligned lines: the runs of positions between gutters, a gutter being `gap` or more positions that
+    are white space on every line."""
+    width = max(len(x) for x in block)
+    blank = [all(j >= len(x) or x[j] == " " for x in block) for j in range(width)]
+    segs: list[tuple[int, int]] = []
+    j = 0
+    while j < width:
+        if blank[j]:
+            j += 1
+            continue
+        a = j
+        while j < width:
+            if blank[j]:
+                k = j
+                while k < width and blank[k]:
+                    k += 1
+                if k - j >= gap or k == width:
+                    break
+                j = k
+            else:
+                j += 1
+        segs.append((a, j))
+    return segs
+
+
+def text_table(output: str, spans: list[list[int]]) -> dict[str, Any] | None:
+    """Printed output that is a table, read as one (table_of) around the line that holds the first highlight: the block
+    of non-blank lines that holds it, aligned in two or more columns (a printed DataFrame, f-string columns), its first
+    line the header; a pandas index name on a line of its own is the corner. None when that block is no table, or the
+    highlight is in its header."""
+    if not spans or "\t" in output:
+        return None
+    lines = output.split("\n")
+    a, at = spans[0][0], 0
+    i = 0
+    for k, x in enumerate(lines):
+        if at <= a <= at + len(x):
+            i = k
+            break
+        at += len(x) + 1
+    if not lines[i].strip():
+        return None
+    lo = i
+    while lo > 0 and lines[lo - 1].strip() and i - lo < TABLE_LINES_MAX:
+        lo -= 1
+    hi = i
+    while hi + 1 < len(lines) and lines[hi + 1].strip() and hi - lo < TABLE_LINES_MAX:
+        hi += 1
+    block = [x.rstrip() for x in lines[lo:hi + 1]]
+    if len(block) < 2 or i == lo:
+        return None
+    segs = _segments(block, 2)
+    if len(segs) < 2 or any("  " in x[s:e].strip() for x in block for s, e in segs):
+        # columns one space apart (numbers right-aligned under left-aligned headers)
+        segs = _segments(block, 1)
+    if len(segs) < 2 or len(segs) > 40:
+        return None
+    cells = [[x[s:e].strip() for s, e in segs] for x in block]
+    head, body, first = cells[0], cells[1:], lo + 1
+    if not any(head[1:]) or any(re.fullmatch(r"[-−]?[\d,.]+%?", h) for h in head[1:] if h) or head[0].endswith(":"):
+        # a header names its columns: lines of a name and a number (`merged: 12`) are no table
+        return None
+    corner = head[0]
+    if body and body[0][0] and not any(body[0][1:]):
+        # pandas prints a named index on a line of its own under the header
+        corner, body, first = body[0][0], body[1:], first + 1
+    if i < first or not body:
+        return None
+    rows = [{"label": x[0], "values": x[1:]} for x in body]
+    col = a - at
+    c = next((k for k, (s, e) in enumerate(segs) if s <= col < e + 1), len(segs) - 1) - 1
+    return table_of(corner, head[1:], rows, i - first, c)
+
+
+LABEL_ESCAPE = frozenset('%/|#[]*_~`\\<>&')
+CARD_TD = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)#([^/]+)/(.+)$")
+CARD_LINE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)@out(\d+)#L(\d+)$")
+
+
+def encode_label(label: str) -> str:
+    """A table's column or row label as a card's citation writes it in `card:<id>#<col>/<row>`: the characters of
+    LABEL_ESCAPE, white space and controls as %XX per UTF-8 byte (the browser's cite.encode_label)."""
+    return "".join("".join(f"%{b:02X}" for b in ch.encode("utf-8")) if ch in LABEL_ESCAPE or ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F else ch for ch in label)
+
+
+def decode_label(label: str) -> str:
+    return unquote(label) if "%" in label else label
+
+
+def _grid(o: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]], dict[tuple[str, str], tuple[int, int]]]:
+    """A card output's cells as a grid: its columns and rows in order, and where each (col, row) stands."""
+    cols: list[str] = []
+    rows: list[dict[str, Any]] = []
+    by_row: dict[str, int] = {}
+    where: dict[tuple[str, str], tuple[int, int]] = {}
+    for col, row, _ in o.get("cells") or []:
+        if str(col) not in cols:
+            cols.append(str(col))
+    for col, row, value in o.get("cells") or []:
+        r = by_row.get(str(row))
+        if r is None:
+            r = by_row[str(row)] = len(rows)
+            rows.append({"label": str(row), "values": [""] * len(cols)})
+        c = cols.index(str(col))
+        rows[r]["values"][c] = str(value)
+        where.setdefault((str(col), str(row)), (r, c))
+    return cols, rows, where
+
+
+def card_places(cards: list[dict[str, Any]] | None) -> list[tuple[str, str]]:
+    """Every place of the cards a citation can name, with what it shows: (`card:<id>#<col>/<row>`, the value) for each
+    table cell, (`card:<id>@out<i>#L<n>`, the line) for each line of printed output."""
+    out: list[tuple[str, str]] = []
+    for card in cards or []:
+        cid = str(card.get("id") or "")
+        for o in card.get("outputs") or []:
+            for col, row, value in o.get("cells") or []:
+                if str(col).strip() and str(row).strip():
+                    out.append((f"card:{cid}#{encode_label(str(col))}/{encode_label(str(row))}", str(value)))
+            for n, text in o.get("lines") or []:
+                if str(text).strip():
+                    out.append((f"card:{cid}@out{int(o.get('out') or 0)}#L{int(n)}", str(text)))
+    return out
+
+
+def card_index(cards: list[dict[str, Any]] | None) -> str:
+    """What the checker greps for a value a card shows: a heading line for each card (`# card:<id> <title>`), then one
+    line for each place, its citation, a tab, and what it shows."""
+    lines: list[str] = []
+    n = 0
+    for card in cards or []:
+        lines.append(f"# card:{card.get('id')} {norm_ws(card.get('title') or '')}".rstrip())
+        for ref, value in card_places([card]):
+            if n >= CARD_PLACES_MAX:
+                break
+            lines.append(f"{ref}\t{norm_ws(value)}")
+            n += 1
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _card_text(v: Any) -> str:
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    if v is None:
+        return ""
+    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+
+
+def _records_table(recs: list[Any]) -> dict[str, Any] | None:
+    """Rows of records as a card output's cells: the columns their keys, each row named by the first column of distinct
+    text, else by its position from 0 (as a chart's rows are named)."""
+    recs = [r for r in recs if isinstance(r, dict)][:5000]
+    if not recs:
+        return None
+    cols: list[str] = []
+    for r in recs:
+        cols.extend(str(k) for k in r if str(k) not in cols)
+    key = next((k for k in cols if all(isinstance(r.get(k), str) and r[k].strip() for r in recs) and len({r[k] for r in recs}) == len(recs)), None)
+    names = [str(r[key]) for r in recs] if key else [str(i) for i in range(len(recs))]
+    return {"corner": key or "", "cells": [[k, nm, _card_text(r.get(k))] for r, nm in zip(recs, names) for k in cols if k != key]}
+
+
+def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
+    """The terminal's cards (cards/store.ts): each card's meta.json and the rows of the version on screen
+    (v<version>/rows.json), as the cards check_mark reads. Rows that are a list of records are one table; an object's
+    lists of records are a table each, in its order."""
+    out: list[dict[str, Any]] = []
+    if not folder or not os.path.isdir(folder):
+        return out
+    for name in sorted(os.listdir(folder)):
+        try:
+            with open(os.path.join(folder, name, "meta.json"), encoding="utf-8") as f:
+                meta = json.load(f)
+            version = int(meta.get("version") or 0)
+            if version < 1:
+                continue
+            with open(os.path.join(folder, name, f"v{version}", "rows.json"), encoding="utf-8") as f:
+                rows = json.load(f)
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        parts = [rows] if isinstance(rows, list) else [v for v in rows.values() if isinstance(v, list)] if isinstance(rows, dict) else []
+        outputs = [{"out": i, **t} for i, t in enumerate(_records_table(p) for p in parts) if t]
+        if outputs:
+            out.append({"id": str(meta.get("id") or name), "title": str(meta.get("title") or ""), "outputs": outputs})
+    return out
+
+
+def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+    """The problems of card evidence, and the evidence to show: the cited place must be one of the session's cards and
+    show the words (a cell's value, with its row's name; a line of printed output)."""
+    ref = str((ev or {}).get("ref") or "").strip().strip("[]") if isinstance(ev, dict) else ""
+    td, ln = CARD_TD.match(ref), CARD_LINE.match(ref)
+    if not td and not ln:
+        return [f"the check named no place of a card ({short(ref, 60) or 'none'})"], None
+    cid = (td or ln).group(1)
+    card = next((c for c in cards or [] if str(c.get("id")) == cid), None)
+    if card is None:
+        return [f"no card card:{cid} is in this session"], None
+    title = str(card.get("title") or "")
+    if td:
+        col, row = decode_label(td.group(2)), decode_label(td.group(3))
+        for o in card.get("outputs") or []:
+            cols, rows, where = _grid(o)
+            if (col, row) not in where:
+                continue
+            r, c = where[(col, row)]
+            value = rows[r]["values"][c]
+            shown = {"kind": "card", "card": cid, "title": title, "ref": f"card:{cid}#{encode_label(col)}/{encode_label(row)}", "value": value,
+                     "table": table_of(str(o.get("corner") or ""), cols, rows, r, c)}
+            text = f"{row} {value}"
+            if not (shows(target, value, approx) or shows(target, text, approx)):
+                return [f"the card's {col} of {row} shows {short(value, 40) or 'nothing'}, not “{target}”"], shown
+            missing = unshown_change(was, target, text, approx) if was else []
+            if missing:
+                return [f"the card's {col} of {row} does not show “{short(' … '.join(missing), 80)}”, which the correction puts in"], shown
+            return [], shown
+        return [f"card:{cid} has no value at {col} of {row}"], None
+    out_i, n = int(ln.group(2)), int(ln.group(3))
+    o = next((x for x in card.get("outputs") or [] if int(x.get("out") or 0) == out_i and x.get("lines")), None)
+    lines = [(int(k), str(t)) for k, t in (o or {}).get("lines") or []]
+    at = next((j for j, (k, _) in enumerate(lines) if k == n), None)
+    if at is None:
+        return [f"card:{cid} has no line {n} in its output {out_i}"], None
+    text = "\n".join(t for _, t in lines)
+    start = sum(len(t) + 1 for _, t in lines[:at])
+    line = lines[at][1]
+    spans = [[start + a, start + b] for a, b in spans_of(target, line)] or [[start, start + len(line)]]
+    shown = {"kind": "card", "card": cid, "title": title, "ref": f"card:{cid}@out{out_i}#L{n}", "value": line}
+    shown["output"], shown["highlight"] = window(text, spans, OUTPUT_MAX)
+    if table := text_table(text, spans):
+        shown["table"] = table
+    if not shows(target, line, approx):
+        return [f"line {n} of the card's output does not show “{target}”"], shown
+    missing = unshown_change(was, target, line, approx) if was else []
+    if missing:
+        return [f"line {n} of the card's output does not show “{short(' … '.join(missing), 80)}”, which the correction puts in"], shown
+    return [], shown
+
+
 # ------------------------------------------------------------------------------------------------ one mark
 
 def parse_answer(text: str) -> list[dict[str, Any]] | None:
@@ -1186,9 +1463,11 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None, was: str = "", cards: list[dict[str, Any]] | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
     new words and `was` the marked words."""
+    if kind == "card":
+        return check_card(target, ev, cards, approx, was)
     if kind == "computed":
         return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was)
     if kind in ("quote", "code"):
@@ -1256,7 +1535,7 @@ def own_words(new: str, mark: dict[str, Any]) -> str:
     return norm_ws(new[at[start]:at[end - 1] + 1])
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?}. `mark` is {n, words,
     sentence?}; `item` the checker's object for it (or None); `calls` the real Bash calls of the session ({command,
     output, by}).
@@ -1299,7 +1578,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         gave when that evidence is real."""
         res = {**out, "status": "failed", "reason": why, "failedBy": by, **extra}
         if ev:
-            _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp)
+            _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards)
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
                 res["evidence"] = evidence
         return res
@@ -1310,7 +1589,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return judged("evidence", reason or "the check could not show this claim from the data")
     if status not in ("verified", "corrected"):
         return {**out, "reason": f"the check gave the status {status!r}"}
-    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if new else "")
+    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if new else "", cards)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
@@ -1341,9 +1620,10 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
     return out
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> dict[str, Any]:
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
-    folder. A mark the validator fails on stays unchecked, with why; the other marks are judged."""
+    folder; `cards` the session's cards' outputs (check_card). A mark the validator fails on stays unchecked, with why;
+    the other marks are judged."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
@@ -1355,7 +1635,7 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
     results = []
     for m in marks:
         try:
-            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp))
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             results.append({"n": m.get("n"), "status": "unchecked", "shown": str(m.get("words", "")),
                             "reason": f"thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})"})

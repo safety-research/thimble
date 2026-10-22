@@ -78,6 +78,7 @@ function placeOf(m: MarkItem): { place?: string; line?: string } {
   const ev = m.evidence
   if (!ev) return {}
   if (ev.kind === 'computed') return { place: 'computed', line: ev.output.split('\n')[0] }
+  if (ev.kind === 'card') return { place: `card ${ev.title || ev.card}`, line: ev.value }
   const hit = ev.lines.find(l => l.highlight) ?? ev.lines[0]
   return { place: `${ev.file}:${ev.line}`, ...(hit ? { line: hit.text } : {}) }
 }

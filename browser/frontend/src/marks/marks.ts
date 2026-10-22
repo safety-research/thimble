@@ -10,9 +10,28 @@
 // While the reply streams (`pending`) and while its check runs (`checking`) it has the plain look.
 import { marksIn } from '../../../../plugin/marks/message.js'
 
+/** A table the evidence shows (evidence.py table_of): the rows around the cited one, the cited cell `at` among them
+ * (c = -1: the row's name), and how many rows are left out above and below. */
+export interface EvidenceTable {
+  corner: string
+  cols: string[]
+  rows: { label: string; values: string[] }[]
+  at: { r: number; c: number }
+  above?: number
+  below?: number
+}
+
 /** One piece of evidence a mark's check found (backend: the terminal's engine/kernel/evidence.py). */
 export interface Evidence {
-  kind: 'computed' | 'quote' | 'code'
+  kind: 'computed' | 'quote' | 'code' | 'card'
+  /** card: the card, its title, the place as a card's citation names it (`card:<id>#<col>/<row>`,
+   * `card:<id>@out<i>#L<n>`) and the value there */
+  card?: string
+  title?: string
+  ref?: string
+  value?: string
+  /** a card's cell, or printed output that is a table: the header and the rows around the cited one */
+  table?: EvidenceTable
   /** computed: the code that ran, its real output, the spans of the output that show the words, and who ran it */
   code?: string
   output?: string
@@ -83,6 +102,16 @@ export function withMarkHrefs(text: string): string {
     at = m.end
   })
   return out + text.slice(at)
+}
+
+/** A card's takeaway's marks as the check left them (backend notebook.takeaway_marks), by their order in the takeaway;
+ * none while no check has started on the takeaway as it reads now (each draws pending). Pure. */
+export function takeawayChecks(cell: { takeaway?: string; takeaway_marks?: { text?: string; items?: MarkItem[] } }): (MarkItem | undefined)[] {
+  const kept = cell.takeaway_marks
+  if (!kept || kept.text !== cell.takeaway || !Array.isArray(kept.items)) return []
+  const out: (MarkItem | undefined)[] = []
+  for (const m of kept.items) if (typeof m?.k === 'number') out[m.k] = m
+  return out
 }
 
 /** The counts a reply's footer says once its check settled: how many marks failed. Pure. */

@@ -584,3 +584,70 @@ def test_the_check_may_give_the_output_lines_as_a_list():
     out = "run a: 1.16 h, merged 14\nrun b: 1.04 h, merged 7\n"
     item = {**computed(), "evidence": {"output": ["run a: 1.16 h, merged 14", "run b: 1.04 h, merged 7"]}}
     assert check_mark(mark("14"), item, [call(CODE, out)], "/data")["status"] == "verified"
+
+
+# ------------------------------------------------------------------------------------------------ card evidence
+
+CARDS = [{"id": "k3f9a1", "title": "Merged pull requests by agent", "outputs": [
+    {"out": 0, "corner": "agent", "cells": [["merged", "agent-03", "4"], ["total", "agent-03", "10"], ["merged", "agent-07", "12"], ["total", "agent-07", "40"]]},
+    {"out": 1, "lines": [[1, "          merged  total"], [2, "agent-03       4     10"], [3, "agent-07      12     40"]]},
+]}]
+
+
+def card(ref: str, status: str = "verified", correction: dict | None = None) -> dict:
+    return {"kind": "card", "status": status, "evidence": {"ref": ref}, "correction": correction, "reason": "the card shows it"}
+
+
+def test_a_card_s_cell_is_evidence_and_shows_as_its_table_with_the_cell_cited():
+    r = check_mark(mark("12"), card("card:k3f9a1#merged/agent-07"), [], "/data", cards=CARDS)
+    assert r["status"] == "verified" and r["evidence"]["kind"] == "card" and r["evidence"]["title"] == "Merged pull requests by agent"
+    t = r["evidence"]["table"]
+    assert t["corner"] == "agent" and t["cols"] == ["merged", "total"] and t["rows"][t["at"]["r"]] == {"label": "agent-07", "values": ["12", "40"]} and t["at"]["c"] == 0
+    # the place must hold the words, and must be a place of a card of the session
+    wrong = check_mark(mark("13"), card("card:k3f9a1#merged/agent-07"), [], "/data", cards=CARDS)
+    assert wrong["status"] == "failed" and wrong["failedBy"] == "evidence" and "shows 12" in wrong["reason"]
+    assert check_mark(mark("12"), card("card:zzzzzz#merged/agent-07"), [], "/data", cards=CARDS)["status"] == "failed"
+    assert check_mark(mark("12"), card("card:k3f9a1#merged/agent-99"), [], "/data", cards=CARDS)["status"] == "failed"
+    # a correction's new words stand at the place
+    fixed = check_mark(mark("15"), card("card:k3f9a1#merged/agent-07", "corrected", {"words": "12"}), [], "/data", cards=CARDS)
+    assert fixed["status"] == "corrected" and fixed["shown"] == "12" and fixed["was"] == "15"
+
+
+def test_a_card_s_printed_line_is_evidence_and_a_printed_table_reads_as_a_table():
+    r = check_mark(mark("12"), card("card:k3f9a1@out1#L3"), [], "/data", cards=CARDS)
+    assert r["status"] == "verified"
+    t = r["evidence"]["table"]
+    assert t["cols"] == ["merged", "total"] and t["rows"][t["at"]["r"]]["label"] == "agent-07" and t["cols"][t["at"]["c"]] == "merged"
+
+
+def test_computed_output_that_is_a_printed_dataframe_carries_its_table():
+    out = "            merged  total\nagent                  \nagent-03         4     10\nagent-07        12     40\n"
+    r = check_mark(mark("12"), computed("agent-07        12     40"), [call(CODE, out)], "/data")
+    assert r["status"] == "verified"
+    t = r["evidence"]["table"]
+    assert t["corner"] == "agent" and t["rows"][t["at"]["r"]] == {"label": "agent-07", "values": ["12", "40"]} and t["at"]["c"] == 0
+    # lines of a name and a value are no table
+    assert "table" not in check_mark(mark("12"), computed("merged: 12"), [call(CODE, "merged: 12\ntotal:  40\n")], "/data")["evidence"]
+
+
+def test_the_checker_s_index_lists_each_place_with_its_value_and_the_terminal_s_cards_read_from_their_folder(tmp_path):
+    from kernel.evidence import card_index, terminal_cards
+
+    index = card_index(CARDS)
+    assert "# card:k3f9a1 Merged pull requests by agent\n" in index and "card:k3f9a1#merged/agent-07\t12\n" in index
+    assert "card:k3f9a1@out1#L3\tagent-07 12 40\n" in index
+    d = tmp_path / "cards" / "cab12cd34"
+    (d / "v2").mkdir(parents=True)
+    (d / "meta.json").write_text(json.dumps({"id": "cab12cd34", "title": "Runs by day", "version": 2}))
+    (d / "v2" / "rows.json").write_text(json.dumps([{"day": "06-23", "runs": 7}, {"day": "06-24", "runs": 9}]))
+    cards = terminal_cards(str(tmp_path / "cards"))
+    assert cards[0]["title"] == "Runs by day" and ["runs", "06-24", "9"] in cards[0]["outputs"][0]["cells"]
+    r = check_mark(mark("9 runs"), card("card:cab12cd34#runs/06-24"), [], "/data", cards=cards)
+    assert r["status"] == "verified"
+    # the validator writes the index for the checker, and reads the folder's cards for a check
+    out = tmp_path / "index.tsv"
+    ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"index": str(out), "cards_dir": str(tmp_path / "cards")}), capture_output=True, text=True, check=True)
+    assert json.loads(ran.stdout) == {"cards": 1} and "card:cab12cd34#runs/06-24\t9" in out.read_text()
+    answer = "```json\n" + json.dumps([{"mark": 1, **card("card:cab12cd34#runs/06-24")}]) + "\n```"
+    ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"marks": [{"n": 1, "words": "9"}], "answer": answer, "calls": [], "cwd": "/data", "cards_dir": str(tmp_path / "cards")}), capture_output=True, text=True, check=True)
+    assert json.loads(ran.stdout)["results"][0]["status"] == "verified"
