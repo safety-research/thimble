@@ -507,6 +507,9 @@ def test_text_printed_with_repr_shows_its_line_breaks_as_line_breaks():
     out = "'shift report addendum\\n\\nSince my earlier report:\\n- MERGED #62992'"
     r = check_mark(mark('"shift report addendum Since my earlier report: - MERGED #62992 …"'), computed(out), [call(code, out)], "/data")
     assert r["status"] == "verified"
+    # the reply may quote the text with its escapes, as repr() printed it
+    r = check_mark(mark('"shift report addendum\\n\\nSince my earlier report:"'), computed(out), [call(code, out)], "/data")
+    assert r["status"] == "verified"
 
 
 def test_a_quote_of_python_text_may_join_string_literals_that_stand_next_to_each_other(tmp_path: Path):

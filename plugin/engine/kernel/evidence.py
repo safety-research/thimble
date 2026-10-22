@@ -365,9 +365,9 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
     the output, each number as a whole number of it, and, for words with no number, each record name (`#102, #125 and
     #130`). Words with none of these ("passed when run alone") are the check's reading of the output it cites, as a
     paraphrase of a quote is: the person sees that output next to the claim. A label that opens a line (`9: `) is no
-    part of the output, `**` and backticks in it are formatting, and a line break that repr() printed as `\\n` is a
-    line break."""
-    out = unlabeled(unescaped(out))
+    part of the output, `**` and backticks in it are formatting, and a line break that repr() printed as `\\n`, in the
+    output or in the words, is a line break."""
+    target, out = unescaped(target), unlabeled(unescaped(out))
     plain = unmark(out)
     if bounded_in(target, out) or bounded_in(target, plain):
         return True
@@ -389,8 +389,9 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
 
 
 def unescaped(out: str) -> str:
-    """The output with the escapes that repr() prints for white space and quote marks (`\\n`, `\\t`, `\\'`) read as the
-    characters they stand for, as code prints a record's text with repr() to show its line breaks."""
+    """The text with the escapes that repr() prints for white space and quote marks (`\\n`, `\\t`, `\\'`) read as the
+    characters they stand for, as code prints a record's text with repr() to show its line breaks, and a reply may
+    quote it so."""
     return re.sub(r"\\([nrt'\"])", lambda m: m.group(1) if m.group(1) in "'\"" else " ", out)
 
 
