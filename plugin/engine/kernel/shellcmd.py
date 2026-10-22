@@ -15,6 +15,7 @@ by name and by folder, never scanned once per word of a command.
 from __future__ import annotations
 
 import bisect
+import functools
 import os
 import re
 from pathlib import Path
@@ -320,21 +321,31 @@ def _expand(t: str, values: dict[str, list[str]]) -> list[str]:
 
 class Known:
     """The root's files (relative paths), indexed: sorted, so the files under a folder are one range; by file name;
-    and the set of their folders."""
+    and the set of their folders. The two last are made when first asked, since in a folder of a million files most
+    sessions' commands never need them."""
 
     def __init__(self, files: Iterable[str]):
-        self.files = sorted(set(files))
-        self.set = set(self.files)
-        self.by_name: dict[str, list[str]] = {}
-        self.folders: set[str] = set()
+        self.set = set(files)
+        self.files = sorted(self.set)
+
+    @functools.cached_property
+    def by_name(self) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
         for f in self.files:
-            self.by_name.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+            out.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+        return out
+
+    @functools.cached_property
+    def folders(self) -> set[str]:
+        out: set[str] = set()
+        for f in self.files:
             d = f
             while "/" in d:
                 d = d.rsplit("/", 1)[0]
-                if d in self.folders:
+                if d in out:
                     break
-                self.folders.add(d)
+                out.add(d)
+        return out
 
     def under(self, folder: str) -> list[str]:
         """The files at any depth under a folder; every file for `.`."""

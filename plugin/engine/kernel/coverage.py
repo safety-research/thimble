@@ -153,7 +153,8 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     """What this session (or `session`, or all sessions for None) did with every source file, file by file, by folder
     and by file type. It keeps apart what entered Claude's context (seen), what a label's model read, and what a rule
     label only computed over; only seen counts as read. Each file also says which of its lines were seen (`ranges`) and which lines a search
-    showed (`hit_lines`), for the coverage pane."""
+    showed (`hit_lines`), for the coverage pane. A file nothing touched is only in `untouched`, as columns of its path,
+    unit and size, and in the counts of its folder and type: in a folder of a million files nearly every file is one."""
     from . import labels as LB
 
     files = S.list_files(st.root)
@@ -271,19 +272,24 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                 x["searched" if how == "searched" else "named"] = True
                 x["searched_by" if how == "searched" else "by"].add(prog)
     out_files = []
+    # a file nothing touched, the most of a large folder: its path, unit and size in columns, and its part of its
+    # folder's and its type's sizes, added up by (folder, type, unit) as [files, units, rows]
+    untouched: dict[str, list[Any]] = {"path": [], "unit": [], "units": []}
+    quiet: dict[tuple[str, str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
     for f in files:
         c, x = cnt.get(f, {}), per.get(f)
         rows, lines = c.get("rows", 0), c.get("lines", 0)
         if x is None or not (x["computed"] or x["lines"] or x["searched"] or x["matched"] or x["named"] or x["hits"]
                              or x["model"] or x["labels"] or x["pages"] or x["whole"]):
-            # a file nothing touched, the most of a large folder: its size and nothing else, quickly
             unit = unit_of[f]
             units = 1 if unit == "file" else lines if unit == "lines" else rows
-            out_files.append({"path": f, "kind": c.get("kind"), "unit": unit, "units": units, "seen_units": 0,
-                              "model_units": 0, "computed_units": 0, "rows": rows, "lines": lines, "status": "not read",
-                              "seen": False, "read": False, "touched": False, "share": 0.0, "model": 0, "computed": 0,
-                              "model_rows": 0, "computed_rows": 0, "read_share": 0.0, "counted_share": 0.0,
-                              "type": type_of(f), "folder": folder_of(f), "said": "none"})
+            untouched["path"].append(f)
+            untouched["unit"].append(unit)
+            untouched["units"].append(units)
+            q = quiet[(folder_of(f), type_of(f), unit)]
+            q[0] += 1
+            q[1] += units
+            q[2] += rows
             continue
         unit = unit_of[f]
         seen_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
@@ -342,13 +348,25 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     # they share one), else the mean of its files' shares
     folders: dict[str, dict[str, Any]] = {}
     types: dict[str, dict[str, Any]] = {}
+
+    def group(into: dict[str, dict[str, Any]], name: str, key: str) -> dict[str, Any]:
+        G = into.get(key)
+        if G is None:
+            G = into[key] = {name: key, "files": 0, "rows": 0, "seen_rows": 0.0, "model_rows": 0, "computed_rows": 0,
+                             "touched": 0, "seen_files": 0, "by_status": defaultdict(int), "computed": 0, "units": {},
+                             "read_sum": 0.0, "counted_sum": 0.0}
+        return G
+    for (folder, typ, unit), (n, units, rows) in quiet.items():
+        for G in (group(folders, "folder", folder), group(types, "type", typ)):
+            G["files"] += n
+            G["rows"] += rows
+            G["by_status"]["not read"] += n
+            u = G["units"].setdefault(unit, {"units": 0, "seen": 0, "model": 0, "computed": 0, "files": 0, "seen_files": 0})
+            u["units"] += units
+            u["files"] += n
     for e in out_files:
         for key, name, into in ((e["folder"], "folder", folders), (e["type"], "type", types)):
-            G = into.get(key)
-            if G is None:
-                G = into[key] = {name: key, "files": 0, "rows": 0, "seen_rows": 0.0, "model_rows": 0, "computed_rows": 0,
-                                 "touched": 0, "seen_files": 0, "by_status": defaultdict(int), "computed": 0, "units": {},
-                                 "read_sum": 0.0, "counted_sum": 0.0}
+            G = group(into, name, key)
             G["read_sum"] += e["read_share"]
             G["counted_sum"] += e["counted_share"]
             _add_units(G["units"], e)
@@ -374,7 +392,8 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
         G["by_status"] = dict(G["by_status"])
         G["seen_rows"] = round(G["seen_rows"])
         G["read_rows"] = G["seen_rows"]
-    rows_all = sum(o["rows"] for o in out_files)
+    quiet_rows = sum(q[2] for q in quiet.values())
+    rows_all = sum(o["rows"] for o in out_files) + quiet_rows
     seen_rows = sum(o["share"] * o["rows"] for o in out_files)
     model_rows = sum(o["model_rows"] for o in out_files)
     computed_rows = sum(o["computed_rows"] for o in out_files)
@@ -390,20 +409,27 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
              "model_share": model_rows / rows_all if rows_all else 0.0,
              "computed_files": sum(1 for o in out_files if o["computed_rows"]), "computed_rows": computed_rows,
              "computed_share": computed_rows / rows_all if rows_all else 0.0,
-             "not_seen_files": len(not_seen), "not_seen_rows": sum(o["rows"] for o in not_seen),
-             "untouched_files": sum(1 for o in out_files if not o["touched"])}
+             "not_seen_files": len(not_seen) + len(untouched["path"]),
+             "not_seen_rows": sum(o["rows"] for o in not_seen) + quiet_rows,
+             "untouched_files": sum(1 for o in out_files if not o["touched"]) + len(untouched["path"])}
     every: dict[str, dict[str, int]] = {}
     unread: dict[str, dict[str, int]] = {}
     for o in out_files:
         _add_units(every, o)
         if not o["seen"]:
             _add_units(unread, o)
+    for (_, _, unit), (n, units, _) in quiet.items():
+        for into in (every, unread):
+            u = into.setdefault(unit, {"units": 0, "seen": 0, "model": 0, "computed": 0, "files": 0, "seen_files": 0})
+            u["units"] += units
+            u["files"] += n
     total["units"] = _units_list(every)
     total["not_seen_units"] = _units_list(unread)
     # the names earlier readers know: read is seen
     total.update(read_files=total["seen_files"], read_rows=total["seen_rows"], read_share=total["seen_share"],
                  not_read_files=total["not_seen_files"], not_read_rows=total["not_seen_rows"])
     return {"root": str(st.root), "session": st.session if session == "" else session, "files": out_files,
+            "untouched": untouched,
             "groups": sorted(folders.values(), key=lambda g: (-g["touched"], -g["files"], g["folder"])),
             "types": sorted(types.values(), key=lambda g: (-g["rows"], g["type"])),
             "total": total}
@@ -458,8 +484,10 @@ def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
     sizes = _sizes(t.get("units") or [])
     lines = [head + (f": {sizes}" if sizes else "")]
     ranked = sorted(cov["files"], key=lambda o: (ORDER.index(o["status"]), o["path"]))
-    if len(cov["files"]) <= max_lines:
-        for o in ranked:
+    quiet = cov.get("untouched", {}).get("path") or []
+    if len(cov["files"]) + len(quiet) <= max_lines:
+        listed = ranked + [{"path": p, "status": "not read", "said": "none"} for p in quiet]
+        for o in sorted(listed, key=lambda o: (ORDER.index(o["status"]), o["path"])):
             lines.append(f"  {o['path']}  {o.get('said') or file_line(o)}")
     else:
         shown = [g for g in cov["groups"] if g["files"] > 1 or set(g["by_status"]) != {"not read"}][:12]
@@ -533,6 +561,7 @@ def coverage_sentence(cov: dict[str, Any]) -> str:
     if t["not_seen_files"]:
         by = {k: [o["path"] for o in cov["files"] if (o["status"] == k and o["touched"]) or (k == "not read" and not o["touched"])]
               for k in ("model", "searched", "computed", "named", "not read")}
+        by["not read"] = sorted(by["not read"] + list(cov.get("untouched", {}).get("path") or []))
         words = {"model": "read only by a label's model", "searched": "searched, which lines a search showed is not known",
                  "computed": "only computed over", "named": "only named or counted", "not read": "not touched"}
         parts = [f"{len(by[k]):,} {words[k]} ({_few(by[k])})" for k in ("not read", "computed", "model", "named", "searched") if by[k]]

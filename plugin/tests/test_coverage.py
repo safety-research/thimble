@@ -124,16 +124,18 @@ def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: P
     ])
     cov = CV.coverage(Store(d))
     by = {o["path"]: o for o in cov["files"]}
-    assert set(by) == {"trials.jsonl", "scores.csv", "notes.md", "chart.png", "song.mp3", "report.pdf"}
+    assert set(by) == {"trials.jsonl", "scores.csv", "notes.md", "chart.png", "report.pdf"}
     got = {f: (o["unit"], o["units"], o["seen_units"], o["status"]) for f, o in by.items()}
     assert got == {"trials.jsonl": ("records", 200, 3, "seen"), "scores.csv": ("rows", 40, 4, "seen"),
                    "notes.md": ("lines", 7, 0, "named"), "chart.png": ("file", 1, 1, "seen"),
-                   "song.mp3": ("file", 1, 0, "not read"), "report.pdf": ("pages", 5, 2, "seen")}
+                   "report.pdf": ("pages", 5, 2, "seen")}
+    # a file nothing touched is only its path, unit and size
+    assert cov["untouched"] == {"path": ["song.mp3"], "unit": ["file"], "units": [1]}
     assert by["report.pdf"]["pages"] == [[2, 3]]
     said = {f: o["said"] for f, o in by.items()}
     assert said["trials.jsonl"] == "read 3 of 200 records (2%)"
     assert said["report.pdf"] == "read 2 of 5 pages (40%)"
-    assert said["chart.png"] == "seen" and said["song.mp3"] == "none"
+    assert said["chart.png"] == "seen"
     text = CV.coverage_text(cov)
     assert text.startswith("Coverage of this session · 6 files: 200 records, 40 rows, 7 lines, 5 pages and 2 other files\n")
     assert "  chart.png  seen\n" in text and "  song.mp3  none\n" in text
@@ -237,9 +239,10 @@ def test_a_working_folder_of_links_counts_the_files_they_point_to(tmp_path: Path
 
     cov = CV.coverage(Store(work))
     by = {o["path"]: o for o in cov["files"]}
+    every = set(by) | set(cov["untouched"]["path"])
     assert cov["total"]["files"] == 602
-    assert "shots/day2/299.png" in by and "gone.jsonl" not in by
-    assert not any(p.startswith("shots/day1/up/") for p in by)
+    assert "shots/day2/299.png" in every and "gone.jsonl" not in every
+    assert not any(p.startswith("shots/day1/up/") for p in every)
     assert by["boats.jsonl"]["touched"] and cov["total"]["touched_files"] == 1
     # the sources are the linked tables too, and nothing was written into the folder or the dataset
     assert [f for f in S.list_files(work) if S.kind_of(work / f)] == ["README.md", "boats.jsonl"]

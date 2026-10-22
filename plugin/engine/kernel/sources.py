@@ -62,10 +62,22 @@ class Row:
 
 
 def kind_of(path: Path) -> str | None:
-    ext = path.suffix.lower()
+    return kind_of_name(path.name)
+
+
+def ext_of(name: str) -> str:
+    """A file name's extension, lower case, as Path.suffix gives it: `.gz` of `a.tar.gz`, none of `.bashrc`."""
+    dot = name.rfind(".")
+    return name[dot:].lower() if 0 < dot < len(name) - 1 else ""
+
+
+def kind_of_name(name: str) -> str | None:
+    """A source file's kind by its name (the last part of its path), or None for a file that is no source."""
+    name = name.rsplit("/", 1)[-1]
+    ext = ext_of(name)
     if ext in KIND_OF_EXT:
         return KIND_OF_EXT[ext]
-    if ext in TEXT_EXT or (not ext and path.name in ("Makefile", "Dockerfile", "README", "LICENSE")):
+    if ext in TEXT_EXT or (not ext and name in ("Makefile", "Dockerfile", "README", "LICENSE")):
         return "text"
     return None
 
@@ -428,25 +440,37 @@ def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str,
 
 def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, dict[str, Any]]:
     """{path: {rows, lines, kind}} for each file, cached by size and mtime. A file that is no source has its kind
-    (pdf, image, audio, video, file), its pages or 1 as rows, and no lines."""
+    (pdf, image, audio, video, file), its pages or 1 as rows, and no lines. A file that is neither a source nor a PDF
+    (an image, a binary) is one whole file by its name alone: it is not opened, looked at or kept in the cache, so a
+    folder of a million screenshots counts quickly."""
     cache: dict[str, Any] = {}
     if cache_file:
         try:
             cache = json.loads(cache_file.read_text())
         except (OSError, ValueError):
             cache = {}
-    out, changed = {}, False
+    out: dict[str, dict[str, Any]] = {}
+    counted: list[str] = []
+    for rel in rels:
+        media = MEDIA_KIND.get(ext_of(rel.rsplit("/", 1)[-1]), "file")
+        if media != "pdf" and kind_of_name(rel) is None:
+            out[rel] = {"kind": media, "rows": 1, "lines": 0}
+        else:
+            counted.append(rel)
+    # a cache that holds files no longer counted (gone, or whole files) is written again without them
+    changed = bool(cache.keys() - set(counted))
+    cache = {r: cache[r] for r in counted if r in cache}
     # the files not counted yet (or changed since), counted together first
     stats: dict[str, Any] = {}
     base = str(root)
-    for rel in rels:
+    for rel in counted:
         try:
             stats[rel] = os.stat(f"{base}/{rel}")
         except OSError:
             continue
     todo = [r for r, st in stats.items() if not ((c := cache.get(r)) and c.get("key") == f"{st.st_size}:{st.st_mtime_ns}")]
     fresh = _count_many(root, todo, {r: stats[r].st_size for r in todo}) if todo else {}
-    for rel in rels:
+    for rel in counted:
         st = stats.get(rel)
         if st is None:
             continue

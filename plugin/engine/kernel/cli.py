@@ -63,7 +63,9 @@ def cmd_coverage(a: argparse.Namespace) -> int:
     if a.json:
         # a file nothing touched is said by its path, unit and size alone, in columns, so the record of a folder of
         # 100,000 files stays a few megabytes
+        quiet = cov.pop("untouched")
         rest = [o for o in cov["files"] if o["status"] == "not read" and not o["touched"]]
+        rest += [{"path": p, "unit": u, "units": n} for p, u, n in zip(quiet["path"], quiet["unit"], quiet["units"])]
         cov["files"] = [o for o in cov["files"] if not (o["status"] == "not read" and not o["touched"])]
         # a folder of a million files (a dataset of screenshots) would print about 100 MB, more than the shell reads of
         # a command's output (4 MB), so its count would fail: each folder lists its first files, the touched files the
