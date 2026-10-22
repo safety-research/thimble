@@ -29,16 +29,15 @@ check CI runs, and `scripts/check.sh STEP` one of them.
 - A change to a text the plugin's model reads is an edit of its one file (`plugin/prompts/<text>.md`), and follows
   CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
   symptom.
-- The browser workbench reads one text from `plugin/`, the label classifier, with the changes
-  `browser/prompts/shared.json` lists. When that text changes, run `scripts/check.sh parity` and fix the pairs it names.
+- The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`; it reads
+  none from `plugin/`. `scripts/check.sh parity` checks that they render and name only what its code has.
 - In the plugin, Claude's card views run only in the card runner (`plugin/cards/runner.mjs`), which runs only in
   Anthropic's sandbox runtime (`plugin/cards/argv.mjs` gives its rules; `plugin/sandbox/` holds the pin and the
   launcher): no network, reads only the runner's code and the card copies, writes only its own folder. A `vm` context
   per card keeps the cards apart. When the sandbox cannot start, cards do not run. The hooks never run a view
   themselves. Keep it that way.
-- The browser's server binds 127.0.0.1 only. Card code and view readers run only in its sandbox
-  (`browser/server/thimble_browser/cards/sandbox.py`), and its agents get only the tools
-  `browser/server/thimble_browser/agent.py` names. Keep both that way.
+- The browser's server binds 127.0.0.1 only, and card code runs only in its kernels' sandbox
+  (`browser/backend/app/kernel_wrap.py`). Keep both that way.
 - The repository holds code, and what the code needs. Keep notes, screenshots and design documents out of it.
 
 The repository is public. The pre-push hook stops a push whose commits hold private details (CONTRIBUTING.md, "Keep

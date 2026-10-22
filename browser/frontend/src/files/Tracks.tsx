@@ -101,6 +101,14 @@ export function followOf(view: { top: number; height: number }): number {
   return free > 0 ? Math.max(0, Math.min(1, view.top / free)) : 0
 }
 
+/** The thumb over the strip for what the reader shows, px of a track `px` tall: as tall as its share of the file and at
+ * least `min`, as far down the room the track leaves it as the reader is through the file (followOf), as a scrollbar's
+ * thumb stands, so that the thumb at the track's end is the file's end. Pure. */
+export function frameOf(view: { top: number; height: number }, px: number, min = FRAME_MIN_PX): { top: number; height: number } {
+  const height = Math.min(px, Math.max(min, view.height * px))
+  return { top: followOf(view) * Math.max(0, px - height), height }
+}
+
 /** Where the reader stands, as it measures it each frame it moves: the share of the file above its top and the share
  * it shows (as Shown), and px of its body: how far it is scrolled, its height and its content's height, and whether the
  * content holds the file's first record and its last. `span` is the share of the file a body's height holds on average

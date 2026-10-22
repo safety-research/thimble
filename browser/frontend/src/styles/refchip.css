@@ -52,8 +52,7 @@
 .refedit-token .chip-ico {
   stroke-width: 2px;
 }
-/* states: unable to verify, a dashed underline in the negative; not linked (its place is gone) and unknown, gray words
-   with a dotted gray underline, never the accent */
+/* states: unable to verify, a dashed underline in the negative; not linked and unknown, dotted and quiet */
 .refchip.refchip-value.broken,
 .refchip.refchip-value.broken:hover {
   color: inherit;
@@ -64,7 +63,7 @@
 .refchip.refchip-value.refchip-unresolved,
 .refchip.refchip-value.refchip-quiet:hover,
 .refchip.refchip-value.refchip-unresolved:hover {
-  color: var(--text-tertiary);
+  color: inherit;
   text-decoration-style: dotted;
   text-decoration-color: var(--text-tertiary);
 }
@@ -89,17 +88,6 @@
   color: var(--text-tertiary);
   background: none;
   cursor: default;
-}
-/* a red × right after a link whose place shows another value, outside its underline */
-.refchip-x {
-  display: inline-block;
-  margin-left: 1px;
-  color: var(--status-negative);
-  font-weight: 600;
-  text-decoration: none;
-}
-:root[data-links='off'] .refchip-x {
-  display: none;
 }
 /* a chip that arrived after its text fades in */
 .refchip-late {
@@ -235,11 +223,6 @@ body[data-cmd] .refchip-pop {
   white-space: nowrap;
 }
 
-/* a cited value read from the card as it stood before an edit (RefChip versionNote): a sentence, in the body face */
-.refchip-pop-version {
-  font: var(--type-caption);
-}
-
 /* a record's facts over its words (canvas.css .rec-facts), under the head or the view's label */
 .refchip-pop-facts {
   margin-top: 6px;
@@ -266,23 +249,6 @@ body[data-cmd] .refchip-pop {
   }
   100% {
     background: transparent;
-  }
-}
-/* a cited part a card's program draws (lib/tableCell revealPart): its hit box takes the accent's wash with an accent
-   edge, then fades, as a cited cell does */
-[data-region].cite-cell-flash {
-  animation: cite-part-flash 2.4s var(--ease-out) forwards;
-}
-@keyframes cite-part-flash {
-  0%,
-  60% {
-    fill: var(--accent-wash);
-    stroke: var(--accent);
-    stroke-width: 1.5px;
-  }
-  100% {
-    fill: transparent;
-    stroke: transparent;
   }
 }
 /* a cited line of a card's printed output, after a click opened it (lib/tableCell revealLines): marked as a cited cell

@@ -1,0 +1,6 @@
+---
+name: Incident timeline
+description: What happened in order, grouped into phases, each entry dated, naming who acted and citing the record that shows it.
+---
+
+An incident timeline tells what happened in the order it happened, so a reader can see when each thing occurred, who did it and what followed from it. A short opening section says what the incident was, when it began and ended, and who took part. Then come the events in time order, grouped into phases, one section per phase headed by what happened in it, such as `## Bob deleted the audit pages within an hour of the vote`. Each event is one bullet that starts with its date and time as the records give them, then says who acted and what they did, cited to the record that shows it, such as `- 2024-06-04 14:02 · Bob deleted the page "Audit" [[wiki/log.jsonl#L88]]`. Mark a time or an order you inferred rather than read as inferred. A last short section says what the timeline leaves open. These phases and entries take the place of the report's length and headings below, whose markdown and citations still hold.

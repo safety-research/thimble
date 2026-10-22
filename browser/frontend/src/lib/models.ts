@@ -1,5 +1,5 @@
 // Model ids as the UI names them, and the models a chat can pick from.
-import type { Settings } from './types'
+import type { ModelConf, Settings } from './types'
 
 /** A model id without its `[…]` tag: `claude-opus-5-5[1m]` → `claude-opus-5-5`. The `[1m]` tag asks Claude Code for
  * the 1M-token context window of the same model, which the server adds for the orientation (backend
@@ -40,7 +40,7 @@ export function modelChoices(settings: Settings | null | undefined, current?: st
   return out
 }
 
-/** Whether a model has fast mode, as the server tells (llm.has_fast_mode): an Opus 5, Opus 5.5 or Opus 4.8 id,
+/** Whether a model has fast mode, as Claude Code and the backend tell (config.has_fast_mode): an Opus 5 or Opus 4.8 id,
  * or `opus`, the alias for the current Opus. Pure. */
 export function hasFastMode(model: string | null | undefined): boolean {
   const m = (model ?? '').toLowerCase()
@@ -84,6 +84,18 @@ export function loadSettings(ws: string, fresh = false): Promise<Settings> {
 export const invalidateSettings = (ws: string): void => {
   cache.delete(ws)
   listeners.forEach((fn) => fn(ws))
+}
+
+/** Save some of a role's model, effort and fast mode (settings.models: the server merges them into what the role
+ * holds), then tell whoever shows the settings, after a failure too, so they show what the server holds. */
+export function saveRole(ws: string, role: string, patch: Partial<ModelConf>): Promise<void> {
+  return api
+    .putSettings(ws, { models: { [role]: patch } })
+    .then(() => invalidateSettings(ws))
+    .catch((e: unknown) => {
+      invalidateSettings(ws)
+      throw e
+    })
 }
 
 /** Hear that the settings of a workspace changed; returns the unsubscribe. */

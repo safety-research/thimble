@@ -12,11 +12,15 @@ export const RETRY_MS = 5_000
 export const RETRY_MAX_MS = 30_000
 
 export interface StreamOptions {
-  onEvent: (event: string, data: unknown) => void
+  /** named events handed to `onEvent` besides `message`; `ping` never is */
+  events?: readonly string[]
+  onEvent: (event: string, data: unknown, lastEventId: string) => void
   /** the stream came back after a failure or a stall; what happened meanwhile was not replayed */
   onReopen?: () => void
   /** the stream failed or stalled: the server is restarting, stopped or out of reach */
   onDown?: () => void
+  /** the URL to reopen with, given the last event id seen (the replay point) */
+  urlFor?: (lastEventId: string | null) => string
 }
 
 /** Open `url` as a stream that reconnects; returns the release. */
@@ -27,19 +31,22 @@ export function openStream(url: string, opts: StreamOptions): () => void {
   let failures = 0
   let released = false
   let interrupted = false
+  let lastId: string | null = null
   const clear = () => {
     if (timer != null) window.clearTimeout(timer)
     timer = null
   }
   const handler = (ev: Event) => {
     alive()
+    const me = ev as MessageEvent
+    if (me.lastEventId) lastId = me.lastEventId
     let data: unknown
     try {
-      data = JSON.parse((ev as MessageEvent).data)
+      data = JSON.parse(me.data)
     } catch {
       return
     }
-    opts.onEvent(ev.type, data)
+    opts.onEvent(ev.type, data, me.lastEventId ?? '')
   }
   const alive = () => {
     clear()
@@ -52,10 +59,10 @@ export function openStream(url: string, opts: StreamOptions): () => void {
     }, STALL_MS)
   }
   const open = () => {
-    const cur = new EventSource(url)
+    const cur = new EventSource(opts.urlFor ? opts.urlFor(lastId) : url)
     es = cur
     alive()
-    cur.addEventListener('message', handler)
+    for (const name of ['message', ...(opts.events ?? [])]) cur.addEventListener(name, handler)
     cur.addEventListener('ping', alive)
     cur.onerror = () => {
       if (released || es !== cur) return

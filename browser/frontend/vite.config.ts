@@ -83,10 +83,10 @@ export default defineConfig({
   cacheDir,
   server: {
     port: 5300,
-    // the terminal plugin's modules the page reads as they are (src/marks: plugin/marks/message.js): one copy for both
-    fs: { allow: ['.', '../../plugin'] },
     // /api, and the same routes under a signed-in browser's own path, /b/<key>/api (src/lib/browserKey)
     proxy: { '/api': toBackend(), '^/b/[A-Za-z0-9_-]+/api(/|$)': toBackend() },
+    // the terminal plugin's modules the page reads as they are (src/marks: plugin/marks/message.js): one copy for both
+    fs: { allow: ['.', '../../plugin'] },
   },
   // render.html is the card harness's page (src/render.tsx, backend/app/render.py): shipped beside the app in dist
   build: { rollupOptions: { input: { main: 'index.html', render: 'render.html' } } },

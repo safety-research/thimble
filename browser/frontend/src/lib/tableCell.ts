@@ -233,9 +233,9 @@ export async function revealCell(home: HTMLElement, col: string, row: string, se
 }
 
 /** Mark `el` cited for FLASH_MS, then let the mark fade (refchip.css), from the start when it was marked already. */
-function flashCited(el: Element): void {
+function flashCited(el: HTMLElement): void {
   el.classList.remove(CITED_FLASH)
-  void el.getBoundingClientRect()
+  void el.offsetWidth
   el.classList.add(CITED_FLASH)
   window.setTimeout(() => el.classList.remove(CITED_FLASH), FLASH_MS)
 }

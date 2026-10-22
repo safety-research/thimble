@@ -1,21 +1,28 @@
 // A card as the analyst sees it at rest: its question, the Labels row (a label card's label row), its body by kind
 // (bodies.tsx) and its takeaway, in the card's own box. The board's CellCard (Cell.tsx) adds hover chrome around it,
-// and the card harness (render.tsx) mounts it alone. The body shimmers while the card's code runs, as when an edit_card
-// call is changing it, and the card shimmers while thimble runs it again because a label it read changed.
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+// and the card harness (render.tsx) mounts it alone, so the image a check reads is the card the canvas draws. The face
+// also shows the card check, only as far as the analyst needs it at rest: a shimmer while it runs, its replacement
+// faded in once confirmed, and a red ✕ at the takeaway's corner only for a real problem it found (lib/cardCheck
+// checkProblem). The rest of the check, the fix's Undo among it, is in the card's details (CheckDetails).
+// The body shimmers the same way while the card's code runs, as when an edit_card call is changing it, and the card
+// shimmers as in a check while thimble runs it again because a label it read changed.
+import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ChatMarkdown } from '../chat/markdown'
-import { shownMarks, useLenses, useSurfaceMarks } from '../lib/lensMarks'
+import { Button } from '../components/Button'
+import { CheckMark as SharedCheckMark } from '../components/CheckMark'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
-import { useTooltip } from '../components/Tooltip'
+import { placeTip, useTooltip } from '../components/Tooltip'
 import { LabelSheet } from '../files/LabelCard'
 import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
 import { addAgentZone, tintElement } from '../lib/agentKey'
 import { bus } from '../lib/bus'
+import { checkOf, checkProblem } from '../lib/cardCheck'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
@@ -48,6 +55,8 @@ export interface CardFaceProps {
   asking?: boolean
   onTextDown?: (field: CardField) => (e: MouseEvent<HTMLElement>) => void
   onTextClick?: (field: CardField) => (e: MouseEvent<HTMLElement>) => void
+  /** Check again in the hover of the problem's ✕ (none in the harness, whose card has no mark) */
+  onCheckAgain?: () => void
   cardRef?: (el: HTMLElement | null) => void
 }
 
@@ -69,15 +78,16 @@ function Face(p: CardFaceProps) {
   const concept = kind === 'label' ? String(payload.concept ?? '') : ''
   const running = cell.status === 'running'
   const failed = cell.status === 'error' && !running
+  const check = checkOf(cell)
+  const problem = p.onCheckAgain ? checkProblem(check) : ''
   // a plan has no takeaway (bodies.tsx PlanBody): its steps say where the work stands
   const takeaway = kind === 'plan' ? '' : cell.takeaway
-  // the lenses' marks on this card's takeaway (lib/lensMarks.ts), where a lens reads the cards
-  const lenses = useLenses(ctx.ws)
-  const cardMarks = useSurfaceMarks(ctx.ws, 'cards')
-  const marks = useMemo(() => shownMarks(cardMarks.filter((m) => m.where === cell.id), lenses, 'cards'), [cardMarks, lenses, cell.id])
+  const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
+  if (check?.state === 'running') cls.push('is-checking')
   if ((cell.regenerating_for ?? []).length > 0) cls.push('is-regenerating')
   if (running) cls.push('is-running')
+  if (swapped) cls.push('is-swapped')
   return (
     <article
       className={cls.join(' ')}
@@ -89,6 +99,8 @@ function Face(p: CardFaceProps) {
       data-cite-home={cell.id}
       data-concept={concept || undefined}
       data-status={cell.status || undefined}
+      data-check={check?.state || undefined}
+      data-check-problem={problem ? '' : undefined}
     >
       {p.chrome}
       <div className="bcell-head">
@@ -98,6 +110,7 @@ function Face(p: CardFaceProps) {
           <InlineField className="bcell-q" value={cell.title} onDone={(v) => p.onEdited?.('title', v)} onAsk={p.onAsk ? (v) => p.onAsk?.('title', v) : undefined} />
         ) : (
           <span className="bcell-q" data-anchor={`card:${cell.id}`} data-anchor-text={cell.title} onMouseDown={p.onTextDown?.('title')} onClick={p.onTextClick?.('title')}>
+            {/* its words alone, which a comment on the card highlights (CommentLayer.tsx) */}
             <span className="bcell-q-text">{cell.title}</span>
           </span>
         )}
@@ -130,13 +143,37 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} marks={marks} lenses={lenses} />
+            <ChatMarkdown text={takeaway} />
           </div>
+          {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
+        </div>
+      ) : problem ? (
+        <div className="bcell-take bcell-take-none">
+          <div className="chat-text bcell-take-text" />
+          <ProblemMark text={problem} onAgain={p.onCheckAgain} />
         </div>
       ) : null}
       {p.after}
     </article>
   )
+}
+
+/** How long a confirmed fix takes to fade in, ms (styles/canvas.css .is-swapped). */
+const SWAP_MS = 320
+
+/** True for SWAP_MS after the fix stamp changes (not on the first render). */
+function useSwap(stamp: string | null): boolean {
+  const seen = useRef(stamp)
+  const [on, setOn] = useState(false)
+  useEffect(() => {
+    if (stamp === seen.current) return
+    seen.current = stamp
+    if (!stamp) return
+    setOn(true)
+    const t = setTimeout(() => setOn(false), SWAP_MS)
+    return () => clearTimeout(t)
+  }, [stamp])
+  return on
 }
 
 /** The tooltip of a label tag on a card, null for none: a label the card is running again for (`regenerating_for`), a
@@ -247,6 +284,35 @@ function LabelTag({ id, label: k, ws, why, ink }: { id: string; label: Concept |
         </Popover>
       )}
     </>
+  )
+}
+
+/** The card check's one mark, a red ✕ at the takeaway's bottom right for a real problem it found (checkProblem). Its
+ * hover says what is wrong and offers Check again. */
+function ProblemMark({ text, onAgain }: { text: string; onAgain?: () => void }) {
+  return (
+    <SharedCheckMark state="failed" problem label={text} popLabel="The card check's problem">
+      {(close) => (
+        <>
+          <span className="bcell-check-what">{text}</span>
+          {onAgain && (
+            <span className="bcell-check-acts">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon="refresh"
+                onClick={() => {
+                  close()
+                  onAgain()
+                }}
+              >
+                Check again
+              </Button>
+            </span>
+          )}
+        </>
+      )}
+    </SharedCheckMark>
   )
 }
 

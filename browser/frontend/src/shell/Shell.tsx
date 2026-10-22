@@ -3,14 +3,14 @@
 // its surface in the pane that holds it, else in the focused pane (panes.show). The layout and the chat column's width
 // and fold state are kept per workspace in browser storage (App clears it first when the workspace was replaced by a new
 // one of the same name, lib/workspace.ts syncInstance); a new workspace opens on Files. A folded chat column opens when
-// something asks for a thread. When the workspace is replaced (the stream's `reset`), the page reloads.
-// A demo page (lib/demo) is static (`data-session`).
+// something asks for a thread. When the workspace is replaced (the stream's `reset`), the page reloads. With no Claude
+// Code session attached the shell is inert under SessionGone, except on a demo page (lib/demo, `data-session` static).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '../canvas/Canvas'
 import { ChatPanel } from '../chat/ChatPanel'
 import { holdForChat } from '../chat/pending'
 import { isUnread, readSeen } from '../chat/seen'
-import { useChatMetas } from '../chat/useChat'
+import { useChatMetas, waitingChats } from '../chat/waiting'
 import { Button } from '../components/Button'
 import type { IconName } from '../components/Icon'
 import { FilesTab } from '../files/FilesTab'
@@ -22,35 +22,53 @@ import { bus, type Tab } from '../lib/bus'
 import { onDemoNote, useDemo } from '../lib/demo'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
-import { useWorkspaceEvents } from '../lib/events'
+import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
 import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
-import { FeatureOff } from './FeatureOff'
-import { LensSidebar, type SideTab } from './LensSidebar'
-import { loadFeatures, useFeature, type FeatureName } from '../features'
-import { tabSignals, useReportTypes, useTabDots, writing } from './dots'
+import { tabSignals, useTabDots, writing } from './dots'
 import { DemoLine } from './DemoLine'
 import { NewVersion } from './NewVersion'
 import { DragGhost, PaneArea, usePaneDrag, type SurfaceSpec } from './PaneArea'
-import { arrange, BASE_SURFACES, close, drop, findPane, focused, focusPane, isNarrow, parsePanes, place, readSurface, resize, show, shownSurfaces, single, slugOfSurface, viewSurface, type Panes, type SurfaceId } from './panes'
+import {
+  arrange,
+  BASE_SURFACES,
+  close,
+  drop,
+  findPane,
+  focused,
+  focusPane,
+  isNarrow,
+  parsePanes,
+  place,
+  preset,
+  readSurface,
+  resize,
+  show,
+  shownSurfaces,
+  single,
+  slugOfSurface,
+  viewSurface,
+  type Panes,
+  type SurfaceId,
+} from './panes'
+import { ClaudeAccessHost } from './ClaudeAccess'
 import { Resizer } from './Resizer'
 import { ServerDown } from './ServerDown'
+import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
 import { TopBar } from './TopBar'
+import { LabelsSidebar } from './LabelsSidebar'
 import { TourHost } from './TourHost'
-import { ShareReportHost } from './ShareReport'
 
-// wide enough by default for a card of about 70 cells, which the chat draws under Claude's calls (cards/Card.tsx)
-export const CHAT_WIDTH = { def: 560, min: 280, max: 960 }
-// the surfaces' tabs, each with the feature it belongs to (features.ts): a tab whose feature is off is not shown
-const BASE: { id: Tab; label: string; icon: IconName; feature?: FeatureName }[] = [
+export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
+const BASE: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'files', label: 'Files', icon: 'files' },
   { id: 'canvas', label: 'Canvas', icon: 'canvas' },
-  { id: 'report', label: 'Report', icon: 'report', feature: 'report' },
+  { id: 'report', label: 'Report', icon: 'report' },
 ]
 interface Layout {
   chatWidth: number
@@ -90,6 +108,7 @@ function useSize(el: HTMLElement | null, guess: () => { w: number; h: number }) 
 
 export function Shell({ ws }: { ws: string }) {
   useWorkspaceEvents(ws)
+  useEffect(() => bus.on('wsReset', (e) => e.workspace === ws && window.location.reload()), [ws])
   // the ask key Settings picks (thimble's config `askKey`, lib/platform), read with the settings and again whenever
   // they change, for the pointer, the canvas, the tour and the views' frames
   useEffect(() => {
@@ -138,6 +157,7 @@ export function Shell({ ws }: { ws: string }) {
 
   // the views, each of which a pane can show on its own
   const { views } = useViews(ws)
+  const available = useMemo<SurfaceId[]>(() => [...BASE_SURFACES, ...views.map((v) => viewSurface(v.slug))], [views])
 
   // the pane a press last landed in (lib/surfaces pressedPane): a request to show a surface right after it comes from
   // that pane
@@ -165,6 +185,16 @@ export function Shell({ ws }: { ws: string }) {
   }, [setPanes])
 
   useEffect(() => bus.on('showTab', (e) => setPanes((p) => show(p, e.tab, e.from === undefined ? pressedPane() : e.from, recent.current))), [setPanes])
+  // a layout main asked for (the set_layout tool); the history the stream replays on load is not asked again
+  useEffect(
+    () =>
+      bus.on('layout', (e) => {
+        if (isReplay()) return
+        setPanes((p) => preset(p, e.layout, available, e.surfaces.length ? e.surfaces : undefined))
+      }),
+    [setPanes, available],
+  )
+
   // a request for the chat while its column is folded opens the column, and the chat panel takes the request once it
   // has mounted (chat/pending.ts)
   const chatOpen = useRef(layout.chatOpen)
@@ -212,15 +242,12 @@ export function Shell({ ws }: { ws: string }) {
       alive = false
     }
   }, [ws, firstOpen])
+  const gone = useSessionGone(ws)
+  // the Labels sidebar (LabelsSidebar.tsx): open or not; it pushes the panes, or the chat when it is the only thing
+  // open, rather than covering them
+  const [side, setSide] = useState(false)
+  useEffect(() => bus.on('openLabels', () => setSide(true)), [])
   const demo = useDemo()
-  // which features are on (features.ts): read once here, and again when Settings changes them
-  useEffect(() => void loadFeatures(ws), [ws])
-  const reportOn = useFeature('report')
-  const featureOn = (t: { feature?: FeatureName }) => !t.feature || reportOn
-  // the Labels and Checks sidebar (LensSidebar.tsx): its tab while open; it pushes the panes, or the chat when it is the
-  // only thing open, rather than covering them
-  const [side, setSide] = useState<SideTab | null>(null)
-  useEffect(() => bus.on('openLens', (e) => setSide(e.tab)), [])
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
   const paneX = 12 + (layout.chatOpen ? liveWidth + 12 : 40)
@@ -263,7 +290,7 @@ export function Shell({ ws }: { ws: string }) {
     () => [
       { id: 'files', label: 'Files', icon: 'files', panel: 'files', keep: true, render: (v, f) => <FilesTab ws={ws} active={v} focused={f} /> },
       { id: 'canvas', label: 'Canvas', icon: 'canvas', panel: 'canvas', keep: true, render: (v, f) => <Canvas ws={ws} active={v} focused={f} /> },
-      { id: 'report', label: 'Report', icon: 'report', panel: 'report', keep: true, render: (v) => (reportOn ? <ReportTab ws={ws} active={v} /> : <FeatureOff title="Report" />) },
+      { id: 'report', label: 'Report', icon: 'report', panel: 'report', keep: true, render: (v) => <ReportTab ws={ws} active={v} /> },
       ...views.map<SurfaceSpec>((view) => ({
         id: viewSurface(view.slug),
         label: view.name,
@@ -273,18 +300,18 @@ export function Shell({ ws }: { ws: string }) {
         render: (v) => <ViewSurface ws={ws} view={view} active={v} />,
       })),
     ],
-    [ws, views, reportOn],
+    [ws, views],
   )
 
   const dots = useTabDots(shown.filter((s): s is Tab => (BASE_SURFACES as readonly string[]).includes(s)))
-  const reportTypes = useReportTypes(ws)
-  const signals = tabSignals(dots, writing(reportTypes))
+  const metas = useChatMetas(ws)
+  const signals = tabSignals(dots, writing(metas))
 
   return (
-    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={demo ? 'static' : undefined} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
+    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : demo ? 'static' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
         ws={ws}
-        tabs={BASE.filter(featureOn).map((t) => ({
+        tabs={BASE.map((t) => ({
           value: t.id,
           label: t.label,
           dot: signals[t.id] === 'dot',
@@ -348,29 +375,32 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
-        {side && <LensSidebar ws={ws} tab={side} onClose={() => setSide(null)} />}
+        {side && <LabelsSidebar ws={ws} onClose={() => setSide(false)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />
       <LabelEditorHost ws={ws} />
+      <ClaudeAccessHost />
       <Toasts />
-      <ShareReportHost ws={ws} />
       <TourHost />
-      <ServerDown />
+      {!gone && <ServerDown />}
       <NewVersion />
+      {gone && <SessionGone gone={gone} ws={ws} />}
     </div>
   )
 }
 
-/** The folded chat column's button, with the accent dot while main or a thread holds a reply the analyst has not read. */
+/** The folded chat column's button, with the accent dot while main or a thread holds a reply the analyst has not read
+ * and the warning dot while a permission prompt waits for them. */
 function ChatStripButton({ ws, onOpen }: { ws: string; onOpen: () => void }) {
   const metas = useChatMetas(ws)
   const seen = readSeen(ws)
+  const waiting = waitingChats(metas).length > 0 || metas.some((m) => m.kind === 'main' && (m.permissions?.length ?? 0) > 0)
   const unread = metas.some((m) => (m.kind === 'main' || m.kind === 'thread') && isUnread(seen, m.id, m.n_messages))
   return (
     <span className="shell-strip-chat">
       <Button variant="icon" icon="chat" title="Chat" aria-label="Chat" onClick={onOpen} />
-      {unread && <span className="dot shell-strip-dot" role="img" aria-label="Unread" />}
+      {(waiting || unread) && <span className={`dot shell-strip-dot${waiting ? ' tt-waiting' : ''}`} role="img" aria-label={waiting ? 'Waiting for you' : 'Unread'} />}
     </span>
   )
 }

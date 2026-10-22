@@ -19,7 +19,6 @@ import { Resizer } from '../shell/Resizer'
 import { LabelEditor } from './LabelEditor'
 import { viewLabels } from './labels'
 import { LabelsPane } from './LabelsPane'
-import { useFeature } from '../features'
 import { TREE } from './params'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import type { BuiltView } from './ViewsBar'
@@ -122,15 +121,14 @@ export interface LabelSideProps {
  * seam. */
 export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactNode; resizer: ReactNode } {
   const { ws, labels, runs, editing, onEdit, drafted, onDraft, appliesTo, width } = p
-  // the labels are listed in the Labels and Checks sidebar (shell/LensSidebar.tsx), not here: the pane is shown only
-  // while a label's edit card is open in it, as the card's place
-  const labelsOn = useFeature('labels') && editing != null
   const filter = useFilesFilter(ws)
   const onFilter = useCallback(
     (id: string, value: string | null) => void (value == null ? api.deleteFilter(ws, 'files') : api.putFilter(ws, 'files', id, value)).catch(() => undefined),
     [ws],
   )
-  const pane = labelsOn && (
+  // the labels are listed in the Labels sidebar (shell/LabelsSidebar.tsx), not here: the pane is shown only while a
+  // label's edit card is open in it, as the card's place
+  const pane = editing != null && (
     <LabelsPane
       labels={labels}
       open={p.open}

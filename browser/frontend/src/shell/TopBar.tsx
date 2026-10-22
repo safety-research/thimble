@@ -1,29 +1,25 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
 // workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
 // the surfaces' tabs over the main area (a click shows the surface, a drag takes it to a pane); at the right Undo and
-// Redo (shell/undo.ts), the links toggle, the theme popover and the settings gear (Report a problem… is in its menu).
-// Before them, Fix… and the line of the fix Claude made (shell/FixEntry). What Claude and thimble are doing shows above
-// the chat's input box (chat/ChatBusy).
+// Redo (shell/undo.ts), Report a problem, the links toggle, the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
-import { bus, type Tab } from '../lib/bus'
+import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
 import type { WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { DemoTag } from './DemoTag'
-import { FixButton, FixState } from './FixEntry'
+import { ProblemReportPopover } from './ProblemReport'
 import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
-import { listedLabels, type SideTab } from './LensSidebar'
-import { useLenses } from '../lib/lensMarks'
+import { listedLabels } from './LabelsSidebar'
 import { useConcepts } from '../canvas/concepts'
-import { useFeature } from '../features'
 
 export interface SurfaceTab extends TabOption<Tab> {
   /** `focus`: the focused pane shows it; `shown`: another pane does; `hidden`: no pane does */
@@ -35,48 +31,51 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
-  /** the Labels and Checks sidebar's tab while it is open (shell/LensSidebar.tsx), and how to open or close it */
-  side?: SideTab | null
-  onSide?: (tab: SideTab | null) => void
+  /** whether the Labels sidebar is open (shell/LabelsSidebar.tsx), and how to open or close it */
+  side?: boolean
+  onSide?: (open: boolean) => void
 }
 
-/** The top bar's two quiet buttons that open the Labels and Checks sidebar on their tab, each with its count; a button
- * whose feature is off (features.ts) is not shown. */
-function SideButtons({ ws, side, onSide }: { ws: string; side: SideTab | null; onSide: (tab: SideTab | null) => void }) {
-  const labelsOn = useFeature('labels')
-  const lensesOn = useFeature('lenses')
-  const concepts = useConcepts(ws)
-  const lenses = useLenses(ws)
-  const nLabels = listedLabels(concepts).length
-  const button = (tab: SideTab, icon: 'label' | 'comment', word: string, n: number) => (
-    <button type="button" className={`shell-side-btn${side === tab ? ' on' : ''}`} aria-pressed={side === tab} data-side={tab} onClick={() => onSide(side === tab ? null : tab)}>
-      <Icon name={icon} size={14} />
-      {word}
-      <span className="shell-side-n">{n}</span>
-    </button>
-  )
+/** The top bar's quiet button that opens the Labels sidebar, with the count of labels. */
+function LabelsButton({ ws, open, onSide }: { ws: string; open: boolean; onSide: (open: boolean) => void }) {
+  const n = listedLabels(useConcepts(ws)).length
   return (
     <span className="shell-side-btns">
-      {labelsOn && button('labels', 'label', 'Labels', nLabels)}
-      {lensesOn && button('checks', 'comment', 'Checks', lenses.length)}
+      <button type="button" className={`shell-side-btn${open ? ' on' : ''}`} aria-pressed={open} data-side="labels" onClick={() => onSide(!open)}>
+        <Icon name="label" size={14} />
+        Labels
+        <span className="shell-side-n">{n}</span>
+      </button>
     </span>
   )
 }
 
-export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopBarProps) {
+export function TopBar({ ws, tabs, onTab, onTabDrag, side = false, onSide }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)
+  const [problemOpen, setProblemOpen] = useState(false)
+  const [prefill, setPrefill] = useState<ProblemPrefill | null>(null)
   const [tools, setTools] = useState<HTMLSpanElement | null>(null)
   const [path, setPath] = useState<string | null>(null)
   const links = useLinksVisible()
   const history = useUndo(ws)
-  // a failure's Report a problem drafts a report through main (shell/ShareReport), which listens for it itself
+  useEffect(
+    () =>
+      bus.on('reportProblem', (p) => {
+        setThemeOpen(false)
+        setSettingsOpen(false)
+        setPrefill(p)
+        setProblemOpen(true)
+      }),
+    [],
+  )
   // a notice's Open Settings (chat/Notice.tsx, the bus's `openSettings`) opens the settings under the gear
   useEffect(
     () =>
       bus.on('openSettings', () => {
         setThemeOpen(false)
+        setProblemOpen(false)
         setSettingsOpen(true)
       }),
     [],
@@ -112,31 +111,42 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
             onClick={() => onTab(t.value)}
           >
             <span className="tab-label">{t.label}</span>
-            {t.dot && <span className="dot tab-dot" role="img" aria-label="Unread" />}
+            {t.busy ? <Spinner size={10} className="tab-dot tab-spinner" label="Writing" /> : t.dot && <span className="dot tab-dot" role="img" aria-label="Unread" />}
           </button>
         ))}
       </nav>
       <span className="shell-spacer" />
-      <FixState ws={ws} />
-      <FixButton />
-      {onSide && <SideButtons ws={ws} side={side} onSide={onSide} />}
+      {onSide && <LabelsButton ws={ws} open={side} onSide={onSide} />}
       <span ref={setTools} className="shell-tools">
         <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />
         <Button variant="icon" icon="redo" title={history.labels.redo ? `Redo: ${history.labels.redo}` : 'Redo'} aria-label="Redo" disabled={!history.labels.redo} onClick={history.redo} data-tel="redo" />
+        <Button variant="icon" icon="bug" title="Report a problem" aria-label="Report a problem" aria-haspopup="dialog" aria-expanded={problemOpen} onClick={() => {
+            setThemeOpen(false)
+            setSettingsOpen(false)
+            setPrefill(null)
+            setProblemOpen((o) => !o)
+          }}
+          data-tel="report-problem" />
         <Button variant="icon" icon={links ? 'link' : 'link-off'} title={links ? 'Hide links' : 'Show links'} aria-label={links ? 'Hide links' : 'Show links'} aria-pressed={links} className={`shell-links${links ? ' on' : ''}`} onClick={toggleLinks} data-tel="links" />
         <Button variant="icon" icon="palette" title="Theme" aria-label="Theme" aria-haspopup="dialog" aria-expanded={themeOpen} onClick={() => {
             setSettingsOpen(false)
+            setProblemOpen(false)
             setThemeOpen((o) => !o)
           }}
           data-tel="theme" />
         <Button ref={setGear} variant="icon" icon="gear" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => {
             setThemeOpen(false)
+            setProblemOpen(false)
             setSettingsOpen((o) => !o)
           }}
           data-tel="settings" />
       </span>
       {/* the popover hangs under the tools, flush with their right end */}
       <ThemePopover anchor={tools} open={themeOpen} onClose={() => setThemeOpen(false)} />
+      <ProblemReportPopover ws={ws} anchor={tools} open={problemOpen} prefill={prefill} onClose={() => {
+          setProblemOpen(false)
+          setPrefill(null)
+        }} />
       <SettingsPopover ws={ws} anchor={gear} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </header>
   )

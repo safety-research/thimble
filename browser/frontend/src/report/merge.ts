@@ -39,3 +39,13 @@ export function mergeUnsaved(stored: DocBlocks, base: DocBlocks, mine: DocBlocks
   return { title: mine.title !== base.title ? mine.title : stored.title, blocks: out }
 }
 
+/** The blocks shown locked: the stored document's locks, with each lock the analyst set or cleared that the server has
+ * not answered yet (`pending`, block id to locked) shown as clicked, so a click on a slow server shows at once. */
+export function locksShown(stored: ReadonlySet<string>, pending: ReadonlyMap<string, boolean>): Set<string> {
+  const out = new Set(stored)
+  for (const [id, on] of pending) {
+    if (on) out.add(id)
+    else out.delete(id)
+  }
+  return out
+}

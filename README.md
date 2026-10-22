@@ -98,18 +98,18 @@ thimble-browser
 ```
 
 `thimble-browser` starts on the folder you are in, as `claude` does (`thimble-browser path/to/folder` names another).
-It prints a sign-in link, opens the page when this machine has a browser, and listens on 127.0.0.1, port 8000 or the
-next free one. The file browser shows the folder. You ask Claude a question in the chat, and Claude answers with cards that show the
-evidence; every number and quote in the answer links to the lines it came from. Claude's code runs in a sandbox that
-reads the folder and has no network. The browser workbench needs credentials for the Claude API, an API key or
-Workload Identity Federation. [browser/README.md](browser/README.md) says how to give them, and what else it does.
+It starts the server on 127.0.0.1, port 8300 or the next free one, and prints the page's sign-in link. The server
+runs the chat itself, with an Anthropic API key (the default), Workload Identity Federation, or your Claude Code sign-in,
+chosen at install or at the page's first start. The file browser shows the folder. You ask Claude a question in the page's chat, and
+Claude answers with cards that cite the evidence. Claude's card code runs in a sandbox that reads the folder.
+[browser/README.md](browser/README.md) says what else it does.
 
 ## Develop
 
 | Folder | What it holds |
 |---|---|
 | `plugin/` | the terminal plugin: the `thimble` command and its kernel, the hooks that draw in the terminal, the checker and the card runner, and the texts the model reads |
-| `browser/` | the browser workbench: the page (`browser/frontend`), the server (`browser/server`), its prompts and its samples |
+| `browser/` | the browser workbench (thimble 0.8's browser mode): the page (`browser/frontend`), the server (`browser/backend`), the plugin its session loads (`browser/plugin`) and its prompts |
 | `scripts/` | `install.sh`, `check.sh` (the checks CI runs), `scan.sh` and the git hooks |
 
 To try the plugin from a checkout, start Claude Code with `claude --plugin-dir plugin`. [CONTRIBUTING.md](CONTRIBUTING.md)

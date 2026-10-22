@@ -9,6 +9,15 @@ import { bus } from '../lib/bus'
 import type { View } from '../lib/types'
 import { viewsForFile } from '../lib/views'
 
+const TYPE_GLOB = /^(?:\*\*\/)?\*(\.[A-Za-z0-9_+-]{1,16})$/
+
+/** The suffix a claim names when it is one extension's glob, such as `*.vtt`, lower-cased; null otherwise (backend
+ * views.type_suffix). */
+export function typeSuffix(glob: string): string | null {
+  const m = TYPE_GLOB.exec(glob.trim())
+  return m ? m[1].toLowerCase() : null
+}
+
 /** A path's suffix, lower-cased with its dot, or '' when its name has none. */
 export function suffixOf(path: string): string {
   const name = path.slice(path.lastIndexOf('/') + 1)

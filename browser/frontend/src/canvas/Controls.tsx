@@ -1,5 +1,8 @@
 // The board's controls. At the top right, the bar that adds to the board (Card · Group, and Group ⌘G for a multiple
-// selection). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and
+// selection) and Comments, which lists the checks that comment on the cards with their switches and counts, as the
+// Report's Comments pane does (report/Checks.tsx CheckRows), and + for a new one; it carries the accent dot while a
+// check's run left comments on the cards that the analyst has not looked at, until the menu opens
+// (report/newComments.ts). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and
 // the minimap, where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the
 // rest faint.
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
@@ -9,8 +12,15 @@ import { Kbd } from '../components/Marks'
 import { Popover } from '../components/Menu'
 import { TipButton, useTooltip } from '../components/Tooltip'
 import { choices, filterOn, toggled, activeParts, type CardFilter, type FilterCard } from './cardFilter'
+import { CardCheckPart } from './CheckStatus'
+import { CHECK_STATES, CHECK_WORDS } from '../lib/cardCheck'
 import { MINIMAP, zoomLabel, type Board, type Layout, type Minimap, type View } from './layout'
 import { shortcutLabel } from '../lib/platform'
+import type { CanvasComment } from '../lib/types'
+import { CheckRows, NewCommentsDot, type Checks } from '../report/Checks'
+import { CANVAS, checksFor } from '../report/checkComments'
+import { useNewComments } from '../report/newComments'
+import { IconButton } from '../report/icons'
 
 /** A label the canvas can be filtered by (its unit is the card), with its values and how many cards each marks. */
 export interface CanvasLabel {
@@ -48,6 +58,10 @@ export interface ControlsProps {
   /** the server's filter has been read: until then the menu stays shut, so a choice made on an empty filter never
    * overwrites the one kept */
   filterReady: boolean
+  ws: string
+  /** the workspace's checks, and the open comments on the cards, whether their check is on or off */
+  checks: Checks
+  comments: readonly CanvasComment[]
 }
 
 export function Controls(p: ControlsProps) {
@@ -69,6 +83,7 @@ export function Controls(p: ControlsProps) {
             </svg>
             Group
           </button>
+          <CommentsButton ws={p.ws} checks={p.checks} comments={p.comments} />
           {p.several > 1 && (
             <>
               <span className="bctl-sep" />
@@ -115,6 +130,47 @@ export function Controls(p: ControlsProps) {
   )
 }
 
+/** Comments in the top bar: the count of the comments shown on the cards, the new comments' dot, and a menu of the
+ * checks that comment on them, each with its switch, its count and its card (CheckRows), with + for a new check over
+ * the cards. While the menu is open, the new comments on the cards are looked at. */
+export function CommentsButton({ ws, checks, comments }: { ws: string; checks: Checks; comments: readonly CanvasComment[] }) {
+  const [open, setOpen] = useState(false)
+  const { runs: fresh, look } = useNewComments(ws, checks, CANVAS)
+  useEffect(() => {
+    if (open) look()
+  }, [open, look])
+  const [adding, setAdding] = useState<HTMLElement | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const head = useRef<HTMLDivElement>(null)
+  const mine = new Set(checksFor(checks.list, CANVAS).map((c) => c.id))
+  const shown = comments.filter((c) => c.check == null || (checks.on.has(c.check) && mine.has(c.check))).length
+  const close = () => {
+    setOpen(false)
+    setAdding(null)
+  }
+  return (
+    <>
+      <button ref={btn} type="button" className={`bctl-btn bctl-comments${open ? ' is-open' : ''}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
+        <Icon name="comment" size={14} />
+        Comments
+        {shown > 0 && <span className="bctl-comments-count">{shown}</span>}
+        {fresh.length > 0 && <NewCommentsDot />}
+      </button>
+      <Popover anchor={btn} open={open} onClose={close} align="end" width={280} label="Comments" className="bcomments">
+        <div className="wu-checks bcomments-pane">
+          <div className="wu-checks-head bcomments-head" ref={head}>
+            <span className="wu-sec-name">Comments</span>
+            <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
+              <Icon name="plus" size={14} />
+            </IconButton>
+          </div>
+          <CheckRows ws={ws} surface={CANVAS} checks={checks} comments={comments} adding={adding} onAdding={setAdding} />
+        </div>
+      </Popover>
+    </>
+  )
+}
+
 /**
  * The search button and its menu: a search field over the cards' questions and takeaways, then a heading per filter
  * part, each choice a row with its count and a check while set. The menu stays open between clicks.
@@ -150,6 +206,10 @@ function FilterButton(p: ControlsProps & { set: number }) {
     )
   }
   const starred = p.cards.filter((c) => c.starred).length
+  const locked = p.cards.filter((c) => c.locked).length
+  // what the card check found, in the states' own order, each that a card has or the filter holds
+  const checkCounts = new Map(choices(p.cards, 'checks').map((c) => [c.value, c.count]))
+  const checks = CHECK_STATES.filter((s) => checkCounts.has(s) || f.checks.includes(s))
   const name = p.set ? `Search and filter the cards (${p.set} set)` : 'Search and filter the cards'
   const { props: tipProps, tip } = useTooltip(open ? null : name)
   return (
@@ -185,6 +245,11 @@ function FilterButton(p: ControlsProps & { set: number }) {
           {part('Kind', 'kinds', (v) => v, true)}
           {part('Group', 'groups', p.groupName)}
           {part('Made by', 'makers', (v) => v, true)}
+          <CardCheckPart
+            cards={p.board.cells}
+            open={open}
+            rows={checks.length ? checks.map((s) => row(`checks:${s}`, CHECK_WORDS[s], f.checks.includes(s), checkCounts.get(s) ?? 0, () => p.onFilter({ ...f, checks: toggled(f.checks, s) }))) : null}
+          />
           {p.labels.some((l) => l.values.length) && (
             <div className="bfilter-part">
               <div className="menu-heading" role="presentation">
@@ -203,6 +268,7 @@ function FilterButton(p: ControlsProps & { set: number }) {
               Marked
             </div>
             {row('starred', 'Starred', f.starred, starred, () => p.onFilter({ ...f, starred: !f.starred }))}
+            {row('locked', 'Locked', f.locked, locked, () => p.onFilter({ ...f, locked: !f.locked }))}
           </div>
           {(filterOn(f) || p.label) && (
             <>

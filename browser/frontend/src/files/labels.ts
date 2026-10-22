@@ -2,8 +2,8 @@
 // stripes a file row carries, the marks over the columns of the labels that are on and the focused one, a record's
 // gutter cells and marks, the marks a custom view's records take, and a text cut into segments at its spans. A class's
 // colour is an index into the label palette, --label-1..LABEL_COLOURS; 0 is --label-none, the grey of "no match".
-import labelOrder from '../../../server/thimble_browser/views/kit/label_order.json'
-import labelWheel from '../../../server/thimble_browser/views/kit/label_wheel.json'
+import labelOrder from '../../../backend/app/label_order.json'
+import labelWheel from '../../../backend/app/label_wheel.json'
 import { recordKey, recordOf } from '../lib/refs'
 import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow, ReadCut } from '../lib/types'
 
@@ -32,14 +32,6 @@ export const marksOf = (k: Pick<Concept, 'unit' | 'marks'>): LabelMarks => k.mar
 /** What a label over files marks, as the canvas label card's chip says it: `marks spans`, `marks records`, `marks files`. */
 export const marksWord = (k: Pick<Concept, 'unit' | 'marks'>): string => `marks ${marksOf(k)}s`
 
-/** What made a label, in the words the terminal says it with (plugin/panes/labels.js howMade): regex, code, or read by
- * Claude (a model reads each record). Pure. */
-export const howMade = (kind: string): string => (kind === 'regex' ? 'regex' : kind === 'code' ? 'code' : 'read by Claude')
-
-/** A label's definition, what its run applies: the pattern, the code, or the model's question (a prompt label keeps
- * it in its description, backend labels/classify.py). Pure. */
-export const labelDefinition = (k: Pick<Concept, 'kind' | 'spec' | 'description'>): string => ((k.kind === 'prompt' ? k.description || k.spec : k.spec) ?? '').trim()
-
 /** The patterns of a label's glob, comma-separated as the server keeps them. */
 export const globPatterns = (glob: string | null | undefined): string[] => (glob ?? '').split(',').map((p) => p.trim()).filter(Boolean)
 
@@ -51,7 +43,7 @@ export const LABEL_COLOURS = 12
 export const LABEL_PICKS = 18
 
 /** The palette's places as the pickers show them, around the color wheel: a column per hue (red, orange, gold, green,
- * teal, sky, blue, purple, pink), its light place above its dark (server/thimble_browser/views/kit/label_wheel.json, which the view kit's
+ * teal, sky, blue, purple, pink), its light place above its dark (backend/app/label_wheel.json, which the view kit's
  * picker reads too). */
 export const LABEL_WHEEL: readonly (readonly number[])[] = labelWheel
 
@@ -115,6 +107,14 @@ export const isMultiClass = (classes: readonly Pick<LabelClass, 'color'>[]): boo
 export const MULTI_COLOUR = 'var(--label-multi)'
 
 /** A label's own colour: its first class's, or MULTI_COLOUR for a multi-class label. */
+/** What made a label, in the words the terminal says it with (plugin/panes/labels.js howMade): regex, code, or read by
+ * Claude (a model reads each record). Pure. */
+export const howMade = (kind: string): string => (kind === 'regex' ? 'regex' : kind === 'code' ? 'code' : 'read by Claude')
+
+/** A label's definition, what its run applies: the pattern, the code, or the model's question (a prompt label keeps
+ * it in its description). Pure. */
+export const labelDefinition = (k: Pick<Concept, 'kind' | 'spec' | 'description'>): string => ((k.kind === 'prompt' ? k.description || k.spec : k.spec) ?? '').trim()
+
 export const mainColour = (k: Pick<Concept, 'labels' | 'classes'>): string => {
   const classes = classesOf(k)
   return isMultiClass(classes) ? MULTI_COLOUR : colourVar(classes[0]?.color)
@@ -711,6 +711,19 @@ export function viewLabels(all: readonly Concept[], presence: ReadonlyMap<string
   return out
 }
 
+/** The labels a view turns on the first time it is opened, so its records open coloured: while no label that marks its
+ * files is on, the orientation's labels over files that mark them (made by one of `orientChats`), oldest first, at most
+ * `max`; none once any is on. Pure. */
+export function viewDefaults(all: readonly Concept[], presence: ReadonlyMap<string, Record<string, Record<string, number>>>, claims: readonly string[], orientChats: ReadonlySet<string>, max = 2): string[] {
+  const marking = viewLabels(all, presence, claims)
+  const mine = all.filter((k) => marking.has(k.id))
+  if (mine.some((k) => k.shown)) return []
+  return mine
+    .filter((k) => !k.trial && k.created_by.startsWith('chat:') && orientChats.has(k.created_by.slice(5)))
+    .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+    .slice(0, max)
+    .map((k) => k.id)
+}
 
 /** A label's name made unique among `names`: the name, else it with the first free number after it. Pure. */
 export function freeName(name: string, names: Iterable<string>): string {

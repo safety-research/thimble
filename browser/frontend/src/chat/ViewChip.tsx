@@ -29,9 +29,11 @@ import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
 import type { Proposal, Settings, StartAnswer } from '../lib/types'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
+import { TERMINAL_WAIT, useTerminalWaits } from './waiting'
 import { useReadyViews } from '../files/viewReady'
 import { AGENT_EFFORTS } from './ModelLine'
 import { openThread } from './Notes'
+import { refusalActions, refusalLine } from './Refused'
 
 /** How many view builds run at once (backend dev.VIEW_POOL); the rest wait in the queue. */
 export const VIEW_POOL = 3
@@ -74,8 +76,9 @@ export const BUILD_TERMINAL_TIP = 'In your terminal: ↓ to thimble:view-builder
 /** The words a build stopped by the analyst's quit shows. */
 export const BUILD_QUIT_LINE = 'Stopped when your Claude Code session ended.'
 
-/** Why a chip shows ✕, for its tooltip: its stop at the quit, or its error. Pure. */
-export function failedWhy(p: Pick<Proposal, 'error' | 'stopped_by'> | null | undefined): string {
+/** Why a chip shows ✕, for its tooltip: the build's refusal, its stop at the quit, or its error. Pure. */
+export function failedWhy(p: Pick<Proposal, 'error' | 'stopped_by' | 'refused'> | null | undefined): string {
+  if (p?.refused) return refusalLine(p.refused)
   if (p?.stopped_by === 'quit') return BUILD_QUIT_LINE
   return p?.error ?? ''
 }
@@ -138,10 +141,14 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   }, [ws])
   const key = p?.slug ?? slug ?? null
   const status = p?.status ?? null
+  // its builder waits on a permission prompt in the terminal (chat/waiting.ts), read while it builds
+  const terminal = useTerminalWaits(ws, status === 'building' && !!p?.chat)
+  const inTerminal = status === 'building' && !!p?.chat && terminal.has(p.chat)
   if (status === 'dropped') return null
   const pending = status === 'queued' || status === 'building'
   const changeFailed = status === 'built' && p?.failed_change != null
-  const failed = status === 'failed' || changeFailed
+  const refused = !!p?.refused && !pending && status !== 'built'
+  const failed = status === 'failed' || changeFailed || refused
   const ran = p?.values?.model ? { model: p.values.model, effort: p.values.effort ?? '' } : p?.model ? { model: p.model, effort: p.effort ?? '' } : null
   const values = picked ?? ran ?? dev ?? { model: '', effort: '' }
   const open = () => {
@@ -154,7 +161,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
     }
   }
   const after = (what: string) => (a: StartAnswer & Partial<Proposal>) => {
-    if (a.kind && !a.agentId) bus.emit('toast', { text: `${what} ${name} didn't start: ${a.reason ?? a.kind}`, kind: 'error' })
+    if (a.kind && !a.agentId) bus.emit('toast', { text: `${what} ${name} didn't start: ${refusalLine({ kind: a.kind, reason: a.reason ?? '', expired: a.expired })}`, kind: 'error' })
     return refreshProposals(ws)
   }
   // Retry and Try again: a new builder through thimble's plugin, with the Build menu's values
@@ -168,21 +175,34 @@ export function ViewChip({ ws, slug, name, className }: Props) {
       .catch((e: Error) => bus.emit('toast', { text: `Could not retry ${p.name}. ${e.message}`, kind: 'error' }))
       .finally(() => setRetrying(false))
   }
+  // Start it: a refused typed build (main's propose_view call), started as a click with the same request
+  const startIt = () => {
+    const rid = p?.refused?.request
+    if (!rid) return
+    setRetrying(true)
+    api
+      .startIt(ws, rid)
+      .then(after('The build of'))
+      .catch((e: Error) => bus.emit('toast', { text: `Could not start ${name}. ${e.message}`, kind: 'error' }))
+      .finally(() => setRetrying(false))
+  }
+  const actions = refused ? refusalActions(p!.refused!.kind, !!p!.refused!.expired) : []
   const clickable = status === 'suggested' ? false : pending || failed ? !!p?.chat : !!key
   const why = failedWhy(p)
   return (
     <span
-      className={['view-chip', status ? `view-chip-${status}` : '', className ?? ''].filter(Boolean).join(' ')}
+      className={['view-chip', status ? `view-chip-${status}` : '', refused ? 'view-chip-refused' : '', className ?? ''].filter(Boolean).join(' ')}
       data-anchor={key ? `view:${key}` : undefined}
       data-anchor-text={name}
       data-status={status ?? undefined}
+      data-refused={refused ? p!.refused!.kind : undefined}
       data-stopped-by={p?.stopped_by ?? undefined}
     >
       <ViewTab name={name} className="view-chip-chip" onClick={clickable ? (e) => (e.stopPropagation(), open()) : undefined} />
       {pending && (
         <Tipped text={status === 'building' ? BUILD_TERMINAL_TIP : `At most ${VIEW_POOL} views build at once`} className="view-chip-state">
-          <Spinner size={10} label={status === 'queued' ? 'Queued' : 'Building'} />
-          <span className="view-chip-word">{status === 'queued' ? queuedText(proposals ?? []) : buildingText(p)}</span>
+          {inTerminal ? <span className="dot tt-waiting view-chip-wait" role="img" aria-label={TERMINAL_WAIT} /> : <Spinner size={10} label={status === 'queued' ? 'Queued' : 'Building'} />}
+          <span className="view-chip-word">{status === 'queued' ? queuedText(proposals ?? []) : inTerminal ? TERMINAL_WAIT.toLowerCase() : buildingText(p)}</span>
         </Tipped>
       )}
       {status === 'built' && !changeFailed && key && ready.includes(key) && (
@@ -199,12 +219,19 @@ export function ViewChip({ ws, slug, name, className }: Props) {
           ) : (
             <Mark kind="failed" className="view-chip-mark" />
           )}
-          {p?.stopped_by === 'quit' && <span className="view-chip-word">stopped</span>}
-          <Button size="sm" className="view-chip-retry" busy={retrying} aria-label={`Retry ${name}`} onClick={(e) => (e.stopPropagation(), retry())}>
-            Retry
-          </Button>
-          <BuildMenu ws={ws} name={name} values={values} onPick={setPicked} />
-          {p?.stopped_by !== 'quit' && <ReportProblemButton compact description={failureText(changeFailed ? `The change to the view ${name} failed.` : `The view ${name} did not build.`, p?.error)} focus={p?.chat ? [p.chat] : []} className="view-chip-report" />}
+          {p?.stopped_by === 'quit' && !refused && <span className="view-chip-word">stopped</span>}
+          {refused && <span className="view-chip-word">didn't start</span>}
+          {actions.includes('start-it') ? (
+            <Button size="sm" className="view-chip-start-it" busy={retrying} aria-label={`Start ${name}`} onClick={(e) => (e.stopPropagation(), startIt())}>
+              Start it
+            </Button>
+          ) : !refused || actions.includes('try-again') ? (
+            <Button size="sm" className="view-chip-retry" busy={retrying} aria-label={`${refused ? 'Try again' : 'Retry'} ${name}`} onClick={(e) => (e.stopPropagation(), retry())}>
+              {refused ? 'Try again' : 'Retry'}
+            </Button>
+          ) : null}
+          {!refused && <BuildMenu ws={ws} name={name} values={values} onPick={setPicked} />}
+          {!refused && p?.stopped_by !== 'quit' && <ReportProblemButton compact description={failureText(changeFailed ? `The change to the view ${name} failed.` : `The view ${name} did not build.`, p?.error)} focus={p?.chat ? [p.chat] : []} className="view-chip-report" />}
         </>
       )}
     </span>

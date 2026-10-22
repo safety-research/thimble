@@ -5,6 +5,14 @@
   flex: none;
   cursor: default;
 }
+.chat-demo-note-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-demo-note-x {
+  flex: none;
+  margin: -4px -6px -4px 0;
+}
 /* The line under the top bar on a demo page (shell/DemoLine), on the window's paper over the chat column and the panes,
    its left edge at the brand's; and the start page's line under its title while it lists a demo dataset (StartPage) */
 .shell-demo-line {

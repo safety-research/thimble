@@ -88,6 +88,11 @@ function holder(): Holder {
   return g[HOLDER]!
 }
 
+/** What the log holds now, oldest first. */
+export function recentProblems(): ProblemEntry[] {
+  return holder().ring.list()
+}
+
 /** Keep one entry, stamped now unless it says when it happened. */
 export function recordProblem(e: Omit<ProblemEntry, 'ts'> & { ts?: string }): void {
   holder().ring.push({ ...e, ts: e.ts ?? new Date().toISOString() })

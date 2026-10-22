@@ -1,12 +1,11 @@
-// The chat's composer: the shared composer (components/Composer) with main's model line at its foot (ModelLine). Main's
-// model is picked in Settings. Its effort and fast mode are this workspace's choice, which its next request takes
-// (PUT /session/effort, /session/fast); a view's build thread has no bolt. A thread whose message goes to a session thimble starts shows that role's line instead
+// The chat's composer: the shared composer (components/Composer) with main's model line at its foot (ModelLine). Main
+// runs in the analyst's Claude Code session, so its model is chosen in the terminal with /model. Its effort and fast mode
+// are kept for its next launch (events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
 // (`chip`, RoleChip). A thread whose run the browser can stop (main's turn, a side thread's fork, the orientation, a
 // writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the send square is
 // its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft.
 import { useRef, useState, type ReactNode } from 'react'
 import { ComposerFrame, type ComposerFrameProps } from '../components/Composer'
-import { keyAtEmpty } from '../cards/keys'
 import type { MainEffort } from '../lib/types'
 import { MODEL_TIP, ModelLine } from './ModelLine'
 
@@ -17,7 +16,7 @@ export interface ComposerProps {
   effort?: MainEffort | null
   /** picks main's effort; without it the foot only names the model */
   onEffort?: (e: MainEffort) => void
-  /** main's fast mode (ModelLine.mainFast); null for no bolt (no session attached, or a view's build thread) */
+  /** main's fast mode (ModelLine.mainFast); null while no session is attached */
   fast?: boolean | null
   onFast?: (on: boolean) => void
   /** the foot's line in place of main's, for a message that goes to another session (RoleChip) */
@@ -72,7 +71,6 @@ export function Composer({ model, effort, onEffort, fast = null, onFast, chip: o
       onEffort={(e) => onEffort?.(e as MainEffort)}
       fast={fast ?? false}
       onFast={fast != null ? onFast : undefined}
-      noFast={fast == null}
       label="main and its threads"
     />
   ) : undefined
@@ -91,7 +89,6 @@ export function Composer({ model, effort, onEffort, fast = null, onFast, chip: o
       busy={sending}
       model={chip}
       stop={stop}
-      onEmptyKey={keyAtEmpty}
     />
   )
 }

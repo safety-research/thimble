@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="thimble">
+  <!-- The logo's glyph alone (docs/assets/thimble-logo.svg), redrawn for a square: a tapered dome whose sides run
+       into its curve without a corner, a rim band and a base, with the logo's stroke width, dot size and pitch. The
+       dots are laid out like the logo's: every row symmetric about the centre line, the top pair and the
+       bottom row 3.82 units clear of the stroke's inner edge, clipped to the dome's inside 2 units clear. -->
+  <defs>
+    <clipPath id="thimble-icon-dimples"><path d="M19.73 62.2 L21.74 48.86 C22.51 43.67 23.69 39.19 25.39 34.92 C27.07 30.7 28.94 27.4 31.37 24.4 C32.57 22.92 33.66 21.8 35.01 20.66 C36.35 19.53 37.5 18.76 38.97 17.99 C40.44 17.22 41.66 16.76 43.26 16.36 C44.88 15.96 46.23 15.8 48 15.8 C49.77 15.8 51.12 15.96 52.74 16.36 C54.34 16.76 55.56 17.22 57.03 17.99 C58.5 18.76 59.65 19.53 60.99 20.66 C62.34 21.8 63.43 22.92 64.63 24.4 C67.06 27.4 68.93 30.7 70.61 34.92 C72.31 39.19 73.49 43.67 74.26 48.86 L76.27 62.2 Z"/></clipPath>
+  </defs>
+  <g fill="none" stroke="#1f2430" stroke-width="7.6" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M10 88 L16 48 C19.3 26 31 10 48 10 C65 10 76.7 26 80 48 L86 88"/>
+    <path d="M4 88 H92"/>
+    <path d="M13 68 H83"/>
+  </g>
+  <g fill="#43389e" clip-path="url(#thimble-icon-dimples)">
+    <circle cx="41.12" cy="21.96" r="2.7"/>
+    <circle cx="54.88" cy="21.96" r="2.7"/>
+    <circle cx="34.25" cy="33.87" r="2.7"/>
+    <circle cx="48" cy="33.87" r="2.7"/>
+    <circle cx="61.75" cy="33.87" r="2.7"/>
+    <circle cx="27.38" cy="45.78" r="2.7"/>
+    <circle cx="41.12" cy="45.78" r="2.7"/>
+    <circle cx="54.88" cy="45.78" r="2.7"/>
+    <circle cx="68.62" cy="45.78" r="2.7"/>
+    <circle cx="20.5" cy="57.68" r="2.7"/>
+    <circle cx="34.25" cy="57.68" r="2.7"/>
+    <circle cx="48" cy="57.68" r="2.7"/>
+    <circle cx="61.75" cy="57.68" r="2.7"/>
+    <circle cx="75.5" cy="57.68" r="2.7"/>
+  </g>
+</svg>

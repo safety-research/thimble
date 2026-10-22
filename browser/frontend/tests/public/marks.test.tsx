@@ -40,3 +40,23 @@ test('while the reply streams its marks wait, whatever an earlier check said', a
   const el = await mount(<ChatMarkdown text="[12](#) runs" streaming checks={[item(0, '12', { status: 'failed' })]} />)
   expect(el.querySelector('.mark')?.getAttribute('data-mark-look')).toBe('pending')
 })
+
+test("a turn's marks go to its own text rows in order, and its reply gets the footer", async () => {
+  const { foldRecords } = await import('../../src/chat/model.ts')
+  const rows = foldRecords([
+    { type: 'user', text: 'q1' },
+    { type: 'text', delta: 'Old [a](#).' },
+    { type: 'done', turn: 'aaaaaaaa' },
+    { type: 'text', delta: 'New [b](#) and ' },
+    { type: 'tool_use', id: 't1', name: 'Read', input: {} },
+    { type: 'text', delta: '[c](#).' },
+    { type: 'done', turn: 'bbbbbbbb' },
+    { type: 'marks', turn: 'bbbbbbbb', items: [item(1, 'c', { n: 2, status: 'corrected', shown: 'C' }), item(0, 'b', { n: 1 })] },
+  ])
+  const texts = rows.filter((r) => r.kind === 'text') as { text: string; checks?: MarkItem[]; turnMarks?: MarkItem[] }[]
+  expect(texts.map((r) => r.text)).toEqual(['Old [a](#).', 'New [b](#) and ', '[c](#).'])
+  expect(texts[0].checks).toBeUndefined()
+  expect(texts[1].checks?.map((m) => m.words)).toEqual(['b'])
+  expect(texts[2].checks?.map((m) => m.words)).toEqual(['c'])
+  expect(texts[2].turnMarks?.length).toBe(2)
+})

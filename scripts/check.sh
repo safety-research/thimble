@@ -9,9 +9,11 @@
 #              ripgrep)
 #   python     pytest over plugin/ (the kernel)
 #
-#   the browser workbench (browser/):
-#   parity     the browser's shared prompts still apply to the plugin's texts (browser/prompts/shared.json)
-#   server     the server's tests (browser/server/tests); the sandbox tests need scripts/install.sh to have run
+#   the browser workbench (browser/, thimble 0.8's browser mode):
+#   parity     the browser's prompts: each renders, names only the tools and hints the code has, and is written in
+#              American English (browser/backend/tests_public/test_prompts.py, test_american_names.py)
+#   server     the server's tests (browser/backend/tests_public), in parallel, without the caller's THIMBLE_* settings;
+#              the sandbox tests need scripts/install.sh to have run
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing
 #
 # The plugin's steps need claude (Claude Code 2.1.307 or later), node 22.18 or later, and Python 3.10 or later with pytest:
@@ -29,6 +31,16 @@ trap 'rm -rf "$fresh"' EXIT
 mkdir -p "$fresh/claude" "$fresh/thimble"
 export THIMBLE_HOME="$fresh/thimble"
 
+# browser_tests ARGS...: pytest in browser/backend with the test extras, without the caller's THIMBLE_* settings and API
+# keys, so that a shell that runs a server or holds a key cannot point the tests at its data or let a test reach the API
+browser_tests() {
+  (
+    for v in $(compgen -e | grep -E '^(THIMBLE_|ANTHROPIC_API_KEY$|ANTHROPIC_AUTH_TOKEN$)' || true); do unset "$v"; done
+    cd browser/backend && uv sync --quiet --frozen --no-dev --no-install-project --extra dev &&
+      THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest -q -p no:cacheprovider "$@"
+  )
+}
+
 for step in "${steps[@]}"; do
   printf '\n== %s\n' "$step"
   case "$step" in
@@ -39,11 +51,12 @@ for step in "${steps[@]}"; do
       while IFS= read -r f; do files+=("$f"); done < <(find plugin -name '*.test.mjs' -not -path '*/node_modules/*' | sort)
       node --test "${files[@]}" ;;
     python) "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ;;
-    parity) (cd browser/server && uv run --quiet --frozen --extra dev pytest -q -p no:cacheprovider tests/test_prompt_parity.py) ;;
-    server) (cd browser/server && uv run --quiet --frozen --extra dev pytest -q -p no:cacheprovider) ;;
+    parity) browser_tests tests_public/test_prompts.py tests_public/test_american_names.py ;;
+    server) browser_tests -n "${THIMBLE_TEST_WORKERS:-8}" tests_public ;;
     page)
       [ -d browser/frontend/node_modules ] || npm --prefix browser/frontend ci --no-audit --no-fund
-      (cd browser/frontend && npm run --silent typecheck && npx vitest run && npx vite build --logLevel warn) ;;
+      # the build goes to a temporary folder, so the frontend/dist a running server serves is left alone
+      (cd browser/frontend && npm run --silent typecheck && npx vitest run && npx vite build --outDir "$fresh/dist" --emptyOutDir --logLevel warn) ;;
     *) echo "check.sh: no step $step (the steps: validate, plugin, node, python, parity, server, page)" >&2; exit 2 ;;
   esac
 done

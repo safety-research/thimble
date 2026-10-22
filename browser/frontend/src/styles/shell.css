@@ -446,12 +446,39 @@
 .settings-effort {
   justify-self: start;
 }
+/* a cell that cannot be changed here (SettingsPopover's lockedWhy): dimmed as a menu's disabled item, still focusable,
+   its reason in the tooltip; no wash on hover, since a click does nothing */
+.settings-locked {
+  justify-self: start;
+  opacity: 0.4;
+  cursor: default;
+}
+.chip.settings-locked.chip-act:hover,
+.btn.settings-locked:hover {
+  border-color: transparent;
+  background: transparent;
+}
+/* fast mode's lightning bolt in the table (ModelLine's FastBolt; its accent while on is components.css .fast-bolt) */
+.settings-fast {
+  justify-self: start;
+}
 /* each agent's permission mode under the table (SettingsPopover's MODE_ROWS): its name, then the mode's menu */
 .settings-modes {
   border-top: 1px solid var(--border-subtle);
 }
 .settings-modes .settings-row {
   grid-template-columns: 132px minmax(0, 1fr);
+}
+.settings-mode {
+  justify-self: start;
+}
+/* the Ask key choice (SettingsPopover's ASK_KEY_LABEL): ⌘-click or ⌥-click */
+.settings-ask-key {
+  justify-self: start;
+}
+/* labels' and the card check's cell where the others have their mode's menu (SettingsPopover's CALL_ROWS) */
+.chip.settings-mode-none {
+  color: var(--text-secondary);
 }
 /* under an agent's mode: who runs it and what it may do (SettingsPopover's agentLine) */
 .settings-agent-line {
@@ -464,6 +491,156 @@
   margin: 6px 6px 0;
   color: var(--text-secondary);
   font: var(--type-body-sm);
+}
+.settings-modes-warn {
+  margin: 6px 6px 0;
+  color: var(--status-warning);
+  font: var(--type-body-sm);
+}
+/* the Extensions section under the tables (ExtensionsSettings): a group under each heading, each row its name and one
+   line on the left and its switch at the right, every switch in one column; headings and hairlines as the tables' */
+.settings-switches {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-ext-group {
+  display: flex;
+  flex-direction: column;
+}
+.settings-ext-group + .settings-ext-group {
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-ext-head {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin: 0;
+  padding: 0 6px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.settings-ext-group > .settings-ext-row,
+.settings-ext {
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-ext-group > :last-child {
+  border-bottom: 0;
+}
+.settings-ext-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px;
+}
+.settings-ext-name {
+  display: inline-flex;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  text-align: left;
+  white-space: nowrap;
+}
+button.settings-ext-name:hover,
+button.settings-ext-name:active {
+  background: none;
+  color: var(--text-primary);
+}
+.settings-ext-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-ext-version {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.settings-ext-caret {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+button.settings-ext-name:hover .settings-ext-caret {
+  color: var(--text-secondary);
+}
+.settings-ext-name.open .settings-ext-caret {
+  transform: rotate(180deg);
+}
+.settings-ext-switch {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  align-items: center;
+}
+.settings-ext-line,
+.settings-ext-more,
+.settings-ext-ask {
+  grid-column: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+/* the line under a name, cut to one line until its details open; a reason it shows in full */
+.settings-ext-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-ext-line.open,
+.settings-ext-line.wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* an extension's details: its description, then each fact beside its key in the tertiary ink, the keys in one column */
+.settings-ext-more {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.settings-ext-more p {
+  margin: 0;
+}
+.settings-ext-facts {
+  display: grid;
+  grid-template-columns: minmax(52px, max-content) minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+}
+.settings-ext-facts div {
+  display: contents;
+}
+.settings-ext-facts dt {
+  color: var(--text-tertiary);
+}
+.settings-ext-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* the question whether to run an extension's orientation now, under its line */
+.settings-ext-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+/* a view of the extension above it: its name set in under the extension's, its switch in the same column */
+.settings-ext-row-extension-view {
+  padding-top: 0;
+  padding-left: 20px;
 }
 .settings-error {
   color: var(--status-negative);
@@ -483,33 +660,19 @@
   background: var(--overlay-bg);
   border-top: 1px solid var(--border-subtle);
 }
-.settings-foot .settings-check {
+.settings-foot .settings-tour {
   margin-right: auto;
   margin-left: -6px;
 }
-/* thimble browser's Claude table (shell/SettingsPopover): a name, then its control */
-.settings-claude .settings-row {
-  grid-template-columns: 84px minmax(0, 1fr);
+
+/* -------- Report a problem (shell/ProblemReport, inside a glass Popover): the form, then where the bundle is and where
+   to send it. While the tab is captured the dialog is transparent, so the picture shows the page. -------- */
+.problem-pop {
+  padding: 10px;
+  max-width: calc(100vw - 16px);
 }
-.settings-source {
-  justify-self: start;
-}
-.field.settings-key,
-.field.settings-wif {
-  width: 100%;
-  font: var(--type-mono);
-}
-.settings-key-saved {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  justify-self: start;
-}
-.settings-check-ok {
-  color: var(--text-secondary);
-}
-.settings-check-failed {
-  color: var(--status-negative);
+.problem-pop.is-capturing {
+  opacity: 0 !important;
 }
 .problem {
   display: flex;
@@ -517,6 +680,61 @@
   gap: 8px;
   font: var(--type-ui-sm);
   color: var(--text-primary);
+}
+.problem-label {
+  color: var(--text-secondary);
+}
+.problem-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.problem-note {
+  margin: -4px 0 0 21px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.problem-ready {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.problem-path {
+  padding: 6px 8px;
+  border-radius: var(--radius-ui);
+  background: var(--track-bg);
+  font: var(--type-mono-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.problem-actions {
+  display: flex;
+  gap: 6px;
+}
+.problem-send {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.problem-send a {
+  color: var(--text-accent);
+}
+.problem-error {
+  color: var(--status-negative);
+  font: var(--type-body-sm);
+}
+.problem-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+/* Report a problem where something failed (ReportProblemButton): a small quiet button after the failure's own words or
+   controls; in a view chip, the bug alone at the chip's height */
+.chat-landing-report.btn {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 .view-chip-report.btn {
   flex: none;
@@ -565,21 +783,6 @@
 }
 .shell-toast-text code {
   font: var(--type-mono-sm);
-}
-/* a toast's one button (Toasts `action`), such as Reopen: accent text, no frame */
-.shell-toast-action {
-  flex: none;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: var(--radius-ui);
-  background: none;
-  color: var(--accent);
-  font: var(--type-ui-sm);
-  font-weight: 500;
-  cursor: pointer;
-}
-.shell-toast-action:hover {
-  background: var(--surface-hover);
 }
 
 /* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */
@@ -656,9 +859,110 @@
 .shell[data-session='gone'] {
   filter: grayscale(1);
 }
+.shell-gone {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scrim);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--scrim);
+  -webkit-backdrop-filter: grayscale(1);
+  backdrop-filter: grayscale(1);
+}
+/* the permission requests of the sessions that go on without main, under the reconnect card */
+.shell-gone-asks {
+  width: min(560px, 100%);
+}
+.shell-gone-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, 100%);
+  box-sizing: border-box;
+  padding: 28px;
+  border-radius: var(--radius-card);
+}
+.shell-gone-title {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font: var(--type-title);
+  letter-spacing: var(--tracking-title);
+}
+.shell-gone-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-lg);
+}
+.shell-gone code {
+  font-family: var(--font-mono);
+}
+.shell-gone-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--radius-ui);
+  background: var(--track-bg);
+}
+.shell-gone-command code {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  font: var(--type-mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* the model table's notes and switches: a row's note under its name, an agent's web switch, the refusal row's switch */
+.settings-row-noted {
+  padding-bottom: 4px;
+}
+/* the dev row's fast switch, for code tickets alone, after its note */
+.settings-ticket-fast {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.settings-role-note {
+  grid-column: 1 / -1;
+  margin-top: -6px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.settings-row-off .settings-model,
+.settings-row-off .settings-effort {
+  opacity: 0.4;
+}
 .settings-web {
   justify-self: start;
   display: inline-flex;
+}
+.settings-next-start,
+.settings-main-mode,
+.settings-ignored {
+  color: var(--text-tertiary);
+}
+.settings-mode-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.settings-card-wait {
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.settings-fence-note {
+  color: var(--text-tertiary);
+}
+.shell-gone-agents {
+  color: var(--text-secondary);
 }
 
 /* the one line a browser that is not signed in sees in place of the app (SignIn), where the start page's title stands */
@@ -850,334 +1154,100 @@
   }
 }
 
-/* a surface whose feature Settings turned off (shell/FeatureOff.tsx) */
-.feature-off {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 24px;
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-}
-
-/* -------- Report a problem (shell/ShareReport): Fix this / Report this after a failure's words, and the preview of the
-   report with the privacy scan beside it. Placeholders of removed details are marked in the warning tint. -------- */
-.report-this {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.report-this-btn {
-  padding: 2px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-ui);
-  background: var(--surface-card);
-  color: var(--text-primary);
-  font: var(--type-ui-sm);
-  cursor: pointer;
-}
-.report-this-btn:hover {
-  background: var(--surface-hover);
-}
-.report-this-fix {
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-.shell-toast-report .report-this-btn {
-  padding: 1px 6px;
-}
-.share-scrim {
+/* how thimble reaches Claude (shell/ClaudeAccess): the setup step, and its line in Settings */
+.access-scrim {
   position: fixed;
   inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
   padding: 16px;
-  background: var(--scrim);
+  background: rgba(var(--ink-rgb), 0.28);
 }
-.share-dialog {
-  display: flex;
-  flex-direction: column;
-  width: min(1180px, 100%);
+.access {
+  width: min(520px, 100%);
   max-height: calc(100vh - 32px);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pane);
-  background: var(--paper-0);
-  box-shadow: var(--shadow-3);
-  overflow: hidden;
-}
-.share-head {
-  padding: 18px 22px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.share-head h2 {
-  margin: 0 0 4px;
-  font: 600 var(--text-lg) / 1.3 var(--font-body);
-}
-.share-head p {
-  margin: 0;
-  color: var(--text-secondary);
-  font: var(--type-body);
-}
-.share-body {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.share-main {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  padding: 14px 22px;
-}
-.share-tabs {
-  display: flex;
-  gap: 4px;
-}
-.share-tab {
-  padding: 4px 10px;
-  border-radius: var(--radius-ui);
-  font: var(--type-ui-sm);
-}
-.share-tab.on {
-  background: var(--surface-selected);
-}
-.share-text {
-  flex: 1 1 auto;
-  min-height: 320px;
-  margin: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border-subtle);
+  overflow: auto;
+  padding: 20px;
   border-radius: var(--radius-card);
   background: var(--surface-card);
+  box-shadow: var(--raised-ring), var(--shadow-float);
   color: var(--text-primary);
-  font: var(--type-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  overflow: auto;
+  font-size: var(--text-md);
 }
-.share-edit {
-  resize: none;
+.access-title {
+  margin: 0 0 4px;
+  font-size: var(--text-xl);
+  font-weight: 600;
 }
-.share-ph {
-  padding: 0 3px;
-  border: 1px solid var(--hl-unverified-ink);
-  border-radius: var(--radius-hl);
-  background: var(--hl-unverified);
-  color: inherit;
-}
-.share-scan {
-  flex: 0 0 340px;
-  padding: 14px 22px;
-  border-left: 1px solid var(--border-subtle);
-  background: var(--paper-1);
-  overflow: auto;
-}
-.share-scan h3 {
-  margin: 0;
-  font: 600 var(--text-sm) / 1.4 var(--font-body);
-}
-.share-scan h4 {
-  margin: 16px 0 6px;
-  font: 600 var(--text-xs) / 1.4 var(--font-body);
-}
-.share-scan-sum {
-  margin: 2px 0 10px;
+.access-lead {
+  margin: 0 0 12px;
   color: var(--text-secondary);
-  font: var(--type-ui-sm);
 }
-.share-hits {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.share-hit {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.share-hit-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--text-secondary);
-  font: var(--type-ui-sm);
-}
-.share-keep {
-  padding: 0 4px;
-  border: 0;
-  border-radius: var(--radius-ui);
-  background: none;
-  color: var(--accent-ink);
-  font: var(--type-ui-sm);
-  cursor: pointer;
-}
-.share-keep:hover {
-  background: var(--surface-hover);
-}
-.share-never {
-  color: var(--text-tertiary);
-}
-.share-hit-what {
-  margin-top: 2px;
-  font: var(--type-mono);
-  font-size: var(--text-mono-sm);
-  overflow-wrap: anywhere;
-}
-.share-hit-what s {
-  color: var(--text-tertiary);
-}
-.share-hit.kept .share-hit-what s {
-  text-decoration: none;
-}
-.share-never-list {
-  margin: 0;
-  padding-left: 18px;
-  color: var(--text-secondary);
-  font: var(--type-ui-sm);
-}
-.share-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 22px;
-  border-top: 1px solid var(--border-subtle);
-}
-.share-foot-note {
-  flex: 1 1 auto;
-  color: var(--text-secondary);
-  font: var(--type-ui-sm);
-}
-.share-error {
-  color: var(--status-negative, var(--text-primary));
-}
-@media (max-width: 760px) {
-  .share-body {
-    flex-direction: column;
-    overflow: auto;
-  }
-  .share-scan {
-    flex: none;
-    border-left: 0;
-    border-top: 1px solid var(--border-subtle);
-  }
-  .share-foot {
-    flex-wrap: wrap;
-  }
-}
-
-/* -------- Fix thimble (shell/FixEntry): the top bar's Fix…, its sheet, and the line of the newest fix -------- */
-.shell-fix-btn {
-  padding: 3px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-ui);
-  background: var(--surface-card);
-  color: var(--text-primary);
-  font: var(--type-ui-sm);
-  cursor: pointer;
-}
-.shell-fix-btn:hover {
-  background: var(--surface-hover);
-}
-.shell-fix-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-}
-.shell-fix-form label {
-  font: 600 var(--type-ui-sm);
-}
-.shell-fix-form textarea {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-ui);
-  background: var(--paper-0);
-  color: var(--text-primary);
-  font: var(--type-body);
-  resize: vertical;
-}
-.shell-fix-note {
-  margin: 0;
-  color: var(--text-secondary);
-  font: var(--type-ui-sm);
-}
-.shell-fix-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-.shell-fix-state {
-  display: inline-flex;
-  align-items: center;
+.access-choices {
+  display: grid;
   gap: 6px;
-  min-width: 0;
-  max-width: 420px;
-  margin-right: 8px;
-  color: var(--text-secondary);
-  font: var(--type-ui-sm);
+  margin: 12px 0;
 }
-.shell-fix-state.good .shell-fix-words {
-  color: var(--status-positive);
-}
-.shell-fix-words {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.shell-fix-act {
-  padding: 1px 8px;
-  border: 1px solid var(--border-strong);
+.access-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
   border-radius: var(--radius-ui);
-  background: var(--surface-card);
-  color: var(--text-primary);
-  font: var(--type-ui-sm);
+  box-shadow: 0 0 0 1px var(--border-subtle);
   cursor: pointer;
 }
-.shell-fix-act:hover {
-  background: var(--surface-hover);
+.access-choice.on {
+  box-shadow: 0 0 0 1.5px var(--accent);
 }
-.share-tab {
-  border: 0;
-  background: none;
-  color: var(--text-primary);
-  cursor: pointer;
+.access-choice-label {
+  font-weight: 600;
 }
-.share-change {
+.access-choice-note {
+  grid-column: 2;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+.access-field {
+  margin: 8px 0;
+}
+.access-consent {
   display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
   gap: 8px;
-  min-height: 0;
+  align-items: flex-start;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-ui);
+  background: var(--bg-sunken);
 }
-.share-files {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font: var(--type-ui-sm);
-}
-.share-files li {
-  padding: 2px 0;
-}
-.share-add {
-  color: var(--status-positive);
-}
-.share-del {
+.access-error {
+  margin: 8px 0;
   color: var(--status-negative);
 }
-.share-diff .share-dl {
-  display: block;
-  white-space: pre;
+.access-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }
-.share-dl-add {
-  background: color-mix(in srgb, var(--status-positive) 14%, transparent);
+.settings-access {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-hairline);
 }
-.share-dl-del {
-  background: var(--status-negative-soft);
+.settings-access-label {
+  font-weight: 600;
 }
-.share-dl-file,
-.share-dl-hunk {
+.settings-access-what {
+  flex: 1;
+  min-width: 0;
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

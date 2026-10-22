@@ -19,7 +19,7 @@ import { mediaOf } from '../lib/media'
 import { fragmentIn, parseRef, refPath } from '../lib/refs'
 import { pressedPane, surfaceShown, useFilesViewsSlot, useShownSurfaces } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
-import type { LabelDraft, SourceKind, ViewQuery } from '../lib/types'
+import type { ConceptRun, LabelDraft, SourceKind, ViewQuery } from '../lib/types'
 import { findView } from '../lib/views'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
@@ -27,19 +27,18 @@ import { viewSurface } from '../shell/panes'
 import { typingIn } from '../shell/undo'
 import { findKey } from './find'
 import { FileSearch } from './FileSearch'
-import { folderPresence, presenceOf, viewLabels, type Presence } from './labels'
+import { folderPresence, presenceOf, viewDefaults, viewLabels, type Presence } from './labels'
 import { inferKind, TREE } from './params'
 import { pickKey, Reader, type FindAsk } from './Reader'
 import { baseName, defaultTabs, fmtSize, glyphOf, kindIn, parentOf, Tree, useFolderStore } from './Tree'
-import { useFilesLabels } from './useLabels'
+import { useFilesLabels, type FilesLabels } from './useLabels'
 import { OpenIn } from './OpenIn'
 import { chooseView, viewPlace, viewValue } from './viewChoice'
 import { ViewPane } from './ViewPane'
 import { FolderPane } from './FolderPane'
 import { AddLabelControls, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
-import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar } from './ViewsBar'
-import { useFeature } from '../features'
+import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
 import { markOpened, useOpenAskedViews } from './viewReady'
 import { fitTabs } from './viewsFit'
 
@@ -239,6 +238,31 @@ function useSessionChoice(ws: string, name: string): [boolean | null, (v: boolea
     [key],
   )
   return [v, set]
+}
+
+/** A view's labels by default: the first time the analyst opens a view (per workspace), while no label marking its
+ * files is on, the orientation's labels over those files are turned on (labels.viewDefaults), so the view opens
+ * coloured, its own label controls as the legend. */
+function useViewDefaults(ws: string, view: BuiltView | null, labels: FilesLabels) {
+  const [orient, setOrient] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    let alive = true
+    api
+      .chats(ws)
+      .then((list) => alive && setOrient(new Set(list.filter((c) => c.role === 'orient').map((c) => c.id))))
+      .catch(() => alive && setOrient(new Set()))
+    return () => {
+      alive = false
+    }
+  }, [ws])
+  const { all, presence, toggle } = labels
+  useEffect(() => {
+    if (!view?.claims?.length || !orient || !all.length || !presence.size) return
+    const key = storageKey(ws, `viewLabels:${view.slug}`)
+    if (readStorage<unknown>(key, false) === true) return
+    writeStorage(key, true)
+    for (const id of viewDefaults(all, presence, view.claims, orient)) toggle(id)
+  }, [ws, view, orient, all, presence, toggle])
 }
 
 /** A per-workspace flag kept in browser storage (the sidebar, the tree and the Labels pane folded or not). */
@@ -590,8 +614,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   useEffect(
     () =>
       bus.on('editLabel', ({ id }) => {
-        // a label opens in the Labels and Checks sidebar, where its detail offers Edit (shell/LensSidebar.tsx)
-        bus.emit('openLens', { tab: 'labels', id })
+        // a label opens in the Labels sidebar, where its detail offers Edit (shell/LabelsSidebar.tsx)
+        bus.emit('openLabels', { id })
       }),
     [shownSlug, showSide, setViewSideChoice, setLabelsOpen],
   )
@@ -618,6 +642,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   }, [])
   // what a new label applies to: the files the view in front claims, else the file open in the reader
   const appliesTo = useMemo(() => (shownView ? shownView.claims ?? (shownPath ? [shownPath] : []) : open?.path ? [open.path] : []), [shownView, shownPath, open?.path])
+  useViewDefaults(ws, shownView, labels)
   const fillNew = useCallback((draft: LabelDraft) => {
     setEditing('new')
     setDrafted(draft)
@@ -662,15 +687,13 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     [sideShown, showSide, tabs, current, closeTab, isDir],
   )
 
-  const viewsOn = useFeature('views')
   const openPath = open?.path ?? null
   const openRefAt = open?.ref
   const openInEnd = useMemo(
     () => (openPath ? <OpenIn ws={ws} path={openPath} current={null} onOpen={(slug) => openIn(openPath, openRefAt, slug)} /> : null),
     [ws, openPath, openRefAt, openIn],
   )
-  // the views bar is the views feature's (features.ts): none while it is off
-  const viewsBar = (compact: boolean) => (viewsOn ? <ViewsBar ws={ws} value={shownView || waitingView ? bar : BROWSER} onChange={pickBar} views={views} compact={compact} /> : null)
+  const viewsBar = (compact: boolean) => <ViewsBar ws={ws} value={shownView || waitingView ? bar : BROWSER} onChange={pickBar} views={views} compact={compact} />
   return (
     <div className="files-tab" data-panel="files" ref={rootRef}>
       {viewsSlot ? createPortal(viewsBar(true), viewsSlot) : viewsBar(false)}

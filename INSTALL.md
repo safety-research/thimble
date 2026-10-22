@@ -68,17 +68,22 @@ until you fix it and run it again. Then it:
    the sandbox the plugin's cards run in: the version of Anthropic's sandbox runtime the plugin pins, with `npm ci`, in
    `~/.thimble/srt`. It starts the card runner in it once, and says whether it works; on Linux, when bubblewrap, socat
    or ripgrep is missing, it prints the one command that installs them (it never runs `sudo` itself).
-2. installs the browser workbench from the checkout: the server's Python packages (`uv sync` in `browser/server`), the
-   page (`npm ci` and a build in `browser/frontend`), and the sandbox runtime (`npm ci` in `browser/server/sandbox`, the
-   same version the plugin pins).
+2. installs the browser workbench (thimble 0.8's browser mode) from the checkout: the server's Python packages (`uv sync`
+   in `browser/backend`), and the page with the sandbox runtime (`npm ci` and a build in `browser/frontend`).
 3. writes a `thimble-browser` launcher in `~/.local/bin` (`--bin-dir DIR` puts it elsewhere), and says when that folder
    is not on your `PATH`.
-4. says how much disk space the browser workbench takes, and whether the sandbox works on this machine.
+4. asks how the browser workbench reaches Claude: 1 an Anthropic API key (the default; you paste it, and it is kept in
+   `~/.thimble-browser` readable by you alone), 2 your Claude Code sign-in (it shows that this launches headless Claude
+   Code sessions in the background and asks you to confirm), or 3 Workload Identity Federation (the path of its config
+   file). It checks the choice with one small call.
+5. says how much disk space the browser workbench takes, and whether the sandbox works on this machine.
 
 Options:
 
 - `--no-browser`: the terminal plugin only.
 - `--no-plugin`: the browser workbench only.
+- `--no-setup`: do not ask how the browser workbench reaches Claude; the page asks at its first start, and
+  `thimble-browser --setup` asks again.
 - `--local`: the plugin from this checkout in place of GitHub, to try a branch. Claude Code then loads the plugin from
   the checkout's `plugin/` folder.
 
@@ -115,11 +120,11 @@ The terminal plugin:
 
 The browser workbench:
 
-1. Run `thimble-browser --check-sandbox`. It prints one line per check of the sandbox, each `pass`.
-2. Run `thimble-browser` in a folder of files, or `thimble-browser browser/samples/agent-runs` in the checkout. The
-   server prints a sign-in link and opens it, on 127.0.0.1 port 8000 or the next free one.
-3. In Settings, give your credentials. Ask in the chat: "How many runs failed, and why?" Claude answers with a card,
-   and the numbers in its answer are links.
+1. Run `thimble-browser` in a folder of files. It starts the server on 127.0.0.1, port 8300 or the next free one, and
+   prints the page's sign-in link. The installer asked how it reaches Claude (an API key, Workload Identity
+   Federation, or your Claude Code sign-in); when it did not, the page asks at its first start.
+2. Open the link, and ask in the page's chat: "How many runs failed, and why?" Claude answers with a card whose claims
+   cite the files.
 
 ## Settings
 

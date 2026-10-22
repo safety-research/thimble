@@ -210,6 +210,32 @@ export function markMatches(root: HTMLElement | null, text: string, current: num
   return k == null ? inCurrent[0] ?? null : pick[0] ?? null
 }
 
+/** Where the find's marks stand in their records (`.reader-card[data-line]`): per line, the middle of each mark as a
+ * fraction of its record's height. Empty without CSS highlights. */
+export function markSpots(): Map<number, number[]> {
+  const registry = (globalThis.CSS as unknown as { highlights?: HighlightRegistry } | undefined)?.highlights
+  const out = new Map<number, number[]>()
+  if (!registry) return out
+  const boxes = new Map<Element, DOMRect>()
+  for (const name of [FIND, CURRENT]) {
+    const ranges = registry.get(name) as Iterable<Range> | undefined
+    for (const range of ranges ?? []) {
+      const node = range.startContainer
+      const card = (node instanceof Element ? node : node.parentElement)?.closest('.reader-card[data-line]')
+      if (!card) continue
+      let box = boxes.get(card)
+      if (!box) boxes.set(card, (box = card.getBoundingClientRect()))
+      const r = range.getBoundingClientRect()
+      if (box.height <= 0 || r.height <= 0) continue
+      const line = Number(card.getAttribute('data-line'))
+      const list = out.get(line) ?? []
+      list.push((r.top + r.height / 2 - box.top) / box.height)
+      out.set(line, list)
+    }
+  }
+  return out
+}
+
 /** The DOM event a folded block (views/common Collapsible) opens on. */
 export const UNFOLD_EVENT = 'reader-unfold'
 

@@ -4,6 +4,7 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import { Chip } from '../components/Chip'
 import { Spinner } from '../components/Spinner'
+import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { ChatMeta } from '../lib/types'
@@ -57,3 +58,21 @@ export function Divider({ text }: { text: string }) {
   )
 }
 
+/** A dev ticket's shot of its target: the phase and what was shot over the picture, which opens full size. */
+export function ShotCard({ ticket, name, phase, note }: { ticket: string; name: string; phase: string; note?: string }) {
+  const src = api.ticketShotUrl(ticket, name)
+  const word = phase === 'after' ? 'After' : phase === 'before' ? 'Before' : phase
+  return (
+    <figure className="chat-msg chat-shot" data-phase={phase}>
+      <div className="chat-shot-frame">
+        <div className="chat-shot-head">
+          <span className="chat-shot-phase">{word}</span>
+          {note && <span className="chat-shot-note">· {note}</span>}
+        </div>
+        <a className="chat-shot-img" href={src} target="_blank" rel="noreferrer">
+          <img src={src} alt={`${word} the change`} loading="lazy" />
+        </a>
+      </div>
+    </figure>
+  )
+}
