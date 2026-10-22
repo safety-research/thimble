@@ -24,14 +24,14 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   unchecked: { word: 'not checked', dim: true },
 }
 
-/** A line of text with spans of it highlighted (inverse), as Text runs. */
+/** A line of text with spans of it highlighted (the theme's warning color behind them), as Text runs. */
 function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, inverse: true, bold: true, children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, color: 'inverseText', backgroundColor: 'warning', bold: true, children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))
