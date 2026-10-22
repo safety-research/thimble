@@ -29,8 +29,13 @@ declare module 'claude-code' {
       // ---- L5 bar
       /** thimble's own work while it runs: the glyph's frame and how many jobs run (bar/busy.ts) */
       busy: { frame: number; n: number }
-      /** the bar's counts: the share of the folder's files Claude touched, in words, and the labels (bar/counts.ts) */
-      counts: { coverage: string | null; labels: number } | null
+      /** the bar's counts: the share of the folder's files Claude touched, in words, the labels, a number that changes
+       *  with each count, and why the last count failed (bar/counts.ts) */
+      counts: { coverage: string | null; labels: number; gen: number; error: string | null } | null
+      /** whether main's conversation holds an answer v can draw a card of (bar/bar.tsx) */
+      answered: boolean
+      /** what the person opened inside a pane of the bar's, by kind: coverage {open, file}, fixshare {diff} (panes/) */
+      paneView: StateFamily<unknown>
       /** the line whose fix keys the bar names (bar/fix.ts): a failure (f F), a fix in use (p u), or a notice */
       fixLine: { kind: 'failed'; text: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string } | null
       /** the fixes that work now (bar/fix.ts), for the busy line */

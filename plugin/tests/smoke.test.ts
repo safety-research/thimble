@@ -39,8 +39,8 @@ function world(on: Any) {
 
 test('the module loads, a session starts, a prompt goes through, and the bar draws', async ($, on) => {
   const w = world(on)
-  // nothing of thimble's to show yet: the engine's own drawing
-  expect(textOf(await $.ui.render(BAND))).toBe('the engine')
+  // the bar shows from the start, and its first drawing counts the folder
+  expect(textOf(await $.ui.render(BAND))).toContain('thimble')
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const r = (await $.prompt.submit({ text: 'How many runs failed?' } as never)) as Any
   expect(r.text).toBe('How many runs failed?')

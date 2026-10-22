@@ -13,24 +13,24 @@
 //                             (telemetry.ts) does this for every model call, so a new call shows without code of its
 //                             own.
 //   busyWhile($, word, alive) a job that ends when `alive()` says false (checked at each tick): work that another
-//                             hook ends, such as a side thread's subagent, whose turn ends in turn.complete.
+//                             hook ends, such as a fork, whose turn ends in turn.complete.
 //   busyNow($)                what the bar shows: the newest job that has run SHOW_MS or more (the step the person
 //                             most likely just started), as a turning glyph and its words, `+1` when another job runs
 //                             beside it, and its seconds from SECS_MS on. Reading it makes the drawing draw again at
 //                             each tick.
-//   busySteps()               the steps running now, by their words, the oldest first (for tests).
+//   busySteps()               the steps running now, by their words, the oldest first (fix.ts starts a fix's step once).
 //
 // A job shorter than SHOW_MS never shows, so quick work does not flicker. A failure says itself where it happened
-// (failNotice), as before. The times are the session's clock ($.clock), so a test steps them.
+// (failNotice). The times are the session's clock ($.clock), so a test steps them.
 import type { EngineInterface } from 'claude-code'
 
 type Engine = EngineInterface
 type Alive = () => boolean | Promise<boolean>
 
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
-export const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-export const SHOW_MS = 300
-export const SECS_MS = 3000
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+const SHOW_MS = 300
+const SECS_MS = 3000
 const TICK_MS = 120
 
 const jobs = new Map<number, { word: string; t0: number; alive?: Alive }>()
@@ -107,24 +107,18 @@ async function shown($: Engine): Promise<{ word: string; ms: number; more: numbe
 }
 
 /** The glyph's frame now. */
-export function spinFrame(): string {
+function spinFrame(): string {
   return SPIN[frame % SPIN.length]!
 }
 
 /** What the bar shows now: the glyph, the step's words (with `+1` when another step runs beside it), and the seconds
  *  once they help (from 3 s); null when nothing runs. */
-export async function busyNow($: Engine): Promise<{ glyph: string; word: string; short: string; secs: number | null } | null> {
+export async function busyNow($: Engine): Promise<{ glyph: string; word: string; secs: number | null } | null> {
   await $.state.get(BUSY)
   const j = await shown($)
   if (!j) return null
   const more = j.more ? ` +${j.more}` : ''
-  return { glyph: spinFrame(), word: `${j.word}${more}`, short: `${briefStep(j.word)}${more}`, secs: j.ms >= SECS_MS ? Math.floor(j.ms / 1000) : null }
-}
-
-/** A step's words for a narrow bar: up to its first colon or comma, at most 18 characters (`fixing`). */
-export function briefStep(word: string): string {
-  const w = word.split(/[:,]/)[0]!.trim()
-  return [...w].length <= 18 ? w : `${[...w].slice(0, 17).join('').trimEnd()}…`
+  return { glyph: spinFrame(), word: `${j.word}${more}`, secs: j.ms >= SECS_MS ? Math.floor(j.ms / 1000) : null }
 }
 
 /** The steps running now, by their words, the oldest first. */
