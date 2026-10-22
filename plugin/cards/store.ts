@@ -3,7 +3,7 @@
 //
 //   <conversation folder>/cards/<card id>/   (core/layout.mjs)
 //     meta.json           the card: id, version, title, the call that drew it first, its anchor, keys, what it read, ...
-//     v<version>/view.js   the view of the version on screen
+//     v<version>/view.js   the view of the version on screen, and of a later call's version that did not draw
 //     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away)
 //     state.json          the person's state of that version (what the view set with setState)
 //
@@ -15,6 +15,7 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import { keptDir } from '../core/env'
+import { tempDir } from '../core/home'
 import { shortHash } from '../core/layout.mjs'
 
 type Engine = EngineInterface
@@ -25,8 +26,11 @@ export type CardCall = { version: number; title?: string; file?: string; read?: 
 export type CardMeta = {
   id: string
   version: number // the version on screen; 0 while no version has drawn
+  last?: number // the folder of the last call's view and rows: the version on screen, or the next one when that call did not draw
+  lastFile?: string // the data file of the last call, as Claude named it
   title: string
-  toolUseId: string // the call of main's that drew the version on screen: it draws under that call
+  toolUseId: string // the call of main's the card draws under: the one that drew its first version, unless Claude Code could not draw it there again (draw.ts canRedraw)
+  turn?: string // main's turn of that call
   agentId: string | null // the fork that drew the version on screen (a designer's), or null for main
   anchorRow: string | null // the answer a designer fork's card draws under
   keys: string[]
@@ -35,6 +39,7 @@ export type CardMeta = {
   file: string // the data file as Claude named it
   gen: number // bumps with each version, so a drawing of an older one is not shown
   error: string | null // the view's last failure on an event the person made
+  errorWidth?: number | null // the width a drawing failed at, when the failure was a drawing's: it holds only at that width
   calls: Record<string, CardCall> // each call of the card, by its tool_use_id
   at: number
 }
@@ -65,6 +70,12 @@ export async function cardDir($: Engine, id: string): Promise<string> {
 
 export async function versionDir($: Engine, id: string, version: number): Promise<string> {
   return `${await cardDir($, id)}/v${version}`
+}
+
+/** Whether a path is inside the temp folder, where Claude writes a card's rows. */
+export async function inTemp($: Engine, path: unknown): Promise<boolean> {
+  const p = typeof path === 'string' ? path : ''
+  return p.startsWith(`${await tempDir($)}/`) && !p.split('/').includes('..')
 }
 
 // ------------------------------------------------------------------------------------------------- $.state
