@@ -49,15 +49,17 @@ export const registerCards: Register = on => {
     return cardCall($, e)
   }).catch(() => ({ result: 'The card did not draw: thimble failed while it drew the card. Call card again; if it fails again, tell the analyst that cards do not work here.' }))
 
-  // the rows of a card: thimble asks Claude to write them in the temp folder ($TMPDIR), which is outside the working
-  // folder, so Claude Code would ask the person before Claude reads them back. A read there needs no dialog; so does a
-  // write by v's fork, which works in the background, where a dialog would stop it until the person answers. Only an
-  // ask that the mode makes is let through: a rule or a hook of the person's still decides
-  on('tool.check', { tool: /^(Read|Grep|Glob|Write|Edit)$/ }, async ($, e, next) => {
+  // the rows of a card: thimble asks Claude to write them in the temp folder ($TMPDIR, a folder of thimble's that only
+  // this user can open), which is outside the working folder, so Claude Code would ask the person before Claude reads
+  // them back. A read there needs no dialog; so does a write by v's fork, which works in the background, where a dialog
+  // would stop it until the person answers. Only an ask that the mode makes is let through: a rule or a hook of the
+  // person's still decides. A Glob's absolute pattern names its own folder, so only a relative one is let through
+  on('tool.check', { tool: /^(Read|Grep|Glob|Write)$/ }, async ($, e, next) => {
     const v = await next(e)
     if (v.decision !== 'ask' || v.rule || v.hook || v.plugin || !featureOn('cards')) return v
-    if ((e.tool === 'Write' || e.tool === 'Edit') && forkOf(e.agentId)?.kind !== 'designer') return v
-    const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown }
+    if (e.tool === 'Write' && forkOf(e.agentId)?.kind !== 'designer') return v
+    const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown; pattern?: unknown }
+    if (e.tool === 'Glob' && (typeof input.pattern !== 'string' || input.pattern.startsWith('/') || input.pattern.split('/').includes('..'))) return v
     return (await inTemp($, input.file_path ?? input.path)) ? { decision: 'allow' } : v
   }).catch(($, e, next) => next(e))
 

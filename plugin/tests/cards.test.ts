@@ -4,7 +4,7 @@
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { promptStub } from './stubs'
+import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -48,14 +48,18 @@ function world(on: Any, o: { crash?: string; ask?: boolean } = {}) {
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
   const dirs: Record<string, string[]> = {}
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: (dirs[e.path ?? ''] ?? []).map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }))
+  // a path's real path, `.` and `..` folded
+  const real = (p: string) => `/${p.split('/').reduce((a: string[], x) => (x === '..' ? a.slice(0, -1) : x && x !== '.' ? [...a, x] : a), []).join('/')}`
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
-    // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder)
+    // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder); so does
+    // link.json in the temp folder
     value: e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
-      : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
-        : e.path === DATA || e.path === '/made-up/tmp' ? { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path }
-          : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
+      : e.path.endsWith('/link.json') ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/made-up/home/.ssh/id' }
+        : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
+          : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
+            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
   }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   on('env.set', () => ({ value: {} }))
   on('ui.toast', () => ({ value: undefined }))
   on('http.fetch', (_$: unknown, e: { url: string; init?: { body?: string } }) => {
@@ -214,11 +218,19 @@ test("main reads a card's rows in the temp folder without a dialog; a person's r
   world(on, { ask: true })
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const check = (tool: string, file_path: string) => ($.tool as Any).check({ tool, input: { file_path } }) as Promise<Any>
-  expect((await check('Read', '/made-up/tmp/rows.json')).decision).toBe('allow')
+  // thimble's own folder in the person's TMPDIR, by real paths: a link out of it, a path that climbs out, and the rest
+  // of TMPDIR ask as before
+  expect((await check('Read', '/made-up/tmp/thimble/rows.json')).decision).toBe('allow')
+  expect((await check('Read', '/made-up/tmp/rows.json')).decision).toBe('ask')
+  expect((await check('Read', '/made-up/tmp/thimble/link.json')).decision).toBe('ask')
   expect((await check('Read', '/made-up/elsewhere/rows.json')).decision).toBe('ask')
-  expect((await check('Read', '/made-up/tmp/../elsewhere/rows.json')).decision).toBe('ask')
+  expect((await check('Read', '/made-up/tmp/thimble/../elsewhere/rows.json')).decision).toBe('ask')
   expect((await check('Read', '/made-up/tmp/mine/rows.json')).decision).toBe('ask')
-  expect((await check('Write', '/made-up/tmp/rows.json')).decision).toBe('ask')
+  expect((await check('Write', '/made-up/tmp/thimble/rows.json')).decision).toBe('ask')
+  // a Glob's absolute pattern names its own folder, whatever its path
+  const glob = (path: string, pattern: string) => ($.tool as Any).check({ tool: 'Glob', input: { path, pattern } }) as Promise<Any>
+  expect((await glob('/made-up/tmp/thimble', '*.json')).decision).toBe('allow')
+  expect((await glob('/made-up/tmp/thimble', '/made-up/home/**')).decision).toBe('ask')
 })
 
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {

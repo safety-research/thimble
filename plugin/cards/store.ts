@@ -72,10 +72,25 @@ export async function versionDir($: Engine, id: string, version: number): Promis
   return `${await cardDir($, id)}/v${version}`
 }
 
-/** Whether a path is inside the temp folder, where Claude writes a card's rows. */
+/** Whether a path lands inside the temp folder, where Claude writes a card's rows: its real path, every link followed,
+ *  is the temp folder or under it (core/home.ts tempDir, a real path). A file not there yet lands by its folder's real path;
+ *  a link that leads nowhere does not land, since a write through it makes a file where it points. */
 export async function inTemp($: Engine, path: unknown): Promise<boolean> {
   const p = typeof path === 'string' ? path : ''
-  return p.startsWith(`${await tempDir($)}/`) && !p.split('/').includes('..')
+  if (!p.startsWith('/')) return false
+  const real = await realOf($, p)
+  const temp = await tempDir($)
+  return real !== undefined && (real === temp || real.startsWith(`${temp}/`))
+}
+
+async function realOf($: Engine, p: string): Promise<string | undefined> {
+  const own = await $.fs.stat(p, { resolve: true }).catch(() => null)
+  if (own) return own.realPath
+  const cut = p.lastIndexOf('/')
+  const name = p.slice(cut + 1)
+  if (!name || name === '.' || name === '..') return undefined
+  const dir = await $.fs.stat(p.slice(0, cut) || '/', { resolve: true }).catch(() => null)
+  return dir?.realPath === undefined ? undefined : `${dir.realPath.replace(/\/$/, '')}/${name}`
 }
 
 // ------------------------------------------------------------------------------------------------- $.state

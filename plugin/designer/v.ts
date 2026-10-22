@@ -15,8 +15,9 @@
 // no longer runs (its end was missed, say in a reload of the plugin) ends as failed: at session start, with a notice,
 // and when v is pressed again.
 //
-// The fork may read, run code and draw cards; it writes only into the temp folder, where its rows go (cards/register.ts
-// lets it read and write there without a dialog in front of the person).
+// The fork may read, run code and draw cards; its Write tool writes only into the temp folder, where its rows go
+// (cards/register.ts lets it read and write there without a dialog in front of the person). Its Bash calls are the
+// person's permission mode's to decide, as main's are.
 //
 //   vKey($, key, until)    what v does at an empty prompt now (hooks/keys.ts asks), or null when it types
 //   designAnchor($, id)    the answer row the cards of that designer fork draw under (the card tool asks it)
@@ -62,7 +63,7 @@ export type Design = {
 const DESCRIPTION = 'card of the last answer (v)'
 /** The most of a card's text copy main reads. */
 const TELL_CHARS = 3000
-/** The tools the fork may call. Write only into the temp folder. */
+/** The tools the fork may call; Write only into the temp folder. */
 const TOOLS = new Set(['Read', 'Grep', 'Glob', 'Bash', 'Write', 'mcp__thimble__card'])
 
 const DESIGNS = { plugin: 'thimble', key: 'designs' } as const

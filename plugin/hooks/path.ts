@@ -6,8 +6,9 @@
 // reload of the module, or a session started from inside another one, finds it there already).
 //
 // A TMPDIR. Claude writes the files it makes for thimble (a card's rows) in the session's temp folder, and the texts
-// call it `$TMPDIR`. A session with no TMPDIR gets thimble's own (core/home.ts tempDir), so `$TMPDIR` in a command is
-// the folder the texts name, and no such file lands in a folder other users share.
+// call it `$TMPDIR`. The session's commands get thimble's own (core/home.ts tempDir: `thimble/` in the person's
+// TMPDIR, else the home's tmp/), so `$TMPDIR` in a command is the folder the texts name, and no such file lands in a
+// folder other users can read.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
@@ -58,7 +59,8 @@ export const registerPath: Register = on => {
       // the PATH stays as Claude Code made it
     }
     try {
-      if (!(await $.env.get('TMPDIR'))) await $.env.set('TMPDIR', await tempDir($))
+      const dir = await tempDir($)
+      if ((await $.env.get('TMPDIR')) !== dir) await $.env.set('TMPDIR', dir)
     } catch {
       // the texts name thimble's temp folder by its path
     }

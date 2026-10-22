@@ -116,7 +116,7 @@
       "prompt": "designer",
       "replace": [
         [
-          "since the card reads its data only from this folder or `$TMPDIR`. The Write, Edit and Read tools take that folder's path as written here, because only the shell knows `$TMPDIR`.",
+          "since the card reads its data only from this folder or `$TMPDIR`. The Write and Read tools take that folder's path as written here, because only the shell knows `$TMPDIR`.",
           "since the card reads its data only from `$TMPDIR`. The Read tool takes that folder's path as written here."
         ],
         [

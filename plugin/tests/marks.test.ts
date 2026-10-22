@@ -10,6 +10,7 @@ import { checkerDenial, checkerPrompt, endCheck, noteRow, PER_FORK, resumeChecks
 import { marksIn } from '../marks/message.js'
 import { notesByMark, restoreMarks, rowMarks } from '../marks/store'
 import { footerEl, messageEl } from '../marks/view'
+import { tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -52,7 +53,7 @@ function engine(validated: Any, files = new Map<string, string>()) {
       list: async (dir: string) => [...files.keys()].filter(p => p.startsWith(`${dir}/`)).map(p => ({ name: p.slice(dir.length + 1), kind: 'file' })),
       exists: async () => false,
     },
-    process: { run: async (_argv: string[], init: Any) => { seen.stdin.push(String(init?.stdin ?? '')); return typeof validated === 'function' ? validated(init) : { exitCode: 0, stdout: JSON.stringify(validated), stderr: '' } } },
+    process: { run: async (argv: string[], init: Any) => { const t = tempRun(argv); if (t) return t; seen.stdin.push(String(init?.stdin ?? '')); return typeof validated === 'function' ? validated(init) : { exitCode: 0, stdout: JSON.stringify(validated), stderr: '' } } },
     agent: { spawn: async (a: Any) => { seen.spawned.push(a); const agentId = forks ? `${FORK}${forks}` : FORK; forks++; return { model: 'claude-opus-5-5', agentId } }, list: async () => [] },
     state: {
       get: async (k: Any) => state.get(JSON.stringify(k)) ?? { value: undefined, version: 0 },

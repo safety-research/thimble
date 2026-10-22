@@ -11,3 +11,9 @@ export function promptStub(path: string): string | undefined {
   if (!m) return undefined
   return STUBS[m[1]!] ?? `PROMPT ${m[1]}`
 }
+
+/** core/home.ts tempDir has the shell make its folder and print the folder's real path: that answer, the folder as
+ *  named; null for any other command. */
+export function tempRun(argv: string[]): { exitCode: number; stdout: string; stderr: string } | null {
+  return argv[0] === 'sh' && String(argv[2] ?? '').includes('pwd -P') ? { exitCode: 0, stdout: `${argv[argv.length - 1]}\n`, stderr: '' } : null
+}

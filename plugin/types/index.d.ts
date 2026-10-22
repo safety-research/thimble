@@ -72,6 +72,8 @@ declare module 'claude-code' {
       forks: Record<string, 'checker' | 'designer'>
       /** what Claude reads with the person's next prompt, by key (core/tell.ts) */
       tell: Record<string, string>
+      /** the session's temp folder, as a real path (core/home.ts tempDir) */
+      tempDir: string
       /** how far the session's change feed has been read (core/feed.ts) */
       feed: { file: string; bytes: number } | null
     }

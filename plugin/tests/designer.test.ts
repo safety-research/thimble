@@ -3,13 +3,14 @@
 // answer yet is a letter. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { promptStub } from './stubs'
+import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
 function world(on: Any, o: { unreadable?: number } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', PATH: '/usr/bin', TMPDIR: '/made-up/tmp' })
+  on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 1, stdout: '', stderr: 'made-up: no such command' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   const clock = mock.clock(on, { now: 1000 })
   const spawns: Any[] = []
   let unreadable = o.unreadable ?? 0

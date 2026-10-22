@@ -7,7 +7,7 @@ import { busySteps } from '../bar/busy'
 import { failLineNow, failNotice } from '../bar/fix'
 import { saveMeta } from '../cards/store'
 import { designAnchor, registerDesigner, vKey } from '../designer/v'
-import { promptStub } from './stubs'
+import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -28,7 +28,7 @@ function setup() {
   const spawns: Any[] = []
   const $: Any = {
     plugin: { root: '/made-up/plugins/thimble/plugin', name: 'thimble' },
-    env: { get: async () => undefined },
+    env: { get: async (k: string) => (k === 'TMPDIR' ? '/made-up/tmp' : undefined) },
     fs: { read: async (p: string) => promptStub(p) ?? '' },
     state: {
       get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }),
@@ -37,7 +37,7 @@ function setup() {
     clock: { now: async () => (now += 1000), sleep: async () => undefined, after: () => ({ cancel() {} }) },
     agent: { spawn: async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-${spawns.length}` } } },
     session: { id: async () => 's-made-up' },
-    process: { run: async () => ({ exitCode: 0, stdout: '', stderr: '' }) },
+    process: { run: async (argv: string[]) => tempRun(argv) ?? { exitCode: 0, stdout: '', stderr: '' } },
     // the card runner, as far as a text copy goes
     http: { fetch: async () => ({ text: JSON.stringify({ ok: true, lines: ['Who ran the failing test', '✕ ✕ ● ✕'] }) }) },
   }
