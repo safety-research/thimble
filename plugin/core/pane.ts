@@ -25,9 +25,9 @@ export const PANE_ID = 'thimble'
 const NOW = { plugin: 'thimble', key: 'pane' } as const
 
 /** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. */
-export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean } = {}): Promise<void> {
+export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number } = {}): Promise<void> {
   await $.state.set(NOW, { kind, args })
-  await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true, closeOnEscape: true } : {}) })
+  await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true, closeOnEscape: true } : {}), ...(o.rows ? { rows: o.rows } : {}) })
 }
 
 export async function closePane($: Engine): Promise<void> {

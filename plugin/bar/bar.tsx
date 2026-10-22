@@ -5,13 +5,14 @@
 //                  wraps, so the whole failure shows
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
 //                  Cards is on, an answer exists and no design runs; at its right `r coverage 43% (3/7 files)` and
-//                  `l 2 labels` while Labels and coverage is on (a click or the key opens the pane, the same again
-//                  closes it)
+//                  `l 2 labels` while Labels and coverage is on (a click or the key opens the pane; register.ts says how
+//                  each closes)
 //
 // The settings pane draws the same bar as its switches would leave it (`preview`): nothing in it is a press and no
 // work shows. Card keys are never named here: a focused card names its own keys under its frame.
 import type { EngineInterface } from 'claude-code'
 
+import { designNow } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, needCounts } from './counts'
@@ -27,8 +28,6 @@ const NAME_COLOR = 'permission'
 const KEY_COLOR = 'suggestion'
 
 const ANSWERED = { plugin: 'thimble', key: 'answered' } as const
-const DESIGN_NOW = { plugin: 'thimble', key: 'designNow' } as const
-const DESIGNS = { plugin: 'thimble', key: 'designs' } as const
 
 /** What a press on a part of the bar does; register.ts gives them, so this module draws and decides nothing else. */
 export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'labels') => unknown }
@@ -48,11 +47,9 @@ export async function setAnswered($: Engine, yes: boolean): Promise<void> {
   await $.state.set(ANSWERED, yes)
 }
 
-/** Whether a design that v started runs now (designer/v.ts keeps it in the state: `designNow`, `designs`). */
+/** Whether a design that v started runs now. */
 async function designRuns($: Engine): Promise<boolean> {
-  const key = (await $.state.get(DESIGN_NOW)).value
-  if (!key) return false
-  const d = (await $.state.get({ ...DESIGNS, id: key })).value as { status?: string } | null | undefined
+  const d = await designNow($)
   return d?.status === 'held' || d?.status === 'running'
 }
 

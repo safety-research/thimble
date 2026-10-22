@@ -4,6 +4,7 @@
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
+import { fixLineNow } from '../bar/fix'
 import { allowedTool, endCheck, marksOf, noteRow, PER_FORK, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
 import { footerEl, messageEl } from '../marks/view'
@@ -22,7 +23,7 @@ const VALIDATED = { parsed: true, results: [
 /** An engine with versioned state, a fork that starts, and a validator that answers `validated`. */
 function engine(validated: Any) {
   const state = new Map<string, { value: unknown; version: number }>()
-  const seen = { spawned: [] as Any[], toasts: [] as string[], stdin: [] as string[] }
+  const seen = { spawned: [] as Any[], stdin: [] as string[] }
   let now = 1000
   const $: Any = {
     env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', THIMBLE_PYTHON: '/made-up/python3' } as Any)[k] },
@@ -47,7 +48,6 @@ function engine(validated: Any) {
         return { isSet: true, version }
       },
     },
-    ui: { toast: (t: string) => { seen.toasts.push(t) } },
     clock: { now: async () => (now += 100), after: () => ({ cancel() {} }), every: () => ({ cancel() {} }) },
   }
   return { $, seen }
@@ -96,7 +96,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('"15 of 40" is corrected to "12 of 40"')
   expect(told).toContain('failed: no record holds these words')
-  expect(seen.toasts.length).toBe(0)
+  expect(await fixLineNow($)).toBe(null)
 })
 
 test('a refused check leaves the marks unchecked, says so once, and nothing spins', async () => {
@@ -108,9 +108,9 @@ test('a refused check leaves the marks unchecked, says so once, and nothing spin
   expect(out).toContain('3 marks not checked')
   expect(out).not.toContain('checking')
   expect(out).not.toContain('×')
-  expect(seen.toasts.length).toBe(1)
-  expect(seen.toasts[0]).toContain('Safeguards refused the check of the marks')
-  expect(seen.toasts[0]).toContain('/model')
+  const line = String((await fixLineNow($))?.text ?? '')
+  expect(line).toContain('Safeguards refused the check of the marks')
+  expect(line).toContain('/model')
 })
 
 test('the checker reads only: Read, Grep, Glob and Bash, never Edit or Write', () => {

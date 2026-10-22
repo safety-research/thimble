@@ -158,7 +158,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   }
   let template = ''
   try {
-    template = (await promptText($, 'checker')).text
+    template = await promptText($, 'checker')
   } catch (err) {
     await giveUp($, whole, 'thimble could not read its checker text', now)
     failNotice($, `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}), so the marks are not checked. Reinstall thimble.`)

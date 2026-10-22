@@ -187,7 +187,7 @@ export const registerDesigner: Register = on => {
     const d: Design = { key: `d${now.toString(36)}`, anchorRow: answerRow, agentId: null, status: 'held', at: now, cards: [] }
     current = d
     wordWindow = { at: now, cancelled: false }
-    const { text: prompt } = await promptText($, 'designer')
+    const prompt = await promptText($, 'designer')
     await save($, d)
     await $.state.set(NOW, d.key)
     void start($, d, prompt)

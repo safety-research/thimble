@@ -27,7 +27,7 @@ function world(on: Any, reply: () => Promise<Any>) {
   mock.env(on, { THIMBLE_HOME: '/made-up/th', HOME: '/made-up/home', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const session = mock.session(on)
-  const w = { feed: '', answers: [] as Any[], toasts: [] as string[] }
+  const w = { feed: '', answers: [] as Any[] }
   let waited = false
   on('session.id', () => ({ value: 's-label' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
@@ -37,7 +37,8 @@ function world(on: Any, reply: () => Promise<Any>) {
   on('fs.exists', () => ({ value: false }))
   on('fs.write', () => ({ value: undefined }))
   on('env.set', () => ({ value: {} }))
-  on('ui.toast', (_$: unknown, e: { text: string }) => { w.toasts.push(e.text); return { value: undefined } })
+  on('ui.toast', () => ({ value: undefined }))
+  on('tool.register', () => ({ value: undefined }))
   on('model.complete', async () => ({ value: await reply() }))
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     const a = e.argv
@@ -83,7 +84,7 @@ test('a label line starts the reads: the busy line names the label, and Claude h
   await clock.advance(500)
   expect(w.answers[0].values).toEqual({ 'chat.jsonl#L1': { value: 'yes', confidence: 0.9 }, 'chat.jsonl#L2': { value: 'no', confidence: 0.8 } })
   expect(textOf(await $.ui.render(BAND))).not.toContain('labeling apology')
-  expect(w.toasts).toEqual([])
+  expect(textOf(await $.ui.render(BAND))).not.toContain('f fix this')
   // the next prompt carries what the reads gave, in a row the person does not see
   await $.prompt.submit({ text: 'How many apologized?', origin: { kind: 'composer' } } as never)
   const told = session.appended().map(r => JSON.stringify(r.message)).join('\n')
@@ -97,8 +98,8 @@ test('a call that failed shows the failure line, in the person\'s words', async 
   await clock.advance(500)
   expect(w.answers[0].failed['chat.jsonl#L1']).toBe('the call failed: the sign-in failed or expired. Sign in again with /login')
   // the failure line, with the keys that fix or report it
-  expect(w.toasts.join('\n')).toContain('× 1 of 1 model calls for the label apology failed: the sign-in failed or expired.')
   const bar = textOf(await $.ui.render(BAND))
+  expect(bar).toContain('× 1 of 1 model calls for the label apology failed: the sign-in failed or expired.')
   expect(bar).toContain('f fix this')
 })
 

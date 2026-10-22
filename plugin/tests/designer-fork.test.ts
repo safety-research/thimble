@@ -4,6 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
+import { fixLineNow } from '../bar/fix'
 import { saveMeta } from '../cards/store'
 import { designAnchor, registerDesigner } from '../designer/v'
 import { promptStub } from './stubs'
@@ -15,7 +16,7 @@ const ROW = 'row-answer-1'
 // each look at the clock, in any test, is a second later: no word window is open at the next look
 let now = 0
 
-/** The module's hooks by event, and an engine that keeps state, toasts and spawns in memory. */
+/** The module's hooks by event, and an engine that keeps state and spawns in memory. */
 function setup() {
   const hooks: Record<string, Any> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
@@ -24,7 +25,6 @@ function setup() {
   }
   registerDesigner(on, {} as never)
   const state = new Map<string, unknown>()
-  const toasts: string[] = []
   const spawns: Any[] = []
   const $: Any = {
     plugin: { root: '/made-up/plugins/thimble/plugin', name: 'thimble' },
@@ -36,7 +36,6 @@ function setup() {
     },
     clock: { now: async () => (now += 1000), sleep: async () => undefined, after: () => ({ cancel() {} }) },
     agent: { spawn: async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-${spawns.length}` } } },
-    ui: { toast: (t: string) => { toasts.push(t) } },
     session: { id: async () => 's-made-up' },
     // the card runner, as far as a text copy goes
     http: { fetch: async () => ({ text: JSON.stringify({ ok: true, lines: ['Who ran the failing test', '✕ ✕ ● ✕'] }) }) },
@@ -44,7 +43,8 @@ function setup() {
   $.fs.write = async () => undefined
   const pass = async (e: Any) => e
   const call = (event: string, e: Any, next: Any = pass) => hooks[event]($, e, next)
-  return { $, call, toasts, spawns }
+  const failLine = async () => String((await fixLineNow($))?.text ?? '')
+  return { $, call, failLine, spawns }
 }
 
 const settle = () => new Promise(r => setTimeout(r, 5))
@@ -74,7 +74,7 @@ test("the fork's cards anchor to the answer v was pressed on, and a fork that dr
   await s.call('session.append', { door: 'response', message: { content: [{ type: 'text', text: 'A later answer.' }] } }, async () => ({ uuid: 'row-answer-2' }))
   expect(designAnchor('agent-1')).toBe(ROW)
   await s.call('turn.complete', end('answer', 'The records hold no times to draw.\nMore words.'), async () => ({ text: '' }))
-  expect(s.toasts.join('\n')).toContain('v drew no card: The records hold no times to draw.')
+  expect(await s.failLine()).toContain('v drew no card: The records hold no times to draw.')
   expect(designAnchor('agent-1')).toBe(null)
 })
 
@@ -82,7 +82,7 @@ test("a refused design says that the model's safeguards refused it, and how to s
   const s = setup()
   await pressV(s)
   await s.call('turn.complete', end('refusal', '', { refusal: { category: null, explanation: null } }), async () => ({ text: '' }))
-  expect(s.toasts.join('\n')).toContain("The model's safeguards refused to draw this card. /model can switch to Opus 4.8")
+  expect(await s.failLine()).toContain("The model's safeguards refused to draw this card. /model can switch to Opus 4.8")
   expect(designAnchor('agent-1')).toBe(null)
 })
 
@@ -91,7 +91,7 @@ test('a fork that drew a card ends done, and main reads the card with the next p
   await pressV(s)
   await saveMeta(s.$, card('c0000000000001', 'agent-1') as never)
   await s.call('turn.complete', end('answer', 'Runs of the failing test: a timeline.'), async () => ({ text: '' }))
-  expect(s.toasts).toEqual([])
+  expect(await s.failLine()).toBe('')
   const told = Object.values(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('a copy of you drew a card under it')
   expect(told).toContain('“Runs of the failing test”\nWho ran the failing test\n✕ ✕ ● ✕')

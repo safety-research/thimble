@@ -3,7 +3,8 @@
 //   registerFixKeys  f and F on a failure line, p and u on a fix in use, at an empty prompt (bar/fix.ts). It comes
 //                    before the cards' keys, so a failure's keys win while its line shows.
 //   registerBar      the bar (bar.tsx) in the AbovePrompt band; r and l at an empty prompt open coverage and the labels
-//                    while the bar names them, and the same key again closes the pane; /thimble-settings and a click on
+//                    while the bar names them. Coverage leaves the keys at the prompt, so r again closes it; the labels
+//                    pane takes the keys (its number keys check records), and esc closes it; /thimble-settings and a click on
 //                    `thimble` open the settings; the fixes' lifecycle (a `thimble fix` call, /thimble:fix, the
 //                    person's next prompt; a `fix_ask` line of the change feed is core/feed.ts's); the counts after each
 //                    of main's turns (counts.ts), and whether an answer exists for v.
@@ -14,6 +15,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
+import { openLabels } from '../labels/pane'
 import { barKeys, barRows, setAnswered, type BarPresses } from './bar'
 import { recount } from './counts'
 import { failNotice, fixCommand, fixKeyOf, pressFix, promptTyped, refreshFixes } from './fix'
@@ -57,11 +59,12 @@ async function paneShows($: Engine, kind: string): Promise<boolean> {
   return (await $.ui.panes()).some(p => p.id === PANE_ID)
 }
 
-/** Coverage or the labels: open, or closed when the pane shows it. Opened from the prompt, it leaves the keys there,
- *  so the same key closes it; a click inside it presses its rows. */
+/** Coverage or the labels: open, or closed when the pane shows it. Coverage leaves the keys at the prompt, so the same
+ *  key closes it; a click inside it presses its rows. The labels pane takes the keys (labels/pane.tsx). */
 async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void> {
   if (await paneShows($, kind)) { await closePane($); return }
-  if (kind === 'coverage') void recount($).catch(() => undefined)
+  if (kind === 'labels') { await openLabels($); return }
+  void recount($).catch(() => undefined)
   await openPane($, kind, {}, TITLES[kind])
 }
 

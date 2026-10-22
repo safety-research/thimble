@@ -52,7 +52,7 @@ async function tempDir($: Engine): Promise<string> {
 
 /** The tool, as the model reads it: card-tool.md with the temp folder filled in. */
 export async function registerCardTool($: Engine): Promise<void> {
-  const { text } = await promptText($, 'card-tool')
+  const text = await promptText($, 'card-tool')
   await $.tool.register({ name: 'card', isDeferred: false, description: fill(text, { TMPDIR: await tempDir($) }).trim(), inputSchema: SCHEMA })
 }
 

@@ -28,7 +28,7 @@ type Engine = EngineInterface
 type Alive = () => boolean | Promise<boolean>
 
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
-const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+export const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const SHOW_MS = 300
 const SECS_MS = 3000
 const TICK_MS = 120
