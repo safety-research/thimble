@@ -1,7 +1,10 @@
-// tell.ts: what Claude reads of thimble's work outside its own turns. A module keeps a text under a key with
-// tellAtNextPrompt; the person's next prompt that starts a turn of main's carries the texts as context beside the
-// prompt (prompt.submit `context`), which Claude reads as thimble's report and the person never sees as typed. One text
-// per key, the latest wins (a reply's check is told once, as it ends), and each is sent once.
+// tell.ts: what Claude reads of thimble's work outside its own turns: the one way a report of thimble's reaches main's
+// model (the guidance is guidance/guidance.ts; a tool's answer is the tool's). Every feature tells main through here,
+// never through a session.append or prompt.context hook of its own. A module keeps a text under a key with
+// tellAtNextPrompt (or adds a line to one with tellLine); the person's next prompt that starts a turn of main's carries
+// the texts as context beside the prompt (prompt.submit `context`), which Claude reads as thimble's report and the
+// person never sees as typed. One text per key, the latest wins (a reply's check is told once, as it ends), and each
+// is sent once.
 //
 // The texts that wait are kept in $.state (merged with update(), so two modules that keep a text at once both land),
 // so a reload of the plugin does not lose them, and in the conversation's kept folder (core/env.ts), so a resumed
@@ -21,6 +24,25 @@ const FROM = "thimble's report (from its own checks and the analyst's actions in
 export async function tellAtNextPrompt($: Engine, key: string, text: string): Promise<void> {
   const next = await update($, WAITING, cur => ({ ...(cur ?? {}), [key]: String(text || '') }))
   await writeKept($, FILE, next ?? {}).catch(() => undefined)
+}
+
+/** One more line of a text kept under `key`, which opens with `head`: lines that gather until the next prompt (what
+ *  the person opened and asked, core/engaged.ts), sent with it as one text. Once sent, the next line starts the text
+ *  again under its head. */
+export async function tellLine($: Engine, key: string, head: string, line: string): Promise<void> {
+  const next = await update($, WAITING, cur => {
+    const was = String((cur ?? {})[key] ?? '')
+    return { ...(cur ?? {}), [key]: `${was || head}\n${line}` }
+  })
+  await writeKept($, FILE, next ?? {}).catch(() => undefined)
+}
+
+/** A turn of main's that a press of the person's starts (0.10's shell.tsx ask): `request` reaches Claude as thimble's
+ *  report beside the prompt, kept under `key`, and `words` stand as the prompt, as the person would type them (the
+ *  claims folder's map). */
+export async function askMain($: Engine, key: string, request: string, words: string): Promise<void> {
+  await tellAtNextPrompt($, key, request)
+  await $.prompt.submit({ text: words })
 }
 
 /** The texts that wait, in the order they were first kept, taken out of the state. */

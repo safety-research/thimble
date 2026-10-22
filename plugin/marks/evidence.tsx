@@ -43,15 +43,16 @@ function highlighted(els: Any, text: string, spans: [number, number][], key: str
   return els.Text({ key, wrap: 'wrap', children: parts.length ? parts : ' ' })
 }
 
-/** The output's lines around its first highlight, each with the parts of the spans that fall in it. */
-function outputRows(els: Any, output: string, spans: [number, number][]): Any[] {
+/** The output's lines around its first highlight, each with the parts of the spans that fall in it; `rows` of them
+ *  (the tray shows fewer than the pane). */
+export function outputRows(els: Any, output: string, spans: [number, number][], rows = OUTPUT_ROWS): Any[] {
   const lines = output.split('\n')
   const starts: number[] = []
   let at = 0
   for (const l of lines) { starts.push(at); at += l.length + 1 }
   const first = spans.length ? Math.max(0, starts.findIndex((s, i) => spans[0]![0] >= s && spans[0]![0] <= s + lines[i]!.length)) : 0
-  const from = Math.max(0, Math.min(first - 3, lines.length - OUTPUT_ROWS))
-  const to = Math.min(lines.length, from + OUTPUT_ROWS)
+  const from = Math.max(0, Math.min(first - 3, lines.length - rows))
+  const to = Math.min(lines.length, from + rows)
   const out: Any[] = []
   if (from > 0) out.push(els.Text({ key: 'up', dimColor: true, children: `… ${from} line${from === 1 ? '' : 's'} above` }))
   for (let i = from; i < to; i++) {
@@ -93,7 +94,7 @@ export function wrapCode(code: string, width: number): string {
 
 /** One cited place: `path:line` of the line that holds the words (the terminal opens it there), with the cited
  *  range when it is wider, then its lines, the cited ones in full color. */
-function placeRows(els: Any, p: Place, key: string): Any[] {
+export function placeRows(els: Any, p: Place, key: string): Any[] {
   const { Box, Text } = els
   const gutter = Math.max(...p.lines.map(l => String(l.n).length))
   const hit = p.lines.find(l => l.highlight && inRange(l.n, p.line))?.n

@@ -2,10 +2,12 @@
 //
 //   v        designer/v.ts vKey      a card of the last answer
 //   f F p u  bar/fix.ts fixKey       the failure line's keys and the fix line's, while those lines show
+//   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
+//                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers', c, t
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
 //
-// Anything no one takes is typed as usual. A card never gets thimble's own keys (OWN_KEYS); the card tool says so.
+// Anything no one takes is typed as usual. A card never gets thimble's own keys (ownKeys); the card tool says so.
 //
 // The word window. Each of these keys is a letter, and a letter also starts a word. So a letter typed within WORD_MS
 // after keys thimble took means the person types a word: the keys are undone and the word goes into the box whole, the
@@ -24,6 +26,7 @@ import { failNotice } from '../bar/notice'
 import { FIX_KEYS } from '../bar/fixask.js'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
+import { restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 
 type Engine = EngineInterface
@@ -31,10 +34,17 @@ type Engine = EngineInterface
 /** How long after a key thimble took a letter means the person is typing a word that starts with it. */
 export const WORD_MS = 350
 
-/** thimble's own keys at an empty prompt. */
-export const OWN_KEYS = ['v', ...FIX_KEYS, ...BAR_KEYS]
+/** thimble's own keys at an empty prompt. (Read when asked: the features' modules, which this one imports through
+ *  core/answerview.ts, import the card tool, which reads them, so a list made as this module loads would read the
+ *  features' keys before their modules set them.) */
+export function ownKeys(): string[] {
+  return ['v', ...FIX_KEYS, ...restoredKeys(), ...BAR_KEYS]
+}
 
-type Take = { card?: string; now?: () => Promise<unknown>; undo?: () => Promise<unknown>; later?: () => Promise<unknown> }
+/** How a taker takes a key: `card` (a card's own key: its keys typed quickly are not a word), `now` with its `undo`
+ *  (done at once, undone when a letter follows within the word window), or `later` (done once the window closed with
+ *  no letter). */
+export type Take = { card?: string; now?: () => Promise<unknown>; undo?: () => Promise<unknown>; later?: () => Promise<unknown> }
 type Window = { at: number; keys: string; undo: (() => Promise<unknown>)[]; card: string | null; shut: boolean }
 
 /** The keys thimble took last, while their word window may still be open. */
@@ -47,7 +57,7 @@ const failed = (key: string, err: unknown) => `The ${key} key did not run: ${Str
 
 /** Who takes the key now, in the order above. */
 async function takerOf($: Engine, key: string, until: number): Promise<Take | null> {
-  return (await vKey($, key, until)) ?? (await fixKey($, key)) ?? (await cardTake($, key)) ?? (await barKey($, key))
+  return (await vKey($, key, until)) ?? (await fixKey($, key)) ?? (await restoredKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
 }
 
 /** The window still open at `now`, or null. */

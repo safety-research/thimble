@@ -27,7 +27,8 @@ import { forkOf } from '../core/forks'
 import { tempDir } from '../core/home'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
-import { OWN_KEYS } from '../hooks/keys'
+import { threadCardAnchor } from '../threads/seam'
+import { ownKeys } from '../hooks/keys'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
@@ -64,11 +65,18 @@ const SCHEMA = {
   },
 }
 
-/** The tool, as the model reads it: card-tool.md with the temp folder and thimble's own keys filled in. */
-export async function registerCardTool($: Engine): Promise<void> {
+/** The card guide, as the model reads it: card-tool.md with the temp folder and thimble's own keys filled in. The
+ *  tool's description, and what a squeeze's request shows of how a card's view is written (squeeze/cards.ts). */
+export async function cardGuide($: Engine): Promise<string> {
   const text = await promptText($, 'card-tool')
-  const kept = `${OWN_KEYS.slice(0, -1).join(', ')} or ${OWN_KEYS[OWN_KEYS.length - 1]}`
-  await $.tool.register({ name: 'card', isDeferred: false, description: fill(text, { TMPDIR: await tempDir($), KEPT: kept }).trim(), inputSchema: SCHEMA })
+  const own = ownKeys()
+  const kept = `${own.slice(0, -1).join(', ')} or ${own[own.length - 1]}`
+  return fill(text, { TMPDIR: await tempDir($), KEPT: kept }).trim()
+}
+
+/** The tool, as the model reads it. */
+export async function registerCardTool($: Engine): Promise<void> {
+  await $.tool.register({ name: 'card', isDeferred: false, description: await cardGuide($), inputSchema: SCHEMA })
 }
 
 /** Why the person's permission rules refuse this call, or null (step 0 above). */
@@ -175,11 +183,13 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const title = oneLine(String(input.title ?? ''), 120) || before?.title || ''
   if (!title) return { result: 'The card did not draw: `title` is empty: give the card\'s title, what it shows in a few words.' }
 
-  // a card stands at a call of main's, or under the answer the running designer fork draws for; another agent's call
-  // stands in that agent's own transcript, where the person never sees a card
+  // a card stands at a call of main's, under the answer the running designer fork draws for, or in the side thread
+  // whose fork drew it (`thread:<key>`, under that thread's answer in its pane); another agent's call stands in that
+  // agent's own transcript, where the person never sees a card
   const fork = forkOf(input.agentId)
-  const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : null
-  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation and the copy that v starts draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
+  const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : fork?.kind === 'thread' ? await threadCardAnchor($, input.agentId, id) : null
+  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation, the copy that v starts and a side thread draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
+  const placeWords = (row: string | null) => (row?.startsWith('thread:') ? 'in the side thread, under your answer' : 'under the answer v was pressed on')
   const meta: CardMeta = before ?? {
     id, version: 0, last: 0, lastFile: '', title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
     keys: [], read: '', columns: [], file: '', gen: 0, error: null, errorWidth: null, calls: {}, at: Date.now(),
@@ -224,7 +234,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   }
 
   const asked = [...new Set([...String(r.keys || '')].filter(k => !/\s/.test(k)))]
-  const keys = asked.filter(k => /^\p{L}$/u.test(k) && !OWN_KEYS.includes(k))
+  const keys = asked.filter(k => /^\p{L}$/u.test(k) && !ownKeys().includes(k))
   // a new version takes the card's place: under the call of main's that drew its first version, or under the answer v
   // was pressed on when the designer fork drew it. Where Claude Code cannot draw that place again (the main screen,
   // once main's turn that drew it ended), main's version stands at its own call
@@ -245,16 +255,16 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
 
   const out: string[] = [
     stays
-      ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? 'under the answer v was pressed on' : 'under the call that first drew the card'}.`
+      ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? placeWords(next.anchorRow) : 'under the call that first drew the card'}.`
       : meta.version > 0
         ? `Version ${version} of “${title}” is drawn where this call stands, since the terminal cannot draw the earlier place again; the earlier call shows one line that points here.`
-        : `“${title}” is drawn ${next.anchorRow ? 'under the answer v was pressed on' : 'where this call stands, above the words you write after it'}. Its id is "${id}": to change it, call card again with this id.`,
+        : `“${title}” is drawn ${next.anchorRow ? placeWords(next.anchorRow) : 'where this call stands, above the words you write after it'}. Its id is "${id}": to change it, call card again with this id.`,
     `It read ${r.summary.read} from ${baseName(file)}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
   if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
   if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
   for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
-  const own = asked.filter(k => OWN_KEYS.includes(k))
+  const own = asked.filter(k => ownKeys().includes(k))
   if (own.length) out.push(`Note on the view: ${own.join(' ')} ${own.length > 1 ? 'are' : 'is'} thimble's own, so the card does not get ${own.length > 1 ? 'them' : 'it'}; give the card other keys. The analyst has not seen ${own.length > 1 ? 'these keys' : 'this key'} on the card.`)
   const other = asked.filter(k => !/^\p{L}$/u.test(k))
   if (other.length) out.push(`Note on the view: a card takes letters only, so it does not get ${other.join(' ')}. The analyst has not seen ${other.length > 1 ? 'these keys' : 'this key'} on the card.`)
@@ -278,4 +288,44 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
   void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0 })
   return { result: out.join('\n') }
+}
+
+/**
+ * A version of a card that the person's action makes, not a call of Claude's: a squeeze's version of one of the answer's
+ * cards, or a card it adds (squeeze/cards.ts). The view runs over a copy of the rows file `rows`, in the runner as a
+ * call's does, and draws in the card's place; a new card (`id` not drawn yet) draws under the answer `anchorRow`, as
+ * v's do. Answers the version drawn, or why it did not draw (the version on screen stays).
+ */
+export async function personVersion($: Engine, o: { id: string; title: string; view: string; rows: string; anchorRow?: string | null }): Promise<{ version: number; error?: undefined } | { error: string }> {
+  if (!isCardId(o.id)) return { error: `"${oneLine(o.id, 40)}" is no card's id` }
+  const before = await metaOf($, o.id)
+  if (!before && !o.anchorRow) return { error: `there is no card ${o.id}` }
+  const meta: CardMeta = before ?? {
+    id: o.id, version: 0, last: 0, lastFile: '', title: o.title, toolUseId: '', agentId: null, anchorRow: o.anchorRow ?? null,
+    keys: [], read: '', columns: [], file: '', gen: 0, error: null, errorWidth: null, calls: {}, at: Date.now(),
+  }
+  const title = oneLine(o.title, 120) || meta.title
+  const version = Math.max(meta.version, meta.last ?? 0) + 1
+  const dir = await versionDir($, o.id, version)
+  await $.fs.write(`${dir}/view.js`, o.view)
+  const copied = await $.process.run(['cp', '--', o.rows, `${dir}/rows.json`])
+  if (copied.exitCode !== 0) return { error: `thimble could not copy the rows (${String(copied.stderr).trim().slice(0, 200)})` }
+  const width = (await treeOf($, o.id))?.width ?? cardWidth()
+  const r = await ask($, 'load', { id: o.id, version, title, view: o.view, rows: `${dir}/rows.json`, state: null, width })
+  if (!r?.ok) {
+    void $.process.run(['rm', '-rf', '--', dir]).catch(() => undefined)
+    if (r?.down) sandboxNotice($, `Cards cannot draw: ${String(r.error).slice(0, 600)}`, !!r.machine)
+    return { error: String(r?.error || 'no answer').slice(0, 400) }
+  }
+  const keys = [...new Set([...String(r.keys || '')])].filter(k => /^\p{L}$/u.test(k) && !ownKeys().includes(k))
+  const next: CardMeta = {
+    ...meta, version, last: version, title, keys, read: String(r.summary.read), columns: r.summary.columns,
+    gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(),
+  }
+  await saveMeta($, next)
+  await setTree($, o.id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
+  await saveState($, o.id, version, r.state)
+  await failCleared($, `card:${o.id}`)
+  if (meta.version > 0) void $.process.run(['rm', '-rf', '--', await versionDir($, o.id, meta.version)]).catch(() => undefined)
+  return { version }
 }

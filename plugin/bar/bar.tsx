@@ -4,14 +4,16 @@
 //                  only`, or a notice. It wraps, so the whole failure shows
 //   the fix line   only while the person's thimble has a fix (bar/fix.ts fixLineNow), with `p submit · u undo`
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
-//                  Cards is on, an answer exists and no design runs; at its right `r coverage 43% (3/7 files)` and
-//                  `l 2 labels` while Labels and coverage is on (a click or the key opens the pane; register.ts says how
-//                  each closes)
+//                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
+//                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
+//                  right their items (barRight: `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
+//                  Labels and coverage is on (a click or the key opens the pane; register.ts says how each closes)
 //
 // The settings pane draws the same bar as its switches would leave it (`preview`): nothing in it is a press and no
 // work shows. Card keys are never named here: a focused card names its own keys under its frame.
 import type { EngineInterface } from 'claude-code'
 
+import { barLeft, barRight } from '../core/answerview'
 import { textWidth } from '../core/text.js'
 import { vReady } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
@@ -33,10 +35,16 @@ const KEY_COLOR = 'suggestion'
 /** What a press on a part of the bar does; register.ts gives them, so this module draws and decides nothing else. */
 export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'labels') => unknown }
 
-/** One item of the bar: an optional key and its words, and the press that does what the key does. */
-type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown }
+/** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
+ *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
+ *  the busy step. `color` and `bold`: words drawn lit (`s ● short`, `s catch up`) or as a failure, not dim. */
+type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
+/** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
+export type BarItem = Item
 
 const len = textWidth
+/** How an item's words are drawn: dim, or in the item's own color. */
+const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
 const itemLen = (x: Item) => (x.key ? len(x.key) + 1 : 0) + len(x.words)
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood. */
@@ -50,12 +58,15 @@ async function countItems($: Engine, on: (key: string) => boolean, presses: BarP
   return out
 }
 
-/** The bar's items at its left, after `thimble`: the busy step, then v. */
+/** The bar's items at its left, after `thimble`: the busy step, v, then the features' items. */
 async function leftItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<Item[]> {
   const out: Item[] = []
   const b = preview ? null : await busyNow($)
   if (b) out.push({ id: 'busy', glyph: b.glyph, words: [`${b.word}${b.secs != null ? ` ${b.secs}s` : ''}`, ...b.more].join(' · ') })
+  const features = await barLeft($, on, preview)
+  if (features.some(x => x.focus)) return [...out, ...features.filter(x => x.focus)]
   if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card' })
+  out.push(...features)
   return out
 }
 
@@ -72,7 +83,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const presses = preview ? null : o.presses ?? null
   if (!preview) needCounts($)
   const left = await leftItems($, on, preview)
-  let right = await countItems($, on, presses, preview)
+  let right = [...(await barRight($, on, preview)), ...(await countItems($, on, presses, preview))]
   // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
   // item the switches leave on, its right part on a line of its own when it does not fit
   const room = () => width - 9 - left.reduce((n, x) => n + itemLen(x) + 3, 0) - right.reduce((n, x) => n + itemLen(x) + 3, 0)
@@ -82,7 +93,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: NAME_COLOR, children: `${x.glyph} ` })] : []),
-    ...(x.key ? [Text({ key: `k${i}`, color: KEY_COLOR, bold: true, children: x.key }), Text({ key: `w${i}`, dimColor: true, children: ` ${x.words}` })] : [Text({ key: `w${i}`, dimColor: true, children: x.words })]),
+    ...(x.key ? [Text({ key: `k${i}`, color: KEY_COLOR, bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
   ]
   const drawn = (x: Item, i: number): Any => (x.press
     ? Button({ key: `bar-${x.id}`, plain: true, label: `${x.key ? `${x.key} ` : ''}${x.words}`, onPress: x.press, children: words(x, i) })

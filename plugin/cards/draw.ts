@@ -4,7 +4,8 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title, the Client, a failure, and the keys that reach it now
+//   frame         the card's frame: its title, the Client, a failure, and the keys that reach it now; nothing for a
+//                 card the version of its answer shown now leaves out (core/answerview.ts cardHidden)
 //   framesUnder   the frames of the cards drawn under an answer
 //   askCard       a request to the runner about a card; a card the runner does not hold is loaded from its copy first
 //   applyAnswer   the runner's answer to an event: the new tree on screen, the state on disk, a failure said
@@ -22,6 +23,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
+import { cardHidden, underCard } from '../core/answerview'
 import { cut } from '../core/text.js'
 import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
@@ -153,9 +155,12 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
 }
 
-/** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now. */
+/** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now; under it, what
+ *  the features put under a card. */
 export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   const E = $.ui.resolve(e) as Any
+  // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
+  if (await cardHidden($, meta.id)) return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', children: [] })
   const width = cardWidth(e.viewport?.columns)
   const t = await treeOf($, meta.id)
   const focused = (await focusNow($)) === meta.id
@@ -174,7 +179,10 @@ export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'claude' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: width + 4, children: rows })
+  const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'claude' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: width + 4, children: rows })
+  // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
+  const under = await underCard($, E, meta.id, width)
+  return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [box, ...under] }) : box
 }
 
 /** The card's Client failed on screen (Claude Code's ui.fault): its frame draws the reason in its place until the card

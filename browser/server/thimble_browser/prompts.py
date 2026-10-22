@@ -8,8 +8,9 @@ Every prompt is a file under browser/prompts/. Three directives join them:
 
 Shared parts. The terminal plugin's texts are read from the plugin itself, plugin/ at the top of the repository, when
 the server makes a prompt: its guidance (how to write for the analyst, cite claims, draw cards and make labels), the
-card tool's description, the checker's and the designer's prompts, and the label classifier. A part names a file of the
-plugin (`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose one file is the one read.
+card tool's description, the checker's and the designer's prompts, the explain and heads lenses, and the label
+classifier. A part names a file of the plugin (`file`) or a prompt of its registry (`prompt`,
+plugin/prompts/registry.mjs), whose one file is the one read.
 prompts/shared.json names each shared part: where it comes from, the `## ` section, which of its bullets (all when not
 given), and the few literal changes the browser needs, such as the terminal's Bash call written as the browser's
 run_python call. Each change is a pair of exact strings, and the test (tests/test_prompt_parity.py) fails when the

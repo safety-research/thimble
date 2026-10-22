@@ -202,7 +202,7 @@ export function blocks(text) {
   return out
 }
 
-/** The marks that lie inside [from, to), each with its index `i` among all marks. */
+/** The marks that lie inside [from, to), each with its index `i` among all marks (a span, too: {start, end}). */
 export const marksWithin = (marks, from, to) => (marks || []).map((m, i) => ({ ...m, i })).filter(m => m.start >= from && m.end <= to)
 
 // ------------------------------------------------------------------------------------------------ inline runs
@@ -214,14 +214,17 @@ function linkAt(s) {
 }
 
 /**
- * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, dim?, mark?, tag?}` where `mark` is the
- * mark's index among the text's marks (`tag` is the drawing's own: a glyph after a mark's words). Bold, italic and
- * inline code as Claude Code draws them; a mark's words keep their own bold, `*` italic and code, and draw each `_` as
- * written; a link that is no mark reads as its words then its target, as Claude Code draws one.
+ * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, dim?, mark?, span?, tag?}` where `mark` is
+ * the mark's index among the text's marks, `span` a span's index among `spans` (words a feature draws as a press of its
+ * own: an explainer, a heads-up; core/answerview.ts Span), and `tag` the drawing's own (a glyph after a mark's words).
+ * Bold, italic and inline code as Claude Code draws them; a mark's words keep their own bold, `*` italic and code, and
+ * draw each `_` as written; a link that is no mark reads as its words then its target, as Claude Code draws one. A span
+ * lies on plain words, inside one mark's words or outside every mark ({start, end}: offsets into the text).
  */
-export function inline(text, from, to, marks = []) {
+export function inline(text, from, to, marks = [], spans = []) {
   const s = String(text || '')
   const mine = marksWithin(marks, from, to)
+  const spanned = (spans || []).map((x, i) => ({ ...x, i })).filter(x => x.start >= from && x.end <= to && x.end > x.start)
   const runs = []
   const style = { b: false, it: false }
   const push = (str, extra = {}) => {
@@ -250,6 +253,12 @@ export function inline(text, from, to, marks = []) {
         walk(mk.start + 1, mk.start + 1 + mk.words.length, { mark: mk.i })
         Object.assign(style, saved)
         i = mk.end
+        continue
+      }
+      const sp = extra.span === undefined ? spanned.find(x => x.start === i && x.end <= end) : null
+      if (sp) {
+        walk(sp.start, sp.end, { ...extra, span: sp.i })
+        i = sp.end
         continue
       }
       const c = s[i]
@@ -290,7 +299,7 @@ export function inline(text, from, to, marks = []) {
 }
 
 /** Two runs that draw alike (the same mark, or none, the same tag and the same styles), so one can hold both. */
-const same = (x, y) => x.mark === y.mark && x.tag === y.tag && !!x.b === !!y.b && !!x.it === !!y.it && !!x.code === !!y.code && !!x.link === !!y.link && !!x.dim === !!y.dim
+const same = (x, y) => x.mark === y.mark && x.span === y.span && x.tag === y.tag && !!x.b === !!y.b && !!x.it === !!y.it && !!x.code === !!y.code && !!x.link === !!y.link && !!x.dim === !!y.dim
 
 /** The plain words of runs, as drawn. */
 export const runsText = runs => runs.map(r => r.s).join('')
@@ -356,7 +365,7 @@ function merge(runs) {
 
 /** A table block's rows of cells, each cell its runs; the separator row is left out. A `|` inside code, a mark or a
  *  link splits no cell. */
-export function tableOf(text, block, marks = []) {
+export function tableOf(text, block, marks = [], spans = []) {
   const s = String(text || '')
   const rows = []
   for (const [k, r] of (block.rows || []).entries()) {
@@ -379,7 +388,7 @@ export function tableOf(text, block, marks = []) {
         let y = i
         while (x < y && /\s/.test(s[x])) x++
         while (y > x && /\s/.test(s[y - 1])) y--
-        cells.push(inline(s, x, y, marks))
+        cells.push(inline(s, x, y, marks, spans))
         a = i + 1
       }
     }

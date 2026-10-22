@@ -14,7 +14,7 @@ const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal',
 const TOOL = 'mcp__thimble__card'
 const TREE = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['ada 3'] }, { t: 'Text', p: {}, c: ['bram 5'] }] }
 const SORTED = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['bram 5'] }, { t: 'Text', p: {}, c: ['ada 3'] }] }
-const VIEW = 'const keys = "s"\nfunction onKey(k, s) { s.setState({ sorted: true }) }\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
+const VIEW = 'const keys = "o"\nfunction onKey(k, s) { s.setState({ sorted: true }) }\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
 
 function elements(n: Any, out: Any[] = []): Any[] {
   if (n == null || typeof n !== 'object') return out
@@ -89,7 +89,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     const answers: Record<string, unknown> = {
       ping: { ok: true },
       load: { ok: true, tree: TREE, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
-      key: { ok: true, handled: body.key === 's', tree: SORTED, state: '{"sorted":true}' },
+      key: { ok: true, handled: body.key === 'o', tree: SORTED, state: '{"sorted":true}' },
       draw: { ok: true, tree: TREE, state: 'null' },
       copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
       undo: { ok: true, tree: TREE, state: 'null' },
@@ -127,7 +127,7 @@ test('a card call keeps the card and answers what it read and what it draws; its
   // one request draws the card and makes its copy
   expect(w.asked).toEqual(['ping', 'load'])
   const meta = Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))
-  expect(JSON.parse(meta![1]).keys).toEqual(['s'])
+  expect(JSON.parse(meta![1]).keys).toEqual(['o'])
   expect(Object.keys(w.files).filter(p => /\/v1\/view\.js$/.test(p))).toEqual([expect.any(String)])
 
   const row = await $.ui.render(callRow('toolu_made_up_1', input))
@@ -260,25 +260,25 @@ test('a key at an empty prompt reaches the focused card when it lists the key, a
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_2', title: 'Scores', data: 'runs.json', view: VIEW } as never)
   const edit = (key: string, text = '') => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text, cursor: text.length, start: text.length, end: text.length, inputText: key } as never) as Any
   // a card not yet on screen takes no keys
-  expect((await edit('s')).text).toBe('s')
+  expect((await edit('o')).text).toBe('o')
   await shown($, callRow('toolu_made_up_2', { title: 'Scores', data: 'runs.json', view: VIEW }))
-  expect(await edit('s')).toEqual({ text: '', cursor: 0 })
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
   expect(w.asked).toContain('key')
   const row = await $.ui.render(callRow('toolu_made_up_2', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).find(n => n.type === 'Client')?.props.props.tree).toEqual(SORTED)
   // a letter typed straight after a key the card took: a word that starts with that key, which goes back whole
-  expect((await edit('q')).text).toBe('sq')
+  expect((await edit('q')).text).toBe('oq')
   expect(w.asked).toContain('undo')
   await w.clock.advance(1000)
   expect((await edit('q')).text).toBe('q')
-  expect((await edit('s', 'a')).text).toBe('as')
+  expect((await edit('o', 'a')).text).toBe('ao')
   // keys that come quickly arrive as one edit: each reaches the card; a burst with a letter no card takes is typed
   const burst = (inputText: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText } as never) as Any
   const keysBefore = w.asked.filter(x => x === 'key').length
-  expect(await burst('sss')).toEqual({ text: '', cursor: 0 })
+  expect(await burst('ooo')).toEqual({ text: '', cursor: 0 })
   expect(w.asked.filter(x => x === 'key').length).toBe(keysBefore + 3)
   await w.clock.advance(1000)
-  expect((await burst('sq')).text).toBe('sq')
+  expect((await burst('oq')).text).toBe('oq')
 })
 
 test('a card scrolled out of view takes no keys, and the one in view does', async ($, on) => {
@@ -289,17 +289,17 @@ test('a card scrolled out of view takes no keys, and the one in view does', asyn
   const at = (onScreen: Any) => ({ ...(callRow('toolu_made_up_4', input) as Any), props: { ...(callRow('toolu_made_up_4', input) as Any).props, onScreen } })
   await shown($, at({ first: 0, last: 9, of: 10 }))
   const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
-  expect(await edit('s')).toEqual({ text: '', cursor: 0 })
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
   await w.clock.advance(1000)
   await $.ui.render(at(null))
-  expect((await edit('s')).text).toBe('s')
+  expect((await edit('o')).text).toBe('o')
 })
 
 test('a card the designer fork drew draws under the answer v was pressed on, also in a resumed session', async ($, on) => {
   const w = world(on)
   // the card as tool.ts keeps a designer fork's call: its anchor is the answer's row
   const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
-  const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['s'], read: '2 rows', columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
+  const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['o'], read: '2 rows', columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
   w.files[`${dir}/meta.json`] = JSON.stringify(meta)
   w.files[`${dir}/v1/view.js`] = VIEW
   w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']
