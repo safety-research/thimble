@@ -1,4 +1,4 @@
-Draw an interactive card, or a new version of one in its place. The card stands where this call stands, above the words you write after it, so name it by its title.
+Draw an interactive card, or a new version of one in its place. The card appears in the conversation at this call, before the words you write after it; refer to it by its title, not as "below".
 
 Data: a JSON file of rows that your code wrote from the records: a list, JSON Lines, or one object. The call says what the card read.
 

@@ -60,10 +60,10 @@ Use a rule (a regex, or code such as `r["exit_code"] != 0`) when the text or fie
 
 ```
 Analyst   How many tickets ask for money back?
-Claude    (runs `thimble label refund --in "tickets/*.jsonl" --regex "refund|money back|chargeback|reimburse"`,
-          then reads ten tickets it left out that hold "back" or "return")
-          [612 of the 4,120 tickets](#) ask for money back. I sorted them with a label, "refund", that matches
-          words such as "refund", "money back" and "chargeback".
+Claude    (runs `thimble label refund --in "tickets/*.jsonl" --regex "refund|money back|chargeback|reimburse"`)
+          [612 of the 4,120 tickets](#) ask for money back, such as ["please refund order 4471"](#) and ["I want
+          my money back for the X200"](#). I sorted them with a label, "refund", that matches words such as
+          "refund", "money back" and "chargeback".
 ```
 
 ## The thimble command
