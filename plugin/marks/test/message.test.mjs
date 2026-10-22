@@ -89,3 +89,22 @@ test('a quote inside a list item is a quote of its own, and an indented line aft
   assert.deepEqual(bs.map(b => [b.type, b.indent]), [['item', 0], ['quote', 3], ['quote', 3], ['para', 3]])
   assert.deepEqual(bs.slice(1).map(b => text.slice(b.from, b.to)), ['= HEADING =', 'a line', 'agent-b put its own list there.'])
 })
+
+test("a feature's span lies on plain words or inside one mark's words, and its runs carry its index", () => {
+  const text = 'The page waits on `hydrate()` until [the query ends](#), then hydrate runs.'
+  const marks = marksIn(text)
+  const at = (w, from = 0) => text.indexOf(w, from)
+  const spans = [
+    { start: at('hydrate runs'), end: at('hydrate runs') + 'hydrate'.length },
+    { start: at('query'), end: at('query') + 'query'.length },
+  ]
+  const runs = inline(text, 0, text.length, marks, spans)
+  assert.equal(runsText(runs), 'The page waits on hydrate() until the query ends, then hydrate runs.')
+  const outside = runs.find(r => r.span === 0)
+  assert.equal(outside.s, 'hydrate')
+  assert.equal(outside.mark, undefined)
+  const inside = runs.find(r => r.span === 1)
+  assert.deepEqual([inside.s, inside.mark], ['query', 0])
+  // the words of the mark around the span stay the mark's
+  assert.equal(runs.filter(r => r.mark === 0).map(r => r.s).join(''), 'the query ends')
+})

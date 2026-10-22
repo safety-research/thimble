@@ -7,13 +7,16 @@
 // folder is known, and because the kernel writes nothing into the folder under analysis.
 // Readers skip the kinds they do not know. Telemetry adds:
 //
-//   {kind: 'call', feature, prompt, model, usage, ms, blocked, ok, ...}   one model call thimble made (a label's read).
-//        `blocked`: whether the main turn waited for it (thimble's calls run beside the turn, so false).
+//   {kind: 'call', feature, prompt, model, usage, ms, blocked, ok, ...}   one model call thimble made: a label's read
+//        (feature 'labels'), the observer's look after an answer ('observer'), a squeeze's rewrite ('squeeze'), a longer
+//        explainer ('explain'). `blocked`: whether the main turn waited for it (thimble's calls run beside the turn, so
+//        false).
 //   {kind: 'turn', feature, agent, ms, usage, model, hook_ms, reason}     one turn: main's (feature 'main'), or a fork's
-//        (feature 'checker' or 'designer'). `hook_ms`: the time thimble's own hooks took inside a main turn, which is
-//        the latency thimble adds to it.
+//        (feature 'checker', 'designer' or 'thread'). `hook_ms`: the time thimble's own hooks took inside a main turn,
+//        which is the latency thimble adds to it.
 //   {kind: 'prompts', plugin}                                             once per session: the plugin's version (its
 //        texts are the ones that version holds)
+//   {kind: 'look', turn, messages, skip?, land_ms?}                       one look of the observer (observer.ts)
 
 /** Price weights of a model call's tokens: input 1, cache write 1.25, cache read 0.1, output 5. */
 export const PRICE = { input_tokens: 1, cache_creation_input_tokens: 1.25, cache_read_input_tokens: 0.1, output_tokens: 5 }

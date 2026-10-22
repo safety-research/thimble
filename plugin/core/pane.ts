@@ -6,16 +6,21 @@
 //   coverage   ../panes/coverage.tsx    what Claude read of the folder
 //   settings   ../panes/settings.tsx    the three switches
 //   fixshare   ../panes/fixshare.tsx    the preview of a fix's share
+//   claims     ../claims/seam.ts        the conversation's claims (c)
+//   threads    ../threads/seam.ts       the side threads (t)
+//   thread     ../threads/seam.ts       one side thread: what it is about, its turns, its input
 //
 // (Each kind's draw is imported and called by name: Claude Code follows `$` only into functions a file declares or
 // imports, so a list of draws that take `$` cannot be called from here.)
 import type { EngineInterface, Register } from 'claude-code'
 
+import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawFixShare } from '../panes/fixshare'
 import { drawSettings } from '../panes/settings'
+import { drawThreadsPane } from '../threads/seam'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,6 +60,8 @@ export const registerPanes: Register = on => {
       if (now?.kind === 'coverage') return await drawCoverage($, e, now.args, els)
       if (now?.kind === 'settings') return await drawSettings($, e, now.args, els)
       if (now?.kind === 'fixshare') return await drawFixShare($, e, now.args, els)
+      if (now?.kind === 'claims') return await drawClaimsPane($, e, now.args, els)
+      if (now?.kind === 'threads' || now?.kind === 'thread') return await drawThreadsPane($, e, now.kind, now.args, els)
       return els.Text({ dimColor: true, children: now ? `thimble has no pane ${now.kind}.` : 'Nothing is open here.' })
     } catch (err) {
       return els.Text({ color: 'error', wrap: 'wrap', children: `This pane could not be drawn (${String((err as Error)?.message || err).slice(0, 160)}). Press esc, then open it again.` })

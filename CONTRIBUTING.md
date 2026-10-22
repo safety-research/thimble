@@ -48,21 +48,23 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 
 | What | Where |
 |---|---|
-| the manifest: name, the three switches (Citations, Cards, Labels and coverage on the bar); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
+| the manifest: name, the switches (Citations, Cards, Squeeze and catch-up, Explainers, Important details, Claims, Labels and coverage on the bar, Squeeze changes cards); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
 | the `thimble` command (`label`, `coverage`, `fix`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, which files Claude read (for coverage), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
-| shared parts: where thimble keeps its records (`layout.mjs`, the same names as `engine/kernel/store.py`), a text's width, whether main's turn runs, the forks (checker, designer), what thimble tells Claude with the next prompt, the change feed, the one side pane | `plugin/core/` |
+| shared parts: where thimble keeps its records (`layout.mjs`, the same names as `engine/kernel/store.py`), a text's width, whether main's turn runs, the forks (checker, designer, side thread), what thimble tells Claude with the next prompt (`tell.ts`, the one way a report reaches Claude; `engaged.ts`, what the person opened and asked), the change feed, the one side pane, the record of main's turns and answers (`answers.ts`), and where the features that act on answers draw and take keys (`answerview.ts`) | `plugin/core/` |
 | the guidance: the `thimble` context block in every conversation | `plugin/guidance/` |
 | the texts the model reads, and their registry | `plugin/prompts/` |
 | marks: find `[words](#)` in a reply, draw them, run the checker fork and the validator, the evidence pane | `plugin/marks/` |
 | cards: the `card` tool, the runner that runs the cards' views (`runner.mjs`) and the command that starts it in the sandbox (`argv.mjs`), drawing, a card's keys | `plugin/cards/` |
 | the sandbox the card runner runs in, shared with the browser workbench: Anthropic's sandbox runtime (srt) pinned (`package.json`, `package-lock.json`), the launcher that runs one command in it (`run.mjs`, `bwrap.sh`), and `setup.mjs`, which installs srt in `~/.thimble/srt` and says whether it works | `plugin/sandbox/` |
 | `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
+| the observer: one look at each answer, a fork of the conversation, for the explainers, important details and claims; its lenses | `plugin/observer/` |
+| the features that act on answers, each meeting the rest through its `seam.ts` (`core/answerview.ts` calls them): squeeze, stretch and catch-up; the explainers and important details; the claims; the side threads; the citation and explanation tray | `plugin/squeeze/`, `plugin/explain/`, `plugin/claims/`, `plugin/threads/`, `plugin/tray/` |
 | the line above the prompt: busy step, failure line, fix line, counts | `plugin/bar/` |
 | the settings, coverage and fix-share panes | `plugin/panes/` |
 | the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
-| a `--prompt` label's model reads, and the labels pane | `plugin/labels/` |
+| a `--prompt` label's model reads, and the labels pane; the labels an answer or a card used, and the ask before a large label run (`use.ts`) | `plugin/labels/` |
 | each model call and turn in the session's events, per feature (`thimble dev stats`) | `plugin/telemetry/` |
 | every `$.state` key, one block per module | `plugin/types/index.d.ts` |
 | `/thimble:fix` | `plugin/commands/fix.md` |
@@ -95,6 +97,12 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 | checker | `prompts/checker.md` | `marks/checker.ts` | the prompt of the fork that checks a reply's marks |
 | designer | `prompts/designer.md` | `designer/v.ts` | the prompt of the fork that `v` starts |
 | label classifier | `prompts/labels.md` | `labels/labels.ts` | each model call of a `--prompt` label |
+| observer | `prompts/observer.md`, `prompts/observer-turn.md` | `observer/observer.ts` | the prompt of the look after each answer: its frame, then the messages to read and what thimble already gave |
+| lenses | `prompts/lens-explain.md`, `prompts/lens-heads.md`, `prompts/lens-claims.md` | `observer/observer.ts` | the sections of the look's prompt, one per switch that is on |
+| longer explainer | `prompts/explain-expand.md` | `explain/expand.ts` | one model call when the person asks for a longer explainer |
+| squeeze | `prompts/squeeze.md` | `squeeze/term.ts` | one model call per change of an answer's chips |
+| claims folder | `prompts/claims-folder.md` | `claims/term.ts` | the guide of the subagent that maps the claims of the whole folder |
+| side thread | `prompts/thread.md` | `threads/thread.ts` | the prompt of the fork that answers a side thread |
 
 To change a text, edit its file; git keeps the earlier wording, so compare with `git diff` or `git log -p`.
 `plugin/prompts/registry.mjs` names each text, its reader and what it is for, and `thimble dev prompts` lists them. A

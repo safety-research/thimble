@@ -2,6 +2,8 @@
 //
 //   v        designer/v.ts vKey      a card of the last answer
 //   f F p u  bar/fix.ts fixKey       the failure line's keys and the fix line's, while those lines show
+//   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
+//                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers', c, t
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
 //
@@ -24,6 +26,7 @@ import { failNotice } from '../bar/notice'
 import { FIX_KEYS } from '../bar/fixask.js'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
+import { RESTORED_KEYS, restoredKey } from '../core/answerview'
 import { vKey } from '../designer/v'
 
 type Engine = EngineInterface
@@ -32,9 +35,12 @@ type Engine = EngineInterface
 export const WORD_MS = 350
 
 /** thimble's own keys at an empty prompt. */
-export const OWN_KEYS = ['v', ...FIX_KEYS, ...BAR_KEYS]
+export const OWN_KEYS = ['v', ...FIX_KEYS, ...RESTORED_KEYS, ...BAR_KEYS]
 
-type Take = { card?: string; now?: () => Promise<unknown>; undo?: () => Promise<unknown>; later?: () => Promise<unknown> }
+/** How a taker takes a key: `card` (a card's own key: its keys typed quickly are not a word), `now` with its `undo`
+ *  (done at once, undone when a letter follows within the word window), or `later` (done once the window closed with
+ *  no letter). */
+export type Take = { card?: string; now?: () => Promise<unknown>; undo?: () => Promise<unknown>; later?: () => Promise<unknown> }
 type Window = { at: number; keys: string; undo: (() => Promise<unknown>)[]; card: string | null; shut: boolean }
 
 /** The keys thimble took last, while their word window may still be open. */
@@ -47,7 +53,7 @@ const failed = (key: string, err: unknown) => `The ${key} key did not run: ${Str
 
 /** Who takes the key now, in the order above. */
 async function takerOf($: Engine, key: string, until: number): Promise<Take | null> {
-  return (await vKey($, key, until)) ?? (await fixKey($, key)) ?? (await cardTake($, key)) ?? (await barKey($, key))
+  return (await vKey($, key, until)) ?? (await fixKey($, key)) ?? (await restoredKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
 }
 
 /** The window still open at `now`, or null. */

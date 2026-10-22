@@ -7,7 +7,8 @@
 // new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key) when it acts.
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `does`:
- *  one line on what the person gets, the field's description (a test checks). */
+ *  one line on what the person gets and what it costs, the field's description (a test checks). `lenses`: the lenses of
+ *  the observer's look it needs (observer/lenses.mjs): the look runs while one such feature is on. */
 export const SWITCHES = [
   {
     key: 'marks', title: 'Citations', default: true,
@@ -18,8 +19,28 @@ export const SWITCHES = [
     does: 'Claude draws interactive cards, and v draws one of the last answer.',
   },
   {
+    key: 'squeeze', title: 'Squeeze and catch-up', default: true,
+    does: 's makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.',
+  },
+  {
+    key: 'explain', title: 'Explainers', default: true, lenses: ['explain'],
+    does: 'Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.',
+  },
+  {
+    key: 'details', title: 'Important details', default: true, lenses: ['heads'],
+    does: 'Marks the details of an answer that are easy to miss and change what it means. A small part of the call after each reply.',
+  },
+  {
+    key: 'claims', title: 'Claims', default: true, lenses: ['claims'],
+    does: 'c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.',
+  },
+  {
     key: 'counts', title: 'Labels and coverage on the bar', default: true,
     does: 'The bar shows how much of the data Claude has seen and how many labels there are. No model call: thimble counts the files after each turn.',
+  },
+  {
+    key: 'squeezeCards', title: 'Squeeze changes cards (experimental)', default: true,
+    does: 'When s makes an answer much shorter or longer, or writes it for another reader, it may edit, add or leave out a card with the text. 0 brings the cards back as they were. Each rewrite also reads the cards.',
   },
 ]
 
@@ -48,8 +69,10 @@ export function noteChange(key, value) {
   if (BY_KEY.has(key) && typeof value === 'boolean') current = { ...current, [key]: value }
 }
 
-/** Whether a feature acts now: its option when it is a boolean, else its default. */
+/** Whether a feature acts now: its option when it is a boolean, else its default. `observer` is whether the look after
+ *  each reply runs: while a feature one of whose lenses it serves is on. */
 export function featureOn(key) {
+  if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && switchesFrom(current)(s.key))
   return switchesFrom(current)(key)
 }
 

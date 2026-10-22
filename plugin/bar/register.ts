@@ -1,6 +1,7 @@
 // register.ts: the bar above the prompt, and its panes.
 //
-//   registerBar  the bar (bar.tsx) in the AbovePrompt band. /thimble-settings and a click on `thimble` open the
+//   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
+//                aboveBar). /thimble-settings and a click on `thimble` open the
 //                settings; the fixes' lifecycle (a `thimble fix` call, /thimble:fix, the person's next prompt; a
 //                `fix_ask` line of the change feed is core/feed.ts's); the counts after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
@@ -8,6 +9,7 @@
 //                number keys check records), and esc closes it
 import type { EngineInterface, Register } from 'claude-code'
 
+import { aboveBar } from '../core/answerview'
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
@@ -112,8 +114,11 @@ export const registerBar: Register = on => {
       if (e.props.hasSurvey) return next(e)
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
-      const rows = await barRows($, els, Math.max(20, e.props.bodyColumns), { presses })
-      return els.Box({ flexDirection: 'column', children: [els.Text({ key: 'gap', children: ' ' }), ...rows] })
+      const width = Math.max(20, e.props.bodyColumns)
+      const rows = await barRows($, els, width, { presses })
+      // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
+      const above = await aboveBar($, els, width)
+      return els.Box({ flexDirection: 'column', children: [...(above.length ? [els.Text({ key: 'above-gap', children: ' ' }), ...above] : []), els.Text({ key: 'gap', children: ' ' }), ...rows] })
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
       return next(e)

@@ -21,10 +21,40 @@
       "description": "Claude draws interactive cards, and v draws one of the last answer.",
       "default": true
     },
+    "squeeze": {
+      "type": "boolean",
+      "title": "Squeeze and catch-up",
+      "description": "s makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.",
+      "default": true
+    },
+    "explain": {
+      "type": "boolean",
+      "title": "Explainers",
+      "description": "Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.",
+      "default": true
+    },
+    "details": {
+      "type": "boolean",
+      "title": "Important details",
+      "description": "Marks the details of an answer that are easy to miss and change what it means. A small part of the call after each reply.",
+      "default": true
+    },
+    "claims": {
+      "type": "boolean",
+      "title": "Claims",
+      "description": "c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.",
+      "default": true
+    },
     "counts": {
       "type": "boolean",
       "title": "Labels and coverage on the bar",
       "description": "The bar shows how much of the data Claude has seen and how many labels there are. No model call: thimble counts the files after each turn.",
+      "default": true
+    },
+    "squeezeCards": {
+      "type": "boolean",
+      "title": "Squeeze changes cards (experimental)",
+      "description": "When s makes an answer much shorter or longer, or writes it for another reader, it may edit, add or leave out a card with the text. 0 brings the cards back as they were. Each rewrite also reads the cards.",
       "default": true
     }
   }

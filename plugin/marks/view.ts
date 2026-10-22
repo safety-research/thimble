@@ -19,12 +19,20 @@
 //   failed       wrong as the check read the data: red, with ` ×` after it
 //   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
 //   unchecked    underlined in the text's color: no check could run
+//
+// A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
+// explainer on a teal fill; a span inside a mark's words keeps the mark's press and adds its fill. While the tray shows
+// a mark (`focus`), it is drawn bold on the selection's background. `dim` draws the words dim (a rewrite of them runs),
+// and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 import { textWidth } from '../core/text.js'
 import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; tag?: string }
+type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; span?: number; tag?: string }
+type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean }
+/** Words a feature draws as a press of its own (core/answerview.ts Span). */
+export type ViewSpan = { start: number; end: number; look: SpanLook; label: string; onPress?: () => unknown }
 type Mark = { start: number; end: number; words: string }
 
 export type MarkStatus = 'pending' | 'checking' | 'verified' | 'corrected' | 'failed' | 'unconfirmed' | 'unchecked'
@@ -44,6 +52,14 @@ export type MessageOpts = {
   /** at a mark's index, the check's note on the words around it, if any */
   notes?: (string | undefined)[]
   onMark: (k: number) => unknown
+  /** the features' spans on the text's words, in order */
+  spans?: ViewSpan[]
+  /** the index of the mark the tray shows */
+  focus?: number | null
+  /** the words drawn dim */
+  dim?: boolean
+  /** what stands in place of the ● of the reply's first block */
+  lead?: string | null
 }
 
 /** A purple that follows the person's theme (Claude Code's color for a merged pull request). */
@@ -70,14 +86,25 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
 }
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
-function runText(els: Any, r: Run, wrap?: string) {
+function runText(els: Any, r: Run, wrap?: string, dim = false) {
   const p: Any = { children: r.s }
   if (wrap) p.wrap = wrap
   if (r.b) p.bold = true
   if (r.it) p.italic = true
   if (r.code) p.color = 'permission'
-  if (r.dim) p.dimColor = true
+  if (r.dim || dim) p.dimColor = true
   return els.Text(p)
+}
+
+/** A span's run as a press of the feature's, drawn in the span's look. */
+function spanEl(els: Any, o: MessageOpts, r: Run, key: string) {
+  const sp = o.spans?.[r.span as number]
+  const p: Any = { children: r.s, ...(sp?.look ?? {}) }
+  if (r.b) p.bold = true
+  if (r.it) p.italic = true
+  if (r.code && !p.color) p.color = 'permission'
+  const text = els.Text(p)
+  return sp?.onPress ? els.Button({ key, plain: true, label: String(sp.label || r.s).slice(0, 120), hover: { bold: true }, children: [text], onPress: () => sp.onPress!() }) : els.Text({ key, children: [text] })
 }
 
 /** A mark's run as a press that opens its evidence, drawn by its status. */
@@ -92,6 +119,10 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   else if (look.status === 'unchecked') p.underline = true
   else if (look.status === 'corrected') { p.color = 'warning'; p.underline = true }
   else { p.color = PURPLE; p.underline = true }
+  // a span inside the mark's words: its fill under the mark's color
+  const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
+  if (sp?.look.backgroundColor) p.backgroundColor = sp.look.backgroundColor
+  if (o.focus === r.mark) { p.bold = true; p.backgroundColor = 'selectionBg' }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   return els.Button({ key, plain: true, label, hover: { bold: true }, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
 }
@@ -101,14 +132,14 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
  *  break the text into columns). */
 function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] = []) {
   const kids: Any[] = [...lead]
-  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, 'truncate-end')))
+  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : r.span !== undefined ? spanEl(els, o, r, `${key}-s${r.span}-${j}`) : runText(els, r, 'truncate-end', !!o.dim)))
   return els.Box({ key, flexDirection: 'row', children: kids })
 }
 
 /** A block that holds marks, as lines laid out here. */
 function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): Any[] {
   if (b.type === 'table') return tableLines(els, o, b, key, w)
-  const runs = withLooks(inline(o.text, b.from, b.to, o.marks), o)
+  const runs = withLooks(inline(o.text, b.from, b.to, o.marks, o.spans ?? []), o)
   if (b.type === 'heading') runs.forEach(r => { r.b = true })
   if (b.type === 'quote') runs.forEach(r => { r.it = true })
   if (b.type === 'item') {
@@ -132,7 +163,7 @@ function noteLines(els: Any, o: MessageOpts, b: Any, key: string): Any[] {
  *  header bold, the cell's words wrapped beside it, each mark a press as in a paragraph. A header wider than half the
  *  column stands on a line of its own, its cell under it, indented. */
 function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): Any[] {
-  const rows: Run[][][] = tableOf(o.text, b, o.marks).map((cells: Run[][]) => cells.map(c => withLooks(c, o)))
+  const rows: Run[][][] = tableOf(o.text, b, o.marks, o.spans ?? []).map((cells: Run[][]) => cells.map(c => withLooks(c, o)))
   const n = Math.max(...rows.map(r => r.length))
   const widths = Array.from({ length: n }, (_, c) => Math.max(1, ...rows.map(r => textWidth(runsText(r[c] || [])))))
   const total = widths.reduce((s, x) => s + x + 3, 1)
@@ -171,7 +202,7 @@ function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
       const pad = widths[c]! - textWidth(runsText(runs))
       const left = k === 0 ? Math.floor(pad / 2) : 0
       kids.push(els.Text({ children: ' ' + ' '.repeat(left) }))
-      runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-t${k}-${c}-${j}`) : runText(els, r)))
+      runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-t${k}-${c}-${j}`) : r.span !== undefined ? spanEl(els, o, r, `${key}-ts${k}-${c}-${j}`) : runText(els, r, undefined, !!o.dim)))
       kids.push(els.Text({ children: ' '.repeat(pad - left) + ' │' }))
     }
     out.push(els.Box({ key: `${key}-r${k}`, flexDirection: 'row', children: kids }))
@@ -187,16 +218,18 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   const bs = blocks(o.text)
   const w = Math.max(20, o.cols)
   const rows: Any[] = []
-  let dot = o.first
+  let dot = o.first || !!o.lead
   let k = 0
   const push = (content: Any[], gap: boolean) => {
-    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [Box({ width: 2, flexShrink: 0, children: [Text({ children: dot ? '●' : ' ' })] }), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+    const bullet = dot ? (o.lead ? Text({ color: 'suggestion', bold: true, children: o.lead }) : Text({ children: '●' })) : Text({ children: ' ' })
+    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [Box({ width: 2, flexShrink: 0, children: [bullet] }), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
   // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
   // item keeps its indent beside its siblings. A code block never is: its lines stay as written, in Claude Code's
   // Markdown, whatever lies in it
-  const laid: boolean[] = bs.map((b: Any) => b.type !== 'code' && marksWithin(o.marks, b.start, b.end).length > 0)
+  // (dim words are laid out here too, as Claude Code's Markdown draws no dim text; and a block with a span)
+  const laid: boolean[] = bs.map((b: Any) => b.type !== 'code' && (!!o.dim || marksWithin(o.marks, b.start, b.end).length > 0 || marksWithin(o.spans ?? [], b.start, b.end).length > 0))
   for (let a = 0; a < bs.length; a++) {
     if (bs[a].type !== 'item') continue
     let z = a

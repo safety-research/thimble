@@ -69,13 +69,26 @@ declare module 'claude-code' {
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */
       mainTurn: string | null
       /** which agents are thimble's forks, and their kind (core/forks.ts) */
-      forks: Record<string, 'checker' | 'designer'>
+      forks: Record<string, 'checker' | 'designer' | 'thread'>
       /** what Claude reads with the person's next prompt, by key (core/tell.ts) */
       tell: Record<string, string>
       /** the session's temp folder, as a real path (core/home.ts tempDir) */
       tempDir: string
       /** how far the session's change feed has been read (core/feed.ts) */
       feed: { file: string; bytes: number } | null
+
+      // ---- answers (core/answers.ts): the record of each of main's turns and text rows, kept on disk too
+      /** a turn of main's, by its id: { turnId, n, prompt: { text, by, row }, rows, answer, reason, startedAt, endedAt,
+       *  labels: [{ name, args, toolUseId, seq, ok }], cards: [{ id, toolUseId, seq }], seq } (TurnRec) */
+      answerTurn: StateFamily<unknown>
+      /** the turns' ids, oldest first */
+      answerTurns: string[]
+      /** a text row of Claude's, by its row: { row, turnId, text, at, parts: { [feature]: its part } } (Msg) */
+      answerMsg: StateFamily<unknown>
+      /** the turn a text row belongs to, by the row */
+      answerRowTurn: StateFamily<string>
+      /** the answer the person picked for the keys with { and }, or null: the newest */
+      answerSel: string | null
     }
   }
 }

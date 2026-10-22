@@ -44,7 +44,7 @@ export function report(events, { plain = null, file = '' } = {}) {
   const rows = Object.values(s.features)
   const main = rows.filter(r => r.main)
   const side = rows.filter(r => !r.main)
-  const order = ['checker', 'designer', 'labels']
+  const order = ['checker', 'designer', 'labels', 'observer', 'squeeze', 'explain', 'claims', 'thread']
   side.sort((a, b) => (order.indexOf(a.feature) + 1 || 99) - (order.indexOf(b.feature) + 1 || 99) || b.w - a.w)
   const session = events.find(e => e.session)?.session || ''
   const lines = []

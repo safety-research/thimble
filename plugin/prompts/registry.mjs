@@ -32,6 +32,51 @@ export const TEXTS = {
     reader: 'labels/labels.ts',
     use: 'one model call per batch of up to 50 records',
   },
+  observer: {
+    about: "the observer's frame: the shared principles of the look after each answer, with the enabled lenses' sections",
+    reader: 'observer/observer.ts',
+    use: "the first part of the prompt of one fork of main's conversation after each answer",
+  },
+  'observer-turn': {
+    about: 'what follows the frame: the messages to read, the cards and what the session read, what thimble already gave',
+    reader: 'observer/observer.ts',
+    use: "the second part of the look's prompt",
+  },
+  'lens-explain': {
+    about: 'explainers on the terms of an answer that would stop the reader',
+    reader: 'observer/observer.ts',
+    use: "a section of the look's prompt while Explainers is on",
+  },
+  'lens-heads': {
+    about: 'an important detail of the answer: an orange mark that opens a heads-up card',
+    reader: 'observer/observer.ts',
+    use: "a section of the look's prompt while Important details is on",
+  },
+  'lens-claims': {
+    about: "the turn's claims, each placed by a quote, in a cluster",
+    reader: 'observer/observer.ts',
+    use: "a section of the look's prompt while Claims is on",
+  },
+  'explain-expand': {
+    about: 'an explainer written again at more length, over the term, the answer and the files it cites',
+    reader: 'explain/expand.ts',
+    use: 'one model call when the person asks for a longer explainer',
+  },
+  squeeze: {
+    about: 'an answer rewritten at the levels the person picked on its chips, or a catch-up of the replies they missed',
+    reader: 'squeeze/term.ts',
+    use: 'one model call per change of the chips',
+  },
+  'claims-folder': {
+    about: 'the guide of the subagent that maps the claims of the whole folder',
+    reader: 'claims/term.ts',
+    use: "the brief main hands the subagent when the person asks for the folder's map",
+  },
+  thread: {
+    about: "a side thread's instructions",
+    reader: 'threads/thread.ts',
+    use: "the prompt of the fork that answers a side thread's question",
+  },
 }
 
 /** A text's file, as a path from the plugin's root. */
