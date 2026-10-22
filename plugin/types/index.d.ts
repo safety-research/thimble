@@ -7,14 +7,15 @@ declare module 'claude-code' {
       /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
        *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, was?, reason?,
-       *  failedBy?, evidence?, note? }] } (marks/store.ts Reply), kept on disk too */
+       *  failedBy?, evidence?, note?, repair? }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>
       /** main's text rows of the turn that runs: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
-      /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks */
-      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number }>
+      /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
+       *  check of one mark again, which x in the tray started */
+      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean }>
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,

@@ -19,7 +19,7 @@
 //   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
-//   canRepair(item), repairAsk(frame, info)   x on a wrong or not-confirmed citation: the turn of main it starts
+//   canRepair(item)                        whether x repairs a citation: the check found it wrong, or could not confirm it
 //   saidOf(gloss)                          what an explainer or an important detail says, in words for an agent
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
@@ -209,32 +209,6 @@ export function scopeText(f, info = {}) {
 
 /** Whether a citation can be repaired (x): the check found it wrong, or could not confirm it. */
 export const canRepair = m => !!m && m.status === 'failed'
-
-/**
- * What x on a wrong or not-confirmed citation asks main for (core/tell.ts askMain): `words`, the prompt's first line as
- * the person reads it in the conversation, and `request` under it: the claim, where it stands, what the check found,
- * and the task. Main checks that one claim again against the records and writes its sentence again when
- * the records show something else; its new reply's citations are checked as every reply's are. `info`: {begins, words,
- * item} (the citation's MarkItem: sentence, reason, failedBy, evidence).
- */
-export function repairAsk(f, info = {}) {
-  const m = info.item || {}
-  const words = plain(info.words || m.shown || m.words) || `citation ${f?.n ?? ''}`
-  const begins = cut(String(info.begins || '').replace(/\s+/g, ' ').trim(), 80)
-  const where = begins ? ` of your reply that begins "${begins}"` : ''
-  // the sentence as the check keeps it, its marks' words in brackets
-  const sentence = plain(m.sentence).replace(/\[([^\]]*)\]/g, '$1')
-  const reason = plain(m.reason)
-  const found = m.failedBy === 'evidence'
-    ? `The check could not confirm it: it did not find these words in the evidence it read${reason ? ` (${reason})` : ''}.`
-    : `The check found it wrong${reason ? `: ${reason}` : '.'}`
-  const request = [
-    `The analyst pressed x (repair) on citation ${f?.n ?? ''}${where}: "${words}"${sentence && sentence !== words ? `, in the sentence "${sentence}"` : ''}.`,
-    found + evidenceWords(m.evidence),
-    'Check this one claim again against the records. If the records show something else, write the sentence again with what they show, and cite the new words. If the claim holds, show the evidence that holds it. Keep the rest of the reply as it is.',
-  ].join(' ')
-  return { words: `Repair citation ${f?.n ?? ''}: "${cut(words, 80)}"`, request }
-}
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
  *  it mattered here. A heads-up: its title in bold, two to four bullets, and one line on what to do. */

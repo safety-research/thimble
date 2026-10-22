@@ -12,6 +12,7 @@
 //   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others)
 //   turn.complete    the checker's turn ended: validate, write the statuses
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
+//   agent.spawn      a repair's fork (x in the tray): waits out the key's word window, refused when a word came
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -26,7 +27,7 @@ import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
-import { checkerDenial, endCheck, noteRow, resumeChecks, startCheck } from './checker'
+import { checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { marksIn, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { footerEl, messageEl, type MarkLook } from './view'
@@ -100,6 +101,16 @@ export const registerMarks: Register = on => {
     const no = denial(e)
     return no ? { deny: no } : next(e)
   })
+
+  // x's repair waits out the word window, and is refused when a letter came in it (hooks/keys.ts undoes x)
+  on('agent.spawn', { description: REPAIR_DESCRIPTION }, async ($, e, next) => {
+    const h = heldRepair()
+    if (next.origin.plugin !== 'thimble' || !h) return next(e)
+    const left = h.until - Number(await $.clock.now())
+    if (left > 0) await $.clock.sleep(left)
+    if (h.cancelled) return { deny: 'the person typed a word that starts with x' }
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {

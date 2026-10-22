@@ -7,6 +7,7 @@
 //   newReply($, reply)       a reply's marks, all `checking`, at the end of main's turn
 //   editReply($, key, edit)  a change of the reply's marks (update(), so two forks that end at once both land)
 //   rowMarks($, row)         what one row of the reply draws: its marks, and the reply's counts on its last row
+//   replyKeyOf($, row)       the key of the reply a row belongs to
 //   restoreMarks($)          the replies a resumed session's transcript holds, back in the state; a check that ran
 //                            when the session ended is not checked
 import { update, type EngineInterface } from 'claude-code'
@@ -25,10 +26,11 @@ export type Evidence =
   | ({ kind: 'quote' | 'code'; more?: Place[] } & Place)
 /** One mark: its number in the reply, its words, the row and place it stands at, its sentence, and its check. `failedBy`
  *  says who failed it: the checker (`check`: the claim is wrong), or thimble, when the checker's evidence did not hold
- *  (`evidence`: the claim is not confirmed). `note` is what the check found wrong in the sentence outside the mark. */
+ *  (`evidence`: the claim is not confirmed). `note` is what the check found wrong in the sentence outside the mark.
+ *  `repair`: the person pressed x on it, and this check is the one x started (checker.ts startRepair). */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence'; evidence?: Evidence; note?: string
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence'; evidence?: Evidence; note?: string; repair?: true
 }
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[] }
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */
@@ -99,8 +101,12 @@ export function counts(r: Reply): Counts {
   }
 }
 
+export async function replyKeyOf($: Engine, row: string): Promise<string | null> {
+  return ((await $.state.get({ ...ROW, id: row })).value as string | undefined) ?? null
+}
+
 export async function rowMarks($: Engine, row: string): Promise<RowMarks | null> {
-  const key = (await $.state.get({ ...ROW, id: row })).value as string | undefined
+  const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null
   if (!r) return null
   return { row, last: r.key === row, ...counts(r), items: r.items.filter(m => m.row === row) }
