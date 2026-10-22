@@ -8,13 +8,13 @@ check_mark() decides what the person sees of that mark; its result wins over the
   computed  the evidence is code. One of the real calls of the session (the checker's or main's Bash calls, as the
             transcript stored their output) ran that code: the call's command holds the code's lines, in order. That
             call's output shows the marked words (or the corrected words): the words whole, the same words with number
-            words as digits ("five" is 5), or every number of the words, each a whole number of the output (a 3 never
+            words as digits ("five" is 5), each quoted part of the words, or every number of the words, each a whole number of the output (a 3 never
             matches inside 2,301). The code does not type in a number of the words where it can be the printed value
             (assigned, printed or returned; a bound in a comparison or an argument of another call is a condition). The
             check reads the output the call really printed, never the output the checker wrote down.
   quote     the file is inside the working folder, the line (or a range of at most 50 lines) exists, and the substring
-  code      is in it: in the raw line or in the line's JSON strings decoded, runs of white space as one space, and
-            `**` and backticks as formatting. The quoted words of a direct quote, and the numbers of the words, are in
+  code      is in it: in the raw line or in the line's JSON strings decoded, runs of white space as one space (or as
+            none: JSON written with no space after its colons), and `**` and backticks as formatting. The quoted words of a direct quote, and the numbers of the words, are in
             the cited lines too. Big files are read line by line.
 
 A mark the checker verified or corrected whose evidence does not hold here fails, with the reason. A mark the checker
@@ -147,13 +147,17 @@ def unlabeled(out: str) -> str:
 
 
 def shows(target: str, out: str) -> bool:
-    """The output holds the marked words: whole, or with number words as digits, or every number of the words, each as
-    a whole number of the output. A label that opens a line (`9: `) is no part of the output."""
+    """The output holds the marked words: whole, or with number words as digits, or each quoted part of the words
+    (`"added", "context" or "removed"`), or every number of the words, each as a whole number of the output. A label
+    that opens a line (`9: `) is no part of the output."""
     out = unlabeled(out)
     if bounded_in(target, out):
         return True
     bare = target.strip(QUOTE_CHARS + " ")
     if bounded_in(bare, out) or bounded_in(wordnums(target), wordnums(out)):
+        return True
+    frags = quote_fragments(target)
+    if frags and all(bounded_in(f, out) for f in frags):
         return True
     nums = numbers(wordnums(target))
     return bool(nums) and all(has_number(v, out) for v in nums)
@@ -436,7 +440,7 @@ def find_loose(sub: str, text: str) -> list[int] | None:
     words = [w for w in unmark(sub).split(" ") if w]
     if not words:
         return None
-    gap = r"(?:[\s*`]|\\n)+"
+    gap = r"(?:[\s*`]|\\n)*"
     rx = re.compile(r"[*`]*" + gap.join(r"[*`]*".join(map(re.escape, w)) for w in words), re.S)
     m = rx.search(text)
     return [m.start(), m.end()] if m else None
@@ -475,7 +479,8 @@ def check_quote(target: str, ev: dict[str, Any], cwd: str) -> tuple[list[str], d
         texts += [" ".join(norm_ws(t) for raw in cited for t, d in forms(raw) if d == dec) for dec in (False, True)]
     hay = [h for t in texts for h in (t, unmark(t)) if h]
     problems = []
-    if not any(norm_ws(sub) in h or unmark(sub) in h for h in hay):
+    tight = re.sub(r"\s+", "", unmark(sub))
+    if not any(norm_ws(sub) in h or unmark(sub) in h or tight in re.sub(r"\s+", "", h) for h in hay):
         problems.append(f"line {line} of {file} does not hold the substring")
     for frag in quote_fragments(target):
         if not any(unmark(frag) in h for h in hay):

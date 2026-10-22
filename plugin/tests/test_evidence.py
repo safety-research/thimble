@@ -142,3 +142,11 @@ def test_a_number_in_a_name_is_no_value_the_line_must_show(tmp_path: Path):
     (tmp_path / "log.jsonl").write_text(json.dumps({"at": "2026-08-30T14:29:00Z", "text": "ran the full suite"}) + "\n")
     r = check_mark(mark("agent-11 at 14:29"), quote("log.jsonl", 1, "14:29"), [], str(tmp_path))
     assert r["status"] == "verified"
+
+
+def test_json_quoted_with_spaces_and_a_list_of_quoted_values(tmp_path: Path):
+    (tmp_path / "p.jsonl").write_text('{"record_id":"pkg:1.0.1:a.yaml","kind":"added"}\n')
+    r = check_mark(mark('"pkg:1.0.1:a.yaml"'), quote("p.jsonl", 1, '"record_id": "pkg:1.0.1:a.yaml"'), [], str(tmp_path))
+    assert r["status"] == "verified"
+    code = 'import json\nkinds = sorted({e["kind"] for l in open("p.jsonl") for e in [json.loads(l)]})\nprint("kinds:", kinds)'
+    assert check_mark(mark('"added", "context" or "removed"'), computed(code), [call(code, "kinds: ['added', 'context', 'removed']")], "/data")["status"] == "verified"
