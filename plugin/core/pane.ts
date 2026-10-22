@@ -36,12 +36,23 @@ const NOW = { plugin: 'thimble', key: 'pane' } as const
  *  whether the pane is on screen. Claude Code places a pane at any width only when the person's own command, prompt
  *  or click opened it; a key at the prompt is none of these, so below 144 columns (110 once the person opened the
  *  pane before) the pane would wait unseen until the terminal grows. Such a pane is closed, and the caller says why. */
+/** Claude Code sets `closeOnEscape` and `rows` anew on each open, so an open that only redraws the pane with other
+ *  arguments (a key in it: j, v, a page) keeps those the open pane has; else Esc would stop closing it after one key. */
 export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number } = {}): Promise<boolean> {
-  await $.state.set(NOW, { kind, args })
-  const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true, closeOnEscape: true } : {}), ...(o.rows ? { rows: o.rows } : {}) })
+  const was = await paneNow($)
+  const open = was ? await isOpen($) : false
+  const escape = Boolean(o.focus || (open && was?.escape))
+  const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined)
+  await $.state.set(NOW, { kind, args, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}) })
+  const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
   if (r.isPlaced) return true
   await closePane($)
   return false
+}
+
+/** Whether thimble's pane is open (the person may have closed it); open when Claude Code cannot say. */
+async function isOpen($: Engine): Promise<boolean> {
+  try { return (await $.ui.panes()).some(p => p.id === PANE_ID) } catch { return true }
 }
 
 export async function closePane($: Engine): Promise<void> {
@@ -49,8 +60,10 @@ export async function closePane($: Engine): Promise<void> {
   await $.ui.close({ id: PANE_ID })
 }
 
-export async function paneNow($: Engine): Promise<{ kind: string; args: unknown } | null> {
-  return ((await $.state.get(NOW)).value ?? null) as { kind: string; args: unknown } | null
+export type PaneNow = { kind: string; args: unknown; escape?: boolean; rows?: number }
+
+export async function paneNow($: Engine): Promise<PaneNow | null> {
+  return ((await $.state.get(NOW)).value ?? null) as PaneNow | null
 }
 
 /** A pane's drawing with its side thread under it (threads/seam.ts threadUnder); the drawing alone when the thread

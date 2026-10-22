@@ -776,7 +776,7 @@ def answer_ask(st: Store, name: str, ask_id: str, choice: str, sample: int, seed
         if choice == "cancel" and units:  # the records that have values are a sample of the scope
             lab["trial"] = True
         now = time.time()
-        lab["run"] = {"state": "asked", "asked": now, "waiting": len(keep), "chose": choice} if keep else \
+        lab["run"] = {"state": "asked", "asked": now, "waiting": len(keep), "of": len(keep), "chose": choice} if keep else \
             {"state": "cancelled", "at": now, "chose": choice, "units": len(wait)}
         write(st, lab)
     return {"label": lab, "choice": choice, "reads": len(keep), "of": len(wait)}

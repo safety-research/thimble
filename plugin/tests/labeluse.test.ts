@@ -145,6 +145,8 @@ test('a large label run asks above the bar and in the bar; its key acts after th
   expect(w.ran.find(a => a.includes('--answer'))).toEqual(['label', 'spam', '--answer', 'sample', '--ask', 'a1'])
   const told = (w.state.get(JSON.stringify({ plugin: 'thimble', key: 'tell' }))?.value ?? {}) as Record<string, string>
   expect(told['label-ask:/made-up/data|spam']).toContain('random sample of 300 of the label spam\'s 420 records')
+  // Claude hears that the sample is being read and how to wait for its counts, never that a trial's counts are the label's
+  expect(told['label-ask:/made-up/data|spam']).toContain('`thimble label spam --wait` waits for them and prints the label\'s counts; counts from before this choice (a trial) are not the label\'s.')
   // the feed's line read again (after Claude's command ended) never brings the answered ask back
   await labelAskFromFeed(w.$, ev)
   expect(await labelAskNow(w.$)).toBe(null)

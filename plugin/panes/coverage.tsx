@@ -132,25 +132,26 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
   const tree = folderTree(cov.groups || [])
   const files = (cov.files || []) as Any[]
   const untouched: string[] = Array.isArray(cov.untouched?.path) ? cov.untouched.path : []
-  // a row is its name, the touched column and two measures (a bar and its percent): in a narrow pane the bars give
-  // way first, so a name keeps 14 cells and the row never wraps
-  const barW = Math.max(2, Math.min(BAR, Math.floor((W - 19 - TOUCHED - 14) / 2)))
+  // a row is its name, the touched column and two measures (a bar and its percent), always on one line: the bars give
+  // way first (down to 3 cells, the same width in every row, so the columns stay aligned) to the longest name shown,
+  // and a name still too long is cut in its middle, since names that start alike differ at their end
+  // (`…__specified`, `…__underspecified`)
+  const maxBar = Math.max(2, Math.min(BAR, Math.floor((W - 19 - TOUCHED - 14) / 2)))
+  let barW = maxBar
   const nameW = (depth: number) => Math.max(6, W - 2 * depth - 20 - TOUCHED - 2 * barW)
   const measureCells = (m: { read: number; searched: number }, k: string) => [
     Text({ key: `${k}-g1`, children: ' ' }), ...bar(m.read, barW, READ, `${k}-r`), Text({ key: `${k}-rp`, children: pad(percent(m.read), 7, true) }),
     Text({ key: `${k}-g2`, children: '  ' }), ...bar(m.searched, barW, SEARCHED, `${k}-s`), Text({ key: `${k}-sp`, children: pad(percent(m.searched), 7, true) }),
   ]
-  const rows: Any[] = []
-  // a row of a folder or a file: its name, then its columns; a name too long for its column stands whole on a line of
-  // its own above them, since names that start alike differ at their end (`…__specified`, `…__underspecified`)
-  const named = (key: string, label: string, lead: string, name: string, depth: number, look: Any, onPress: () => unknown, cells: Any[]) => {
-    const w = nameW(depth)
-    if (len(name) <= w) {
-      rows.push(Button({ key, plain: true, label, onPress, children: [Text({ key: 'n', ...look, children: `${lead}${pad(name, w)} ` }), ...cells] }))
-      return
-    }
-    rows.push(Button({ key: `${key}:name`, plain: true, label, onPress, children: [Text({ key: 'n', ...look, children: `${lead}${cut(name, W - len(lead), true)}` })] }))
-    rows.push(Button({ key, plain: true, label, onPress, children: [Text({ key: 'n', children: ' '.repeat(len(lead) + w + 1) }), ...cells] }))
+  // the rows are drawn once every row is known, since the widths follow the longest name
+  const rows: (Any | (() => Any))[] = []
+  let fit = maxBar
+  const named = (key: string, label: string, lead: string, name: string, depth: number, look: Any, onPress: () => unknown, cells: () => Any[]) => {
+    fit = Math.min(fit, Math.floor((W - 2 * depth - 20 - TOUCHED - len(name)) / 2))
+    rows.push(() => {
+      const w = nameW(depth)
+      return Button({ key, plain: true, label, onPress, children: [Text({ key: 'n', ...look, children: `${lead}${pad(len(name) <= w ? name : cut(name, w, true), w)} ` }), ...cells()] })
+    })
   }
   const fileRows = (folder: string, depth: number) => {
     const ind = '  '.repeat(depth)
@@ -158,7 +159,7 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
     for (const f of mine) {
       const path = String(f.path)
       const shown = view.file === path
-      named(`file:${path}`, path, `${ind}  `, nameOf(path), depth, shown ? { bold: true } : {}, () => setView({ file: shown ? null : path }), [
+      named(`file:${path}`, path, `${ind}  `, nameOf(path), depth, shown ? { bold: true } : {}, () => setView({ file: shown ? null : path }), () => [
         Text({ key: 'f', dimColor: true, children: pad(SAID[String(f.status)] || '', TOUCHED, true) }),
         ...measureCells({ read: Number(f.read_share) || 0, searched: Number(f.counted_share) || 0 }, 'm'),
       ])
@@ -191,7 +192,7 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
   const folderRows = (at: Node, depth: number) => {
     for (const k of [...at.kids.values()].sort(byTouch)) {
       const isOpen = open.has(k.path)
-      named(`dir:${k.path}`, k.path, `${'  '.repeat(depth)}${isOpen ? '▾' : '▸'} `, nameOf(k.path), depth, k.touched ? {} : { dimColor: true }, flip(k.path), [
+      named(`dir:${k.path}`, k.path, `${'  '.repeat(depth)}${isOpen ? '▾' : '▸'} `, nameOf(k.path), depth, k.touched ? {} : { dimColor: true }, flip(k.path), () => [
         Text({ key: 'f', dimColor: true, children: pad(`${short(k.touched)}/${short(k.files)}`, TOUCHED, true) }),
         ...measureCells(measures(k), 'm'),
       ])
@@ -203,6 +204,7 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
   }
   folderRows(tree, 0)
   fileRows('./', 0)
+  barW = Math.max(Math.min(3, maxBar), Math.min(maxBar, fit))
 
   return Box({ flexDirection: 'column', width: W, children: [
     Text({ key: 'title', bold: true, children: 'Coverage' }),
@@ -211,6 +213,6 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
     overview('searched or computed over', Number(total.touched_files) || 0, SEARCHED, 'o-searched'),
     Text({ key: 'gap', children: ' ' }),
     Text({ key: 'head', dimColor: true, children: `  ${pad('folder', nameW(0))} ${pad('files', TOUCHED, true)} ${pad('read', barW + 7)}  ${pad('searched', barW + 7)}` }),
-    ...rows,
+    ...rows.map(r => (typeof r === 'function' ? r() : r)),
   ] })
 }

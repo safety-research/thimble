@@ -188,3 +188,31 @@ test('a failure while the person tries a fix keeps the fix line and its keys; th
   expect(after).not.toContain('A made-up card failed.')
   expect(after).toContain('p submit · u undo')
 })
+
+test('in a narrow coverage pane a long folder name is cut in its middle and its row keeps its counts on one line', async ($, on) => {
+  const long = (run: string) => ({ folder: `runs/${run}/`, files: 57, touched: 1, read_share: 0, counted_share: 0.02, units: [{ unit: 'records', units: 1000, seen: 0, model: 0, searched: 20, computed: 0 }] })
+  const runs = ['sweep1-fable-managed_prs_issues', 'sweep2-opus-managed_prs_issues', 'a-run-whose-name-is-far-too-long-for-any-column-at-all']
+  const cov = { root: '/made-up/data', total: { files: 171, touched_files: 3, seen_files: 0 }, groups: runs.map(long), files: [], untouched: { path: [] } }
+  const w = world(on, { ok: true, out: JSON.stringify(cov) })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Done.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'r' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'r' } as never)
+  await w.clock.advance(400)
+  const W = 72
+  const pane = await $.ui.mount({ ...(PANE as Any), props: { ...(PANE as Any).props, bodyColumns: W } } as never)
+  await pane.press({ key: 'dir:runs/' })
+  const widths = new Set<number>()
+  for (const run of runs) {
+    const row = (await pane.find({ key: `dir:runs/${run}/` }))?.text ?? ''
+    expect(row).toContain('1/57')
+    expect(row.length).toBeLessThanOrEqual(W)
+    widths.add(row.indexOf('1/57'))
+    expect(await pane.find({ key: `dir:runs/${run}/:name` })).toBeUndefined()
+  }
+  // the counts stand in one column; a name that fits stays whole, one too long keeps its start and its end
+  expect(widths.size).toBe(1)
+  expect((await pane.find({ key: 'dir:runs/sweep1-fable-managed_prs_issues/' }))?.text).toContain('sweep1-fable-managed_prs_issues/')
+  expect((await pane.find({ key: `dir:runs/${runs[2]}/` }))?.text).toMatch(/a-run-wh.*….*at-all\//)
+  await pane.unmount()
+})
