@@ -25,7 +25,7 @@ import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { claimsThreadScope as threadScope, drawClaims } from './pane'
-import { claimsBarWords, claimsDigest, folderClaimsFromFeed as fromFeed, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
+import { claimsBarWords, claimsBright, claimsDigest, folderClaimsFromFeed as fromFeed, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,7 +42,10 @@ export async function claimsKey($: Engine, key: string, _until: number): Promise
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('claims')) return []
   if (preview) return [{ id: 'claims', key: 'c', words: 'claims' }]
-  return [{ id: 'claims', key: 'c', words: await claimsBarWords($), press: () => openClaims($) }]
+  const words = await claimsBarWords($)
+  // lit (`● 12 claims, 1 corrected`) in the lit color, as squeeze's; bold for a moment after new claims
+  const look = words.startsWith('● ') ? { color: 'suggestion' } : {}
+  return [{ id: 'claims', key: 'c', words, ...look, ...(await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
 }
 
 export async function claimsState($: Engine): Promise<Record<string, unknown>> {

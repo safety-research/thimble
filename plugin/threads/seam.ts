@@ -25,7 +25,7 @@ import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
 import { drawThreads, threadUnder as under } from './pane'
-import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor } from './thread'
+import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,7 +52,7 @@ export async function threadsBar($: Engine, _on: (key: string) => boolean, _prev
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   const n = threadCount()
   if (!n) return []
-  return [{ id: 'threads', key: 't', words: n === 1 ? '1 thread' : `${n.toLocaleString('en-US')} threads`, press: () => listThreads($) }]
+  return [{ id: 'threads', key: 't', words: n === 1 ? '1 thread' : `${n.toLocaleString('en-US')} threads`, ...(threadsBright() ? { bold: true } : {}), press: () => listThreads($) }]
 }
 
 export async function drawThreadsPane($: Engine, e: Any, kind: 'threads' | 'thread', args: unknown, els: Any): Promise<unknown> {

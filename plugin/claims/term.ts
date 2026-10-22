@@ -44,6 +44,9 @@ export type ClaimsArgs = { claim?: string | null; open?: 'ev' | 'hist' | null; a
 
 const CLAIMS = { plugin: 'thimble', key: 'claims' } as const
 const OFFER = { plugin: 'thimble', key: 'claimsOffer' } as const
+const BRIGHT = { plugin: 'thimble', key: 'claimsBright' } as const
+/** How long the bar's count is bold after new claims, as in 0.10. */
+const BRIGHT_MS = 1600
 const FILE = 'claims.json'
 const OFFER_MS = 5 * 60 * 1000
 
@@ -69,7 +72,13 @@ async function reloadClaims($: Engine): Promise<Store> {
 
 /** The claims kept: held for the drawing, and written to the kept folder. */
 export async function saveClaims($: Engine, store: Store): Promise<void> {
+  const before = ((await $.state.get(CLAIMS)).value as Store | null | undefined)?.claims.length ?? 0
   await $.state.set(CLAIMS, store)
+  // more claims: the bar's count is bold for a moment, and plain again after it
+  if (store.claims.length > before) {
+    await $.state.set(BRIGHT, Number(await $.clock.now()))
+    $.clock.after(BRIGHT_MS + 50, () => { void (async () => { await $.state.set(BRIGHT, null) })().catch(() => undefined) })
+  }
   await writeKept($, FILE, store).catch(() => undefined)
 }
 
@@ -147,6 +156,12 @@ export async function lookFailed($: Engine, look: Look, why: string): Promise<vo
 
 /** c on the bar: `c 11 claims`, lit with its note when a claim of the answer the keys act on was corrected
  *  (`c ● 12 claims, 1 corrected`). */
+/** Whether the bar's count is bold now: for a moment after the count went up. */
+export async function claimsBright($: Engine): Promise<boolean> {
+  const at = (await $.state.get(BRIGHT)).value
+  return typeof at === 'number' && Number(await $.clock.now()) - at < BRIGHT_MS
+}
+
 export async function claimsBarWords($: Engine): Promise<string> {
   const n = await claimCount($)
   const words = n === 1 ? '1 claim' : n > 1 ? `${n.toLocaleString('en-US')} claims` : 'claims'

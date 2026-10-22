@@ -113,9 +113,25 @@ export async function restoreThreads($: Engine): Promise<void> {
 }
 
 /** The list and the bar draw again. */
+// when the count of threads last changed: the bar's count is bold for a moment after, as in 0.10
+const BRIGHT_MS = 1600
+let lastCount = -1
+let brightAt = 0
+
 async function bump($: Engine): Promise<void> {
+  const n = threadCount()
+  if (lastCount >= 0 && n !== lastCount) {
+    brightAt = Date.now()
+    $.clock.after(BRIGHT_MS + 50, () => { void (async () => { await $.state.set(GEN, Date.now()) })().catch(() => undefined) })
+  }
+  lastCount = n
   try { await $.state.set(GEN, Date.now()) } catch { /* drawn at the next change */ }
   $.ui.invalidate('ui.render')
+}
+
+/** Whether the bar's count is bold now: for a moment after it changed. */
+export function threadsBright(): boolean {
+  return Date.now() - brightAt < BRIGHT_MS
 }
 
 async function keep($: Engine, t: Thread): Promise<void> {
@@ -454,6 +470,8 @@ export async function paneShowsThread($: Engine, key: string): Promise<boolean> 
 
 /** For tests: the module's memory, cleared. */
 export function resetThreads(): void {
+  lastCount = -1
+  brightAt = 0
   threads.clear()
   byAgent.clear()
   sending.clear()

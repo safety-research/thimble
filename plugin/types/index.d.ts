@@ -128,6 +128,8 @@ declare module 'claude-code' {
       claims: unknown
       /** the folder's estimate for its map, read again after a few minutes: { root, at, value } (claims/estimate.mjs) */
       claimsOffer: { root: string; at: number; value: unknown } | null
+      /** when the count of claims last went up: the bar's count is bold for a moment after (claims/term.ts) */
+      claimsBright: number | null
     }
   }
 }
