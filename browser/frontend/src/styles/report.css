@@ -1284,9 +1284,8 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   font: var(--type-body);
 }
 
-/* -------- an empty cell: a block of an empty document is drawn as a dashed ink hairline around its line until it
-   has text -------- */
-.wu-root .wu-page-col .wu-zone-empty .bn-block-outer[data-id='title'] + .bn-block-outer > .bn-block > .bn-block-content,
+/* -------- an empty field of the slides or the story is drawn as a dashed ink hairline around its line until it has
+   text; an empty report is the editor's plain empty line -------- */
 .wu-tpl.wu-tpl-empty {
   border-radius: var(--radius-ui);
   outline: 1px dashed rgba(var(--ink-rgb), 0.24);

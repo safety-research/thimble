@@ -45,7 +45,7 @@ function useReportComments(ws: string): { comments: WriteupComment[]; reload: ()
   const reload = useCallback(() => {
     docsApi
       .document(ws, REPORT)
-      .then((d) => setComments(((d as { comments?: WriteupComment[] }).comments ?? []).filter((c) => c.status === 'open')))
+      .then((d) => setComments(((d as { comments?: WriteupComment[] } | undefined)?.comments ?? []).filter((c) => c.status === 'open')))
       .catch(() => setComments([]))
   }, [ws])
   useEffect(() => {

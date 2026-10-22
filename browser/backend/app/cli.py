@@ -4653,14 +4653,14 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if not name:
         print(BROWSER_LINE.format(what=f"could not open {cwd} as a workspace; see {log_path()}"))
         return 1
-    print(BROWSER_LINE.format(what=ui_url(name, pair=to_terminal())))
+    print(BROWSER_LINE.format(what=ui_url(name, pair=to_terminal())), flush=True)
     p = claude_access.problem_line()
-    print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")))
+    print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")), flush=True)
     if not env["dev"] and not has_ui_build():
-        print(NO_UI_LINE)
+        print(NO_UI_LINE, flush=True)
     if getattr(args, "detach", False):
         return 0
-    print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."))
+    print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."), flush=True)
     try:
         while True:
             time.sleep(3600)

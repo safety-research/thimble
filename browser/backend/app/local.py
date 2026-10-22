@@ -655,7 +655,7 @@ async def _doc(c: str, args: list[str], pos: list[str]) -> Any:
 
     if not pos:
         raise StateError("doc needs a document's slug")
-    return await report_types.get_doc_route(c, investigation.MAIN, pos[0].removeprefix("report:"))
+    return report_types.get_doc(c, investigation.MAIN, pos[0].removeprefix("report:"))
 
 
 def _unread(c: str, meta: dict[str, Any]) -> bool:

@@ -342,6 +342,17 @@ async def test_view_proposals_off_keep_no_job(cwd, tmp_path, cards, forks, monke
     assert forks == [] and proposer.pending(CORPUS) is None
 
 
+async def test_no_fork_and_no_notice_while_claude_cannot_be_reached(cwd, tmp_path, cards, forks, monkeypatch):
+    # the chat's own card says what is missing (runtime._access_record); the proposer repeats nothing
+    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
+    lv, p = _attach(cwd, tmp_path)
+    _append(p, lv, _turn("Who replies?", "cut-1"))
+    await _settle()
+    assert forks == [] and _shown_notice() is None
+    assert proposer.run_now(CORPUS) == {"started": False,
+                                        "reason": "thimble does not know yet how to reach Claude."}
+
+
 # ----------------------------------------------------------------------------- outcomes and notices
 
 
@@ -397,6 +408,8 @@ async def test_access_refused_has_its_own_words_not_the_sign_in_s(cwd, tmp_path,
     (stream("I would rather not say."), "unparsed", "Claude's answer couldn't be read"),
     (stream(error="server_error", error_text="API Error: Repeated 529 Overloaded errors"), "error",
      "API Error: Repeated 529 Overloaded errors"),
+    ({"code": 1, "stdout": "", "stderr": "Claude's API could not be reached.", "timed_out": False, "seconds": 0.0},
+     "error", "Claude's API could not be reached"),
 ])
 async def test_any_other_failure_says_why_with_try_again(cwd, tmp_path, cards, forks, answer, status, reason):
     forks.answer = answer

@@ -7,7 +7,7 @@ import wave
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import runpy
@@ -109,3 +109,19 @@ async def test_an_extension_report_types_formats_join_the_built_in_ones(report, 
     assert not any(f.get("hook") for f in exports.formats(CORPUS, "report", "document"))
 
 
+
+
+async def test_a_document_not_written_yet_answers_no_content_and_a_written_one_itself(report):
+    """GET …/types/report before a write is a normal answer (204, which the page reads as no document), not a 404."""
+    api = FastAPI()
+    api.include_router(report_types.router, prefix="/api")
+    client = TestClient(api)
+    r = client.get(f"{BASE}/report")
+    assert r.status_code == 204 and r.content == b""
+    assert client.get(f"{BASE}/no-such-type").status_code == 404
+    with pytest.raises(HTTPException) as e:  # the terminal's callers (local.py, term_report.py) still hear 404
+        report_types.get_doc(CORPUS, MAIN, "report")
+    assert e.value.status_code == 404
+    await _write(report)
+    r = client.get(f"{BASE}/report")
+    assert r.status_code == 200 and r.json()["id"] == report_types.read_doc(CORPUS, MAIN, "report")["id"]

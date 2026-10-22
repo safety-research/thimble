@@ -29,8 +29,8 @@ For the browser workbench:
   or later when you have none.
 - **Credentials for the Claude API**: an API key, or Workload Identity Federation. You give them when it runs; see
   [browser/README.md](browser/README.md#credentials). The browser workbench does not use your Claude Code login.
-- **About 600 MB of disk** in the checkout: the page's packages (about 290 MB), the server's Python packages (about
-  280 MB), the sandbox runtime and the built page.
+- **About 1 GB of disk** in the checkout: the page's packages, the server's Python packages, the sandbox runtime and
+  the built page.
 
 ## If you used thimble 0.10 or earlier
 

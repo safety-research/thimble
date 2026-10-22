@@ -1,9 +1,10 @@
 // How thimble reaches Claude (backend claude_access.py): an Anthropic API key (the default), the person's Claude Code
 // sign-in, or Workload Identity Federation. The setup step opens by itself while no way is chosen (the first run, when
 // install.sh's question was skipped), and again from Settings, from a chat's card that says Claude cannot be reached
-// (bus `claudeAccess`), or from the line in Settings. Claude Code sign-in needs the person's yes to the consent text,
-// since it launches headless Claude Code sessions in the background. Saving checks the choice with one small call and
-// says what failed in plain words.
+// (bus `claudeAccess`), or from the line in Settings. Not now (or Escape) closes it, so the person can still browse
+// without access; it opens by itself again on the next start while nothing is saved. Claude Code sign-in needs the
+// person's yes to the consent text, since it launches headless Claude Code sessions in the background. Saving checks
+// the choice with one small call and says what failed in plain words.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextInput } from '../components/Field'
@@ -65,6 +66,13 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
       })
       .catch((e: Error) => setError(e.message))
   }, [])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   const save = async () => {
     setBusy(true)
     setError(null)
@@ -118,11 +126,9 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
           </p>
         )}
         <div className="access-foot">
-          {!first && (
-            <Button variant="ghost" onClick={onClose}>
-              {check && !check.ok ? 'Close' : 'Cancel'}
-            </Button>
-          )}
+          <Button variant="ghost" onClick={onClose}>
+            {check && !check.ok ? 'Close' : first ? 'Not now' : 'Cancel'}
+          </Button>
           <Button variant="primary" busy={busy} disabled={!ready} onClick={save}>
             {how === 'claude-code' ? 'Confirm and check' : 'Save and check'}
           </Button>

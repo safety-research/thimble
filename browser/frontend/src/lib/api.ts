@@ -789,8 +789,8 @@ import type { AnyDoc, DeckBody, DeckDoc, DocHistory, DocPreset, NewDocBody, Page
 export const docsApi = {
   /** `GET …/investigations/main/types`: per type, whether its document exists, its renderer and its name. */
   types: (c: string) => j<TypesState>(`${ws(c)}/investigations/main/types`),
-  /** `GET …/types/{slug}`: the stored document of any shape (404 before a write). */
-  document: (c: string, slug: string) => j<AnyDoc>(inv(c, slug)),
+  /** `GET …/types/{slug}`: the stored document of any shape; undefined (204) before a write. */
+  document: (c: string, slug: string) => j<AnyDoc | undefined>(inv(c, slug)),
   /** `GET …/types/{slug}/versions`: every generation of the written document, newest first (404 before a write). */
   versions: (c: string, slug: string) => j<DocHistory>(`${inv(c, slug)}/versions`),
   /** `GET …/types/{slug}/versions/{n}`: generation `n` as it stood (404 when its text is not kept). */

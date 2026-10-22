@@ -70,7 +70,7 @@ async def _act_doc_save(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(400, "`blocks` must be a list of the editor's blocks")
     title = " ".join(str(payload.get("title") or "").split())
     if not title:
-        title = str((await report_types.get_doc_route(c, investigation.MAIN, slug)).get("title") or "")
+        title = str(report_types.get_doc(c, investigation.MAIN, slug).get("title") or "")
     try:
         body = report_types.BlocksBody(title=title, blocks=blocks, client="terminal")
     except ValidationError as e:

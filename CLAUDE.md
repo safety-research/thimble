@@ -8,7 +8,7 @@ This repository holds two products: the terminal plugin for Claude Code (`plugin
 When the user asks you to install thimble (for example "install thimble from
 https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
 
-1. Ask whether they want the browser workbench too. It takes about 600 MB of disk and needs credentials for the Claude
+1. Ask whether they want the browser workbench too. It takes about 1 GB of disk and needs credentials for the Claude
    API; the terminal plugin alone needs neither.
 2. If `~/.local/bin/thimble` exists, it is thimble 0.9's launcher. Tell the user, and offer `thimble uninstall` (or
    removing that file) before you go on.
