@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -223,7 +224,10 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         ref, value = a.check
         r = LB.check(st, name, ref, None if value in ("-", "none") else value)
         if a.json:
-            out_json({"ref": r["ref"], "was": r["was"], "now": r["now"], **LB.status(r["label"])})
+            # every check that changed a value, for the note the plugin gives Claude
+            changed = [{"ref": k, "was": c.get("was"), "now": c.get("v")} for k, c in (r["label"].get("checks") or {}).items()
+                       if c.get("v") != c.get("was")]
+            out_json({"ref": r["ref"], "was": r["was"], "now": r["now"], **LB.status(r["label"]), "changed": changed})
             return 0
         print(f"{r['ref']}: the analyst says {r['now']}" + (f" (the label gave {r['was']})" if r["was"] is not None else ""))
         return 0
@@ -519,4 +523,9 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(a, "fn", None):
         print(__doc__.strip())
         return 0
-    return a.fn(a)
+    try:
+        return a.fn(a)
+    except BrokenPipeError:
+        # a reader that stopped early (`thimble label NAME --csv | head`): the rest goes nowhere, with no traceback
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0

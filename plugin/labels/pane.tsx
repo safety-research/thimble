@@ -5,7 +5,9 @@
 // part a regex matched, marked). The person checks the record the ▸ points at with a number key, or a press on a value:
 // their value counts in place of the label's (labels.ts checkRecord).
 //
-//   openLabels($, args)   opens the pane (the bar's l, a click on its label count): the list, or one label
+//   openLabels($, args)   opens the pane and gives it the keyboard (the bar's l, a click on its label count): the
+//                         list, or one label
+//   showLabels($, args)   what the pane shows next, as the person moves in it
 //
 //   args: {label: the label open, value: the value whose records show ('-': no value yet), at: the page's first record,
 //          sel: the ref of the record the ▸ points at}
@@ -41,10 +43,15 @@ export function placeOf(ref: string): string {
   return m ? `${m[1]}:${m[2]}` : ref
 }
 
+const titleOf = (args: LabelsArgs) => (args.label ? `Label ${args.label}` : 'Labels')
+
 export async function openLabels($: Engine, args: LabelsArgs = {}): Promise<void> {
-  const title = args.label ? `Label ${args.label}` : 'Labels'
-  await openPane($, 'labels', args, title)
-  await $.ui.open({ id: PANE_ID, title, focus: true, rows: 28 })
+  await openPane($, 'labels', args, titleOf(args))
+  await $.ui.open({ id: PANE_ID, title: titleOf(args), focus: true, rows: 28 })
+}
+
+export async function showLabels($: Engine, args: LabelsArgs): Promise<void> {
+  await openPane($, 'labels', args, titleOf(args))
 }
 
 /** `cells` shared by `weights` (largest remainders), each part that is not zero at least one cell while there are
@@ -91,7 +98,6 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
   const H = Math.max(12, Number(e?.props?.scroll?.bodyRows) || 28)
   const list = await labelsData($, { root })
   const { Text } = els
-  if (list === undefined) return Text({ dimColor: true, children: 'reading the labels…' })
   if (!Array.isArray(list)) return Text({ color: 'error', wrap: 'wrap', children: `× The labels could not be read: ${String(list?.error || 'no answer')}` })
   const lab = a.label ? list.find((l: Any) => l.name === a.label) : list.length === 1 ? list[0] : null
   if (!lab) return listView($, els, list, W)
@@ -116,7 +122,7 @@ function listView($: Engine, els: Any, list: Any[], W: number): unknown {
     return Box({ key: `l-${l.name}`, flexDirection: 'column', children: [
       Button({
         key: `open-${l.name}`, plain: true, ...(i < 9 ? { hotkey: String(i + 1) } : {}),
-        onPress: () => openLabels($, { label: String(l.name) }),
+        onPress: () => showLabels($, { label: String(l.name) }),
         children: [Text({ key: 'n', bold: true, children: `${pad(String(l.name), nameW)}  ` }), ...(bar.length ? bar : [Text({ key: 'b', dimColor: true, children: pad('not run yet', barW) })]), Text({ key: 'r', dimColor: true, children: `  ${n(l.records).padStart(recW)} records · ${l.kind}` })],
       }),
       Text({ key: 'legend', wrap: 'truncate-end', children: [i < 9 ? '   ' : '', ...legend, ...(l.checked ? [Text({ key: 'ck', dimColor: true, children: `you checked ${n(l.checked)}` })] : [])] }),
@@ -150,8 +156,8 @@ function scopeWords(lab: Any): string {
   return parts.join(' · ')
 }
 
-/** A record's words as parts of a Text, cut to `room` characters: the part a regex matched in the value's color, the
- *  fields the code read, or the record's words. */
+/** A record's words as parts of a Text, cut to `room` characters: around the part a regex matched, that part in the
+ *  value's color; else the record's words, then the fields a code label read, in the value's color. */
 function wordsOf(els: Any, r: Any, color: string, room: number): unknown[] {
   const { Text } = els
   if (r.missing) return [Text({ key: 'w', dimColor: true, children: String(r.missing) })]
@@ -166,15 +172,17 @@ function wordsOf(els: Any, r: Any, color: string, room: number): unknown[] {
       cut(after, side),
     ]
   }
-  if (Array.isArray(r.fields) && r.fields.length) return [cut(r.fields.map((f: string[]) => `${f[0]}: ${oneLine(f[1])}`).join(' · '), room)]
-  return [cut(oneLine(r.words || r.text), room)]
+  const said = oneLine(r.words || r.text)
+  const fields = Array.isArray(r.fields) ? r.fields.map((f: string[]) => `${f[0]} ${oneLine(f[1])}`).join(' · ') : ''
+  if (!fields) return [cut(said, room)]
+  return [cut(said, Math.max(10, room - width(fields) - 2)), Text({ key: 'f', color, children: `  ${cut(fields, room)}` })]
 }
 
 async function labelView($: Engine, els: Any, root: string, a: LabelsArgs, lab: Any, labels: number, W: number, H: number): Promise<unknown> {
   const { Box, Button, Text } = els
   const values: string[] = lab.values || []
   const parts = partsOf(lab)
-  const go = (b: LabelsArgs) => openLabels($, { label: String(lab.name), value: a.value, at: a.at, sel: a.sel, ...b })
+  const go = (b: LabelsArgs) => showLabels($, { label: String(lab.name), value: a.value, at: a.at, sel: a.sel, ...b })
   const picks = parts.filter(p => p.v !== NONE || p.n)
   const value = picks.some(p => p.v === a.value) ? a.value! : (picks.find(p => p.n)?.v ?? picks[0]?.v ?? NONE)
   const total = parts.find(p => p.v === value)?.n ?? 0
@@ -234,7 +242,6 @@ async function labelView($: Engine, els: Any, root: string, a: LabelsArgs, lab: 
 
   const body: unknown[] = []
   if (!total) body.push(Text({ key: 'none', dimColor: true, children: 'No record has this value.' }))
-  else if (page === undefined) body.push(Text({ key: 'reading', dimColor: true, children: 'reading the records…' }))
   else if (!Array.isArray(page?.records)) body.push(Text({ key: 'err', color: 'error', wrap: 'wrap', children: `× The records could not be read: ${String(page?.error || 'no answer')}` }))
   else {
     const vname = parts.find(p => p.v === value)?.name ?? value
@@ -269,7 +276,7 @@ async function labelView($: Engine, els: Any, root: string, a: LabelsArgs, lab: 
   if (pageAt + per < count) key('n', 'next page', () => go({ at: pageAt + per, sel: null }))
   if (pageAt > 0) key('p', 'previous page', () => go({ at: Math.max(0, pageAt - per), sel: null }))
   if (picks.length > 1) key('v', 'next value', () => go({ value: picks[(picks.findIndex(p => p.v === value) + 1) % picks.length]!.v, at: 0, sel: null }))
-  if (labels > 1) key('b', 'labels', () => openLabels($, {}))
+  if (labels > 1) key('b', 'labels', () => showLabels($, {}))
   return Box({ flexDirection: 'column', children: [
     ...head,
     ...valueRows,

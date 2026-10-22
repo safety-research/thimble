@@ -175,7 +175,9 @@ def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: P
     run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     r = run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
     assert r.stdout.strip() == "chat/room.jsonl#L5: the analyst says yes (the label gave no)"
-    run(root, "label", "sorry", "--check", "chat/room.jsonl#L1", "yes")
+    got = json.loads(run(root, "label", "sorry", "--check", "chat/room.jsonl#L1", "yes", "--json").stdout)
+    # what the plugin tells Claude: the label's checks that changed a value, as the label holds them
+    assert got["checked"] == 2 and got["agree"] == 1 and got["changed"] == [{"ref": "chat/room.jsonl#L5", "was": "no", "now": "yes"}]
     bad = run(root, "label", "sorry", "--check", "chat/room.jsonl#L1", "maybe")
     assert bad.returncode == 1 and "'maybe' is not a value of sorry" in bad.stdout
     st = Store(root)
@@ -200,6 +202,15 @@ def test_csv_gives_every_record_with_the_analysts_check_in_place_of_the_labels_v
     assert by["chat/room.jsonl#L1"] == {"ref": "chat/room.jsonl#L1", "value": "yes", "confidence": "1.0", "by": "regex", "checked": "false"}
     assert by["chat/room.jsonl#L5"] == {"ref": "chat/room.jsonl#L5", "value": "yes", "confidence": "", "by": "analyst", "checked": "true"}
     assert sum(x["value"] == "yes" for x in rows) == 3
+    # a reader that takes only the first lines ends it without a traceback
+    many = root / "big" / "many.jsonl"
+    many.parent.mkdir()
+    many.write_text("".join(json.dumps({"text": f"sorry {i}"}) + "\n" for i in range(20000)))
+    run(root, "label", "many", "--in", "big/many.jsonl", "--regex", "sorry")
+    env = {**os.environ, "THIMBLE_ROOT": str(root), "THIMBLE_PYTHON": sys.executable}
+    head = subprocess.run(f"'{LEAN}' label many --csv | head -2", shell=True, capture_output=True, text=True, env=env, cwd=root)
+    assert head.stdout.splitlines() == ["ref,value,confidence,by,checked", "big/many.jsonl#L1,yes,1.0,regex,false"]
+    assert "Traceback" not in head.stderr
     # a record that waits for the model has no value yet
     run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
     waiting = list(csv.DictReader(io.StringIO(run(root, "label", "apology", "--csv").stdout)))

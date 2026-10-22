@@ -129,7 +129,7 @@ function paneEngine(ran: string[][]): Any {
         const head = checked ? { ...HEAD, checked: 1, disagree: 1, counts: { yes: 1, no: 2 } } : HEAD
         const l1 = { ref: 'chat.jsonl#L1', i: 0, value: 'yes', by: 'regex', words: "I'm sorry, I broke the build.", meta: 'wren', hit: { before: "I'm ", match: 'sorry', after: ', I broke the build.' } }
         const l3 = { ref: 'chat.jsonl#L3', i: 1, value: 'yes', by: 'regex', words: 'Apologies for the noise.', meta: 'moss' }
-        const out = a.includes('--check') ? { ref: a[3], was: 'yes', now: a[4], ...head }
+        const out = a.includes('--check') ? { ref: a[3], was: 'yes', now: a[4], ...head, checked: 1, agree: 0, changed: [{ ref: a[3], was: 'yes', now: a[4] }] }
           : a.includes('--records') ? { label: head, value: a[3], at: 0, total: checked ? 1 : 2, records: checked ? [l3] : [l1, l3] }
             : [head, { ...HEAD, name: 'long', kind: 'code', rule: 'def label(unit):\n    return len(unit["text"]) > 30' }]
         if (a.includes('--check')) checked = true
@@ -159,4 +159,6 @@ test('the labels pane: the list, a label with its definition and its records at 
   tree = await draw()
   expect(tree.filter(n => n.type === 'Button' && /chat\.jsonl:\d/.test(words(n))).map(words)).toEqual(['▸ chat.jsonl:3  moss'])
   expect(tree.some(n => n.type === 'Text' && /you checked 1: 0 agree, 1 changed/.test(words(n)))).toBe(true)
+  // Claude hears the label's checks with the next prompt
+  expect(Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value)).toEqual(['The analyst checked records of the label sorry in the labels pane. It now holds 1 check: 0 agree with the label and 1 changed a value: chat.jsonl#L1 (the label gave yes, the analyst says no). The checks count in place of the label\'s values; `thimble label sorry` prints the counts now.'])
 })

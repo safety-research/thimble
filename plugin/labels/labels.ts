@@ -9,7 +9,7 @@
 //   checkRecord    the person's check of one record in the labels pane: `thimble label NAME --check REF VALUE`; Claude
 //                  hears what the person checked with their next prompt
 //   labelsData     what the pane shows: the folder's labels (`thimble label --json`), or a page of one label's records
-//                  (`--records`), read once per change of the labels and drawn when it arrives
+//                  (`--records`), read once per change of the labels
 //   labelsChanged  labelGen goes up: the pane reads the labels again
 //
 // The kernel calls run as the person: nothing they read counts as what Claude read (core/env.ts runThimble).
@@ -28,7 +28,6 @@ type Engine = EngineInterface
 type Any = any
 
 const GEN = { plugin: 'thimble', key: 'labelGen' } as const
-const READ = { plugin: 'thimble', key: 'labelRead' } as const
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 
 /** A count that goes up whenever a label changes (Claude's command, the model's reads, the person's check): what shows
@@ -122,26 +121,19 @@ async function readHere($: Engine, name: string, root: string): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the person's checks
 
-/** The checks the person made in this load of the plugin, by folder and label: each record's latest. */
-const checked = new Map<string, Map<string, { was: string | null; now: string | null }>>()
-
-/** The person's check of one record: the value they say it has (null takes the check back). Returns a line for the
- *  person when it was not kept, else null. */
+/** The person's check of one record: the value they say it has (null takes the check back). Claude hears, with the
+ *  next prompt, every check of the label that changed a value, as the label holds them. Returns a line for the person
+ *  when the check was not kept, else null. */
 export async function checkRecord($: Engine, root: string, label: string, ref: string, value: string | null): Promise<string | null> {
   const r = await runThimble($, root, ['label', label, '--check', ref, value ?? '-', '--json'])
   let got: Any = null
   try { got = JSON.parse(r.stdout) } catch { got = null }
   if (r.code !== 0 || !got) return `× The check was not kept: ${said(r) || 'thimble label gave nothing'}`
-  const key = `${root}|${label}`
-  const mine = checked.get(key) ?? new Map<string, { was: string | null; now: string | null }>()
-  mine.set(String(got.ref), { was: got.was ?? null, now: got.now ?? null })
-  checked.set(key, mine)
-  const all = [...mine.entries()].filter(([, c]) => c.now !== null)
-  const changed = all.filter(([, c]) => c.was !== c.now)
-  const shown = changed.slice(0, 8).map(([ref, c]) => `${ref} (the label gave ${c.was ?? 'no value'}, the analyst says ${c.now})`)
-  await tellAtNextPrompt($, `label-checks:${key}`, `The analyst checked ${all.length} record${all.length === 1 ? '' : 's'} of the label ${label} in the labels pane: they agree with ${all.length - changed.length}` +
-    (changed.length ? ` and changed ${changed.length}: ${shown.join('; ')}${changed.length > 8 ? '; …' : ''}` : '') +
-    `. Their checks count in place of the label's values; \`thimble label ${label}\` prints the counts now.`)
+  const changed: Any[] = Array.isArray(got.changed) ? got.changed : []
+  const shown = changed.slice(0, 8).map(c => `${c.ref} (the label gave ${c.was ?? 'no value'}, the analyst says ${c.now})`)
+  await tellAtNextPrompt($, `label-checks:${root}|${label}`, `The analyst checked records of the label ${label} in the labels pane. It now holds ${got.checked} check${got.checked === 1 ? '' : 's'}: ${got.agree} agree with the label` +
+    (changed.length ? ` and ${changed.length} changed a value: ${shown.join('; ')}${changed.length > 8 ? '; …' : ''}` : '') +
+    `. The checks count in place of the label's values; \`thimble label ${label}\` prints the counts now.`)
   await labelsChanged($)
   return null
 }
@@ -152,39 +144,28 @@ export async function checkRecord($: Engine, root: string, label: string, ref: s
  *  none yet), from `at`, `n` of them. */
 export type LabelsAsk = { root: string; label?: string; value?: string; at?: number; n?: number }
 
-/** The answers read since labelGen last changed, by ask: `value` once it came. */
-const read = new Map<string, { value?: Any }>()
+/** The answers read since labelGen last changed, by ask. */
+const read = new Map<string, Any>()
 let readGen = -1
-let arrived = 0
 
 /** What the pane shows for `ask`: `thimble label --json` (a list of labels), or `thimble label NAME --records …
- *  --json` (a page: {label, value, at, total, records}); `{error}` when the kernel could not say; undefined while it is
- *  being read (a page of a large file takes a few seconds), and the pane is drawn again when it comes. Each ask is
- *  read once per labelGen, so drawing the pane again reads nothing. */
-export async function labelsData($: Engine, ask: LabelsAsk): Promise<Any | undefined> {
+ *  --json` (a page: {label, value, at, total, records}); `{error}` when the kernel could not say. An answer is kept until
+ *  labelGen changes, so drawing the pane again reads nothing. (A read belongs to the drawing that made it, which a newer
+ *  drawing stops: so only a read that came back is kept, and the newer drawing reads again.) */
+export async function labelsData($: Engine, ask: LabelsAsk): Promise<Any> {
   const gen = await labelGen($)
-  await $.state.get(READ)
   if (gen !== readGen) {
     read.clear()
     readGen = gen
   }
   const key = JSON.stringify(ask)
-  let got = read.get(key)
-  if (!got) {
-    const mine: { value?: Any } = {}
-    got = mine
-    read.set(key, mine)
-    const args = ask.label
-      ? ['label', ask.label, '--records', ask.value ?? '*', '--at', String(ask.at ?? 0), '--count', String(ask.n ?? 10), '--json']
-      : ['label', '--json']
-    const came = runThimble($, ask.root, args, { timeoutMs: 60000 }).then(r => {
-      try { return JSON.parse(r.stdout) } catch { return { error: said(r) || 'thimble label gave nothing' } }
-    }, err => ({ error: String((err as Error)?.message || err).slice(0, 200) })).then(v => {
-      mine.value = v
-      void $.state.set(READ, ++arrived).catch(() => undefined)
-    })
-    // a quick read is drawn at once, without a "reading" frame first
-    await Promise.race([came, new Promise<void>(resolve => { $.clock.after(400, () => resolve()) })])
-  }
-  return got.value
+  if (read.has(key)) return read.get(key)
+  const args = ask.label
+    ? ['label', ask.label, '--records', ask.value ?? '*', '--at', String(ask.at ?? 0), '--count', String(ask.n ?? 10), '--json']
+    : ['label', '--json']
+  const r = await runThimble($, ask.root, args, { timeoutMs: 60000 })
+  let v: Any
+  try { v = JSON.parse(r.stdout) } catch { v = { error: said(r) || 'thimble label gave nothing' } }
+  if (gen === readGen) read.set(key, v)
+  return v
 }
