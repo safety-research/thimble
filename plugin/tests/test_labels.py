@@ -55,6 +55,26 @@ def feed(tmp: Path) -> list[dict]:
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
 
+def test_coverage_reads_a_label_from_its_summary_and_not_its_records(root: Path, monkeypatch: pytest.MonkeyPatch):
+    # a label of millions of records is a file of hundreds of megabytes: the label keeps a summary per file as it
+    # writes, and coverage reads the label file again only when it changed in another way
+    assert run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog").returncode == 0
+    st = Store(root)
+    read, read_json = [], Store.read_json
+    monkeypatch.setattr(Store, "read_json", staticmethod(lambda p: read.append(p.name) or read_json(p)))
+    got = LB.summaries(st)
+    assert [(s["name"], s["sessions"], s["files"]) for s in got] == [("sorry", ["s-test"], {"chat/room.jsonl": [0, 6]})]
+    assert CV.coverage(st)["total"]["computed_rows"] == 6 and "sorry.json" not in read
+    # a label file another tool changed is read again
+    p = LB.path(st, "sorry")
+    lab = json.loads(p.read_text())
+    lab["units"] = {k: {**u, "by": "model"} for k, u in lab["units"].items()}
+    p.write_text(json.dumps(lab))
+    assert LB.summaries(st)[0]["files"] == {"chat/room.jsonl": [6, 0]}
+    p.unlink()
+    assert LB.summaries(st) == []
+
+
 def test_a_regex_label_gives_each_record_a_value_and_prints_its_counts(root: Path):
     r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -174,6 +194,22 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert "2 records wait for the model (1 model call)" in out
     assert feed(root)[-1]["kind"] == "label"
     assert LB.status(LB.load(st, "apology"))["waiting"] == 2
+
+
+def test_the_model_reads_every_field_of_a_long_record_and_the_named_field_whole(root: Path):
+    # a closed ticket whose long body comes before the field the definition asks about: the record is cut field by
+    # field, so the late field reaches the model, and whole since the definition names it
+    reason = "Closed as a duplicate of ticket 12. " + "x" * 1500
+    (root / "tickets.jsonl").write_text(json.dumps({"id": 7, "body": "word " * 2000, "close_reason": reason,
+                                                    "state": "closed"}) + "\n")
+    assert run(root, "label", "dup", "--in", "tickets.jsonl", "--prompt", "yes if close_reason says it is a duplicate").returncode == 0
+    text = LB.waiting(Store(root), "dup")["units"][0]["text"]
+    rec = json.loads(text)
+    assert rec["close_reason"] == reason and rec["state"] == "closed" and rec["id"] == 7
+    assert rec["body"].endswith("characters)") and len(text) < LB.UNIT_CHARS + 200
+    # the same record under a definition that names no field: each long value is cut to the same length
+    rec = json.loads(LB._fields_cut(json.loads((root / "tickets.jsonl").read_text()), 1000, "is it a duplicate?"))
+    assert rec["close_reason"].startswith("Closed as a duplicate") and len(rec["body"]) == len(rec["close_reason"])
 
 
 def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: Path):

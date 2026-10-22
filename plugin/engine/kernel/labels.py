@@ -98,7 +98,57 @@ def write(st: Store, lab: dict[str, Any], change: bool = True) -> None:
     if change:
         lab["rev"] = int(lab.get("rev") or 0) + 1
     lab["updated"] = time.time()
-    st.write_json(path(st, lab["name"]), lab)
+    p = path(st, lab["name"])
+    st.write_json(p, lab)
+    _keep_summary(st, {p.name: _summary(p, lab)})
+
+
+# ------------------------------------------------------------------ what coverage reads of the labels
+
+SUMMARIES = "labels.json"  # in the folder's cache
+
+
+def _summary(p: Path, lab: dict[str, Any]) -> dict[str, Any]:
+    """What coverage reads of a label: its name, the sessions that applied it, and for each file the records a model
+    read and the records a rule (regex, code) went over, keyed by the label file's size and time."""
+    files: dict[str, list[int]] = {}
+    for ref, u in (lab.get("units") or {}).items():
+        by = u.get("by")
+        if by in ("model", "regex", "code"):
+            files.setdefault(ref.split("#")[0], [0, 0])[0 if by == "model" else 1] += 1
+    s = p.stat()
+    return {"key": f"{s.st_size}:{s.st_mtime_ns}", "name": lab["name"], "sessions": lab.get("sessions") or [],
+            "files": files}
+
+
+def _keep_summary(st: Store, fresh: dict[str, dict[str, Any]]) -> None:
+    kept = st.read_json(st.cache / SUMMARIES)
+    st.write_json(st.cache / SUMMARIES, {**(kept if isinstance(kept, dict) else {}), **fresh})
+
+
+def summaries(st: Store) -> list[dict[str, Any]]:
+    """Each label of the folder as coverage reads it (`_summary`). A label of millions of records is a file of
+    hundreds of megabytes, so its summary is kept in the folder's cache: `write` keeps it, and a label file that
+    changed in another way is read once again here."""
+    d = st.dir / "labels"
+    kept = st.read_json(st.cache / SUMMARIES)
+    kept = kept if isinstance(kept, dict) else {}
+    out: dict[str, dict[str, Any]] = {}
+    for p in sorted(d.glob("*.json")) if d.is_dir() else []:
+        try:
+            s = p.stat()
+        except OSError:
+            continue
+        got = kept.get(p.name)
+        if not (got and got.get("key") == f"{s.st_size}:{s.st_mtime_ns}"):
+            lab = st.read_json(p)
+            if not (isinstance(lab, dict) and lab.get("name")):
+                continue
+            got = _summary(p, lab)
+        out[p.name] = got
+    if out != kept:
+        st.write_json(st.cache / SUMMARIES, out)
+    return list(out.values())
 
 
 # ------------------------------------------------------------------ values
@@ -295,9 +345,11 @@ def rows_of(st: Store, refs: list[str]) -> dict[str, S.Row]:
     return out
 
 
-def unit_text(row: S.Row, cut: int = UNIT_CHARS) -> str:
+def unit_text(row: S.Row, cut: int = UNIT_CHARS, definition: str = "") -> str:
     """A record as the model reads it: a transcript record's blocks (its words, tool calls, results), a record's JSON,
-    or a line of text; cut at `cut` characters."""
+    or a line of text, cut to about `cut` characters. A record's fields are cut one by one, the longest first, so each
+    field keeps its start and a field late in the record is never lost; a field the definition names is cut last.
+    A cut part ends with how many characters it left out."""
     v = row.value
     if isinstance(v, dict) and v.get("type") in ("assistant", "user") and isinstance(v.get("message"), dict):
         parts = []
@@ -306,11 +358,47 @@ def unit_text(row: S.Row, cut: int = UNIT_CHARS) -> str:
             if t:
                 parts.append(t if b["kind"] == "text" else f"[{b['kind']}] {t}")
         text = f"({v['type']}) " + "\n".join(parts)
+    elif isinstance(v, dict) and len(row.raw) > cut:
+        return _fields_cut(v, cut, definition)
     elif isinstance(v, str):
         text = v
     else:
         text = row.raw
-    return text if len(text) <= cut else text[:cut] + f" … (+{len(text) - cut} characters)"
+    return _cut(text, cut)
+
+
+def _cut(text: str, n: int) -> str:
+    return text if len(text) <= n else text[:n] + f" … (+{len(text) - n} characters)"
+
+
+def _fields_cut(v: dict[str, Any], cut: int, definition: str) -> str:
+    """A record's JSON with each value cut to one length, the largest that keeps the record within `cut` characters;
+    the values of the fields the definition names count first and are cut only when they alone pass `cut`. A record
+    whose keys leave less than 20 characters for each value (a short excerpt) is cut at its end."""
+    texts = {k: x if isinstance(x, str) else json.dumps(x, ensure_ascii=False) for k, x in v.items()}
+    named = {k for k in texts if re.search(r"(?<![\w.])" + re.escape(k) + r"(?![\w])", definition)}
+    room = cut - sum(len(k) + 8 for k in texts)  # (a key, its quotes and its separators)
+    if room < 20 * len(texts):
+        return _cut(json.dumps(v, ensure_ascii=False), cut)
+    rest = room - sum(len(texts[k]) for k in named)
+    if rest < 0:
+        each = _fair_share([len(t) for t in texts.values()], room)
+        named = set()
+    else:
+        each = _fair_share([len(t) for k, t in texts.items() if k not in named], rest)
+    return json.dumps({k: x if k in named or len(texts[k]) <= each else _cut(texts[k], each) for k, x in v.items()},
+                      ensure_ascii=False)
+
+
+def _fair_share(lengths: list[int], room: int) -> int:
+    """The largest length `n` such that the lengths, each cut to `n`, add up to `room` at most."""
+    left = max(0, room)
+    for i, n in enumerate(sorted(lengths)):
+        share = left // (len(lengths) - i)
+        if n > share:
+            return share
+        left -= n
+    return max(lengths, default=0)
 
 
 def _unit_of(row: S.Row) -> dict[str, Any]:
@@ -520,7 +608,7 @@ def waiting(st: Store, name: str, cut: int = UNIT_CHARS, first: int | None = Non
         raise LabelError(f"no label {name!r}")
     refs = [r for r, u in (lab.get("units") or {}).items() if u.get("wait")]
     rows = rows_of(st, refs)
-    units = [{"ref": r, "text": unit_text(rows[r], cut)} for r in refs if r in rows]
+    units = [{"ref": r, "text": unit_text(rows[r], cut, lab.get("rule") or "")} for r in refs if r in rows]
     gone = [r for r in refs if r not in rows]
     total = len(units)
     bs = batches(units)
@@ -588,7 +676,7 @@ def answers(st: Store, name: str, payload: dict[str, Any]) -> dict[str, Any]:
             lab["run"] = {**(lab.get("run") or {}), **payload["run"], "at": time.time()}
             if payload["run"].get("state") == "running" and not (took or failed):
                 # picked up, nothing written yet: the label's values have not changed
-                st.write_json(path(st, lab["name"]), {**lab, "updated": time.time()})
+                write(st, lab, change=False)
                 return {"label": lab, "took": 0, "failed": 0}
         if not any(u.get("wait") for u in units.values()) and (lab.get("run") or {}).get("state") not in ("done", "failed"):
             lab["run"] = {**(lab.get("run") or {}), "state": "done", "at": time.time()}

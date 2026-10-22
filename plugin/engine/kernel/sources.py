@@ -417,12 +417,8 @@ def _count_one(args: tuple[str, str]) -> int:
 
 
 def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str, int]:
-    """Rows of many files: in up to 8 worker processes when they are big together (Linux), else one after another. A
-    file that is no source and no PDF (an image, a binary) is 1 without being opened, so a million images count fast."""
-    whole = {r: 1 for r in rels if kind_of(Path(r)) is None and MEDIA_KIND.get(os.path.splitext(r)[1].lower()) != "pdf"}
-    if whole:
-        rest = [r for r in rels if r not in whole]
-        return {**whole, **(_count_many(root, rest, sizes) if rest else {})}
+    """Rows of many files (sources and PDFs): in up to 8 worker processes when they are big together (Linux), else one
+    after another."""
     if len(rels) > 1 and sum(sizes.get(r, 0) for r in rels) >= PARALLEL_MIN and sys.platform.startswith("linux"):
         n = max(1, min(8, (os.cpu_count() or 2) - 1, len(rels)))
         if n > 1:
@@ -438,11 +434,22 @@ def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str,
     return {r: count_rows(root, r) for r in rels}
 
 
+def counted(name: str) -> bool:
+    """Whether a file is counted by its rows (a source) or its pages (a PDF), by its name alone. Any other file (an
+    image, a sound, a binary) is one whole file (`whole_file`)."""
+    return kind_of_name(name) is not None or MEDIA_KIND.get(ext_of(name.rsplit("/", 1)[-1])) == "pdf"
+
+
+def whole_file(rel: str) -> dict[str, Any]:
+    """A file that is neither a source nor a PDF, as `counts` would give it: its kind by its extension (image, audio,
+    video, file), one row and no lines."""
+    return {"kind": MEDIA_KIND.get(ext_of(rel.rsplit("/", 1)[-1]), "file"), "rows": 1, "lines": 0}
+
+
 def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, dict[str, Any]]:
-    """{path: {rows, lines, kind}} for each file, cached by size and mtime. A file that is no source has its kind
-    (pdf, image, audio, video, file), its pages or 1 as rows, and no lines. A file that is neither a source nor a PDF
-    (an image, a binary) is one whole file by its name alone: it is not opened, looked at or kept in the cache, so a
-    folder of a million screenshots counts quickly."""
+    """{path: {rows, lines, kind}} for each file of `rels` that is `counted`, cached by size and mtime. A PDF has its
+    pages as rows and no lines. A file that is not `counted` is left out: it is one whole file by its name alone
+    (`whole_file`), never opened or kept in the cache, so a folder of a million screenshots costs nothing here."""
     cache: dict[str, Any] = {}
     if cache_file:
         try:
@@ -450,27 +457,21 @@ def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, di
         except (OSError, ValueError):
             cache = {}
     out: dict[str, dict[str, Any]] = {}
-    counted: list[str] = []
-    for rel in rels:
-        media = MEDIA_KIND.get(ext_of(rel.rsplit("/", 1)[-1]), "file")
-        if media != "pdf" and kind_of_name(rel) is None:
-            out[rel] = {"kind": media, "rows": 1, "lines": 0}
-        else:
-            counted.append(rel)
+    rels = [rel for rel in rels if counted(rel)]
     # a cache that holds files no longer counted (gone, or whole files) is written again without them
-    changed = bool(cache.keys() - set(counted))
-    cache = {r: cache[r] for r in counted if r in cache}
+    changed = bool(cache.keys() - set(rels))
+    cache = {r: cache[r] for r in rels if r in cache}
     # the files not counted yet (or changed since), counted together first
     stats: dict[str, Any] = {}
     base = str(root)
-    for rel in counted:
+    for rel in rels:
         try:
             stats[rel] = os.stat(f"{base}/{rel}")
         except OSError:
             continue
     todo = [r for r, st in stats.items() if not ((c := cache.get(r)) and c.get("key") == f"{st.st_size}:{st.st_mtime_ns}")]
     fresh = _count_many(root, todo, {r: stats[r].st_size for r in todo}) if todo else {}
-    for rel in counted:
+    for rel in rels:
         st = stats.get(rel)
         if st is None:
             continue
