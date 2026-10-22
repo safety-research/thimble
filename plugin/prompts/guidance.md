@@ -61,7 +61,7 @@ Advice:
 - The first line states the answer, since the analyst reads it first.
 - Each part of the question has its answer on the card, in words that code computes from the rows, next to the marks it explains.
 - thimble draws the title.
-- A color must read on light and dark backgrounds.
+- Take colors from `surface.colors`, so they stay muted and read on light and dark terminals.
 - Show what each color, symbol and line style means with a sample (`█ survived`); mark the selected item with bold or `▸`.
 - Size each column from its longest value; a cut value keeps the part that tells it apart, and a line counts what is left out (`+47 more`).
 - Numbers that touch read as one; a cell of two records shows its count.
