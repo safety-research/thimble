@@ -27,7 +27,7 @@ import re
 import sqlite3
 import sys
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,11 +74,6 @@ def kind_of(path: Path) -> str | None:
     if ext in TEXT_EXT or (not ext and path.name in ("Makefile", "Dockerfile", "README", "LICENSE")):
         return "text"
     return None
-
-
-def list_sources(root: Path) -> list[str]:
-    """Every source file under root, relative, sorted (list_files' files that have rows)."""
-    return [f for f in list_files(root) if kind_of(Path(f))]
 
 
 def file_kind(path: Path) -> str:
@@ -149,32 +144,6 @@ def count_pages(p: Path) -> int:
     return max(1, n)
 
 
-def fingerprint(p: Path) -> dict[str, Any]:
-    """What tells a later run that the file changed: size, mtime, and a hash of its first and last 64 KiB."""
-    st = p.stat()
-    h = hashlib.sha1()
-    with open(p, "rb") as f:
-        h.update(f.read(65536))
-        if st.st_size > 65536:
-            f.seek(max(65536, st.st_size - 65536))
-            h.update(f.read(65536))
-    return {"size": st.st_size, "mtime": st.st_mtime_ns, "head_tail": h.hexdigest()[:12]}
-
-
-def same_file(p: Path, fp: dict[str, Any] | None) -> bool:
-    if not fp:
-        return True
-    try:
-        st = p.stat()
-    except OSError:
-        return False
-    if st.st_size != fp.get("size"):
-        return False
-    if st.st_mtime_ns == fp.get("mtime"):
-        return True
-    return fingerprint(p).get("head_tail") == fp.get("head_tail")
-
-
 # ------------------------------------------------------------------ adapters
 
 
@@ -223,33 +192,6 @@ def json_rows_key(v: Any) -> str | None:
                     if isinstance(y, list) and len(y) > n:
                         best, n = f"/{k}/{k2}", len(y)
     return best
-
-
-def one_document(p: Path) -> bool:
-    """Whether a .json file holds one JSON value (a document), not one value per line. Read from its first 64 KiB: a
-    file whose first line is a whole value and goes on after it holds one value per line."""
-    try:
-        with open(p, "rb") as f:
-            head = f.read(65536)
-    except OSError:
-        return False
-    first, _, rest = head.lstrip().partition(b"\n")
-    if not rest.strip():
-        return True
-    try:
-        json.loads(first)
-    except ValueError:
-        return True
-    return False
-
-
-def document_ref(root: Path, ref: str) -> str:
-    """A whole-file ref of a JSON document as its root row (`x.json` is `x.json#/`): a file that is one JSON document is
-    one row. Any other ref as it is."""
-    if "#" in ref or not ref.lower().endswith(".json"):
-        return ref
-    p = root / ref
-    return f"{ref}#/" if p.is_file() and one_document(p) else ref
 
 
 def _pointer_get(v: Any, pointer: str) -> Any:
@@ -500,73 +442,6 @@ def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, di
     return out
 
 
-def group_of(files: list[str]) -> dict[str, str]:
-    """A pattern per file (from thimble-lite): a folder level with 4 or more sibling folders reads `*`, and 6 or more
-    files of one extension in one folder read `*.ext`, so runs/a/agents/x.jsonl reads runs/*/agents/*.jsonl."""
-    kids: dict[str, set[str]] = defaultdict(set)
-    files_in: dict[tuple[str, str], int] = defaultdict(int)
-    for f in files:
-        parts = f.split("/")
-        for i in range(len(parts) - 1):
-            kids["/".join(parts[:i])].add(parts[i])
-        files_in[("/".join(parts[:-1]), Path(f).suffix)] += 1
-    out = {}
-    for f in files:
-        parts = f.split("/")
-        pat = []
-        for i in range(len(parts) - 1):
-            pat.append("*" if len(kids["/".join(parts[:i])]) >= 4 else parts[i])
-        ext = Path(f).suffix
-        pat.append(f"*{ext}" if files_in[("/".join(parts[:-1]), ext)] >= 6 else parts[-1])
-        out[f] = "/".join(pat)
-    return out
-
-
-def _shape(name: str) -> str:
-    """A folder's name with its numbers and ids read as `#`: run-003 and run-017 have one shape."""
-    return re.sub(r"[0-9a-f]{6,}|\d+", "#", name.lower())
-
-
-def pattern_of(files: list[str], alike: float = 0.6, many: int = 4) -> dict[str, str]:
-    """A wildcard pattern per file, for the coverage pane: a folder level reads `*` where it has `many` or more sibling
-    folders and most of them look alike (`alike` of them share a name shape, run-001 and run-002, or hold the same
-    names and file types), so runs/r1/agents/a.jsonl reads runs/*/agents/*.jsonl while backend/ and frontend/ keep
-    their names; three or more files of one type in one (pattern) folder read `*.ext`."""
-    kids: dict[str, set[str]] = defaultdict(set)
-    sig: dict[str, set[str]] = defaultdict(set)
-    for f in files:
-        parts = f.split("/")
-        for i in range(len(parts) - 1):
-            parent = "/".join(parts[:i])
-            kids[parent].add(parts[i])
-            if i:
-                sig["/".join(parts[:i])].add(parts[i] + "/")
-        sig["/".join(parts[:-1])].add(Path(f).suffix or parts[-1])
-    star: dict[str, bool] = {}
-    for parent, names in kids.items():
-        if len(names) < many:
-            star[parent] = False
-            continue
-        join = (lambda n: f"{parent}/{n}" if parent else n)
-        shapes = Counter(_shape(n) for n in names)
-        sigs = Counter(frozenset(sig[join(n)]) for n in names)
-        star[parent] = max(shapes.values()) >= alike * len(names) or max(sigs.values()) >= alike * len(names)
-    folder: dict[str, str] = {}
-    for f in files:
-        parts = f.split("/")
-        pat = [("*" if star.get("/".join(parts[:i])) else parts[i]) for i in range(len(parts) - 1)]
-        folder[f] = "/".join(pat)
-    names_in: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for f in files:
-        names_in[(folder[f], Path(f).suffix)].add(f.split("/")[-1])
-    out = {}
-    for f in files:
-        ext, name = Path(f).suffix, f.split("/")[-1]
-        leaf = f"*{ext}" if ext and len(names_in[(folder[f], ext)]) >= 3 else name
-        out[f] = f"{folder[f]}/{leaf}" if folder[f] else leaf
-    return out
-
-
 def expand_glob(root: Path, pattern: str) -> list[str]:
     """Source files under root that a path or glob names, relative, sorted."""
     import glob
@@ -585,25 +460,6 @@ def expand_glob(root: Path, pattern: str) -> list[str]:
 
 
 # ------------------------------------------------------------------ fetching rows by ref
-
-
-def _flat_text(v: Any) -> str:
-    out: list[str] = []
-
-    def walk(x: Any) -> None:
-        if isinstance(x, str):
-            out.append(x)
-        elif isinstance(x, dict):
-            for y in x.values():
-                walk(y)
-        elif isinstance(x, list):
-            for y in x:
-                walk(y)
-        elif x is not None:
-            out.append(str(x))
-
-    walk(v)
-    return "\n".join(out)
 
 
 def _content_block(b: Any) -> dict[str, str] | None:
@@ -668,34 +524,10 @@ def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
     under root (`locate`). Raises RefError when the file is missing or a row is not there."""
     p = R.parse(rowset)
     k = p["kind"]
-    if k in ("query", "object"):
-        raise R.RefError(f"{rowset} is not a source ref")
     rel = locate(root, p.get("path", ""))
     path = root / rel
     if k == "file":
         return [Row(rel, "", {"path": rel})]
-    if k == "block":
-        rows = fetch(root, f"{rel}#L{p['line']}")
-        bl = blocks_of(rows[0].value)
-        if p["block"] >= len(bl):
-            raise R.RefError(f"{rel}#L{p['line']} has {len(bl)} blocks, no block {p['block']}")
-        b = bl[p["block"]]
-        return [Row(rowset, b["text"], b)]
-    if k == "blocks":
-        # each record read once, for as many of its blocks as the set names (up to `limit` blocks in all)
-        want: list[tuple[int, int]] = []
-        for pair in R.block_pairs(p):
-            want.append(pair)
-            if limit and len(want) >= limit:
-                break
-        recs = {r.ref: r for r in fetch(root, f"{rel}#L{R.format_nums([x for x, _ in want])}")}
-        got = []
-        for line, block in want:
-            bl = blocks_of(recs[f"{rel}#L{line}"].value)
-            if block >= len(bl):
-                raise R.RefError(f"{rel}#L{line} has {len(bl)} blocks, no block {block}")
-            got.append(Row(f"{rel}#L{line}.b{block}", bl[block]["text"], bl[block]))
-        return got
     kind = kind_of_file(root, rel)
     if k == "lines":
         want = set(p["nums"])
@@ -793,44 +625,133 @@ def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
     raise R.RefError(f"cannot read {rowset}")
 
 
-def text_of(row: Row) -> str:
-    """Every string of a row, joined: what a quote is looked for in."""
-    if isinstance(row.value, str):
-        return row.value
-    return _flat_text(row.value) + "\n" + row.raw
+# ------------------------------------------------------------------ what a row says, in words
+
+# what a file kind's rows are called: records of JSON and JSONL, rows of a table, lines of text; a Markdown file's
+# sections and a diff's hunks are what a label or a count goes over, though coverage counts both in lines
+UNIT_OF_KIND = {"jsonl": "records", "transcript": "records", "json": "records", "csv": "rows", "sqlite": "rows",
+                "markdown": "lines", "diff": "lines", "text": "lines", "pdf": "pages"}
+ROW_WORD = {"markdown": "sections", "diff": "hunks"}
 
 
-def find_quote(text: str, quote: str) -> bool:
-    """Whether a quote is in a text: as written, as JSON escapes it, or with whitespace folded and case ignored; an
-    ellipsis splits it into parts that must all be there, in order (from 0.9.0's refs._find_quote)."""
-    q = quote.strip().strip('"').strip()
-    if not q:
-        return False
-    tr = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "—": "-", "–": "-"})
-    fold = lambda s: " ".join(s.translate(tr).split()).lower()  # noqa: E731
-    parts = [x.strip(" ,;:") for x in re.split(r"\s*(?:\.\.\.|…|\[\.\.\.\]|\[…\])\s*", q) if x.strip(" ,;:")]
-    hay = fold(text)
-    at = 0
-    for part in parts:
-        if part in text or json.dumps(part, ensure_ascii=False)[1:-1] in text:
+def entry_word(kind: str | None) -> str | None:
+    """What one file kind's entries are called: records of JSON and JSONL, rows of a table, lines of text (a Markdown
+    file's sections, a diff's hunks); None for a file with no entries (an image, a PDF)."""
+    unit = ROW_WORD.get(kind or "") or UNIT_OF_KIND.get(kind or "")
+    return unit if unit in ("records", "rows", "lines", "sections", "hunks") else None
+
+
+# the fields that hold a record's words, best first; then the fields that say whose and where it is (the shell's detail
+# view shows `words` and `meta`; `text` stays the excerpt the CLI prints)
+WORD_KEYS = ("text", "quote", "summary", "title", "message", "msg", "body", "content", "comment", "description", "subject",
+             "note", "change_summary", "reason", "answer", "question", "prompt")
+META_KEYS = ("user", "author", "agent", "sender", "name", "label", "page", "run", "step", "epoch", "rev", "kind", "type",
+             "event_type", "activity", "day", "date", "time")
+
+
+def _long_words(v: dict[str, Any]) -> list[tuple[str, str]]:
+    """A record's fields whose values read as words: strings of several words, in a field that is no id or path. A
+    time stamp (`2026-06-01 15:19:25.769`) has a space but no words: the rows are never named by it."""
+    return [(k, x) for k, x in v.items() if isinstance(x, str) and len(x.strip()) >= 16 and " " in x.strip()
+            and len(re.findall(r"[^\W\d_]{2,}", x)) >= 2 and not re.search(r"(id|uuid|ref|hash|key|url|path)$", k, re.I)]
+
+
+def word_key(rows: list[Row]) -> str | None:
+    """The field rows of one file read as words when no field by a known name holds them: the one their longest words
+    are in most often. A row is then named by that field like the rows beside it, never by another field that happens
+    to be longer in it (a passenger by a ticket number such as "SOTON/O.Q. 3101312")."""
+    count: dict[str, int] = defaultdict(int)
+    for row in rows:
+        v = row.value
+        if not isinstance(v, dict) or any(isinstance(v.get(k), str) and v[k].strip() for k in WORD_KEYS):
             continue
-        i = hay.find(fold(part), at)
-        if i < 0:
-            return False
-        at = i
-    return True
+        long = _long_words(v)
+        if long:
+            count[max(long, key=lambda kv: len(kv[1]))[0]] += 1
+    return max(count, key=lambda k: count[k]) if count else None
 
 
-def relocate(root: Path, ref: str, h: str, window: int = 100000) -> str | None:
-    """Where a one-row ref's row went when its hash no longer matches: the ref of the row in the same file whose
-    content hash is `h`, or None."""
-    p = R.parse(ref)
-    rel = p.get("path", "")
-    if not (root / rel).is_file():
-        return None
-    for n, row in enumerate(iter_rows(root, rel)):
-        if n > window:
+def words_by_file(rows: list[Row]) -> dict[str, tuple[str, str]]:
+    """words_of for each of several rows, by ref: the rows of each file named by one field (word_key)."""
+    by: dict[str, list[Row]] = defaultdict(list)
+    for row in rows:
+        by[row.ref.split("#")[0]].append(row)
+    out: dict[str, tuple[str, str]] = {}
+    for group in by.values():
+        prefer = word_key(group)
+        for row in group:
+            out[row.ref] = words_of(row, prefer)
+    return out
+
+
+def words_of(row: Row, prefer: str | None = None) -> tuple[str, str]:
+    """A row as a person reads it: its meaningful words (its text, title, summary, message, body and the like; a
+    transcript row's first words or tool call) and a short line of whose and where it is. ('', '') when nothing in it
+    reads as words. `prefer`: the field the rows of its file read as words (word_key), taken before the row's own
+    longest words."""
+    v = row.value
+    one = lambda x: " ".join(str(x).split())  # noqa: E731
+    if isinstance(v, str):
+        return one(v)[:240], ""
+    if not isinstance(v, dict):
+        return "", ""
+    words, key = "", None
+    if v.get("type") in ("assistant", "user") and isinstance(v.get("message"), dict):
+        content = v["message"].get("content")
+        for b in (content if isinstance(content, list) else [{"type": "text", "text": content}]):
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text" and str(b.get("text") or "").strip():
+                words = one(b["text"])
+            elif b.get("type") == "tool_use":
+                i = b.get("input") if isinstance(b.get("input"), dict) else {}
+                arg = next((i[k] for k in ("command", "file_path", "pattern", "path", "description", "query") if i.get(k)), "")
+                words = one(f"{b.get('name')}: {arg}" if arg else f"{b.get('name')}: {json.dumps(i, ensure_ascii=False)}")
+            elif b.get("type") == "tool_result":
+                c = b.get("content")
+                words = one(c if isinstance(c, str) else " ".join(str(x.get("text") or "") for x in c or [] if isinstance(x, dict)))
+            if words:
+                break
+        if words:
+            t = str(v.get("timestamp") or "")
+            return (words if len(words) <= 240 else words[:239] + "…"), " · ".join(x for x in (v["type"], t[11:16]) if x)
+        return "", ""
+    if not words:
+        key = next((k for k in WORD_KEYS if isinstance(v.get(k), str) and v[k].strip()), None)
+        if key:
+            words = one(v[key])
+    if not words and prefer and isinstance(v.get(prefer), str) and v[prefer].strip():
+        key = prefer
+        words = one(v[prefer])
+    if not words:
+        long = _long_words(v)
+        if long:
+            key, x = max(long, key=lambda kv: len(kv[1]))
+            words = one(x)
+    used: set[str] = {key} if key else set()
+    if not words:
+        # an event row with no sentence in it (a request, a state change): what happened, from its short words, as
+        # "request · browse-bare · wiki dse", never its ids or its time
+        kinds, rest = [], []
+        for k, x in v.items():
+            if not isinstance(x, str) or not x.strip() or len(x) > 60 or re.search(r"(^|_)(id|uuid|ref|hash|key|url|path|sha)$", k, re.I):
+                continue
+            if re.match(r"^\d{4}-\d\d-\d\d([T ]\d\d:\d\d)?", x) or k in ("time", "date", "timestamp", "ts"):
+                continue
+            (kinds if re.search(r"(^|_)(type|kind|action|activity|status|outcome|result|event)$", k, re.I) else rest).append((k, x))
+        # only a row that says what kind of thing happened reads as words; a row of plain values reads as a table
+        if kinds:
+            picked = (kinds + rest)[:4]
+            used.update(k for k, _ in picked)
+            words = " · ".join(one(x) if (k, x) in kinds else f"{k} {one(x)}" for k, x in picked)
+    if not words:
+        return "", ""
+    meta = []
+    for k in META_KEYS:
+        x = v.get(k)
+        if len(meta) >= 3:
             break
-        if row_hash(row.raw) == h:
-            return row.ref
-    return None
+        if k in used or x in (None, "") or isinstance(x, (dict, list)) or len(one(x)) > 40:
+            continue
+        meta.append(f"{k} {x}" if isinstance(x, (int, float)) and not isinstance(x, bool) else one(x))
+    return (words if len(words) <= 240 else words[:239] + "…"), " · ".join(meta)

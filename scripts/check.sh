@@ -12,7 +12,7 @@
 #   server     the server's tests (browser/server/tests); the sandbox tests need scripts/install.sh to have run
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing
 #
-# The plugin's steps need claude (Claude Code 2.1.301 or later), node 22 or later, and a Python with pandas and pytest:
+# The plugin's steps need claude (Claude Code 2.1.301 or later), node 22 or later, and Python 3.10 or later with pytest:
 # THIMBLE_PYTHON, else python3. The browser's steps need uv and node 22.12 or later. Each step runs with a Claude Code
 # config folder and a THIMBLE_HOME of its own, made fresh and deleted after, so it never reads or writes your own; the
 # server's tests give each test a thimble browser home of its own.

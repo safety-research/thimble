@@ -1,10 +1,9 @@
 """Coverage claims no more than happened: a file is seen only when some of its lines or rows entered Claude's context
-(Read, cat, head, tail, sed, `thimble rows`, a search that showed them by line, a query that printed them as rows). A
-query or a rule label that only went over its rows computed over it, and a label's model that read its records is said
-apart; neither is seen. A file only named, listed or counted (wc, ls, find, git ls-files, grep -c) is not seen, nor is
-one a shell search went over. The bar counts the files touched (total.touched_files): seen, or gone over by a query,
-a rule, a search, a count or a program; a file only listed by name (ls, find) is not touched. The coverage text, the
-object's snapshot and trace use the one rule. Run: python -m pytest plugin/tests"""
+(Read, cat, head, tail, sed, a search that showed them by line). A rule label that only went over its rows computed
+over it, and a label's model that read its records is said apart; neither is seen. A file only named, listed or counted
+(wc, ls, find, git ls-files, grep -c) is not seen, nor is one a shell search went over. The bar counts the files touched
+(total.touched_files): seen, or gone over by a rule label, a search, a count or a program; a file only listed by name
+(ls, find) is not touched. Run: python3 -m pytest plugin/tests"""
 from __future__ import annotations
 
 import json
@@ -16,7 +15,7 @@ import pytest
 ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
 
-from kernel import lineage as LIN  # noqa: E402
+from kernel import coverage as CV  # noqa: E402
 from kernel import sources as S  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
@@ -66,7 +65,7 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
         bash("cat src/j.py", 4),  # a long output, cut: four lines reached Claude
     ])
     st = Store(code)
-    cov = LIN.coverage(st)
+    cov = CV.coverage(st)
     status = {o["path"]: o["status"] for o in cov["files"]}
     assert {f for f, s in status.items() if s == "seen"} == {"src/a.py", "src/b.py", "src/c.py", "src/d.py", "src/j.py"}
     assert status["src/e.py"] == "searched"
@@ -78,7 +77,7 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     assert (t["seen_files"], t["not_seen_files"], t["untouched_files"], t["touched_files"]) == (5, 8, 0, 13)
     # the bar's share is of files touched, each file once whatever its unit: a count over a file touches it
     assert t["touched_share"] == 1.0
-    text = LIN.coverage_text(cov)
+    text = CV.coverage_text(cov)
     assert "Every source file" not in text
     assert ("Touched 13 of 13 files (read, searched, counted or computed over). Read 5 of the files, at least in part: "
             "0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's context. Not read: 8 files (3 rows and 210 lines): "
@@ -93,32 +92,11 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
 
 def test_reading_every_file_says_so_and_how_much(code: Path, tmp_path: Path) -> None:
     saw(tmp_path, code, [bash("head -3 src/*.py runs.csv", 60)])
-    cov = LIN.coverage(Store(code))
+    cov = CV.coverage(Store(code))
     assert all(o["status"] == "seen" for o in cov["files"])
-    assert LIN.coverage_sentence(cov) == ("Touched 13 of 13 files (read, searched, counted or computed over). Read all 13 "
+    assert CV.coverage_sentence(cov) == ("Touched 13 of 13 files (read, searched, counted or computed over). Read all 13 "
                                           "files, at least in part: 2 of 3 rows (67%) and 36 of 360 lines (10%) entered "
                                           "Claude's context.")
-
-
-def test_a_query_reads_the_rows_its_shown_table_holds_and_a_print_of_refs_reads_none(code: Path, tmp_path: Path) -> None:
-    # a print of `_refs`, a script whose output named refs, and a result of refs alone name rows without their content:
-    # the files are touched, none of their rows read. A result table of the rows' fields beside their refs shows its rows
-    from kernel import query as Q
-
-    (code / "people.csv").write_text("id,name,fare\n" + "".join(f"{i},Person{i} Example,{i}.25\n" for i in range(1, 101)))
-    saw(tmp_path, code, [{**bash("python3 ids.py", 1), "refs": ["runs.csv#row=2"]}])
-    st = Store(code)
-    Q.run(st, "refs", 'df = load("people.csv")\nprint(list(df._ref[:12]))\nNone')
-    Q.run(st, "refs alone", 'load("people.csv")._ref[:12]')
-    by = {o["path"]: o for o in LIN.coverage(Store(code))["files"]}
-    assert by["people.csv"]["status"] == "computed" and by["people.csv"]["seen_units"] == 0 and by["people.csv"]["touched"]
-    assert by["runs.csv"]["status"] == "named" and by["runs.csv"]["seen_units"] == 0
-    # 100 rows with their names: the result shows its first and last rows (query.display), and those are read
-    q = Q.run(st, "names", 'load("people.csv")[["_ref", "name"]]')
-    n = len(q["shown_rows"])
-    assert 10 <= n < 100 and q["shown_rows"][0] == 0 and q["shown_rows"][-1] == 99
-    by = {o["path"]: o for o in LIN.coverage(Store(code))["files"]}
-    assert by["people.csv"]["status"] == "seen" and by["people.csv"]["seen_units"] == n
 
 
 def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,7 +122,7 @@ def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: P
         # a search over the folder goes over the text files, not the image or the PDF
         {"tool": "Grep", "path": str(d), "mode": "files_with_matches", "files": []},
     ])
-    cov = LIN.coverage(Store(d))
+    cov = CV.coverage(Store(d))
     by = {o["path"]: o for o in cov["files"]}
     assert set(by) == {"trials.jsonl", "scores.csv", "notes.md", "chart.png", "song.mp3", "report.pdf"}
     got = {f: (o["unit"], o["units"], o["seen_units"], o["status"]) for f, o in by.items()}
@@ -156,7 +134,7 @@ def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: P
     assert said["trials.jsonl"] == "read 3 of 200 records (2%)"
     assert said["report.pdf"] == "read 2 of 5 pages (40%)"
     assert said["chart.png"] == "seen" and said["song.mp3"] == "none"
-    text = LIN.coverage_text(cov)
+    text = CV.coverage_text(cov)
     assert text.startswith("Coverage of this session · 6 files: 200 records, 40 rows, 7 lines, 5 pages and 2 other files\n")
     assert "  chart.png  seen\n" in text and "  song.mp3  none\n" in text
     assert ("Touched 5 of 6 files (read, searched, counted or computed over). Read 4 of the files, at least in part: "
@@ -171,19 +149,19 @@ def test_a_full_count_with_no_line_read_touches_the_file_and_a_listing_does_not(
     """Coverage 0 means Claude looked at no file at all: a count over every line touches a file though none of its
     lines entered Claude's context; a file only listed by name is not touched."""
     saw(tmp_path, code, [bash("ls src/ runs.csv", 13), bash("wc -l runs.csv", 1)])
-    cov = LIN.coverage(Store(code))
+    cov = CV.coverage(Store(code))
     t = cov["total"]
     assert (t["touched_files"], t["seen_files"], t["files"]) == (1, 0, 13)
     assert t["touched_share"] == pytest.approx(1 / 13)
     by = {o["path"]: o for o in cov["files"]}
     assert by["runs.csv"]["touched"] and not by["src/a.py"]["touched"]
     assert by["src/a.py"]["said"] == "only listed by name (ls); Claude read none of it"
-    assert LIN.coverage_sentence(cov).startswith("Touched 1 of 13 files (read, searched, counted or computed over). "
+    assert CV.coverage_sentence(cov).startswith("Touched 1 of 13 files (read, searched, counted or computed over). "
                                                  "Read: no part of any file entered Claude's context.")
     saw(tmp_path, code, [bash("ls src/", 12)])
-    t = LIN.coverage(Store(code))["total"]
+    t = CV.coverage(Store(code))["total"]
     assert t["touched_files"] == 0 and t["touched_share"] == 0
-    assert LIN.coverage_sentence(LIN.coverage(Store(code))).startswith("Touched 0 of 13 files: Claude has not looked at any of them.")
+    assert CV.coverage_sentence(CV.coverage(Store(code))).startswith("Touched 0 of 13 files: Claude has not looked at any of them.")
 
 
 def test_a_shell_variable_in_a_path_names_only_the_files_it_can_stand_for(code: Path, tmp_path: Path) -> None:
@@ -191,46 +169,25 @@ def test_a_shell_variable_in_a_path_names_only_the_files_it_can_stand_for(code: 
     not set stands for one name (`src/$1.py` is `src/*.py`), and a word that is only such a variable names nothing."""
     saw(tmp_path, code, [bash("for n in a b; do wc -l src/$n.py; done", 2), bash("head -3 $f", 3),
                          bash("D=src; wc -l $D/c.py", 1)])
-    cov = LIN.coverage(Store(code))
+    cov = CV.coverage(Store(code))
     touched = sorted(o["path"] for o in cov["files"] if o["touched"])
     assert touched == ["src/a.py", "src/b.py", "src/c.py"] and cov["total"]["touched_files"] == 3
     saw(tmp_path, code, [bash("sqlite3 src/$1/forge.db 'select 1'", 1)])
-    assert LIN.coverage(Store(code))["total"]["touched_files"] == 0
+    assert CV.coverage(Store(code))["total"]["touched_files"] == 0
     saw(tmp_path, code, [bash("set -- $spec; wc -l src/$1.py", 12)])
-    assert LIN.coverage(Store(code))["total"]["touched_files"] == 12
-
-
-def test_the_entries_behind_a_value_take_their_files_word(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Records of a JSONL file, rows of a table, lines of text; the word of the kind most of them come from, `entries`
-    when no kind holds most, and none for whole files with no entries."""
-    d = tmp_path / "words"
-    d.mkdir()
-    (d / "trials.jsonl").write_text("".join(json.dumps({"trial": i}) + "\n" for i in range(1, 11)))
-    (d / "scores.csv").write_text("team,score\n" + "".join(f"t{i},{i}\n" for i in range(10)))
-    (d / "notes.txt").write_text("".join(f"line {i}\n" for i in range(10)))
-    (d / "chart.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(64))
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
-    st = Store(d)
-    assert LIN.entries_of(st, ["trials.jsonl#L1-3"]) == {"unit": "records", "unit_one": "record"}
-    assert LIN.entries_of(st, ["scores.csv#L2-3"])["unit"] == "rows"
-    assert LIN.entries_of(st, ["notes.txt#L4"])["unit"] == "lines"
-    # most from the JSONL file: its word; an even split: entries
-    assert LIN.entries_of(st, ["trials.jsonl#L1-3", "scores.csv#L2"])["unit"] == "records"
-    assert LIN.entries_of(st, ["trials.jsonl#L1", "scores.csv#L2"]) == {"unit": "entries", "unit_one": "entry"}
-    assert LIN.entries_of(st, ["chart.png"]) == {"unit": None, "unit_one": None}
+    assert CV.coverage(Store(code))["total"]["touched_files"] == 12
 
 
 def test_each_file_and_folder_has_two_measures_read_and_counted(code: Path, tmp_path: Path) -> None:
-    # 8 of 40 records read, and a query over all of them: read 20%, counted 100% (read is part of it); a folder of
+    # 8 of 40 records read, and a code label over all of them: read 20%, counted 100% (read is part of it); a folder of
     # files of one unit says the same in that unit
     (code / "logs").mkdir()
     (code / "logs" / "events.jsonl").write_text("".join(json.dumps({"i": i}) + "\n" for i in range(40)))
-    th = code / "thimble"
-    th.mkdir()
-    (th / "ledger.jsonl").write_text(json.dumps({"session": "s-cov", "kind": "query", "id": "q1", "loaded": {"logs/events.jsonl": 40}}) + "\n")
+    (code / "thimble" / "labels").mkdir(parents=True)
+    units = {f"logs/events.jsonl#L{i}": {"v": "yes", "c": 1.0, "by": "code"} for i in range(1, 41)}
+    (code / "thimble" / "labels" / "even.json").write_text(json.dumps({"name": "even", "kind": "code", "units": units, "sessions": ["s-cov"]}))
     saw(tmp_path, code, [{"tool": "Read", "file": str(code / "logs" / "events.jsonl"), "from": 1, "to": 8}])
-    cov = LIN.coverage(Store(code))
+    cov = CV.coverage(Store(code))
     f = next(o for o in cov["files"] if o["path"] == "logs/events.jsonl")
     assert (f["read_share"], f["counted_share"]) == (0.2, 1.0)
     g = next(g for g in cov["groups"] if g["folder"] == "logs/")
@@ -245,10 +202,10 @@ def test_only_a_model_labels_reads_are_said_as_a_models(code: Path, tmp_path: Pa
     (st.dir / "labels").mkdir(parents=True, exist_ok=True)
     for name, by in (("mood", "model"), ("passed_flag", "code")):
         units = {ref: {"v": "yes", "c": 1.0, "by": by} for ref in rows}
-        (st.dir / "labels" / f"{name}.json").write_text(json.dumps({"name": name, "kind": "prompt" if by == "model" else "code", "in": "runs.csv", "units": units}))
-        st.log({"kind": "label", "name": name})
+        (st.dir / "labels" / f"{name}.json").write_text(json.dumps({"name": name, "kind": "prompt" if by == "model" else "code",
+                                                                    "in": "runs.csv", "units": units, "sessions": ["s-cov"]}))
     saw(tmp_path, code, [])
-    o = {f["path"]: f for f in LIN.coverage(Store(code))["files"]}["runs.csv"]
+    o = {f["path"]: f for f in CV.coverage(Store(code))["files"]}["runs.csv"]
     assert o["model_labels"] == ["mood"]
     assert "a label's model read 3 of 3 rows (mood)" in o["said"]
     assert "passed_flag" not in o["said"].split("computed over")[0]
@@ -278,14 +235,14 @@ def test_a_working_folder_of_links_counts_the_files_they_point_to(tmp_path: Path
     before = sorted(p.name for p in work.iterdir())
     saw(tmp_path, work, [{"tool": "Read", "file": str(work / "boats.jsonl"), "from": 1, "to": 2}])
 
-    cov = LIN.coverage(Store(work))
+    cov = CV.coverage(Store(work))
     by = {o["path"]: o for o in cov["files"]}
     assert cov["total"]["files"] == 602
     assert "shots/day2/299.png" in by and "gone.jsonl" not in by
     assert not any(p.startswith("shots/day1/up/") for p in by)
     assert by["boats.jsonl"]["touched"] and cov["total"]["touched_files"] == 1
     # the sources are the linked tables too, and nothing was written into the folder or the dataset
-    assert S.list_sources(work) == ["README.md", "boats.jsonl"]
+    assert [f for f in S.list_files(work) if S.kind_of(work / f)] == ["README.md", "boats.jsonl"]
     assert sorted(p.name for p in work.iterdir()) == before
     assert sorted(p.name for p in data.iterdir()) == ["README.md", "boats.jsonl", "shots"]
 

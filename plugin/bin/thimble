@@ -1,15 +1,13 @@
 #!/bin/sh
 # thimble's kernel as one command. Claude Code puts a plugin's bin/ folder on the Bash tool's PATH, so `thimble` runs
 # as a bare command, through the session's permission mode like any other. The Python it runs: THIMBLE_PYTHON, else the
-# plugin's own .venv, else thimble's own Python ($THIMBLE_HOME/python), else python3. Only `thimble run` needs pandas:
-# the installation makes thimble's own Python with `thimble setup` (engine/kernel/pyenv.py).
+# plugin's own .venv, else python3. The kernel needs Python 3.10 or later and nothing else.
 here=$(cd "$(dirname "$0")/.." && pwd)
 # for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs), and
-# `thimble dev stats`, the session's cost and time per feature (telemetry/stats.mjs); the names before dev still work
-[ "$1" = dev ] && shift
-case "$1" in prompts) exec node "$here/prompts/node.mjs" "$@";; stats) shift; exec node "$here/telemetry/stats.mjs" "$@";; esac
+# `thimble dev stats`, the session's cost and time per feature (telemetry/stats.mjs)
+if [ "$1" = dev ]; then
+  case "$2" in prompts) shift; exec node "$here/prompts/node.mjs" "$@";; stats) shift 2; exec node "$here/telemetry/stats.mjs" "$@";; esac
+fi
 py=${THIMBLE_PYTHON:-}
 if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
-own="${THIMBLE_HOME:-$HOME/.thimble}/python/bin/python"
-if [ -z "$py" ] && [ -x "$own" ]; then py="$own"; fi
 exec "${py:-python3}" "$here/engine/thimble.py" "$@"

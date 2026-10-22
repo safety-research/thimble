@@ -1,4 +1,4 @@
-"""The `thimble` command's entry: bin/thimble runs this file with a Python that has pandas."""
+"""The `thimble` command's entry: bin/thimble runs this file with Python 3.10 or later."""
 import sys
 from pathlib import Path
 

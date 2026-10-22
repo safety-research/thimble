@@ -1,7 +1,6 @@
 """Labels (engine/kernel/labels.py, `thimble label`): a category given to every record of a scope by a regex, code, the
-model (records that wait for its reads) or Claude's own values; counts that are a query, so each is a citation;
-use(name) and `thimble rows --label` in later work; the person's checks; and the label's card. Run with any Python that
-has pandas: python -m pytest plugin/tests/test_labels.py"""
+model (records that wait for its reads) or Claude's own values; counts per value as plain numbers; the person's checks;
+and what coverage counts of a label. Run: python3 -m pytest plugin/tests/test_labels.py"""
 from __future__ import annotations
 
 import json
@@ -16,9 +15,8 @@ import pytest
 ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
 
+from kernel import coverage as CV  # noqa: E402
 from kernel import labels as LB  # noqa: E402
-from kernel import lineage as LIN  # noqa: E402
-from kernel import objects as O  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
 LEAN = Path(__file__).resolve().parents[1] / "bin" / "thimble"
@@ -56,35 +54,26 @@ def feed(tmp: Path) -> list[dict]:
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
 
-def test_a_regex_label_gives_each_record_a_value_and_its_counts_are_citations(root: Path):
+def test_a_regex_label_gives_each_record_a_value_and_prints_its_counts(root: Path):
     r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "yes        2  r1#sorry=yes@n" in r.stdout
-    assert "no         4  r1#sorry=no@n" in r.stdout
-    assert "Cite a count as [2](r1#sorry=yes@n)" in r.stdout
+    assert "  sorry: yes 2 · no 4 of 6 records" in r.stdout and "#" not in r.stdout.split("\n", 1)[1]
     st = Store(root)
     # the rule went over every record and none entered a context: the file is computed over, not seen
-    cov = LIN.coverage(st)
+    cov = CV.coverage(st)
     f = next(x for x in cov["files"] if x["path"] == "chat/room.jsonl")
     assert f["status"] == "computed" and f["computed"] == 6 and not f["seen"] and cov["total"]["seen_rows"] == 0
-    assert "Computed over by a query or a rule label, none of it read: 6 of 6 records (100%)." in LIN.coverage_text(cov)
-    res = LIN.resolve(st, "r1#sorry=yes@n", n=5)
-    assert res["count"] == 2
-    assert [x["ref"] for x in res["records"]] == ["chat/room.jsonl#L1", "chat/room.jsonl#L3"]
-    # the two rows the resolve showed are seen; the rest stays computed over
-    f = next(x for x in LIN.coverage(st)["files"] if x["path"] == "chat/room.jsonl")
-    assert f["status"] == "seen" and f["seen_lines"] == 2 and f["computed_rows"] == 4
-    # its card: the counts bound to the query, each value's records as examples, saved to the change feed
-    lab = LB.load(st, "sorry")
-    obj = O.load(st, lab["card"])
-    assert obj["label"] == "sorry" and obj["title"] == "sorry: 2 of 6 records are yes"
-    assert obj["text"] == "[2](r1#sorry=yes@n) of 6 records are yes."
-    assert {s["ref"] for s in obj["data"]["samples"]["yes"]} == {"chat/room.jsonl#L1", "chat/room.jsonl#L3"}
-    assert [e["kind"] for e in feed(root)] == ["save"]
+    assert "Computed over by a rule label, none of it read: 6 of 6 records (100%)." in CV.coverage_text(cov)
+    # another session did not apply it, so its coverage holds none of it
+    assert CV.coverage(Store(root, session="s-other"))["total"]["touched_files"] == 0
+    # each value's records as examples, the unchecked first
+    assert {s["ref"] for s in LB.samples(st, LB.load(st, "sorry"))["yes"]} == {"chat/room.jsonl#L1", "chat/room.jsonl#L3"}
+    # a rule label asks the plugin for nothing
+    assert feed(root) == []
 
 
 def test_the_viewer_marks_the_part_a_label_matched(root: Path):
-    # a regex: its match on its line, the words around it; code: the fields it read; the card names no definition
+    # a regex: its match on its line, the words around it; code: the fields it read
     assert run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry").returncode == 0
     st = Store(root)
     yes = LB.page(st, "sorry", "yes")["records"]
@@ -94,8 +83,6 @@ def test_the_viewer_marks_the_part_a_label_matched(root: Path):
     assert run(root, "label", "size", "--in", "chat/*.jsonl", "--code", stdin=code).returncode == 0
     r = LB.page(st, "size")["records"][0]
     assert [f[0] for f in r["fields"]] == ["text"]
-    card = LB.card_spec(st, LB.load(st, "size"), None)
-    assert "none checked yet" not in card["program"] and "corrected by you" in card["program"]
 
 
 def test_code_labels_take_a_value_a_confidence_or_none_and_say_what_failed(root: Path):
@@ -120,8 +107,7 @@ def test_a_code_label_with_no_values_takes_the_values_it_returns_the_most_common
     lab = LB.load(st, "team")
     # wren, moss and fern each wrote 2: a tie keeps the order the code first returned them; no yes or no
     assert lab["values"] == ["wren-team", "moss-team", "fern"]
-    card = LB.card_spec(st, lab, None)
-    assert card["title"] == "team: 2 of 6 records are wren-team"
+    assert "  team: wren-team 2 · moss-team 2 · fern 2 of 6 records" in r.stdout
     # a bool is yes or no, the positive first, whichever is more common
     r = run(root, "label", "long", "--in", "chat/*.jsonl", "--code", stdin="def label(unit):\n    return len(unit['text']) > 45\n")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -142,12 +128,9 @@ def test_a_none_from_code_leaves_the_record_outside_the_label(root: Path):
     s = LB.status(lab)
     assert s["records"] == s["valued"] == 2 and s["failed"] == 0 and s["out"] == 4
     assert lab["values"] == ["yes", "no"] and s["counts"] == {"yes": 1, "no": 1}
-    card = LB.card_spec(st, lab, None)
-    assert card["title"] == "wren-sorry: 1 of 2 records are yes"
-    assert card["data"]["label"]["records"] == 2 and card["data"]["label"]["failed"] == 0
-    assert "have no value" not in card["text"]
-    # the viewer and the label's rows hold only its records
-    assert LB.page(st, "wren-sorry")["total"] == 2 and len(LB.frame(st, "wren-sorry")) == 2
+    assert "  wren-sorry: yes 1 · no 1 of 2 records" in r.stdout and "have no value" not in r.stdout
+    # the viewer holds only its records
+    assert LB.page(st, "wren-sorry")["total"] == 2
     # the same definition again does not count the records outside it as new
     again = run(root, "label", "wren-sorry", "--in", "chat/*.jsonl", "--code", stdin=code)
     assert again.returncode == 0 and LB.status(LB.load(st, "wren-sorry"))["records"] == 2
@@ -156,11 +139,11 @@ def test_a_none_from_code_leaves_the_record_outside_the_label(root: Path):
 def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     r = run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.", "--reason")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "6 records wait for the model" in r.stdout and "1 call of up to 50 records" in r.stdout
+    assert "6 records wait for the model" in r.stdout and "1 model call of up to 50 records each" in r.stdout
     st = Store(root)
-    # the reads are asked for in the change feed, on the label's card
+    # the reads are asked for in the change feed
     ev = feed(root)[-1]
-    assert ev["kind"] == "label" and ev["name"] == "apology" and ev["object"] == LB.load(st, "apology")["card"]
+    assert ev["kind"] == "label" and ev["name"] == "apology"
     w = json.loads(run(root, "label", "apology", "--waiting").stdout)
     assert w["definition"] == "The message apologizes." and w["reason"] is True and len(w["units"]) == 6
     assert w["batches"] == [[u["ref"] for u in w["units"]]]
@@ -169,11 +152,11 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
                           refs[1]: {"value": "No"}, refs[2]: {"value": "maybe"}},
                "failed": {refs[3]: "the call failed: api-error 529"}}
     got = json.loads(run(root, "label", "apology", "--answers", "-", "--json", stdin=json.dumps(payload)).stdout)
-    assert got["took"] == 2 and got["failed"] == 2 and got["waiting"] == 2 and got["card"] is None
+    assert got["took"] == 2 and got["failed"] == 2 and got["waiting"] == 2
     payload = {"values": {refs[4]: {"value": "yes"}, refs[5]: {"value": "no"}}}
     got = json.loads(run(root, "label", "apology", "--answers", "-", "--json", stdin=json.dumps(payload)).stdout)
-    # nothing waits: counted again, and the card saved again
-    assert got["waiting"] == 0 and got["counts"] == {"yes": 2, "no": 2} and got["card"]["version"] == 2
+    # nothing waits: the counts are whole
+    assert got["waiting"] == 0 and got["counts"] == {"yes": 2, "no": 2}
     lab = LB.load(st, "apology")
     assert lab["units"][refs[2]]["err"].startswith("the model gave 'maybe'")
     assert lab["units"][refs[0]]["why"] == "says sorry"
@@ -181,7 +164,7 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert "2 records have no value" in out and "--again" in out
     # again: the two without a value wait again, and the reads are asked for again
     out = run(root, "label", "apology", "--again").stdout
-    assert "2 records wait for the model (1 call)" in out
+    assert "2 records wait for the model (1 model call)" in out
     assert feed(root)[-1]["kind"] == "label"
     assert LB.status(LB.load(st, "apology"))["waiting"] == 2
 
@@ -197,83 +180,7 @@ def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: P
     s = LB.status(LB.load(st, "sorry"))
     assert s["counts"] == {"yes": 3, "no": 3} and s["checked"] == 2 and s["agree"] == 1 and s["disagree"] == 1
     out = run(root, "label", "sorry").stdout
-    assert "yes        3  r2#sorry=yes@n" in out and "the analyst checked 2: 1 agree, 1 disagree" in out
-    # each record's labels, as the detail view reads them, the check included
-    of = json.loads(run(root, "label", "--of", "chat/room.jsonl#L5", "chat/room.jsonl#L2").stdout)
-    assert of["chat/room.jsonl#L5"]["sorry"] == {"value": "yes", "by": "analyst", "values": ["yes", "no"], "checked": True, "was": "no"}
-    assert of["chat/room.jsonl#L2"]["sorry"]["value"] == "no"
-    # a resolve says how the rows split by the label, and each record's value
-    res = json.loads(run(root, "resolve", "chat/room.jsonl#L1-6", "--json", "-n", "6").stdout)
-    assert res["labels"]["sorry"]["values"] == {"yes": 3, "no": 3}
-    assert res["records"][4]["labels"] == {"sorry": "yes"}
-
-
-def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Path):
-    with open(root / "chat" / "big.jsonl", "w") as f:
-        for i in range(420):
-            f.write(json.dumps({"agent": "wren", "text": f"message {i}", "n": i}) + "\n")
-    st = Store(root)
-    # a trial never asks
-    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.", "--limit", "25")
-    assert r.returncode == 0 and "Not started" not in r.stdout and feed(root)[-1]["kind"] == "label"
-    # all 420: more than a sample, so it waits for the person's choice, and no session starts the reads
-    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "Not started" in r.stdout and "asked first" in r.stdout
-    ev = feed(root)[-1]
-    assert ev["kind"] == "label_ask" and ev["units"] == 420 and ev["sample"] == 300
-    assert ev["text"] == "Read 420 records of chat/big.jsonl with Claude" and ev["meta"] == "9 model calls"
-    assert "the analyst's choice" in run(root, "label", "spam").stdout
-    # --wait returns at once while the ask waits, and says nothing runs before the analyst chooses
-    t0 = time.time()
-    r = run(root, "label", "spam", "--wait", "60")
-    assert r.returncode == 0 and time.time() - t0 < 30
-    assert "waiting for the analyst's choice in the bar; nothing runs until then" in r.stdout
-    # Claude cannot answer for the person: a made-up ask id is refused and the label still waits
-    r = run(root, "label", "spam", "--answer", "all", "--ask", "a000")
-    assert r.returncode == 1 and LB.load(st, "spam")["run"]["state"] == "ask"
-    # the person's key: a sample of 300 of the 420 that wait; the reads are asked for in the feed
-    got = json.loads(run(root, "label", "spam", "--answer", "sample", "--ask", ev["ask"]).stdout)
-    assert got["reads"] == 300 and got["waiting"] == 300 and got["card"]["id"] == LB.load(st, "spam")["card"]
-    out = run(root, "label", "spam").stdout
-    assert "a random sample of 300" in out and "the other 120 records have no value" in out
-    # the same label again asks again for the rest (a sample is no yes for all): run them or cancel, no second sample;
-    # this time the person runs them
-    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
-    assert "run them or cancel" in r.stdout and "do not point them to a key" in r.stdout
-    ev = feed(root)[-1]
-    assert ev["kind"] == "label_ask" and ev["rest"] is True and ev["sample"] == 0
-    assert ev["text"] == "Read the other 420 records of chat/big.jsonl with Claude"
-    got = json.loads(run(root, "label", "spam", "--answer", "all", "--ask", ev["ask"]).stdout)
-    assert got["choice"] == "all" and got["reads"] == got["waiting"] == 420
-    # they said yes to this exact label and scope: asking again starts the reads at once
-    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
-    assert "Not started" not in r.stdout and feed(root)[-1]["kind"] == "label"
-    # a changed definition is a new label: it asks again, and cancel reads nothing
-    run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam or an ad.")
-    ev = feed(root)[-1]
-    got = json.loads(run(root, "label", "spam", "--answer", "cancel", "--ask", ev["ask"]).stdout)
-    assert got["reads"] == 0 and got["waiting"] == 0
-    assert "chose not to run it over its 420 records" in run(root, "label", "spam").stdout
-
-
-def test_a_card_counted_where_pandas_is_missing_shows_the_labels_own_counts_and_no_stale_citation(root: Path, monkeypatch: pytest.MonkeyPatch):
-    """The shell's kernel may run in a Python without pandas: after the model's reads it cannot run the count query, so
-    the old query (an earlier count) no longer counts the label. Nothing cites it, and the card shows the label's own
-    counts."""
-    st = Store(root)
-    LB.define(st, "apology", "prompt", "The message apologizes.", "chat/*.jsonl")
-    refs = [u["ref"] for u in LB.waiting(st, "apology")["units"]]
-    LB.answers(st, "apology", {"values": {refs[0]: {"value": "yes"}}})
-    old = LB.count_query(st, "apology")
-    assert old and LB.load(st, "apology")["query"] == old["id"]
-    LB.answers(st, "apology", {"values": {r: {"value": "yes" if i < 3 else "no"} for i, r in enumerate(refs[1:])}})
-    monkeypatch.setitem(sys.modules, "pandas", None)  # import pandas fails, as in a Python without it
-    assert LB.count_query(st, "apology") is None
-    assert LB.load(st, "apology")["query"] is None
-    card = LB.save_card(st, "apology")
-    assert sorted(card["data"]["counts"], key=lambda r: r["apology"]) == [{"apology": "no", "n": 2}, {"apology": "yes", "n": 4}]
-    assert card["title"] == "apology: 4 of 6 records are yes" and old["id"] not in card["text"]
+    assert "  sorry: yes 3 · no 3 of 6 records" in out and "the analyst checked 2: 1 agree, 1 disagree" in out
 
 
 def test_a_regex_reads_a_json_records_decoded_values_and_a_text_or_csv_row_as_the_file_holds_it(root: Path):
@@ -307,17 +214,12 @@ def test_a_label_counts_records_in_each_files_unit_and_says_when_it_mixes_units(
     r = run(root, "label", "cites-code", "--in", "notes/*.py", "--regex", r"\bcite\b")
     assert r.returncode == 0, r.stdout + r.stderr
     assert LB.load(st, "cites-code") and "3 lines of notes/*.py" in r.stdout
-    card = LB.card_spec(st, LB.load(st, "cites-code"), None)
-    assert card["title"] == "cites-code: 1 of 3 lines are yes"
+    assert "  cites-code: yes 1 · no 2 of 3 lines" in r.stdout
     # whole Markdown files and lines of code together: each counted in its unit, and the mix said plainly
     r = run(root, "label", "cites", "--in", "notes/*", "--regex", r"\bcite\b")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "the records mix units: 3 lines and 2 files" in r.stdout
-    assert "(1 of the 3 lines, 1 of the 2 files)" in r.stdout
-    card = LB.card_spec(st, LB.load(st, "cites"), None)
-    assert card["title"] == "cites: 2 of 5 records are yes (3 lines and 2 files)"
-    assert card["text"].endswith("The records mix units (3 lines and 2 files): 1 of the 3 lines and 1 of the 2 files are yes.")
-    assert card["data"]["label"]["units"] == "3 lines and 2 files"
+    assert "    yes: 1 of the 3 lines, 1 of the 2 files" in r.stdout
 
 
 def test_a_label_in_one_table_of_a_database_labels_only_that_tables_rows(root: Path):

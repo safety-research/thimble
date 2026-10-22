@@ -112,7 +112,10 @@ def test_new_draft_keep_send(env: Path, capsys, monkeypatch):
     assert fx["branch"] == "fix/rows-for-semicolon-csv-files" and sh("git", "branch", "--show-current", cwd=wt) == fx["branch"]
     assert str(wt).startswith(os.environ["THIMBLE_HOME"])
     change(fx)
-    assert cli.main(["rows", "tickets.csv", "-n", "2"]) == 0  # the session read the file's rows and fields
+    # the session read the file's rows and fields (the hooks module's record of a Read call)
+    seen = Path(os.environ["THIMBLE_HOME"]) / "lean" / "seen"
+    seen.mkdir(parents=True, exist_ok=True)
+    (seen / "s1.jsonl").write_text(json.dumps({"tool": "Read", "file": str(env / "support" / "tickets.csv"), "from": 1, "to": 3, "cwd": str(env / "support")}) + "\n")
     f = env / "draft.md"
     f.write_text(DRAFT.format(tok="Ab3" * 12))
     assert cli.main(["fix", "draft", fx["slug"], "--from", str(f)]) == 0

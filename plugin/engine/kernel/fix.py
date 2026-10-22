@@ -778,19 +778,24 @@ def session_terms(st: Store) -> dict[str, list[str]]:
         t["folder"] |= {x for x in parts[:-1] if named(x)}
     fields: set[str] = set()
     values: set[str] = set()
-    qdir = st.dir / "queries"
-    for q in sorted(qdir.glob("r*.json")) if qdir.is_dir() else []:
-        rec = read_json(q) or {}
-        if rec.get("session") not in (st.session, None):
+    # the records Claude read this session (the hooks module keeps the lines each Read call showed): their fields and
+    # values. A record's line is its #L<n>, a CSV row's its row number after the header line.
+    left = 2000
+    for s in st.seen():
+        rel = st.rel(str(s.get("file") or "")) if s.get("tool") == "Read" else None
+        if not rel or left <= 0:
             continue
-        for k in ("table", "samples", "keys"):
-            _walk_strings(rec.get(k), fields, values)
-    refs = [r for row in st.ledger() for r in row.get("shown") or []]
-    for ref in refs[:2000]:
+        a, b = int(s.get("from") or 1), int(s.get("to") or 10**9)
         try:
-            for row in S.fetch(st.root, ref, 1):
-                _walk_strings(row.value, fields, values)
-        except Exception:  # noqa: BLE001 - a file that changed or went away since: its other rows still count
+            for row in S.iter_rows(st.root, rel):
+                m = re.search(r"#(?:L(\d+)|row=(\d+))", row.ref)
+                line = int(m.group(1)) if m and m.group(1) else int(m.group(2)) + 1 if m else 0
+                if line > b or left <= 0:
+                    break
+                if line >= a:
+                    _walk_strings(row.value, fields, values)
+                    left -= 1
+        except Exception:  # noqa: BLE001 - a file that changed or went away since: the other files still count
             continue
     t["field"] |= fields
     t["value"] |= values
