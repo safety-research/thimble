@@ -750,8 +750,10 @@ def shown_code(command: str) -> str:
 
 def output_parts(given: Any) -> list[str]:
     """The output the check gave, as its lines, each cut where it put "…" for left-out text: its parts, runs of white
-    space as one space. The check may copy a few lines of an output and leave out the lines between them."""
-    return [p for p in (norm_ws(x) for x in re.split(r"…|\.\.\.|\n", str(given or ""))) if p]
+    space as one space. The check may copy a few lines of an output and leave out the lines between them, and may give
+    the lines as one text or as a list."""
+    text = "\n".join(map(str, given)) if isinstance(given, list) else str(given or "")
+    return [p for p in (norm_ws(x) for x in re.split(r"…|\.\.\.|\n", text)) if p]
 
 
 def printed(given: Any, output: str) -> list[int] | None:

@@ -514,3 +514,9 @@ def test_a_quote_of_python_text_may_join_string_literals_that_stand_next_to_each
     words = '"Wrap-up: submit the final report with `forge report submit`."'
     r = check_mark(mark(words), quote("nudge.py", "1-2", '"Wrap-up: submit the final report "'), [], str(tmp_path))
     assert r["status"] == "verified"
+
+
+def test_the_check_may_give_the_output_lines_as_a_list():
+    out = "run a: 1.16 h, merged 14\nrun b: 1.04 h, merged 7\n"
+    item = {**computed(), "evidence": {"output": ["run a: 1.16 h, merged 14", "run b: 1.04 h, merged 7"]}}
+    assert check_mark(mark("14"), item, [call(CODE, out)], "/data")["status"] == "verified"
