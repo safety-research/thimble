@@ -87,9 +87,8 @@ async function readHere($: Engine, ev: Any): Promise<void> {
   const name = String(ev.name)
   const root = String(ev.root).replace(/\/+$/, '')
   const doing = `labeling ${name}`
-  const t = await promptText($, 'labels')
   const out: Any = await readLabel({
-    name, template: t.text, promptId: t.id, settings: SETTINGS,
+    name, template: await promptText($, 'labels'), promptId: 'labels', settings: SETTINGS,
     kernel: (args: string[], input?: string): Promise<Ran> => runThimble($, root, args, input != null ? { stdin: input } : {}),
     callAll: (reqs: Any[], each: (i: number, r: Any) => unknown) => callAll($, reqs, SETTINGS.parallel, doing, each),
   })

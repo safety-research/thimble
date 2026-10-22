@@ -31,9 +31,7 @@ test('a text is its file, read once', async () => {
   resetPrompts()
   const reads: string[] = []
   const $ = { plugin: { root: '/made-up/plugin' }, fs: { read: async (p: string) => { reads.push(p); return promptStub(p) ?? '' } } } as Any
-  const t = await promptText($, 'labels')
-  expect(t.id).toBe('labels')
-  expect(t.text).toContain('LABEL {{NAME}}')
+  expect(await promptText($, 'labels')).toContain('LABEL {{NAME}}')
   await promptText($, 'labels')
   expect(reads).toEqual(['/made-up/plugin/prompts/labels.md'])
 })
