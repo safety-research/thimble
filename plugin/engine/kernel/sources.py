@@ -195,11 +195,17 @@ def _pointer_get(v: Any, pointer: str) -> Any:
     return v
 
 
+def _read_only(path: Any) -> sqlite3.Connection:
+    """A database opened to read only, which writes nothing beside it: `mode=ro` alone still makes the -wal and -shm
+    files of a WAL database in its folder, and the folder under analysis may be read-only or someone else's data."""
+    return sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+
+
 def table_names(root: Path, rel: str) -> list[str]:
     """The tables of a database, by name; none for a file that is not one."""
     if kind_of_file(root, rel) != "sqlite":
         return []
-    with closing(sqlite3.connect(f"file:{root / rel}?mode=ro", uri=True)) as con:
+    with closing(_read_only(root / rel)) as con:
         return [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
 
 
@@ -232,7 +238,7 @@ def iter_rows(root: Path, rel: str, table: str | None = None) -> Iterator[Row]:
         for i, x in enumerate(items):
             yield Row(f"{rel}#{key}/{i}", json.dumps(x, ensure_ascii=False), x)
     elif kind == "sqlite":
-        with closing(sqlite3.connect(f"file:{p}?mode=ro", uri=True)) as con:
+        with closing(_read_only(p)) as con:
             con.row_factory = sqlite3.Row
             tables = [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
             for t in tables:
@@ -331,7 +337,7 @@ def _count_sqlite(p: Path) -> int:
     """The rows iter_rows gives of a database, counted by the database: each table's rows, for the tables whose rows
     can be selected by rowid (iter_rows skips the others)."""
     n = 0
-    with closing(sqlite3.connect(f"file:{p}?mode=ro", uri=True)) as con:
+    with closing(_read_only(p)) as con:
         tables = [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
         for t in tables:
             try:
@@ -597,7 +603,7 @@ def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
                 break
         return got
     if k in ("dbrows", "table"):
-        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as con:
+        with closing(_read_only(path)) as con:
             con.row_factory = sqlite3.Row
             t = p["table"]
             if not con.execute("select 1 from sqlite_master where type='table' and name=?", (t,)).fetchone():
