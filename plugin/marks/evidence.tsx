@@ -5,13 +5,13 @@
 //              the check ran
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
 //   code       the substring highlighted
-//   card       the card's title, then the header over the cited row, the cited cell tinted (or the card's printed
+//   card       the card's title, then the header over the cited row, the cited cell marked (or the card's printed
 //              lines around the words)
 //
 // Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words.
 //
 // Two outcomes, as in the reply and the tray: verified (a corrected mark is verified too, and says what it was) and
-// failed, which says why in the warning color, with the evidence the check gave when it is real. The cited value has a soft tint behind it (CITE_TINT). What the check found wrong in the rest of the
+// failed, which says why in the warning color, with the evidence the check gave when it is real. The cited value is bold in the citations' purple (CITE_LOOK). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
@@ -33,18 +33,20 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   unchecked: { word: 'not checked', dim: true },
 }
 
-/** The cited words' tint: the theme key of the soft band Claude Code draws behind the person's own messages, so Claude
- *  Code picks its shade for the theme it draws in (auto too), and the text on it reads as on those messages. */
-export const CITE_TINT = 'userMessageBackground'
+/** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold in the citations'
+ *  purple, the theme key Claude Code shades for the theme it draws in (auto too), so they read on a light and on a dark
+ *  background and stand apart from a heads-up's orange. A color behind them did not: a theme's soft band is faint on a
+ *  light background, and some terminals draw it yellow. */
+export const CITE_LOOK = { color: 'merged', bold: true } as const
 
-/** A line of text with spans of it highlighted (the citations' soft tint behind them), as Text runs. */
+/** A line of text with spans of it highlighted (the cited words in CITE_LOOK), as Text runs. */
 export function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, backgroundColor: CITE_TINT, children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, ...CITE_LOOK, children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))
@@ -117,7 +119,7 @@ export function placeRows(els: Any, p: Place, key: string): Any[] {
   ]
 }
 
-/** A cited cell of a table: the header over its row, the cell tinted (marks/table.mjs). */
+/** A cited cell of a table: the header over its row, the cell marked (marks/table.mjs). */
 export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb'): Any[] {
   const lines = tableLines(t, Math.max(20, width))
   if (!lines) return []

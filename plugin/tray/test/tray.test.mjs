@@ -121,6 +121,18 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.ok(cut.text.length <= 40 && cut.text.startsWith('…') && cut.text.endsWith('…'))
   assert.equal(cut.text.slice(cut.spans[0][0], cut.spans[0][1]), 'VALUE')
   assert.deepEqual(lineWindow({ text: 'short', spans: [] }, 40), { text: 'short', spans: [] })
+  // a line with words is cut between them, … only where words were left out
+  const said = 'Each open ticket waits for a second reviewer to sign off before it can close — ask one with `desk sign <n>`.'
+  const at = said.indexOf('a second reviewer to sign off')
+  for (const room of [24, 40, 60]) {
+    const w = lineWindow({ text: said, spans: [[at, at + 29]] }, room)
+    assert.ok(w.text.length <= room)
+    assert.match(w.text, /^… \S/)
+    assert.match(w.text, /\S …$/)
+    for (const word of w.text.replace(/^… | …$/g, '').split(' ')) assert.ok(said.split(' ').includes(word), `${room}: ${word}`)
+    assert.ok('a second reviewer to sign off'.startsWith(w.text.slice(w.spans[0][0], w.spans[0][1])))
+  }
+  assert.equal(lineWindow({ text: said, spans: [[0, 4]] }, 30).text, 'Each open ticket waits for a …')
 })
 
 test('the code line that printed the cited output line: its own words stand in that line, else the last print', () => {

@@ -4,7 +4,7 @@
 // the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { CITE_TINT } from '../marks/evidence'
+import { CITE_LOOK } from '../marks/evidence'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,9 +95,9 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('4 │')
   expect(band).not.toContain('runs: 40')
   expect(band).not.toContain('passed: 28')
-  // the value in the soft tint, the place dim
+  // the value bold in the citation purple, the place dim
   const drawnBand = all(await $.ui.render(above()))
-  expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT && textOf(n) === '12')).toBe(true)
+  expect(drawnBand.some(n => n.type === 'Text' && n.props?.color === CITE_LOOK.color && n.props?.bold === true && textOf(n) === '12')).toBe(true)
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'runs/summary.txt:4')?.props).toMatchObject({ dimColor: true })
   expect(band).toContain('a ask')
   expect(band).toContain('0 close')
@@ -170,7 +170,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('c one line')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')
-  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT && textOf(n) === '11')).toBe(true)
+  expect(all(open).some(n => n.type === 'Text' && n.props?.color === CITE_LOOK.color && n.props?.bold === true && textOf(n) === '11')).toBe(true)
   // c again: back to the one line
   await clock.advance(2000)
   await $.prompt.edit(key('c'))
@@ -318,6 +318,12 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   expect(page.props.height + 3 + 1 + 2 + barRows).toBeLessThanOrEqual(12)
   expect(band).toContain('m more · lines 1–')
   expect(band).not.toContain('Count distinct run ids')
+  // the fewest rows that show it whole hold all of it and the bar: its 10 lines at this width, the blank row over
+  // them, the frame's three rows and the two blank rows
+  let whole = 12
+  while (textOf(await $.ui.render(above(whole))).includes('m more')) whole++
+  expect(3 + 1 + 10 + 2 + barRows).toBeLessThanOrEqual(whole)
+  await $.ui.render(above(12))
   // m: the next lines, then from the top
   await clock.advance(2000)
   expect(await $.prompt.edit(key('m'))).toEqual({ text: '', cursor: 0 })
