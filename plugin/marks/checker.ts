@@ -1,7 +1,7 @@
 // checker.ts: the check of a reply's marks. After each of main's turns that answered with marks, a fork of the
 // session (core/forks.ts, kind `checker`; for a reply with many marks, up to MAX_FORKS forks at once, each with a share
-// of the marks) reads prompts/checker.md with its marks filled in and gives one answer per mark: verified, corrected or
-// failed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
+// of the marks) reads prompts/checker.md with its marks filled in and gives one answer per mark: verified, corrected,
+// wrong or unconfirmed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
 // without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence names one
 // of the session's real Bash calls (the checker's or main's) by a part of its output, and that call's real output must
 // show the words. Its result is what the person sees.

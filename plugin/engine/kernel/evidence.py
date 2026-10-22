@@ -2,8 +2,8 @@
 import it too.
 
 A reply marks its claims as `[words](#)`. After the reply, the checker (a fork of the session, prompts/checker.md) gives
-one answer per mark: a status (`verified`, `corrected`, `failed`), the evidence, and for a correction the new words.
-check_mark() decides what the person sees of that mark; its result wins over the checker's status.
+one answer per mark: a status (`verified`, `corrected`, `wrong`, `unconfirmed`), the evidence, and for a correction
+the new words. check_mark() decides what the person sees of that mark; its result wins over the checker's status.
 
 What it guarantees. The checker judges what a claim means; this module makes sure the evidence it gave is real and
 shows the words, so a mark is never verified on evidence the checker made up:
@@ -46,11 +46,12 @@ number inside a date matches only a number of the words' own dates, and a time t
 Cited lines a few lines off from the ones that hold the words, or a few lines short of them, are moved to them. A
 correction is the words that replace the mark: words of the sentence the checker repeated around them go.
 
-A mark the checker verified or corrected whose evidence does not hold here fails as not confirmed, with the reason; a
-correction whose evidence shows the marked words instead leaves them verified. A mark the checker failed keeps its
-reason: the checker fails a mark also for the words around it (a wrong condition), which evidence that prints the
-marked words does not answer. A mark with no answer, or one this module cannot judge, stays unchecked. A checker's
-note on the rest of the sentence stays beside the mark.
+A mark the checker verified whose evidence does not hold here fails as not confirmed, with the reason. A mark the
+checker found wrong stays wrong, with its reason: the checker finds a mark wrong also for the words around it (a wrong
+condition), which evidence that prints the marked words does not answer. A correction whose evidence does not show its
+new words is not confirmed: its evidence confirms neither the new words nor the marked ones. A mark the checker could
+not confirm is not confirmed, never wrong. A mark with no answer, or one this
+module cannot judge, stays unchecked. A checker's note on the rest of the sentence stays beside the mark.
 
   check_all(marks, answer, calls, cwd, root, tmp)  -> {parsed, results}: every mark of a reply
   check_mark(mark, item, calls, cwd, root, tmp)    -> {n, status, shown, reason, failedBy?, evidence?, note?}
@@ -1175,11 +1176,13 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     sentence?}; `item` the checker's object for it (or None); `calls` the real Bash calls of the session ({command,
     output, by}).
 
-    A correction whose evidence does not show the new words, but shows the marked words, leaves the mark verified: the
-    words held at the precision they were written in. A mark the checker failed keeps the evidence it gave, when that
-    evidence is real, so the person sees what the check found. `failedBy` is `check` when the checker failed the mark,
-    `evidence` when its evidence did not hold: then the claim is not shown wrong, only not confirmed. A `note` is what
-    the checker found wrong in the sentence outside the mark's own claim."""
+    The checker's status is `verified`, `corrected`, `wrong` (the data show the claim false) or `unconfirmed` (the
+    check could not see what shows it true or false). This module checks the evidence of the words it shows: it never
+    turns the checker's verdict that a claim is wrong into verified, so a correction whose evidence does not show the
+    new words is not confirmed. A mark the checker judged wrong or unconfirmed keeps the evidence it gave, when that
+    evidence is real, so the person sees what the check found. `failedBy` is `check` when the checker found the claim
+    wrong, `evidence` when the claim is only not confirmed: the checker could not see it, or its evidence did not hold.
+    A `note` is what the checker found wrong in the sentence outside the mark's own claim."""
     n, words = mark["n"], str(mark["words"])
     out: dict[str, Any] = {"n": n, "status": "unchecked", "shown": words, "reason": "the check gave no answer for this mark"}
     if not item:
@@ -1197,31 +1200,39 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         status, new = "verified", ""
     if status == "corrected" and (not new or unmark(new) == unmark(words)):
         # a correction that leaves the words as they were found an error around them (a wrong place, a wrong
-        # condition), which the words cannot show: the mark fails, with the checker's reason
-        status = "failed"
+        # condition), which the words cannot show: the mark is wrong, with the checker's reason
+        status = "wrong"
         reason = reason or "the check gave no corrected words"
-    if status == "failed":
-        failed = {**out, "status": "failed", "reason": reason or "no source supports this claim", "failedBy": "check", **extra}
+
+    def judged(by: str, why: str) -> dict[str, Any]:
+        """The checker's verdict that the claim is wrong (`check`) or not confirmed (`evidence`), with the evidence it
+        gave when that evidence is real."""
+        res = {**out, "status": "failed", "reason": why, "failedBy": by, **extra}
         if ev:
             _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp)
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
-                failed["evidence"] = evidence
-        return failed
+                res["evidence"] = evidence
+        return res
+
+    if status == "wrong":
+        return judged("check", reason or "the check found this claim wrong")
+    if status == "unconfirmed":
+        return judged("evidence", reason or "the check could not show this claim from the data")
     if status not in ("verified", "corrected"):
         return {**out, "reason": f"the check gave the status {status!r}"}
     problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp)
-    if problems and new:
-        kept, kept_ev = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp)
-        if not kept:
-            return {"n": n, "status": "verified", "shown": words, "reason": reason, **extra, **({"evidence": kept_ev} if kept_ev else {})}
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
-    if status == "corrected":
+    if problems and new:
+        # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
+        # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
+        # printed False, is no sign that they hold)
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check found these words wrong, but {problems[0]}.")
+    elif problems:
+        res.update(status="failed", failedBy="evidence", reason=f"Not confirmed: {problems[0]}. The claim may still be true.")
+    elif new:
         res["was"] = words
-    if problems:
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: {problems[0]}. The claim may still be true.")
-        res.pop("was", None)
     return res
 
 

@@ -107,7 +107,7 @@ def test_quote_in_a_decoded_jsonl_line_and_a_range(tmp_path: Path):
 
 
 def test_a_failed_mark_keeps_its_reason_and_a_missing_one_stays_unchecked():
-    out = check_all([mark("a", 1), mark("b", 2)], '```json\n[{"mark": 1, "status": "failed", "reason": "no record says so"}]\n```', [], "/data")
+    out = check_all([mark("a", 1), mark("b", 2)], '```json\n[{"mark": 1, "status": "wrong", "reason": "no record says so"}]\n```', [], "/data")
     assert out["parsed"] is True
     assert [(r["status"], r["reason"]) for r in out["results"]] == [("failed", "no record says so"), ("unchecked", "the check gave no answer for this mark")]
     assert check_all([mark("a")], "I could not check it.", [], "/data")["parsed"] is False
@@ -178,20 +178,33 @@ def test_words_with_no_number_are_shown_by_their_record_names():
     assert check_mark(mark("merged #102, #125 and #131"), computed("#102, #125, #130"), [call(code, "#102, #125, #130")], "/data")["status"] == "failed"
 
 
-def test_a_correction_to_a_finer_value_leaves_the_marked_words_verified():
-    corr = {"words": "06:39:10", "was": "06:39"}
-    r = check_mark(mark("06:39"), computed("last event 06:39", status="corrected", correction=corr), [call(CODE, "last event 06:39")], "/data")
-    assert (r["status"], r["shown"]) == ("verified", "06:39") and "was" not in r
+def test_a_correction_whose_output_does_not_show_its_new_words_is_not_confirmed_never_verified():
+    # the check printed 126 and a test of the old bound; it corrected to 125, which no line shows. The old words' 250
+    # stands in the output only as the label of a test that printed False: no words are confirmed
+    out = "fewest prior messages 126; all in first session: True; all after 250 or more: False"
+    corr = {"words": "in the first session, after 125 or more of its messages"}
+    item = {**computed(out, status="corrected", correction=corr), "reason": "the earliest report came at message 126"}
+    r = check_mark(mark("in the first session, after 250 or more of its messages"), item, [call(CODE, out)], "/data")
+    assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", "in the first session, after 250 or more of its messages")
+    assert r["reason"].startswith("Not confirmed: the check found these words wrong") and "125" in r["reason"] and "was" not in r
+
+
+def test_an_unconfirmed_claim_is_not_confirmed_never_wrong():
+    out = "62 of 68 set to /tmp, mktemp -d or the run folder; 6 read from files"
+    item = {**computed(out), "status": "unconfirmed", "reason": "6 values come from files the commands do not print"}
+    r = check_mark(mark("each one is set to a /tmp path"), item, [call(CODE, out)], "/data")
+    assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", "6 values come from files the commands do not print")
+    assert r["evidence"]["output"] == out
 
 
 def test_a_failed_mark_keeps_the_real_evidence_the_check_gave():
-    item = {**computed("602 deletions"), "status": "failed", "reason": "the sentence says June 18, the deletions began on June 20"}
+    item = {**computed("602 deletions"), "status": "wrong", "reason": "the sentence says June 18, the deletions began on June 20"}
     r = check_mark(mark("602"), item, [call(CODE, "602 deletions, first on 2026-06-20")], "/data")
     assert r["status"] == "failed" and r["failedBy"] == "check" and r["evidence"]["output"].startswith("602")
 
 
 def test_an_answer_that_quotes_a_fence_still_parses():
-    answer = 'Done.\n```json\n[{"mark": 1, "kind": "code", "status": "failed", "evidence": {"substring": "re.compile(r\'```(?:json)?\')"}, "reason": "no"}]\n```'
+    answer = 'Done.\n```json\n[{"mark": 1, "kind": "code", "status": "wrong", "evidence": {"substring": "re.compile(r\'```(?:json)?\')"}, "reason": "no"}]\n```'
     out = check_all([mark("a")], answer, [], "/data")
     assert out["parsed"] is True and out["results"][0]["status"] == "failed"
 
@@ -487,3 +500,4 @@ def test_a_condition_the_code_tests_in_another_form_may_stand_in_its_printed_wor
 def test_when_no_call_printed_the_cited_output_the_pane_shows_what_the_check_ran():
     r = check_mark(mark("72 min"), computed("opus: 72"), [call(CODE, "opus: 71.5")], "/data")
     assert r["status"] == "failed" and r["evidence"]["output"] == "opus: 71.5"
+
