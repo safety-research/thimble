@@ -41,3 +41,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["thimble_browser"]
+
+[tool.uv]
+# Ignore packages published in the last 7 days, on every machine, so the lockfile reads the same everywhere.
+exclude-newer = "7 days"

@@ -39,8 +39,8 @@ for step in "${steps[@]}"; do
       while IFS= read -r f; do files+=("$f"); done < <(find plugin -name '*.test.mjs' -not -path '*/node_modules/*' | sort)
       node --test "${files[@]}" ;;
     python) "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ;;
-    parity) (cd browser/server && uv run --quiet --locked --extra dev pytest -q -p no:cacheprovider tests/test_prompt_parity.py) ;;
-    server) (cd browser/server && uv run --quiet --locked --extra dev pytest -q -p no:cacheprovider) ;;
+    parity) (cd browser/server && uv run --quiet --frozen --extra dev pytest -q -p no:cacheprovider tests/test_prompt_parity.py) ;;
+    server) (cd browser/server && uv run --quiet --frozen --extra dev pytest -q -p no:cacheprovider) ;;
     page)
       [ -d browser/frontend/node_modules ] || npm --prefix browser/frontend ci --no-audit --no-fund
       (cd browser/frontend && npm run --silent typecheck && npx vitest run && npx vite build --logLevel warn) ;;

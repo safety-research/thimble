@@ -185,7 +185,7 @@ if [ "$web" = 1 ]; then
   say "The server's Python packages (uv sync)..."
   export NPM_CONFIG_UPDATE_NOTIFIER=false
   # with pytest (the dev extra, about 3 MB), so that a fix made in the browser can run its tests (fixcopy.py, fix_test)
-  quietly uv sync --project "$browser/server" --locked --extra dev
+  quietly uv sync --project "$browser/server" --frozen --extra dev
   say "The page (npm ci, then a build)..."
   quietly npm --prefix "$browser/frontend" ci --no-audit --no-fund
   quietly npm --prefix "$browser/frontend" run build
