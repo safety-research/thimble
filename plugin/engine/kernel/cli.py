@@ -108,7 +108,7 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     thimble label NAME --csv                   every record as a CSV row: ref, value, confidence, by, checked. The
                                                analyst's check is the value where they checked one (by: analyst); a
                                                record that waits or got no value has an empty value. Read it in your
-                                               code (csv or pandas) to count or join
+                                               code with Python's csv module to count or join
     thimble label NAME --in GLOB --regex RE    the first value where the record's text matches: a JSON or JSONL
                                                record's values, decoded, one per line (a newline in a value is a real
                                                newline), not its keys or quotes; a line of text or a CSV row as the
