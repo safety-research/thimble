@@ -211,7 +211,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a p
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 0 })
   const open = await draw(paneNow(s).args)
   expect(textOf(open)).toContain('p95 check   not checked · cite')
-  expect(textOf(open)).toContain('citation 1 of 1')
+  expect(textOf(open)).toContain('‹ 1 of 1 ›')
   expect(textOf(open)).not.toContain('Run 9 failed')
   expect(textOf(open)).not.toContain('said in')
   expect(keysOf(open)).toEqual([['e', 'close']])
@@ -251,4 +251,37 @@ test('a corrected claim says corrected under it; e opens its history: what it sa
   // a press on the turns picks the earlier claim
   await buttons(pane).find(b => /^p\d+:was-c1$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1' })
+})
+
+test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
+  setOptions({})
+  const s = setup([reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' }])])
+  const spawns: Any[] = []
+  s.$.agent = { spawn: async (o: Any) => { spawns.push(o); return { agentId: 'agent-made-up-1' } } }
+  s.$.ui.busy = async () => undefined
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed on the [p95 check](#).'] })
+  // the check could not confirm the citation
+  const row = 't1-row-0'
+  const item = { n: 1, row, words: 'p95 check', start: 22, end: 31, sentence: 'Run 4 failed on the p95 check.', status: 'failed', failedBy: 'check', shown: 'p95 check', reason: 'No file names a p95 check.' }
+  await s.$.state.set({ plugin: 'thimble', key: 'marks', id: row }, { key: row, turnId: 't1', rows: [row], startedAt: 0, settledAt: 1, items: [item] })
+  await s.$.state.set({ plugin: 'thimble', key: 'marksRow', id: row }, row)
+  const args = { claim: 'c1', open: true, cite: 0 }
+  await s.$.state.set({ plugin: 'thimble', key: 'pane' }, { kind: 'claims', args })
+  const pane = await drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
+  const t = textOf(pane)
+  expect(t).toContain('? 1 citation failed')
+  expect(t).toContain('p95 check   ? failed · cite')
+  expect(t).toContain('‹ 1 of 1 ›')
+  expect(t).not.toMatch(/×|wrong/)
+  const x = buttons(pane).find(b => b.hotkey === 'x')
+  expect([x?.key, x?.label]).toEqual(['claims-repair', 'repair'])
+  // the press: a fork with the repair's request, and the citation checking again
+  const r = await s.call('ui.press', { plugin: 'thimble', element: 'claims-repair', component: 'Pane', requestId: 'thimble', surface: 'terminal' }, async () => ({ element: 'none' }))
+  expect(r).toEqual({ element: 'claims-repair' })
+  expect(spawns.length).toBe(1)
+  expect(spawns[0].description).toBe('checking a citation again (x)')
+  expect(spawns[0].prompt).toContain('The analyst pressed x to repair citation 1.')
+  const now = (s.state.get(JSON.stringify({ plugin: 'thimble', key: 'marks', id: row }))?.value as Any).items[0]
+  expect([now.status, now.repair]).toEqual(['checking', true])
 })

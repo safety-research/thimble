@@ -1,16 +1,17 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
-// out: the head (how many claims), the map of clusters (folded to one line per cluster when the detail needs the rows,
-// a list in a narrow pane), the clusters it leaves out, the detail under it (the cluster chosen and its claims, or the
-// claim picked in that list with its chips, and with e its history and evidence), and the keys. A click is the main
-// way to move: a cluster's name chooses the cluster, a dot or a claim in the list picks that claim (its dot again, the
-// cluster); a citation opens its evidence pane. Tab and Enter reach the same Buttons.
+// out: the head (how many claims), the map of clusters (its cells shorter when the detail needs the rows; a list in a
+// narrow pane), the detail under it (the cluster chosen and its claims, or the claim picked in that list with its
+// chips, and with e its history and evidence), and the keys. A pane taller than Claude Code gives it scrolls. A click is
+// the main way to move: a cluster's name chooses the cluster, a dot or a claim in the list picks that claim (its dot
+// again, the cluster); `↑ N earlier` and `↓ N more` page the list; ‹ › step through the citations; a citation opens its
+// evidence pane. Tab and Enter reach the same Buttons.
 //
-//   keys while the pane holds the keyboard, each once: p n the previous or next cluster · m the clusters the map leaves
-//   out, listed or folded · k j the previous or next claim (a claim picked, the list in a window) · e the claim's
-//   evidence, open or closed · with it open: c the code and output whole · h the whole history · k j the previous or
-//   next citation · x repair the citation shown (wrong or not confirmed: the tray's repair, tray/tray.ts) · b back
-//   (where it was said). A focused pane hands a plugin only its Buttons' hotkeys, one letter or digit each, so the
-//   citations step on k j, not [ ]. The input under the pane asks about what is chosen (threads/pane.tsx).
+//   keys while the pane holds the keyboard, each once: p n the previous or next cluster · k j the previous or next
+//   claim (a claim picked, the list in a window) · e the claim's evidence, open or closed · with it open: c the code
+//   and output whole · h the whole history · k j the previous or next citation · x repair the citation shown (a failed
+//   one: a check of it again in the background, marks/checker.ts launchRepair, started in this feature's ui.press hook,
+//   seam.ts) · b back (where it was said). A focused pane hands a plugin only its Buttons' hotkeys, one letter or digit
+//   each, so the citations step on k j, not [ ]. The input under the pane asks about what is chosen (threads/pane.tsx).
 //
 // A claim's citations are the reply's marks near its words (store.js sources): their check and evidence come from
 // marks/store.ts as they stand now, so a check that ends after the look shows in the detail.
@@ -18,11 +19,12 @@ import type { EngineInterface } from 'claude-code'
 
 import { messageOf } from '../core/answers'
 import { tellOpened } from '../core/engaged'
-import { openPane } from '../core/pane'
+import { failNotice } from '../bar/notice'
+import { openPane, paneNow } from '../core/pane'
+import { launchRepair, repairOf } from '../marks/checker'
 import { CITE_TINT } from '../marks/evidence'
 import { rowMarks, type MarkItem } from '../marks/store'
-import { repairCitation } from '../tray/tray'
-import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, sourceView, threadAbout } from './graph.js'
+import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
 import { claimsBright, claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
 
 type Engine = EngineInterface
@@ -119,14 +121,43 @@ export async function claimsThreadScope($: Engine, args: unknown): Promise<{ abo
   return { about: threadAbout(null), args: {} }
 }
 
-/** The keys' row, ` · ` between them: each a plain Button the key presses. Claude Code draws its key itself (lit, then
- *  a colon), so its words are only the label's, dim as the bar's: words that held the key too drew it twice. */
-function keysRow(els: Any, keys: { k: string; label: string; onPress: () => unknown }[]): unknown {
+type Key = { k: string; label: string; onPress: () => unknown; id?: string }
+
+/** The keys' row, ` · ` between them: each a plain Button the key presses (its address `key-<k>`, or its own `id`).
+ *  Claude Code draws its key itself (lit, then a colon), so its words are only the label's, dim as the bar's: words
+ *  that held the key too drew it twice. */
+function keysRow(els: Any, keys: Key[]): unknown {
   const { Box, Button, Text } = els
   return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
+    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
   ]) })
+}
+
+/** The address of x's Button in the keys' row: this feature's ui.press hook (seam.ts) starts the repair, so the
+ *  repair's fork starts inside a hook (core/forks.ts). */
+export const CLAIMS_REPAIR = 'claims-repair'
+
+/** x in the Claims pane, or a click on `repair`: a check again, in the background, of the failed citation the pane
+ *  shows (marks/checker.ts). Call it inside a hook: the spawn is launchRepair's first call. Answers whether the press
+ *  was a repair's (a repair started, or a notice says why none did). */
+export async function repairShown($: Engine): Promise<boolean> {
+  const now = await paneNow($)
+  if (now?.kind !== 'claims') return false
+  const a = (now.args && typeof now.args === 'object' ? now.args : {}) as ClaimsArgs
+  if (!a.open || a.source) return false
+  const data = await withMarks($, paneData(await claimsStore($)))
+  const claim = selectedOf(data, a).claim as Any
+  if (!claim) return false
+  const cites = evidenceOf(claim) as Any[]
+  const s = cites[Math.max(0, Math.min(cites.length - 1, Number(a.cite) || 0))]
+  if (!repairable(s)) return false
+  const r = await repairOf($, s.row, s.n)
+  if (r === null) return false
+  // no word window in a pane that holds the keyboard: x is a key of the pane's, never a letter of the prompt
+  const why = typeof r === 'string' ? r : await launchRepair($, r, { until: 0, cancelled: false })
+  if (why) failNotice($, why, 'claims:repair')
+  return true
 }
 
 export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
@@ -134,15 +165,14 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const W = Math.max(24, Number(e?.props?.bodyColumns) || 90)
   const H = Math.max(14, Number(e?.props?.scroll?.bodyRows) || 36)
   const { Box } = els
-  const data = await withMarks($, paneData(await claimsStore($)))
-  const keys: { k: string; label: string; onPress: () => unknown }[] = []
-  const key = (k: string, label: string, onPress: () => unknown) => keys.push({ k, label, onPress })
-  const more = a.more ? { more: true } : {}
-  const keep = { claim: a.claim ?? null, group: a.group ?? null, at: a.at ?? null, ...more, ...(a.open ? { open: true, cite: a.cite ?? 0 } : {}) }
+  const raw = await withMarks($, paneData(await claimsStore($)))
+  const keys: Key[] = []
+  const key = (k: string, label: string, onPress: () => unknown, id?: string) => keys.push({ k, label, onPress, ...(id ? { id } : {}) })
+  const keep = { claim: a.claim ?? null, group: a.group ?? null, at: a.at ?? null, ...(a.open ? { open: true, cite: a.cite ?? 0 } : {}) }
 
   // ---- where a claim was said
   if (a.source) {
-    const c = data.claims.find((x: Any) => x.id === a.source) ?? null
+    const c = raw.claims.find((x: Any) => x.id === a.source) ?? null
     const text = a.row ? await placeText($, a.row) : null
     const lines = sourceView(c, text, W) as Run[][]
     key('b', 'back', () => showClaims($, keep))
@@ -154,11 +184,13 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   }
 
   // ---- the map and the detail
-  const view = graphView(data, keep, { w: W, h: H, bright: await claimsBright($) })
+  const view = graphView(raw, { ...keep, ...(a.from != null ? { from: a.from } : {}) }, { w: W, h: H, bright: await claimsBright($) })
+  // the clusters as the map draws them (graph.js fitClusters): p n walk these
+  const data = view.data as Any
   const claim = view.claim as Any
   const group = view.group as string | null
-  const pick = (id: string | null) => (id ? showClaims($, { claim: id, at: data.last, ...more }) : undefined)
-  const pickGroup = (k: string | null) => (k != null ? showClaims($, { group: k, at: data.last, ...more }) : undefined)
+  const pick = (id: string | null) => (id ? showClaims($, { claim: id, at: data.last }) : undefined)
+  const pickGroup = (k: string | null) => (k != null ? showClaims($, { group: k, at: data.last }) : undefined)
   const cites = claim ? (evidenceOf(claim) as Any[]) : []
   const openEvidence = async (s: Any) => {
     if (!s?.row || !s.n) return
@@ -166,9 +198,14 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const m = await messageOf($, s.row)
     await tellOpened($, { kind: 'citation', row: s.row, n: s.n, words: s.label, status: s.status }, m?.text ?? '')
   }
-  const toggleMore = () => showClaims($, { ...keep, more: !a.more })
+  const at = claim ? { claim: claim.id, at: data.last } : null
+  const cite = Math.max(0, Math.min(view.cites - 1, Number(a.cite) || 0))
+  const stepCite = (d: number) => () => (at ? showClaims($, { ...at, open: true, cite: (cite + d + view.cites) % view.cites, ...(a.all ? { all: true } : {}) }) : undefined)
   const press = (part: string) => {
-    if (part === 'more') return toggleMore()
+    if (part === 'cite-prev') return stepCite(-1)()
+    if (part === 'cite-next') return stepCite(1)()
+    const pg = /^pg:(\d+)$/.exec(part)
+    if (pg) return showClaims($, { ...keep, from: Number(pg[1]) })
     if (part.startsWith('g:')) return pickGroup(part.slice(2))
     if (part.startsWith('d:')) {
       // a dot: its claim; the claim picked again, its cluster
@@ -181,20 +218,17 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (ev && claim) return openEvidence(cites[Number(ev[1]) - 1])
     if (part.startsWith('was-')) return pick(part.slice(4))
   }
-  const at = claim ? { claim: claim.id, at: data.last, ...more } : null
   if (claim && a.open && at) {
     // the evidence open: its own keys, as the citation's card in the reply has them
-    const cite = Math.max(0, Math.min(view.cites - 1, Number(a.cite) || 0))
     const now = { ...at, open: true, cite, ...(a.all ? { all: true } : {}), ...(a.whole ? { whole: true } : {}) }
     if (view.cut || a.whole) key('c', a.whole ? 'shorter' : 'all code and output', () => showClaims($, { ...now, whole: !a.whole }))
     if (view.fixes > 2) key('h', a.all ? 'newest history' : 'all history', () => showClaims($, { ...now, all: !a.all }))
     if (view.cites > 1) {
-      const step = (d: number) => () => showClaims($, { ...at, open: true, cite: (cite + d + view.cites) % view.cites, ...(a.all ? { all: true } : {}) })
-      key('k', 'previous citation', step(-1))
-      key('j', 'next citation', step(1))
+      key('k', 'previous citation', stepCite(-1))
+      key('j', 'next citation', stepCite(1))
     }
-    const shown = view.shown as Any
-    if (repairable(shown)) key('x', 'repair', () => repairCitation($, shown.row, shown.n))
+    // the press is the ui.press hook's (seam.ts), which starts the repair inside a hook
+    if (repairable(view.shown)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
     key('e', 'close', () => showClaims($, at))
   } else {
     if (claim && view.windowed) {
@@ -209,7 +243,6 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
       key('p', 'previous', () => pickGroup(hopCluster(data, group, -1)))
       key('n', 'next', () => pickGroup(view.chosen ? hopCluster(data, group, 1) : group))
     }
-    if (view.extra && !view.narrow) key('m', a.more ? 'fold' : 'more clusters', toggleMore)
     if (claim && at && (view.cites || view.fixes)) key('e', 'evidence', () => showClaims($, { ...at, open: true, cite: 0 }))
   }
   const row = (r: Run[], k: string) => rowEl(els, r, k, press)
@@ -218,7 +251,6 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     ...(view.head as Run[][]).map((r, i) => row(r, `h${i}`)),
     ...((view.graph as Run[][]).length ? [row([], 'gap')] : []),
     ...(view.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
-    ...(view.under as Run[][]).map((r, i) => row(r, `u${i}`)),
     ...(view.panel as Run[][]).map((r, i) => row(r, `p${i}`)),
     ...(keys.length ? [row(rule, 'rule'), keysRow(els, keys)] : []),
   ] })

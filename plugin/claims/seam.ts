@@ -14,14 +14,16 @@
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
 //   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, the
 //                                      cluster selected, or where a claim was said (threads/pane.tsx)
-//   registerClaims                     its own hooks (/claims)
+//   registerClaims                     its own hooks (/claims; x in the pane, which starts a repair inside its
+//                                      ui.press hook, as the tray's does)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { failNotice } from '../bar/notice'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
-import { claimsThreadScope as threadScope, drawClaims } from './pane'
+import { CLAIMS_REPAIR, claimsThreadScope as threadScope, drawClaims, repairShown } from './pane'
 import { claimsBarWords, claimsBright, claimsDigest, claimsLit, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
@@ -67,4 +69,16 @@ export async function claimsThreadScope($: Engine, args: unknown): Promise<{ abo
 
 export const registerClaims: Register = (on, options) => {
   registerClaimsTerm(on, options)
+  // x in the pane, or a click on its `repair`: the repair starts in this hook, so the plugin's other hooks serve its
+  // fork (core/forks.ts)
+  on('ui.press', { element: /^claims-repair$/ }, async ($, e, next) => {
+    try {
+      if (e.plugin !== 'thimble' || e.element !== CLAIMS_REPAIR) return next(e)
+      if (!(await repairShown($))) return next(e)
+      return { element: e.element }
+    } catch (err) {
+      failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'claims:repair')
+      return { element: e.element }
+    }
+  }).catch(($, e, next) => next(e))
 }

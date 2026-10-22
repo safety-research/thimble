@@ -31,10 +31,10 @@ type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: 
 export type ClaimsPart = { lit: true; note: string; claims: string[] }
 /** The pane's arguments: the claim picked, else the cluster chosen (its key: graph.js groupKey), the last turn when it
  *  was chosen; with a claim, `open` while its evidence is open, `cite` the citation shown (from 0), `all` the whole
- *  history, `whole` the citation's code and output whole; `more` the clusters the map leaves out listed; with `source`,
- *  where that claim was said. */
+ *  history, `whole` the citation's code and output whole; `from` the first claim of the list's window, once the person
+ *  paged it; with `source`, where that claim was said. */
 export type ClaimsArgs = {
-  claim?: string | null; group?: string | null; at?: number | null; open?: boolean; cite?: number; all?: boolean; whole?: boolean; more?: boolean
+  claim?: string | null; group?: string | null; at?: number | null; open?: boolean; cite?: number; all?: boolean; whole?: boolean; from?: number
   source?: string; row?: string
 }
 

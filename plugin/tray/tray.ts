@@ -352,11 +352,6 @@ async function repair($: Engine, f: Frame, hold: { until: number; cancelled: boo
   return true
 }
 
-/** x in the Claims pane on a citation of a picked claim: the same repair as x in the tray. */
-export async function repairCitation($: Engine, row: string, n: number): Promise<void> {
-  await repair($, { row, kind: 'citation', n } as Frame)
-}
-
 /** e on an explainer: written again at more length, in its place; the tray shows the longer one when it lands. */
 async function expand($: Engine, f: Frame): Promise<void> {
   const why = await expandExplainer($, refOf(f) as MarkRef)
