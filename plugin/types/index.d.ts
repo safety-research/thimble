@@ -29,8 +29,10 @@ declare module 'claude-code' {
       // ---- L4 v
       /** a design v started, by its key: { key, anchorRow, agentId, status, at, error?, cards } */
       designs: StateFamily<unknown>
-      /** the design key the bar names */
+      /** the key of the design that runs now, which the bar names */
       designNow: string | null
+      /** main's last answer row (the session.append uuid of main's last text row): what v draws under */
+      answerRow: string | null
 
       // ---- L5 bar
       /** thimble's own work while it runs: the glyph's frame and how many jobs run (bar/busy.ts) */
