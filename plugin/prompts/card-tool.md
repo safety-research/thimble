@@ -8,6 +8,16 @@ State: `surface.state` (undefined at first) and `surface.setState(next)` hold pl
 
 Input: `const keys = "jk"` names the letters the card takes at an empty prompt, and `function onKey(key, surface, props)` gets each. Only letters reach a card (a digit types into the prompt), and {{KEPT}} are thimble's own; j and k suit next and previous. `surface.onPointer(fn)`, in view, gets clicks as {type: "down"|"up", x, y} in cells.
 
-The analyst reads the first line first, so it states the answer. Each part of the question has its answer on the card, in words that code computes from the rows, next to the marks it explains. thimble draws the title. A color must read on light and dark backgrounds. Show what each color, symbol and line style means with a sample (`█ survived`), and mark the selected item with bold or `▸`. Size each column from its longest value; a cut value keeps the part that tells it apart, and a line counts what is left out (`+47 more`). Numbers that touch read as one, and a cell of two records shows its count. Put each axis label at its tick, with one scale across states. About 30 rows fit: put details beside or under the selected item, and say which page shows ("rows 1-14 of 28"). Keys and Buttons open what the analyst will ask next, such as the records behind a count.
-
 The call returns a text copy of the card or the view's error. Try each key and Button with `actions`, read each copy as the analyst will, and fix what they would misread in one new version before you reply. For a change, also one the analyst asks for, call card with the `id` and `edits`, since a whole view takes half a minute to write. The new version still answers the card's first question, with the change beside it. A new question gets a new card.
+
+Advice:
+- The first line states the answer, since the analyst reads it first.
+- Each part of the question has its answer on the card, in words that code computes from the rows, next to the marks it explains.
+- thimble draws the title.
+- A color must read on light and dark backgrounds.
+- Show what each color, symbol and line style means with a sample (`█ survived`); mark the selected item with bold or `▸`.
+- Size each column from its longest value; a cut value keeps the part that tells it apart, and a line counts what is left out (`+47 more`).
+- Numbers that touch read as one; a cell of two records shows its count.
+- Put each axis label at its tick, with one scale across states.
+- About 30 rows fit: put details beside or under the selected item, and say which page shows ("rows 1-14 of 28").
+- Keys and Buttons open what the analyst will ask next, such as the records behind a count.
