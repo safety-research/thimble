@@ -21,7 +21,7 @@
 // kept for the next call's `edits`, and the view's error goes back to Claude.
 import type { EngineInterface } from 'claude-code'
 
-import { failCleared, failNotice } from '../bar/fix'
+import { failCleared, failNotice } from '../bar/notice'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { tempDir } from '../core/home'

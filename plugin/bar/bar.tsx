@@ -17,7 +17,8 @@ import { vReady } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, needCounts } from './counts'
-import { failLineNow, fixLineNow, pressFix } from './fix'
+import { fixLineNow, pressFix } from './fix'
+import { failLineNow } from './notice'
 import { FAIL_KEYS, USE_KEYS } from './fixask.js'
 
 type Engine = EngineInterface

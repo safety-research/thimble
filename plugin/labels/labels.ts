@@ -16,7 +16,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { busy } from '../bar/busy'
-import { failCleared, failNotice } from '../bar/fix'
+import { failCleared, failNotice } from '../bar/notice'
 import { runThimble, type Ran } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import { promptText } from '../prompts/prompts'

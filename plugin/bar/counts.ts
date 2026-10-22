@@ -10,7 +10,7 @@ import { rootHere, runThimble, startDir, type Ran } from '../core/env'
 import { featureOn } from '../settings/features.mjs'
 import { sessionKey } from '../hooks/conversation'
 import { busy } from './busy'
-import { failCleared, failNotice } from './fix'
+import { failCleared, failNotice } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

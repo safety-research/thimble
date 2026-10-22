@@ -19,7 +19,8 @@
 // is empty too.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failNotice, fixKey } from '../bar/fix'
+import { fixKey } from '../bar/fix'
+import { failNotice } from '../bar/notice'
 import { FIX_KEYS } from '../bar/fixask.js'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'

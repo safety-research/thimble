@@ -12,7 +12,8 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, recount } from './counts'
-import { failCleared, fixCommand, noticeLine, promptTyped, refreshFixes } from './fix'
+import { fixCommand, refreshFixes } from './fix'
+import { failCleared, noticeLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

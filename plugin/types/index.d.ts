@@ -47,7 +47,7 @@ declare module 'claude-code' {
       counts: { coverage: string | null; labels: number; gen: number; error: string | null } | null
       /** what the person opened inside a pane of the bar's, by kind: coverage {open, file}, fixshare {diff} (panes/) */
       paneView: StateFamily<unknown>
-      /** the failure line (f F) or a notice, until the person's next prompt (bar/fix.ts) */
+      /** the failure line (f F) or a notice, until the person's next prompt (bar/notice.ts) */
       failLine: { kind: 'failed' | 'notice'; text: string; about?: string } | null
       /** the fix the person's thimble has now, with p and u (bar/fix.ts) */
       fixLine: { slug: string; title: string; said?: string } | null

@@ -28,7 +28,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failCleared, failNotice, noticeLine } from '../bar/fix'
+import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { anchoredAt, type CardMeta, inTemp, metaOf } from '../cards/store'
 import { readKept, writeKept } from '../core/env'

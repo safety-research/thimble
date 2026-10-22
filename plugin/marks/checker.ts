@@ -21,7 +21,7 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failNotice, noticeLine } from '../bar/fix'
+import { failNotice, noticeLine } from '../bar/notice'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'

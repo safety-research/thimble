@@ -5,7 +5,7 @@
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { failLineNow } from '../bar/fix'
+import { failLineNow } from '../bar/notice'
 import { checkerDenial, checkerPrompt, endCheck, noteRow, PER_FORK, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
 import { notesByMark, restoreMarks, rowMarks } from '../marks/store'

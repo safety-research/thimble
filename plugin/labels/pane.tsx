@@ -15,7 +15,7 @@
 //          j k the next or previous record · n p the next or previous page · v the next value · b back to the labels
 import type { EngineInterface } from 'claude-code'
 
-import { failNotice } from '../bar/fix'
+import { failNotice } from '../bar/notice'
 import { rootHere, startDir } from '../core/env'
 import { openPane, PANE_ID } from '../core/pane'
 import { cut, textWidth } from '../core/text.js'

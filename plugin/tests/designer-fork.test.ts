@@ -4,7 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
-import { failLineNow, failNotice } from '../bar/fix'
+import { failLineNow, failNotice } from '../bar/notice'
 import { saveMeta } from '../cards/store'
 import { designAnchor, registerDesigner, vKey } from '../designer/v'
 import { promptStub, tempRun } from './stubs'

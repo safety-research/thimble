@@ -21,7 +21,7 @@
 // (client.tsx), and that request draws it; the Client also says when the card is first on screen.
 import type { EngineInterface } from 'claude-code'
 
-import { failCleared, failNotice } from '../bar/fix'
+import { failCleared, failNotice } from '../bar/notice'
 import { cut } from '../core/text.js'
 import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'

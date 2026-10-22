@@ -2,10 +2,6 @@
 // thimble, load it into the person's thimble, and build the share (plugin/engine/kernel/fix.py); this module shows
 // what the person needs to see of that and gives them its keys.
 //
-//   failNotice    the failure line: the notice, whole, with `f fix this · F report only` (bar.tsx draws it), until the
-//                 person types their next prompt, or until what failed works again (failCleared, by the notice's
-//                 `about`: a card that draws again). f or F sends a turn to main (fixask.js). noticeLine is the same
-//                 line with no keys
 //   refreshFixes  $THIMBLE_HOME/fixes/*/fix.json: a fix that works shows in the bar (`fixing: <title>`); one that the
 //                 person's thimble now uses shows the fix line, `✓ Your thimble now has the fix: <title>`, with
 //                 `p share it · u undo`, under the failure line and apart from it, so a failure never takes its keys.
@@ -20,7 +16,9 @@
 //                 writes its sha256 into share/ask.json and gives the secret on stdin. No file, argument or feed line holds it, so Claude's
 //                 shell cannot send
 //
-//   state: failLine (a failure, or a notice), fixLine (the fix in use), fixes (the fixes that work), fixSeen (what
+//   The failure line itself (failNotice, noticeLine) is bar/notice.ts; this module gives its keys f and F.
+//
+//   state: fixLine (the fix in use), fixes (the fixes that work), fixSeen (what
 //   refreshFixes last saw), fixShare (a fix's share, by slug)
 import type { EngineInterface } from 'claude-code'
 
@@ -31,19 +29,18 @@ import { closePane, openPane, paneNow } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { busy, busySteps, busyWhile } from './busy'
+import { failLineNow, noticeLine, takeFailLine } from './notice'
 import { FAIL_KEYS, fixRequest, fixVerb, lineKey, shareRequest, USE_KEYS } from './fixask.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-const FAIL = { plugin: 'thimble', key: 'failLine' } as const
 const LINE = { plugin: 'thimble', key: 'fixLine' } as const
 const FIXES = { plugin: 'thimble', key: 'fixes' } as const
 const SHARE = { plugin: 'thimble', key: 'fixShare' } as const
 const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/
 
-export type FailLine = { kind: 'failed' | 'notice'; text: string; about?: string }
 export type FixLine = { slug: string; title: string; said?: string }
 type Fix = { slug: string; title: string; kind: string; status: string; created: number; used: number }
 
@@ -101,43 +98,9 @@ async function reloadPlugins($: Engine): Promise<void> {
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the failure line
-
-/** A failure the person should know of: one line above the prompt (bar.tsx), the whole text with the keys that fix or
- *  report it, until the person's next prompt. `about` names what failed (`card:<id>`), so the line goes when it works
- *  again (failCleared). */
-export function failNotice($: Engine, text: string, about?: string): void {
-  const t = String(text || '').trim()
-  if (!t) return
-  void $.state.set(FAIL, { kind: 'failed', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
-}
-
-/** A notice the person should read, with no keys: the failure line's place, until the person's next prompt, or until
- *  what it is about is done (failCleared with the same `about`). */
-export function noticeLine($: Engine, text: string, about?: string): void {
-  const t = String(text || '').trim()
-  if (t) void $.state.set(FAIL, { kind: 'notice', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
-}
-
-/** What a failure line or a notice was about works again: the line goes, when it is still about that. */
-export async function failCleared($: Engine, about: string): Promise<void> {
-  if ((await failLineNow($))?.about === about) await $.state.set(FAIL, null)
-}
-
-/** The failure line or notice the bar shows now, if any. */
-export async function failLineNow($: Engine): Promise<FailLine | null> {
-  return ((await $.state.get(FAIL)).value ?? null) as FailLine | null
-}
-
 /** The fix in use the bar shows now, if any. */
 export async function fixLineNow($: Engine): Promise<FixLine | null> {
   return ((await $.state.get(LINE)).value ?? null) as FixLine | null
-}
-
-/** The person typed their next prompt: the failure line goes (they have seen it, and its keys with it). The fix line
- *  stays until p or u. */
-export async function promptTyped($: Engine): Promise<void> {
-  if (await failLineNow($)) await $.state.set(FAIL, null)
 }
 
 /** A key at an empty prompt that the two lines take now: f and F on a failure, p and u on a fix in use; its work runs
@@ -152,7 +115,7 @@ export async function pressFix($: Engine, what: 'fix' | 'report' | 'share' | 'un
   if (what === 'fix' || what === 'report') {
     const l = await failLineNow($)
     if (l?.kind !== 'failed') return
-    await $.state.set(FAIL, null)
+    await takeFailLine($)
     await $.prompt.submit({ text: fixRequest({ failure: l.text, kind: what }) })
     return
   }
@@ -236,7 +199,7 @@ async function currentFix($: Engine, fixes: Fix[], active: string | null, verb =
 export async function fixCommand($: Engine, args: string): Promise<{ text?: string } | null> {
   const v = fixVerb(args) as { verb: string; slug?: string; text?: string }
   // the person acts on their fixes: a notice that one went off has been seen
-  if ((await failLineNow($))?.kind === 'notice') await $.state.set(FAIL, null)
+  if ((await failLineNow($))?.kind === 'notice') await takeFailLine($)
   if (v.verb === 'change') return null
   const { fixes, active } = await listFixes($)
   if (v.verb === 'status') {

@@ -14,7 +14,7 @@
 // With the Cards switch off (featureOn('cards')), no tool is registered and nothing is drawn.
 import type { Register } from 'claude-code'
 
-import { failNotice } from '../bar/fix'
+import { failNotice } from '../bar/notice'
 import { cut } from '../core/text.js'
 import { forkOf } from '../core/forks'
 import { featureOn } from '../settings/features.mjs'

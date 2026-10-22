@@ -4,7 +4,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
-import { failNotice, promptTyped } from '../bar/fix'
+import { failNotice, promptTyped } from '../bar/notice'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
