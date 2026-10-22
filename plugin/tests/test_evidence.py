@@ -136,3 +136,9 @@ def test_a_copied_line_whose_label_words_differ_still_names_the_call_but_other_c
     script = 'import json\nrows = [json.loads(l) for l in open("t.jsonl")]\nhit = [r for r in rows if r["ok"]]\nprint(f"{len(hit)} of the {len(rows)}")'
     assert check_mark(mark("4 of the 703"), computed('print(f"{len(hit)} of {len(rows)}")'), [call(script, "4 of the 703")], "/data")["status"] == "verified"
     assert "no call" in check_mark(mark("4 of the 703"), computed('print(f"{len(rows)} of {len(hit)}")'), [call(script, "4 of the 703")], "/data")["reason"]
+
+
+def test_a_number_in_a_name_is_no_value_the_line_must_show(tmp_path: Path):
+    (tmp_path / "log.jsonl").write_text(json.dumps({"at": "2026-08-30T14:29:00Z", "text": "ran the full suite"}) + "\n")
+    r = check_mark(mark("agent-11 at 14:29"), quote("log.jsonl", 1, "14:29"), [], str(tmp_path))
+    assert r["status"] == "verified"

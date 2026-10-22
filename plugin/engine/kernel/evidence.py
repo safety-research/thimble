@@ -73,9 +73,14 @@ def num_value(tok: str) -> str:
     return str(int(v)) if v == int(v) and "." not in t.rstrip("0").rstrip(".") else repr(v)
 
 
+def names_record(text: str, m: re.Match) -> bool:
+    """The number is part of a name, not a value: after `#` (`#118`) or after a letter and a hyphen (`agent-11`)."""
+    return text[max(0, m.start() - 1):m.start()] == "#" or bool(re.search(r"[A-Za-z][-_]$", text[:m.start()]))
+
+
 def numbers(text: str) -> list[str]:
-    """The numbers of a text, each in one form; a number after `#` names a record (`#118`) and is left out."""
-    return [num_value(m.group(1)) for m in NUM.finditer(text) if text[max(0, m.start() - 1):m.start()] != "#"]
+    """The numbers of a text, each in one form; a number that is part of a name (`#118`, `agent-11`) is left out."""
+    return [num_value(m.group(1)) for m in NUM.finditer(text) if not names_record(text, m)]
 
 
 def wordnums(s: str) -> str:
@@ -93,13 +98,13 @@ def date_spans(text: str) -> list[tuple[int, int]]:
 def cited_numbers(words: str) -> set[str]:
     """The numbers of the marked words that the evidence must not type in. Numbers inside a date are the claim when the
     words state only dates (a date range); when the words also state another number, the dates are its condition
-    (`1,714 on Jun 16`) and the code may name them. A number after `#` names a record (`#118`)."""
+    (`1,714 on Jun 16`) and the code may name them. A number that is part of a name (`#118`, `agent-11`) is no value."""
     words = wordnums(words)
     spans = date_spans(words)
     in_date, other = set(), set()
     for m in NUM.finditer(words):
-        if words[max(0, m.start() - 1):m.start()] == "#":
-            continue  # `#118` names a record
+        if names_record(words, m):
+            continue
         v = num_value(m.group(1))
         (in_date if any(a <= m.start(1) < b for a, b in spans) else other).add(v)
     return other if other else in_date
@@ -531,7 +536,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     corr = item.get("correction") if isinstance(item.get("correction"), dict) else None
     new = norm_ws(corr.get("words") or "") if status == "corrected" and corr else ""
     if status == "corrected" and (not new or unmark(new) == unmark(words)):
-        status = "verified" if new else "failed"
+        # a correction that leaves the words as they were found an error around them (a wrong place, a wrong
+        # condition), which the words cannot show: the mark fails, with the checker's reason
+        status = "failed"
         reason = reason or "the check gave no corrected words"
     if status == "failed":
         return {**out, "status": "failed", "reason": reason or "no source supports this claim"}
