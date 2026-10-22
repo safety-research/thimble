@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, push, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, top,
+  open, pageOf, push, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
@@ -32,6 +32,34 @@ test('a row\'s stops: its citations and explainers by where they stand, then its
   assert.equal(stepFrom(stops, 4, 1), null)
   assert.equal(stepFrom(stops, 0, -1), null)
   assert.deepEqual(stops.map(stopWhat), ['citation', 'heads up', 'explainer', 'citation', 'card'])
+})
+
+test('a heads-up on a citation\'s words stops before the citation, so one ] opens it; an explainer there stops after it', () => {
+  const cites = [{ n: 1, start: 30, words: 'more in 7 of 8' }, { n: 2, start: 60, words: 'tied in 1' }]
+  const spans = [{ id: 'g1', kind: 'explain', start: 4, end: 14 }, { id: 'h1', kind: 'heads', start: 31, end: 45 }, { id: 'g2', kind: 'explain', start: 61, end: 65 }]
+  const stops = stopsOfRow('r2', cites, spans, [])
+  assert.deepEqual(stops.map(s => (s.kind === 'citation' ? `c${s.n}` : s.id)), ['g1', 'h1', 'c1', 'c2', 'g2'])
+})
+
+test('a turn\'s stops: the cards Claude drew inline stand between the text rows where their calls stood, v\'s under their row', () => {
+  const own = { a: [{ row: 'a', kind: 'citation', n: 1 }], b: [{ row: 'b', kind: 'explain', id: 'g1' }, { row: 'b', card: 'cv' }] }
+  const stops = stopsOfTurn(['a', 'b'], row => own[row], [{ id: 'c0', after: 0 }, { id: 'c1', after: 1 }, { id: 'c9', after: 5 }])
+  assert.deepEqual(stops.map(s => s.card ?? (s.kind === 'citation' ? `c${s.n}` : s.id)), ['c0', 'c1', 'c1', 'g1', 'c9', 'cv'])
+  assert.deepEqual(stops.filter(s => s.card).map(s => `${s.card}@${s.row}`), ['c0@a', 'c1@a', 'c9@b', 'cv@b'])
+})
+
+test('a tall tray body: the lines that fit and a row for m, which goes on and then back to the top', () => {
+  assert.deepEqual(pageOf([1, 1, 1], 5), { start: 0, end: 3, more: 0, next: null })
+  assert.deepEqual(pageOf([1, 1, 1], 0), { start: 0, end: 3, more: 0, next: null })
+  const hs = [1, 2, 1, 1, 3, 1]
+  assert.deepEqual(pageOf(hs, 5), { start: 0, end: 3, more: 3, next: 3 })
+  assert.deepEqual(pageOf(hs, 5, 3), { start: 3, end: 5, more: 4, next: 5 })
+  assert.deepEqual(pageOf(hs, 5, 5), { start: 5, end: 6, more: 5, next: 0 })
+  // a unit taller than the room still shows
+  assert.equal(pageOf([9, 1], 4).end, 1)
+  assert.equal(rowsOf('', 40), 1)
+  assert.equal(rowsOf('aaaa bbbb cccc', 9), 2)
+  assert.equal(rowsOf('x'.repeat(20), 8), 3)
 })
 
 test('the bar names ] with what it goes to while there is a next, else [ with what is before', () => {

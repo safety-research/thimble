@@ -6,7 +6,8 @@
 //              the prompt that started it and who sent it (prompt.submit's origin kind: composer, bridge, plugin,
 //              task-notification, peer, ...), its text rows in order, its answer (its last text row; none for a turn
 //              that ended in an error), the `thimble label` commands its Bash calls ran and the cards its card calls
-//              drew, each with its place in the turn (`seq`, shared by both lists)
+//              drew, each with its place in the turn (`seq`, shared by both lists; a card also with the number of text
+//              rows above it, `after`)
 //   a message  {row, turnId, text, at, parts}: one text row of Claude's, by its id (session.append's uuid, which is
 //              the AssistantMessage's requestId and the marks' row). `parts` holds what each feature keeps of the
 //              message, by the feature's name (partOf, setPart): one feature never writes another's part
@@ -26,7 +27,7 @@
 //   labelsOf($, turnId, beforeSeq?)   the labels the turn's `thimble label` commands ran, before a step of the turn
 import { update, type EngineInterface, type Register } from 'claude-code'
 
-import { callOf } from '../cards/store'
+import { callOf, metaOf } from '../cards/store'
 import { keptDir } from './env'
 import { safeName } from './layout.mjs'
 import { mainTurn } from './turn'
@@ -36,7 +37,9 @@ type Engine = EngineInterface
 
 export type Prompt = { text: string; by: string; row: string | null }
 export type LabelUse = { name: string; args: string[]; toolUseId: string; seq: number; ok: boolean }
-export type CardUse = { id: string; toolUseId: string; seq: number }
+/** A card a card call of the turn drew: `after`, how many of the turn's text rows stand above it (the card draws at
+ *  its call; a version drawn in an earlier call's place keeps that place). */
+export type CardUse = { id: string; toolUseId: string; seq: number; after?: number }
 export type TurnRec = {
   turnId: string; n: number; prompt: Prompt; rows: string[]; answer: string | null; reason: string | null
   startedAt: number; endedAt: number | null; labels: LabelUse[]; cards: CardUse[]; seq: number
@@ -369,7 +372,12 @@ export const registerAnswers: Register = on => {
         if (found.length) await editTurn($, turnId, t => ({ ...t, seq: t.seq + 1, labels: [...t.labels, ...found.map((l: { name: string; args: string[] }) => ({ ...l, toolUseId, seq: t.seq + 1, ok }))] }))
       } else if (ok) {
         const id = await callOf($, toolUseId)
-        if (id) await editTurn($, turnId, t => ({ ...t, seq: t.seq + 1, cards: [...t.cards.filter(c => c.id !== id), { id, toolUseId, seq: t.seq + 1 }] }))
+        const here = id ? (await metaOf($, id))?.toolUseId === toolUseId : false
+        if (id) await editTurn($, turnId, t => {
+          const was = t.cards.find(c => c.id === id)?.after
+          const after = !here && was !== undefined ? was : t.rows.length
+          return { ...t, seq: t.seq + 1, cards: [...t.cards.filter(c => c.id !== id), { id, toolUseId, seq: t.seq + 1, after }] }
+        })
       }
     } catch {
       // the call's result is the same whatever the record makes of it

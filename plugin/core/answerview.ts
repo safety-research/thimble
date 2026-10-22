@@ -11,7 +11,8 @@
 //   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the chips)
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
 //                                         margin asks: a side thread about it)
-//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray, the label ask)
+//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray, the label ask), in the rows the
+//                                         band has left over the bar
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take
@@ -152,9 +153,12 @@ export async function underCard($: Engine, els: Any, id: string, cols: number): 
 
 // ------------------------------------------------------------------------------------------------ above the prompt
 
-/** What stands above the bar: the tray while it is open, then a large label run's ask while it waits. */
-export async function aboveBar($: Engine, els: Any, width: number): Promise<Any[]> {
-  return [...els0(await safe(trayBand($, els, width), [])), ...els0(await safe(labelAskBand($, els, width), []))]
+/** What stands above the bar: the tray while it is open, then a large label run's ask while it waits. `room`: the rows
+ *  they may take, so the bar under them stays on screen (0: no limit); the tray fits in what the ask leaves. */
+export async function aboveBar($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
+  const ask = els0(await safe(labelAskBand($, els, width), []))
+  const left = room > 0 ? Math.max(1, room - ask.length) : 0
+  return [...els0(await safe(trayBand($, els, width, left), [])), ...ask]
 }
 
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */

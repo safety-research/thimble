@@ -3,8 +3,9 @@
 //
 // It shows one mark at a time, the top of a stack (tray.mjs): a citation with its check and its evidence, or an
 // explainer (what a term is, where it mattered here) or an important detail (a heads-up). ] and [ at an empty prompt
-// step through the answers' citations, explainers, heads-ups and the cards under them, in reading order, and open the
-// tray on the one reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
+// step through the answers' citations, explainers, heads-ups and cards (drawn inline at Claude's calls, or under an
+// answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
+// reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). While it is open its keys are in the bar, after the busy step:
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed
@@ -13,9 +14,11 @@
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
 //   0 close     back to the mark under it, or close
+//   m more      a tray taller than the rows above the bar: its next lines, then from the top (the line under it says)
 //   ] [         the next mark or card, and the one before
 //
-// A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. A question
+// The tray takes only the rows the band has over the bar (bar/register.ts), so the bar stays on screen. A card ] reaches
+// takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. A question
 // typed with the tray open is about the mark: its scope reaches Claude with the prompt (core/tell.ts), the person's
 // prompt shows `▸ about …` under it, and the tray closes. What the person opens reaches main through core/engaged.ts.
 //
@@ -26,31 +29,31 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import { failNotice, noticeLine } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
-import { actingRow, messageOf, partOf, pickAnswer, textRows, turnOfRow, turnsNow } from '../core/answers'
+import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
-import { highlighted, outputRows, wrapCode } from '../marks/evidence'
+import { highlighted, wrapCode } from '../marks/evidence'
 import { marksIn, withoutMarks } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { squeezeBar, squeezeView } from '../squeeze/seam'
+import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, push, refOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, top,
+  open, pageOf, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Frame = MarkRef & { open?: 'code' | null }
+export type Frame = MarkRef & { open?: 'code' | null; page?: number }
 export type Tray = { stack: Frame[] } | null
 type Stop = { row: string; kind?: 'citation' | 'explain' | 'heads'; n?: number; id?: string; at?: number; card?: string }
 type Stand = { row: string; card: string } | null
@@ -68,6 +71,8 @@ const TONES = {
 
 // the question the person typed with the tray open, until main's turn for it starts (then kept by its turn)
 let pendingAbout: string | null = null
+// the tray as last drawn, when its body was taller than the room above the bar: the frame and where m goes next
+let paged: { f: Frame; next: number | null } | null = null
 let theme: 'dark' | 'light' | null = null
 
 const quietly = (p: Promise<unknown> | unknown) => Promise.resolve(p).catch(() => undefined)
@@ -129,22 +134,46 @@ async function spansOf($: Engine, row: string, shown: { text: string; marks: { s
     .map(s => ({ ...s, kind: part?.items?.[s.id]?.kind === 'heads' ? 'heads' as const : 'explain' as const }))
 }
 
-/** One row's stops: its marks in reading order, then the cards drawn under it. */
+/** One row's stops: its marks in reading order, then the cards drawn under it (v's). */
 async function rowStops($: Engine, row: string): Promise<Stop[]> {
   const shown = await shownOf($, row)
   if (!shown) return []
   const cards: string[] = []
   for (const id of await anchoredAt($, row)) {
     const m = await metaOf($, id)
-    if (m && m.version > 0 && m.anchorRow === row) cards.push(id)
+    if (m && m.version > 0 && m.anchorRow === row && !(await hiddenCard($, id))) cards.push(id)
   }
   return stopsOfRow(row, await citesOf($, row, shown), await spansOf($, row, shown), cards) as Stop[]
 }
 
-/** What ] and [ move through, in reading order: each of Claude's text rows' marks, then the cards under it. */
+async function hiddenCard($: Engine, id: string): Promise<boolean> {
+  try { return !!(await squeezeHidesCard($, id)) } catch { return false }
+}
+
+/** The cards Claude drew inline in a turn, each where its call stands among the turn's text rows (core/answers.ts
+ *  CardUse.after; a card whose place was not kept goes after the turn's last row). A card stands in the turn of the call
+ *  it draws at. */
+async function inlineCards($: Engine, t: TurnRec): Promise<{ id: string; after: number }[]> {
+  const out: { id: string; after: number }[] = []
+  for (const c of t.cards ?? []) {
+    const m = await metaOf($, c.id)
+    if (!m || !(m.version > 0) || m.anchorRow || out.some(x => x.id === c.id)) continue
+    if (m.turn ? m.turn !== t.turnId : m.toolUseId !== c.toolUseId) continue
+    if (await hiddenCard($, c.id)) continue
+    out.push({ id: c.id, after: typeof c.after === 'number' ? c.after : t.rows.length })
+  }
+  return out
+}
+
+/** What ] and [ move through, in reading order: each turn's text rows' marks, the cards Claude drew between them, and
+ *  the cards under a row. */
 async function allStops($: Engine): Promise<Stop[]> {
   const out: Stop[] = []
-  for (const row of await textRows($)) out.push(...(await rowStops($, row)))
+  for (const t of await turnsNow($)) {
+    const byRow = new Map<string, Stop[]>()
+    for (const row of t.rows) byRow.set(row, await rowStops($, row))
+    out.push(...(stopsOfTurn(t.rows, (row: string) => byRow.get(row) ?? [], await inlineCards($, t)) as Stop[]))
+  }
   return out
 }
 
@@ -256,7 +285,15 @@ async function toggleCode($: Engine): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return
-  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code' }] } as never)
+  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code', page: 0 }] } as never)
+}
+
+/** m on a tray taller than the room above the bar: its next rows, and from the top again after the last. */
+async function setPage($: Engine, page: number): Promise<void> {
+  const tray = await trayNow($)
+  const f = top(tray) as Frame | null
+  if (!tray || !f) return
+  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, page }] } as never)
 }
 
 /** A card ] reached takes the keys, its own first, and shows framed in focus. */
@@ -282,7 +319,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
     next = (dir > 0 ? pool[0] : pool[pool.length - 1]) ?? null
   }
-  if (!next) { noticeLine($, "Nothing to step to yet: each citation, explainer and card in Claude's replies opens here.", 'tray'); return }
+  if (!next) { noticeLine($, "Nothing to step to yet: each citation, explainer, heads-up and card in Claude's replies opens here.", 'tray'); return }
   if (next.card) await standOn($, next.row, next.card)
   else await openMark($, refOf(next) as Frame, { reveal: true })
 }
@@ -330,6 +367,11 @@ export async function trayKey($: Engine, key: string): Promise<Any | null> {
   const f = top(tray) as Frame | null
   if (!f) return null
   if (key === '0') return { now: () => goBack($) }
+  if (key === 'm' && paged && sameRef(paged.f, f) && (paged.f.open ?? null) === (f.open ?? null) && paged.next !== null) {
+    const was = f.page ?? 0
+    const to = paged.next
+    return { now: () => setPage($, to), undo: () => setPage($, was) }
+  }
   if (key === 'a') return { later: () => askAbout($, f) }
   if (key === '1') return { now: () => askAbout($, f) }
   if (f.kind === 'citation') {
@@ -447,37 +489,65 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   unchecked: { word: 'not checked', dim: true },
 }
 
+/** A part of the tray's body and the rows it takes: an element, or a line of code (the code's lines draw as one Code). */
+type Unit = { h: number; el?: Any; code?: string }
+
 /** A citation's card. By default its status, why in one sentence, and the one line of its evidence that holds the
  *  cited value, the value in the citations' purple (a file's line with its number). With c, for a value code computed:
  *  the whole code, in code styling, then a blank line and the whole output, the value in purple as before. */
-function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number): Any[] {
+function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number): Unit[] {
   const { Box, Text } = els
-  if (!m) return [Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })]
+  if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
   const unconfirmed = m.status === 'failed' && m.failedBy === 'evidence'
   const st = STATUS[unconfirmed ? 'unconfirmed' : m.status] ?? STATUS.unchecked!
   const ev = m.evidence
   const why = m.reason ? firstSentence(m.reason) : m.status === 'checking' ? 'The check is running.' : ev ? '' : 'The check gave no evidence for it.'
-  const rows: Any[] = [Text({ key: 'status', wrap: 'wrap', children: [
+  const rows: Unit[] = [{ h: rowsOf(`${st.word}${why ? `  ${why}` : ''}`, w), el: Text({ key: 'status', wrap: 'wrap', children: [
     Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
     ...(why ? [Text({ key: 'why', ...(m.status === 'failed' && !unconfirmed ? { color: st.color } : { dimColor: true }), children: `  ${why}` })] : []),
-  ] })]
+  ] }) }]
   if (!ev || m.status === 'checking') return rows
   if (ev.kind === 'computed' && f.open === 'code') {
-    const code = wrapCode(ev.code, w)
-    rows.push(els.Code ? els.Code({ key: 'code', source: code, language: 'python' }) : Text({ key: 'code', color: 'permission', children: code }))
-    rows.push(Text({ key: 'gap', children: ' ' }))
-    rows.push(Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight, Number.MAX_SAFE_INTEGER) }))
+    for (const line of wrapCode(ev.code, w).split('\n')) rows.push({ h: 1, code: line })
+    rows.push({ h: 1, el: Text({ key: 'gap', children: ' ' }) })
+    const spans = (ev.highlight ?? []) as [number, number][]
+    let at = 0
+    String(ev.output ?? '').split('\n').forEach((line, i) => {
+      const s0 = at
+      at += line.length + 1
+      const mine = spans.map(([a, b]) => [Math.max(a, s0) - s0, Math.min(b, s0 + line.length) - s0] as [number, number]).filter(([a, b]) => b > a)
+      rows.push({ h: rowsOf(line, w), el: highlighted(els, line, mine, `o${i}`) })
+    })
     return rows
   }
   const line = evidenceLine(ev)
   if (!line) return rows
   const gutter = line.n !== undefined ? `${line.n} │ ` : ''
   const cut = lineWindow(line, w - gutter.length)
-  rows.push(Box({ key: 'ev', flexDirection: 'row', children: [
+  rows.push({ h: 1, el: Box({ key: 'ev', flexDirection: 'row', children: [
     ...(gutter ? [Text({ key: 'n', dimColor: true, children: gutter })] : []),
     Box({ key: 'l', flexShrink: 1, children: [highlighted(els, cut.text, cut.spans, 't')] }),
-  ] }))
+  ] }) })
   return rows
+}
+
+/** Units start..end-1 as elements: consecutive lines of code as one Code. */
+function drawUnits(els: Any, units: Unit[]): Any[] {
+  const out: Any[] = []
+  let code: string[] = []
+  const flush = () => {
+    if (!code.length) return
+    const source = code.join('\n')
+    out.push(els.Code ? els.Code({ key: `code${out.length}`, source, language: 'python' }) : els.Text({ key: `code${out.length}`, color: 'permission', children: source }))
+    code = []
+  }
+  for (const u of units) {
+    if (u.code !== undefined) { code.push(u.code); continue }
+    flush()
+    out.push(u.el)
+  }
+  flush()
+  return out
 }
 
 /** Under a citation of a file's lines, the file's place (`runs.jsonl:41`): a click opens the citation's whole evidence
@@ -502,51 +572,77 @@ async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Pr
 }
 
 /** The tray, drawn above the bar while it is open: one frame, its title and its kind (cite, explain, heads up) on top,
- *  the mark's card under them, its rows starting where the title starts. */
-export async function trayBand($: Engine, els: Any, width: number): Promise<Any[]> {
+ *  the mark's card under them, its rows starting where the title starts. `room`: the rows it may take, so the bar
+ *  under it stays on screen (0: no limit); a body taller than that shows the rows that fit, and m shows the next. */
+export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
-  if (!tray || !f) return []
+  if (!tray || !f) { paged = null; return [] }
   const { Box, Text } = els
   const w = Math.max(40, Math.min(104, width - 3))
   const inner = w - 4
   const tones = TONES[await themeOf($)]
   let title = ''
-  let body: Any[] = []
+  let units: Unit[] = []
   let under: Any | null = null
+  let words: { text: string; start: number; end: number } | null = null
   if (f.kind === 'citation') {
     const m = await itemOf($, f.row, f.n)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
-    body = citationBody(els, f, m, inner)
+    units = citationBody(els, f, m, inner)
     under = await fileLinkEl($, els, f, m)
   } else {
     const g = await glossOf($, f.row, f.id)
     const heads = f.kind === 'heads'
     title = String(g?.term || g?.title || (heads ? 'heads up' : 'explain'))
-    if (!g) body = [Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` })]
+    if (!g) units = [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` }) }]
     else {
-      const text = explainerText(g)
-      const { marks, looks } = await linksOf($, f, text)
-      body = [messageEl(els, {
-        text, marks, looks, key: `tray-${f.row}-${f.id}`, cols: inner, first: false, spin: '', gutter: false,
-        onMark: (k: number) => { const n = looks[k]?.n; if (n > 0) void pushMark($, { row: f.row, kind: 'citation', n }) },
-      })]
+      // each line of its words is a unit, drawn together as one message
+      const lines = explainerText(g).split('\n')
+      units = lines.map(l => ({ h: /^- /.test(l) ? rowsOf(l.slice(2), inner - 2) : rowsOf(l, inner) }))
+      words = { text: lines.join('\n'), start: 0, end: lines.length }
     }
   }
   // the thread about this mark, once a question was asked in it: a opens it
   const asked = f.open === 'code' ? null : await threadAsked($, { about: '', mark: refOf(f) as MarkRef })
-  if (asked) body = [...body, Text({ key: 'thread', wrap: 'truncate-end', children: [
+  if (asked) units.push({ h: 1, el: Text({ key: 'thread', wrap: 'truncate-end', children: [
     Text({ key: 'a', dimColor: true, children: '↳ thread: ' }),
     Text({ key: 'q', children: asked.length > 60 ? asked.slice(0, 59) + '…' : asked }),
     Text({ key: 'b', dimColor: true, children: ' · a opens it' }),
-  ] })]
+  ] }) })
+  // what fits above the bar: the frame's two borders and title take three rows, the file's place under it one
+  const fit = room > 0 ? Math.max(3, room - 3 - (under ? 1 : 0)) : 0
+  const page = pageOf(units.map(u => u.h), fit, f.page ?? 0)
+  paged = page.next === null ? null : { f, next: page.next }
+  const shown = units.slice(page.start, page.end)
+  let body: Any[]
+  if (words) {
+    const lines = words.text.split('\n')
+    const text = lines.slice(page.start, Math.min(page.end, lines.length)).join('\n')
+    const { marks, looks } = await linksOf($, f, text)
+    const id = (f as { id: string }).id
+    body = [
+      ...(text.trim() ? [messageEl(els, {
+        text, marks, looks, key: `tray-${f.row}-${id}`, cols: inner, first: false, spin: '', gutter: false,
+        onMark: (k: number) => { const n = looks[k]?.n; if (n > 0) void pushMark($, { row: f.row, kind: 'citation', n }) },
+      })] : []),
+      ...drawUnits(els, shown.slice(Math.max(0, lines.length - page.start))),
+    ]
+  } else body = drawUnits(els, shown)
+  if (page.next !== null) {
+    const n = units.length
+    body = [
+      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1), overflow: 'hidden', children: body }),
+      Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
+    ]
+  }
   // the right of the title says what kind of mark it is, nothing more
   const right = f.kind === 'citation' ? 'cite' : f.kind === 'heads' ? 'heads up' : 'explain'
   const avail = inner - 2
-  const room = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
+  const roomT = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
   const tone = tones[f.kind]
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
-    Text({ key: 't', bold: true, color: tone, wrap: 'truncate-end', children: cutTitle(title, room) }),
+    Text({ key: 't', bold: true, color: tone, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
     Text({ key: 'r', dimColor: true, children: right }),
   ] })
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: body })] })
@@ -603,5 +699,6 @@ export const registerTray: Register = on => {
 /** For tests: the module's memory, cleared. */
 export function resetTray(): void {
   pendingAbout = null
+  paged = null
   theme = null
 }

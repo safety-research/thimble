@@ -27,11 +27,12 @@ function all(n: Any, out: Any[] = []): Any[] {
 const TEXT = 'Of the runs, [12 of 40](#) failed on the p95 check.'
 const view = { columns: 100, rows: 40, isFullscreen: true }
 const answer = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: view, props: { text, isFirstOfReply: true } }) as never
-const above = () => ({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 20 }, view: {} }, viewport: view }) as never
+const above = (maxRows = 20) => ({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 100, scroll: { offset: 0, bodyRows: maxRows - 1 }, view: {} }, viewport: view }) as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
-/** A resumed session with one answer, TEXT, whose citation the check left as `item`. */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray'): Promise<{ submitted: Any[]; clock: Any }> {
+/** A resumed session with one answer, TEXT, whose citation the check left as `item`; `more`: the turn's cards, the
+ *  message's parts and kept files to add (a card's meta.json under cards/<id>/). */
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string> } = {}): Promise<{ submitted: Any[]; clock: Any }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -41,12 +42,13 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray'): Promise<
   on('session.messages', () => ({ value: [] }))
   const kept: Record<string, string> = {
     'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [item] }),
-    'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: TEXT, at: 1 }] }),
+    'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: more.cards ?? [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: TEXT, at: 1, ...(more.parts ? { parts: more.parts } : {}) }] }),
+    ...(more.kept ?? {}),
   }
   const keptOf = (path: string) => Object.keys(kept).find(k => path.endsWith(`/${k}`))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: keptOf(e.path) ? kept[keptOf(e.path)!] : promptStub(e.path) ?? '' }))
   on('fs.write', () => ({ value: undefined }))
-  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(kept).filter(k => String(e.path).endsWith(`/${k.split('/')[0]}`)).map(k => ({ name: k.split('/')[1], kind: 'file' })) }))
+  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: [...new Set(Object.keys(kept).filter(k => String(e.path).endsWith(`/${k.split('/')[0]}`)).map(k => k.split('/').slice(0, 3).join('/')))].map(k => ({ name: k.split('/')[1], kind: k.split('/').length > 2 ? 'dir' : 'file' })) }))
   on('fs.exists', () => ({ value: false }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
@@ -161,4 +163,74 @@ test('a corrected value computed by code: purple in the reply; c shows the whole
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('runs: 40')
   expect(band).toContain('failed: 11')
+})
+
+test('] stops on a card Claude drew inline, where it stands in the answer: here before the words, so first; a asks about it', async ($, on) => {
+  const id = 'c0123456789ab'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_1', turn: 't1', agentId: null, anchorRow: null, keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_1: { version: 1 } }, at: 1 }
+  await resumed($, on, QUOTED, 's-tray-3', {
+    cards: [{ id, toolUseId: 'toolu_made_up_1', seq: 1, after: 0 }],
+    kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) },
+  })
+  // ]: the card above the words, which takes the keys (a ask, 0 back); no tray
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  let band = textOf(await $.ui.render(above()))
+  expect(band).toContain('a ask')
+  expect(band).toContain('0 back')
+  expect(band).toContain('] next citation')
+  expect(band).not.toContain('failed: 12')
+  // ] again: the citation in the words under it
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  band = textOf(await $.ui.render(above()))
+  expect(band).toContain('failed: 12')
+  expect(band).toContain('[ previous card')
+})
+
+// a heads-up on the citation's words, with long bullets, and an explainer after it
+const HEADS = {
+  explain: {
+    order: ['h1', 'g1'],
+    items: {
+      h1: { id: 'h1', kind: 'heads', term: '12 of 40', title: 'Retried runs count twice', bullets: [
+        'Four of the runs were retried after a timeout, and the summary file counts each try as its own run, so the share of failures reads higher than the share of distinct runs.',
+        'The check read the summary file only, so it cannot say which of the tries failed or whether a retry passed later on in the same sweep of runs.',
+        'The runs that were not retried all finished inside their budget, so the timeout explains the retries but not the failures among the other runs.',
+      ], todo: 'Count distinct run ids before you quote the share.' },
+      g1: { id: 'g1', term: 'p95', body: 'The time that 95 of 100 checks stay under.' },
+    },
+  },
+}
+
+test('a heads-up on a citation\'s words is one ] away; a tray taller than the room keeps the bar on screen, and m shows the rest', async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-4', { parts: HEADS })
+  // ]: the heads-up first, not the citation under it
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  let drawn = await $.ui.render(above(12))
+  let band = textOf(drawn)
+  expect(band).toContain('heads up')
+  expect(band).toContain('Retried runs count twice')
+  expect(band).toContain('] next citation')
+  // the band's room is 12 rows: the tray fits in what the bar and the blank rows leave, and says there is more
+  const page = all(drawn).find(n => n.props?.key === 'tray-page')
+  expect(page?.props).toMatchObject({ overflow: 'hidden' })
+  const barRows = all(drawn).filter(n => n.props?.key === 'bar').length
+  expect(page.props.height + 3 + 1 + 2 + barRows).toBeLessThanOrEqual(12)
+  expect(band).toContain('m more · lines 1–')
+  expect(band).not.toContain('Count distinct run ids')
+  // m: the next lines, then from the top
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key('m'))).toEqual({ text: '', cursor: 0 })
+  band = textOf(await $.ui.render(above(12)))
+  expect(band).not.toContain('m more · lines 1–')
+  // a tall screen shows it whole
+  band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('Count distinct run ids')
+  expect(band).not.toContain('m more')
+  // ] goes on to the citation, then the explainer after it
+  await clock.advance(2000)
+  await $.prompt.edit(key(']'))
+  expect(textOf(await $.ui.render(above(40)))).toContain('failed: 12')
+  await clock.advance(2000)
+  await $.prompt.edit(key(']'))
+  expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
