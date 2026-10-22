@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isPersonPrompt, labelCommands, oneLine, sinceLastPrompt, stepFrom } from '../answers.mjs'
+import { isOthersPrompt, isPersonPrompt, labelCommands, oneLine, sinceLastPrompt, stepFrom } from '../answers.mjs'
 import { HEAD, askedLine, openedLine } from '../engaged.mjs'
 
 test('a Bash command names the labels it runs `thimble label` on, in order; data and the list name none', () => {
@@ -31,6 +31,21 @@ test("since the person's last prompt: that prompt, Claude's rows after it, and t
   assert.deepEqual(sinceLastPrompt([]), { prompt: null, rows: [], replies: [] })
   assert.equal(isPersonPrompt('plugin'), true)
   assert.equal(isPersonPrompt('task-notification'), false)
+})
+
+test("a turn whose sender was not recorded ends the span: it never reaches back past the person's prompts", () => {
+  const turns = [
+    { prompt: { text: 'How many runs failed?', by: 'composer', row: 'p1' }, rows: ['a'], answer: 'a' },
+    { prompt: { text: '<task-notification>…', by: 'task-notification', row: 'p2' }, rows: ['b'], answer: 'b' },
+    { prompt: { text: 'Break them down by type', by: 'unknown', row: 'p3' }, rows: ['c'], answer: 'c' },
+  ]
+  // one reply since the newest prompt: the replies before it are not in the span
+  assert.deepEqual(sinceLastPrompt(turns), { prompt: { row: 'p3', text: 'Break them down by type' }, rows: ['c'], replies: ['c'] })
+  assert.deepEqual(sinceLastPrompt([...turns, { prompt: { text: '', by: 'continuation', row: null }, rows: ['d'], answer: 'd' }]).replies, ['c', 'd'])
+  assert.equal(sinceLastPrompt([turns[0], { ...turns[2], prompt: { ...turns[2].prompt, by: 'unclassified' } }]).replies.length, 1)
+  assert.equal(isOthersPrompt('peer'), true)
+  assert.equal(isOthersPrompt('unknown'), false)
+  assert.equal(isOthersPrompt(undefined), false)
 })
 
 test('a step over the answers stops at either end; from none it starts at the newest going back', () => {

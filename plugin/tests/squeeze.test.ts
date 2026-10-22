@@ -125,6 +125,23 @@ test('with two replies since the last prompt, s writes one catch-up of them unde
 const HEAD = 'thimble  catch-up of the 2 replies since your last message'
 const RULE = '▎'
 
+test("after one reply to the newest prompt s is plain squeeze, whoever's turns came before; a catch-up comes with the second reply", async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The background job ended.', { text: '<task-notification>one</task-notification>', by: 'task-notification' })
+  // a prompt typed over the running turn waits while a task's report arrives; then the typed prompt's turn starts
+  await t.ask('why did it fail?')
+  await t.ask('<task-notification>two</task-notification>', 'task-notification')
+  await $.turn.start({ text: 'why did it fail?', turnId: 't3' } as never)
+  await t.say('row-t3', 'The build failed on three runs.')
+  await $.turn.complete({ turnId: 't3', reason: 'answer', answer: 'The build failed on three runs.', durationMs: 10, isAborted: false } as never)
+  await t.clock.advance(100)
+  expect(await t.bar()).toContain('s squeeze')
+  expect(await t.bar()).not.toContain('catch up')
+  await t.turn('t4', 'The second job ended.', null)
+  expect(await t.bar()).toContain('s catch up')
+})
+
 test('the catch-up draws last, under the newest message it covers, and the replies it covers draw nothing while it shows', async ($, on) => {
   const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
