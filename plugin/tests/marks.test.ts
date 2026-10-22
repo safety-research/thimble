@@ -8,7 +8,7 @@ import { expect, test } from 'claude-code/testing'
 import { failLineNow } from '../bar/notice'
 import { checkerDenial, checkerPrompt, endCheck, noteRow, PER_FORK, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
-import { notesByMark, restoreMarks, rowMarks } from '../marks/store'
+import { restoreMarks, rowMarks } from '../marks/store'
 import { footerEl, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
 
@@ -94,7 +94,7 @@ async function drawn($: Any): Promise<string> {
   const reply = await rowMarks($, 'row-1')
   const marks = marksIn(REPLY)
   const looks = marks.map((_m: Any, k: number) => ({ n: k + 1, status: reply!.items[k]!.status, shown: reply!.items[k]!.shown }))
-  const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, notes: notesByMark(reply!.items) })
+  const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
   const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking })
   return textOf(body) + '\n' + textOf(foot)
 }
@@ -120,13 +120,14 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   // once settled no footer counts the marks: each shows its own status where it stands
   expect(settled).not.toContain('citation wrong')
   expect(settled).not.toContain('1 corrected')
-  // the note on the first sentence, once, under the block that holds it
-  expect(settled.split('agent-02 approved each one').length).toBe(2)
-  expect(settled).toContain('↳ agent-07 merged none of them alone')
+  // the check's note on the first sentence is not shown to the person: main reads it with the next prompt (below)
+  expect(settled).not.toContain('agent-02 approved each one')
+  expect(settled).not.toContain('↳')
   expect(settled).not.toContain('checking')
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('"15 of 40" is corrected to "12 of 40"')
   expect(told).toContain('"ship it" is flagged as wrong (the check: "no record holds these words")')
+  expect(told).toContain('The analyst does not see these')
   expect(told).toContain('- "agent-07 merged none of them alone: agent-02 approved each one."')
   expect(told).toContain('would tell them twice')
   expect(await failLineNow($)).toBe(null)

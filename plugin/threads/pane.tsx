@@ -35,7 +35,7 @@ import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
 import { cut, textWidth } from '../core/text.js'
-import { marksIn } from '../marks/message.js'
+import { blocks, inline, marksIn, tableOf } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
 import type { ThreadScope } from './seam'
@@ -53,7 +53,7 @@ const fieldGen = new Map<string, number>()
 
 /** The top of every thread, one look for each kind of subject: a quoted block as Claude Code draws a quote, a dim rule
  *  `▎` down its left side, the subject's title on its first row, bold, and one dim row that says what it is. */
-function subjectBlock(els: Any, key: string, title: string, line = '', more: string[] = []): Any {
+function subjectBlock(els: Any, key: string, title: string, line = '', more: Any[] = []): Any {
   const { Box, Text } = els
   const rows = [Text({ key: `${key}-t`, wrap: 'truncate-end', children: [Text({ dimColor: true, children: '▎ ' }), Text({ bold: true, children: title })] })]
   if (line) rows.push(Text({ key: `${key}-l`, wrap: 'truncate-end', dimColor: true, children: `▎ ${line}` }))
@@ -198,6 +198,50 @@ async function drawList($: Engine, e: Any, els: Any): Promise<Any> {
   return Box({ flexDirection: 'column', children: out })
 }
 
+type PassageRun = { s: string; b?: boolean; it?: boolean; code?: boolean; mark?: number }
+
+/** A passage as the person reads it in the reply, on one line of at most `max` cells: each block's words without its
+ *  markdown (a table's cells joined by ` · `, a code block as written), each citation its words alone, flagged `mark`. */
+export function passageRuns(text: string, max = 600): PassageRun[] {
+  const marks = marksIn(text)
+  const out: PassageRun[] = []
+  for (const b of blocks(text) as Any[]) {
+    if (b.type === 'rule') continue
+    if (out.length) out.push({ s: ' ' })
+    if (b.type === 'code') out.push({ s: text.slice(b.start, b.end).replace(/^\s*(```|~~~)[^\n]*\n?|\n?\s*(```|~~~)\s*$/g, ''), code: true })
+    else if (b.type === 'table') (tableOf(text, b, marks) as PassageRun[][][]).forEach((row, r) => row.forEach((cell, c) => { if (r || c) out.push({ s: c ? ' · ' : ' ' }); out.push(...cell) }))
+    else out.push(...(inline(text, b.from, b.to, marks) as PassageRun[]))
+  }
+  // one line, cut at `max` cells
+  const kept: PassageRun[] = []
+  let room = max
+  let prevSpace = true
+  for (const r of out) {
+    let w = r.s.replace(/\s+/g, ' ')
+    if (prevSpace) w = w.replace(/^ /, '')
+    if (!w) continue
+    if (textWidth(w) >= room) { kept.push({ ...r, s: cut(w, room) }); break }
+    kept.push({ ...r, s: w })
+    room -= textWidth(w)
+    prevSpace = w.endsWith(' ')
+  }
+  if (kept.length) kept[kept.length - 1]!.s = kept[kept.length - 1]!.s.replace(/ $/, '')
+  return kept
+}
+
+/** A passage's runs as one wrapped text: a citation's words purple and underlined, as the reply draws them. */
+function passageEl(els: Any, runs: PassageRun[]): Any {
+  const { Text } = els
+  return Text({ key: 'passage', children: runs.map((r, k) => {
+    const p: Any = { key: `p${k}`, children: r.s }
+    if (r.b) p.bold = true
+    if (r.it) p.italic = true
+    if (r.code) p.color = 'permission'
+    if (r.mark !== undefined) { p.color = 'merged'; p.underline = true }
+    return Text(p)
+  }) })
+}
+
 /** What a thread is on, at the top of its pane: a card, drawn; an explainer or a heads-up, its words; else its name. */
 async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number): Promise<{ el: Any; rows: number }> {
   const s = t.scope
@@ -213,8 +257,9 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
     return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'an important detail in Claude\'s reply' : 'an explainer in Claude\'s reply', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W), 0) }
   }
   if (s.passage) {
-    const words = cut(String(s.passage.text).replace(/\s+/g, ' ').trim(), 600)
-    return { el: subjectBlock(els, 'subject', aboutOf(s), 'a passage of Claude\'s reply', [words]), rows: 3 + rowsAt(words, W) }
+    const runs = passageRuns(String(s.passage.text))
+    const words = runs.map(r => r.s).join('')
+    return { el: subjectBlock(els, 'subject', 'A passage of Claude\'s reply', '', [passageEl(els, runs)]), rows: 2 + rowsAt(words, W) }
   }
   if (s.mark) {
     const it = (await rowMarks($, s.mark.row).catch(() => null))?.items.find(x => x.n === (s.mark as Any).n)

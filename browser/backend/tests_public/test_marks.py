@@ -156,3 +156,9 @@ def test_main_s_turn_end_names_its_turn_and_starts_the_check(tmp_path, monkeypat
     done = [r for r in _log() if r["type"] == "done"][-1]
     ((turn, texts, cut, sid),) = started
     assert done["turn"] == turn and texts == ["[3 of 8](#) runs failed."] and cut == "u-cut" and sid == SID
+
+
+def test_main_still_reads_the_check_s_notes_which_the_analyst_does_not_see():
+    told = marks.tell_text([{"n": 1, "words": "41", "status": "verified", "note": "Runs did not only stop after noon."}])
+    assert "The analyst does not see these" in told
+    assert '- "Runs did not only stop after noon."' in told

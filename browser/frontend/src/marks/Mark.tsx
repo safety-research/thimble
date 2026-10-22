@@ -97,7 +97,6 @@ function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: Return
       {evs.map((ev, i) => (
         <EvidenceView key={i} ev={ev} />
       ))}
-      {item.note && <span className="mark-card-note">{item.note}</span>}
     </>
   )
 }

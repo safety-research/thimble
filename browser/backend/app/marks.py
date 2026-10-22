@@ -145,8 +145,9 @@ def split_marks(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
 
 
 def tell_text(items: list[dict[str, Any]]) -> str:
-    """What main reads with its next event: each mark the check corrected or flagged, and each note, as the analyst
-    reads them (the terminal's tellText). The check's own words are quoted, since they may quote the records."""
+    """What main reads with its next event: each mark the check corrected or flagged, as the analyst reads it, and each
+    note, which the analyst does not see (the terminal's tellText). The check's own words are quoted, since they may
+    quote the records."""
     def q(w: str) -> str:
         return w if re.match(r"^[\"“]", w) else f"\"{w}\""
 
@@ -170,10 +171,10 @@ def tell_text(items: list[dict[str, Any]]) -> str:
     if said:
         parts.append("The analyst sees these changes in the reply:\n" + f"{fence}text\n" + "\n".join(said) + f"\n{fence}")
     if notes:
-        parts.append("Under the reply, the analyst also reads what the check found false in its uncited statements:\n"
+        parts.append("The check also found these uncited statements false. The analyst does not see these:\n"
                      + f"{fence}text\n" + "\n".join(notes) + f"\n{fence}")
-    parts.append("Use the corrected facts from now on. The analyst has read these where they stand, so a correction of "
-                 "them in your next reply would tell them twice. A claim the check could not confirm may still be "
+    parts.append("Use the corrected facts from now on. The analyst has read the changes in the reply, so a correction "
+                 "of them in your next reply would tell them twice. A claim the check could not confirm may still be "
                  "true: when you need it again, check it first.")
     return "\n".join(parts)
 

@@ -85,8 +85,3 @@ export function footerCounts(items: readonly MarkItem[]): { look: MarkLook; n: n
   const order: MarkLook[] = ['corrected', 'failed', 'unconfirmed', 'unchecked']
   return order.map((look) => ({ look, n: items.filter((m) => lookOf(m) === look).length })).filter((c) => c.n > 0)
 }
-
-/** The notes of a reply's marks, once each: what the check found false in the sentences around them. Pure. */
-export function notesOf(items: readonly MarkItem[]): string[] {
-  return [...new Set(items.map((m) => m.note?.trim() ?? '').filter(Boolean))]
-}
