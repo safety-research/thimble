@@ -8,13 +8,14 @@
 // In the editor the question line is a handle that moves the figure, as the block's actions in the gutter do.
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
+import { ChatMarkdown } from '../chat/markdown'
 import { CardBody } from '../canvas/bodies'
 import { useConceptDetail, useConcepts } from '../canvas/concepts'
 import { CanvasContext } from '../canvas/context'
+import { RefEditor } from '../canvas/RefEditor'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { Chip } from '../components/Chip'
-import { TextArea } from '../components/Field'
 import { CARD_MIME, chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
@@ -229,7 +230,11 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   const [box, setBox] = useState<HTMLElement | null>(null)
   const [width, setWidth] = useState(0)
   const [cell, setCell] = useState<Cell | null | undefined>(undefined)
+  // the caption edited in place, and where the click that opened it landed
+  const [editing, setEditing] = useState<{ at: { x: number; y: number } | null } | null>(null)
   const concepts = useConcepts(ws)
+  // the card is its citations' home, so a citation of its own table marks the cell in place, as on the canvas
+  const citeHome = cellRef ? cellIdOf(cellRef) : undefined
   // the card as the caption last followed it, the latest caption and its setter, read by the card's updates
   const followed = useRef<Cell | null>(null)
   const captionNow = useRef({ caption, onFollow })
@@ -324,15 +329,18 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   ) : null
   if (bare) {
     return (
-      <div className="wu-fig-bare" ref={setBox} data-anchor={cellRef || undefined} data-anchor-text={caption} data-anchor-parts="">
+      <div className="wu-fig-bare" ref={setBox} data-anchor={cellRef || undefined} data-anchor-text={caption} data-anchor-parts="" data-cite-home={citeHome}>
         {body}
       </div>
     )
   }
-  // the caption under the rule: the writer's or the analyst's; a locked figure without one shows the card's takeaway
-  const take = caption || (readOnly ? readableText(cell?.takeaway ?? '') : '')
+  // the caption under the rule: the writer's or the analyst's; a locked figure without one shows the card's takeaway.
+  // While it says the card's takeaway word for word it is shown as the takeaway, with its citations, as on the canvas
+  const takeaway = cell?.takeaway ?? ''
+  const take = takeaway && (caption ? readableText(caption) === readableText(takeaway) : readOnly) ? takeaway : caption
+  const editable = !readOnly && !!onCaption
   return (
-    <figure className="wu-fig" ref={setBox} data-fig={id} data-anchor={cellRef || undefined} data-anchor-text={caption || cell?.title || ''} data-anchor-parts="" contentEditable={false}>
+    <figure className="wu-fig" ref={setBox} data-fig={id} data-anchor={cellRef || undefined} data-anchor-text={caption || cell?.title || ''} data-anchor-parts="" data-cite-home={citeHome} contentEditable={false}>
       {!pending && (
         <div className="wu-fig-head">
           <span className="wu-fig-q" draggable={drag ? true : undefined} onDragStart={drag?.onDragStart} onDragEnd={drag?.onDragEnd}>
@@ -343,19 +351,46 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
       <div className="wu-fig-body">
         {body}
       </div>
-      {/* a pending figure's caption is its request, already shown beside the spinner; the caption field fits its text once
-          the block is laid out: it mounts before the first measure, so it remounts once */}
-      {!pending && (readOnly ? !!take : !!onCaption) && (
+      {/* a pending figure's caption is its request, already shown beside the spinner. A click on the caption (not on a
+          citation, which opens its evidence) edits it in place with its citations as tokens, as a takeaway on the canvas */}
+      {!pending && (editable || !!take) && (
         <div className="wu-fig-take">
-          {readOnly || !onCaption ? (
-            <span className="wu-fig-caption wu-fig-caption-read">{take}</span>
+          {editing ? (
+            <RefEditor
+              className="wu-fig-caption chat-text"
+              label="Caption"
+              value={take}
+              at={editing.at}
+              onDone={(v) => {
+                setEditing(null)
+                const next = v.replace(/\s*\n+\s*/g, ' ').trim()
+                if (next !== take.trim()) onCaption?.(next)
+              }}
+            />
           ) : (
-            <TextArea key={width > 0 ? 'laid-out' : 'unmeasured'} bare block autoGrow rows={1} className="wu-fig-caption" value={caption} onChange={(v) => onCaption(v.replace(/\n+/g, ' '))} aria-label="Caption" spellCheck={false} />
+            <div
+              ref={editable ? keepFromEditor : undefined}
+              className={'wu-fig-caption chat-text' + (editable ? '' : ' wu-fig-caption-read') + (take ? '' : ' wu-fig-caption-empty')}
+              role={editable ? 'textbox' : undefined}
+              aria-label={editable ? 'Caption' : undefined}
+              tabIndex={editable ? 0 : undefined}
+              onClick={editable ? (e) => !(e.target as Element).closest('.refchip') && setEditing({ at: { x: e.clientX, y: e.clientY } }) : undefined}
+              onKeyDown={editable ? (e) => e.key === 'Enter' && (e.preventDefault(), setEditing({ at: null })) : undefined}
+            >
+              {take && <ChatMarkdown text={take} />}
+            </div>
           )}
         </div>
       )}
     </figure>
   )
+}
+
+/** A press on the caption is the caption's, not the editor's: the report's editor (ProseMirror) hears a press inside a
+ * figure before React does and selects the figure, taking the focus from the caption field the click opens. A native
+ * listener on the caption stops the press there; the caption's own handlers listen to the click. */
+function keepFromEditor(el: HTMLElement | null) {
+  el?.addEventListener('mousedown', (e) => e.stopPropagation())
 }
 
 /** A card without a run to show, or a card type's graphic, drawn by the canvas's own body for its kind (canvas/bodies
