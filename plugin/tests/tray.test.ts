@@ -141,7 +141,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   let drawnBand = all(await $.ui.render(above()))
   let band = textOf(drawnBand)
   // the header's status, what it was under it (no reason), the code line that printed the value, its output line
-  expect(band).toContain('✓ corrected · cite')
+  expect(band).toContain('✓ verified · cite')
   expect(band).toContain('was 12 of 40')
   expect(band).not.toContain('The output says 11')
   expect(band).toContain('print(f"failed: {bad}")│failed: 11')

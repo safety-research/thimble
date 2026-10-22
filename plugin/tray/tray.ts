@@ -470,7 +470,7 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
   verified: { word: '✓ verified', color: 'success' },
-  corrected: { word: '✓ corrected', color: 'success' },
+  corrected: { word: '✓ verified', color: 'success' },
   failed: { word: '× wrong', color: 'error' },
   unconfirmed: { word: '? not confirmed', color: 'warning' },
   unchecked: { word: 'not checked', dim: true },
