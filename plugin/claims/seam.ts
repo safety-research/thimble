@@ -12,8 +12,8 @@
 //                                      look.out.clusters), placed by their words in the look's messages
 //   claimsLookFailed($, look, why)     a look that gave nothing: the turn's claims are missing, and why
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
-//   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, or
-//                                      where it was said (threads/pane.tsx)
+//   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, the
+//                                      cluster selected, or where a claim was said (threads/pane.tsx)
 //   registerClaims                     its own hooks (/claims)
 import type { EngineInterface, Register } from 'claude-code'
 

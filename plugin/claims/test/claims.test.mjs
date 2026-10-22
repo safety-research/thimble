@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { graphView, paneData, rowText } from '../graph.js'
+import { graphView, hopCluster, paneData, rowText } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -90,34 +90,65 @@ function uneven() {
 const text = view => [...view.head, [], ...view.graph].map(rowText).join('\n')
 const panel = view => view.panel.map(rowText).join('\n')
 
-test('the claims graph uses the whole pane above the panel, which shows the claim selected and its cluster', () => {
+test('the claims graph uses the whole pane above the panel, which shows the cluster selected, or the claim selected', () => {
   const data = paneData(uneven())
   for (const h of [46, 40, 34]) {
     const rest = graphView(data, {}, { w: 136, h })
     const tu = text(rest)
     assert.match(tu, /^Claims {3}155 · 7 clusters/)
     assert.ok(tu.split('\n').length + rest.panel.length <= h, `${h}: ${tu.split('\n').length} + ${rest.panel.length} rows`)
-    assert.equal(rest.claim.id, 'c155')
-    assert.doesNotMatch(tu, /╭─{20,}╮/)
+    // at rest: the newest claim's cluster, as a cluster (no claim selected), nothing dimmed
+    assert.equal(rest.claim, null)
+    assert.equal(rest.chosen, false)
+    assert.match(panel(rest), /^─+\ngroup 3 {3}\d+ claims · turns 1–5\n {2}. Wiki /)
     const cols = tu.split('\n').slice(2).flatMap(l => [...l].map((ch, x) => (/[●◉○]/.test(ch) ? x : -1)).filter(x => x >= 0))
     assert.ok(Math.min(...cols) < 136 * 0.15 && Math.max(...cols) > 136 * 0.85, `${h}: dots from ${Math.min(...cols)} to ${Math.max(...cols)}`)
     const sel = graphView(data, { claim: 'c40' }, { w: 136, h })
     assert.equal(sel.claim.id, 'c40')
-    // the panel: the claim's sentence, then its cluster's name, what it holds, and its claims, the one selected marked
+    // a claim: its cluster's name (a press selects the cluster) and its whole sentence, no other claim, no citation
     const p = panel(sel)
-    assert.match(p, /^─+\n. Wiki 40 had 50 saves\./)
-    assert.match(p, /\n▸ . Wiki 40 had 50 saves\./)
-    assert.match(p, /\d+ claims · /)
-    // every dot is a press on its claim, and so is each claim of the cluster in the panel
-    assert.ok(sel.graph.some(r => r.some(x => x.part === 'n:c40')))
-    assert.ok(sel.panel.some(r => r[0]?.s === '▸ ' && r[0].part === 'n:c40'))
-    assert.ok(sel.panel.filter(r => r.some(x => /^n:/.test(x.part || ''))).length >= 3)
-    // the dots keep their places whatever is selected (the graph's rows do not follow the panel's), and a press takes
-    // the blank cell beside a dot too
+    assert.match(p, /^─+\ngroup 5 {3}\d+ claims · turns \d–\d\n. Wiki 40 had 50 saves\.$/)
+    assert.ok(sel.panel[1].every(x => x.part === `g:${sel.group}`))
+    // every dot is a press on its claim, and so is the blank cell beside it; the dots keep their places whatever is
+    // selected (the graph's rows do not follow the panel's)
+    assert.ok(sel.graph.some(r => r.some(x => x.part === 'd:c40')))
     const dotsOf = v => v.graph.map(r => rowText(r).replace(/[^●◉○]/g, ' ').trimEnd()).join('\n')
     assert.equal(dotsOf(sel), dotsOf(graphView(data, { claim: 'c155' }, { w: 136, h })))
-    assert.ok(sel.graph.some(r => r.some((x, i) => x.part === 'n:c40' && x.s === ' ' && r[i + 1]?.part === 'n:c40')))
+    assert.equal(dotsOf(sel), dotsOf(rest))
+    assert.ok(sel.graph.some(r => r.some((x, i) => x.part === 'd:c40' && x.s === ' ' && r[i + 1]?.part === 'd:c40')))
   }
+})
+
+test('a cluster selected: its name and its claims in the panel, each a press on the claim, no checks; its dots bold, the rest dim', () => {
+  const data = paneData(uneven())
+  const key = String(data.groups[2].id)
+  const v = graphView(data, { group: key }, { w: 136, h: 40 })
+  assert.equal(v.claim, null)
+  assert.equal(v.group, key)
+  assert.ok(v.chosen)
+  const p = panel(v)
+  assert.match(p, new RegExp(`^─+\\n${data.groups[2].name} {3}\\d+ claims`))
+  assert.doesNotMatch(p, /▸|verified|not checked|cites/)
+  const subs = v.panel.slice(2).filter(r => r.some(x => /^n:/.test(x.part || '')))
+  assert.ok(subs.length >= 3)
+  // its name is a press on the cluster; its dots are bold and lit, every other dot faint and plain
+  assert.ok(v.graph.some(r => r.some(x => x.part === `g:${key}` && x.s.includes(data.groups[2].name))))
+  const mine = new Set(data.claims.filter(c => String(c.cluster) === key).map(c => c.id))
+  const dots = v.graph.flatMap(r => r.filter(x => /^d:/.test(x.part || '') && /[●◉○]/.test(x.s)))
+  for (const d of dots) {
+    const on = mine.has(d.part.slice(2))
+    assert.equal(d.bold, on, d.part)
+    assert.equal(/-faint$/.test(d.tone), !on, d.part)
+  }
+  // n p walk the clusters, round
+  const keys = data.groups.map(g => String(g.id))
+  assert.equal(hopCluster(data, keys[0], 1), keys[1])
+  assert.equal(hopCluster(data, keys[0], -1), keys.at(-1))
+  assert.equal(hopCluster(data, keys.at(-1), 1), keys[0])
+  // a claim selected keeps its cluster lit, only its own dot bold
+  const c = graphView(data, { claim: [...mine][0] }, { w: 136, h: 40 })
+  const bold = c.graph.flatMap(r => r.filter(x => x.bold && /[●◉○]/.test(x.s)))
+  assert.deepEqual(bold.map(x => x.part), [`d:${[...mine][0]}`])
 })
 
 function linkedClaims() {
@@ -129,43 +160,27 @@ function linkedClaims() {
   return paneData(st)
 }
 
-test("the panel wraps the claim's whole sentence, braces and all, with no word cut; its citations show their checks, and e the cited lines", () => {
+test("the panel wraps the claim's whole sentence, braces and all, with no word cut; e shows its citations with their checks and the cited lines", () => {
   const data = linkedClaims()
   const rows = graphView(data, { claim: 'c1' }, { w: 110, h: 34 }).panel
-  const said = rows.filter(r => r.some(x => x.part === 'said')).map(r => rowText(r).slice(2).trim()).join(' ')
+  const said = rows.slice(2).map(r => rowText(r).slice(2).trim()).join(' ')
   assert.match(said, /^The keys \(v, s, \], 1, \{ \}\) need a reply .* returns null when there is no reply yet\.$/)
   assert.doesNotMatch(said, /…/)
-  // each citation's check as the evidence pane words it, its words and the cited place; e adds the cited line
+  // the citations show only on e: each check as the evidence pane words it, its words, the cited place and line
   const c = { ...data.claims[0], sources: [{ ref: 'a1@3', row: 'a1', at: 3, n: 2, label: '212 edits', status: 'failed', failedBy: 'evidence', place: 'edits.csv:4', line: 'Alice,212' }] }
   const shut = panel(graphView({ ...data, claims: [c, ...data.claims.slice(1)] }, { claim: 'c1' }, { w: 110, h: 34 }))
-  assert.match(shut, /\n {2}not confirmed 212 edits {2}edits\.csv:4\n/)
+  assert.doesNotMatch(shut, /212 edits|not confirmed/)
   const ev = graphView({ ...data, claims: [c, ...data.claims.slice(1)] }, { claim: 'c1', open: 'ev' }, { w: 110, h: 34 })
-  assert.match(panel(ev), /not confirmed 212 edits {2}edits\.csv:4 {2}Alice,212/)
+  assert.match(panel(ev), /\n {2}not confirmed 212 edits {2}edits\.csv:4 {2}Alice,212/)
   assert.ok(ev.panel.some(r => r.some(x => x.part === 'ev-1')))
 })
 
-test("the claims graph's lines join their dots: no line in pieces", () => {
+test('no lines join the claims, however they are linked', () => {
   const data = linkedClaims()
-  const SIDES = { '─': 'RL', '│': 'UD', '╭': 'RD', '╮': 'DL', '╰': 'UR', '╯': 'UL', '├': 'URD', '┤': 'UDL', '┬': 'RDL', '┴': 'URL', '┼': 'URDL' }
-  const STEP = { U: [0, -1, 'D'], R: [1, 0, 'L'], D: [0, 1, 'U'], L: [-1, 0, 'R'] }
-  for (const claim of ['c9', 'c14', 'c1']) {
-    const g = text(graphView(data, { claim }, { w: 110, h: 34 })).split('\n').map(l => [...l])
-    const at = (x, y) => (g[y] || [])[x] || ' '
-    const top = g.findIndex(r => /╭─{20,}╮/.test(r.join('')))
-    const bottom = g.findIndex(r => /╰─{20,}╯/.test(r.join('')))
-    const left = top >= 0 ? g[top].join('').search(/╭─{20,}╮/) : -1, right = top >= 0 ? g[top].lastIndexOf('╮') : -1
-    const inBox = (x, y) => top >= 0 && y >= top && y <= bottom && x >= left && x <= right
-    let lines = 0
-    g.forEach((row, y) => row.forEach((ch, x) => {
-      if (!SIDES[ch] || y < 2 || inBox(x, y)) return
-      lines++
-      for (const s of SIDES[ch]) {
-        const [dx, dy, back] = STEP[s]
-        const n = at(x + dx, y + dy)
-        assert.ok(/[●◉○]/.test(n) || (SIDES[n] || '').includes(back), `${claim}: ${ch} at ${x},${y} leaves ${s} to "${n}"\n${g.map(r => r.join('')).join('\n')}`)
-      }
-    }))
-    assert.ok(claim === 'c1' || lines > 0, `${claim} draws its lines`)
+  assert.ok(data.edges.length > 10)
+  for (const st of [{}, { claim: 'c9' }, { claim: 'c14' }, { group: String(data.groups[0].id) }]) {
+    const g = graphView(data, st, { w: 110, h: 34 }).graph.map(rowText).join('\n')
+    assert.doesNotMatch(g, /[─│╭╮╰╯├┤┬┴┼]/, JSON.stringify(st))
   }
 })
 
