@@ -159,10 +159,18 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     files = S.list_files(st.root)
     cnt = S.counts(st.root, files, st.cache / "counts.json")
     unit_of = {f: S.UNIT_OF_KIND.get(cnt.get(f, {}).get("kind") or "", "file") for f in files}
-    per: dict[str, dict[str, Any]] = {f: {"computed": 0, "lines": [], "searched": False, "matched": 0, "named": False,
-                                          "hits": set(), "by": set(), "searched_by": set(), "model": 0, "labels": set(),
-                                          "model_labels": set(), "pages": [], "whole": False}
-           for f in files}
+    # the files, indexed once for the commands' paths (shellcmd.Known); what happened to each file is kept only for the
+    # files something touched, since in a folder of a million files nearly every file is untouched
+    known = SH.Known(files)
+    per: dict[str, dict[str, Any]] = {}
+
+    def at(f: str) -> dict[str, Any]:
+        x = per.get(f)
+        if x is None:
+            x = per[f] = {"computed": 0, "lines": [], "searched": False, "matched": 0, "named": False, "hits": set(),
+                          "by": set(), "searched_by": set(), "model": 0, "labels": set(), "model_labels": set(),
+                          "pages": [], "whole": False}
+        return x
     # the labels this session applied (each label keeps the sessions that defined it): a model's reads of a --prompt
     # label's records, a rule's pass over the others
     want = st.session if session == "" else session
@@ -175,36 +183,36 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
         ruled: dict[str, int] = defaultdict(int)
         for ref, u in (lab.get("units") or {}).items():
             f = ref.split("#")[0]
-            if f not in per:
+            if f not in known.set:
                 continue
             if u.get("by") == "model":
                 model[f] += 1
             elif u.get("by") in ("regex", "code"):
                 ruled[f] += 1
         for f, n in model.items():
-            per[f]["model"] += n
-            per[f]["labels"].add(name)
+            at(f)["model"] += n
+            at(f)["labels"].add(name)
             # (only a model's labels read rows: a code or regex label over the same file computed over it)
-            per[f]["model_labels"].add(name)
+            at(f)["model_labels"].add(name)
         for f, n in ruled.items():
-            per[f]["computed"] = max(per[f]["computed"], n)
-            per[f]["labels"].add(name)
+            at(f)["computed"] = max(at(f)["computed"], n)
+            at(f)["labels"].add(name)
     root = str(st.root)
     for s in st.seen(session):
         tool = s.get("tool")
         if tool == "Read":
             f = st.rel(s.get("file") or "")
-            if f in per and unit_of[f] == "pages":
+            if f in known.set and unit_of[f] == "pages":
                 # the pages it read (`pages: "1-5"`), else all of them
-                per[f]["pages"].extend(_page_ranges(s.get("pages"), cnt.get(f, {}).get("rows") or 1))
-            elif f in per and unit_of[f] == "file":
+                at(f)["pages"].extend(_page_ranges(s.get("pages"), cnt.get(f, {}).get("rows") or 1))
+            elif f in known.set and unit_of[f] == "file":
                 # an image (or any other file) viewed with Read is seen whole
-                per[f]["whole"] = True
-            elif f in per:
+                at(f)["whole"] = True
+            elif f in known.set:
                 a, b = s.get("from"), s.get("to")
                 if a is None or b is None:
                     a, b = 1, max(1, cnt.get(f, {}).get("lines") or 1)
-                per[f]["lines"].append((int(a), int(b)))
+                at(f)["lines"].append((int(a), int(b)))
         elif tool == "Grep":
             scope = st.rel(s.get("path") or s.get("cwd") or root)
             if scope is None:
@@ -213,23 +221,22 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             # a search that showed lines leaves its files searched (the lines it showed are seen); one that showed only
             # names or counts, named
             lines = s.get("mode") == "content" or (s.get("mode") is None and bool(s.get("lines")))
-            for f in files:
+            for f in ([scope] if scope in known.set else known.under(scope.rstrip("/"))):
                 if unit_of[f] in ("pages", "file"):
                     continue  # a search skips a binary file
-                inside = scope in (".", "") or f == scope or f.startswith(scope.rstrip("/") + "/")
-                if inside and (not glob or fnmatch.fnmatch(Path(f).name, glob) or fnmatch.fnmatch(f, glob)):
-                    per[f]["searched" if lines else "named"] = True
+                if not glob or fnmatch.fnmatch(Path(f).name, glob) or fnmatch.fnmatch(f, glob):
+                    at(f)["searched" if lines else "named"] = True
                     if not lines:
-                        per[f]["by"].add("Grep")
+                        at(f)["by"].add("Grep")
             for fp in s.get("files") or []:
                 f = st.rel(fp)
-                if f in per:
-                    per[f]["matched"] += 1
+                if f in known.set:
+                    at(f)["matched"] += 1
             for fp, ns in (s.get("lines") or {}).items():
                 f = st.rel(fp)
-                if f in per:
-                    per[f]["hits"].update(f"L{n}" for n in ns)
-                    per[f]["lines"].extend((int(n), int(n)) for n in ns)
+                if f in known.set:
+                    at(f)["hits"].update(f"L{n}" for n in ns)
+                    at(f)["lines"].extend((int(n), int(n)) for n in ns)
         elif tool == "Bash":
             cmd = str(s.get("command") or "")
             if re.match(r"^\s*thimble(\s|$)", cmd):
@@ -238,16 +245,16 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             # touched, none of it read
             for t in s.get("refs") or []:
                 path = str(t).partition("#")[0]
-                f = path if path in per else st.rel(str(Path(s.get("cwd") or root) / path))
-                if f in per:
-                    per[f]["named"] = True
-                    per[f]["by"].add(_program(cmd))
+                f = path if path in known.set else st.rel(str(Path(s.get("cwd") or root) / path))
+                if f in known.set:
+                    at(f)["named"] = True
+                    at(f)["by"].add(_program(cmd))
             # what reached Claude is at most the lines the command printed (a long output is cut)
             left = s.get("out_lines")
-            for f, how, span, prog in SH.shows(cmd, files, root, s.get("cwd"), lambda f: cnt.get(f, {}).get("lines") or 0):
-                x = per.get(f)
-                if x is None:
+            for f, how, span, prog in SH.shows(cmd, known, root, s.get("cwd"), lambda f: cnt.get(f, {}).get("lines") or 0):
+                if f not in known.set:
                     continue
+                x = at(f)
                 if how == "read" and unit_of[f] in ("pages", "file"):
                     # a file with no lines printed whole (cat of an image or a PDF)
                     x["whole"] = True
@@ -265,10 +272,10 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                 x["searched_by" if how == "searched" else "by"].add(prog)
     out_files = []
     for f in files:
-        c, x = cnt.get(f, {}), per[f]
+        c, x = cnt.get(f, {}), per.get(f)
         rows, lines = c.get("rows", 0), c.get("lines", 0)
-        if not (x["computed"] or x["lines"] or x["searched"] or x["matched"] or x["named"] or x["hits"] or x["model"]
-                or x["labels"] or x["pages"] or x["whole"]):
+        if x is None or not (x["computed"] or x["lines"] or x["searched"] or x["matched"] or x["named"] or x["hits"]
+                             or x["model"] or x["labels"] or x["pages"] or x["whole"]):
             # a file nothing touched, the most of a large folder: its size and nothing else, quickly
             unit = unit_of[f]
             units = 1 if unit == "file" else lines if unit == "lines" else rows

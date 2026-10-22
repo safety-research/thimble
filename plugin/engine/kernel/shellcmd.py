@@ -8,13 +8,17 @@ leaves the file searched. A command that only names, lists or counts files (`wc`
 
     shows(command, known, root, cwd, lines_of) -> [(file, how, (first, last) or None, program)]
         how is "read" (with the lines it printed), "searched" or "named"
+
+`known` is the root's files as a Known index (or a list, indexed on the call): a folder of a million files is looked up
+by name and by folder, never scanned once per word of a command.
 """
 from __future__ import annotations
 
+import bisect
 import os
 import re
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 SEARCHES = {"grep", "egrep", "fgrep", "zgrep", "rg", "ag", "ack"}
 # programs that pass on the lines they get (head, tail and sed narrow them; uniq -c counts them)
@@ -314,14 +318,53 @@ def _expand(t: str, values: dict[str, list[str]]) -> list[str]:
     return [o for o in outs if "$" not in o]
 
 
-def named(text: str, known: list[str], root: str, cwd: str | None = None,
+class Known:
+    """The root's files (relative paths), indexed: sorted, so the files under a folder are one range; by file name;
+    and the set of their folders."""
+
+    def __init__(self, files: Iterable[str]):
+        self.files = sorted(set(files))
+        self.set = set(self.files)
+        self.by_name: dict[str, list[str]] = {}
+        self.folders: set[str] = set()
+        for f in self.files:
+            self.by_name.setdefault(f.rsplit("/", 1)[-1], []).append(f)
+            d = f
+            while "/" in d:
+                d = d.rsplit("/", 1)[0]
+                if d in self.folders:
+                    break
+                self.folders.add(d)
+
+    def under(self, folder: str) -> list[str]:
+        """The files at any depth under a folder; every file for `.`."""
+        if folder in (".", ""):
+            return self.files
+        lo = bisect.bisect_left(self.files, folder + "/")
+        hi = bisect.bisect_left(self.files, folder + "0")  # "0" is the character after "/"
+        return self.files[lo:hi]
+
+    def glob(self, rx: re.Pattern[str], pat: str) -> set[str]:
+        """The files a glob's regex matches, looked for under the folder its pattern names before its first wildcard."""
+        head = re.split(r"[*?\[]", pat, maxsplit=1)[0]
+        folder = head.rsplit("/", 1)[0] if "/" in head else ""
+        last = pat.rsplit("/", 1)[-1]
+        pool = self.by_name.get(last, []) if not re.search(r"[*?\[]", last) and folder == "" else self.under(folder)
+        return {f for f in pool if rx.match(f)}
+
+
+def as_known(known: "Known | Iterable[str]") -> Known:
+    return known if isinstance(known, Known) else Known(known)
+
+
+def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None = None,
           values: dict[str, list[str]] | None = None) -> set[str]:
     """The source files a command's words name, by path, folder or glob. A path resolves from the command's folder
     first, so `cat x.csv` names that folder's x.csv and not every x.csv under the root, and `*` stays within one folder;
     a path that does not resolve matches by its end, as after a `cd`. A shell variable takes the values the command
     gave it (`values`), else stands for one folder or name."""
     root = root.rstrip("/")
-    known_set = set(known)
+    K = as_known(known)
     if not cwd:
         here = "."
     elif cwd == root or cwd.startswith(root + "/") or root.startswith(cwd.rstrip("/") + "/"):
@@ -342,39 +385,45 @@ def named(text: str, known: list[str], root: str, cwd: str | None = None,
         else:
             rel = os.path.normpath(os.path.join(here, t))
         if "*" in t or "?" in t:
-            rx = _glob_rx(rel)
-            got = {f for f in known if rx.match(f)}
+            got = K.glob(_glob_rx(rel), rel)
             if not got:
-                rx = _glob_rx("**/" + t.lstrip("./"))
-                got = {f for f in known if rx.match(f)}
+                anywhere = "**/" + t.lstrip("./")
+                rx = _glob_rx(anywhere)
+                got = {f for f in K.files if rx.match(f)} if re.search(r"[*?\[]", Path(t).name) else K.glob(rx, anywhere)
             hit |= got
         elif "." in t or "/" in t:
-            if rel in known_set:
+            if rel in K.set:
                 hit.add(rel)
                 continue
-            if t.endswith("/") or "." not in Path(t).name:
-                under = set(known) if rel == "." else {f for f in known if f.startswith(rel + "/")}
+            folder_word = t.endswith("/") or "." not in Path(t).name
+            if folder_word:
+                under = K.under(rel)
                 if under:
-                    hit |= under
+                    hit.update(under)
                     continue
             tt = t.rstrip("/")
-            for f in known:
+            # a path that resolves by its end, as after a `cd`: a file whose path ends with the word, or a word that
+            # ends with the file's path; and for a folder's word, every file under a folder whose path ends with it
+            for f in K.by_name.get(tt.rsplit("/", 1)[-1], []):
                 if f == tt or f.endswith("/" + tt) or tt.endswith("/" + f):
                     hit.add(f)
-                elif (t.endswith("/") or "." not in Path(t).name) and "/" + tt + "/" in "/" + f:
-                    hit.add(f)
+            if folder_word:
+                for d in K.folders:
+                    if d == tt or d.endswith("/" + tt):
+                        hit.update(K.under(d))
     return hit
 
 
 # ------------------------------------------------------------------ a whole command
 
 
-def shows(cmd: str, known: list[str], root: str, cwd: str | None,
+def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None,
           lines_of: Callable[[str], int]) -> list[tuple[str, str, tuple[int, int] | None, str]]:
     """What the command put in front of Claude of each source file it names: (file, how, (first, last), program), how
     being "read" with the lines it printed, "searched" or "named". The `thimble` command keeps its own record, so its
     stages and heredocs are left out here."""
     out: list[tuple[str, str, tuple[int, int] | None, str]] = []
+    known = as_known(known)
     values = variables(cmd)
     for pipe in pipelines(cmd):
         sent = not pipe[-1]["out"]
