@@ -87,6 +87,22 @@ def definitions(names: tuple[str, ...], slots: dict[str, str] | None = None) -> 
     return out
 
 
+def run_text(outputs: list[dict[str, Any]]) -> str:
+    """run_python's result as Claude reads it, as a shell shows a script's output: what the code printed and the text of
+    each value it showed (the last line's value, a table, a figure's description), in order, then an error's name,
+    message and the end of its traceback."""
+    parts = []
+    for o in outputs:
+        if "application/vnd.thimble.error+json" in o:
+            e = o["application/vnd.thimble.error+json"]
+            tb = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", t) for t in (e.get("traceback") or [])[-6:])
+            parts.append(f"{e.get('ename')}: {e.get('evalue')}\n{tb}".strip())
+        else:
+            parts.append(str(o.get("text/plain") or "").rstrip("\n"))
+    text = "\n".join(p for p in parts if p) or "(no output)"
+    return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + f"\n[cut at {RESULT_CHARS} characters]"
+
+
 class Tools:
     """The tools of one agent. `on_card(cell_id)` hears each card a tool made or changed."""
 
@@ -213,9 +229,7 @@ class Tools:
     async def t_run_python(self, args: dict[str, Any]) -> Result:
         res = await canvas.run_code(self.ws, str(args.get("code") or ""), self.folder, timeout=120,
                                     unsandboxed=self.unsandboxed, tmp=home.temp_dir(self.ws))
-        cell = {"id": "run", "outputs": [{**o, "_out": i} for i, o in enumerate(res.get("outputs") or [])]}
-        text = canvas.outputs_text(cell, limit=RESULT_CHARS).replace("(cite a value as card:run#<column>/<row>)", "")
-        return Result(text, res.get("status") != "ok")
+        return Result(run_text(res.get("outputs") or []), res.get("status") != "ok")
 
     # ---- reporting a problem with thimble (issues.py): a draft the person previews; no tool sends
 
