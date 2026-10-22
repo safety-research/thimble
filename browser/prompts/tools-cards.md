@@ -11,11 +11,16 @@ cards/tool.ts gives.
 ```json
 {
   "type": "object",
-  "required": ["title", "data", "view"],
+  "required": ["title"],
   "properties": {
     "title": {"type": "string", "description": "the card's title: what it shows, in a few words"},
-    "data": {"type": "string", "description": "the path of the JSON file of rows you wrote, in $TMPDIR (a path may start with $TMPDIR/)"},
-    "view": {"type": "string", "description": "JavaScript that defines function view(props, surface)"},
+    "data": {"type": "string", "description": "the path of the JSON file of rows you wrote, in $TMPDIR (a path may start with $TMPDIR/); with `id`, leave it out to keep the rows of the version on screen"},
+    "view": {"type": "string", "description": "JavaScript that defines function view(props, surface); with `id`, leave it out and give `edits` to change the view of the version on screen"},
+    "edits": {
+      "type": "array",
+      "description": "with `id`: changes to the view of the version on screen, in order; each `old` stands once in it",
+      "items": {"type": "object", "required": ["old", "new"], "properties": {"old": {"type": "string"}, "new": {"type": "string"}}}
+    },
     "id": {"type": "string", "description": "the id of a card you drew, to draw a new version of it here; leave it out for a new card"},
     "actions": {
       "type": "array",

@@ -14,7 +14,9 @@ One call:
      each action, in the terminal's words (plugin/cards/tool.ts)
 
 A call with `id` draws a new version of that card where this call stands; the page shows the earlier call as a line
-that points to it. A version that fails leaves the one on screen, and the view's error goes back to Claude.
+that points to it. A new version may keep the rows of the version on screen (no `data`) and give `edits` to its view in
+place of the whole view, as the terminal's card tool takes them. A version that fails leaves the one on screen, and the
+view's error goes back to Claude.
 
 The page draws the tree (frontend cards/), and sends the analyst's keys and clicks to the routes below, which pass them
 to the runner and answer the new tree. A card's state is kept beside its copy, so it draws the same after a restart.
@@ -194,10 +196,40 @@ def notice(ws: str, chat: str, text: str) -> None:
     chats.append(ws, chat, {"type": "notice", "kind": "cards", "text": text})
 
 
+def view_of(args: dict[str, Any], on_screen: Path | None) -> tuple[str, str | None]:
+    """(the view of a call, why there is none): the whole `view` it gives, or, for a new version, the view on screen
+    (`on_screen`, its version's folder) with the call's `edits` made in order, each `old` text standing once in it (the
+    terminal's viewOf)."""
+    if str(args.get("view") or "").strip():
+        return str(args["view"]), None
+    edits = args.get("edits") if isinstance(args.get("edits"), list) else []
+    if not edits:
+        return "", ("give the whole `view`, or `edits` to the view on screen" if on_screen else
+                    "`view` is empty: give the JavaScript that defines function view(props, surface)")
+    if on_screen is None:
+        return "", "`edits` change a card you drew: give its `id`, or the whole `view` for a new card"
+    try:
+        text = (on_screen / "view.js").read_text()
+    except OSError:
+        return "", "the view on screen cannot be read; give the whole `view`"
+    for k, e in enumerate(edits, 1):
+        old = str((e or {}).get("old") or "")
+        n = text.count(old) if old else 0
+        if n > 1:
+            return "", f"edit {k}: its `old` text stands {n} times in the view on screen, not once; give more of the text around it"
+        if not n:
+            # where its first line stands, so the next try copies the view's own text
+            first = old.split("\n")[0].strip()
+            at = text.find(first) if first else -1
+            here = f", which has here: {json.dumps(text[at:at + len(old) + 20])}" if at >= 0 else ""
+            return "", f"edit {k}: its `old` text is not in the view on screen{here}"
+        text = text.replace(old, str((e or {}).get("new") or ""), 1)
+    return text, None
+
+
 async def card(t: Any, args: dict[str, Any]) -> Result:
     t0 = time.monotonic()
     title = one_line(args.get("title"), 120) or "Card"
-    view = str(args.get("view") or "")
     given = str(args.get("id") or "").strip()
     design = (t.session.meta.get("design") if t.session is not None else None) or None
     before = meta_of(t.ws, given) if given else None
@@ -205,9 +237,17 @@ async def card(t: Any, args: dict[str, Any]) -> Result:
         return Result(f"There is no card \"{one_line(given, 40)}\" to replace. Leave out `id` to draw a new card.", True)
     cid = given or f"c{secrets.token_hex(4)}"
     meta = before or {"id": cid, "version": 0, "title": title, "at": home.now()}
-    path, bad = data_file(t, args.get("data"))
+    # a new version may keep the view on screen with a few edits, and its rows: writing the whole view again takes the
+    # model half a minute
+    on_screen = version_dir(t.ws, cid, int(before["version"])) if before else None
+    view, bad = view_of(args, on_screen)
+    if bad:
+        return Result(f"The card did not draw: {bad}.", True)
+    keep = on_screen is not None and not str(args.get("data") or "").strip()
+    path, bad = (on_screen / "rows.json", "") if keep else data_file(t, args.get("data"))
     if path is None:
         return Result(f"The card did not draw: {bad}.", True)
+    file = str(meta.get("file") or "") if keep else str(args.get("data"))
     version = int(meta["version"]) + 1
     d = version_dir(t.ws, cid, version)
     d.mkdir(parents=True, exist_ok=True)
@@ -227,7 +267,7 @@ async def card(t: Any, args: dict[str, Any]) -> Result:
     asked = list(dict.fromkeys(k for k in str(r.get("keys") or "") if not k.isspace()))
     nxt = {**meta, "version": version, "title": title, "rows": summary["rows"], "columns": summary["columns"],
            "keys": [k for k in asked if k.isalpha() and len(k) == 1 and k not in OWN_KEYS],
-           "file": str(args.get("data")), "width": width, "at": home.now(),
+           "file": file, "width": width, "at": home.now(),
            "chat": design["chat"] if design else t.chat, "turn": design["turn"] if design else None,
            "design": design["id"] if design else None}
     save_meta(t.ws, nxt)
@@ -247,7 +287,7 @@ async def card(t: Any, args: dict[str, Any]) -> Result:
     else:
         out = [f"“{title}” is drawn {where}. Its id is \"{cid}\": to change it, call card again with this id."]
     rows, columns = summary["rows"], summary["columns"]
-    out.append(f"It read {rows} row{'' if rows == 1 else 's'} from {Path(str(args.get('data'))).name}"
+    out.append(f"It read {rows} row{'' if rows == 1 else 's'} from {Path(file).name}"
                + (f", with the columns {', '.join(columns)}" if columns else "") + ".")
     if summary.get("other"):
         out.append("The file is an object: props.rows is its \"rows\" list, and props.data the whole object, with "

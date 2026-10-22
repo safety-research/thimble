@@ -46,6 +46,21 @@ async def test_a_data_file_outside_the_folder_and_the_temp_folder_is_refused(fol
 VIEW = "function view(props, surface) { const { Text } = surface.elements; return Text({ children: `${props.rows.length} runs` }) }"
 
 
+@node
+async def test_a_new_version_may_keep_the_rows_and_edit_the_view_on_screen(folder):
+    ws = home.open_folder(folder)
+    (home.temp_dir(ws) / "runs.json").write_text(json.dumps([{"run": "a"}, {"run": "b"}]))
+    t = tools.Tools(ws, "main", folder, unsandboxed=True)
+    first = await cards.card(t, {"title": "Runs", "data": "$TMPDIR/runs.json", "view": VIEW})
+    cid = first.extra["card"]
+    bad = await cards.card(t, {"title": "Runs", "id": cid, "edits": [{"old": "no such text", "new": "x"}]})
+    assert bad.is_error and "is not in the view on screen" in bad.text
+    r = await cards.card(t, {"title": "Runs", "id": cid, "edits": [{"old": "runs`", "new": "runs kept`"}]})
+    assert not r.is_error and r.extra["version"] == 2, r.text
+    assert "It read 2 rows from runs.json" in r.text and "2 runs kept" in r.text
+    await cardrunner.close_all()
+
+
 def designer(req):
     asked = req["messages"][-1]["content"]
     asked = asked if isinstance(asked, str) else json.dumps(asked)
