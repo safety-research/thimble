@@ -99,7 +99,7 @@ test('a call that failed shows the failure line, in the person\'s words', async 
   expect(w.answers[0].failed['chat.jsonl#L1']).toBe('the call failed: the sign-in failed or expired. Sign in again with /login')
   // the failure line, with the keys that fix or report it
   const bar = textOf(await $.ui.render(BAND))
-  expect(bar).toContain('× 1 of 1 model calls for the label apology failed: the sign-in failed or expired.')
+  expect(bar).toContain('× 2 records of the label apology got no value, because a model call failed: the sign-in failed or expired.')
   expect(bar).toContain('f fix this')
 })
 

@@ -4,7 +4,8 @@
 // Claude nor the person waits on them (`thimble label NAME --wait` waits, when Claude wants the counts in the same
 // turn). No `$` here: the plugin hands in the kernel and the model, and the tests a stand-in for each.
 //
-//   readLabel({name, kernel, callAll, template, promptId, settings, progress}) -> {text, note, failedCalls, calls, why}
+//   readLabel({name, kernel, callAll, template, promptId, settings, progress}) -> {text, note, failed, failedCalls, calls,
+//                                                                                   why}
 //                                                                                   | {error}
 //   requestFor(template, label, units, settings) -> a $.model.complete request for one batch (units: [{ref, text}])
 //   answersOf(reply, units, values)              -> {values: {ref: {value, confidence, reason}}, failed: {ref: why}}
@@ -169,7 +170,7 @@ export async function readLabel({ name, kernel, callAll, template, promptId = nu
   why = why.replace(/^the call failed: /, '')
   const text = summary(name, { ...s, why: failedCalls ? `${failedCalls} call${failedCalls === 1 ? '' : 's'} failed: ${why}` : '' })
   return {
-    text, calls, failedCalls, why,
+    text, calls, failedCalls, why, failed: Number(s.failed) || 0,
     note: `The model finished reading the records of the label ${name} (${calls} call${calls === 1 ? '' : 's'}). ${text} \`thimble label ${name}\` prints its counts.`,
   }
 }

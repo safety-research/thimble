@@ -311,3 +311,11 @@ def test_a_label_in_one_table_of_a_database_labels_only_that_tables_rows(root: P
     # a table the database does not have says which it has
     r = run(root, "label", "nope", "--in", "forge.db#pulls", "--regex", "parser")
     assert r.returncode != 0 and "no table 'pulls'" in r.stdout + r.stderr and "issues, prs" in r.stdout + r.stderr
+
+
+def test_a_label_sorts_only_the_folders_own_records(root: Path, tmp_path: Path):
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "scratch" / "derived.jsonl").write_text(json.dumps({"text": "sorry"}) + "\n")
+    r = run(root, "label", "derived", "--in", str(tmp_path / "scratch" / "derived.jsonl"), "--regex", "sorry")
+    assert r.returncode == 1 and "is outside the folder" in r.stdout and "Label the records it came from" in r.stdout
+    assert LB.names(Store(root)) == []

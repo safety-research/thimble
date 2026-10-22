@@ -16,7 +16,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { busy } from '../bar/busy'
-import { failNotice } from '../bar/fix'
+import { failCleared, failNotice } from '../bar/fix'
 import { runThimble, type Ran } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import { promptText } from '../prompts/prompts'
@@ -114,8 +114,28 @@ async function readHere($: Engine, name: string, root: string): Promise<void> {
   })
   await tellAtNextPrompt($, `label:${root}|${name}`, out.error ? `The model's reads of the label ${name} failed: ${out.error}` : out.note)
   await labelsChanged($)
-  if (out.error) failNotice($, `× The model's reads of the label ${name} failed: ${String(out.error).slice(0, 200)}.`)
-  else if (out.failedCalls) failNotice($, `× ${out.failedCalls} of ${out.calls} model calls for the label ${name} failed: ${out.why}. \`thimble label ${name} --again\` asks again.`)
+  const about = `label:${root}|${name}`
+  if (out.error) failNotice($, `× The model's reads of the label ${name} failed: ${String(out.error).slice(0, 200)}.`, about)
+  else if (out.failed) failNotice($, `× ${out.failed.toLocaleString('en-US')} record${out.failed === 1 ? '' : 's'} of the label ${name} got no value, because ${out.failedCalls === 1 ? 'a model call' : `${out.failedCalls} model calls`} failed: ${out.why}. \`thimble label ${name} --again\` asks again.`, about)
+  else return
+  failing.set(about, { root, name })
+}
+
+/** The labels a failure line is about now, by the line's `about`. */
+const failing = new Map<string, { root: string; name: string }>()
+
+/** After a `thimble label` command of Claude's: a label whose failure line shows and whose records all have a value now
+ *  (Claude set them, or `--again` read them) takes the line away, and what waited to be told of it. */
+export async function labelsSettled($: Engine): Promise<void> {
+  for (const [about, { root, name }] of [...failing]) {
+    const r = await runThimble($, root, ['label', name, '--json'])
+    let s: Any = null
+    try { s = JSON.parse(r.stdout) } catch { s = null }
+    if (!s || s.waiting || s.failed) continue
+    failing.delete(about)
+    await failCleared($, about)
+    await tellAtNextPrompt($, about, '')
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ the person's checks

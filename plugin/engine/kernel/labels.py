@@ -207,6 +207,11 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
     # `x.db#prs` names one table of a database, as load() reads it
     pattern, _, table = glob.partition("#")
     files = S.expand_glob(st.root, pattern)
+    outside = [f for f in files if f == ".." or f.startswith("../")]
+    if outside:
+        raise LabelError(f"{outside[0]} is outside the folder {st.root}: a label sorts the folder's own records, so that "
+                         f"the analyst can open and check each one. Label the records it came from (a database's "
+                         f"table is `file.db#table`)")
     if not files:
         raise LabelError(f"no source file matches {pattern!r} under {st.root}")
     if table:
