@@ -127,6 +127,29 @@ test('a turn that ended in an error answered nothing; the keys act on the newest
   expect(await answerStepKey(s.$, 'x')).toBe(null)
 })
 
+test("a typed prompt is the person's though its turn starts while its prompt.submit hooks run, or before they run", async () => {
+  const s = setup()
+  await turn(s, { id: 't1', prompt: 'Why was pr/118 reverted?', rows: ['It broke the build.'] })
+  await turn(s, { id: 't2', prompt: '<task-notification>one</task-notification>', by: 'task-notification', rows: ['The first job ended.'] })
+  // Claude Code starts the turn beneath this module's prompt.submit hook
+  const typed = 'Break down the events by type'
+  await s.call('prompt.submit', { text: typed, origin: { kind: 'composer' } }, async (x: Any) => {
+    await s.call('turn.start', { text: x.text, turnId: 't3' })
+    return { text: x.text }
+  })
+  await s.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text: 'Mostly reviews.' }] } }, async () => ({ uuid: 't3-row-0' }))
+  await s.call('turn.complete', { turnId: 't3', reason: 'answer', answer: 'Mostly reviews.' }, async () => ({ text: '' }))
+  await settle()
+  await turn(s, { id: 't4', prompt: '<task-notification>two</task-notification>', by: 'task-notification', rows: ['The second job ended.'] })
+  expect((await turnOf(s.$, 't3'))!.prompt.by).toBe('composer')
+  // since the person's last prompt: that prompt's turn and the one after, not the replies to the prompt before
+  expect((await sinceLast(s.$)).rows).toEqual(['t3-row-0', 't4-row-0'])
+  // the turn starts before the prompt's hook runs at all
+  await s.call('turn.start', { text: 'And by agent?', turnId: 't5' })
+  await s.call('prompt.submit', { text: 'And by agent?', origin: { kind: 'composer' } })
+  expect((await turnOf(s.$, 't5'))!.prompt.by).toBe('composer')
+})
+
 test("each feature keeps its own part of a message, and a resumed session reads the turns and their parts back", async () => {
   const s = setup()
   await turn(s, { id: 't1', prompt: 'Why?', rows: ['Because the cache key ignored the locale.'] })

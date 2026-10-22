@@ -75,8 +75,9 @@ async function wordOf(now: number, key: string): Promise<string> {
 }
 
 /** One key: taken by thimble (`true`), or what goes into the box for it: the key alone, or a word whose first keys
- *  thimble had taken. */
-async function press($: Engine, key: string, now: number): Promise<true | string> {
+ *  thimble had taken. `live`: whether the edit still waits for this hook; once Claude Code went on without it (the
+ *  hook ran past its budget and its .catch typed the key), the key is not taken. */
+async function press($: Engine, key: string, now: number, live: () => boolean): Promise<true | string> {
   const w = windowAt(now)
   let t: Take | null = null
   try {
@@ -84,6 +85,7 @@ async function press($: Engine, key: string, now: number): Promise<true | string
   } catch (err) {
     failNotice($, failed(key, err))
   }
+  if (!live()) return key
   if (w && w.card && t?.card === w.card) {
     w.at = now
     w.keys += key
@@ -104,14 +106,25 @@ async function press($: Engine, key: string, now: number): Promise<true | string
   return true
 }
 
+/** Whether every key of a burst is a key of one card. Asked key by key, up to the first that is not: a paste of a
+ *  prompt asks for its first key alone, so the hook keeps within its budget whatever the paste's length. */
+async function oneCard($: Engine, keys: string[]): Promise<boolean> {
+  let card: string | null = null
+  for (const k of keys) {
+    const o = await cardTake($, k).catch(() => null)
+    if (!o || (card !== null && o.card !== card)) return false
+    card = o.card
+  }
+  return card !== null
+}
+
 /** A burst of keys in one edit: taken key by key when each is a key of one card, else typed whole. */
-async function burst($: Engine, keys: string[], now: number): Promise<true | string> {
-  const owners = await Promise.all(keys.map(k => cardTake($, k).catch(() => null)))
-  if (owners.every(o => o && o.card === owners[0]!.card)) {
+async function burst($: Engine, keys: string[], now: number, live: () => boolean): Promise<true | string> {
+  if (await oneCard($, keys)) {
     let typed = ''
     for (const key of keys) {
       if (typed) typed += key
-      else { const r = await press($, key, now); if (r !== true) typed = r }
+      else { const r = await press($, key, now, live); if (r !== true) typed = r }
     }
     return typed || true
   }
@@ -131,7 +144,10 @@ export const registerKeys: Register = on => {
     const k = e.key
     if ((k && (k.ctrl || k.meta || [...k.key].length !== 1)) || !e.inputText) return next(empty)
     const now = Number(await $.clock.now())
-    const r = k ? await press($, k.key, now) : await burst($, [...e.inputText], now)
+    // Claude Code gives this hook a short budget; past it, its .catch typed the key and the edit went on without it
+    const live = () => !next.signal.aborted
+    const r = k ? await press($, k.key, now, live) : await burst($, [...e.inputText], now, live)
+    if (!live()) return { text: e.text, cursor: e.cursor }
     if (r === true) return { text: '', cursor: 0 }
     taken = ''
     if (!e.text && r === e.inputText) return next(e)

@@ -30,6 +30,7 @@ import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, s
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayKey } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
+import { askOnce } from './rowhook'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -196,11 +197,17 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
 
 export const registerAnswerView: Register = on => {
   // the lines under a row after its cards (cards/register.ts draws the cards; this hook wraps that one)
+  // (fails safe, core/rowhook.ts: a throw here leaves the answer and its cards as drawn beneath)
   on('ui.render', { component: 'AssistantMessage', requestId: /\S/ }, async ($, e, next) => {
-    const r = await next(e)
-    if (e.props.isSummary) return r
-    const els = $.ui.resolve(e) as Any
-    const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3))
-    return tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
+    const below = askOnce(e, next)
+    try {
+      const r = await below()
+      if (e.props.isSummary) return r
+      const els = $.ui.resolve(e) as Any
+      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3))
+      return tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
+    } catch {
+      return below()
+    }
   }).catch(($, e, next) => next(e))
 }

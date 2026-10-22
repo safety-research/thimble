@@ -17,6 +17,7 @@
 import type { Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
+import { askOnce } from '../core/rowhook'
 import { cut } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
 import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
@@ -101,14 +102,20 @@ export const registerCards: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // the cards the designer fork drew under this answer, below it (outside the marks' drawing of the answer)
+  // (fails safe, core/rowhook.ts: a throw here leaves the answer as drawn beneath)
   on('ui.render', { component: 'AssistantMessage', requestId: /./ }, async ($, e, next) => {
-    noteViewport(e.viewport)
-    const r = await next(e)
-    if (!featureOn('cards')) return r
-    const frames = await framesUnder($, e)
-    if (!frames.length) return r
-    const E = $.ui.resolve(e) as Any
-    return E.Box({ flexDirection: 'column', children: [r, ...frames] })
+    const below = askOnce(e, next)
+    try {
+      noteViewport(e.viewport)
+      const r = await below()
+      if (!featureOn('cards')) return r
+      const frames = await framesUnder($, e)
+      if (!frames.length) return r
+      const E = $.ui.resolve(e) as Any
+      return E.Box({ flexDirection: 'column', children: [r, ...frames] })
+    } catch {
+      return below()
+    }
   }).catch(($, e, next) => next(e))
 
   // a card's Client posted: a Button or a click

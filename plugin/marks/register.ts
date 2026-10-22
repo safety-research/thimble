@@ -17,11 +17,12 @@
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
 //                    citation the tray shows, the lines under its words (the labels it used), a press on a citation,
 //                    and the margin of each passage it draws, which asks a side thread about it
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
 import { markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText } from '../core/answerview'
 import { forkOf } from '../core/forks'
+import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
@@ -30,6 +31,7 @@ import { marksIn, withoutMarks } from './message.js'
 import { notesByMark, restoreMarks, rowMarks, type MarkItem } from './store'
 import { footerEl, messageEl, type MarkLook } from './view'
 
+type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
@@ -99,60 +101,72 @@ export const registerMarks: Register = on => {
     return no ? { deny: no } : next(e)
   })
 
+  // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (e.props.isSummary) return next(e)
-    const row = e.requestId
-    const raw = String(e.props.text ?? '')
-    const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
-    // the text this row shows (a squeezed version in place of Claude's words), or nothing (a catch-up covers it)
-    const view = await textView($, row, raw)
-    const els = $.ui.resolve(e) as Any
-    if (view.hidden) return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [] })
-    // a row a feature draws whole (a catch-up in the newest reply's place), with the lines under its words
-    const whole = await rowDrawing($, els, row, cols)
-    if (whole) {
-      const under = await underText($, els, row, cols)
-      return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [whole, ...under] })
+    const below = askOnce(e, next)
+    try {
+      return await drawAnswer($, e, below)
+    } catch {
+      return below()
     }
-    const marksOn = featureOn('marks')
-    const text = marksOn ? view.text : withoutMarks(view.text)
-    const marks = marksOn ? marksIn(text) : []
-    const reply = marksOn ? await rowMarks($, row) : null
-    const spans = await spansFor($, row, text, marks)
+  }).catch(($, e, next) => next(e))
+}
+
+/** A row of Claude's words as marks/register.ts draws it: hidden (a catch-up covers it), a catch-up in its place, its
+ *  marks, spans and lines under it, or the drawing beneath (`below`) when it has none of these. */
+async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
+  if (e.props.isSummary) return below()
+  const row = e.requestId
+  const raw = String(e.props.text ?? '')
+  const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
+  // the text this row shows (a squeezed version in place of Claude's words), or nothing (a catch-up covers it)
+  const view = await textView($, row, raw)
+  const els = $.ui.resolve(e) as Any
+  if (view.hidden) return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [] })
+  // a row a feature draws whole (a catch-up in the newest reply's place), with the lines under its words
+  const whole = await rowDrawing($, els, row, cols)
+  if (whole) {
     const under = await underText($, els, row, cols)
-    const own = text === raw
-    if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
-      return own ? next(e) : next({ ...e, props: { ...e.props, text } })
-    }
-    // the turning glyph follows the bar's busy line, which ticks while `checking N marks` runs
-    const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
-    const spin = SPIN[frame % SPIN.length]!
-    const runs = await mainRuns($)
-    // the marks of Claude's own words by their place; those of a text shown in their place by their words
-    const looks: MarkLook[] = own
-      ? marks.map((_m: Any, k: number) => {
-        const it = reply?.items[k]
-        return it ? { n: it.n, status: it.status === 'failed' && it.failedBy === 'evidence' ? 'unconfirmed' : it.status, shown: it.shown } : { n: k + 1, status: runs ? 'pending' : 'unchecked' }
-      })
-      : looksByWords(marks, reply?.items ?? [], runs)
-    const focusN = await markFocus($, row)
-    const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
-    const body = marks.length || spans.length || view.dim || view.lead
-      ? messageEl(els, {
-        text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
-        notes: own ? notesByMark(reply?.items ?? []) : [],
-        spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null,
-        // while a rewrite of it runs, no passage is asked about
-        passages: view.dim ? null : await passagesFor($, row),
-        onMark: async (k: number) => {
-          const n = looks[k]!.n
-          if (await markPressed($, row, n)) return
-          if (n > 0) await openPane($, 'evidence', { row, n }, `citation ${n}`)
-        },
-      })
-      : await (own ? next(e) : next({ ...e, props: { ...e.props, text } }))
-    const foot = reply?.last ? footerEl(els, { key: `mf-${row}`, spin, checking: reply.checking }) : null
-    const parts = [body, ...(foot ? [foot] : []), ...under]
-    return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })
-  })
+    return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [whole, ...under] })
+  }
+  const marksOn = featureOn('marks')
+  const text = marksOn ? view.text : withoutMarks(view.text)
+  const marks = marksOn ? marksIn(text) : []
+  const reply = marksOn ? await rowMarks($, row) : null
+  const spans = await spansFor($, row, text, marks)
+  const under = await underText($, els, row, cols)
+  const own = text === raw
+  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
+    return own ? below() : below({ ...e, props: { ...e.props, text } })
+  }
+  // the turning glyph follows the bar's busy line, which ticks while `checking N marks` runs
+  const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
+  const spin = SPIN[frame % SPIN.length]!
+  const runs = await mainRuns($)
+  // the marks of Claude's own words by their place; those of a text shown in their place by their words
+  const looks: MarkLook[] = own
+    ? marks.map((_m: Any, k: number) => {
+      const it = reply?.items[k]
+      return it ? { n: it.n, status: it.status === 'failed' && it.failedBy === 'evidence' ? 'unconfirmed' : it.status, shown: it.shown } : { n: k + 1, status: runs ? 'pending' : 'unchecked' }
+    })
+    : looksByWords(marks, reply?.items ?? [], runs)
+  const focusN = await markFocus($, row)
+  const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
+  const body = marks.length || spans.length || view.dim || view.lead
+    ? messageEl(els, {
+      text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
+      notes: own ? notesByMark(reply?.items ?? []) : [],
+      spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null,
+      // while a rewrite of it runs, no passage is asked about
+      passages: view.dim ? null : await passagesFor($, row),
+      onMark: async (k: number) => {
+        const n = looks[k]!.n
+        if (await markPressed($, row, n)) return
+        if (n > 0) await openPane($, 'evidence', { row, n }, `citation ${n}`)
+      },
+    })
+    : await (own ? below() : below({ ...e, props: { ...e.props, text } }))
+  const foot = reply?.last ? footerEl(els, { key: `mf-${row}`, spin, checking: reply.checking }) : null
+  const parts = [body, ...(foot ? [foot] : []), ...under]
+  return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })
 }
