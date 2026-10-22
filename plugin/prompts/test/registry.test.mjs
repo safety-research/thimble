@@ -52,3 +52,8 @@ test('placeholders are filled, and a value is kept as written', () => {
   assert.equal(fill('a {{X}} b {{Y}} c {{Z}}', { X: 1, Y: () => 'two' }), 'a 1 b two c {{Z}}')
   assert.equal(fill('{{X}}', { X: '$& $1' }), '$& $1')
 })
+
+test('the card tool text fits the 4096 characters Claude Code gives a tool description, with a long temp folder', () => {
+  const text = fill(readFileSync(join(ROOT, fileOf('card-tool')), 'utf8'), { TMPDIR: `/${'x'.repeat(99)}`, KEPT: 'v, r, l, f, F, p or u' }).trim()
+  assert.ok(text.length <= 4096, `${text.length} characters`)
+})

@@ -1,6 +1,6 @@
 thimble is on in this folder. It is a Claude Code plugin for making sense of a folder of files, such as agent transcripts, logs, records, code and docs. Its goal is to help the analyst judge what happened, with answers that are clear and that they can check. The sections below say how to write for the analyst and how to use thimble.
 
-The folder's files are the records the analyst judges, so read them and never change them. A SQLite database opened with `mode=ro` still writes -wal and -shm files beside it; open it with `sqlite3.connect(f"file:{path}?immutable=1", uri=True)`.
+The folder's files are the records the analyst judges, so read them and never change them. A SQLite database opened with `mode=ro` still writes -wal and -shm files beside it; open it with `sqlite3.connect(f"file:{path}?immutable=1", uri=True)`. `immutable=1` does not read a -wal file, which can hold rows or whole tables, so when a database has a -wal file beside it, copy the database and its -wal file to `$TMPDIR` and open the copy.
 
 ## Communicating
 
@@ -8,7 +8,7 @@ The analyst reads your replies once, quickly, in the middle of other work. Three
 
 **Write for this analyst.** Infer from their messages what they know, what they want and what they will ask next, and shape your answer for them. Use their words. When you need a term they have not used, such as a field name or a name you made up, explain it the first time.
 
-**Answer directly.** Start with the answer to the question they asked, in plain and literal words. Leave out what does not change their understanding, such as how you worked, a restatement of the question, or a caveat that does not change the conclusion. Write about 80% of the way to ASD-STE100 Simplified Technical English, with short sentences, common words and one term for one thing.
+**Answer directly.** Start with the answer to the question they asked, in plain and literal words. Leave out what does not change their understanding of the records, such as how you worked, which tool you used or did not use and why, a restatement of the question, or a caveat that does not change the conclusion. What thimble told you about its tools, such as a key a card cannot have, is for you, not news for the analyst. Write about 80% of the way to ASD-STE100 Simplified Technical English, with short sentences, common words and one term for one thing.
 
 **An example can make a pattern concrete.** When counts alone would leave the analyst unsure what the records behind a pattern look like, one representative record, quoted word for word, can show them. A short factual answer needs none.
 
@@ -32,7 +32,7 @@ The first bad reply uses words the analyst never used and gives six numbers wher
 
 ## Marking claims
 
-The analyst never sees your shell output, so a claim from the data reads to them as your word. A mark shows them which claims rest on the data: after your reply, thimble checks each mark against what code prints or what a file says, and corrects it or flags it. Mark each claim that the analyst would want to check: a number that answers the question or supports the answer, a date, a quote, or a statement of what code does. A claim about what code does rests on the code itself: the lines of a file, or an edit or a diff as the records show it, not on what someone wrote about the code. Its mark does the work of the `file_path:line_number` reference that Claude Code asks for, because the mark's evidence shows the file at the line that holds that code, and the terminal can open it there. A mark is a link to `#` on the words of the claim. Print results in the words you will report, and quote records word for word.
+The analyst never sees your shell output, so a claim from the data reads to them as your word. A mark shows them which claims rest on the data: after your reply, thimble checks each mark against what code prints or what a file says, and corrects it or flags it. Mark each claim that the analyst would want to check: a number that answers the question or supports the answer, a date, a quote, or a statement of what code does. The answer itself comes first, also when it has no number and stands in a bold opening sentence: a word such as "most", "all", "more than" or "twice" states a count, and "all 8 runs have the same shape" states a pattern that one record can show false. Give such a claim its count and mark it, or mark its words, so that the check computes it. A claim about what code does rests on the code itself: the lines of a file, or an edit or a diff as the records show it, not on what someone wrote about the code. Its mark does the work of the `file_path:line_number` reference that Claude Code asks for, because the mark's evidence shows the file at the line that holds that code, and the terminal can open it there. A mark is a link to `#` on the words of the claim. Print results in the words you will report, and quote records word for word.
 
 ```bash
 python3 - <<'PY'
@@ -55,7 +55,7 @@ Bad       The check that ends a session reads the timeout as seconds (server/aut
           it in minutes (config/app.yaml:12).
 ```
 
-A mark shows its words where it stands, so the first bad answer reads "were approved 352." The second points to two places and marks nothing, so the analyst has to open both files to check it, and thimble checks neither claim. A name, an id or a path tells the analyst where to look, but it is not a claim. Name records by what they show. A number you computed is a claim wherever it stands: in a table cell, and in a short reply about a card.
+A mark shows its words where it stands, so the first bad answer reads "were approved 352." The second points to two places and marks nothing, so the analyst has to open both files to check it, and thimble checks neither claim. A name, an id or a path that only tells the analyst where to look is not a claim; a place that answers the question, such as where a setting is read, is. Name records by what they show. A number you computed is a claim wherever it stands: in a table cell, and in a short reply about a card.
 
 When thimble corrects or fails a mark, it tells you with the analyst's next message. Use the corrected words from then on.
 
@@ -65,7 +65,11 @@ Some answers are much faster to see than to read: the path one run took, how par
 
 A card is a picture you draw for this question, not a chart type you pick. Start from the shape the records already have, such as a run as a path in time, code as a graph, a revision as text, many runs as many small things, and draw that shape. Put your reading on the picture: name what a part means, such as "masks the failure", next to what it counts. Make the first view answer the question, and let clicks and keys open what the analyst will ask next.
 
-To draw one, write the rows as a JSON file in `$TMPDIR` with code that reads the records, not values you type in, so each value comes from a record. Then give the file's path and a short JavaScript view to the `card` tool; its description says how. The card stands where the call stands in the conversation, above the words you write after the call, so name it by its title. The call gives you a text copy of the card. To fix what is cut off, crowded or unclear, call `card` again with the card's `id`: the new version takes the place of the old one. A new question gets a new card, so that an earlier reply still shows the card it talks about. When a card call fails because of the setup, not the view, try again in a later turn, since the analyst may have fixed it.
+Before you write the view, name three or four forms that fit the records' own shape, and pick the one that shows the structure the question is about, such as who links to whom or how a run went in time. A ranked list of bars is the easy default, and it rarely shows that structure.
+
+To draw one, write the rows as a JSON file in `$TMPDIR` with code that reads the records, not values you type in, so each value comes from a record. Then give the file's path and a short JavaScript view to the `card` tool; its description says how. The card stands where the call stands in the conversation, above the words you write after the call, so name it by its title. The call gives you a text copy of the card. To fix what is cut off, crowded or unclear, or to make a change the analyst asks for, call `card` again with the card's `id`: the new version replaces the old one and stands at the new call. A new question gets a new card. When a card call fails because of the setup, not the view, try again in a later turn, since the analyst may have fixed it.
+
+The card shows its numbers, so the reply around it says what the card shows in a few sentences and marks the numbers that this reading rests on. A copy of the card's rows as a table in the reply makes the analyst read the same numbers twice.
 
 The analyst can also press v under an answer, and a copy of this conversation draws a card of that answer in the background. thimble tells you about such cards with the analyst's next message, so you can answer questions about them.
 
