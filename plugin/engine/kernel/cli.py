@@ -148,6 +148,10 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
     --reason            the model also gives a one-line reason per record
 
+A --prompt label over more than 300 records does not start at once: the analyst is asked first, in the terminal, to
+run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. The
+choices leave the screen once the analyst answers. After a sample, the same command again asks them to run the rest.
+
 The same definition again keeps the values it has and labels only records it has not seen. A --prompt label prints how
 many model calls it makes before they run. The analyst can open a value's records and check a sample of them: what
 they say a record is counts in place of the label's value."""
@@ -161,6 +165,12 @@ def _parse_within(s: str | None) -> tuple[str, str] | None:
     k, v = s.split("=", 1)
     return k.strip(), v.strip()
 
+
+
+def _where_of(lab: dict[str, Any]) -> str:
+    """The files a label reads, as its ask names them: " of revisions.jsonl", or nothing for every file."""
+    g = str(lab.get("in") or "")
+    return f" of {g}" if g and g not in ("*", "**/*") else ""
 
 
 def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
@@ -189,8 +199,22 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
         out.append(f"  the records mix units: {LB.units_said(parts)}; count each unit apart:")
         for v in vals:
             out.append(f"    {v}: " + ", ".join(f"{u['counts'].get(v, 0):,} of the {LB.unit_count(u['n'], u['unit'])}" for u in parts))
-    if s["waiting"]:
-        out.append(f"  {s['waiting']:,} records wait for the model")
+    run = lab.get("run") or {}
+    if run.get("state") == "ask" and (run.get("ask") or {}).get("rest"):
+        out.append(f"  the other {s['waiting']:,} records wait for the analyst's choice: the model reads them "
+                   f"({EST.calls_line((run.get('ask') or {}).get('calls') or 0)}), or none")
+    elif run.get("state") == "ask":
+        out.append(f"  {s['waiting']:,} records wait for the analyst's choice: the model reads all of them "
+                   f"({EST.calls_line((run.get('ask') or {}).get('calls') or 0)}), a random sample of {EST.SAMPLE}, or none")
+    elif s["waiting"]:
+        out.append(f"  {s['waiting']:,} records wait for the model"
+                   + (f" (the analyst chose a random sample of {EST.SAMPLE})" if run.get("chose") == "sample" else ""))
+    if run.get("state") == "cancelled":
+        out.append(f"  the analyst chose not to run it over its {run.get('units') or 0:,} records")
+    rest = int(lab.get("matched") or 0) - s["records"]
+    if lab.get("trial") and lab.get("sampled") == LB.scope_key(lab) and run.get("state") != "ask" and rest > 0:
+        out.append(f"  the analyst chose a random sample; the other {rest:,} records have no value. The same command "
+                   f"without --limit asks the analyst again, to run them or cancel")
     if s["failed"]:
         why = next((u.get("err") for u in (lab.get("units") or {}).values() if u.get("v") is None and u.get("err")), "")
         out.append(f"  {s['failed']:,} records have no value" + (f" ({why})" if why else "")
@@ -259,6 +283,12 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         return 0
     if a.waiting is not None:
         out_json(LB.waiting(st, name, first=a.waiting or None))
+        return 0
+    if a.answer:
+        # the person's choice for a big label's ask (the terminal's ask runs this, as the person); the key that ran
+        # this starts the model's reads itself (labels/use.ts answerAsk), so the feed has no line
+        r = LB.answer_ask(st, name, a.ask or "", a.answer, EST.SAMPLE, a.seed)
+        out_json({"name": name, "choice": r["choice"], "reads": r["reads"], "of": r["of"], **LB.status(_load(st, name))})
         return 0
     if a.answers:
         raw = Path(a.answers).read_text() if a.answers != "-" else stdin_text(5.0)
@@ -329,7 +359,19 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                       _parse_within(a.within), a.limit, a.reason, a.seed)
         lab = _load(st, name)
         s = LB.status(lab)
-        if kind == "prompt" and s["waiting"]:
+        # a big prompt label asks the person first (estimate.py), unless it is a trial or they said yes to this exact
+        # label and scope; the person's key answers with --answer, as the person (labels/use.ts)
+        ask = None
+        if kind == "prompt" and not a.limit and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
+            calls = len(LB.batches(LB.waiting(st, name)["units"]))
+            ask = LB.hold_for_ask(st, name, calls)
+            lab = _load(st, name)
+            # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample
+            st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
+                     "sample": 0 if ask["rest"] else min(EST.SAMPLE, ask["units"]), "rest": ask["rest"],
+                     "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(lab)} with Claude",
+                     "meta": EST.calls_line(ask["calls"])})
+        elif kind == "prompt" and s["waiting"]:
             # the plugin reads the change feed and starts the model's reads beside the session (labels/labels.ts)
             st.emit({"kind": "label", "name": name})
         if a.json:
@@ -341,7 +383,16 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             print(line)
         for e in r["errors"]:
             print(f"  error: {e}")
-        if s["waiting"]:
+        if ask:
+            choices = "run them or cancel" if ask["rest"] else f"run all, run on a random sample of {EST.SAMPLE}, or cancel"
+            print(f"  Not started: the model would read {'the other ' if ask['rest'] else ''}{ask['units']:,} records in "
+                  f"{EST.calls_line(ask['calls'])}, so the analyst is asked first, in the terminal: {choices}. "
+                  f"Their choice reaches you with their next message, and `thimble label {name}` shows it (then the "
+                  f"counts, once the reads end). Answer now from what you have, and say that the label waits for their "
+                  f"choice. The choices leave the screen once they answer, so after that do not point them to a key: "
+                  f"to read more records, run this command again, and the terminal asks again. A trial (--limit N) "
+                  f"never asks.")
+        elif s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {EST.calls_line(calls)} of up to {LB.BATCH_ITEMS} records each, which run "
                   f"beside the session through its own model. `thimble label {name} --wait` waits for them, then "
@@ -353,8 +404,13 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             lab = _load(st, name)
             s = LB.status(lab)
             run = lab.get("run") or {}
-            if not s["waiting"]:
+            if not s["waiting"] or run.get("state") == "cancelled":
                 break
+            if run.get("state") == "ask":
+                # nothing runs before the analyst chooses, so waiting here would only hold up the reply
+                print(f"{name}: waiting for the analyst's choice in the bar; nothing runs until then. "
+                      f"{s['waiting']:,} records wait. Their choice reaches you with their next message.")
+                return 0
             if time.time() - t0 > a.wait:
                 print(f"{name}: still {s['waiting']:,} records waiting after {a.wait:.0f}s; the calls go on beside the session")
                 break
@@ -521,6 +577,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--records", nargs="?", const="*", help=argparse.SUPPRESS)
     p.add_argument("--at", type=int, help=argparse.SUPPRESS)
     p.add_argument("--count", type=int, help=argparse.SUPPRESS)
+    # the person's answer to a big label's ask, which their key in the terminal runs (never Claude's to pass)
+    p.add_argument("--answer", choices=("all", "sample", "cancel"), help=argparse.SUPPRESS)
+    p.add_argument("--ask", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_label)
     p = sub.add_parser("coverage", help="what entered Claude's context and what was only computed over")
     p.add_argument("--all", action="store_true", help="every session, not only this one")
