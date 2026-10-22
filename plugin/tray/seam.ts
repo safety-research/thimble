@@ -1,8 +1,8 @@
 // seam.ts: where the tray (the citation and explanation tray above the prompt) meets the rest of thimble
 // (core/answerview.ts calls each function by name, since Claude Code follows `$` only into functions a file declares or
-// imports). The base leaves each one doing nothing; the feature fills them in, with its own modules beside this file
-// (0.10: shell/tray.js, the tray's pane program panes/tray.js and panes/mark.js, shell.tsx trayBand, stepMark,
-// trayScope). What the person opens reaches main through core/engaged.ts.
+// imports). Each one calls the tray's own module, tray.ts (0.10: shell/tray.js, the tray's pane program panes/tray.js
+// and panes/mark.js, shell.tsx trayBand, stepMark, trayScope), with its pure parts in tray.mjs. What the person opens
+// reaches main through core/engaged.ts.
 //
 //   trayKey($, key, until)             its keys at an empty prompt: ] and [ step through the answers' citations and
 //                                      explainers at rest; while it is open, its own (a taker as hooks/keys.ts takes it)
@@ -19,33 +19,34 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
+import { markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayKey as key } from './tray'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export async function trayKey(_$: Engine, _key: string, _until: number): Promise<Take | null> {
-  return null
+export async function trayKey($: Engine, k: string, _until: number): Promise<Take | null> {
+  return key($, k)
 }
 
-export async function trayBand(_$: Engine, _els: Any, _width: number): Promise<Any[]> {
-  return []
+export async function trayBand($: Engine, els: Any, width: number): Promise<Any[]> {
+  return band($, els, width)
 }
 
-export async function trayBar(_$: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
-  return []
+export async function trayBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  return bar($, on, preview)
 }
 
-export async function trayFocus(_$: Engine, _row: string): Promise<MarkRef | null> {
-  return null
+export async function trayFocus($: Engine, row: string): Promise<MarkRef | null> {
+  return focus($, row)
 }
 
-export async function markPressed(_$: Engine, _row: string, _n: number): Promise<boolean> {
-  return false
+export async function markPressed($: Engine, row: string, n: number): Promise<boolean> {
+  return pressed($, row, n)
 }
 
-export async function openTray(_$: Engine, _mark: MarkRef): Promise<boolean> {
-  return false
+export async function openTray($: Engine, mark: MarkRef): Promise<boolean> {
+  return openOn($, mark)
 }
 
-export const registerTray: Register = () => undefined
+export const registerTray: Register = (on, ctx) => register(on, ctx)
