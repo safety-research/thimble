@@ -487,6 +487,15 @@ const OPS = {
 
 // ------------------------------------------------------------------------------------------------- the socket
 
+// A view's own code can leave a rejected promise or throw from a microtask (a bare `Promise.reject`, an async built-in
+// such as WebAssembly.compile whose rejection no one awaits). Node makes an unhandled rejection or an uncaught
+// exception fatal by default, which would end the one runner for every card in the session. The runner awaits all its
+// own promises and wraps each request in try/catch, so what still reaches here comes from a card's code; it is already
+// contained (the card's own call answered, or will time out), so the process stays up and the card draws on. A card
+// cannot take the runner down this way.
+process.on('unhandledRejection', () => {})
+process.on('uncaughtException', () => {})
+
 function serve(sock) {
   try { fs.unlinkSync(sock) } catch { /* no socket left from an earlier runner */ }
   const server = http.createServer((req, res) => {
