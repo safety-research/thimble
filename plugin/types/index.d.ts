@@ -89,6 +89,12 @@ declare module 'claude-code' {
       answerRowTurn: StateFamily<string>
       /** the answer the person picked for the keys with { and }, or null: the newest */
       answerSel: string | null
+
+      // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
+      /** { v, session, updated, claims, clusters, gaps, folder?, folderAsked? } (claims/store.js) */
+      claims: unknown
+      /** the folder's estimate for its map, read again after a few minutes: { root, at, value } (claims/estimate.mjs) */
+      claimsOffer: { root: string; at: number; value: unknown } | null
     }
   }
 }
