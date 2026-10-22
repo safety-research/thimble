@@ -91,12 +91,15 @@ export function wrapCode(code: string, width: number): string {
   }).join('\n')
 }
 
-/** One cited place: `path:line`, then its lines, the cited ones in full color. */
+/** One cited place: `path:line` of the line that holds the words (the terminal opens it there), with the cited
+ *  range when it is wider, then its lines, the cited ones in full color. */
 function placeRows(els: Any, p: Place, key: string): Any[] {
   const { Box, Text } = els
   const gutter = Math.max(...p.lines.map(l => String(l.n).length))
+  const hit = p.lines.find(l => l.highlight && inRange(l.n, p.line))?.n
+  const at = hit !== undefined && String(hit) !== p.line ? `${p.file}:${hit}` : `${p.file}:${p.line}`
   return [
-    Text({ key: `${key}at`, bold: true, wrap: 'wrap', children: `${p.file}:${p.line}` }),
+    Text({ key: `${key}at`, wrap: 'wrap', children: [Text({ key: 'a', bold: true, children: at }), ...(at.endsWith(`:${p.line}`) ? [] : [Text({ key: 'r', dimColor: true, children: `  (cited lines ${p.line})` })])] }),
     ...p.lines.map(l => Box({ key: `${key}l${l.n}`, flexDirection: 'row', children: [
       Text({ dimColor: true, children: `${String(l.n).padStart(gutter)} ${l.decoded ? '›' : '│'} ` }),
       Box({ flexShrink: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't') : Text({ wrap: 'wrap', dimColor: !inRange(l.n, p.line), children: l.text || ' ' })] }),
@@ -110,7 +113,8 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
     return [
       Text({ key: 'oh', bold: true, children: ev.by === 'main' ? 'Output of the code Claude ran for the reply' : 'Output of the code the check ran' }),
       Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight) }),
-      Text({ key: 'ch', bold: true, children: 'The code' }),
+      Text({ key: 'ch', bold: true, children: ' ' }),
+      Text({ key: 'ch2', bold: true, children: 'The code' }),
       Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),
     ]
   }
@@ -132,12 +136,12 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const st = STATUS[unconfirmed ? 'unconfirmed' : m.status] ?? STATUS.unchecked!
   const head = Text({ key: 'head', wrap: 'wrap', children: [
     Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
-    Text({ key: 'w', children: `  ${m.shown}` }),
+    Text({ key: 'w', children: `  ${m.shown.replace(/\*\*|`/g, '')}` }),
   ] })
   const rows: Any[] = [head]
-  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `was ${m.was}` }))
+  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `was ${m.was.replace(/\*\*|`/g, '')}` }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: m.reason }))
-  if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'warning', children: `The rest of the sentence: ${m.note}` }))
+  if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   // the sentence as the person read it, the mark's own words in bold
   const sentence = plainSentence(m.sentence)
   const at = sentence.indexOf(m.words.replace(/`/g, ''))

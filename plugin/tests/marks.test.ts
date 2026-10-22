@@ -16,7 +16,7 @@ type Any = any
 const FORK = 'a0f0e0d0c0b0a0901'
 const REPLY = 'Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it"](#).'
 const VALIDATED = { parsed: true, results: [
-  { n: 1, status: 'verified', shown: '40', reason: 'counted' },
+  { n: 1, status: 'verified', shown: '40', reason: 'counted', note: 'agent-07 merged none of them alone: agent-02 approved each one.' },
   { n: 2, status: 'corrected', shown: '12 of 40', was: '15 of 40', reason: 'agent-07 merged 12' },
   { n: 3, status: 'failed', shown: '"ship it"', reason: 'no record holds these words' },
 ] }
@@ -80,7 +80,7 @@ async function drawn($: Any): Promise<string> {
   const marks = marksIn(REPLY)
   const looks = marks.map((_m: Any, k: number) => ({ n: k + 1, status: reply!.items[k]!.status, shown: reply!.items[k]!.shown }))
   const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
-  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking ? reply!.total : 0, wrong: reply!.wrong, unconfirmed: reply!.unconfirmed, corrected: reply!.corrected, unchecked: reply!.unchecked })
+  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking ? reply!.total : 0, wrong: reply!.wrong, unconfirmed: reply!.unconfirmed, corrected: reply!.corrected, unchecked: reply!.unchecked, notes: reply!.notes })
   return textOf(body) + '\n' + textOf(foot)
 }
 
@@ -103,10 +103,15 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(settled).toContain('merged 12 of 40.')
   expect(settled).toContain('"ship it" ×')
   expect(settled).toContain('1 mark wrong · 1 corrected')
+  // the note on the first sentence, once, under the reply
+  expect(settled.split('agent-02 approved each one').length).toBe(2)
+  expect(settled).toContain('× agent-07 merged none of them alone')
   expect(settled).not.toContain('checking')
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('"15 of 40" is corrected to "12 of 40"')
   expect(told).toContain('"ship it" is marked as wrong: no record holds these words')
+  expect(told).toContain('- agent-07 merged none of them alone: agent-02 approved each one.')
+  expect(told).toContain('would tell them twice')
   expect(await fixLineNow($)).toBe(null)
 })
 
@@ -129,13 +134,19 @@ test('the checker reads only: Read, Grep, Glob and Bash, never Edit or Write', (
   expect(['Edit', 'Write', 'NotebookEdit', 'Agent'].some(allowedTool)).toBe(false)
 })
 
-test('a reply with many marks is split between forks, a sentence never across two', () => {
-  const items = Array.from({ length: 25 }, (_, i) => ({ n: i + 1, words: String(i), start: 0, end: 0, sentence: `s${Math.floor(i / 3)}`, status: 'checking' as const, shown: String(i) }))
+test('a reply with many marks is split between forks of about equal size, a sentence in one share up to its size', () => {
+  const mark = (i: number, sentence: string) => ({ n: i + 1, words: String(i), start: 0, end: 0, sentence, status: 'checking' as const, shown: String(i) })
+  const items = Array.from({ length: 25 }, (_, i) => mark(i, `s${Math.floor(i / 3)}`))
   const shares = splitMarks(items)
   expect(shares.length).toBe(Math.ceil(25 / PER_FORK))
   expect(shares.flat().map(m => m.n)).toEqual(items.map(m => m.n))
   for (let k = 1; k < shares.length; k++) expect(shares[k]![0]!.sentence).not.toBe(shares[k - 1]!.at(-1)!.sentence)
   expect(splitMarks(items.slice(0, PER_FORK)).length).toBe(1)
+  // one mark, then a sentence of four, then one of six: no share of one beside a share of six
+  const uneven = [mark(0, 'a'), ...[1, 2, 3, 4].map(i => mark(i, 'b')), ...[5, 6, 7, 8, 9, 10].map(i => mark(i, 'c'))]
+  const sizes = splitMarks(uneven).map(s => s.length)
+  expect(sizes.reduce((a, b) => a + b, 0)).toBe(11)
+  expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(3)
 })
 
 test('two checker forks that end at the same moment both settle their marks', async () => {

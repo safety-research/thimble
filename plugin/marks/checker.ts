@@ -23,7 +23,7 @@ import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
 import { marksIn, sentenceOf } from './message.js'
-import { counts, editReply, type MarkItem, type MarkStatus, newReply, type Reply, replyOf } from './store'
+import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, type Reply, replyOf } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -85,17 +85,24 @@ async function giveUp($: Engine, c: Check, why: string, now: number): Promise<vo
 }
 
 /** The marks split into the forks' shares, in order: one share up to PER_FORK marks, else as many as PER_FORK gives
- *  (at most MAX_FORKS), of about equal size, and the marks of one sentence always in one share. */
+ *  (at most MAX_FORKS), of about equal size. The marks of one sentence stay in one share up to a share's size, since a
+ *  fork writes the notes on its sentences; each run of a sentence's marks goes to the share its middle falls in. */
 export function splitMarks<M extends { sentence: string }>(items: M[]): M[][] {
   const k = Math.min(MAX_FORKS, Math.max(1, Math.ceil(items.length / PER_FORK)))
   const size = Math.ceil(items.length / k)
-  const out: M[][] = [[]]
+  const runs: M[][] = []
   for (const m of items) {
-    const cur = out[out.length - 1]!
-    if (cur.length >= size && cur[cur.length - 1]!.sentence !== m.sentence && out.length < k) out.push([m])
-    else cur.push(m)
+    const run = runs[runs.length - 1]
+    if (run && run[0]!.sentence === m.sentence && run.length < size) run.push(m)
+    else runs.push([m])
   }
-  return out
+  const out: M[][] = Array.from({ length: k }, () => [])
+  let before = 0
+  for (const run of runs) {
+    out[Math.min(k - 1, Math.floor(((before + run.length / 2) * k) / items.length))]!.push(...run)
+    before += run.length
+  }
+  return out.filter(s => s.length)
 }
 
 /** At the end of one of main's turns: when its reply holds marks, the reply's marks go in the store, and the checker
@@ -171,9 +178,9 @@ async function python($: Engine): Promise<string> {
   return (await $.fs.exists(venv)) ? venv : 'python3'
 }
 
-/** What main reads with the person's next prompt: each mark the check corrected or flagged, as the person reads it,
- *  and what the check found wrong in a sentence outside its marks. A mark whose evidence did not hold is not shown to
- *  be wrong, and main hears it that way. */
+/** What main reads with the person's next prompt: each mark the check corrected or flagged, and each note, as the
+ *  person reads them. The person has read them in the reply, so main uses them from now on and need not say them
+ *  again. A mark whose evidence did not hold is not shown to be wrong, and main hears it that way. */
 export function tellText(items: MarkItem[]): string {
   const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
   const said = items.filter(m => m.status === 'corrected' || m.status === 'failed').map(m => {
@@ -181,12 +188,12 @@ export function tellText(items: MarkItem[]): string {
     if (m.failedBy === 'evidence') return `- ${q(m.words)} is marked as not confirmed: the check could not show it from the data`
     return `- ${q(m.words)} is marked as wrong${m.reason ? `: ${m.reason}` : ''}`
   })
-  const seen = new Set<string>()
-  const notes = items.filter(m => m.note && !seen.has(m.sentence) && seen.add(m.sentence)).map(m => `- In "${m.sentence}": ${m.note}`)
+  const notes = notesOf(items).map(n => `- ${n}`)
   if (!said.length && !notes.length) return ''
   const parts = ['thimble checked the marks of your last reply against the data.']
-  if (said.length) parts.push(`The analyst now sees these changes in it:\n${said.join('\n')}\nUse the corrected words from now on. A claim marked as wrong is wrong as the check read the data. A claim the check could not confirm may still be true: when you need it again, check it first.`)
-  if (notes.length) parts.push(`The check also found these statements wrong, which no mark carried, so the analyst does not see a flag on them:\n${notes.join('\n')}\nCorrect them for the analyst when you next write about them.`)
+  if (said.length) parts.push(`The analyst sees these changes in the reply:\n${said.join('\n')}`)
+  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its unmarked statements:\n${notes.join('\n')}`)
+  parts.push('Use the corrected facts from now on. The analyst has read these where they stand, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
   return parts.join('\n')
 }
 
@@ -215,7 +222,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     const plugin = $.plugin.root.replace(/\/+$/, '')
     const ran = await $.process.run([await python($), `${plugin}/engine/validate.py`], {
       cwd: c.cwd, timeoutMs: 120000,
-      stdin: JSON.stringify({ cwd: c.cwd, root: c.root, marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
+      stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: (await $.env.get('TMPDIR')) || null, marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
     })
     let out: { parsed: boolean; results: Any[] } | null = null
     try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }

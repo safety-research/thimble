@@ -4,14 +4,15 @@
 //   messageEl(els, o)  one text block of a reply: each block of its markdown that holds marks laid out here, each mark a
 //                      press with its status drawn on it; every other run of blocks drawn by Claude Code's own Markdown,
 //                      so paragraphs, lists, code and tables look as in any reply
-//   footerEl(els, o)   the line under a reply's last block while its marks are checked, or when the check changed or
-//                      flagged some
+//   footerEl(els, o)   the lines under a reply's last block while its marks are checked, or when the check changed or
+//                      flagged some or found a statement no mark carries false (a note)
 //
 // A mark's look by its status:
 //   pending      the turn still runs: purple, underlined
 //   checking     purple, underlined, and a turning glyph right after it
 //   verified     purple, underlined
-//   corrected    the corrected words in place of the marked ones, purple, underlined (the footer counts them)
+//   corrected    the corrected words in place of the marked ones, in the warning color, underlined (the footer counts
+//                them), so a changed claim stands out from the ones that held
 //   failed       wrong as the check read the data: red, with ` ×` after it
 //   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
 //   unchecked    underlined in the text's color: no check could run
@@ -82,6 +83,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   else if (look.status === 'failed') p.color = 'error'
   else if (look.status === 'unconfirmed') p.color = 'warning'
   else if (look.status === 'unchecked') p.underline = true
+  else if (look.status === 'corrected') { p.color = 'warning'; p.underline = true }
   else { p.color = PURPLE; p.underline = true }
   const label = `mark ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   return els.Button({ key, plain: true, label, hover: { bold: true }, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
@@ -205,15 +207,17 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
 }
 
-export type FooterOpts = { key: string; checking: number; wrong: number; unconfirmed: number; corrected: number; unchecked: number; spin: string }
+export type FooterOpts = { key: string; checking: number; wrong: number; unconfirmed: number; corrected: number; unchecked: number; notes?: string[]; spin: string }
 
-/** The line under a reply's last block: `checking 12 marks` while the check runs; afterwards, when there are any,
- *  `1 mark wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim; nothing when
- *  every mark was verified as written. */
+/** The lines under a reply's last block: `checking 12 marks` while the check runs; afterwards, when there are any,
+ *  `1 mark wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim, then each
+ *  note, a statement of the reply that no mark carried and the check found false, after a red ×; nothing when every
+ *  mark was verified as written and no note came. */
 export function footerEl(els: Any, o: FooterOpts): Any | null {
   const { Box, Text } = els
   const marks = (n: number) => `${n} mark${n === 1 ? '' : 's'}`
   const parts: Any[] = []
+  const notes: Any[] = []
   if (o.checking) parts.push(Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${marks(o.checking)}` }))
   else {
     const said: [string, number, Any][] = [['wrong', o.wrong, { color: 'error' }], ['not confirmed', o.unconfirmed, { color: 'warning' }], ['corrected', o.corrected, { dimColor: true }], ['not checked', o.unchecked, { dimColor: true }]]
@@ -222,7 +226,10 @@ export function footerEl(els: Any, o: FooterOpts): Any | null {
       if (parts.length) parts.push(Text({ key: `s${parts.length}`, dimColor: true, children: ' · ' }))
       parts.push(Text({ key: word, ...style, children: `${parts.length ? n : marks(n)} ${word}` }))
     }
+    for (const [k, note] of (o.notes ?? []).entries()) {
+      notes.push(Box({ key: `n${k}`, flexDirection: 'row', children: [Text({ color: 'error', children: '× ' }), Box({ flexShrink: 1, children: [Text({ wrap: 'wrap', children: note })] })] }))
+    }
   }
-  if (!parts.length) return null
-  return Box({ key: o.key, marginLeft: 2, flexDirection: 'row', children: parts })
+  if (!parts.length && !notes.length) return null
+  return Box({ key: o.key, marginLeft: 2, flexDirection: 'column', children: [...(parts.length ? [Box({ key: 'counts', flexDirection: 'row', children: parts })] : []), ...notes] })
 }
