@@ -206,3 +206,11 @@ def test_a_quote_comes_from_the_records_its_numbers_with_it():
     assert r["status"] == "failed" and "quoted words" in r["reason"]
     found = read.replace('print(c.execute("select body from reports").fetchone()[0])', 'body = c.execute("select body from reports").fetchone()[0]\nif "merged 6 PRs: #107" in body: print("merged 6 PRs: #107")')
     assert check_mark(mark('"merged 6 PRs: #107"'), computed(found), [call(found, "merged 6 PRs: #107")], "/data")["status"] == "verified"
+
+
+def test_a_path_shows_from_the_folder_the_session_started_in(tmp_path: Path):
+    (tmp_path / "plugin" / "engine").mkdir(parents=True)
+    (tmp_path / "plugin" / "engine" / "labels.py").write_text("UNIT_CHARS = 4_000\n")
+    # the shell had moved into plugin/, so the checker named the file from there
+    r = check_mark(mark("4,000 characters"), quote("engine/labels.py", 1, "UNIT_CHARS = 4_000", kind="code"), [], str(tmp_path / "plugin"), str(tmp_path))
+    assert r["status"] == "verified" and r["evidence"]["file"] == "plugin/engine/labels.py"
