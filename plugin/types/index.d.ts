@@ -62,6 +62,9 @@ declare module 'claude-code' {
       /** goes up when a label changes (Claude's `thimble label` command, a wave of the model's reads, the person's
        *  check): the labels pane reads the labels again (labels/labels.ts) */
       labelGen: number
+      /** the ask before a large label run that waits for the person's choice (labels/use.ts): { root, name, ask, text,
+       *  meta, units, sample, rest }, or null */
+      labelAsk: { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean } | null
 
       // ---- core (core/)
       /** what the side pane shows (core/pane.ts) */

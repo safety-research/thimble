@@ -30,7 +30,7 @@ export type LabelsArgs = { label?: string; value?: string; at?: number; sel?: st
 /** The values' colors, the first value's first; a record with no value yet is drawn in the theme's inactive gray. */
 const COLORS = ['#5aa2e6', '#cfae7e', '#8fa1bd', '#e384b2', '#b2c24f', '#a98be0', '#3cc2b9']
 const NONE = '-'
-const colorOf = (values: string[], v: string) => (v === NONE ? 'inactive' : COLORS[Math.max(0, values.indexOf(v)) % COLORS.length]!)
+export const colorOf = (values: string[], v: string) => (v === NONE ? 'inactive' : COLORS[Math.max(0, values.indexOf(v)) % COLORS.length]!)
 
 const n = (x: unknown) => Number(x || 0).toLocaleString('en-US')
 const width = textWidth
