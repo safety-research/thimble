@@ -1,7 +1,6 @@
-// A frame opened from its deck collapses again only at a click on the bare board, in a real browser with the real
-// Canvas (src/canvas/Canvas.tsx collapsePeeked). A click on a card, in the frame or out of it and including the card a
-// thread is about, leaves it open; a click on a deck still opens that deck; the frame's title still opens and closes
-// it.
+// Only the person collapses or opens a frame, in a real browser with the real Canvas (src/canvas/Canvas.tsx). A frame
+// the person collapsed opens at a click on its deck or its title and then stays open: a click on the bare board or on
+// another card collapses nothing. The title collapses it again, and the browser keeps the frames collapsed so.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -24,7 +23,7 @@ const CANVAS = {
 
 beforeAll(async () => {
   const script = await bundle(
-    'canvas-peek',
+    'canvas-open',
     [`import '${src('styles/index.css')}'`, `import { createRoot } from 'react-dom/client'`, `import { Canvas } from '${src('canvas/Canvas.tsx')}'`, `createRoot(document.getElementById('root')!).render(<Canvas ws="w" active={true} />)`],
     { loader: { '.css': 'css', '.woff2': 'empty', '.woff': 'empty' }, conditions: ['style'] },
   )
@@ -43,9 +42,9 @@ beforeAll(async () => {
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
-  // Your work open, the thread's frame and Notes collapsed, the board at 50% from its origin
+  // the thread's frame and Notes collapsed by the person, Your work open, the board at 50% from its origin
   await page.evaluate(() => {
-    localStorage.setItem('thimble:w:canvas-open', JSON.stringify(['g']))
+    localStorage.setItem('thimble:w:canvas-shut', JSON.stringify(['t', 'h']))
     localStorage.setItem('thimble:w:canvas-view', JSON.stringify({ x: 0, y: 0, scale: 0.5 }))
   })
   await page.addScriptTag({ path: script })
@@ -71,37 +70,34 @@ async function clickBoard() {
   await page.waitForTimeout(150)
 }
 
-test('a click on a card, including the card the thread is about, leaves a frame opened from its deck open', async () => {
+const shut = () => page.evaluate(() => JSON.parse(localStorage.getItem('thimble:w:canvas-shut') ?? '[]') as string[])
+
+test('a frame opened from its deck stays open at a click on a card or on the bare board', async () => {
   assert.equal(await isOpen('t'), false, "the thread's frame starts collapsed")
+  assert.equal(await isOpen('g'), true, 'a frame the person did not collapse is open')
   await clickCard('t1')
   assert.equal(await isOpen('t'), true, 'a click on the deck opens it')
   await clickCard('a')
-  assert.equal(await isOpen('t'), true, 'a click on the card the thread is about leaves it open')
   await clickCard('b')
-  assert.equal(await isOpen('t'), true, 'a click on another card of the frame around it leaves it open')
+  assert.equal(await isOpen('t'), true, 'a click on another card leaves it open')
   await clickCard('d')
   assert.equal(await isOpen('h'), true, 'a click on another deck opens that deck')
-  assert.equal(await isOpen('t'), true, 'and leaves the first one open')
-})
-
-test('a click on the bare board collapses the frames opened from their decks', async () => {
   await clickBoard()
-  assert.equal(await isOpen('t'), false)
-  assert.equal(await isOpen('h'), false)
-  assert.equal(await isOpen('g'), true, 'a frame opened by its title stays open')
+  assert.equal(await isOpen('t'), true, 'a click on the bare board leaves it open')
+  assert.equal(await isOpen('h'), true)
+  assert.deepEqual(await shut(), [], 'the browser keeps them open')
 })
 
-test("a frame's title still opens and closes it", async () => {
-  await clickCard('t1')
-  assert.equal(await isOpen('t'), true)
+test("a frame's title closes and opens it, and the browser keeps that", async () => {
   await page.click('[data-group="t"] > .frame-title .frame-name')
   await page.waitForTimeout(400)
   assert.equal(await isOpen('t'), false, 'its title closes it')
+  assert.deepEqual(await shut(), ['t'])
+  await clickBoard()
+  await clickCard('a')
+  assert.equal(await isOpen('t'), false, 'a click elsewhere does not open it')
   await page.click('[data-group="t"] > .frame-title .frame-name')
   await page.waitForTimeout(400)
   assert.equal(await isOpen('t'), true, 'and opens it again')
-  await page.click('[data-group="h"] > .frame-title .frame-name')
-  await page.waitForTimeout(400)
-  assert.equal(await isOpen('h'), true)
-  assert.equal(await isOpen('t'), true, "another frame's title leaves it open")
+  assert.deepEqual(await shut(), [])
 })

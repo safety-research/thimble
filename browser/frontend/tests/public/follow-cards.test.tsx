@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // Following Claude's cards (src/lib/follow.ts): a card Claude makes during a turn shows the canvas and the card, unless
-// the person is busy; a deck Claude writes opens while it is written (src/canvas/Canvas.tsx).
+// the person is busy; frames are open by default, and a frame the person collapsed stays collapsed while Claude writes
+// into it (src/canvas/Canvas.tsx).
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { Canvas } from '../../src/canvas/Canvas.tsx'
 import { dispatch } from '../../src/lib/events.ts'
@@ -70,8 +71,6 @@ describe('a deck Claude writes', () => {
   let data: CanvasResponse
   beforeEach(() => {
     localStorage.clear()
-    // both decks stored as collapsed: nothing kept open in this browser
-    localStorage.setItem('thimble:ws:canvas-open', JSON.stringify([]))
     data = { groups: [group('g1', 'Deploys'), group('g2', 'Other')], cells: [cell('a', 'g1'), cell('b', 'g2', 'user')] }
     vi.stubGlobal('fetch', async (url: string) => {
       const body = String(url).endsWith('/canvas') ? data : String(url).includes('/chats') ? [] : {}
@@ -82,29 +81,32 @@ describe('a deck Claude writes', () => {
     unmountAll()
     vi.unstubAllGlobals()
   })
-  const opened = () => JSON.parse(localStorage.getItem('thimble:ws:canvas-open') ?? '[]') as string[]
+  const isOpen = (g: string) => document.querySelector(`[data-group="${g}"] > .frame-title .frame-chev.is-open`) != null
+  const shut = () => JSON.parse(localStorage.getItem('thimble:ws:canvas-shut') ?? '[]') as string[]
 
-  test('opens while Claude writes it; a card the person made leaves its deck as it was', async () => {
+  test('every frame is open by default and stays open while Claude writes into it', async () => {
     await mount(<Canvas ws="ws" active={false} />)
     await settle()
-    expect(opened()).toEqual([])
-    // Claude adds a card to Deploys: the board is read again and the deck opens
+    expect([isOpen('g1'), isOpen('g2')]).toEqual([true, true])
+    data = { ...data, cells: [...data.cells, cell('c', 'g1'), cell('d', 'g2')] }
+    dispatch({ type: 'cell', op: 'created', cell: 'c', by: 'main', notebook: 'g1' })
+    dispatch({ type: 'cell', op: 'created', cell: 'd', by: 'main', notebook: 'g2' })
+    await reread()
+    await settle()
+    expect([isOpen('g1'), isOpen('g2')]).toEqual([true, true])
+    expect(shut()).toEqual([])
+  })
+
+  test('a frame the person collapsed stays collapsed while Claude writes into it', async () => {
+    localStorage.setItem('thimble:ws:canvas-shut', JSON.stringify(['g1']))
+    await mount(<Canvas ws="ws" active={false} />)
+    await settle()
+    expect([isOpen('g1'), isOpen('g2')]).toEqual([false, true])
     data = { ...data, cells: [...data.cells, cell('c', 'g1')] }
     dispatch({ type: 'cell', op: 'created', cell: 'c', by: 'main', notebook: 'g1' })
     await reread()
     await settle()
-    expect(opened()).toContain('g1')
-    // the person adds a card to Other: it stays collapsed
-    data = { ...data, cells: [...data.cells, cell('d', 'g2', 'user')] }
-    dispatch({ type: 'cell', op: 'created', cell: 'd', by: 'user', notebook: 'g2' })
-    await reread()
-    await settle()
-    expect(opened()).not.toContain('g2')
-    // the history the stream replays on load opens nothing
-    data = { ...data, cells: [...data.cells, cell('e', 'g2')] }
-    dispatch({ type: 'cell', op: 'created', cell: 'e', by: 'main', notebook: 'g2' }, true)
-    await reread()
-    await settle()
-    expect(opened()).not.toContain('g2')
+    expect([isOpen('g1'), isOpen('g2')]).toEqual([false, true])
+    expect(shut()).toEqual(['g1'])
   })
 })

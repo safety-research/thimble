@@ -85,8 +85,6 @@ beforeAll(async () => {
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
-  // the frame open, as the analyst leaves it once they open it (a collapsed frame draws its first card alone)
-  await page.evaluate(() => localStorage.setItem('thimble:w:canvas-open', JSON.stringify(['g'])))
   await page.addScriptTag({ path: script })
   await page.waitForSelector('[data-cell="plan1"]')
   // the plan's step rows, drawn as a plan card draws them: a row per step carrying its anchor

@@ -103,11 +103,11 @@ const visible = (sel: string) => page.evaluate((s) => {
   return !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
 }, sel)
 
-test("Your work starts open on the first load, with nothing kept in the browser", async () => {
+test("Your work is open on the first load, with nothing kept in the browser", async () => {
   assert.equal(await page.locator('[data-group="g"] .frame-chev.is-open').count(), 1, 'the analyst\'s frame is open')
   const [plan, box] = await page.evaluate(() => ['plan1', 'box1'].map((id) => document.querySelector(`[data-cell="${id}"]`)!.getBoundingClientRect().toJSON()))
   assert.ok(plan.bottom <= box.top, `its second card stands below the first, not under it: ${plan.bottom} vs ${box.top}`)
-  assert.deepEqual(JSON.parse((await page.evaluate(() => localStorage.getItem('thimble:w:canvas-open')))!), ['g'])
+  assert.equal(await page.evaluate(() => localStorage.getItem('thimble:w:canvas-shut')), null, 'nothing is kept collapsed')
 })
 
 test("each comment shows its check's name in the check's color and its statement, its details folded, on both surfaces", async () => {

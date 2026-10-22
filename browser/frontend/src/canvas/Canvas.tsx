@@ -3,8 +3,8 @@
 // writes every change through the notebook routes before re-reading. With no view kept it opens on the orientation's
 // deck; a switch to the tab while it has its dot lands by landing.ts. Every card carries `data-anchor`, so ⌘-click
 // reaches it. The comments the checks over the cards leave sit beside the cards (CommentLayer.tsx), and the top bar's
-// Comments lists those checks with their switches (Controls.tsx, report/Checks.tsx CheckRows). A plan card main adds
-// opens the frames it is in, so the next phase's plan shows below the finished one.
+// Comments lists those checks with their switches (Controls.tsx, report/Checks.tsx CheckRows). Frames are open by
+// default; only the person collapses or opens one, and the browser keeps the frames they collapsed.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ChipContext } from '../chat/markdown'
 import { readSeen } from '../chat/seen'
@@ -31,7 +31,6 @@ import { NO_FILTER, activeParts, bothKeep, cardParts, keepShown, keptBy, readFil
 import { useChecks } from '../report/Checks'
 import { CellCard, type CardAction, type CardField, type Edge } from './Cell'
 import { CommentLayer, shownCanvasComments, useCanvasComments } from './CommentLayer'
-import { newPlans } from './plan'
 import { conceptName, useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
 import { Controls, type CanvasLabel } from './Controls'
@@ -170,10 +169,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [keep, setKeep] = useState<Set<string> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
-  const openKey = storageKey(ws, 'canvas-open')
-  const [open, setOpenState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(openKey, [])))
-  // no frame kept open or shut yet in this browser: the analyst's own frame, Your work, opens on the first read
-  const firstOpen = useRef(readStorage<string[] | null>(openKey, null) == null)
+  // the frames the person collapsed with a click on their title, kept in this browser: every other frame is open, and
+  // only the person collapses or opens one (nothing Claude writes, no click elsewhere, no teleport)
+  const shutKey = storageKey(ws, 'canvas-shut')
+  const [shut, setShutState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(shutKey, [])))
+  const open = useMemo<ReadonlySet<string>>(() => new Set((data?.groups ?? []).map((g) => g.id).filter((g) => !shut.has(g))), [data, shut])
   // the card filter as the analyst sets it, shown at once; the server's canvas filter holds it (filters, loadFilters)
   const [cardFilter, setCardFilterState] = useState<CardFilter>(NO_FILTER)
   const viewKey = storageKey(ws, 'canvas-view')
@@ -212,22 +212,27 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const vp = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setOpenState(new Set(readStorage<string[]>(openKey, [])))
-    firstOpen.current = readStorage<string[] | null>(openKey, null) == null
-  }, [openKey])
+    setShutState(new Set(readStorage<string[]>(shutKey, [])))
+  }, [shutKey])
   useEffect(() => {
     const kept = readView(viewKey)
     placed.current = kept != null
     setViewState(kept ?? DEFAULT_VIEW)
   }, [viewKey])
-  const setOpen = useCallback(
+  const setShut = useCallback(
     (f: (cur: ReadonlySet<string>) => ReadonlySet<string>) =>
-      setOpenState((cur) => {
+      setShutState((cur) => {
         const next = f(cur)
-        writeStorage(openKey, [...next])
+        if (next === cur) return cur
+        writeStorage(shutKey, [...next])
         return next
       }),
-    [openKey],
+    [shutKey],
+  )
+  /** opens frames the person collapsed, at the person's own action (a click on the deck, a ref they followed) */
+  const openFrames = useCallback(
+    (ids: readonly string[]) => setShut((cur) => (ids.some((g) => cur.has(g)) ? new Set([...cur].filter((g) => !ids.includes(g))) : cur)),
+    [setShut],
   )
   const setView = useCallback(
     (f: View | ((v: View) => View)) =>
@@ -394,26 +399,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     return { ...board, cells, cellById: new Map(cells.map((c) => [c.id, c] as const)) }
   }, [board, sizing])
   const lay = useMemo(() => (shownBoard ? layoutBoard(shownBoard, open, heights) : null), [shownBoard, open, heights])
-  // a plan card main just added, such as the next phase's plan after a finished one, opens the frames it is in, so it
-  // shows below the cards before it rather than under the first card of a collapsed frame
-  const drawnCells = useRef<Set<string> | null>(null)
-  useEffect(() => {
-    drawnCells.current = null
-  }, [ws])
-  useEffect(() => {
-    if (!data || !firstOpen.current) return
-    const own = analystGroup(data.groups)
-    if (!own) return
-    firstOpen.current = false
-    setOpen((cur) => (cur.has(own.id) ? cur : new Set([...cur, own.id])))
-  }, [data, setOpen])
-  useEffect(() => {
-    if (!data || !board) return
-    const fresh = newPlans(data.cells, drawnCells.current)
-    drawnCells.current = new Set(data.cells.map((c) => c.id))
-    const shut = [...new Set(fresh.flatMap((id) => framesAbove(board, id)))].filter((g) => !open.has(g))
-    if (shut.length) setOpen((cur) => new Set([...cur, ...shut]))
-  }, [data, board, open, setOpen])
   // the box the comments beside the cards cover (CommentLayer), which Fit, the minimap and the Content pill take in
   const [noteBox, setNoteBox] = useState<Rect | null>(null)
   const content = useMemo(() => (lay ? extentOf([...lay.rects.values(), ...(noteBox ? [noteBox] : [])]) : null), [lay, noteBox])
@@ -484,37 +469,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const live = useRef({ data, board, lay, view, sel, open, heights })
   live.current = { data, board, lay, view, sel, open, heights }
 
-  // frames opened by a click on their collapsed deck or by a teleport (not by their title): each collapses again at a
-  // click on the bare board outside it, never at a click on a card or a frame's title. Kept for the page's life only.
-  const peeked = useRef<Set<string>>(new Set())
-  const peek = (ids: string[]) => {
-    for (const g of ids) peeked.current.add(g)
-    setOpen((cur) => new Set([...cur, ...ids]))
-  }
-  /** collapses the peeked frames that do not hold `at` (a frame, or null for the bare board) */
-  const collapsePeeked = (at: string | null) => {
-    const b = live.current.board
-    if (!b || !peeked.current.size) return
-    const drop = [...peeked.current].filter((g) => !(at && isWithin(b, at, g)))
-    if (!drop.length) return
-    for (const g of drop) peeked.current.delete(g)
-    track('ui-click', { target: drop.map((g) => `group:${g}`).join(','), detail: { action: 'collapse', via: 'outside' } })
-    setOpen((cur) => new Set([...cur].filter((g) => !drop.includes(g))))
-  }
-  // a deck Claude is writing opens while it is written: each card Claude makes opens the collapsed frames it is in once
-  // the re-read board holds it, as a click on the deck would (peek), so it collapses again at a click outside it
-  const written = useRef<Set<string>>(new Set())
-  useEffect(() => {
-    if (!board || !written.current.size) return
-    const shut: string[] = []
-    for (const id of [...written.current]) {
-      if (!board.cellById.has(id)) continue
-      written.current.delete(id)
-      for (const g of framesAbove(board, id)) if (!open.has(g) && !shut.includes(g)) shut.push(g)
-    }
-    if (shut.length) peek(shut)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, open])
   const planeAt = (clientX: number, clientY: number): Pos => {
     const r = vp.current!.getBoundingClientRect()
     return toPlane(live.current.view, clientX - r.left, clientY - r.top)
@@ -660,13 +614,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       setMarquee(null)
       const { board: b, lay: l, open: o } = live.current
       if (big || !b || !l) return
-      // a click on the bare board outside a frame its deck opened collapses it; a click on a collapsed frame (the edges
-      // of its deck among it) opens it
+      // a click on a collapsed frame (the edges of its deck among it) opens it; a click on the bare board collapses none
       const g = frameAt(b, l, p0)
-      collapsePeeked(g)
       if (g && !o.has(g)) {
         track('ui-click', { target: `group:${g}`, detail: { action: 'expand', via: 'region' } })
-        peek([g])
+        openFrames([g])
       }
     }
     window.addEventListener('mousemove', mv)
@@ -724,7 +676,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       // frame's card it opens the frame
       if (bc.parent && !live.current.open.has(bc.parent)) {
         track('ui-click', { target: `group:${bc.parent}`, detail: { action: 'expand', via: 'card' } })
-        peek([bc.parent])
+        openFrames([bc.parent])
       }
     }
     window.addEventListener('mousemove', mv)
@@ -825,12 +777,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       clickTimer.current = window.setTimeout(() => {
         clickTimer.current = null
         clickOn.current = null
-        peeked.current.delete(gid)
         track('ui-click', { target: `group:${gid}`, detail: { action: live.current.open.has(gid) ? 'collapse' : 'expand' } })
-        setOpen((cur) => {
+        setShut((cur) => {
           const next = new Set(cur)
-          if (next.has(gid)) next.delete(gid)
-          else next.add(gid)
+          if (live.current.open.has(gid)) next.add(gid)
+          else next.delete(gid)
           return next
         })
       }, DOUBLE_MS)
@@ -937,7 +888,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         made = await canvasApi.createGroup(ws, { title, pos: { x: Math.round(box.x - PAD), y: Math.round(box.y - HEAD) } })
       }
       await canvasApi.move(ws, { cells: picked.map((c) => c.id), group: made.id })
-      setOpen((cur) => new Set([...cur, made.id]))
       setSel([])
       setGsel(made.id)
       setRenaming(made.id)
@@ -954,11 +904,12 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     try {
       const g = analystGroup(data.groups) ?? (await api.createGroup(ws, { title: 'Your work', role: 'analyst' }))
       const cell = await api.addCell(ws, g.id, { kind: 'code', title: 'New card', code: '' })
-      setOpen((cur) => new Set([...cur, g.id]))
+      openFrames([g.id])
       setSel([cell.id])
       setGsel(null)
       setEditing({ id: cell.id, field: 'title' })
       pendingRef.current = `card:${cell.id}`
+      pendingShut.current = false
       await load()
     } catch (e) {
       fail(e)
@@ -970,11 +921,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     track('ui-click', { target: 'canvas:group', detail: { action: 'add' } })
     try {
       const g = await canvasApi.createGroup(ws, { title: nextGroupTitle(data.groups) })
-      setOpen((cur) => new Set([...cur, g.id]))
       setSel([])
       setGsel(g.id)
       setRenaming(g.id)
       pendingRef.current = `group:${g.id}`
+      pendingShut.current = false
       await load()
     } catch (e) {
       fail(e)
@@ -1144,6 +1095,9 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const pendingFocus = useRef(false)
   // the ref waiting opens its card still: not selected and not flashed (the screenshot tool's `?ref=`, Shell)
   const pendingStill = useRef(false)
+  // the ref waiting is a landing or a card Claude made, not one the person followed: it opens no frame the person
+  // collapsed, and goes to that frame's deck instead
+  const pendingShut = useRef(false)
   const pendingSince = useRef(0)
   const settling = useRef<{ ref: string; timer: number } | null>(null)
   const [, bump] = useState(0)
@@ -1155,6 +1109,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         pendingRef.current = e.ref
         pendingFocus.current = !!e.focus
         pendingStill.current = !!e.still
+        pendingShut.current = false
         pendingSince.current = 0
         bump((n) => n + 1)
         // a render once the wait is over, so a card that never arrives is given up on even when nothing else changes
@@ -1203,8 +1158,13 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     }
     pendingSince.current = 0
     const closed = framesAbove(board, id).filter((g) => !open.has(g))
+    if (closed.length && pendingShut.current) {
+      pendingRef.current = `group:${closed[0]}`
+      bump((n) => n + 1)
+      return
+    }
     if (closed.length) {
-      peek(closed)
+      openFrames(closed)
       return
     }
     const r = lay.rects.get(id)
@@ -1308,7 +1268,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         if (isReplay()) return
         const made = cardClaudeMade(e)
         if (made) {
-          written.current.add(made)
           if (mayFollow()) {
             follow.current = made
             if (activeNow.current) bump((n) => n + 1)
@@ -1340,10 +1299,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       ? { kind: 'card', id: followed }
       : canvasLanding({ seen: new Set(seen.current), cards: board.cellById.keys(), arrived: got ?? [], start: openingFrame(board, lay) })
     if (to.kind === 'stay') return
-    // the deck opens, so its cards read from the first (a frame so opened collapses again at a click outside it)
-    if (to.kind === 'frame' && !open.has(to.id)) peek([to.id])
+    // a frame the person collapsed stays collapsed: the canvas goes to its deck instead
     pendingRef.current = to.kind === 'frame' ? `group:${to.id}` : `card:${to.id}`
     pendingFocus.current = false
+    pendingShut.current = true
     pendingSince.current = 0
     bump((n) => n + 1)
     window.setTimeout(() => bump((n) => n + 1), WAIT_MS + 100)
