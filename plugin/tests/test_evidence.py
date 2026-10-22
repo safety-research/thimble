@@ -195,3 +195,14 @@ def test_an_answer_that_quotes_a_fence_still_parses():
     answer = 'Done.\n```json\n[{"mark": 1, "kind": "code", "status": "failed", "evidence": {"substring": "re.compile(r\'```(?:json)?\')"}, "reason": "no"}]\n```'
     out = check_all([mark("a")], answer, [], "/data")
     assert out["parsed"] is True and out["results"][0]["status"] == "failed"
+
+
+def test_a_quote_comes_from_the_records_its_numbers_with_it():
+    read = 'import sqlite3\nc = sqlite3.connect("file:f.db?immutable=1", uri=True)\nprint(c.execute("select body from reports").fetchone()[0])'
+    out = "Reviewed and merged 6 PRs: #107 (fix) #108 (docs)"
+    assert check_mark(mark('"Reviewed and merged 6 PRs: #107 … #108"'), computed(read), [call(read, out)], "/data")["status"] == "verified"
+    typed = 'print("Reviewed and merged 6 PRs: #107 and #108")'
+    r = check_mark(mark('"Reviewed and merged 6 PRs: #107 … #108"'), computed(typed), [call(typed, out)], "/data")
+    assert r["status"] == "failed" and "quoted words" in r["reason"]
+    found = read.replace('print(c.execute("select body from reports").fetchone()[0])', 'body = c.execute("select body from reports").fetchone()[0]\nif "merged 6 PRs: #107" in body: print("merged 6 PRs: #107")')
+    assert check_mark(mark('"merged 6 PRs: #107"'), computed(found), [call(found, "merged 6 PRs: #107")], "/data")["status"] == "verified"

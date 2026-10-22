@@ -29,6 +29,7 @@ no answer stays unchecked.
 """
 from __future__ import annotations
 
+import ast
 import io
 import json
 import math
@@ -154,10 +155,12 @@ def date_spans(text: str) -> list[tuple[int, int]]:
 
 
 def cited_numbers(words: str) -> set[str]:
-    """The numbers of the marked words that the evidence must not type in: each number outside a date or a time. A date
-    in code names the period the code counts (`n['2025-04']`, `f"April 2025: {n}"`), so a date is never a typed value.
-    A number that is part of a name (`#118`, `agent-11`) is no value either."""
-    return {v for v, in_date in marked_numbers(wordnums(words)) if not in_date}
+    """The numbers of the marked words that the evidence must not type in: each number outside a date or a time, and
+    outside a direct quote. A date in code names the period the code counts (`n['2025-04']`, `f"April 2025: {n}"`), so
+    a date is never a typed value. A number in a quote is part of the record's words, which must come from the record
+    (typed_quote). A number that is part of a name (`#118`, `agent-11`) is no value either."""
+    words = re.sub(r"[\"“][^\"“”]+[\"”]", " ", wordnums(words))
+    return {v for v, in_date in marked_numbers(words) if not in_date}
 
 
 def bounded_find(needle: str, hay: str) -> int:
@@ -327,6 +330,55 @@ def conditions(code: str) -> set[str]:
     return every - {v for kind, v in literals(code) if kind == "number"}
 
 
+def string_values(code: str) -> tuple[list[str], list[str]]:
+    """The text of each string the code prints or assigns (a plain string's value, an f-string's text between its
+    fields), as literals() reads a number's place, and of each string it compares with something (`r["v"] == "yes"`,
+    `"words" in body`). A key or an argument of another call is neither."""
+    out: list[str] = []
+    tested: list[str] = []
+    try:
+        toks = list(tokenize.generate_tokens(io.StringIO(code).readline))
+    except (tokenize.TokenError, SyntaxError, IndentationError):
+        return out, tested
+    stack: list[str] = []
+    prev = None
+    before_fstring = None
+    for i, t in enumerate(toks):
+        if t.type == tokenize.OP and t.string in "([{":
+            stack.append("cond" if is_comparison(prev) else prev.string if prev is not None and prev.type == tokenize.NAME and t.string == "(" else t.string)
+        elif t.type == tokenize.OP and t.string in ")]}" and stack:
+            stack.pop()
+        if t.type == getattr(tokenize, "FSTRING_START", -1):
+            before_fstring = prev
+        if t.type in (tokenize.STRING, getattr(tokenize, "FSTRING_MIDDLE", -1)):
+            opener = prev if t.type == tokenize.STRING else before_fstring
+            nxt = toks[i + 1] if i + 1 < len(toks) else None
+            call = next((x for x in reversed(stack) if x not in ("(", "[", "{", "cond")), None)
+            assigned = opener is not None and opener.type == tokenize.OP and opener.string in ("=", "+=") and not stack
+            compared = is_comparison(opener) or is_comparison(nxt)
+            text: Any = t.string
+            if t.type == tokenize.STRING:
+                try:
+                    text = ast.literal_eval(t.string)
+                except (ValueError, SyntaxError):
+                    text = None
+            if isinstance(text, str) and compared:
+                tested.append(text)
+            elif isinstance(text, str) and (call in PRINTERS or assigned):
+                out.append(text)
+        prev = t
+    return out, tested
+
+
+def typed_quote(words: str, code: str) -> list[str]:
+    """The quoted words of a direct quote that the code writes itself, in a string it prints, so that its output shows
+    them whatever the records say. Code that prints them only after it found them in a record (`if "…" in body:`)
+    reads them from the record. A quoted single word ("yes") names a value, as a label's, and is no quote."""
+    printed, tested = string_values(code)
+    has = lambda f, xs: any(norm_ws(f) in norm_ws(x) for x in xs)  # noqa: E731
+    return [f for f in quote_fragments(words) if len(f.split()) > 1 and has(f, printed) and not has(f, tested)]
+
+
 def typed_values(words: str, code: str) -> list[str]:
     """The numbers of the words that the code types in (0 and 1 as numbers are never a typed value). A number the code
     uses as a condition may stand in its printed words too: `print(f"{n} children under 12")` after `age < 12`."""
@@ -404,10 +456,14 @@ def check_computed(target: str, code: str, calls: list[dict[str, Any]]) -> tuple
     for c, script in runs:
         # the whole script that ran, not only the lines the checker gave, types in no value (a script that is the
         # command itself, not a here-document, is read by the lines given)
-        typed = typed_values(target, code if script == c.get("command") else script)
+        body = code if script == c.get("command") else script
+        typed = typed_values(target, body)
+        quoted = typed_quote(target, body)
         out = str(c.get("output") or "")
         if typed:
             problem = problem or f"its code writes {', '.join(typed)} in by hand instead of computing it"
+        elif quoted:
+            problem = problem or f"its code writes the quoted words “{quoted[0]}” itself instead of reading them from the records"
         elif shows(target, out):
             return [], shown(c, script, spans_of(target, out))
         else:
