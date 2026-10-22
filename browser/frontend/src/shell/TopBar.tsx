@@ -1,7 +1,7 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
 // workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
 // the surfaces' tabs over the main area (a click shows the surface, a drag takes it to a pane); at the right Undo and
-// Redo (shell/undo.ts), Report a problem, the links toggle, the theme popover and the settings gear.
+// Redo (shell/undo.ts), Report a problem, the citations toggle (Hide citations), the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -132,7 +132,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = false, onSide }: Top
             setProblemOpen((o) => !o)
           }}
           data-tel="report-problem" />
-        <Button variant="icon" icon={links ? 'link' : 'link-off'} title={links ? 'Hide links' : 'Show links'} aria-label={links ? 'Hide links' : 'Show links'} aria-pressed={links} className={`shell-links${links ? ' on' : ''}`} onClick={toggleLinks} data-tel="links" />
+        <Button variant="icon" icon={links ? 'link' : 'link-off'} title={links ? 'Hide citations' : 'Show citations'} aria-label={links ? 'Hide citations' : 'Show citations'} aria-pressed={links} className={`shell-links${links ? ' on' : ''}`} onClick={toggleLinks} data-tel="links" />
         <Button variant="icon" icon="palette" title="Theme" aria-label="Theme" aria-haspopup="dialog" aria-expanded={themeOpen} onClick={() => {
             setSettingsOpen(false)
             setProblemOpen(false)

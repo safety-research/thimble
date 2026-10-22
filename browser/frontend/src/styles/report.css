@@ -909,8 +909,9 @@
   --wu-gutter-l: 48px;
 }
 
-/* the page: the cell's paper to the pane's edge, a column at most a card wide (--w-card, plus gutters of 24 at the
-   left and 76 at the right for the block actions) and the margin beside it */
+/* the page: the cell's paper to the pane's edge, a column as wide as the pane (gutters of 40 at the left and 108 at
+   the right for the block actions) and the margin beside it. Figures take the column's width; text keeps a card's
+   width (--w-card), a line that reads comfortably */
 .wu-page {
   flex: 1;
   min-width: 0;
@@ -928,12 +929,11 @@
   min-height: 100%;
 }
 .wu-page-col {
-  --wu-gutter-l: 24px;
+  --wu-gutter-l: 40px;
   --wu-gutter-r: 108px;
   --wu-acts-gap: 12px;
   position: relative;
   flex: 1;
-  max-width: calc(var(--w-card) + var(--wu-gutter-l) + var(--wu-gutter-r));
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1035,6 +1035,9 @@
 .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content {
   --wu-first: 4px;
   padding: 4px 0;
+}
+.wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content:not([data-content-type='figure']) {
+  max-width: var(--w-card);
 }
 .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='bulletListItem'],
 .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='numberedListItem'] {
@@ -1580,17 +1583,29 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   width: 2px;
   background: var(--ink-900);
 }
+/* the caption, whole at any length: the card's takeaway with its citations, or the words the analyst gave it; a click
+   edits it in place (FigureBlock) */
 .wu-fig-take .wu-fig-caption {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 0;
-  /* the bare field keeps a transparent 1px border that its grown height does not count */
-  border-width: 0;
+  min-height: 1.55em;
   padding: 0;
   font: 400 var(--text-sm) / 1.55 var(--font-prose);
   color: var(--text-secondary);
+  text-wrap: pretty;
 }
-.wu-fig-take .wu-fig-caption:focus {
+.wu-fig-take .wu-fig-caption[role='textbox'] {
+  cursor: text;
+  outline: none;
+}
+.wu-fig-take .wu-fig-caption p {
+  margin: 0;
+}
+.wu-fig-take .wu-fig-caption p + p {
+  margin-top: 4px;
+}
+.wu-fig-take .wu-fig-caption:focus,
+.wu-fig-take .wu-fig-caption.refedit {
   color: var(--text-primary);
 }
 .wu-fig-chart .outputs-vega {
