@@ -89,6 +89,14 @@ declare module 'claude-code' {
       answerRowTurn: StateFamily<string>
       /** the answer the person picked for the keys with { and }, or null: the newest */
       answerSel: string | null
+
+      // ---- the tray (tray/tray.ts)
+      /** the cite and explain tray while it is open: { stack: [MarkRef & { open?: 'code' | null }] }, its top shown */
+      tray: { stack: unknown[] } | null
+      /** the card ] reached, which holds the keys: { row, card } */
+      trayCard: { row: string; card: string } | null
+      /** by main's turn: what its prompt was about when the person asked it with the tray open (`the citation "…"`) */
+      trayAsked: StateFamily<string>
     }
   }
 }
