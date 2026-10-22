@@ -47,7 +47,7 @@ export async function drawFixShare($: EngineInterface, e: Any, args: unknown, el
   const slug = String((args as Any)?.slug || '')
   const s = (await fixStore($, slug)) as Any
   if (s?.problem) return Text({ color: 'error', wrap: 'wrap', children: `× ${String(s.problem)}` })
-  if (!s?.issue) return Text({ dimColor: true, wrap: 'wrap', children: 'There is no draft to show yet. Claude writes it with `thimble fix draft`, and it opens here.' })
+  if (!s?.issue) return Text({ dimColor: true, wrap: 'wrap', children: 'No draft yet.' })
   const view = ((await $.state.get(VIEW)).value ?? {}) as { diff?: boolean }
   const report = s.kind === 'report' || !s.diff
   const act = (a: Record<string, unknown>) => async () => {
@@ -118,7 +118,7 @@ export async function drawFixShare($: EngineInterface, e: Any, args: unknown, el
       Button({ key: 'file', plain: true, hotkey: 'w', label: 'save as a file', onPress: act({ do: 'send', answer: 'file' }) }),
       Text({ key: 's2', dimColor: true, children: ' · esc not now' }),
     ] }))
-    out.push(Text({ key: 'edit', dimColor: true, wrap: 'wrap', children: 'To change the text, say so in the chat: Claude writes the draft again and it opens here.' }))
+    out.push(Text({ key: 'edit', dimColor: true, wrap: 'wrap', children: 'To change it, say so in the chat.' }))
   }
   return Box({ flexDirection: 'column', width: W, children: out })
 }

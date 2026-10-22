@@ -102,7 +102,7 @@ export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, e
   const W = Math.max(40, Number(e.props?.bodyColumns) || 80)
   const counts = await countsNow($)
   const cov = lastCoverage()
-  if (!featureOn('counts')) return Text({ dimColor: true, wrap: 'wrap', children: 'Labels and coverage is off. Turn it on in /thimble-settings to count what Claude read.' })
+  if (!featureOn('counts')) return Text({ dimColor: true, wrap: 'wrap', children: 'Coverage is off. Turn it on in /thimble-settings.' })
   const failed = counts?.error ? Text({ key: 'failed', color: 'error', wrap: 'wrap', children: `× ${counts.error}${cov ? ' Below is the last count.' : ''}` }) : null
   if (!cov) return failed ?? Text({ dimColor: true, children: 'Counting what Claude touched…' })
   const view = ((await $.state.get(VIEW)).value ?? { open: [], file: null }) as View

@@ -182,7 +182,7 @@ async function drawList($: Engine, e: Any, els: Any): Promise<Any> {
   if (!rows.length) {
     return Box({ flexDirection: 'column', children: [
       subjectBlock(els, 'subject', 'Threads', 'none in this session yet'),
-      Text({ key: 'none', dimColor: true, wrap: 'wrap', children: 'A question asked beside a card, a citation or a label starts a thread, and the thread is listed here.' }),
+      Text({ key: 'none', dimColor: true, wrap: 'wrap', children: 'No threads yet.' }),
     ] })
   }
   const out: Any[] = [subjectBlock(els, 'subject', 'Threads', `${rows.length} thread${rows.length === 1 ? '' : 's'} in this session`), Text({ key: 'main', bold: true, children: 'main' })]
@@ -231,7 +231,7 @@ async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> 
   const key = String(args?.key ?? '')
   await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
   const t = threadOf(key)
-  if (!t) return Text({ dimColor: true, wrap: 'wrap', children: 'That thread is not in this session any more.' })
+  if (!t) return Text({ dimColor: true, wrap: 'wrap', children: 'This thread is no longer in the session.' })
   const { W, H } = sizeOf(e)
   const top: Any[] = []
   // the way back to the list, when the list opened it (esc closes the pane)

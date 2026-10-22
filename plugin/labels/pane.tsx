@@ -116,7 +116,7 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
 function listView($: Engine, els: Any, list: Any[], W: number): unknown {
   const { Box, Button, Text } = els
   if (!list.length) {
-    return Text({ dimColor: true, wrap: 'wrap', children: 'No labels here yet. When Claude sorts records into a few values, it makes a label, and the label shows here.' })
+    return Text({ dimColor: true, wrap: 'wrap', children: 'No labels yet.' })
   }
   const nameW = Math.min(24, Math.max(...list.map(l => width(String(l.name)))))
   const recW = Math.max(...list.map(l => n(l.records).length))
