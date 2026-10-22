@@ -431,7 +431,8 @@ class Session:
                 if final.stop_reason == "refusal":
                     cat = getattr(getattr(final, "stop_details", None), "category", None)
                     self._append({"type": "error", "kind": "refusal",
-                                  "message": "Claude declined this request" + (f" ({cat})." if cat else ".")})
+                                  "message": "Claude's safeguards declined this request" + (f" ({cat})" if cat else "")
+                                  + ". Rephrase or narrow it and send it again, or pick another model in Settings."})
                     result = "refused"
                     break
                 if final.stop_reason == "pause_turn":

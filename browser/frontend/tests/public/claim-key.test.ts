@@ -96,7 +96,7 @@ test('a code that is gone leaves the address and shows the page its own notice, 
   expect(gone.id.startsWith(notices.PAGE_NOTICE)).toBe(true)
   await vi.advanceTimersByTimeAsync(0)
   const before = requests.length
-  await notices.dismissNotice('logs', gone)
+  notices.dismissNotice(gone)
   expect(pageNotices(notices)).toEqual([])
   expect(requests.slice(before)).toEqual([])
 })

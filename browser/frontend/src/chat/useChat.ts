@@ -1,13 +1,12 @@
-// One chat's live state: its meta and records, refetched on the stream's `chat` events, and its rows (tidy.ts). A
-// message goes to the analyst's Claude Code session as a browser event (`main`, or `thread` with the thread's id); the
-// reply comes back through the log the mirror writes. A null chat is idle.
+// One chat's live state: its meta and records, refetched on the stream's `chat` events, and its rows (model.ts). A
+// message goes to the server as a browser event (`main`, or `thread` with the thread's id); the agent's reply comes back
+// through the chat's log. A null chat is idle.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { newest, STALE } from '../lib/newest'
 import type { ChatMeta, ChatRecord } from '../lib/types'
-import { foldRecords, withApiErrors, type Row } from './model'
-import { tidyRows } from './tidy'
+import { foldRecords, type Row } from './model'
 
 export interface ChatState {
   meta: ChatMeta | null
@@ -116,7 +115,7 @@ export function useChat(ws: string, chatId: string | null): ChatState {
     }
   }, [ws, chatId])
 
-  const rows = useMemo(() => withApiErrors(tidyRows(foldRecords(records))) as Row[], [records])
+  const rows = useMemo(() => foldRecords(records), [records])
   return { meta, records, rows, loading, error, streaming, running: streaming || !!meta?.running, send, interrupt, reload }
 }
 

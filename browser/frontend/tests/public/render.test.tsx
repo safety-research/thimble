@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // The chat drawn by its real components under jsdom (src/chat/Rows.tsx): a session's records render as rows, the
 // analyst's message, the reply's markdown with its chips and its marks, a call of the card tool with the card under it,
-// and a stopped turn. Rendering logs no React error.
+// and a turn that ended on an error. Rendering logs no React error.
 // The browser's smoke test, page half: smoke.json holds the records the server leaves when a question gets an answer
 // with a card and a checked mark (browser/server/tests/test_smoke.py checks that it still leaves records of that form).
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { foldRecords } from '../../src/chat/model.ts'
+import { foldRecords, retryOf } from '../../src/chat/model.ts'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { Rows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
@@ -27,10 +28,10 @@ afterEach(() => {
 })
 
 const LOG = [
-  { type: 'user', ts: '2026-08-30T14:00:00Z', text: 'How many agents reviewed a PR? See [[agents/agent-01.jsonl#L3]].', by: 'terminal' },
+  { type: 'user', ts: '2026-08-30T14:00:00Z', text: 'How many agents reviewed a PR? See [[agents/agent-01.jsonl#L3]].', by: 'browser', turn: '0a1b2c3d' },
   { type: 'text', delta: 'There are **three**, listed below:\n\n- agent-01\n- agent-02\n\nIn all [[3|card:abcd1234#agents/total]] agents.' },
-  { type: 'done', ts: '2026-08-30T14:00:05Z', session_id: 'sess' },
-  { type: 'error', ts: '2026-08-30T14:00:06Z', message: 'stopped', kind: 'interrupted', detail: 'the analyst stopped it' },
+  { type: 'error', ts: '2026-08-30T14:00:05Z', message: "Claude's API could not be reached. Check the network and send the message again.", kind: 'api' },
+  { type: 'done', ts: '2026-08-30T14:00:06Z', result: 'failed' },
 ] as unknown as ChatRecord[]
 
 async function rows(records: ChatRecord[] | ReturnType<typeof foldRecords>): Promise<HTMLElement> {
@@ -45,11 +46,10 @@ async function rows(records: ChatRecord[] | ReturnType<typeof foldRecords>): Pro
 }
 
 describe('chat rows', () => {
-  test("the analyst's message, markdown with a value chip, and a stopped turn", async () => {
+  test("the analyst's message, markdown with a value chip, and a turn that ended on an error", async () => {
     const el = await rows(LOG)
     const user = el.querySelector('.chat-user .chat-message')
     expect(user?.textContent).toMatch(/How many agents reviewed a PR\?/)
-    expect(user?.getAttribute('data-by')).toBe('terminal')
     expect(el.querySelector('.chat-user .refchip')?.getAttribute('data-ref')).toBe('agents/agent-01.jsonl#L3')
     expect(el.querySelector('.chat-user .refchip')?.classList.contains('chip-tone-evidence')).toBe(true)
     expect(el.querySelector('.chat-text strong')?.textContent).toBe('three')
@@ -57,7 +57,24 @@ describe('chat rows', () => {
     const value = el.querySelector('.chat-text .refchip-value')
     expect(value?.textContent).toBe('3')
     expect(value?.getAttribute('data-ref')).toBe('card:abcd1234#agents/total')
-    expect(el.querySelector('.chat-stopped')).not.toBeNull()
+    expect(el.querySelector('.chat-api-error[data-error-kind="api"] .chat-apierr-what')?.textContent).toMatch(/could not be reached/)
+    expect(errors).toEqual([])
+  })
+
+  test("Retry under the error that ended the last turn sends the analyst's message again; a refusal has none", async () => {
+    const retry = retryOf(LOG)
+    expect(retry).toEqual({ index: 2, text: 'How many agents reviewed a PR? See [[agents/agent-01.jsonl#L3]].' })
+    const sent: string[] = []
+    const el = await mount(
+      <ThreadsContext.Provider value={{ labels: new Map() }}>
+        <Rows rows={foldRecords(LOG)} ws="w" retry={{ index: retry!.index, onRetry: async () => void sent.push(retry!.text) }} />
+      </ThreadsContext.Provider>,
+    )
+    await act(async () => (el.querySelector('.chat-apierr-retry') as HTMLButtonElement).click())
+    expect(sent).toEqual([retry!.text])
+    const refused = LOG.map((r) => (r.type === 'error' ? { ...r, kind: 'refusal' } : r)) as ChatRecord[]
+    expect(retryOf(refused)).toBeNull()
+    expect(retryOf([...LOG, { type: 'user', text: 'next', turn: '1b2c3d4e' }] as ChatRecord[])).toBeNull()
     expect(errors).toEqual([])
   })
 

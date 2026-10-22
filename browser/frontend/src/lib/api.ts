@@ -1,62 +1,8 @@
 // The typed client for every route of the backend's API.
-import type {
-  CanvasResponse,
-  Extensions,
-  LocalExtension,
-  Cell,
-  CardVersion,
-  CellName,
-  PlanRun,
-  CellPatch,
-  ChatDetail,
-  ChatMeta,
-  ChatPatch,
-  Concept,
-  CorpusInfo,
-  DocumentType,
-  CardFilterParts,
-  Filters,
-  FilterScope,
-  Group,
-  LabelRowsResponse,
-  LabelsForPath,
-  NewCellBody,
-  NewThreadBody,
-  NewTicketBody,
-  DevStatus,
-  OrientRun,
-  Proposal,
-  ResolvedRef,
-  Settings,
-  SettingsPatch,
-  FileFind,
-  GrepDone,
-  GrepFile,
-  GrepProgress,
-  SourceEvents,
-  SourceFind,
-  SourceInfo,
-  SourceLines,
-  SourceKeys,
-  SourcePage,
-  SourceTurns,
-  StartAnswer,
-  StoredCall,
-  SubagentRequest,
-  CallIndex,
-  Ticket,
-  View,
-  ViewSuggestion,
-  ViewOpen,
-  ViewQuery,
-  ViewProblems,
-  ViewShown,
-  WorkspaceRow,
-  Writeup,
-} from './types'
+import type { CanvasResponse, Cell, CardVersion, CellName, PlanRun, CellPatch, ChatDetail, ChatMeta, ChatPatch, Concept, CorpusInfo, DocumentType, CardFilterParts, Filters, FilterScope, Group, LabelRowsResponse, LabelsForPath, NewCellBody, NewThreadBody, NewTicketBody, Proposal, ResolvedRef, Settings, SettingsPatch, FileFind, GrepDone, GrepFile, GrepProgress, SourceEvents, SourceFind, SourceInfo, SourceLines, SourceKeys, SourcePage, SourceTurns, StartAnswer, SubagentRequest, Ticket, View, ViewOpen, ViewQuery, ViewProblems, ViewShown, WorkspaceRow, Writeup } from './types'
 import { bus } from './bus'
 import { heavy } from './limit'
-import { clearCodeGone, setBrowserId, showCodeGone } from './notices'
+import { clearCodeGone, showCodeGone } from './notices'
 import { apiBase, setBrowserKey } from './browserKey'
 
 // Every path below starts with apiBase(): `/b/<key>/api` once this browser holds its key, which the server scopes the
@@ -103,8 +49,8 @@ function setHash(params: URLSearchParams): void {
  * it holds stands. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
  * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
  * the notice away). The key an earlier version's link carried (`k` in the hash)
- * is taken out of the address and never sent. After the claim the page asks which browser it is (GET /ui/paired), so
- * it leaves out the notice of its own sign-in (lib/notices setBrowserId). Memoised: with no code in the link the
+ * is taken out of the address and never sent. After the claim the page asks whether this browser is signed in (GET
+ * /ui/paired). Memoised: with no code in the link the
  * cookie the browser already holds stands; a claim the server never answered leaves the code in the address and is
  * tried again by the next call. `j` awaits it, so a write never races the claim. */
 export function claimKey(): Promise<void> {
@@ -160,15 +106,12 @@ type Paired = { paired: boolean; id: string }
 // what GET /ui/paired answered after the last claim the server answered; null before one, or when the read failed
 let afterClaim: Promise<Paired | null> = Promise.resolve(null)
 
-/** This browser's id (GET /ui/paired), for lib/notices; a read that fails leaves it unknown. The answer, or null when
- * the read failed. */
+/** Whether this browser is signed in (GET /ui/paired): the answer, or null when the read failed. */
 async function learnBrowser(): Promise<Paired | null> {
   try {
-    const got = await api.paired()
-    setBrowserId(typeof got?.id === 'string' ? got.id : '')
-    return got ?? null
+    return (await api.paired()) ?? null
   } catch {
-    return null // unknown: every sign-in notice shows
+    return null
   }
 }
 
@@ -420,10 +363,7 @@ export const api = {
   subagentRequest: (c: string, request: string) => j<SubagentRequest>(`${ws(c)}/subagents/requests/${enc(request)}`),
 
   // ---- the workspace stream ----
-  eventsUrl: (c: string, after?: number | string | null, log?: string | null) => {
-    const q = [after != null && after !== '' ? `after=${enc(String(after))}` : '', log ? `log=${enc(log)}` : ''].filter(Boolean)
-    return `${ws(c)}/events${q.length ? `?${q.join('&')}` : ''}`
-  },
+  eventsUrl: (c: string) => `${ws(c)}/events`,
 
   // ---- canvas ----
   canvas: (c: string) => j<CanvasResponse>(`${ws(c)}/canvas`),
@@ -484,11 +424,6 @@ export const api = {
   /** Reject on a view proposal: the proposal dropped as rejected (backend views.answer_offer). 403 without the
    * analyst's cookie, 409 for a row that is no open proposal. */
   rejectProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/reject`, { method: 'POST' }),
-  /** The open notices (backend notices.list_route): failures of main and of thimble's agents, each with its fix,
-   * oldest first. */
-  notices: (c: string) => j<unknown[]>(`${ws(c)}/notices`),
-  /** × on a notice, or a fix of the analyst's that went through: the server forgets it (backend notices.dismiss_route). */
-  dismissNotice: (c: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
   /** Whether this browser is signed in, and its id: the first 12 hex digits of its cookie's hash, '' when not signed in
    * (backend main.ui_paired). */
   paired: () => j<{ paired: boolean; id: string }>(`${apiBase()}/ui/paired`),
@@ -635,16 +570,6 @@ import type { ReportBlocksBody } from './types'
 export const reportApi = {
   /** `PUT …/types/{slug}/blocks`: the editor's whole document as blocks; answers the stored document. */
   putBlocks: (c: string, slug: DocumentType, body: ReportBlocksBody) => j<Writeup>(`${inv(c, slug)}/blocks`, { method: 'PUT', body: JSON.stringify(body) }),
-}
-
-// ---- the problem report (shell/ProblemReport.tsx; backend feedback.py) ----
-export const feedbackApi = {
-  /** `POST /ws/{c}/feedback`: writes the bundle on the server's machine and answers where it is and how to send it. */
-  prepare: (c: string, body: import('./types').ProblemReportBody) => j<import('./types').ProblemReport>(`${ws(c)}/feedback`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `POST /feedback/reveal`: shows the bundle in the file manager of the server's machine. */
-  reveal: (path: string) => j<{ ok: boolean }>(`${apiBase()}/feedback/reveal`, { method: 'POST', body: JSON.stringify({ path }) }),
-  /** `GET /feedback/download`: the zip itself, for a browser on another machine than the server. */
-  downloadUrl: (path: string) => `${apiBase()}/feedback/download?path=${enc(path)}`,
 }
 
 // --- label cards: the details drawer (canvas/LabelDetails.tsx) ---

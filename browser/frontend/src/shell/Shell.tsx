@@ -22,7 +22,7 @@ import { bus, type Tab } from '../lib/bus'
 import { onDemoNote, useDemo } from '../lib/demo'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
-import { isReplay, useWorkspaceEvents } from '../lib/events'
+import { useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
@@ -36,28 +36,7 @@ import { tabSignals, useReportTypes, useTabDots, writing } from './dots'
 import { DemoLine } from './DemoLine'
 import { NewVersion } from './NewVersion'
 import { DragGhost, PaneArea, usePaneDrag, type SurfaceSpec } from './PaneArea'
-import {
-  arrange,
-  BASE_SURFACES,
-  close,
-  drop,
-  findPane,
-  focused,
-  focusPane,
-  isNarrow,
-  parsePanes,
-  place,
-  preset,
-  readSurface,
-  resize,
-  show,
-  shownSurfaces,
-  single,
-  slugOfSurface,
-  viewSurface,
-  type Panes,
-  type SurfaceId,
-} from './panes'
+import { arrange, BASE_SURFACES, close, drop, findPane, focused, focusPane, isNarrow, parsePanes, place, readSurface, resize, show, shownSurfaces, single, slugOfSurface, viewSurface, type Panes, type SurfaceId } from './panes'
 import { Resizer } from './Resizer'
 import { ServerDown } from './ServerDown'
 import { Toasts } from './Toasts'
@@ -111,7 +90,6 @@ function useSize(el: HTMLElement | null, guess: () => { w: number; h: number }) 
 
 export function Shell({ ws }: { ws: string }) {
   useWorkspaceEvents(ws)
-  useEffect(() => bus.on('wsReset', (e) => e.workspace === ws && window.location.reload()), [ws])
   // the ask key Settings picks (thimble's config `askKey`, lib/platform), read with the settings and again whenever
   // they change, for the pointer, the canvas, the tour and the views' frames
   useEffect(() => {
@@ -160,7 +138,6 @@ export function Shell({ ws }: { ws: string }) {
 
   // the views, each of which a pane can show on its own
   const { views } = useViews(ws)
-  const available = useMemo<SurfaceId[]>(() => [...BASE_SURFACES, ...views.map((v) => viewSurface(v.slug))], [views])
 
   // the pane a press last landed in (lib/surfaces pressedPane): a request to show a surface right after it comes from
   // that pane
@@ -188,16 +165,6 @@ export function Shell({ ws }: { ws: string }) {
   }, [setPanes])
 
   useEffect(() => bus.on('showTab', (e) => setPanes((p) => show(p, e.tab, e.from === undefined ? pressedPane() : e.from, recent.current))), [setPanes])
-  // a layout main asked for (the set_layout tool); the history the stream replays on load is not asked again
-  useEffect(
-    () =>
-      bus.on('layout', (e) => {
-        if (isReplay()) return
-        setPanes((p) => preset(p, e.layout, available, e.surfaces.length ? e.surfaces : undefined))
-      }),
-    [setPanes, available],
-  )
-
   // a request for the chat while its column is folded opens the column, and the chat panel takes the request once it
   // has mounted (chat/pending.ts)
   const chatOpen = useRef(layout.chatOpen)

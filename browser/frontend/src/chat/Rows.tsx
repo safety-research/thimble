@@ -1,10 +1,10 @@
 // The rows of a chat: the analyst's message as an accent tile, the assistant's markdown as plain text with its marks,
 // and the work as tool-call cards. A raw call (Read, Grep, Glob) is one line with its state's glyph, tool and target;
 // two or more in a row fold into one chip that names each tool and count (Grep 2 · Read 1). Other runs of one kind of
-// call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the chips of what it points at. A
-// notice (a failure with its fix, which the strip above the composer offers) is one warning line, quiet once it is
-// closed (Notice.tsx).
-import { useEffect, useState } from 'react'
+// call are one card (Label · 2 steps · 31s), and a call of the card tool is its line with the card under it. A notice
+// (a failure of thimble's own work, with what to do) is one warning line; an error that ended a turn is a card with
+// Retry.
+import { useState } from 'react'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
@@ -12,36 +12,28 @@ import { Mark } from '../components/Marks'
 import { UserMessage } from '../components/Message'
 import { RefChip, scrubIds } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
-import { ChipRun, ToolCard, type ToolState } from '../components/ToolCard'
-import { api, docsApi } from '../lib/api'
-import { bus } from '../lib/bus'
+import { ChipRun, ToolCard } from '../components/ToolCard'
 import { isDropped, useProposals } from '../lib/proposals'
 import { parseRef } from '../lib/refs'
 import { Card } from '../cards/Card'
 import { startV } from '../cards/keys'
 import { useFeature } from '../features'
 import { MarksFooter } from '../marks/MarksFooter'
-import { teleport } from '../lib/teleport'
-import { track } from '../lib/telemetry'
-import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
-import { API_ERROR_KIND, callPieces, callToolName, capacityNote, corpusRelative, groupState, groupTools, isRawCall, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
+import { callPieces, groupState, groupTools, isRawCall, madeBy, runTools, toolMeta, toolSteps, toolSummary, type BranchRow, type CallsRow, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, type ViewChipRow } from './model'
 import { Note, ThreadChip } from './Notes'
 import { midTurnTexts } from './tidy'
-import { ApiErrorCard } from './ApiError'
+import { ErrorCard } from './ErrorCard'
 import { NoticeRow } from './Notice'
 import { LabelRunRow } from './LabelRun'
-import { DocChip, GroupChip, LabelChip, openLabel } from './SurfaceChips'
+import { LabelChip, openLabel } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 
-export type RecordState = ToolState
-
-
-/** A run of consecutive `view` chips: the views main or a subagent proposed, one note. */
+/** A run of consecutive `view` chips: the views whose builds ended, one note. */
 export interface ViewsRow {
   kind: 'views'
   index: number
-  chips: ChipRowT[]
+  chips: ViewChipRow[]
 }
 
 /** A call of the card tool: its line, and the card it drew under it (Card.tsx). */
@@ -54,53 +46,30 @@ export interface CardCallRow {
 export type ShownRow = Exclude<Row, ToolRowT> | ToolGroup | CallsRow | BranchRow | ViewsRow | CardCallRow
 
 /** The rows as the transcript shows them: consecutive raw calls (model.isRawCall) as one run of chip lines, other calls
- * of one kind folded into one card, consecutive view chips into one note (duplicates dropped), consecutive saves of one
- * document by one writer as one row, the latest (chips.sameDocRun). A view build's capacity wait joins the error row before it. A line saying the session shows no
- * activity holds only until the next row. With `each`, every call is a chip line of its own. Pure. */
-export function shownRows(rows: readonly (Row | BranchRow)[], each = false): ShownRow[] {
+ * of one kind folded into one card, a card call as a row of its own, consecutive view chips as one note (a view this
+ * chat proposed, or one already shown, left out). Pure. */
+export function shownRows(rows: readonly (Row | BranchRow)[]): ShownRow[] {
   const out: ShownRow[] = []
   // a view a call of this chat proposed is a chip on that call's card, so its chip note would say it twice
   const proposedHere = new Set(madeBy(rows.filter((r): r is ToolRowT => r.kind === 'tool')).views)
   // a proposal's later chips (built, failed) are the first chip's state, which it reads for itself
   const viewsSeen = new Set<string>()
-  for (const r of groupCalls(rows as Row[])) {
-    const before = out[out.length - 1]
-    if (before?.kind === 'note' && QUIET_RE.test(before.text)) out.pop()
-    if (r.kind === 'cardcall') {
-      out.push(r)
-      continue
-    }
-    if (r.kind === 'tools' && (each || r.tools.every((t) => isRawCall(t.name)))) {
+  for (const r of groupCalls(rows)) {
+    if (r.kind === 'tools' && r.tools.every((t) => isRawCall(t.name))) {
       const last = out[out.length - 1]
       if (last && last.kind === 'calls') last.tools.push(...r.tools)
       else out.push({ kind: 'calls', index: r.index, tools: [...r.tools] })
       continue
     }
     if (r.kind === 'chip') {
-      // a run's saves of one document in a row are one row, the latest
-      const last = out[out.length - 1]
-      if (last?.kind === 'chip' && sameDocRun(last, r)) {
-        out[out.length - 1] = r
-        continue
-      }
-    }
-    if (r.kind === 'chip' && r.chip === 'view') {
       const key = r.ref || r.text
-      if (proposedHere.has(r.text) || viewsSeen.has(key)) continue
+      const name = r.text.replace(/: (built|the build failed)$/, '')
+      if (proposedHere.has(name) || viewsSeen.has(key)) continue
       viewsSeen.add(key)
       const last = out[out.length - 1]
       if (last && last.kind === 'views') last.chips.push(r)
       else out.push({ kind: 'views', index: r.index, chips: [r] })
       continue
-    }
-    if (r.kind === 'note') {
-      const wait = capacityNote(r.text)
-      if (wait) {
-        const last = out[out.length - 1]
-        if (last?.kind === 'error' && last.errorKind === API_ERROR_KIND && last.wait == null) out[out.length - 1] = { ...last, wait: wait.wait }
-        else out.push({ kind: 'error', index: r.index, message: wait.reason, errorKind: API_ERROR_KIND, wait: wait.wait })
-        continue
-      }
     }
     out.push(r)
   }
@@ -108,15 +77,15 @@ export function shownRows(rows: readonly (Row | BranchRow)[], each = false): Sho
 }
 
 /** The rows with each card call as a row of its own, the other calls grouped (model.groupTools). Pure. */
-function groupCalls(rows: readonly Row[]): (Exclude<Row, ToolRowT> | ToolGroup | BranchRow | CardCallRow)[] {
+function groupCalls(rows: readonly (Row | BranchRow)[]): (Exclude<Row, ToolRowT> | ToolGroup | BranchRow | CardCallRow)[] {
   const out: (Exclude<Row, ToolRowT> | ToolGroup | BranchRow | CardCallRow)[] = []
-  let run: Row[] = []
+  let run: (Row | BranchRow)[] = []
   const flush = () => {
-    out.push(...(groupTools(run) as (Exclude<Row, ToolRowT> | ToolGroup | BranchRow)[]))
+    out.push(...groupTools(run))
     run = []
   }
   for (const r of rows) {
-    if (r.kind === 'tool' && toolDisplayName(r.name) === 'card') {
+    if (r.kind === 'tool' && r.name === 'card') {
       flush()
       out.push({ kind: 'cardcall', index: r.index, tool: r })
     } else run.push(r)
@@ -132,41 +101,40 @@ function newestCalls(rows: readonly ShownRow[]): Map<string, number> {
   return out
 }
 
-/**
- * The rows of one log level. `streaming` marks the last text row as still growing. `chat` is the log's chat id: every
- * message body carries `data-anchor="chat:<id>#<index>"`, so a ⌘-click starts a thread there. `live` marks the calls of
- * a run still going. `retry` names the error row whose Retry sends the analyst's message again, and `note` its line.
- */
-const EMPTY_SET: ReadonlySet<number> = new Set()
+const EMPTY: ReadonlySet<string> = new Set()
 
-export function Rows({ rows, ws, chat, streaming = false, nested = false, live = false, retry }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; nested?: boolean; live?: boolean; retry?: ErrorRetry }) {
+/**
+ * The rows of one chat. `streaming` marks the last text row as still growing. `chat` is the log's chat id: every
+ * message body carries `data-anchor="chat:<id>#<index>"`, so a ⌘-click starts a thread there. `live` marks the calls of
+ * a run still going. `retry` names the error row whose Retry sends the analyst's message again.
+ */
+export function Rows({ rows, ws, chat, streaming = false, live = false, retry }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; live?: boolean; retry?: ErrorRetry }) {
   const lastText = streaming ? [...rows].reverse().find((r): r is Extract<Row, { kind: 'text' }> => r.kind === 'text') : undefined
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows)
   // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them,
   // or the last text before the last call when nothing follows it
-  const notes = nested ? EMPTY_SET : midTurnTexts(shown, streaming || live)
+  const notes = midTurnTexts(shown, streaming || live)
   const newest = newestCalls(shown)
   const cardsOn = useFeature('cards')
   // v draws a card of the chat's last reply, once it is whole
   const lastTurn = shown.reduce((at, r, i) => (r.kind === 'user' ? i : at), -1)
-  const reply = streaming || live || nested ? -1 : shown.reduce((at, r, i) => (i > lastTurn && r.kind === 'text' && !notes.has(r.index) && r.text.trim() ? i : at), -1)
+  const reply = streaming || live ? -1 : shown.reduce((at, r, i) => (i > lastTurn && r.kind === 'text' && !notes.has(r.index) && r.text.trim() ? i : at), -1)
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
       {shown.map((r, i) => {
         switch (r.kind) {
           case 'user':
             return (
-              <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
-                {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
-                <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
-                  <RefText text={stripHarness(r.text)} workspace={ws} />
+              <div key={r.index} className="chat-msg chat-user">
+                <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
+                  <RefText text={r.text} workspace={ws} />
                 </UserMessage>
               </div>
             )
           case 'text':
             return (
-              <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}${notes.has(r.index) ? ' chat-step-note' : ''}`}>
+              <div key={r.index} className={`chat-msg chat-assistant${notes.has(r.index) ? ' chat-step-note' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
                   <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} />
                 </div>
@@ -187,8 +155,6 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
             return <ToolGroupCard key={r.index} group={r} ws={ws} pending={streaming && i === shown.length - 1} />
           case 'calls':
             return <CallLines key={r.index} tools={r.tools} ws={ws} pending={live || (streaming && i === shown.length - 1)} />
-          case 'chip':
-            return <ChipRow key={r.index} item={r} ws={ws} />
           case 'views':
             return <ViewsNote key={r.index} chips={r.chips} ws={ws} />
           case 'branch':
@@ -209,12 +175,10 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
                 }
               />
             )
-          case 'note':
-            return <Note key={r.index} className="chat-stage" text={r.text} />
           case 'error':
             return <ErrorRow key={r.index} item={r} retry={retry && retry.index === r.index ? retry : undefined} />
           case 'notice':
-            return <NoticeRow key={r.index} item={r} ws={ws} />
+            return <NoticeRow key={r.index} item={r} />
           case 'label_run':
             return <LabelRunRow key={r.index} item={r} ws={ws} />
         }
@@ -224,18 +188,12 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   )
 }
 
-const EMPTY: ReadonlySet<string> = new Set()
-
-// the input fields that hold code, each with the language it is coloured in (components/Code.tsx): a card's code runs
-// in the Python kernel, a command in the shell
+// the input fields that hold code, each with the language it is colored in (components/Code.tsx)
 const CODE_KEYS = new Map([
   ['code', 'python'],
-  ['command', 'bash'],
-  ['sql', 'sql'],
-  ['html', 'xml'],
-  ['data_md', 'markdown'],
+  ['view', 'javascript'],
+  ['text', 'markdown'],
 ])
-const HIDDEN_KEYS = new Set(['id', 'tool_use_id'])
 
 interface InputRow {
   key: string
@@ -251,51 +209,33 @@ function safeJson(v: unknown): string {
   }
 }
 
-/** Whether the head's summary already prints this field, so the open body need not repeat it. */
-function inSummary(row: InputRow, summary: string): boolean {
-  if (!summary || !row.value) return false
-  if (row.kind === 'code') return row.value.trim() === summary
-  if (row.kind !== 'text') return false
-  const one = row.value.replace(/\s+/g, ' ').trim()
-  return one.length > 0 && (summary.includes(one) || summary.includes(corpusRelative(one)))
-}
-
 /**
  * The rows an open tool row shows for its input: strings as text or code, anything else as JSON. A string field the
- * head's `summary` already shows (the pattern of a search, the path of a read) is left out.
+ * head's `summary` already shows whole (the pattern of a search, the path of a read) is left out.
  */
-export function inputRows(input: unknown, summary = ''): InputRow[] {
-  if (input == null) return []
-  if (typeof input === 'string') return input.trim() === summary ? [] : [{ key: '', kind: 'text', value: input }]
-  if (typeof input !== 'object' || Array.isArray(input)) return [{ key: '', kind: 'json', value: scrubIds(safeJson(input)) }]
+function inputRows(input: unknown, summary = ''): InputRow[] {
+  if (input == null || typeof input !== 'object' || Array.isArray(input)) return input == null ? [] : [{ key: '', kind: 'json', value: scrubIds(safeJson(input)) }]
   const out: InputRow[] = []
   for (const [key, v] of Object.entries(input as Record<string, unknown>)) {
-    if (HIDDEN_KEYS.has(key) || v == null || v === '') continue
+    if (v == null || v === '') continue
     let row: InputRow
     if (typeof v === 'string') row = { key, kind: CODE_KEYS.has(key) ? 'code' : 'text', value: v }
     else if (typeof v === 'number' || typeof v === 'boolean') row = { key, kind: 'text', value: String(v) }
     else if (Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number')) row = { key, kind: 'text', value: v.map(String).join(', ') }
     else row = { key, kind: 'json', value: scrubIds(safeJson(v)) }
-    if ((typeof v === 'string' || Array.isArray(v)) && inSummary(row, summary)) continue
+    const one = row.value.replace(/\s+/g, ' ').trim()
+    if (row.kind === 'text' && one && summary.includes(one)) continue
     out.push(row)
   }
   return out
 }
 
-/** A tool result as the analyst reads it: the `card:`/`notebook:` header lines gone, ids scrubbed. */
-export function resultText(summary: string | undefined): string {
-  if (!summary) return ''
-  const lines = summary.split('\n')
-  let i = 0
-  while (i < lines.length && /^(card|cell|notebook):[A-Za-z0-9_-]+\s*$/.test(lines[i].trim())) i++
-  return scrubIds(lines.slice(i).join('\n'))
-}
-
-/** What an open call shows: its input fields the head does not already print, and its result as text unless it made a
- * card (the chip is the result) or it failed (the error is). Pure. */
+/** What an open call shows: its input fields the head does not already print, and its result as text unless it left a
+ * label's card (the label's chip is the result) or it failed (the error is). Pure. */
 function callParts(tool: ToolRowT, summary: string): { rows: InputRow[]; result: string; failed: boolean } {
   const failed = !!tool.result?.is_error
-  return { rows: inputRows(tool.input, summary), result: tool.result && (!tool.result.cell_id || failed) ? resultText(tool.result.summary) : '', failed }
+  const result = tool.result && (!tool.result.label_card || failed) ? scrubIds(tool.result.summary) : ''
+  return { rows: inputRows(tool.input, summary), result, failed }
 }
 
 /** The body an open single call shows (callParts); nothing when it has nothing more to say. A failed call shows its
@@ -337,53 +277,44 @@ function CallBody({ tool, ws, summary }: { tool: ToolRowT; ws: string; summary: 
   )
 }
 
+/** The chips of what calls made: the views proposed and the labels applied. */
+function madeChips(tools: readonly ToolRowT[], ws: string) {
+  const made = madeBy(tools)
+  return [
+    ...made.views.map((v) => <ViewChip key={`view:${v}`} ws={ws} slug={made.viewSlugs[v]} name={v} />),
+    ...made.labels.map((l) => <LabelChip key={`label:${l}`} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
+  ]
+}
+
 /** A run of calls of one kind as one tool-call card. One call's card names what it was about in the meta and opens to
- * its input and result as well as its step; what the calls made are chips under the head: the cards, the views
- * proposed, the labels applied. */
-export function ToolGroupCard({ group, ws, pending }: { group: ToolGroup; ws: string; pending: boolean }) {
+ * its input and result as well as its step; what the calls made are chips under the head. */
+function ToolGroupCard({ group, ws, pending }: { group: ToolGroup; ws: string; pending: boolean }) {
   const [open, setOpen] = useState(false)
   const tools = group.tools
   const single = tools.length === 1 ? tools[0] : null
-  const made = madeBy(tools)
-  const cells = made.cells.map((c) => c.id)
   const summary = single ? toolSummary(single.name, single.input, ws) : ''
-  const madeSome = cells.length + made.views.length + made.labels.length > 0
-  const meta = single && !madeSome && summary ? summary : toolMeta(tools)
-  const state = groupState(tools, pending)
-  const body = open && single ? <CallBody tool={single} ws={ws} summary={summary} /> : null
-  const chips = [
-    ...cells.map((id) => (
-      <span key={`card:${id}`} className="chat-tool-cell" data-anchor={`card:${id}`} onClick={(e) => e.stopPropagation()}>
-        <RefChip ref={`card:${id}`} compact workspace={ws} />
-      </span>
-    )),
-    ...made.views.map((v) => <ViewChip key={`view:${v}`} ws={ws} slug={made.viewSlugs?.[v]} name={v} />),
-    ...made.labels.map((l) => <LabelChip key={`label:${l}`} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
-  ]
+  const chips = madeChips(tools, ws)
   return (
     <ToolCard
       className="chat-tool"
-      data-tool={single ? toolDisplayName(single.name) : group.name}
-      data-cells={cells.length || undefined}
+      data-tool={single ? single.name : group.name}
       title={<span className="chat-tool-name">{group.name}</span>}
-      meta={meta}
-      state={state}
+      meta={single && !chips.length && summary ? summary : toolMeta(tools)}
+      state={groupState(tools, pending)}
       open={open}
       onToggle={setOpen}
       steps={toolSteps(tools, pending)}
-      body={body}
+      body={open && single ? <CallBody tool={single} ws={ws} summary={summary} /> : null}
       chips={chips.length > 0 ? <ChipRun>{chips}</ChipRun> : undefined}
     />
   )
 }
 
-export { underCorpus }
-
 /** A run of calls: two or more raw calls in a row as one folded chip (CallRun), every other call a line of its own. */
 function CallLines({ tools, ws, pending }: { tools: readonly ToolRowT[]; ws: string; pending: boolean }) {
   return (
     <div className="chat-msg chat-calls">
-      {callPieces(tools, false).map((p) =>
+      {callPieces(tools).map((p) =>
         p.kind === 'run' ? (
           <CallRun key={p.tools[0].id} tools={p.tools} ws={ws} pending={pending} />
         ) : (
@@ -441,76 +372,32 @@ function CallRun({ tools, ws, pending }: { tools: readonly ToolRowT[]; ws: strin
   )
 }
 
-/** The thimble tools whose target is one or more refs (a card, a passage of the report): their chip line names the
- * tool alone and each ref follows it as its chip, which names a card by its name, never its id. */
-const REF_TARGET_TOOLS = new Set(['read_ref', 'edit_card', 'delete_card'])
-
-/** The refs a call's target names, when it is a thimble call whose target is refs alone; null otherwise. Pure. */
-export function targetRefs(name: string, summary: string): string[] | null {
-  if (!REF_TARGET_TOOLS.has(toolDisplayName(name))) return null
-  // a card named by its id alone, as edit_card and delete_card take it, is that card's ref
-  const parts = summary
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .map((x) => (/^[0-9a-f]{8}$/.test(x) ? `card:${x}` : x))
-  return parts.length && parts.every((x) => x.includes(':') && parseRef(x) != null) ? parts : null
-}
-
-/** The chips of what a thimble call made, after its chip line: the card, the view proposed, the label applied; and the
- * refs its target named that are not among them (targetRefs). */
-function madeChips(tool: ToolRowT, ws: string, refs: readonly string[] = []) {
-  const made = madeBy([tool])
-  const madeIds = new Set(made.cells.map((c) => `card:${c.id}`))
-  return [
-    ...refs
-      .map((r) => r.replace(/^cell:/, 'card:'))
-      .filter((r) => !madeIds.has(r.split(/[#@]/)[0]))
-      .map((r) => (
-        <span key={`ref:${r}`} className="chat-tool-cell" data-anchor={r} onClick={(e) => e.stopPropagation()}>
-          <RefChip ref={r} compact workspace={ws} />
-        </span>
-      )),
-    ...made.cells.map((c) => (
-      <span key={`card:${c.id}`} className="chat-tool-cell" data-anchor={`card:${c.id}`} onClick={(e) => e.stopPropagation()}>
-        <RefChip ref={`card:${c.id}`} compact workspace={ws} />
-      </span>
-    )),
-    ...made.views.map((v) => <ViewChip key={`view:${v}`} ws={ws} slug={made.viewSlugs?.[v]} name={v} />),
-    ...made.labels.map((l) => <LabelChip key={`label:${l}`} name={l} onClick={(e) => (e.stopPropagation(), openLabel(ws, l))} />),
-  ]
-}
-
 /**
- * One call as Claude Code prints its line: its state's glyph, the tool and its target in mono, and the chips of what a
- * thimble call made. A click opens the call's other input fields and its result.
+ * One call as Claude Code prints its line: its state's glyph, the tool and its target in mono, and the chips of what
+ * it made. A click opens the call's other input fields and its result.
  */
-export function CallLine({ tool, ws, running, startOpen = false }: { tool: ToolRowT; ws: string; running: boolean; startOpen?: boolean }) {
+function CallLine({ tool, ws, running, startOpen = false }: { tool: ToolRowT; ws: string; running: boolean; startOpen?: boolean }) {
   const [open, setOpen] = useState(startOpen)
-  const name = callToolName(tool.name)
   const summary = toolSummary(tool.name, tool.input, ws)
-  const refs = targetRefs(tool.name, summary)
-  const target = refs ? '' : underCorpus(summary, ws)
   const { rows, result, failed } = callParts(tool, summary)
   const opens = rows.length > 0 || !!result
-  const made = madeChips(tool, ws, refs ?? [])
-  const state = running ? 'running' : failed ? 'failed' : tool.result?.not_run ? 'skipped' : tool.result ? 'done' : undefined
+  const state = running ? 'running' : failed ? 'failed' : tool.result ? 'done' : undefined
   const words = (
     <>
-      <span className="chat-call-tool">{name}</span>
-      {target && (
+      <span className="chat-call-tool">{tool.name}</span>
+      {summary && (
         <>
           {' '}
-          <span className="chat-call-target">{target}</span>
+          <span className="chat-call-target">{summary}</span>
         </>
       )}
     </>
   )
   return (
-    <div className={`chat-call${open && opens ? ' open' : ''}`} data-tool={toolDisplayName(tool.name)} data-state={state} data-call={tool.n}>
+    <div className={`chat-call${open && opens ? ' open' : ''}`} data-tool={tool.name} data-state={state}>
       <span className="chat-call-head">
         <span className="chat-call-state" aria-hidden={running || failed ? undefined : true}>
-          {running ? <Spinner size={10} label="running" /> : failed ? <Mark kind="failed" label="failed" className="chat-call-mark" /> : state === 'skipped' ? '–' : <span className="chat-call-dot" />}
+          {running ? <Spinner size={10} label="running" /> : failed ? <Mark kind="failed" label="failed" className="chat-call-mark" /> : <span className="chat-call-dot" />}
         </span>
         {opens ? (
           <button type="button" className="chat-call-chip" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
@@ -519,7 +406,7 @@ export function CallLine({ tool, ws, running, startOpen = false }: { tool: ToolR
         ) : (
           <span className="chat-call-chip">{words}</span>
         )}
-        {made}
+        {madeChips([tool], ws)}
       </span>
       {open && opens && (
         <div className="chat-call-body">
@@ -544,195 +431,39 @@ function CardCall({ tool, ws, running, newest }: { tool: ToolRowT; ws: string; r
   )
 }
 
-export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
-  const settled = useChipSettled(ws, item)
-  if (item.chip === 'view_failed') {
-    // a proposal nobody asked for that failed through its repairs: the line, and the view's chip with ✕ and Retry
-    const target = item.ref ? parseRef(item.ref) : null
-    const slug = target?.kind === 'view' ? target.slug : null
-    return <Note className="chat-chip-row" data-chip="view_failed" text={item.text} chips={<ViewChip ws={ws} slug={slug} name={item.view || slug || ''} />} />
-  }
-  if (item.chip === 'say') {
-    return (
-      <div className="chat-msg chat-assistant chat-say" data-chip="say">
-        <div className="chat-text">
-          <RefText text={item.text} workspace={ws} cite />
-        </div>
-      </div>
-    )
-  }
-  if (item.chip === 'thread' && item.chat) return <Note className="chat-chip-row" data-chip="thread" text={item.text} chips={<ThreadChip id={item.chat} />} />
-  const pending = chipPending(item.status) && settled == null
-  const opens = !!item.ref
-  const status = pending ? 'pending' : settled ?? item.status
-  const go = () => {
-    track('chip-teleport', { target: item.ref, detail: { kind: item.chip } })
-    // a canvas group's chip opens focus mode on the frame's first card (Canvas)
-    teleport(item.ref!, item.ref!.startsWith('group:') ? { focus: true } : {})
-  }
-  const target = opens ? parseRef(item.ref!) : null
-  const save = opens ? docSave(item.chip, item.ref, item.text, item.generation) : null
-  if (save && target?.kind === 'report') {
-    return (
-      <Note
-        className="chat-chip-row chat-doc-save"
-        data-chip={item.chip}
-        data-status={status ?? undefined}
-        data-verb={save.verb}
-        spin={pending}
-        text={save.verb}
-        chips={
-          <span className="chat-chip" data-ref={item.ref} title={save.generation ? `generation ${save.generation}` : undefined}>
-            <DocChip ws={ws} slug={target.slug} className="chat-chip-link" onClick={go} />
-            {settled === 'failed' && <span className="chat-chip-settled chat-chip-settled-failed">{settledWord(settled)}</span>}
-          </span>
-        }
-      />
-    )
-  }
-  return (
-    <Note
-      className="chat-chip-row"
-      data-chip={item.chip}
-      data-status={status ?? undefined}
-      spin={opens && pending}
-      text={opens ? undefined : item.text}
-      chips={
-        opens ? (
-          <span className="chat-chip" data-ref={item.ref}>
-            {target?.kind === 'report' ? (
-              <DocChip ws={ws} slug={target.slug} className="chat-chip-link" onClick={go}>
-                {item.text}
-              </DocChip>
-            ) : target?.kind === 'group' ? (
-              <GroupChip name={item.text} className="chat-chip-link" onClick={go} />
-            ) : (
-              <Chip kind="ref" tone="accent" icon={chipIcon(item.chip, item.ref)} face="sans" className="chat-chip-link" onClick={go}>
-                {item.text}
-              </Chip>
-            )}
-            {settled && <span className={`chat-chip-settled chat-chip-settled-${settled}`}>{settledWord(settled)}</span>}
-          </span>
-        ) : undefined
-      }
-    />
-  )
-}
-
-/** Views proposed in a row, one note: each proposal's ViewChip, which follows its build. A dropped proposal is left
+/** Views whose builds ended, one note: each proposal's ViewChip, which follows its build. A dropped proposal is left
  * out, and a note left with none is not drawn. */
-function ViewsNote({ chips, ws }: { chips: ChipRowT[]; ws: string }) {
+function ViewsNote({ chips, ws }: { chips: ViewChipRow[]; ws: string }) {
   const proposals = useProposals(ws)
   const shown = chips
     .map((c) => ({ c, p: c.ref ? parseRef(c.ref) : null }))
-    .map(({ c, p }) => ({ c, slug: p?.kind === 'view' ? p.slug : null }))
-    .filter(({ c, slug }) => !isDropped(proposals, slug, c.text))
+    .map(({ c, p }) => ({ c, slug: p?.kind === 'view' ? p.slug : null, name: c.text.replace(/: (built|the build failed)$/, '') }))
+    .filter(({ slug, name }) => !isDropped(proposals, slug, name))
   if (!shown.length) return null
   return (
     <Note
       className="chat-views-note"
       data-chip="view"
-      text={shown.length === 1 ? 'View proposed' : 'Views proposed'}
-      chips={shown.map(({ c, slug }) => (
-        <ViewChip key={c.index} ws={ws} slug={slug} name={c.text} />
+      text={shown.length === 1 ? 'View' : 'Views'}
+      chips={shown.map(({ c, slug, name }) => (
+        <ViewChip key={c.index} ws={ws} slug={slug} name={name} />
       ))}
     />
   )
 }
 
-/**
- * Whether a pending chip's work has since finished: the stream's `report` events settle it live, and one read of the
- * document settles a chip appended before this page loaded. A view's chip follows its proposal itself (ViewChip).
- */
-function useChipSettled(ws: string, item: ChipRowT): Settled | null {
-  const [settled, setSettled] = useState<Settled | null>(null)
-  const pending = chipPending(item.status)
-  const ref = item.ref
-  useEffect(() => {
-    if (!pending || !ref) return
-    let alive = true
-    const offReport = bus.on('report', (e) => {
-      const s = settleChip(ref, { type: 'report', slug: e.slug, status: e.status })
-      if (s && alive) setSettled(s)
-    })
-    const p = parseRef(ref)
-    if (p?.kind === 'report') {
-      // the written document
-      docsApi
-        .document(ws, p.slug)
-        .then((d) => {
-          if (alive && (d as { generated_at?: string }).generated_at) setSettled('done')
-        })
-        .catch(() => undefined)
-    }
-    return () => {
-      alive = false
-      offReport()
-    }
-  }, [ws, ref, pending])
-  return settled
-}
-
-/** Retry under the error row at `index`: what it runs again, and the line that says nothing else retries it. */
+/** Retry under the error row at `index`: what it runs again. */
 export interface ErrorRetry {
   index: number
   onRetry: () => Promise<unknown>
-  note?: string
 }
 
-/** Main's line under its API error that Retry can send again (model.apiRetry). */
-export const MAIN_RETRY_NOTE = 'Not retried. The turn ended here.'
-/** A thread's line under the API error that ended its reply, which Retry asks again. */
-export const THREAD_RETRY_NOTE = 'Not retried. The reply ended here.'
-
-/** The line of a view build's card after an API error it waits out (backend dev.run_view). Pure. */
-export const buildWaitNote = (wait: number): string => `thimble retries the build after ${waitText(wait)}.`
-
-/** Why a thread's run ended without a reply, each said in its record's message (backend threads.STOP_TEXT). */
-const THREAD_STOPS: ReadonlySet<string> = new Set(['session-ended', 'unanswered', 'fork-lost'])
-
-/** A reply that stopped or failed, as a quiet line: the ✕ mark and one word (or why a thread's run ended), the detail
- * behind the chevron. An API error is its card instead (ApiErrorCard), with Retry. */
-export function ErrorRow({ item, retry }: { item: ErrorRowT; retry?: ErrorRetry }) {
-  const [open, setOpen] = useState(false)
-  if (item.errorKind === API_ERROR_KIND) {
-    const onRetry = retry
-      ? () => {
-          track('chat-retry', { target: 'chat:main', detail: { error: item.message.split('\n', 1)[0].trim() } })
-          return retry.onRetry()
-        }
-      : undefined
-    return (
-      <div className="chat-msg chat-api-error" data-error-kind={item.errorKind}>
-        <ApiErrorCard line={item.message} failure={item.failure} retrying={item.wait != null ? buildWaitNote(item.wait) : retry?.note} waits={item.wait != null} onRetry={onRetry} />
-      </div>
-    )
-  }
-  const said = item.errorKind && THREAD_STOPS.has(item.errorKind) ? item.message.split('\n', 1)[0].trim() : ''
-  const stopped = !!said || item.errorKind === 'interrupted' || item.errorKind === 'stopped'
-  const detail = stopped ? (said ? item.detail || '' : '') : item.detail || item.message || ''
-  const toggle = () => detail && setOpen((o) => !o)
-  const word = said || (stopped ? 'stopped' : 'failed')
+/** An error that ended a turn: its card with what failed and what to do (backend llm.failure), and Retry when it is the
+ * chat's last row and the request may go through again. */
+function ErrorRow({ item, retry }: { item: ErrorRowT; retry?: ErrorRetry }) {
   return (
-    <div className={`chat-row chat-note chat-error-row${stopped ? ' chat-stopped' : ' chat-failed'}${open ? ' open' : ''}`} role={stopped ? undefined : 'alert'} data-error-kind={item.errorKind}>
-      <span
-        className={`chat-note-head${detail ? ' chat-note-act' : ''}`}
-        role={detail ? 'button' : undefined}
-        tabIndex={detail ? 0 : undefined}
-        aria-expanded={detail ? open : undefined}
-        onClick={toggle}
-        onKeyDown={(e) => {
-          if (detail && (e.key === 'Enter' || e.key === ' ')) {
-            e.preventDefault()
-            toggle()
-          }
-        }}
-      >
-        <Mark kind="failed" label={word} className={`chat-row-mark chat-row-mark-${stopped ? 'stopped' : 'failed'}`} />
-        <span className="chat-row-word">{word}</span>
-        {detail && <Icon name="chevron-right" size={10} className="chat-row-caret" />}
-      </span>
-      {open && detail && <div className="chat-row-body chat-error-detail">{detail}</div>}
+    <div className="chat-msg chat-api-error" data-error-kind={item.errorKind}>
+      <ErrorCard text={item.message} onRetry={retry?.onRetry} />
     </div>
   )
 }
