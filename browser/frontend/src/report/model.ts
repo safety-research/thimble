@@ -20,11 +20,6 @@ export function paragraphText(p: WriteupParagraph): string {
     .join(' ')
 }
 
-/** Whether the frame routes may edit or remove a unit here: every unit of a frame, only pinned units of a document. */
-export function editable(doc: Pick<Writeup, 'frame'>, unit: object): boolean {
-  return doc.frame === true || (unit as { pinned?: boolean }).pinned === true
-}
-
 export interface ReportFilterSets {
   /** the sentence ids the value covers */
   sids: Set<string>

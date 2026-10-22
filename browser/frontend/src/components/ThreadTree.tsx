@@ -167,10 +167,6 @@ export function attention(nodes: readonly ThreadNode[], current: string, starter
   }
 }
 
-/** How many threads want attention: running, or holding a reply the analyst has not read (the current one is being
- * read). Pure. */
-export const activeCount = (nodes: readonly ThreadNode[], current: string): number => nodes.filter((n) => n.running || (n.unread && n.id !== current)).length
-
 /** `nodes` in the order `kept` lists them, those it does not know after, in their own order: the open tree holds the
  * order it opened with, so rows do not move under the pointer as activity comes in. Pure. */
 export function inKeptOrder(nodes: readonly ThreadNode[], kept: readonly string[] | null): readonly ThreadNode[] {

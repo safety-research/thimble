@@ -55,9 +55,7 @@ Each list may also be a DataFrame or a dict of (key, value) pairs; anything else
 The British spellings stay as aliases: colours, colour_value and colour_on, and a mark's or a label's "colour" beside
 its "color".
 
-Server-only helpers: `_frame()` returns a table card's final DataFrame as JSON (frames.CAPTURE); `_trial_begin/_end/
-_undo/_drop` let the card check run a fix's code and put names back if it is refused; `_labels_read()` reports the
-labels (with revisions) the last cell read.
+Server-only helper: `_frame_json(df)` is a DataFrame as the server stores a table (runner.py).
 
 Rows come from labels/<id>.sqlite when it reflects the labels file, else from labels/<id>.jsonl (last row per ref wins).
 A cover over a range of records supplies their negative value. Only the standard library at import; pandas is imported
@@ -454,8 +452,6 @@ def labels(name=None, negatives=False):
                               "n_labeled": k["n_labeled"], "set_by_analyst": _set_by_analyst(k["id"])} for k in ks],
                             columns=_LIST_COLUMNS)
     k = _find(name)
-    if all(x["id"] != k["id"] for x in _LABELS_READ):
-        _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
     jsonl = _ws() / "labels" / f"{k['id']}.jsonl"
     db = jsonl.with_suffix(".sqlite")
     rows = _rows_from_store(db, negatives) if _store_fresh(jsonl, db) else _rows_from_jsonl(jsonl, negatives)
@@ -506,8 +502,6 @@ def colors(name, values=None):
     """thimble.colors("<name>") maps each of the label's values to its color, in the label's order; with `values`,
     other values follow sorted, in the neutral inks. thimble.colours is the same function."""
     k = _find(name)
-    if all(x["id"] != k["id"] for x in _LABELS_READ):
-        _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
     own = {v: LABEL_COLOURS[n or 0] for v, n in k["classes"]}
     if values is None:
         return own
@@ -1587,8 +1581,6 @@ def _label_values(kind: str, name, s, col: str) -> list:
     if not {str(v) for v in s.dropna().tolist()} & set(values):
         raise ValueError(f"thimble.chart({kind!r}): the column `{col}` holds none of the label {k['name']!r}'s values, "
                          + ", ".join(map(repr, values)))
-    if ws is None and all(x["id"] != k["id"] for x in _LABELS_READ):
-        _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
     return values
 
 
@@ -2686,9 +2678,6 @@ def card(type, labels=None, **args):
         args = _checked(t.get("args") or {"type": "object"}, args, "the arguments")
     except ValueError as e:
         raise ValueError(f"thimble.card({type!r}): {e}") from None
-    for k in ks:
-        if all(x["id"] != k["id"] for x in _LABELS_READ):
-            _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
     host = _views_host(t["host"])
     reader = host._reader(t["slug"], t["reader"])
     index, _built = host._index(t["slug"], reader, t["fp"], t["paths"], t["cache"])
@@ -2709,33 +2698,6 @@ def card(type, labels=None, **args):
                        "args": args, "size": t.get("size"),
                        "labels": [{"id": k["id"], "name": k["name"]} for k in ks], "data": data},
            "text/plain": "\n".join(lines)})
-
-
-class _Json:
-    """A user expression's value whose text/plain is the JSON it carries (_frame), since IPython formats a user
-    expression's value by its repr."""
-
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-    def __repr__(self) -> str:
-        return self.text
-
-
-def _as_frame(value):
-    """The value as a DataFrame when it is tabular (a DataFrame, a Series, a Styler's data), else None."""
-    import sys
-
-    pd = sys.modules.get("pandas")
-    if pd is None:
-        return None
-    styler = getattr(getattr(pd, "io", None), "formats", None)
-    styler = getattr(getattr(styler, "style", None), "Styler", None)
-    if styler is not None and isinstance(value, styler):
-        value = value.data
-    if isinstance(value, pd.Series):
-        return value.to_frame(name=value.name if value.name is not None else "value")
-    return value if isinstance(value, pd.DataFrame) else None
 
 
 def _type_of(series) -> str:
@@ -2801,108 +2763,3 @@ def _frame_json(df) -> dict:
             df[c] = df[c].map(lambda v: v.isoformat() if hasattr(v, "isoformat") else v)
     rows = _json.loads(df.to_json(orient="values", date_format="iso", date_unit="s", default_handler=str))
     return {"columns": names, "types": types, "index": index, "rows": rows, "total": total}
-
-
-def _frame():
-    """The DataFrame the card that just ran ends in."""
-    import json as _json
-
-    frame, problem, last = None, None, None
-    try:
-        # imported, not the builtin: IPython puts get_ipython in builtins only while a cell runs, and a user expression
-        # is evaluated after the cell
-        from IPython import get_ipython
-
-        ip = get_ipython()
-        value = getattr(getattr(ip, "last_execution_result", None), "result", None)
-    except ImportError:
-        value = None
-    df = _as_frame(value)
-    if df is not None:
-        try:
-            frame = _frame_json(df)
-        except Exception as e:  # noqa: BLE001 — reported to the server rather than raised into the reply
-            problem = f"the DataFrame could not be read: {type(e).__name__}: {e}"
-    elif value is not None:
-        last = type(value).__name__
-    return _Json(_json.dumps({"frame": frame, "problem": problem, "last": last}, default=str))
-
-
-# The card check's trials (notebook.trial_run). A fix's code runs on the card's kernel before the check keeps it, so a
-# refused fix would leave its variables behind. _trial_begin notes the namespace's bindings, _trial_end records the
-# names the trial bound or rebound, and _trial_undo puts back each that still holds the trial's value. Values are not
-# copied. _trial_drop forgets a kept fix's trial. At most _TRIALS_KEPT trials are held, since a cancelled check never
-# settles.
-_TRIALS = {}
-_TRIALS_KEPT = 8
-_UNSET = object()
-
-
-def _user_ns():
-    from IPython import get_ipython
-
-    return get_ipython().user_ns
-
-
-def _trial_begin(tid):
-    _TRIALS[tid] = {"before": dict(_user_ns())}
-    while len(_TRIALS) > _TRIALS_KEPT:
-        _TRIALS.pop(next(iter(_TRIALS)))
-
-
-def _trial_end(tid):
-    t = _TRIALS.get(tid)
-    if t is None:
-        return
-    before, ns = t.pop("before", {}), _user_ns()
-    t["changed"] = {k: (before.get(k, _UNSET), ns.get(k, _UNSET)) for k in set(before) | set(ns)
-                    if not k.startswith("_") and before.get(k, _UNSET) is not ns.get(k, _UNSET)}
-
-
-def _trial_undo(tid):
-    t = _TRIALS.get(tid)
-    if t is not None and "changed" not in t:  # a trial whose code raised ends here, since its user expression never ran
-        _trial_end(tid)
-    ns = _user_ns()
-    for k, (old, new) in (_TRIALS.pop(tid, None) or {}).get("changed", {}).items():
-        if ns.get(k, _UNSET) is not new:
-            continue
-        if old is _UNSET:
-            ns.pop(k, None)
-        else:
-            ns[k] = old
-
-
-def _trial_drop(tid):
-    _TRIALS.pop(tid, None)
-
-
-# The labels a cell uses. thimble.labels("<name>") and thimble.colours("<name>") note the label id and revision they
-# read; _labels_read hands them to the server after the cell (notebook.LABELS_EXPR), and IPython's pre_run_cell event
-# empties the list before each cell. The call is the signal, since a regex over the code would miss a label named
-# through a variable. The event handler reads the list by global name, so a re-run of this source
-# (notebook._refresh_thimble) keeps it working.
-_LABELS_READ = []
-
-
-def _labels_read():
-    return _Json(json.dumps(list(_LABELS_READ)))
-
-
-def _new_cell(*_args, **_kwargs):
-    del _LABELS_READ[:]
-
-
-def _watch_cells():
-    try:
-        from IPython import get_ipython
-    except ImportError:
-        return
-    ip = get_ipython()
-    if ip is None or globals().get("_CELLS_WATCHED"):
-        return
-    ip.events.register("pre_run_cell", _new_cell)
-    globals()["_CELLS_WATCHED"] = True
-
-
-_watch_cells()

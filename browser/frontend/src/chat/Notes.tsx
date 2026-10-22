@@ -4,7 +4,6 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import { Chip } from '../components/Chip'
 import { Spinner } from '../components/Spinner'
-import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { ChatMeta } from '../lib/types'

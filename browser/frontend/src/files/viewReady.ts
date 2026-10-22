@@ -7,7 +7,6 @@
 // workspace in localStorage.
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { bus } from '../lib/bus'
-import { isReplay } from '../lib/events'
 import { teleport } from '../lib/teleport'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 
@@ -91,8 +90,8 @@ export function typingIn(el: Element | null): boolean {
 
 /** What a `view` record asks of the page: open the view, mark it ready, mark a new version of it updated, or nothing.
  * The first build of an accepted view proposal is ready, never opened. Pure, so the rule is tested without a page. */
-export function onBuilt(e: { status: string; asked?: boolean; accepted?: boolean; version?: string }, replay: boolean, typing: boolean, shownNow = false): 'open' | 'ready' | 'updated' | null {
-  if (e.status !== 'built' || replay) return null
+export function onBuilt(e: { status: string; asked?: boolean; accepted?: boolean; version?: string }, typing: boolean, shownNow = false): 'open' | 'ready' | 'updated' | null {
+  if (e.status !== 'built') return null
   if (e.accepted) return 'ready'
   if (e.asked) return typing ? 'ready' : 'open'
   return e.version && !shownNow ? 'updated' : null
@@ -108,7 +107,7 @@ export function useOpenAskedViews(ws: string, names: ReadonlyMap<string, string>
       bus.on('view', (e) => {
         if (e.held) return // a proposal of the orientation's still waiting for its first passing build
         if (e.status === 'deleted') return markOpened(ws, e.slug)
-        const act = onBuilt(e, isReplay(), typingIn(document.activeElement), isShown(ws, e.slug))
+        const act = onBuilt(e, typingIn(document.activeElement), isShown(ws, e.slug))
         if (act === 'open') teleport(`view:${e.slug}`)
         else if (act === 'updated') markUpdated(ws, e.slug)
         else if (act === 'ready') {

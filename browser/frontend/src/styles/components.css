@@ -458,12 +458,6 @@
   top: 3px;
   right: -11px;
 }
-/* the spinner in the dot's slot while a writer writes (the Report tab, a type in the report's type bar): 10px, its left
-   edge 5px after the name as the dot's is, and centred on the name's line box (1.45em tall at the tab's top) */
-.tab-spinner {
-  top: calc((1.45em - 10px) / 2);
-  right: -15px;
-}
 
 /* -------- Card: the frame. Opaque paper, radius 8; the cell is the lightest thing on screen, ringed on Neutral and
    Dark -------- */

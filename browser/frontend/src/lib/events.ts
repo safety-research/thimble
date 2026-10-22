@@ -1,34 +1,16 @@
-// One EventSource per workspace on `GET /ws/{c}/events`, fanned out on the bus by record type. The first open replays
-// the workspace's history, then the server sends `live` (backend investigation._stream); isReplay tells whether the
-// record being dispatched is from that history, so one-time effects (a toast, a tab dot) happen only for new records.
-// When `/thimble fresh` or `resume` replaces the log, the server sends `reset`, the bus gets `wsReset` and the shell
-// reloads the page.
+// One EventSource per workspace on `GET /ws/{c}/events`, fanned out on the bus by record type. A record says what
+// changed, never the content, and the server keeps no history to replay (backend hub.py): a page that reconnects reads
+// what it shows anew.
 import { useEffect } from 'react'
 import { api } from './api'
 import { bus } from './bus'
-import { parseNotice } from './notices'
 import { openStream } from './sse'
-import type { ViewQuery, WsEvent } from './types'
+import type { WsEvent } from './types'
 
-let replaying = false
-
-/** Whether the record being dispatched now is from the replayed history rather than new. Read it inside a bus
- * handler, which runs during the dispatch. */
-export function isReplay(): boolean {
-  return replaying
-}
-
-/** Hand one stream record to the bus; `replay` marks a record of the history (isReplay). Exported so a test can feed
- * records without a socket. */
-export function dispatch(ev: WsEvent, replay = false): void {
+/** Hand one stream record to the bus. Exported so a test can feed records without a socket. */
+export function dispatch(ev: WsEvent): void {
   if (!ev || typeof ev !== 'object' || typeof ev.type !== 'string') return
-  const was = replaying
-  replaying = replay
-  try {
-    fanOut(ev)
-  } finally {
-    replaying = was
-  }
+  fanOut(ev)
 }
 
 function fanOut(ev: WsEvent): void {
@@ -64,58 +46,12 @@ function fanOut(ev: WsEvent): void {
     case 'concepts':
       bus.emit('concepts', { concept: String(rest.concept ?? ''), what: String(rest.what ?? ''), rows: rest.rows !== false })
       return
-    case 'check':
-      if (typeof rest.id === 'string')
-        bus.emit('check', { id: rest.id, doc: String(rest.doc ?? ''), status: String(rest.status ?? ''), run: typeof rest.run === 'string' ? rest.run : undefined, chat: typeof rest.chat === 'string' ? rest.chat : undefined })
-      return
-    case 'checks':
-      bus.emit('checks', { id: typeof rest.id === 'string' ? rest.id : undefined })
-      return
-    case 'canvas-comments':
-      bus.emit('canvasComments', { card: typeof rest.card === 'string' ? rest.card : undefined })
-      return
-    case 'card-request':
-      if (typeof rest.request === 'string' && typeof rest.card === 'string') bus.emit('cardRequest', { request: rest.request, card: rest.card })
-      return
-    case 'layout': {
-      const presets = ['one', 'columns', 'rows', 'three', 'quadrants'] as const
-      const name = presets.find((x) => x === rest.layout)
-      if (name) bus.emit('layout', { layout: name, surfaces: Array.isArray(rest.surfaces) ? rest.surfaces.filter((x): x is string => typeof x === 'string') : [] })
-      return
-    }
-    case 'open-view':
-      // a view main opened with open_view (backend cardtypes.tool_open_view); the history the stream replays is not
-      // opened again
-      if (!replaying && typeof rest.slug === 'string') bus.emit('openView', { slug: rest.slug, query: viewQuery(rest.query) })
-      return
-    case 'notice': {
-      // a failure of main or of one of thimble's agents with its fix, or the end of one (backend notices.py): the open
-      // notices (lib/notices.ts) and the chat whose log holds its row follow it
-      const chat = typeof rest.chat === 'string' && rest.chat ? rest.chat : null
-      const id = typeof rest.id === 'string' && rest.id ? rest.id : undefined
-      const key = typeof rest.key === 'string' && rest.key ? rest.key : undefined
-      if (rest.cleared === true || rest.dismissed === true) {
-        if (id || key) bus.emit('notice', { chat, notice: null, gone: { ...(id ? { id } : {}), ...(key ? { key } : {}) }, foreground: false, replay: replaying })
-        return
-      }
-      const notice = parseNotice(rest)
-      if (notice) bus.emit('notice', { chat, notice, gone: null, foreground: rest.foreground !== false, replay: replaying })
-      return
-    }
     case 'filter':
       bus.emit('filter',{ scope: rest.scope as 'files' | 'canvas' | 'report', concept: typeof rest.concept === 'string' ? rest.concept : undefined, value: typeof rest.value === 'string' ? rest.value : undefined })
       return
     default:
       return
   }
-}
-
-/** A stream record's `query` as a view takes it: {card, title, args}, else null. */
-function viewQuery(q: unknown): ViewQuery | null {
-  if (!q || typeof q !== 'object') return null
-  const o = q as Record<string, unknown>
-  if (typeof o.card !== 'string' || !o.args || typeof o.args !== 'object') return null
-  return { card: o.card, title: typeof o.title === 'string' ? o.title : '', args: o.args as Record<string, unknown> }
 }
 
 interface Sub {
@@ -128,23 +64,8 @@ const subs = new Map<string, Sub>()
 export function subscribeWorkspace(workspace: string): () => void {
   let sub = subs.get(workspace)
   if (!sub) {
-    // the history lasts until the first `live` event; a reopen after a failure asks from the last record seen, so what
-    // it replays happened while the page was open
-    let history = true
-    let log: string | null = null
     const release = openStream(api.eventsUrl(workspace), {
-      events: ['live', 'reset'],
-      urlFor: (last) => api.eventsUrl(workspace, last, log),
-      onEvent: (event, data) => {
-        if (event === 'live') {
-          history = false
-          const named = (data as { log?: unknown } | null)?.log
-          if (typeof named === 'string' && named) log = named
-        } else if (event === 'reset') {
-          history = true
-          bus.emit('wsReset', { workspace })
-        } else dispatch(data as WsEvent, history)
-      },
+      onEvent: (event, data) => event === 'message' && dispatch(data as WsEvent),
       onReopen: () => bus.emit('wsStream', { connected: true }),
       onDown: () => bus.emit('wsStream', { connected: false }),
     })

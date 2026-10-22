@@ -20,11 +20,6 @@ import { invalidateSettings, loadSettings, modelLabel, sameModel } from '../lib/
 import { EFFORTS, type BrowserSettings, type Credentials } from '../lib/types'
 import { loadFeatures } from '../features'
 
-/** The efforts a role's menu offers (chat/RoleChip): Claude's levels. */
-export function roleEfforts(_role?: string): string[] {
-  return [...EFFORTS]
-}
-
 /** The two ways to sign in, as the switch names them. */
 export const SOURCES: { value: 'wif' | 'key'; label: string }[] = [
   { value: 'wif', label: 'Workload Identity' },

@@ -191,14 +191,6 @@ export function FigureBlock({ block, editor }: FigureBlockProps) {
   return <Figure ws={ws} id={block.id} cellRef={block.props.cell} caption={block.props.caption} stored={stored} readOnly={!!readOnly} onCaption={(v) => setProps({ caption: v })} onFollow={follow} onRemove={remove} drag={drag} />
 }
 
-/** A figure standing on its own, outside the editor, from its stored record: a scene's or a slide's figure. `bare`
- * draws the chart alone, without the card's frame, question and caption (a slide carries its own heading). */
-export function FigureView({ ws, figure, bare = false }: { ws: string; figure: WriteupFigure; bare?: boolean }) {
-  const pending = !figure.cell && !!figure.make && (figure.status ?? 'pending') === 'pending'
-  if (!figure.cell && !pending) return null
-  return <Figure ws={ws} id={figure.id} cellRef={figure.cell ?? ''} caption={figure.caption ?? ''} stored={figure} readOnly bare={bare} />
-}
-
 interface FigureProps {
   ws: string
   id: string

@@ -5,7 +5,6 @@
 import { useEffect, useState } from 'react'
 import { docsApi } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
-import { isReplay } from '../lib/events'
 
 export type Dots = Record<Tab, boolean>
 /** What a tab wears after its name: the accent dot, the spinner, or nothing. */
@@ -76,7 +75,7 @@ export function useTabDots(shown: readonly Tab[]): Dots {
     () =>
       bus.on('wsEvent', (ev) => {
         const tab = tabOfEvent(ev.type, ev as Record<string, unknown>)
-        if (!tab || key.split(' ').includes(tab) || isReplay()) return
+        if (!tab || key.split(' ').includes(tab)) return
         setDots((d) => (d[tab] ? d : { ...d, [tab]: true }))
       }),
     [key],

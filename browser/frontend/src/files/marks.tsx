@@ -448,12 +448,6 @@ export function labelsArrived(ws: string, path: string, ref: string): boolean {
   return at?.line != null && e.arrived.has(blockOf(at.line))
 }
 
-/** Ask for the block of labels that holds `line` of `path`, once; the watchers of the path get it when it arrives.
- * `soon`, for a record in view, puts its block before those asked for without it, even when it was asked for already. */
-export function wantLabels(ws: string, path: string, line: number, soon = false): void {
-  fetchBlock(ws, path, blockOf(line), soon)
-}
-
 /** Ask for the labels of a record of `path` by its ref, once: a record that is no line (lib/refs recordOf), or a line
  * of a view's page, which asks for its records' rows alone rather than for the pages they fall on; the watchers of the
  * path get them when they arrive. `soon`, for a record in view, puts it before those asked for without it. */

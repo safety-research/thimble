@@ -5,7 +5,6 @@
 // with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
 // about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
 // at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
-import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
 
@@ -637,7 +636,6 @@ export const stepZoom = (scale: number, dir: 1 | -1): number =>
 
 export const panBy = (view: View, dx: number, dy: number): View => ({ ...view, x: view.x + dx, y: view.y + dy })
 export const toPlane = (view: View, px: number, py: number): Pos => ({ x: (px - view.x) / view.scale, y: (py - view.y) / view.scale })
-export const toScreen = (view: View, x: number, y: number): Pos => ({ x: x * view.scale + view.x, y: y * view.scale + view.y })
 
 export interface WheelLike {
   deltaX: number
@@ -795,18 +793,6 @@ export function scopeForUnit(unit: string | undefined): FilterScope | null {
 
 /** Whether `filters[scope]` is exactly this concept and value. */
 export const filterIs = (filters: Filters | null | undefined, scope: FilterScope, concept: string, value: string): boolean => filters?.[scope]?.concept === concept && filters?.[scope]?.value === value
-
-/** The chip tone for a `whoMade` word: thimble accent, orient warning, the analyst and anyone else neutral. */
-export const WHO_TONE: Readonly<Record<string, ChipTone>> = { thimble: 'accent', orient: 'warning' }
-export const whoTone = (who: string): ChipTone => WHO_TONE[who] ?? 'neutral'
-
-/** `you` for the analyst, `thimble` for a chat, `orient` for the orientation, else the creator as written. */
-export function whoMade(createdBy: string | null | undefined): string {
-  const c = createdBy ?? ''
-  if (!c || c === 'user' || c === 'terminal') return 'you'
-  if (c.startsWith('chat:')) return 'thimble'
-  return c
-}
 
 /** The thread a card came from: its chat, and its name as the card's foot shows it. */
 export interface CellThread {

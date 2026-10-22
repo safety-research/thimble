@@ -16,7 +16,7 @@ from thimble_browser.cards import sandbox
 
 ERR = "application/vnd.thimble.error+json"
 LINUX = sys.platform.startswith("linux")
-works = pytest.mark.skipif(sandbox.available() is None, reason="no sandbox on this machine")
+works = pytest.mark.skipif(sandbox.status().kind is None, reason="no sandbox on this machine")
 srt_installed = pytest.mark.skipif(shutil.which("node") is None or sandbox.installed() != sandbox.pinned(),
                                    reason="needs Node and srt in server/sandbox (npm ci there)")
 H = "/Users/t"

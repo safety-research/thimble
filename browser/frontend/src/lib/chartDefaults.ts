@@ -21,10 +21,6 @@ const SHORT_LABEL = 12
 export const FOLD_GROUPS = 7
 /** the field a folded chart colours by: the group, or "other (n)" for a folded one */
 export const FOLD_FIELD = '__thimble_group'
-/** the height a row of a discrete y axis needs for its label to show at the theme's label size and separation (11 px
- * and 6 px, lib/vizTheme, which the overlap rule measures), with a pixel to spare; an axis that sets its own label size
- * or separation gets a step of those (rowStep) */
-export const ROW_STEP = 18
 /** the least room a group of dots set side by side on a row's line takes (yOffset), px: a dot at Vega-Lite's size (6 px
  * across) with a gap, so the dots of two groups next to each other never touch */
 export const GROUP_STEP = 8

@@ -141,11 +141,6 @@ def status() -> Status:
     return Status(f"srt {got} with {'Seatbelt' if macos else 'bubblewrap'}", node=node)
 
 
-def available() -> str | None:
-    """The sandbox this machine has, or None."""
-    return status().kind
-
-
 def _read(path: str) -> str:
     try:
         return Path(path).read_text().strip()
@@ -426,6 +421,22 @@ def _failed(ename: str, evalue: str, tb: list[str] | None = None) -> dict[str, A
     return {"status": "error", "ok": False, "error": f"{ename}: {evalue}", "traceback": "\n".join(tb or []),
             "frame": None, "outputs": [{"application/vnd.thimble.error+json": {"ename": ename, "evalue": evalue,
                                                                                 "traceback": tb or []}}]}
+
+
+def write_bytecode() -> None:
+    """Write the bytecode of the modules a run imports (IPython, pandas, altair and the rest): a run cannot, since its
+    Python's folders are read-only to it, so where nothing wrote it before, each run compiles those modules again (about
+    2.4 s a run instead of 0.9 s). The server calls this once when it starts; it runs runner.py outside the sandbox with
+    no code, which runs nothing of Claude's."""
+    run_dir = Path(tempfile.mkdtemp(prefix="thimble-run-")).resolve()
+    try:
+        env = {k: v for k, v in child_env(run_dir).items() if k != "PYTHONDONTWRITEBYTECODE"}
+        subprocess.run([sys.executable, "-I", str(RUNNER)], input=json.dumps({"code": "", "corpus": str(run_dir)}),
+                       capture_output=True, text=True, env=env, cwd=run_dir, timeout=PROBE_S * 4)
+    except (OSError, subprocess.SubprocessError):
+        pass  # the runs then compile what they import, as before
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 async def run_code(code: str, corpus: Path, *, timeout: float = 60.0, unsandboxed: bool = False,

@@ -5,7 +5,6 @@
 
 export type SurfaceId = string
 export const BASE_SURFACES = ['files', 'canvas', 'report'] as const
-export type BaseSurface = (typeof BASE_SURFACES)[number]
 export type Dir = 'row' | 'col'
 export type Edge = 'left' | 'right' | 'top' | 'bottom'
 export type Zone = Edge | 'center'
@@ -27,10 +26,6 @@ export interface Panes {
   root: PaneNode
   focus: string
 }
-
-export const PRESETS = ['one', 'columns', 'rows', 'three', 'quadrants'] as const
-export type Preset = (typeof PRESETS)[number]
-const SLOTS: Record<Preset, number> = { one: 1, columns: 2, rows: 2, three: 3, quadrants: 4 }
 
 /** The gap between panes, which is also the divider's grab strip, in px. */
 export const GAP = 12
@@ -178,56 +173,6 @@ export function show(p: Panes, surface: SurfaceId, from: string | null = null, r
     target = [...recent, p.focus].find((id) => id !== from && others.includes(id)) ?? others[0]
   }
   return place(p, target, surface)
-}
-
-function shape(preset: Preset, ls: PaneLeaf[]): PaneNode {
-  const s = (dir: Dir, a: PaneNode, b: PaneNode): PaneSplit => ({ kind: 'split', dir, ratio: 0.5, a, b })
-  switch (preset) {
-    case 'one':
-      return ls[0]
-    case 'columns':
-      return s('row', ls[0], ls[1])
-    case 'rows':
-      return s('col', ls[0], ls[1])
-    case 'three':
-      return s('row', ls[0], s('col', ls[1], ls[2]))
-    case 'quadrants':
-      return s('col', s('row', ls[0], ls[1]), s('row', ls[2], ls[3]))
-  }
-}
-
-/** The layout of a preset: `columns`, `rows`, `three` or `quadrants`. With `order` the panes show those surfaces in
- * reading order; otherwise the current surfaces keep their order and the rest of `available` fill in. The focused
- * surface keeps the focus. */
-export function preset(p: Panes, name: Preset, available: readonly SurfaceId[], order?: readonly SurfaceId[]): Panes {
-  const n = SLOTS[name]
-  const now = focused(p).surface
-  const shownNow = shownSurfaces(p)
-  let seq: SurfaceId[]
-  if (order) seq = unique([...order.filter((s) => available.includes(s) || shownNow.includes(s)), ...available])
-  else {
-    seq = unique([...(name === 'one' && now ? [now] : []), ...shownNow, ...available])
-    if (now && seq.indexOf(now) >= n) seq.splice(n - 1, 0, now)
-    seq = unique(seq)
-  }
-  const ls = Array.from({ length: n }, (_, i) => leaf(`p${i + 1}`, seq[i] ?? null))
-  const keep = ls.find((l) => l.surface != null && l.surface === (order ? order[0] : now))
-  return { root: shape(name, ls), focus: keep?.id ?? 'p1' }
-}
-
-function unique<T>(xs: readonly T[]): T[] {
-  return [...new Set(xs)]
-}
-
-/** The preset whose shape the layout has, whatever its ratios; null for a shape made by dragging. */
-export function presetOf(p: Panes): Preset | null {
-  const r = p.root
-  const isLeaf = (n: PaneNode) => n.kind === 'pane'
-  if (r.kind === 'pane') return 'one'
-  if (isLeaf(r.a) && isLeaf(r.b)) return r.dir === 'row' ? 'columns' : 'rows'
-  if (r.dir === 'row' && isLeaf(r.a) && r.b.kind === 'split' && r.b.dir === 'col' && isLeaf(r.b.a) && isLeaf(r.b.b)) return 'three'
-  if (r.dir === 'col' && r.a.kind === 'split' && r.b.kind === 'split' && r.a.dir === 'row' && r.b.dir === 'row' && [r.a.a, r.a.b, r.b.a, r.b.b].every(isLeaf)) return 'quadrants'
-  return null
 }
 
 // -------- geometry --------

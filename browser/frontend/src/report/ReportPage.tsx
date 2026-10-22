@@ -3,11 +3,11 @@
 // the start: an empty report is a document they type into and place cards in.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PageRuler, type Passage } from '../files/Ruler'
-import { api, reportApi } from '../lib/api'
+import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { Cell, Group, Writeup } from '../lib/types'
-import { ReadProbe, useDock } from '../shell/dock'
+import { ReadProbe } from '../shell/dock'
 import { usedCells } from './cards'
 import type { Flag } from './decorations'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'

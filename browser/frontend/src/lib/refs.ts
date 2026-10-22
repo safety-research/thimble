@@ -43,8 +43,6 @@ export type ParsedRef =
 export const CARD = 'card:'
 /** Whether a string is a card's ref, by either prefix. */
 export const isCardRef = (ref: string): boolean => ref.startsWith('card:') || ref.startsWith('cell:')
-/** `card:<id>` for a card id. */
-export const cardRef = (id: string): string => `${CARD}${id}`
 const CELL_RE = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@(out)?(\d+))?(?:#(.*))?$/
 const CELL_LINES_RE = /^L(\d+)(?:-L?(\d+))?$/
 const CELL_TD_RE = /^([^/]+)\/(.+)$/

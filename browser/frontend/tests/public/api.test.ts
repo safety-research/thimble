@@ -27,7 +27,6 @@ const CLIENTS: Record<string, Record<string, unknown>> = {
   api: client.api,
   canvasApi: client.canvasApi,
   reportApi: client.reportApi,
-  feedbackApi: client.feedbackApi,
   labelApi: client.labelApi,
   docsApi: client.docsApi,
   scaleApi: client.scaleApi,

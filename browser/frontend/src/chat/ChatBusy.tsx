@@ -9,11 +9,6 @@ import { useChatMetas } from './useChat'
 
 type Meta = { id?: string; kind?: string; title?: string; name?: string | null; running?: boolean }
 
-/** Main's turn while it runs, as the chat list says it (`running`, which the server sets for the open turn). */
-export function mainRunning(metas: readonly Meta[]): boolean {
-  return metas.some((m) => m.kind === 'main' && !!m.running)
-}
-
 /** The chats whose turn runs now, each as its step: main's "answering", a thread's "answering: <its name>". Pure. */
 export function answering(metas: readonly Meta[]): { id: string; word: string }[] {
   return metas

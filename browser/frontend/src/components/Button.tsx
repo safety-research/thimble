@@ -174,35 +174,3 @@ export interface TabOption<V extends string> {
   busy?: boolean
 }
 
-export interface TabsProps<V extends string> {
-  options: readonly TabOption<V>[]
-  value: V
-  onChange: (value: V) => void
-  /** the accessible name of the tab list */
-  label?: string
-  className?: string
-}
-
-/** The surfaces' tabs: text only, outside the pane; the active tab in ink at 500, the others tertiary. */
-export function Tabs<V extends string>({ options, value, onChange, label, className }: TabsProps<V>) {
-  return (
-    <nav className={`tabs${className ? ` ${className}` : ''}`} role="tablist" aria-label={label}>
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="tab"
-          aria-selected={o.value === value}
-          className={`tab${o.value === value ? ' active' : ''}`}
-          data-tab={o.value}
-          onClick={() => {
-            if (o.value !== value) onChange(o.value)
-          }}
-        >
-          <span className="tab-label">{o.label}</span>
-          {o.dot && <span className="dot tab-dot" role="img" aria-label="Unread" />}
-        </button>
-      ))}
-    </nav>
-  )
-}

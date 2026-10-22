@@ -161,10 +161,11 @@ function outputLines(output: string, spans: [number, number][]): ReactNode[] {
     const a = starts[i]
     const b = a + lines[i].length
     let pos = a
-    for (const [x, y] of spans) {
-      if (y <= a || x >= b) continue
-      const s = Math.max(x, a)
+    // in order, each part once: the check may give a span twice, or spans that overlap (the terminal's highlighted)
+    for (const [x, y] of [...spans].sort((p, q) => p[0] - q[0])) {
+      const s = Math.max(x, a, pos)
       const e = Math.min(y, b)
+      if (e <= s) continue
       if (s > pos) out.push(output.slice(pos, s))
       out.push(<mark key={`${i}:${s}`}>{output.slice(s, e)}</mark>)
       pos = e

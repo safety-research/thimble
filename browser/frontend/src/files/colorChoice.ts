@@ -93,25 +93,6 @@ export function valueMeaning(definition: string | null | undefined, values: read
   return words.trim() || null
 }
 
-/** A label's definition before the first of its values written as `'value': …` (its question), the whole definition
- * when it writes none so. Pure. */
-export function definitionLead(definition: string | null | undefined, values: readonly string[]): string {
-  const text = (definition ?? '').trim()
-  let cut = text.length
-  for (const v of values) {
-    for (const [q, close] of [
-      ["'", "'"],
-      ['"', '"'],
-      ['‘', '’'],
-      ['“', '”'],
-    ]) {
-      const at = text.indexOf(`${q}${v}${close}:`)
-      if (at >= 0 && at < cut) cut = at
-    }
-  }
-  return text.slice(0, cut).trim()
-}
-
 /** A label's chips: its highlighted values in its colors, with their counts on the file and their meanings, then the
  * records it does not mark, when there are any or their count is not known. */
 export function labelChips(k: Concept, counts: Readonly<Record<string, number>> | undefined, total: number | null): ColorValue[] {

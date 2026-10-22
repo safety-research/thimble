@@ -13,7 +13,6 @@ import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
 import { api, canvasApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
-import { isReplay } from '../lib/events'
 import { freeKeyHeld, pointKeyHeld } from '../lib/platform'
 import { takesSideways } from '../lib/scrolls'
 import { registerCells } from '../lib/cellName'
@@ -1268,7 +1267,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     () =>
       bus.on('wsEvent', (ev) => {
         const e = ev as Record<string, unknown>
-        if (activeNow.current || isReplay() || e.type !== 'cell' || e.op !== 'created' || typeof e.cell !== 'string') return
+        if (activeNow.current || e.type !== 'cell' || e.op !== 'created' || typeof e.cell !== 'string') return
         arrived.current.push(e.cell)
       }),
     [],

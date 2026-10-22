@@ -3,7 +3,6 @@
 // ---- chats and records ----
 
 export type ChatKind = 'main' | 'thread' | 'agent'
-export type AgentRole = 'orient' | 'propose' | 'writer' | 'check' | 'labels' | 'dev'
 export type AgentStatus = 'running' | 'done' | 'failed' | 'stopped'
 
 /** `chats/<id>.meta.json`; the list route adds `n_messages`, `last_ts`, `running`. */
@@ -48,23 +47,18 @@ export interface ThreadComment {
   text: string
 }
 
-export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'view' | 'thread'
-
-/** One line of `chats/<id>.jsonl`; its index in the log is its id. */
+/** One line of `chats/<id>.jsonl` (backend agent.py and the features); its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string; turn?: string }
-  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
-  | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
-  | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string; card?: string; version?: number }
-  | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
-  | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
-  | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
+  | { type: 'user'; ts?: string; text: string; by?: string; turn?: string }
+  | { type: 'text'; ts?: string; delta: string }
+  | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; n?: number }
+  | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; cell_id?: string; label_card?: string; card?: string; version?: number }
+  | { type: 'done'; ts?: string; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
+  | { type: 'error'; ts?: string; message: string; kind?: string }
   | { type: 'marks'; ts?: string; turn: string; items: import('../marks/marks').MarkItem[] }
   | { type: 'card'; ts?: string; card: string; turn: string }
-  | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
-  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
-  | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
-  | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
+  | { type: 'chip'; ts?: string; kind: string; text: string; ref?: string; view?: string; status?: string }
+  | { type: 'notice'; ts?: string; kind?: string; text?: string }
   | ({ type: 'label_run'; ts?: string } & LabelRunState)
 
 /** A label run in the chat that started it (backend labels/asks.py): the analyst's go-ahead before a model reads many
@@ -154,23 +148,6 @@ export interface ChatDetail {
   meta: ChatMeta
   events: ChatRecord[]
 }
-
-/** One call of an orientation as its store keeps it (backend calls.py, `workspaces/<c>/calls/<chat>.jsonl`): its number
- * in the orientation's one sequence, the chat whose log holds its record (the orientation's, or a step's), the tool, its
- * input, and its whole output as text, null while it runs (`output` read the same). */
-export interface StoredCall {
-  n: number
-  id: string
-  chat?: string
-  name: string
-  input: unknown
-  result?: string | null
-  output?: string | null
-  is_error?: boolean
-}
-
-/** The index of an orientation's calls: each call's number by its tool_use id. A bare list reads the same. */
-export type CallIndex = { calls: { n: number; id: string; name?: string }[] } | { n: number; id: string; name?: string }[]
 
 export interface NewThreadBody {
   anchor?: string | null
@@ -471,8 +448,6 @@ export interface ConceptPatch {
   classes?: { name: string; color?: number | null; highlight?: boolean }[]
   shown?: boolean
 }
-export type Label = Concept
-
 export interface LabelRow {
   ref: string
   label: string | null
@@ -610,17 +585,6 @@ export interface ViewReview {
   shots?: number
   /** the reviewer's agent id, a subagent of main (`thimble:view-reviewer`) */
   agent_id?: string | null
-}
-
-/** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
- * browser, why not, the workspace's answer for the type and its proposal (backend views.suggestion_for). */
-export interface ViewSuggestion {
-  path: string
-  suffix: string
-  eligible: boolean
-  reason: string
-  answer: 'suggested' | 'none' | 'dismissed' | null
-  proposal: Proposal | null
 }
 
 /** One form a view adds to the citation grammar: a fragment of a file it claims, or view:<slug>/<key>. */
@@ -865,25 +829,6 @@ export interface RunValues {
   effort?: string
 }
 
-/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request, the run's exact
- * model and effort, who started it, the pending request, and for a start that did not happen its refusal. {} before
- * any orientation was asked for. */
-export interface OrientRun {
-  status?: 'requested' | 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused' | (string & {})
-  query?: string | null
-  model?: string | null
-  effort?: string | null
-  route?: 'subagent' | 'program' | (string & {}) | null
-  started_by?: 'click' | 'typed' | (string & {}) | null
-  agent_id?: string | null
-  request?: string | null
-  refused?: Refusal | null
-  requested?: string | null
-  started?: string | null
-  ended?: string | null
-  chats?: { orient?: string }
-}
-
 /** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal, or
  * Esc in its agent view (`user`), after which Claude Code resumes it no more. */
 export type StoppedBy = 'analyst' | 'quit' | 'refused' | 'user' | (string & {})
@@ -1034,29 +979,6 @@ export interface WriteupComment {
    * before 0.7.0, is resolved as any other) */
   resolution?: 'done' | 'superseded' | string | null
 }
-
-/** A comment beside a card or a step of a plan card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a
- * check's run over the cards left it (`check`), or main did (author `claude`). `ref` is `card:<id>`, or
- * `card:<id>#step-<n>` with `n` the step's place. Only open comments on cards that are there are served. */
-export interface CanvasComment {
-  id: string
-  card: string
-  /** the step's stable id; null for a comment on the card */
-  step: string | null
-  n: number | null
-  ref: string
-  check: string | null
-  run: string | null
-  author: 'check' | 'claude' | string
-  /** the statement, shown first */
-  text: string
-  /** what supports it, shown on request: markdown whose citations show as chips */
-  details: string
-  evidence?: string | null
-  ts: string
-  status: 'open' | 'dismissed' | string
-}
-
 /** A written document, or (`frame: true`) the frame of pinned figures and bullets before any write. */
 export interface Writeup {
   id?: string
@@ -1139,75 +1061,6 @@ export type DocumentType = 'report' | 'story' | 'slides' | string
 /** How a check's run on one document went (backend checks.py). */
 export type CheckRunStatus = 'running' | 'done' | 'failed' | 'stopped'
 
-/** One run of a check on one document: its session's chat, the passages it covered and the fingerprints it has seen
- * (the cache: a passage whose fingerprint is seen is not checked again), how many comments it left, its last line. */
-export interface CheckRun {
-  run: string
-  status: CheckRunStatus | string
-  chat: string
-  started: string
-  ended?: string | null
-  covered: string[]
-  seen: string[]
-  comments: number
-  summary: string
-  /** `writer` while the run is queued until the document's writer ends; `queued` while it waits for one of the
-   * MAX_SESSIONS slots (backend checks.py) */
-  waiting?: string | null
-  /** the passages that changed since the run checked them (checks.to_cover after the analyst's own edits): the row
-   * says so, with Run, and nothing runs by itself (Q8) */
-  stale?: number | null
-  /** the run's agent, a subagent of main (`thimble:check`) */
-  agent_id?: string | null
-  /** a run's start that did not happen */
-  refused?: Refusal | null
-}
-
-/** A report check (`GET /ws/{c}/checks`): a prompt a session reads a written document against, commenting on its
- * passages. `colour` is an index into the label palette (1..12); `shown` is whether its comments show, kept on the
- * server so main can turn on a check it made; `runs` is the latest run per document slug. */
-export interface Check {
-  id: string
-  name: string
-  prompt: string
-  colour: number
-  shown: boolean
-  builtin: boolean
-  created_by: string
-  ts: string
-  version: number
-  runs: Record<string, CheckRun>
-  /** what it comments on: the documents, the cards (its runs on them are `runs['@canvas']`) or both */
-  covers?: CheckCover[]
-}
-
-/** What a check comments on (backend checks.COVERS). */
-export type CheckCover = 'documents' | 'cards'
-
-/** `PATCH /ws/{c}/checks/{id}`: what the sidebar changes. */
-export interface CheckPatch {
-  shown?: boolean
-  name?: string
-  prompt?: string
-  colour?: number
-  covers?: CheckCover[]
-}
-
-/** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by
- * itself on a new card (`auto`, thimble's config `agents.cardCheck.auto`), and the checks running now, each with its
- * phase. */
-export interface CardCheckStatus {
-  enabled: boolean
-  auto: boolean
-  render: boolean
-  /** why no card can be drawn here (no Chromium, the harness off); empty while the harness runs or starts */
-  render_why: string
-  concurrency: number
-  running: { card: string; author: string; check: string; effort: string; phase: string; for_s: number }[]
-  timings: Record<string, unknown>[]
-}
-
-
 // ---- tickets ----
 
 /** backend dev.STATUSES */
@@ -1250,21 +1103,8 @@ export interface NewTicketBody {
   source?: 'ui'
 }
 
-/** The ticket runner's state (`GET /dev/status`): `tickets` is '' where code tickets run here (a development install),
- * else why they do not (backend dev.ticket_problem). */
-export interface DevStatus {
-  running: boolean
-  tickets: string
-  queued: number
-}
-
 // ---- settings ----
 
-/** Every role that runs a model, as the settings popover lists them (backend config.MODEL_ROLES), main first, whose
- * model, effort and fast mode are its session's and the composer chip's: the agents (each runs exactly the model and
- * effort of its row), then the classifiers, then the row a refused classifier call runs again on. */
-export const ROLES = ['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'] as const
-export type Role = (typeof ROLES)[number]
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type Effort = (typeof EFFORTS)[number]
 
@@ -1393,78 +1233,6 @@ export interface SettingsPatch {
   /** the ask key: "alt", or null to put back the default ("meta") */
   ask_key?: 'meta' | 'alt' | null
   [k: string]: unknown
-}
-
-/** One view an extension gives, as this workspace finds it (backend extensions.public): whether it shows here, the
- * check's reason, where its switch stands (switched here, else as the check says), and whether that switch can change
- * anything (`locked`: the extension does not run here, or no file here matches the view's claims). */
-export interface ExtensionViewRow {
-  slug: string
-  name: string
-  shown: boolean
-  note: string
-  on: boolean
-  locked: boolean
-}
-
-/** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
- * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), what it gives,
- * the settings it runs under, its orientation instructions and the offer to run them, and its views. */
-export interface ExtensionRow {
-  name: string
-  version: string
-  /** what it is, from its extension.json */
-  description?: string
-  /** one thimble ships, whose version is thimble's */
-  builtin?: boolean
-  active: boolean
-  why: string
-  /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
-  note: string
-  on: boolean
-  locked: boolean
-  views: ExtensionViewRow[]
-  /** what it gives, each in a few words */
-  parts?: string[]
-  /** the settings of the agents it changes or adds, in words */
-  consent?: string
-  /** whether its code runs in a sandbox; null for one with no code */
-  sandboxed?: boolean | null
-  /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
-  orients?: boolean
-  /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
-  offer?: boolean
-  /** an extension thimble ships that is not added: turning its switch on adds it */
-  addable?: boolean
-  /** for one not added: the extensions thimble ships that adding it adds with it */
-  needs?: string[]
-}
-
-/** One view built for this workspace, in its local extension (backend views.local_extension). */
-export interface LocalViewRow {
-  slug: string
-  name: string
-  /** what it shows, from its view.json */
-  description?: string
-  /** a file viewer, which opens in the File browser */
-  file_viewer: boolean
-  /** its switch in Settings: off, it leaves the views bar and the File browser */
-  on: boolean
-}
-
-/** The workspace's local extension: the views built for this workspace, which no other workspace shows. */
-export interface LocalExtension {
-  name: string
-  views: LocalViewRow[]
-}
-
-/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, whether an
- * orientation ran here, and the workspace's local extension. */
-export interface Extensions {
-  extensions: ExtensionRow[]
-  conflicts: string[]
-  orientation_ran?: boolean
-  local?: LocalExtension | null
 }
 
 // ---- the corpus (backend corpus.py) ----
@@ -1996,21 +1764,6 @@ export interface StoryDoc {
   title_locked?: boolean
   lock_reverts?: LockRevert[]
 }
-
-/** `PUT …/types/{slug}/story`: the story editor's whole story (backend story.apply_story). A block's `text` is its
- * sentences as typed, a bullets block one item per line. */
-export interface StoryBody {
-  title: string
-  client?: string
-  sections: {
-    id: string
-    heading: string
-    card: StoryCardSide
-    main: { id: string; cell: string; caption: string } | null
-    blocks: { id: string; type: string; text?: string; speaker?: string; cell?: string; caption?: string }[]
-  }[]
-}
-
 /** A deck's slide: a heading, its layout, its lines as sentences (a quote marked `quote`), up to four figures (or a
  * single `figure`), its format (figure side and share, card slots, a grid), speaker notes. */
 export interface DeckSlide {
@@ -2038,24 +1791,6 @@ export interface DeckDoc {
   /** a deck not written yet: its frame (GET …/frame), which the deck's editor lays out */
   frame?: boolean
 }
-
-/** `PUT …/types/{slug}/deck`: the deck editor's whole deck (backend report_types.apply_deck). */
-export interface DeckBody {
-  title: string
-  client?: string
-  slides: {
-    id: string
-    heading: string
-    layout: string
-    format: { side?: 'left' | 'right'; width?: number; slots?: number; grid?: boolean } | null
-    lines: { id: string; text: string }[]
-    bullets: boolean
-    quote: { id: string; text: string; speaker: string } | null
-    figures: { id: string; cell: string; caption: string }[]
-    notes: string
-  }[]
-}
-
 /** A page: one html document and the claims it makes as sentences. */
 export interface PageDoc {
   id?: string
@@ -2103,15 +1838,6 @@ export interface VideoDoc {
 
 /** Any stored document the Report tab shows. */
 export type AnyDoc = Writeup | StoryDoc | DeckDoc | PageDoc | VideoDoc
-
-/** A preset + New offers (`GET /report-types/presets`, backend prompts/types/<id>.md). */
-export interface DocPreset {
-  id: string
-  name: string
-  description: string
-  renderer: string
-}
-
 /** `POST /report-types/new`: a preset's document by its id, a page (`page`), or one of the analyst's own
  * (`document`) from a name and a brief; the server numbers a name a type has already. */
 export interface NewDocBody {
@@ -2289,9 +2015,6 @@ export interface FollowUpRecord {
   views?: number
 }
 
-/** Where the analyst's line was typed: the terminal of the Claude Code session, or the browser's composer. */
-export type RecordBy = 'terminal' | 'browser'
-
 // ---- scale: the tree fetches one folder at a time; the rows route pages by cursor ----
 
 /** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth and its direct subfolders
@@ -2336,39 +2059,3 @@ export interface UndoLabels {
 
 // ---- the problem report (backend feedback.py) ----
 
-/** `POST /ws/{c}/feedback`: what the Report a problem dialog sends. */
-export interface ProblemReportBody {
-  description: string
-  /** a data URL of the tab, when the browser captured it */
-  screenshot?: string | null
-  /** the reporter asked for a screenshot, so the bundle says when there is none */
-  screenshot_asked?: boolean
-  /** the server log's tail and the workspace's chats and event stream */
-  logs: boolean
-  user_agent: string
-  /** the tab's recent console errors and failed requests (lib/problemLog), sent with the logs */
-  browser?: import('./problemLog').ProblemEntry[]
-  /** the chats the failure concerns, which the bundle takes first */
-  focus?: string[]
-}
-
-/** Where the bundle was written and how to send it. */
-export interface ProblemReport {
-  path: string
-  name: string
-  bytes: number
-  /** the zip's size in words, such as `184 KB` */
-  size: string
-  files: string[]
-  /** the server's machine can show the zip in its file manager (POST /feedback/reveal) */
-  can_reveal: boolean
-  /** a screenshot was asked for and not captured */
-  screenshot_missing?: boolean
-  /** the maintainer's GitHub handle, which `instructions` names for private logs, and their profile's URL */
-  contact: string
-  contact_url: string
-  /** the sentence that says to attach the zip to an issue only if it may be public, naming `contact` */
-  instructions: string
-  /** the new-issue page, prefilled with the description, the versions and the doctor's summary, none of the logs */
-  issue_url: string
-}

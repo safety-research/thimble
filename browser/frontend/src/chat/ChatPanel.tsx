@@ -23,12 +23,12 @@ import { setVTarget } from '../cards/keys'
 import { ChatBusy } from './ChatBusy'
 import { Composer } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
-import { API_ERROR_KIND, apiRetry, branchIndex, foldRecords, withApiErrors, withBranches, type Row } from './model'
+import { branchIndex, foldRecords, retryOf, withBranches } from './model'
 import { Divider, Note, ThreadsContext } from './Notes'
 import { NoticeStrip } from './Notice'
 import { replayHeld } from './pending'
 import { ProposalCard } from './ProposalCard'
-import { MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type ErrorRetry } from './Rows'
+import { Rows, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
 import { answeredSince, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { useChat, type ChatState } from './useChat'
@@ -75,21 +75,11 @@ export function threadAnchors(meta: Pick<ChatMeta, 'anchor'> | null | undefined)
     .filter(Boolean)
 }
 
-/** The Retry of a chat whose turn ended on an API error: the error row when it is the chat's last and the chat is not
- * working, which sends the analyst's last message again; else undefined. Pure but for `ask`. */
-export function threadRetry(rows: readonly Row[], running: boolean, ask: () => Promise<unknown>): ErrorRetry | undefined {
-  const last = rows.filter((r) => r.kind !== 'notice').at(-1)
-  if (running || !last || last.kind !== 'error' || last.errorKind !== API_ERROR_KIND) return undefined
-  return { index: last.index, onRetry: ask, note: THREAD_RETRY_NOTE }
-}
-
-/** The analyst's last message in a chat's records, for Retry. Pure. */
-export function lastAsk(records: readonly ChatRecord[]): string | null {
-  for (let i = records.length - 1; i >= 0; i--) {
-    const r = records[i]
-    if (r.type === 'user') return r.text
-  }
-  return null
+/** Retry under the error that ended a chat's last turn (model.retryOf), which sends the analyst's message again;
+ * undefined while the chat runs or when nothing can be retried. */
+function retryIn(records: readonly ChatRecord[], running: boolean, send: (text: string) => Promise<unknown>): ErrorRetry | undefined {
+  const failed = running ? null : retryOf(records)
+  return failed ? { index: failed.index, onRetry: () => send(failed.text) } : undefined
 }
 
 export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => void }) {
@@ -334,19 +324,15 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   )
   const curPath = labels.get(current) ?? current
 
-  const mainRows = useMemo(() => withApiErrors(foldRecords(main.records)), [main.records])
+  const mainRows = useMemo(() => foldRecords(main.records), [main.records])
   useChatColumns(ws, flowRef)
   // v at an empty message box draws a card of the last answer of the chat shown (cards/keys.ts), while it does not run
   useEffect(() => {
     setVTarget((kind === 'main' || kind === 'thread') && !chat.running && !chat.loading ? { ws, chat: current } : null)
     return () => setVTarget(null)
   }, [ws, kind, current, chat.running, chat.loading])
-  // the API error that ended main's last turn: its Retry sends the analyst's message again
-  const failed = useMemo(() => apiRetry(main.records, new Set()), [main.records])
-  const mainRetry = useMemo(() => (failed && !main.running ? { index: failed.index, onRetry: () => {
-    toEnd()
-    return main.send(failed.text)
-  }, note: MAIN_RETRY_NOTE } : undefined), [failed, main.running, main.send])
+  // the error that ended main's last turn: its Retry sends the analyst's message again
+  const mainRetry = useMemo(() => retryIn(main.records, main.running, (text) => (toEnd(), main.send(text))), [main.records, main.running, main.send])
   // the threads asked from main, as notes where they branched
   const branches = useMemo(
     () => chats.filter((m) => m.kind === 'thread' && (m.parent ?? 'main') === 'main').map((m) => ({ id: m.id, created_at: m.created_at, anchors: threadAnchors(m) })),
@@ -436,7 +422,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         </div>
         <div ref={footRef} className="chat-foot">
           <ProposalCard ws={ws} />
-          <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          <NoticeStrip />
           <ChatBusy ws={ws} />
           <Composer
             model={mainModel}
@@ -458,15 +444,14 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 }
 
 /** A fork of main: main up to the branch, the line that says when, what it was asked about, then its own rows, and
- * Retry on an API error that ended its last turn. */
+ * Retry on an error that ended its last turn. */
 export function ThreadView({ ws, meta, chat, main, branches }: { ws: string; meta: ChatMeta; chat: ChatState; main: ChatState; branches: { id: string; created_at: string; anchors: string[] }[] }) {
   const cut = useMemo(() => branchIndex(main.records, meta.created_at), [main.records, meta.created_at])
   const inherited = useMemo(() => {
     const records = main.records.slice(0, cut)
-    return withBranches(withApiErrors(foldRecords(records)), records, branches.filter((b) => b.id !== meta.id))
+    return withBranches(foldRecords(records), records, branches.filter((b) => b.id !== meta.id))
   }, [main.records, cut, branches, meta.id])
   const anchors = threadAnchors(meta)
-  const ask = lastAsk(chat.records)
   return (
     <>
       <Rows rows={inherited} ws={ws} chat="main" />
@@ -486,7 +471,7 @@ export function ThreadView({ ws, meta, chat, main, branches }: { ws: string; met
           }
         />
       )}
-      <Rows rows={chat.rows} ws={ws} chat={meta.id} streaming={chat.running} retry={ask ? threadRetry(chat.rows, chat.running, () => chat.send(ask)) : undefined} />
+      <Rows rows={chat.rows} ws={ws} chat={meta.id} streaming={chat.running} retry={retryIn(chat.records, chat.running, chat.send)} />
     </>
   )
 }
