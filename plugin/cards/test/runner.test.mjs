@@ -84,7 +84,7 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   r = await ask('press', { id, button })
   assert.deepEqual(JSON.parse(r.state), { n: 11 })
   r = await ask('pointer', { id, down: { x: 2, y: 1 }, up: { x: 2, y: 1 } })
-  assert.equal(r.pointer, true)
+  assert.equal(r.handled, true)
   r = await ask('draw', { id, width: 40, text: true })
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
   r = await ask('query', { id, text: 'br' })

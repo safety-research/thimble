@@ -91,7 +91,7 @@ export async function askCard($: Engine, meta: CardMeta, op: string, body: Recor
 export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: number): Promise<void> {
   if (r?.ok) {
     const before = await treeOf($, meta.id)
-    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, pointer: !!r.pointer, seq: Number(r.seq) || 0 })
+    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0 })
     if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state, typeof r.query === 'string' ? r.query : null).catch(() => undefined)
     if (meta.error) await saveMeta($, { ...meta, error: null })
     await failCleared($, about(meta.id))
@@ -290,7 +290,6 @@ async function clientEvent($: Engine, meta: CardMeta, ev: Any): Promise<Any> {
   if (typeof ev.press === 'number') return askCard($, meta, 'press', { button: ev.press })
   if (ev.pointer && typeof ev.pointer === 'object') {
     const at = (v: Any) => ({ x: Math.trunc(Number(v?.x) || 0), y: Math.trunc(Number(v?.y) || 0) })
-    if (!(await treeOf($, meta.id))?.pointer) return null
     return askCard($, meta, 'pointer', { down: at(ev.pointer.down), up: at(ev.pointer.up), button: String(ev.pointer.button || 'left') })
   }
   return null

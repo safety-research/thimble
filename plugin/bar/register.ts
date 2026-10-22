@@ -18,7 +18,7 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { recount } from './counts'
-import { failNotice, fixCommand, fixKeyOf, noticeLine, pressFix, promptTyped, refreshFixes } from './fix'
+import { failCleared, failNotice, fixCommand, fixKeyOf, noticeLine, pressFix, promptTyped, refreshFixes } from './fix'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,7 +67,8 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void>
   if (await paneShows($, kind)) { await closePane($); return }
   if (kind === 'coverage') void recount($).catch(() => undefined)
   const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind])
-  if (!placed) noticeLine($, `Claude Code opens the ${kind === 'labels' ? 'labels' : 'coverage'} pane from a key only in a wider terminal. Click “${kind === 'labels' ? 'labels' : 'coverage'}” below to open it here.`)
+  if (placed) await failCleared($, `pane:${kind}`)
+  else noticeLine($, `Claude Code opens the ${kind} pane from a key only in a wider terminal. Click “${kind}” below to open it here.`, `pane:${kind}`)
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */

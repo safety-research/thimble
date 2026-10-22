@@ -62,10 +62,10 @@ function world(on: Any) {
     const body = JSON.parse(e.init?.body || '{}')
     const answers: Record<string, unknown> = {
       ping: { ok: true },
-      load: { ok: true, tree: TREE, pointer: false, state: 'null', query: null, keys: 's', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
-      key: { ok: true, handled: body.key === 's', tree: SORTED, pointer: false, state: '{"sorted":true}', query: null },
-      draw: { ok: true, tree: TREE, pointer: false, state: 'null', query: null, lines: ['ada 3', 'bram 5'], cut: [] },
-      undo: { ok: true, tree: TREE, pointer: false, state: 'null', query: null },
+      load: { ok: true, tree: TREE, state: 'null', query: null, keys: 's', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
+      key: { ok: true, handled: body.key === 's', tree: SORTED, state: '{"sorted":true}', query: null },
+      draw: { ok: true, tree: TREE, state: 'null', query: null, lines: ['ada 3', 'bram 5'], cut: [] },
+      undo: { ok: true, tree: TREE, state: 'null', query: null },
     }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answers[op] ?? { ok: false, error: 'no such request' }) } }
   })

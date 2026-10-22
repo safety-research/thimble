@@ -218,7 +218,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     notes = []
     const c = kids(tree, 0, false, [])
     const root = c.length === 1 && c[0].t === 'Box' ? c[0] : { t: 'Box', p: { flexDirection: 'column' }, c }
-    return { tree: root, pointer: pointer !== null, notes }
+    return { tree: root, notes }
   }
   function saved() {
     try { return stringify(state === undefined ? null : state) } catch (e) { throw new Error('the state is not plain JSON: ' + Str(e && e.message)) }
@@ -315,7 +315,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       if (op === 'key') undoable = undoable.concat([before]).slice(-16)
       else if (before) undoable = []
       const d = draw()
-      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, pointer: d.pointer, notes: d.notes, state: saved(), query }))
+      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, notes: d.notes, state: saved(), query }))
     } catch (e) {
       try {
         if (before) { state = before.state === 'null' ? undefined : parse(before.state); query = before.query }

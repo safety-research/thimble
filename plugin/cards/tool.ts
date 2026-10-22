@@ -174,7 +174,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     toolUseId: fork?.kind === 'designer' ? meta.toolUseId : toolUseId,
   }
   await remember(next, { version, title, file: String(input.data), rows: next.rows })
-  await setTree($, id, { gen: next.gen, width, tree: r.tree, pointer: !!r.pointer, seq: Number(r.seq) || 0 })
+  await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
   await setFocus($, id)
   await failCleared($, `card:${id}`)
   if ((await searchNow($))?.id === id) await setSearch($, null)

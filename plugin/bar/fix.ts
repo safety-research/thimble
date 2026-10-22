@@ -37,7 +37,7 @@ const FIXES = { plugin: 'thimble', key: 'fixes' } as const
 const SHARE = { plugin: 'thimble', key: 'fixShare' } as const
 const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/
 
-export type FixLine = { kind: 'failed'; text: string; about?: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string }
+export type FixLine = { kind: 'failed'; text: string; about?: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string; about?: string }
 type Fix = { slug: string; title: string; kind: string; status: string; created: number; used: number }
 
 const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
@@ -106,16 +106,17 @@ export function failNotice($: Engine, text: string, about?: string): void {
   void $.state.set(LINE, { kind: 'failed', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
 }
 
-/** A notice the person should read, with no keys: one line above the prompt, until the person's next prompt. */
-export function noticeLine($: Engine, text: string): void {
+/** A notice the person should read, with no keys: one line above the prompt, until the person's next prompt, or
+ *  until what it is about is done (failCleared with the same `about`). */
+export function noticeLine($: Engine, text: string, about?: string): void {
   const t = String(text || '').trim()
-  if (t) void $.state.set(LINE, { kind: 'notice', text: t }).catch(() => undefined)
+  if (t) void $.state.set(LINE, { kind: 'notice', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
 }
 
-/** What a failure line was about works again: the line goes, when it is still about that. */
+/** What a failure line or a notice was about works again: the line goes, when it is still about that. */
 export async function failCleared($: Engine, about: string): Promise<void> {
   const l = await fixLineNow($)
-  if (l?.kind === 'failed' && l.about === about) await $.state.set(LINE, null)
+  if ((l?.kind === 'failed' || l?.kind === 'notice') && l.about === about) await $.state.set(LINE, null)
 }
 
 /** The line whose keys the bar names now, if any. */
