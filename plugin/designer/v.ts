@@ -14,7 +14,8 @@
 // no longer runs (its end was missed, say in a reload of the plugin) ends as failed: at session start, with a notice,
 // and when v is pressed again.
 //
-// The fork may read, run code and draw cards; it writes only into the temp folder, where its rows go.
+// The fork may read, run code and draw cards; it writes only into the temp folder, where its rows go, and reads and
+// writes there without a dialog in front of the person.
 //
 //   vKey($, key, until)    what v does at an empty prompt now (hooks/keys.ts asks), or null when it types
 //   designAnchor($, id)    the answer row the cards of that designer fork draw under (the card tool asks it)
@@ -216,9 +217,13 @@ async function denial($: Engine, e: { tool: string; file_path?: unknown }): Prom
   const tool = String(e.tool)
   if (!TOOLS.has(tool)) return `The card's copy uses ${[...TOOLS].join(', ')} only.`
   if (tool !== 'Write') return null
-  const path = String(e.file_path ?? '')
-  const tmp = await tempDir($)
-  return path.startsWith(`${tmp}/`) && !path.split('/').includes('..') ? null : `The card's copy writes only in the temp folder, ${tmp}.`
+  return (await inTemp($, e.file_path)) ? null : `The card's copy writes only in the temp folder, ${await tempDir($)}.`
+}
+
+/** Whether a path is inside the temp folder, where the fork keeps its rows. */
+async function inTemp($: Engine, path: unknown): Promise<boolean> {
+  const p = typeof path === 'string' ? path : ''
+  return p.startsWith(`${await tempDir($)}/`) && !p.split('/').includes('..')
 }
 
 export const registerDesigner: Register = on => {
@@ -275,6 +280,16 @@ export const registerDesigner: Register = on => {
     const no = await denial($, e as never)
     return no ? { deny: no } : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : forkOf(e.agentId)?.kind === 'designer' ? { deny: "thimble could not check this call of the card's copy" } : next(e)))
+
+  // the fork's own files: thimble gave it the temp folder for its rows, so a read or a write there needs no dialog in
+  // front of the person (Claude Code asks about reads outside the working folders). A rule or a hook of the person's
+  // still decides
+  on('tool.check', { agentId: /\S/ }, async ($, e, next) => {
+    const v = await next(e)
+    if (v.decision !== 'ask' || v.rule || v.hook || v.plugin || forkOf(e.agentId)?.kind !== 'designer') return v
+    const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown }
+    return (await inTemp($, input.file_path ?? input.path)) ? { decision: 'allow' } : v
+  }).catch(($, e, next) => next(e))
 
   // v's spawn waits out the word window, and is refused when a letter came in it
   on('agent.spawn', { description: DESCRIPTION }, async ($, e, next) => {

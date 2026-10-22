@@ -103,3 +103,17 @@ test('a fork that drew a card ends done, and main reads the card with the next p
   // the card's text, fenced as the records' own words
   expect(told).toContain('“Runs of the failing test” (id "c0000000000001"), as drawn now:\n```text\nWho ran the failing test\n✕ ✕ ● ✕\n```')
 })
+
+test("the fork reads and writes its rows in the temp folder without a dialog; a person's rule still decides", async () => {
+  const s = setup()
+  s.$.env.get = async (k: string) => (k === 'TMPDIR' ? '/made-up/tmp' : undefined)
+  await pressV(s)
+  const asked = async () => ({ decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' })
+  const check = (agentId: string | undefined, path: string, next: Any = asked) => s.call('tool.check', { tool: 'Read', input: { file_path: path }, agentId }, next)
+  expect((await check('agent-1', '/made-up/tmp/rows.json')).decision).toBe('allow')
+  expect((await check('agent-1', '/made-up/elsewhere/rows.json')).decision).toBe('ask')
+  expect((await check('agent-1', '/made-up/tmp/../elsewhere/rows.json')).decision).toBe('ask')
+  expect((await check(undefined, '/made-up/tmp/rows.json')).decision).toBe('ask')
+  const rule = async () => ({ decision: 'ask', rule: 'Read(/made-up/tmp/**)' })
+  expect((await check('agent-1', '/made-up/tmp/rows.json', rule)).decision).toBe('ask')
+})
