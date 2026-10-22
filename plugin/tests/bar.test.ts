@@ -18,15 +18,15 @@ const COVERAGE = {
   root: '/made-up/data',
   total: { files: 7, touched_files: 3, seen_files: 1 },
   groups: [
-    { folder: 'runs/', files: 4, touched: 2, read_share: 0.25, counted_share: 0.5, by_status: { seen: 1, searched: 1, listed: 1, untouched: 1 }, units: [{ unit: 'records', units: 40, seen: 5, model: 0, searched: 10, computed: 0 }] },
+    { folder: 'runs/', files: 4, touched: 2, seen_files: 1, read_share: 0.25, counted_share: 0.5, by_status: { seen: 1, searched: 1, listed: 1, untouched: 1 }, units: [{ unit: 'records', units: 40, seen: 5, model: 0, searched: 10, computed: 0 }] },
     { folder: './', files: 3, touched: 1, read_share: 0, counted_share: 0.2, units: [{ unit: 'lines', units: 30, seen: 0, model: 0, computed: 6 }] },
   ],
   files: [
-    { path: 'runs/r1.jsonl', folder: 'runs/', unit: 'records', read_share: 0.5, counted_share: 0.5, said: 'read 5 of 10 records (50%)', ranges: [[1, 5]] },
-    { path: 'runs/r2.jsonl', folder: 'runs/', unit: 'records', read_share: 0, counted_share: 1, said: 'searched 10 of 10 records', ranges: [] },
-    { path: 'notes.md', folder: './', unit: 'lines', read_share: 0, counted_share: 0.6, said: 'searched', ranges: [] },
+    { path: 'runs/r1.jsonl', folder: 'runs/', unit: 'records', units: 10, seen: true, seen_units: 5, read_share: 0.5, counted_share: 0.5, said: 'read 5 of 10 records (50%)', ranges: [[1, 5]] },
+    { path: 'runs/r2.jsonl', folder: 'runs/', unit: 'records', units: 10, seen: false, seen_units: 0, searched: true, searched_units: 10, searched_by: ['grep'], read_share: 0, counted_share: 1, said: 'searched 10 of 10 records', ranges: [] },
+    { path: 'notes.md', folder: './', unit: 'lines', units: 10, seen: false, computed_units: 6, computed_over_units: 6, computed_by: ['wc'], read_share: 0, counted_share: 0.6, said: 'computed over', ranges: [] },
   ],
-  untouched: { path: ['runs/r3.jsonl', 'runs/r4.jsonl', 'a.md', 'b.md'] },
+  untouched: { path: ['runs/r3.jsonl', 'runs/r4.jsonl', 'a.md', 'b.md'], unit: ['records', 'records', 'lines', 'lines'], units: [4, 4, 3, 3], by: ['ls', '', '', ''] },
 }
 
 function textOf(n: Any): string {
@@ -88,15 +88,23 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   await w.clock.advance(400)
   expect(w.opened).toContain('thimble')
   const pane = await $.ui.mount(PANE)
-  expect((await pane.find({ type: 'Text', text: /read into Claude's context/ }))?.text).toContain('14% (1/7 files)')
-  expect((await pane.find({ type: 'Text', text: /searched or computed over/ }))?.text).toContain('43% (3/7 files)')
-  expect(await pane.find({ type: 'Text', text: /r1\.jsonl/ })).toBeUndefined()
+  // one bar for the folder and its key: 1 file read into Claude's context, 2 more computed over or searched
+  expect((await pane.find({ type: 'Text', text: /files touched/ }))?.text).toMatch(/3\/7 files touched · 43%/)
+  expect((await pane.find({ type: 'Text', text: /read into Claude's context/ }))?.text).toContain("read into Claude's context 1")
+  expect((await pane.find({ type: 'Text', text: /computed over or searched/ }))?.text).toContain('not in its context 2')
+  // the top folder Claude touched most is open: its files, one line each, the files touched after the name
+  expect((await pane.find({ key: 'file:runs/r1.jsonl' }))?.text).toMatch(/r1\.jsonl +█+ +1\/1/)
+  expect((await pane.find({ key: 'file:runs/r3.jsonl' }))?.text).toMatch(/r3\.jsonl +░+ +0\/1/)
+  // a press closes it, and again opens it
   await pane.press({ key: 'dir:runs/' })
-  expect(await pane.find({ type: 'Text', text: /r1\.jsonl/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /2 files, none touched \(1 only listed by name\)/ })).toBeDefined()
-  // a file shows its path, from its first line read
+  expect(await pane.find({ key: 'file:runs/r1.jsonl' })).toBeUndefined()
+  await pane.press({ key: 'dir:runs/' })
+  // a file picked shows what touched it, in its own unit
   await pane.press({ key: 'file:runs/r1.jsonl' })
-  expect(await pane.find({ type: 'Text', text: '/made-up/data/runs/r1.jsonl:1' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /in Claude's context +5\/10 records +50%/ })).toBeDefined()
+  // j moves the selection; r closes the pane
+  await pane.press({ key: 'key-j' })
+  expect(await pane.find({ type: 'Text', text: /in Claude's context +0\/10 records/ })).toBeDefined()
   await pane.unmount()
 })
 
@@ -189,7 +197,7 @@ test('a failure while the person tries a fix keeps the fix line and its keys; th
   expect(after).toContain('p submit · u undo')
 })
 
-test('in a narrow coverage pane a long folder name is cut in its middle and its row keeps its counts on one line', async ($, on) => {
+test('in a narrow coverage pane a long folder name is cut in its middle and its row keeps its count on one line', async ($, on) => {
   const long = (run: string) => ({ folder: `runs/${run}/`, files: 57, touched: 1, read_share: 0, counted_share: 0.02, units: [{ unit: 'records', units: 1000, seen: 0, model: 0, searched: 20, computed: 0 }] })
   const runs = ['sweep1-fable-managed_prs_issues', 'sweep2-opus-managed_prs_issues', 'a-run-whose-name-is-far-too-long-for-any-column-at-all']
   const cov = { root: '/made-up/data', total: { files: 171, touched_files: 3, seen_files: 0 }, groups: runs.map(long), files: [], untouched: { path: [] } }
@@ -201,7 +209,6 @@ test('in a narrow coverage pane a long folder name is cut in its middle and its 
   await w.clock.advance(400)
   const W = 72
   const pane = await $.ui.mount({ ...(PANE as Any), props: { ...(PANE as Any).props, bodyColumns: W } } as never)
-  await pane.press({ key: 'dir:runs/' })
   const widths = new Set<number>()
   for (const run of runs) {
     const row = (await pane.find({ key: `dir:runs/${run}/` }))?.text ?? ''

@@ -316,6 +316,14 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
   return [els.Text({ key: 'thread-gap', children: ' ' }), ...conv, ...entry($, els, scope, W - 1, takeAskNext(key))]
 }
 
+/** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of
+ *  the pane. A pane that keeps its own rows in view (the coverage pane's tree) leaves these out. */
+export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
+  const t = threadOf(threadKey(await paneScope($, kind, args)))
+  const { H } = sizeOf(e)
+  return 5 + (t?.turns.length ? Math.max(4, Math.floor(H * 0.4)) + 1 : 0)
+}
+
 export async function drawThreads($: Engine, e: Any, kind: 'threads' | 'thread', args: unknown, els: Any): Promise<Any> {
   return kind === 'threads' ? drawList($, e, els) : drawThread($, e, els, args)
 }

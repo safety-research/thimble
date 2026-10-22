@@ -392,6 +392,10 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
         o = {"path": f, "kind": c.get("kind"), "unit": unit, "units": units, "seen_units": seen_units,
              "model_units": round(model_part * per_unit), "searched_units": round(searched_part * per_unit),
              "computed_units": round(computed_part * per_unit), "pages": pages, "rows": rows, "lines": lines,
+             # what a label's model read and what code computed over, each whole (not the part the ones before it
+             # leave), in the file's unit, as the coverage pane's detail says them
+             "model_read_units": min(units, round(model * per_unit)) if unit != "file" else int(bool(model)),
+             "computed_over_units": min(units, round(computed_rows * per_unit)) if unit != "file" else int(bool(computed_rows)),
              "status": status, "seen": seen, "read": seen, "touched": True, "share": share,
              "seen_lines": seen_lines, "read_lines": seen_lines, "seen_rows": round(seen_rows),
              "model": model, "model_rows": round(model_part), "computed": computed_rows,

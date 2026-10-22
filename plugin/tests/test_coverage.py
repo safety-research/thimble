@@ -216,6 +216,8 @@ def test_only_a_model_labels_reads_are_said_as_a_models(code: Path, tmp_path: Pa
     saw(tmp_path, code, [])
     o = {f["path"]: f for f in CV.coverage(Store(code))["files"]}["runs.csv"]
     assert o["model_labels"] == ["mood"]
+    # each whole, in the file's unit: the model read all 3 rows, and code went over all 3
+    assert (o["unit"], o["units"], o["model_read_units"], o["computed_over_units"]) == ("rows", 3, 3, 3)
     assert "a label's model read 3 of 3 rows (mood)" in o["said"]
     assert "passed_flag" not in o["said"].split("computed over")[0]
     assert "computed over all 3 rows (passed_flag)" in o["said"]

@@ -1,218 +1,84 @@
 // coverage.tsx: the coverage pane (core/pane.ts kind `coverage`): what this session did with the folder's files, from
 // the last `thimble coverage --json` (bar/counts.ts lastCoverage; engine/kernel/coverage.py says what each measure
-// is). The bar's `r coverage …` opens it, by a click or r.
+// is). The bar's `r coverage …` opens it, by a click or r. coverage-view.mjs lays it out as lines of runs; this file
+// draws them with Claude Code's own elements and keeps the view.
 //
-// Overview first: two labeled bars of the folder's files, those read into Claude's context and those searched or
-// computed over (the bar's count). Then the folders as a tree, each with its files and the same two measures, in its
-// files' own unit (records, rows, lines, pages, whole files), as a line above the columns says: the share read, and
-// the share gone over (read, searched or computed over), with how many of its files Claude touched; those Claude
-// touched first. A press on a folder opens it one level (and closes it again); its files not touched are one line,
-// which says how many were only listed by name and opens to their names. A press on a file shows its path (with its
-// first line read), so the terminal can open it, and what was read of it.
+// Each tree row is a Button (its key `dir:<folder>` or `file:<path>`): a click or ↵ on it opens a folder one level,
+// or closes it, and picks a file. j k move the selection, and the focus with it, so ↵ acts on the row selected. The
+// three shades are theme colors, so the pane reads on a dark and a light terminal: read into Claude's context in the
+// citations' color (`merged`), computed over or searched in `inactive`, untouched in `subtle`.
 //
-//   state: paneView/coverage {open: folders open (and `rest:<folder>` for their untouched files), file: the file shown}
+//   state: paneView/coverage {open: the folders open, sel: the row selected, top: the first tree row shown}
 import type { EngineInterface } from 'claude-code'
 
-import { countsNow, lastCoverage, percent, shareOfFiles } from '../bar/counts'
-import { cut, textWidth } from '../core/text.js'
+import { countsNow, lastCoverage } from '../bar/counts'
+import { closePane, PANE_ID } from '../core/pane'
 import { featureOn } from '../settings/features.mjs'
+import { rowsUnder } from '../threads/seam'
+import { coverageView, pressView, stepView } from './coverage-view.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
 const VIEW = { plugin: 'thimble', key: 'paneView', id: 'coverage' } as const
-type View = { open: string[]; file: string | null }
+type View = { open?: string[]; sel?: string | null; top?: number }
+type Run = { s: string; tone?: string | null }
 
-/** The colors of the two measures. */
-const READ = 'suggestion'
-const SEARCHED = 'inactive'
-/** Cells of a row's bar at most, and of the overview's at least. */
-const BAR = 8
-/** Names of untouched files listed when their line is opened, at most. */
-const REST_MAX = 200
-
-type Unit = { units: number; seen: number; model: number; searched: number; computed: number }
-type Node = { path: string; files: number; touched: number; units: Map<string, Unit>; readSum: number; countedSum: number; kids: Map<string, Node> }
-
-/** A file's status as the kernel names it (kernel/coverage.py ORDER), in the pane's words. */
-const SAID: Record<string, string> = { seen: 'read', model: 'model', searched: 'searched', computed: 'computed' }
-/** Cells of the touched column: `12/340` for a folder, `searched` for a file. */
-const TOUCHED = 9
-
-/** A count in a few cells: 9,812, 41k, 1.0M. */
-const short = (n: number) => (n < 10000 ? n.toLocaleString('en-US') : n < 1e6 ? `${Math.round(n / 1000)}k` : `${(n / 1e6).toFixed(1)}M`)
-
-const node = (path: string): Node => ({ path, files: 0, touched: 0, units: new Map(), readSum: 0, countedSum: 0, kids: new Map() })
-const len = textWidth
-const pad = (s: string, n: number, right = false) => { const t = cut(s, n); const sp = ' '.repeat(Math.max(0, n - len(t))); return right ? sp + t : t + sp }
-/** A file's folder as the kernel names it (`runs/r04/`, `./` at the top). */
-const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : './')
-const nameOf = (p: string) => p.replace(/\/$/, '').slice(p.replace(/\/$/, '').lastIndexOf('/') + 1) + (p.endsWith('/') ? '/' : '')
-
-/** The folder tree of the kernel's groups (one per folder that holds files): each folder adds its files and measures to
- *  itself and every folder above it. */
-function folderTree(groups: Any[]): Node {
-  const root = node('')
-  for (const g of groups || []) {
-    const folder = String(g.folder || './')
-    const parts = folder === './' ? [] : folder.replace(/\/$/, '').split('/')
-    const chain = [root]
-    let at = root
-    parts.forEach((_, i) => {
-      const p = `${parts.slice(0, i + 1).join('/')}/`
-      if (!at.kids.has(p)) at.kids.set(p, node(p))
-      at = at.kids.get(p)!
-      chain.push(at)
-    })
-    const files = Number(g.files) || 0
-    for (const n of chain) {
-      n.files += files
-      n.touched += Number(g.touched) || 0
-      n.readSum += (Number(g.read_share) || 0) * files
-      n.countedSum += (Number(g.counted_share) || 0) * files
-      for (const u of g.units || []) {
-        const m = n.units.get(u.unit) ?? { units: 0, seen: 0, model: 0, searched: 0, computed: 0 }
-        m.units += Number(u.units) || 0
-        m.seen += Number(u.seen) || 0
-        m.model += Number(u.model) || 0
-        m.searched += Number(u.searched) || 0
-        m.computed += Number(u.computed) || 0
-        n.units.set(u.unit, m)
-      }
-    }
-  }
-  return root
+/** Each tone of the layout as Text props: the three shades as theme colors, the rest dim or bold. */
+const TONE: Record<string, Record<string, unknown>> = {
+  read: { color: 'merged' },
+  comp: { color: 'inactive' },
+  track: { color: 'subtle' },
+  dim: { dimColor: true },
+  rule: { dimColor: true },
+  bold: { bold: true },
 }
+/** The selected row's name, tinted as a cited value is (marks/evidence.tsx CITE_TINT). */
+const SEL_TINT = 'userMessageBackground'
 
-/** A folder's two measures, as the kernel measures a group: in its files' unit when they share one, else the mean of
- *  its files' shares. */
-function measures(n: Node): { read: number; searched: number } {
-  const us = [...n.units.values()]
-  if (us.length === 1 && us[0]!.units) {
-    const u = us[0]!
-    return { read: Math.min(1, u.seen / u.units), searched: Math.min(1, (u.seen + u.model + u.searched + u.computed) / u.units) }
-  }
-  return n.files ? { read: n.readSum / n.files, searched: n.countedSum / n.files } : { read: 0, searched: 0 }
-}
-
-const byTouch = (a: Node, b: Node) => b.touched - a.touched || b.files - a.files || a.path.localeCompare(b.path)
-
-export async function drawCoverage($: EngineInterface, e: Any, _args: unknown, els: Any): Promise<unknown> {
+export async function drawCoverage($: EngineInterface, e: Any, args: unknown, els: Any): Promise<unknown> {
   const { Box, Button, Text } = els
-  const W = Math.max(40, Number(e.props?.bodyColumns) || 80)
+  const W = Math.max(24, Number(e?.props?.bodyColumns) || 80)
+  const H = Math.max(12, Number(e?.props?.scroll?.bodyRows) || 40)
   const counts = await countsNow($)
   const cov = lastCoverage()
   if (!featureOn('counts')) return Text({ dimColor: true, wrap: 'wrap', children: 'Coverage is off. Turn it on in /thimble-settings.' })
   const failed = counts?.error ? Text({ key: 'failed', color: 'error', wrap: 'wrap', children: `× ${counts.error}${cov ? ' Below is the last count.' : ''}` }) : null
   if (!cov) return failed ?? Text({ dimColor: true, children: 'Counting what Claude touched…' })
-  const view = ((await $.state.get(VIEW)).value ?? { open: [], file: null }) as View
-  const open = new Set(view.open)
-  const setView = (v: Partial<View>) => $.state.set(VIEW, { ...view, ...v })
-  const flip = (key: string) => () => { const next = new Set(open); if (next.has(key)) next.delete(key); else next.add(key); return setView({ open: [...next] }) }
+  const view = ((await $.state.get(VIEW)).value ?? {}) as View
+  const under = await rowsUnder($, e, 'coverage', args).catch(() => 5)
+  const dims = { W, H: H - (failed ? 2 : 0), under }
+  const v = coverageView(cov, view, dims)
+  const focus = (key: string | null | undefined) => (key ? $.ui.focus({ requestId: PANE_ID, key }).catch(() => undefined) : undefined)
+  const go = async (next: View) => { await $.state.set(VIEW, next); await focus(next.sel) }
+  const press = (key: string) => () => $.state.set(VIEW, pressView(cov, view, key, dims))
+  const step = (d: number) => () => go(stepView(cov, view, d, dims))
 
-  const total = cov.total || {}
-  const all = Number(total.files) || 0
-  const bar = (share: number, w: number, color: string, k: string) => {
-    const n = share > 0 ? Math.max(1, Math.min(w, Math.round(share * w))) : 0
-    return [Text({ key: `${k}-on`, color, children: '█'.repeat(n) }), Text({ key: `${k}-off`, dimColor: true, children: '░'.repeat(w - n) })]
-  }
-  // the overview's bars as wide as the row leaves them, up to 24 cells; in a narrow pane its label stands on a row of
-  // its own, so the counts are never cut
-  const said = (part: number) => shareOfFiles(part, all)
-  const saidW = Math.max(len(said(Number(total.seen_files) || 0)), len(said(Number(total.touched_files) || 0)))
-  const labelW = W - 30 - saidW >= BAR ? 28 : 0
-  const big = Math.max(BAR, Math.min(24, W - labelW - 2 - saidW))
-  const overview = (label: string, part: number, color: string, k: string) => {
-    const counts = [...bar(all ? part / all : 0, big, color, k), Text({ key: `${k}-n`, children: `  ${said(part)}` })]
-    if (labelW) return Text({ key: k, wrap: 'truncate-end', children: [Text({ key: `${k}-label`, children: pad(label, labelW) }), ...counts] })
-    return Box({ key: k, flexDirection: 'column', children: [Text({ key: `${k}-label`, children: label }), Text({ key: `${k}-bar`, wrap: 'truncate-end', children: counts })] })
-  }
+  const runs = (rs: Run[], sel = false) => rs.map((r, i) => Text({ key: `r${i}`, ...(r.tone ? TONE[r.tone] : {}),
+    ...(sel && i === 0 ? { bold: true, backgroundColor: SEL_TINT } : {}), children: r.s }))
+  const lines = v.lines.map((l: Any) => (l.press
+    ? Button({ key: l.press, plain: true, label: l.press.replace(/^(dir|file):/, ''), onPress: press(l.press), ...(l.sel ? { autoFocus: true } : {}), children: runs(l.runs, l.sel) })
+    : Text({ key: l.key, wrap: 'truncate-end', children: runs(l.runs) })))
 
-  // the rows: a folder's own row, its sub-folders and its files when open
-  const tree = folderTree(cov.groups || [])
-  const files = (cov.files || []) as Any[]
-  const untouched: string[] = Array.isArray(cov.untouched?.path) ? cov.untouched.path : []
-  // a row is its name, the touched column and two measures (a bar and its percent), always on one line: the bars give
-  // way first (down to 3 cells, the same width in every row, so the columns stay aligned) to the longest name shown,
-  // and a name still too long is cut in its middle, since names that start alike differ at their end
-  // (`…__specified`, `…__underspecified`)
-  const maxBar = Math.max(2, Math.min(BAR, Math.floor((W - 19 - TOUCHED - 14) / 2)))
-  let barW = maxBar
-  const nameW = (depth: number) => Math.max(6, W - 2 * depth - 20 - TOUCHED - 2 * barW)
-  const measureCells = (m: { read: number; searched: number }, k: string) => [
-    Text({ key: `${k}-g1`, children: ' ' }), ...bar(m.read, barW, READ, `${k}-r`), Text({ key: `${k}-rp`, children: pad(percent(m.read), 7, true) }),
-    Text({ key: `${k}-g2`, children: '  ' }), ...bar(m.searched, barW, SEARCHED, `${k}-s`), Text({ key: `${k}-sp`, children: pad(percent(m.searched), 7, true) }),
+  // the keys, under a rule: each a plain Button its key presses (Claude Code draws the key, lit, then a colon)
+  const keys: [string | null, string, () => unknown][] = [
+    ['k', 'up', step(-1)],
+    ['j', 'down', step(1)],
+    [null, v.anyOpen ? 'open / collapse' : 'open', () => (v.selKey ? press(v.selKey)() : undefined)],
+    ['r', 'close', () => closePane($)],
   ]
-  // the rows are drawn once every row is known, since the widths follow the longest name
-  const rows: (Any | (() => Any))[] = []
-  let fit = maxBar
-  const named = (key: string, label: string, lead: string, name: string, depth: number, look: Any, onPress: () => unknown, cells: () => Any[]) => {
-    fit = Math.min(fit, Math.floor((W - 2 * depth - 20 - TOUCHED - len(name)) / 2))
-    rows.push(() => {
-      const w = nameW(depth)
-      return Button({ key, plain: true, label, onPress, children: [Text({ key: 'n', ...look, children: `${lead}${pad(len(name) <= w ? name : cut(name, w, true), w)} ` }), ...cells()] })
-    })
-  }
-  const fileRows = (folder: string, depth: number) => {
-    const ind = '  '.repeat(depth)
-    const mine = files.filter(f => folderOf(String(f.path)) === folder).sort((a, b) => (b.counted_share || 0) - (a.counted_share || 0) || String(a.path).localeCompare(String(b.path)))
-    for (const f of mine) {
-      const path = String(f.path)
-      const shown = view.file === path
-      named(`file:${path}`, path, `${ind}  `, nameOf(path), depth, shown ? { bold: true } : {}, () => setView({ file: shown ? null : path }), () => [
-        Text({ key: 'f', dimColor: true, children: pad(SAID[String(f.status)] || '', TOUCHED, true) }),
-        ...measureCells({ read: Number(f.read_share) || 0, searched: Number(f.counted_share) || 0 }, 'm'),
-      ])
-      if (shown) {
-        const first = Array.isArray(f.ranges) && f.ranges.length ? Number(f.ranges[0][0]) : 0
-        // the whole path where it fits on one line (a terminal opens it), else the folder's own
-        const line = first ? `:${first}` : ''
-        const at = `${String(cov.root || '').replace(/\/+$/, '')}/${path}${line}`
-        const ranges = (f.ranges || []).slice(0, 12).map((r: number[]) => (r[0] === r[1] ? `${r[0]}` : `${r[0]}–${r[1]}`)).join(', ')
-        rows.push(Box({ key: `detail:${path}`, flexDirection: 'column', marginLeft: 2 * depth + 4, children: [
-          Text({ key: 'path', wrap: 'truncate-start', children: at.length <= W - 2 * depth - 4 ? at : `${path}${line}` }),
-          Text({ key: 'said', dimColor: true, wrap: 'wrap', children: `${String(f.said || '')}${ranges && (f.unit === 'lines' || f.unit === 'records') ? ` · lines ${ranges}` : ''}` }),
-        ] }))
-      }
-    }
-    // the folder's files not touched: one line, which says how many were only listed and opens to their names
-    const n = untouched.filter(p => folderOf(p) === folder)
-    const own = (cov.groups || []).find((g: Any) => g.folder === folder)
-    const rest = Math.max(n.length, (Number(own?.files) || 0) - mine.length)
-    if (!rest) return
-    const listed = Number(own?.by_status?.listed) || 0
-    const key = `rest:${folder}`
-    const words = `${rest.toLocaleString('en-US')} ${rest === 1 ? 'file' : 'files'}, none touched${listed ? ` (${listed === rest ? 'all' : listed.toLocaleString('en-US')} only listed by name)` : ''}`
-    rows.push(Button({ key, plain: true, label: `${rest} files, none touched`, onPress: flip(key), children: [Text({ key: 'r', dimColor: true, children: `${ind}  ${open.has(key) ? '▾' : '▸'} ${words}` })] }))
-    if (open.has(key)) {
-      for (const p of n.slice(0, REST_MAX)) rows.push(Text({ key: `u:${p}`, dimColor: true, children: `${ind}      ${cut(nameOf(p), W - 2 * depth - 6)}` }))
-      if (rest > Math.min(n.length, REST_MAX)) rows.push(Text({ key: `u-more:${folder}`, dimColor: true, children: `${ind}      and ${(rest - Math.min(n.length, REST_MAX)).toLocaleString('en-US')} more` }))
-    }
-  }
-  const folderRows = (at: Node, depth: number) => {
-    for (const k of [...at.kids.values()].sort(byTouch)) {
-      const isOpen = open.has(k.path)
-      named(`dir:${k.path}`, k.path, `${'  '.repeat(depth)}${isOpen ? '▾' : '▸'} `, nameOf(k.path), depth, k.touched ? {} : { dimColor: true }, flip(k.path), () => [
-        Text({ key: 'f', dimColor: true, children: pad(`${short(k.touched)}/${short(k.files)}`, TOUCHED, true) }),
-        ...measureCells(measures(k), 'm'),
-      ])
-      if (isOpen) {
-        folderRows(k, depth + 1)
-        fileRows(k.path, depth + 1)
-      }
-    }
-  }
-  folderRows(tree, 0)
-  fileRows('./', 0)
-  barW = Math.max(Math.min(3, maxBar), Math.min(maxBar, fit))
+  const keyRow = Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap(([k, label, onPress], i) => [
+    ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
+    k
+      ? Button({ key: `key-${k}`, plain: true, hotkey: k, label, onPress, children: [Text({ key: 'w', dimColor: true, children: label })] })
+      : Button({ key: 'key-enter', plain: true, label, onPress, children: [Text({ key: 'k', color: 'suggestion', bold: true, children: '↵' }), Text({ key: 'w', dimColor: true, children: ` ${label}` })] }),
+  ]) })
 
   return Box({ flexDirection: 'column', width: W, children: [
-    Text({ key: 'title', bold: true, children: 'Coverage' }),
+    ...lines.slice(0, 1),
     ...(failed ? [failed] : []),
-    overview("read into Claude's context", Number(total.seen_files) || 0, READ, 'o-read'),
-    overview('searched or computed over', Number(total.touched_files) || 0, SEARCHED, 'o-searched'),
-    Text({ key: 'gap', children: ' ' }),
-    Text({ key: 'head', dimColor: true, children: `  ${pad('folder', nameW(0))} ${pad('files', TOUCHED, true)} ${pad('read', barW + 7)}  ${pad('searched', barW + 7)}` }),
-    ...rows.map(r => (typeof r === 'function' ? r() : r)),
+    ...lines.slice(1),
+    Text({ key: 'keys-rule', dimColor: true, children: '─'.repeat(W) }),
+    keyRow,
   ] })
 }

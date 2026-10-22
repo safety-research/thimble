@@ -16,6 +16,7 @@
 //                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
+//   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
 //                                      subject; `has` once a question was asked of it, `ask` opens it (openThread)
 //   threadOnCard($, id, title)         what a card's margin asks about (cards/draw.ts): the card, as the tray's `a` asks
@@ -27,7 +28,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { drawThreads, threadUnder as under } from './pane'
+import { drawThreads, rowsUnder as roomUnder, threadUnder as under } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
 
 type Engine = EngineInterface
@@ -79,6 +80,11 @@ export async function threadAsked($: Engine, scope: ThreadScope): Promise<string
 
 export async function threadUnder($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<unknown[]> {
   return under($, e, kind, args, els)
+}
+
+/** About how many rows threadUnder takes under a pane (threads/pane.tsx rowsUnder). */
+export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
+  return roomUnder($, e, kind, args)
 }
 
 export async function openThread($: Engine, scope: ThreadScope): Promise<boolean> {
