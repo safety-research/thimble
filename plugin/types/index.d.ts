@@ -5,10 +5,16 @@ declare module 'claude-code' {
   interface PluginState {
     'thimble': {
       // ---- L1 marks
-      /** a reply's marks and their checks, by the reply's row (the session.append uuid of a main text row):
-       *  { row, turnId, checking, agentId, startedAt, settledAt, failed, items: [{ n, words, start, end, sentence,
-       *  status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, reason?, evidence? }] } */
+      /** a reply's marks and their checks, by the reply's row (the session.append uuid of a main text row; the
+       *  AssistantMessage's requestId): { row, turnId, last (the reply's last text row: it holds the reply's counts and
+       *  draws the footer), total, checking, startedAt, settledAt, failed, unchecked, items: [{ n, words, start,
+       *  end, sentence, status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, was?, reason?,
+       *  evidence? }] } (marks/checker.ts ReplyMarks) */
       marks: StateFamily<unknown>
+      /** main's text rows of the turn that runs: [{ row, text, at }] */
+      marksRows: { row: string; text: string; at: number }[]
+      /** the checks that run, by the checker fork's agent: the reply's rows and the marks this fork checks */
+      marksRunning: Record<string, { agentId: string; turnId: string; rows: string[]; marks: number[]; cwd: string; replyEnd: number; spawnedAt: number }>
 
       // ---- L2 cards
       /** a card, by its id: { id, version, title, toolUseId, agentId, anchorRow, keys, rows, gen, error } */
