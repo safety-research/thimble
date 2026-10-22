@@ -414,3 +414,14 @@ def test_heredoc_code_with_its_output_in_a_file_and_a_script_from_stdin_go_over_
     import os
     os.mkfifo(fifo)
     assert SH._script_text(str(fifo), {}) == ""
+
+
+def test_a_read_that_showed_no_line_only_names_the_file_and_a_part_of_a_file_counts_a_row(code: Path, tmp_path: Path) -> None:
+    # a Read past the file's end shows no numbered line: the file is named, not read; a program that went over a few
+    # lines of a file of one long record went over that record
+    saw(tmp_path, code, [{"tool": "Read", "file": str(code / "src" / "a.py"), "from": None, "to": None},
+                         bash("head -1 runs.csv | python3 -c 'import sys; print(len(sys.stdin.read()))'", 1)])
+    cov = CV.coverage(Store(code))
+    by = {o["path"]: o for o in cov["files"]}
+    assert "src/a.py" not in by and "src/a.py" in (cov.get("untouched") or {}).get("path", [])
+    assert by["runs.csv"]["said"] != ""

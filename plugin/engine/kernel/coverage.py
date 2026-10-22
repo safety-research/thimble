@@ -241,9 +241,9 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                 at(f)["whole"] = True
             elif f in known.set:
                 a, b = s.get("from"), s.get("to")
-                if a is None or b is None:
-                    a, b = 1, max(1, count(f).get("lines") or 1)
-                at(f)["lines"].append((int(a), int(b)))
+                # a Read that showed no numbered line (an offset past the end, an empty file) showed nothing of it
+                if a is not None and b is not None:
+                    at(f)["lines"].append((int(a), int(b)))
                 at(f)["named"].add("Read")
         elif tool == "Grep":
             scope = st.rel(s.get("path") or s.get("cwd") or root)
@@ -312,7 +312,7 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
 
     # a file a call named but showed nothing of (a Read past its end, a search that showed none of its lines) is only
     # named, not touched
-    for f in [f for f, x in per.items() if not (_ranges_len(x["lines"]) or x["pages"] or x["whole"] or x["model"] or x["searched"] or x["computed"])]:
+    for f, x in [(f, x) for f, x in per.items() if not (_ranges_len(x["lines"]) or x["pages"] or x["whole"] or x["model"] or x["searched"] or x["computed"])]:
         del per[f]
         listed[f] |= x["named"]
 
