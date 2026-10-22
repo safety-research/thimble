@@ -1,8 +1,8 @@
-// seam.ts: where the side threads meet the rest of thimble (core/answerview.ts and core/pane.ts call each function by
-// name, since Claude Code follows `$` only into functions a file declares or imports). The base leaves each one doing
-// nothing; the feature fills them in, with its own modules beside this file (0.10: shell/thread.ts, shell/threads.js,
-// the thread list's pane program panes/threads.js, the side panel shell/side.ts, prompts/thread.md). A thread's agent is
-// a fork of main (core/forks.ts spawnFork, kind `thread`); what the person asks reaches main through core/engaged.ts.
+// seam.ts: where the side threads meet the rest of thimble (core/answerview.ts, core/pane.ts and cards/tool.ts call each
+// function by name, since Claude Code follows `$` only into functions a file declares or imports). The feature's own
+// modules are beside this file: thread.ts (the threads, their forks, their records), threads.mjs (pure), pane.tsx (the
+// list, a thread, the thread under a pane). A thread's agent is a fork of main (core/forks.ts spawnFork, kind `thread`);
+// what the person asks reaches main through core/engaged.ts, an answer they send with m through core/tell.ts.
 //
 //   THREADS_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts OWN_KEYS)
 //   threadsKey($, key, until)          t: the thread list in the side pane (a taker as hooks/keys.ts takes it)
@@ -12,12 +12,18 @@
 //   openThread($, scope)               the side pane on the thread about `scope` (a new one, or the one already about
 //                                      it), its input taking the keys: the tray's `a` on a mark, a claim's question in
 //                                      the claims pane; true when it opened
+//   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
+//                                      conversation and its input bar, about what the pane shows (core/pane.ts)
+//   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
+//                                      in the thread's pane; null for any other agent (cards/tool.ts)
 //   registerThreads                    its own hooks (/threads, the forks' ends, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
+import { drawThreads, threadUnder as under } from './pane'
+import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount } from './thread'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,20 +36,37 @@ export const THREADS_KEYS = ['t']
  *  pane). */
 export type ThreadScope = { about: string; mark?: MarkRef; card?: string; pane?: { kind: string; args: unknown } }
 
-export async function threadsKey(_$: Engine, _key: string, _until: number): Promise<Take | null> {
-  return null
+/** t with threads: the list in the side pane, once the word window closed with no letter after it (a letter makes t
+ *  the start of a word). With no thread, t types. */
+export async function threadsKey($: Engine, key: string, _until: number): Promise<Take | null> {
+  if (key !== 't') return null
+  await restoreThreads($)
+  if (!threadCount()) return null
+  return { later: () => listThreads($, { fromKey: true }) }
 }
 
-export async function threadsBar(_$: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
-  return []
+/** `t 2 threads` at the bar's right, while the session has threads: a click lists them, as t does. */
+export async function threadsBar($: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
+  await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
+  const n = threadCount()
+  if (!n) return []
+  return [{ id: 'threads', key: 't', words: n === 1 ? '1 thread' : `${n.toLocaleString('en-US')} threads`, press: () => listThreads($) }]
 }
 
-export async function drawThreadsPane(_$: Engine, _e: Any, _kind: 'threads' | 'thread', _args: unknown, els: Any): Promise<unknown> {
-  return els.Text({ dimColor: true, children: 'No side threads yet.' })
+export async function drawThreadsPane($: Engine, e: Any, kind: 'threads' | 'thread', args: unknown, els: Any): Promise<unknown> {
+  return drawThreads($, e, kind, args, els)
 }
 
-export async function openThread(_$: Engine, _scope: ThreadScope): Promise<boolean> {
-  return false
+export async function threadUnder($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<unknown[]> {
+  return under($, e, kind, args, els)
 }
 
-export const registerThreads: Register = () => undefined
+export async function openThread($: Engine, scope: ThreadScope): Promise<boolean> {
+  return openThreadOn($, scope)
+}
+
+export async function threadCardAnchor($: Engine, agentId: string | undefined, cardId: string): Promise<string | null> {
+  return anchor($, agentId, cardId)
+}
+
+export const registerThreads: Register = (on, options) => register(on, options)

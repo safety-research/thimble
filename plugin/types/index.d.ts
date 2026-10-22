@@ -97,6 +97,13 @@ declare module 'claude-code' {
       trayCard: { row: string; card: string } | null
       /** by main's turn: what its prompt was about when the person asked it with the tray open (`the citation "…"`) */
       trayAsked: StateFamily<string>
+
+      // ---- side threads (threads/)
+      /** a side thread, by its key (threads/thread.ts Thread): { id, key, agentId, scope, subject, root, status, asks,
+       *  turns, sent?, error?, at }, kept on disk too; read by the pane that draws it, so it draws again at each change */
+      thread: StateFamily<unknown>
+      /** goes up when a thread changes: the bar's count and the thread list draw again */
+      threadsGen: number
     }
   }
 }
