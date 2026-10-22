@@ -17,14 +17,20 @@ declare module 'claude-code' {
       marksRunning: Record<string, { agentId: string; turnId: string; rows: string[]; marks: number[]; cwd: string; replyEnd: number; spawnedAt: number }>
 
       // ---- L2 cards
-      /** a card, by its id: { id, version, title, toolUseId, agentId, anchorRow, keys, rows, gen, error } */
+      /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,
+       *  columns, file, gen, error, calls: { [tool_use_id]: { version, error? } }, at } */
       card: StateFamily<unknown>
-      /** a card's drawing as the runner made it, by the card's id: { gen, width, tree } */
+      /** a card's drawing as the runner made it, by the card's id: { gen, width, tree, pointer } */
       cardTree: StateFamily<unknown>
       /** the card that takes keys */
       cardFocus: string | null
-      /** the card a `/` search types into, and its words */
-      cardSearch: { id: string; text: string } | null
+      /** the card a `/` search types into, and its words; `kept` once Enter kept it (its words leave the prompt box at
+       *  the next edit) */
+      cardSearch: { id: string; text: string; kept?: boolean } | null
+      /** the cards the designer fork drew under an answer, by the answer's row */
+      cardsAt: Record<string, string[]>
+      /** the card a call of the card tool drew or changed, by the call's tool_use_id: { id } */
+      cardCall: StateFamily<unknown>
 
       // ---- L4 v
       /** a design v started, by its key: { key, anchorRow, agentId, status, at, error?, cards } */

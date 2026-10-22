@@ -1,0 +1,176 @@
+// The card runner (cards/runner.mjs), started as the hooks start it: a view's error and time-out, state, keys, presses,
+// clicks, the search, actions and the card put back after them, and the sandbox around a view. All rows are made up.
+//   node --test plugin/cards/test/runner.test.mjs
+import '../../test-home.mjs'
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import http from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { after, before, test } from 'node:test'
+import { fileURLToPath } from 'node:url'
+
+import { checkView } from '../runner.mjs'
+
+const HERE = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
+let dir
+let child
+let sock
+
+const ask = (op, body) => new Promise((resolve, reject) => {
+  const q = http.request({ socketPath: sock, path: `/${op}`, method: 'POST' }, res => {
+    let t = ''
+    res.on('data', d => { t += d })
+    res.on('end', () => resolve(JSON.parse(t)))
+  })
+  q.on('error', reject)
+  q.end(JSON.stringify(body))
+})
+
+const ROWS = [{ name: 'ada', score: 3 }, { name: 'bram', score: 5 }, { name: 'cleo', score: 1 }]
+const COUNTER = `const keys = "+r"
+function onKey(k, s) { const st = s.state || { n: 0 }; if (k === '+') s.setState({ n: st.n + 1 }); if (k === 'r') s.setState({ n: 0 }) }
+function view(props, surface) {
+  const { Box, Text, Button } = surface.elements
+  const st = surface.state || { n: 0 }
+  surface.onPointer(e => { if (e.type === 'up') surface.setState({ ...st, at: e.x + ',' + e.y }) })
+  const rows = props.rows.filter(r => !props.query || r.name.includes(props.query))
+  return Box({ flexDirection: 'column', children: [
+    Text({ children: 'count ' + st.n + (st.at ? ' clicked ' + st.at : '') }),
+    ...rows.map(r => Text({ children: r.name + ' ' + r.score })),
+    Button({ onPress: () => surface.setState({ ...st, n: st.n + 10 }), children: 'add ten' }),
+  ] })
+}`
+
+let n = 0
+async function load(view, extra = {}) {
+  const id = `c${(++n).toString(16).padStart(8, '0')}`
+  const r = await ask('load', { id, version: 1, title: 'Scores', view, rows: join(dir, 'rows.json'), width: 40, ...extra })
+  return { id, r }
+}
+
+before(async () => {
+  dir = mkdtempSync(join(tmpdir(), 'thimble-runner-'))
+  writeFileSync(join(dir, 'rows.json'), JSON.stringify(ROWS))
+  sock = join(dir, 'r.sock')
+  child = spawn('node', ['--permission', `--allow-fs-read=${HERE}`, `--allow-fs-read=${dir}`, `--allow-fs-write=${dir}`, join(HERE, 'runner.mjs'), sock], { stdio: 'ignore' })
+  for (let i = 0; i < 100; i++) {
+    try { if ((await ask('ping', {})).ok) return } catch { /* not yet */ }
+    await new Promise(r => setTimeout(r, 20))
+  }
+  throw new Error('the runner did not start')
+})
+
+after(() => {
+  child?.kill()
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('a card loads: its text copy, what it read, and its keys', async () => {
+  const { r } = await load(COUNTER)
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.lines, ['count 0', 'ada 3', 'bram 5', 'cleo 1', '[ add ten ]'])
+  assert.deepEqual(r.summary, { rows: 3, columns: ['name', 'score'], first: '{"name":"ada","score":3}' })
+  assert.equal(r.keys, '+r')
+})
+
+test('a key, a press and a click reach the view, and the state comes back to keep', async () => {
+  const { id } = await load(COUNTER)
+  let r = await ask('key', { id, key: '+' })
+  assert.equal(r.handled, true)
+  assert.deepEqual(JSON.parse(r.state), { n: 1 })
+  const button = r.tree.c.find(x => x.t === 'Button').p.onPress
+  r = await ask('press', { id, button })
+  assert.deepEqual(JSON.parse(r.state), { n: 11 })
+  r = await ask('pointer', { id, down: { x: 2, y: 1 }, up: { x: 2, y: 1 } })
+  assert.equal(r.pointer, true)
+  r = await ask('draw', { id, width: 40, text: true })
+  assert.equal(r.lines[0], 'count 11 clicked 2,1')
+  r = await ask('query', { id, text: 'br' })
+  assert.equal(r.query, 'br')
+  assert.deepEqual((await ask('draw', { id, width: 40, text: true })).lines.slice(1, 3), ['bram 5', '[ add ten ]'])
+})
+
+test('a card loads again with the state it kept', async () => {
+  const { r } = await load(COUNTER, { state: { n: 7 }, query: 'cl' })
+  assert.deepEqual(r.lines.slice(0, 2), ['count 7', 'cleo 1'])
+})
+
+test('actions give a copy after each, then the card is as it was', async () => {
+  const { id } = await load(COUNTER)
+  await ask('key', { id, key: '+' })
+  const r = await ask('act', { id, width: 40, actions: [{ key: '+' }, { click: 'add ten' }, { click: [0, 0] }, { click: 'no such button' }, { key: 'x' }] })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.copies.map(c => c.lines?.[0]), ['count 2', 'count 12', 'count 12 clicked 0,0', 'count 12 clicked 0,0', 'count 12 clicked 0,0'])
+  assert.match(r.copies[3].note, /no Button shows "no such button"/)
+  assert.deepEqual(JSON.parse(r.state), { n: 1 })
+})
+
+test('a view that fails says where; a view that runs too long is stopped; the card keeps answering after', async () => {
+  let { r } = await load('function view(props) { return props.rows[99].name }')
+  assert.equal(r.ok, false)
+  assert.match(r.error, /^line 1: .*name/)
+  ;({ r } = await load('function view( {'))
+  assert.match(r.error, /does not parse/)
+  ;({ r } = await load('function view() { while (true) {} }'))
+  assert.match(r.error, /ran past its 5 s limit/)
+  const { id } = await load(`const keys = "x"
+function onKey(k, s) { if (k === 'x') { while (true) {} } }
+function view(p, s) { return s.elements.Text({ children: 'ok' }) }`)
+  const k = await ask('key', { id, key: 'x' })
+  assert.match(k.error, /ran past its 1 s limit/)
+  assert.deepEqual((await ask('draw', { id, width: 20, text: true })).lines, ['ok'])
+  assert.equal((await ask('draw', { id: 'c0000ffff', width: 20 })).missing, true)
+})
+
+test('a key the view fails on is undone: the card keeps the state it had; a border style Claude Code lacks is noted', async () => {
+  const { id, r } = await load(`const keys = "x"
+function onKey(k, s) { s.setState({ broken: true }) }
+function view(p, s) { if (s.state && s.state.broken) return p.rows[99].name; return s.elements.Box({ borderStyle: 'wavy', children: [s.elements.Text({ children: 'whole' })] }) }`)
+  assert.deepEqual(r.notes, ['borderStyle "wavy" is not a border style (single, double, round, bold, singleDouble, doubleSingle, classic, arrow, dashed, quote), so that Box has no border'])
+  const k = await ask('key', { id, key: 'x' })
+  assert.equal(k.ok, false)
+  const d = await ask('draw', { id, width: 20, text: true })
+  assert.deepEqual(d.lines, ['whole'])
+  assert.equal(d.state, 'null')
+})
+
+test('the sandbox: no process, require, import, fetch or timers, and no code from strings by any path', async () => {
+  const probe = `function view(p, s) {
+  const out = []
+  const g = (function () { return this })()
+  out.push(typeof g.require, typeof g.fetch, typeof g.setTimeout, typeof g.Buffer, typeof g.process)
+  try { out.push(String((() => {}).constructor('return 1')())) } catch (e) { out.push('no Function') }
+  try { out.push(String(s.constructor.constructor('return 1')())) } catch (e) { out.push('no Function') }
+  try { out.push(String(Object.getPrototypeOf(async () => {}).constructor('return 1'))) } catch (e) { out.push('no AsyncFunction') }
+  try { out.push(String(this.constructor.constructor('return 1')())) } catch (e) { out.push('no host') }
+  return s.elements.Text({ children: out.join(' ') })
+}`
+  const { r } = await load(probe)
+  assert.equal(r.ok, true, r.error)
+  assert.equal(r.lines.join(' '), 'undefined undefined undefined undefined undefined no Function no Function no AsyncFunction no host')
+  for (const bad of ['function view() { return process.env }', 'function view() { return require("fs") }', 'function view() { return import("fs") }', 'function view() { return eval("1") }', 'function view() { return globalThis }', 'function view() { return $.fs }']) {
+    assert.equal((await load(bad)).r.ok, false, bad)
+  }
+})
+
+test('a view cannot reach the runner, the prelude, or files outside the card', async () => {
+  const { r } = await load(`function view(p, s) {
+  const g = (function () { return this })()
+  try { g.__thimble = null } catch (e) { /* refused */ }
+  try { Object.defineProperty(g, '__thimble', { value: null }) } catch (e) { /* refused */ }
+  return s.elements.Text({ children: typeof g.__thimble.call })
+}`)
+  assert.equal(r.ok, true, r.error)
+  assert.equal(r.lines[0], 'function')
+  const out = await ask('load', { id: 'c0000fffe', version: 1, title: 'x', view: 'function view(p, s) { return s.elements.Text({ children: "x" }) }', rows: '/etc/passwd', width: 20 })
+  assert.equal(out.ok, false)
+  assert.match(out.error, /cannot be read/)
+})
+
+test('the static check names what a view must not hold, and leaves words in strings and comments alone', () => {
+  assert.deepEqual(checkView('function view() { return "import process eval( Function(" } // require'), [])
+  assert.deepEqual(checkView('const x = 1'), ['define `function view(props, surface)`'])
+  assert.ok(checkView('function view() { return import("x") }').some(s => /import/.test(s)))
+})

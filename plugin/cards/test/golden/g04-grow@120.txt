@@ -1,0 +1,6 @@
+┌──────────────────────────────────────────┐  ┌──────────────────┐  ┌──────────────────────────────────────────────────┐
+│ Agent 1                                  │  │ Agent 2          │  │ Agent 3                                          │
+│ The first agent ran the suite three      │  │ The second agent │  │ The third agent ran everything twice, then       │
+│ times and saw one failure each time it   │  │ only ran the     │  │ stopped after a time-out in the network tests    │
+│ touched the parser.                      │  │ unit tests.      │  │ that it never ran again.                         │
+└──────────────────────────────────────────┘  └──────────────────┘  └──────────────────────────────────────────────────┘

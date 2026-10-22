@@ -1,0 +1,7 @@
+Runs                                                                               18 in all
+╭───╮
+│big│ centered next to a box
+╰───╯
+                                                                                at the right
+                                       in the middle
+              a                              b                              c
