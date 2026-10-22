@@ -501,3 +501,16 @@ def test_when_no_call_printed_the_cited_output_the_pane_shows_what_the_check_ran
     r = check_mark(mark("72 min"), computed("opus: 72"), [call(CODE, "opus: 71.5")], "/data")
     assert r["status"] == "failed" and r["evidence"]["output"] == "opus: 71.5"
 
+
+def test_text_printed_with_repr_shows_its_line_breaks_as_line_breaks():
+    code = 'import json\nr = json.loads(open("reports.jsonl").readline())\nprint(repr(r["body"][:60]))'
+    out = "'shift report addendum\\n\\nSince my earlier report:\\n- MERGED #62992'"
+    r = check_mark(mark('"shift report addendum Since my earlier report: - MERGED #62992 …"'), computed(out), [call(code, out)], "/data")
+    assert r["status"] == "verified"
+
+
+def test_a_quote_of_python_text_may_join_string_literals_that_stand_next_to_each_other(tmp_path: Path):
+    (tmp_path / "nudge.py").write_text('NUDGE = ("Wrap-up: submit the final report "\n    "with `forge report submit`.")\n')
+    words = '"Wrap-up: submit the final report with `forge report submit`."'
+    r = check_mark(mark(words), quote("nudge.py", "1-2", '"Wrap-up: submit the final report "'), [], str(tmp_path))
+    assert r["status"] == "verified"

@@ -365,8 +365,9 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
     the output, each number as a whole number of it, and, for words with no number, each record name (`#102, #125 and
     #130`). Words with none of these ("passed when run alone") are the check's reading of the output it cites, as a
     paraphrase of a quote is: the person sees that output next to the claim. A label that opens a line (`9: `) is no
-    part of the output, and `**` and backticks in it are formatting."""
-    out = unlabeled(out)
+    part of the output, `**` and backticks in it are formatting, and a line break that repr() printed as `\\n` is a
+    line break."""
+    out = unlabeled(unescaped(out))
     plain = unmark(out)
     if bounded_in(target, out) or bounded_in(target, plain):
         return True
@@ -385,6 +386,12 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
         out = wordnums(out, counts=True)
         return all(has_number(v, out, dates=d, approx=approx or v in rough) or (v in pct and has_number(fraction(v), out, approx=approx or v in rough)) for v, d in nums)
     return bool(frags or calendar_days(target)) or all(has_name(x, out) for x in NAME.findall(target))
+
+
+def unescaped(out: str) -> str:
+    """The output with the escapes that repr() prints for white space and quote marks (`\\n`, `\\t`, `\\'`) read as the
+    characters they stand for, as code prints a record's text with repr() to show its line breaks."""
+    return re.sub(r"\\([nrt'\"])", lambda m: m.group(1) if m.group(1) in "'\"" else " ", out)
 
 
 def approx_numbers(words: str) -> set[str]:
@@ -969,11 +976,16 @@ def paths_of(file: str, cwd: str, root: str | None, tmp: str | None, calls: list
     return [p for p in dict.fromkeys(os.path.abspath(os.path.join(b, file)) for b in bases) if inside(p, folders)]
 
 
+ADJACENT = re.compile(r"([\"'])\s+\1")
+
+
 def hay_of(cited: list[str]) -> list[str]:
-    """The texts cited lines hold words in: each line raw and decoded, and for a range the lines joined."""
+    """The texts cited lines hold words in: each line raw and decoded, and for a range the lines joined, also with
+    string literals that stand next to each other joined, as Python joins `"final report " "with …"` into one."""
     texts = [norm_ws(t) for raw in cited for t, _ in forms(raw)]
     if len(cited) > 1:
         texts += [" ".join(norm_ws(t) for raw in cited for t, d in forms(raw) if d == dec) for dec in (False, True)]
+    texts += [j for t in texts for j in [ADJACENT.sub("", t)] if j != t]
     return [h for t in texts for h in (t, unmark(t)) if h]
 
 
