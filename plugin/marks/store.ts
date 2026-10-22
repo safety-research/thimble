@@ -33,9 +33,9 @@ export type MarkItem = {
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[] }
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */
 export type RowMarks = { row: string; last: boolean; items: MarkItem[] } & Counts
-/** A reply's marks by what the person sees: `wrong` failed by the check, `unconfirmed` failed because the evidence did
- *  not hold. */
-export type Counts = { total: number; checking: boolean; corrected: number; wrong: number; unconfirmed: number; unchecked: number }
+/** A reply's marks by what the person sees: `checking` the marks still checked, `wrong` failed by the check,
+ *  `unconfirmed` failed because the evidence did not hold. */
+export type Counts = { total: number; checking: number; corrected: number; wrong: number; unconfirmed: number; unchecked: number }
 
 const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
@@ -91,7 +91,7 @@ export function counts(r: Reply): Counts {
   const n = (f: (m: MarkItem) => boolean) => r.items.filter(f).length
   return {
     total: r.items.length,
-    checking: r.items.some(m => m.status === 'checking'),
+    checking: n(m => m.status === 'checking'),
     corrected: n(m => m.status === 'corrected'),
     wrong: n(m => m.status === 'failed' && m.failedBy !== 'evidence'),
     unconfirmed: n(m => m.status === 'failed' && m.failedBy === 'evidence'),

@@ -105,7 +105,7 @@ export const registerMarks: Register = on => {
       })
       : await next(e)
     const foot = reply?.last ? footerEl(els, {
-      key: `mf-${e.requestId}`, spin, checking: reply.checking ? reply.total : 0, wrong: reply.wrong, unconfirmed: reply.unconfirmed, corrected: reply.corrected, unchecked: reply.unchecked,
+      key: `mf-${e.requestId}`, spin, checking: reply.checking, wrong: reply.wrong, unconfirmed: reply.unconfirmed, corrected: reply.corrected, unchecked: reply.unchecked,
     }) : null
     return foot ? els.Box({ flexDirection: 'column', children: [body, foot] }) : body
   })

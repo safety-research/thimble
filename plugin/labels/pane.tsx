@@ -156,7 +156,8 @@ function definition(els: Any, lab: Any): unknown[] {
 /** The scope a label went over, in words. */
 function scopeWords(lab: Any): string {
   const parts = [`${n(lab.records)} record${lab.records === 1 ? '' : 's'} in ${lab.in || 'the records Claude named'}`]
-  if (lab.where) parts.push(`where ${lab.where}`)
+  // a long condition (a list of 22 values) at most two lines: the scope stays readable above the counts
+  if (lab.where) parts.push(`where ${cut(oneLine(String(lab.where), false), 160)}`)
   if (lab.within) parts.push(`within ${lab.within[0]} = ${lab.within[1]}`)
   if (lab.trial) parts.push(`a trial: ${n(lab.records)} of ${n(lab.matched)} at random`)
   if (lab.checked) parts.push(`you checked ${n(lab.checked)}: ${n(lab.agree)} agree, ${n(lab.disagree)} changed`)

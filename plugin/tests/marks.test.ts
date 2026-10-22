@@ -85,7 +85,7 @@ async function drawn($: Any): Promise<string> {
   const marks = marksIn(REPLY)
   const looks = marks.map((_m: Any, k: number) => ({ n: k + 1, status: reply!.items[k]!.status, shown: reply!.items[k]!.shown }))
   const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, notes: notesByMark(reply!.items) })
-  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking ? reply!.total : 0, wrong: reply!.wrong, unconfirmed: reply!.unconfirmed, corrected: reply!.corrected, unchecked: reply!.unchecked })
+  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking, wrong: reply!.wrong, unconfirmed: reply!.unconfirmed, corrected: reply!.corrected, unchecked: reply!.unchecked })
   return textOf(body) + '\n' + textOf(foot)
 }
 
@@ -155,7 +155,7 @@ test('a validator that cannot run, or a fork that is gone, leaves no mark checki
   await noteRow(other, 'row-1', REPLY)
   await startCheck(other, { turnId: 't-1', reason: 'answer' })
   await resumeChecks(other)
-  expect((await rowMarks(other, 'row-1'))!.checking).toBe(false)
+  expect((await rowMarks(other, 'row-1'))!.checking).toBe(0)
   expect(String((await failLineNow(other))?.text)).toContain('thimble lost the copy that checked them')
 })
 
@@ -193,7 +193,7 @@ test('checker forks that end at the same moment all settle their marks, and main
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await Promise.all([FORK, `${FORK}1`, `${FORK}2`].map(agentId => endCheck($, { agentId, reason: 'answer', answer: '```json\n[]\n```' })))
   const reply = await rowMarks($, 'row-1')
-  expect(reply!.checking).toBe(false)
+  expect(reply!.checking).toBe(0)
   expect(reply!.items.map(m => m.status)).toEqual(Array(12).fill('corrected'))
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>)
   expect(told.length).toBe(1)
@@ -215,5 +215,5 @@ test('a resumed session draws the marks as their check left them; a check the se
   expect(first!.wrong).toBe(1)
   const second = await rowMarks(resumed, 'row-2')
   expect(second!.items[0]!.status).toBe('unchecked')
-  expect(second!.checking).toBe(false)
+  expect(second!.checking).toBe(0)
 })
