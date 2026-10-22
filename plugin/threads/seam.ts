@@ -39,8 +39,8 @@ export const THREADS_KEYS = ['t']
 
 /** What a thread is about, as the feature that opens it names it: in words (`about`, as the list and main read it),
  *  and the thing itself: a mark of a row, a card, or a pane of thimble's with its arguments (a claim of the claims
- *  pane). */
-export type ThreadScope = { about: string; mark?: MarkRef; passage?: { row: string; text: string }; card?: string; pane?: { kind: string; args: unknown } }
+ *  pane). `part`: a card's line that was selected when it was asked about (threads.mjs cardPart). */
+export type ThreadScope = { about: string; mark?: MarkRef; passage?: { row: string; text: string }; card?: string; part?: string; pane?: { kind: string; args: unknown } }
 
 /** A passage of a reply (marks/view.ts Passage): its words, and a few of them that name it. */
 type Passage = { text: string; label: string }

@@ -6,7 +6,8 @@
 // and no answer unless the person sends one there (m).
 //
 //   scope        {about, mark?: {row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}, passage?: {row, text},
-//                card?, pane?: {kind, args}}
+//                card?, part?, pane?: {kind, args}}; `part` is the line of a card that was selected when `a` asked
+//                about it (cardPart), which the pane shows in place of the whole card
 //   threadKey(scope)              one thread per mark, per passage, per card, or per pane: 'mark-<row>-<kind>-<n|id>',
 //                                 'passage-<row>-<its words, hashed>', 'card-<id>', 'pane-<kind>-<its arguments>' (a pane
 //                                 of one citation's evidence is that citation's)
@@ -24,6 +25,7 @@
 //   answerOf(messages)            its last answer
 //   rowsOf(list, now)             the thread list's rows: key, name, status, questions, last question, how long ago
 //   ago(at, now)                  how long ago, in a word: `now`, `4m`, `2h`, `3d`
+//   cardPart(copy)                the part of a card a question is about: its selected line, from its text copy
 
 const safe = s => String(s ?? '').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'x'
 /** A short, stable name for a text. */
@@ -39,6 +41,13 @@ function argsKey(args) {
   if (args == null || typeof args !== 'object') return safe(args ?? 'main')
   const keys = Object.keys(args).sort()
   return safe(keys.filter(k => args[k] != null && args[k] !== '').map(k => `${k}=${typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]}`).join('-') || 'main')
+}
+
+/** The part of a card a question is about: the line of its text copy that marks the selected item with `▸`, as the
+ *  card guide asks a view to, from the mark on and its runs of spaces shortened; '' when no line does. */
+export function cardPart(copy = '') {
+  const line = String(copy).split('\n').find(l => l.includes('▸'))
+  return line ? line.slice(line.indexOf('▸')).replace(/\s{3,}/g, '  ').trim() : ''
 }
 
 /** The mark a pane stands for: the evidence pane of a citation is that citation. */

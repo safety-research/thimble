@@ -5,8 +5,9 @@
 //                                root and a row per thread, `main/<what it is on>`, the newest first, with how many
 //                                questions it has (or that it is answering) and its last question under it. A row is a
 //                                press (tab walks the rows, ↵ presses): it opens that thread
-//   a thread (kind `thread`)     what it is on at the top (a card, drawn; an explainer's or a passage's words; else
-//                                its name), its conversation under it, the input bar at the bottom
+//   a thread (kind `thread`)     what it is on at the top (a card: its title and the line asked about, e or a click
+//                                draws it whole; an explainer's or a passage's words; else its name), its conversation
+//                                under it, the keys' row and the input bar at the bottom
 //   under a pane (threadUnder)   a citation's evidence, a label, coverage, the claims: the pane's thread under it, its
 //                                conversation and the input bar (core/pane.ts calls it)
 //
@@ -22,15 +23,16 @@
 //   ● Links peaked that day: 2,994 of …       the answer after ●
 //
 //     [a card it drew]
-//   m: send this answer to Claude             once it answered: m (or a click) sends the answer to main
 //                                             a question at work: the bar says `⠋ answering: <thread>` (bar/busy.ts)
+//   e: show the card · m: send this answer…   the keys' row, as other panes draw keys: e the card whole or not (a
+//                                             card's thread), m (or a click) sends the answer to main once it answered
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
 //   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them
 //   ─────────────────────────────────
 import type { EngineInterface } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
-import { frame } from '../cards/draw'
+import { cardWidth, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
@@ -50,14 +52,16 @@ const GEN = { plugin: 'thimble', key: 'threadsGen' } as const
 
 // each thread's input bar: a new field (a new key) once a question was asked, so no word of it stays in the field
 const fieldGen = new Map<string, number>()
+// the card threads whose card the pane draws whole (e); else its title and the line asked about
+const cardOpen = new Set<string>()
 
 /** The top of every thread, one look for each kind of subject: a quoted block as Claude Code draws a quote, a dim rule
  *  `▎` down its left side, the subject's title on its first row, bold, and one dim row that says what it is. */
-function subjectBlock(els: Any, key: string, title: string, line = '', more: Any[] = []): Any {
+function subjectBlock(els: Any, key: string, title: string, line = '', more: Any[] = [], moreWrap = 'wrap'): Any {
   const { Box, Text } = els
   const rows = [Text({ key: `${key}-t`, wrap: 'truncate-end', children: [Text({ dimColor: true, children: '▎ ' }), Text({ bold: true, children: title })] })]
   if (line) rows.push(Text({ key: `${key}-l`, wrap: 'truncate-end', dimColor: true, children: `▎ ${line}` }))
-  more.forEach((m, i) => rows.push(Text({ key: `${key}-m${i}`, wrap: 'wrap', children: [Text({ dimColor: true, children: '▎ ' }), m] })))
+  more.forEach((m, i) => rows.push(Text({ key: `${key}-m${i}`, wrap: moreWrap, children: [Text({ dimColor: true, children: '▎ ' }), m] })))
   rows.push(Text({ key: `${key}-gap`, children: ' ' }))
   return Box({ key, flexDirection: 'column', children: rows })
 }
@@ -68,7 +72,7 @@ const rowsAt = (s: string, w: number) => String(s).split('\n').reduce((n, l) => 
 /** The thread's conversation: its newest turns that fit in about `room` rows, with a dim row on top saying how many
  *  are above them. */
 async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, room: number): Promise<Any[]> {
-  const { Box, Button, Text } = els
+  const { Box, Text } = els
   const turns = t.turns
   if (!turns.length) return []
   const out: Any[] = []
@@ -121,17 +125,39 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     out.push(Text({ key: 'conv-fail-gap', children: ' ' }))
     out.push(Text({ key: 'conv-fail', color: 'error', wrap: 'wrap', children: `  ⎿ × ${String(t.error || 'the thread stopped')} · ask again` }))
   }
-  // m: the last answer to main, once the thread answered
-  const answered = t.status === 'done' && turns[turns.length - 1]?.role === 'claude' && !!turns[turns.length - 1]?.text
-  if (answered) {
-    const sent = (t.sent ?? -1) >= turns.length
+  // the answer sent to main (m in the keys' row sends it)
+  if (answerToSend(t) === 'sent') {
     out.push(Text({ key: 'conv-m-gap', children: ' ' }))
-    out.push(sent
-      ? Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude' })
-      // a plain Button draws its key and label itself (`m: send this answer to Claude`); children would draw them twice
-      : Button({ key: 'conv-m', plain: true, dimColor: true, hotkey: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } }))
+    out.push(Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude' }))
   }
   return out
+}
+
+/** The thread's last answer: 'send' once it answered and m may send it to main, 'sent' once it did, else null. */
+function answerToSend(t: Thread): 'send' | 'sent' | null {
+  const last = t.turns[t.turns.length - 1]
+  if (t.status !== 'done' || last?.role !== 'claude' || !last.text) return null
+  return (t.sent ?? -1) >= t.turns.length ? 'sent' : 'send'
+}
+
+type PaneKey = { k: string; label: string; onPress: () => unknown }
+
+/** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
+ *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). m sends the last answer to
+ *  main once the thread answered; `more` are the pane's own (e on a card). */
+function keysRow($: Engine, els: Any, t: Thread | null, more: PaneKey[] = []): Any[] {
+  const { Box, Button, Text } = els
+  const keys = [...more]
+  if (t && answerToSend(t) === 'send') keys.push({ k: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } })
+  if (!keys.length) return []
+  return [
+    Text({ key: 'keys-gap', children: ' ' }),
+    Box({ key: 'thread-keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
+      ...(i ? [Text({ key: `thread-key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
+      // a plain Button draws its key and label itself; children would draw them twice
+      Button({ key: `thread-key-${x.k}`, plain: true, dimColor: true, hotkey: x.k, label: x.label, onPress: x.onPress }),
+    ]) }),
+  ]
 }
 
 /** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule. ↵ asks the
@@ -243,12 +269,17 @@ function passageEl(els: Any, runs: PassageRun[]): Any {
 }
 
 /** What a thread is on, at the top of its pane: a card, drawn; an explainer or a heads-up, its words; else its name. */
-async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number): Promise<{ el: Any; rows: number }> {
+async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number): Promise<{ el: Any; rows: number; keys?: PaneKey[] }> {
   const s = t.scope
   if (s.card) {
     const meta = await metaOf($, s.card).catch(() => null)
-    if (meta && meta.version > 0) return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta)]), rows: 14 }
-    return { el: subjectBlock(els, 'subject', aboutOf(s), 'a card that is no longer in the session'), rows: 3 }
+    if (!meta || meta.version < 1) return { el: subjectBlock(els, 'subject', aboutOf(s), 'a card that is no longer in the session'), rows: 3 }
+    const open = cardOpen.has(t.key)
+    const keys: PaneKey[] = [{ k: 'e', label: open ? 'hide the card' : 'show the card', onPress: () => { if (open) cardOpen.delete(t.key); else cardOpen.add(t.key); $.ui.invalidate('ui.render') } }]
+    // collapsed: the title and the line asked about (else that it is a card)
+    if (!open) return { el: subjectBlock(els, 'subject', meta.title, s.part ? '' : 'card', s.part ? [els.Text({ children: s.part })] : [], 'truncate-end'), rows: 3, keys }
+    // whole: the conversation's drawing of the card, cut at the pane's edge (no row of it wraps)
+    return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta, { layout: cardWidth() })]), rows: 14, keys }
   }
   if (s.mark && s.mark.kind !== 'citation') {
     const m = s.mark as { row: string; kind: string; id: string }
@@ -282,8 +313,9 @@ async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> 
   // the way back to the list, when the list opened it (esc closes the pane)
   if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', onPress: () => { void listThreads($) }, children: [Text({ color: 'suggestion', children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
   const subject = await subjectOfPane($, e, els, t, W)
-  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length))
-  return column(els, [...top, subject.el, ...conv, ...entry($, els, t.scope, W - 1, takeAskNext(key))])
+  const keys = keysRow($, els, t, subject.keys)
+  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length - keys.length))
+  return column(els, [...top, subject.el, ...conv, ...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key))])
 }
 
 /** The scope of a pane of thimble's, for the thread under it: what it shows, in words. */
@@ -313,7 +345,7 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
   const t = threadOf(key)
   // two fifths of the pane for the conversation, as 0.10's panel gave it
   const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4))) : []
-  return [els.Text({ key: 'thread-gap', children: ' ' }), ...conv, ...entry($, els, scope, W - 1, takeAskNext(key))]
+  return [els.Text({ key: 'thread-gap', children: ' ' }), ...conv, ...keysRow($, els, t), ...entry($, els, scope, W - 1, takeAskNext(key))]
 }
 
 /** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of

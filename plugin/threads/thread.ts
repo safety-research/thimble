@@ -38,7 +38,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import type { ThreadScope } from './seam'
-import { aboutOf, display, firstMessage, forkDirective, nextMessage, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
+import { aboutOf, cardPart, display, firstMessage, forkDirective, nextMessage, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -379,7 +379,14 @@ export function takeAskNext(key: string): boolean {
  *  taking the keys. */
 export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boolean> {
   await restoreThreads($)
+  // a card: the line it selects now, which the pane shows in place of the whole card
+  if (scope.card && !scope.part) {
+    const part = cardPart(await cardText($, scope.card).catch(() => ''))
+    if (part) scope = { ...scope, part }
+  }
   const key = threadKey(scope)
+  const was = threads.get(key)
+  if (was && scope.part && was.scope.part !== scope.part) threads.set(key, { ...was, scope: { ...was.scope, part: scope.part } })
   if (!threads.has(key)) {
     const now = new Date().toISOString()
     // kept in memory only until its first question
