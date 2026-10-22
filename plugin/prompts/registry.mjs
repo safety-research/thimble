@@ -10,7 +10,7 @@ export const TEXTS = {
   guidance: {
     about: 'what thimble is, how to cite claims, when to draw a card or make a label',
     reader: 'guidance/guidance.ts',
-    use: 'the `thimble` context block of every conversation, sent again after a compaction',
+    use: 'context beside the first prompt of every conversation, sent again after a compaction',
   },
   'card-tool': {
     about: 'how a card reads its rows and draws them, and how to test it',

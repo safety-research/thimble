@@ -53,7 +53,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, which files Claude read (for coverage), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
 | shared parts: where thimble keeps its records (`layout.mjs`, the same names as `engine/kernel/store.py`), a text's width, whether main's turn runs, the forks (checker, designer), what thimble tells Claude with the next prompt, the change feed, the one side pane | `plugin/core/` |
-| the guidance: the `thimble` context block in every conversation | `plugin/guidance/` |
+| the guidance: context beside the first prompt of every conversation | `plugin/guidance/` |
 | the texts the model reads, and their registry | `plugin/prompts/` |
 | marks: find `[words](#)` in a reply, draw them, run the checker fork and the validator, the evidence pane | `plugin/marks/` |
 | cards: the `card` tool, the runner that runs the cards' views (`runner.mjs`) and the command that starts it in the sandbox (`argv.mjs`), drawing, a card's keys | `plugin/cards/` |
@@ -90,7 +90,7 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 
 | Text | File | Read by | As |
 |---|---|---|---|
-| guidance | `prompts/guidance.md` | `guidance/guidance.ts` | the `thimble` context block of every conversation, without the section of a switched-off feature |
+| guidance | `prompts/guidance.md` | `guidance/guidance.ts` | context beside the first prompt of every conversation, without the section of a switched-off feature |
 | card tool | `prompts/card-tool.md` | `cards/tool.ts` | the description of the `card` tool |
 | checker | `prompts/checker.md` | `marks/checker.ts` | the prompt of the fork that checks a reply's marks |
 | designer | `prompts/designer.md` | `designer/v.ts` | the prompt of the fork that `v` starts |

@@ -1,5 +1,5 @@
-// The guidance block (guidance/guidance.ts): every conversation's first request carries one context block named
-// `thimble` with guidance.md's text, and a switched-off feature's section is left out. All text is made up.
+// The guidance (guidance/guidance.ts): the first prompt of every conversation, and the first after a compaction, carries
+// guidance.md's text as context beside it, once, and a switched-off feature's section is left out. All text is made up.
 // `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -30,32 +30,65 @@ const GUIDANCE = [
   '',
 ].join('\n')
 
-function world(on: Any) {
+/** The conversation as its next request holds it, which the test's core answers `session.messages` with. */
+type World = { messages: Any[]; context: string[][] }
+
+function world(on: Any): World {
   resetPrompts()
+  const w: World = { messages: [], context: [] }
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 1, stdout: '', stderr: 'made-up: no such command' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? GUIDANCE : '' }))
-  // the engine's own blocks, which the plugin keeps
-  on('prompt.context', (_$: unknown, e: Any) => ({ blocks: e.blocks }))
+  on('session.messages', () => ({ value: w.messages }))
+  // the engine: the prompt enters with its context, which the next request holds as a reminder after the prompt
+  on('prompt.submit', (_$: unknown, e: Any) => {
+    const context = [...(e.context ?? [])]
+    w.context.push(context)
+    w.messages.push({ role: 'user', content: [{ type: 'text', text: e.text }, ...context.map(c => ({ type: 'text', text: `<system-reminder>\nprompt.submit hook additional context: ${c}\n</system-reminder>` }))] })
+    w.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'A made-up answer.' }] })
+    return { text: e.text, context }
+  })
+  return w
 }
 
-async function thimbleBlock($: Any): Promise<{ all: Any[]; text: string }> {
-  const r: Any = await $.prompt.context({ blocks: [{ name: 'currentDate', text: 'Today is a made-up day.' }] })
-  const mine = r.blocks.filter((b: Any) => b.name === 'thimble')
-  expect(mine.length).toBe(1)
-  return { all: r.blocks, text: mine[0].text }
+/** The person asks; the guidance this prompt carried, the one copy there must be. */
+async function ask($: Any, w: World, text = 'Which runs failed?'): Promise<string[]> {
+  await $.prompt.submit({ text })
+  return w.context.at(-1)!
 }
 
-test("the first request carries the thimble block with guidance.md's text, after the engine's blocks", async ($, on) => {
-  world(on)
-  const { all, text } = await thimbleBlock($)
-  expect(all.map((b: Any) => b.name)).toEqual(['currentDate', 'thimble'])
-  expect(text).toBe(GUIDANCE.trim())
+async function thimbleText($: Any, w: World): Promise<string> {
+  const carried = await ask($, w)
+  expect(carried.length).toBe(1)
+  return carried[0]
+}
+
+test("the first prompt carries guidance.md's text beside it, and the next prompts do not carry it again", async ($, on) => {
+  const w = world(on)
+  expect(await thimbleText($, w)).toBe(GUIDANCE.trim())
+  expect(await ask($, w, 'And why?')).toEqual([])
+  expect(await ask($, w, 'Show me one.')).toEqual([])
+})
+
+test('after a compaction, which replaces the copy with a summary, the next prompt carries it again, once', async ($, on) => {
+  const w = world(on)
+  await ask($, w)
+  w.messages = [{ role: 'user', content: [{ type: 'text', text: 'Summary: the analyst asked which runs failed; thimble is on in this folder.' }] }]
+  expect(await ask($, w, 'And why?')).toEqual([GUIDANCE.trim()])
+  expect(await ask($, w, 'Show me one.')).toEqual([])
+})
+
+test('a resumed conversation that holds the copy gets no second one', async ($, on) => {
+  const w = world(on)
+  w.messages = [
+    { role: 'user', content: [{ type: 'text', text: 'Which runs failed?' }, { type: 'text', text: `<system-reminder>\nprompt.submit hook additional context: ${GUIDANCE.trim()}\n</system-reminder>` }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] },
+  ]
+  expect(await ask($, w, 'And why?')).toEqual([])
 })
 
 test('with cards off, the Cards section is left out and the rest stays', { options: { cards: false } }, async ($, on) => {
-  world(on)
-  const { text } = await thimbleBlock($)
+  const text = await thimbleText($, world(on))
   expect(text).not.toContain('## Cards')
   expect(text).not.toContain('`card` tool')
   expect(text).toContain('## Citing claims')
@@ -64,8 +97,7 @@ test('with cards off, the Cards section is left out and the rest stays', { optio
 })
 
 test("with citations off, the Citing claims section is left out and the other examples' citations read as plain words", { options: { marks: false } }, async ($, on) => {
-  world(on)
-  const { text } = await thimbleBlock($)
+  const text = await thimbleText($, world(on))
   expect(text).not.toContain('## Citing claims')
   expect(text).not.toContain('](#)')
   expect(text).toContain('Answer first: 12 of 40 runs failed.')

@@ -179,7 +179,10 @@ export function registerTelemetry(on: Any, which: 'first' | 'last'): void {
   const first = which === 'first'
   on('prompt.submit', first ? { text: /^/ } : { text: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'prompt.submit', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
   on('tool.call', first ? { tool: /^/ } : { tool: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'tool.call', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
-  on('session.append', first ? { door: /^/ } : { door: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'session.append', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
+  // only the door thimble's own session.append hooks take (main's reply rows), named as a string: where an organization
+  // manages Claude Code, its built-in cc-plugin-sec-default sends the other doors past the plugins a person installs,
+  // and Claude Code says so for each hook a regex door would put there
+  on('session.append', first ? { door: 'response' } : { door: 'response', uuid: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'session.append', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
   on('turn.start', first ? { turnId: /^/ } : { turnId: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'turn.start', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
   on('turn.complete', first ? { turnId: /^/ } : { turnId: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'turn.complete', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
 }
