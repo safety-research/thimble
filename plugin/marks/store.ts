@@ -16,18 +16,25 @@ import { keptDir } from '../core/env'
 type Engine = EngineInterface
 
 export type MarkStatus = 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked'
+/** A cited place of a file: its path from the folder the session started in, the cited line or range, and those lines
+ *  with a line around them, the words found highlighted. */
+export type Place = { file: string; line: string; lines: { n: number; text: string; highlight?: [number, number]; decoded?: true }[] }
 export type Evidence =
   | { kind: 'computed'; code: string; output: string; highlight: [number, number][]; by: 'checker' | 'main' }
-  | { kind: 'quote' | 'code'; file: string; line: string; lines: { n: number; text: string; highlight?: [number, number]; decoded?: true }[] }
+  | ({ kind: 'quote' | 'code'; more?: Place[] } & Place)
 /** One mark: its number in the reply, its words, the row and place it stands at, its sentence, and its check. `failedBy`
- *  says who failed it: the checker (`check`), or thimble, when the checker's evidence did not hold (`evidence`). */
+ *  says who failed it: the checker (`check`: the claim is wrong), or thimble, when the checker's evidence did not hold
+ *  (`evidence`: the claim is not confirmed). `note` is what the check found wrong in the sentence outside the mark. */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence'; evidence?: Evidence
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence'; evidence?: Evidence; note?: string
 }
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[] }
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */
-export type RowMarks = { row: string; last: boolean; total: number; checking: boolean; failed: number; unchecked: number; items: MarkItem[] }
+export type RowMarks = { row: string; last: boolean; items: MarkItem[] } & Counts
+/** A reply's marks by what the person sees: `wrong` failed by the check, `unconfirmed` failed because the evidence did
+ *  not hold. */
+export type Counts = { total: number; checking: boolean; corrected: number; wrong: number; unconfirmed: number; unchecked: number }
 
 const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
@@ -67,12 +74,15 @@ export async function editReply($: Engine, key: string, edit: (r: Reply) => Repl
   return (out ?? null) as Reply | null
 }
 
-export function counts(r: Reply): { total: number; checking: boolean; failed: number; unchecked: number } {
+export function counts(r: Reply): Counts {
+  const n = (f: (m: MarkItem) => boolean) => r.items.filter(f).length
   return {
     total: r.items.length,
     checking: r.items.some(m => m.status === 'checking'),
-    failed: r.items.filter(m => m.status === 'failed').length,
-    unchecked: r.items.filter(m => m.status === 'unchecked').length,
+    corrected: n(m => m.status === 'corrected'),
+    wrong: n(m => m.status === 'failed' && m.failedBy !== 'evidence'),
+    unconfirmed: n(m => m.status === 'failed' && m.failedBy === 'evidence'),
+    unchecked: n(m => m.status === 'unchecked'),
   }
 }
 

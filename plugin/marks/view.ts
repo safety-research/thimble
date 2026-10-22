@@ -4,15 +4,17 @@
 //   messageEl(els, o)  one text block of a reply: each block of its markdown that holds marks laid out here, each mark a
 //                      press with its status drawn on it; every other run of blocks drawn by Claude Code's own Markdown,
 //                      so paragraphs, lists, code and tables look as in any reply
-//   footerEl(els, o)   the line under a reply's last block while its marks are checked, or when some failed
+//   footerEl(els, o)   the line under a reply's last block while its marks are checked, or when the check changed or
+//                      flagged some
 //
 // A mark's look by its status:
-//   pending    the turn still runs: purple, underlined
-//   checking   purple, underlined, and a turning glyph right after it
-//   verified   purple, underlined
-//   corrected  the corrected words in place of the marked ones, purple, underlined
-//   failed     red, with ` ×` after it
-//   unchecked  underlined in the text's color: no check could run
+//   pending      the turn still runs: purple, underlined
+//   checking     purple, underlined, and a turning glyph right after it
+//   verified     purple, underlined
+//   corrected    the corrected words in place of the marked ones, purple, underlined (the footer counts them)
+//   failed       wrong as the check read the data: red, with ` ×` after it
+//   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
+//   unchecked    underlined in the text's color: no check could run
 import { blocks, inline, marksWithin, runsText, tableOf, width, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,7 +22,7 @@ type Any = any
 type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; tag?: string }
 type Mark = { start: number; end: number; words: string }
 
-export type MarkStatus = 'pending' | 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked'
+export type MarkStatus = 'pending' | 'checking' | 'verified' | 'corrected' | 'failed' | 'unconfirmed' | 'unchecked'
 export type MarkLook = { n: number; status: MarkStatus; shown?: string }
 
 export type MessageOpts = {
@@ -53,6 +55,7 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     out.push(...(look?.status === 'corrected' && look.shown ? [{ s: look.shown, mark: r.mark }] : runs.slice(k, e + 1)))
     if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
     if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    if (look?.status === 'unconfirmed') out.push({ s: ' ?', mark: r.mark, tag: 'x' })
     k = e
   }
   return out
@@ -77,6 +80,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (r.it) p.italic = true
   if (r.tag === 'spin') p.color = PURPLE
   else if (look.status === 'failed') p.color = 'error'
+  else if (look.status === 'unconfirmed') p.color = 'warning'
   else if (look.status === 'unchecked') p.underline = true
   else { p.color = PURPLE; p.underline = true }
   const label = `mark ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
@@ -201,18 +205,23 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
 }
 
-export type FooterOpts = { key: string; checking: number; failed: number; unchecked: number; spin: string }
+export type FooterOpts = { key: string; checking: number; wrong: number; unconfirmed: number; corrected: number; unchecked: number; spin: string }
 
-/** The line under a reply's last block: `checking 12 marks` while the check runs; afterwards `2 marks failed` in red
- *  and `3 marks not checked` dim, when there are any; nothing when every mark passed. */
+/** The line under a reply's last block: `checking 12 marks` while the check runs; afterwards, when there are any,
+ *  `1 mark wrong` in red, `2 not confirmed` in the warning color, `1 corrected` and `3 not checked` dim; nothing when
+ *  every mark was verified as written. */
 export function footerEl(els: Any, o: FooterOpts): Any | null {
   const { Box, Text } = els
   const marks = (n: number) => `${n} mark${n === 1 ? '' : 's'}`
   const parts: Any[] = []
   if (o.checking) parts.push(Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${marks(o.checking)}` }))
   else {
-    if (o.failed) parts.push(Text({ key: 'f', color: 'error', children: `${marks(o.failed)} failed` }))
-    if (o.unchecked) parts.push(Text({ key: 'u', dimColor: true, children: `${parts.length ? ' · ' : ''}${marks(o.unchecked)} not checked` }))
+    const said: [string, number, Any][] = [['wrong', o.wrong, { color: 'error' }], ['not confirmed', o.unconfirmed, { color: 'warning' }], ['corrected', o.corrected, { dimColor: true }], ['not checked', o.unchecked, { dimColor: true }]]
+    for (const [word, n, style] of said) {
+      if (!n) continue
+      if (parts.length) parts.push(Text({ key: `s${parts.length}`, dimColor: true, children: ' · ' }))
+      parts.push(Text({ key: word, ...style, children: `${parts.length ? n : marks(n)} ${word}` }))
+    }
   }
   if (!parts.length) return null
   return Box({ key: o.key, marginLeft: 2, flexDirection: 'row', children: parts })

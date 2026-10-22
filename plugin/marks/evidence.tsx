@@ -1,17 +1,19 @@
 // evidence.tsx: the side pane of one mark (core/pane.ts kind `evidence`, args {row, n}): its status and, once the check
 // gave it, its evidence.
 //
-//   computed   the code the check ran, and that call's real output with the marked words highlighted
-//   quote      the file at its line: `path:line` on top (the terminal opens it), the cited lines with a line or two
-//   code       around them, the substring highlighted
+//   computed   that call's real output, the marked words highlighted, first, so it is on the screen; then the code
+//              the check ran
+//   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
+//   code       the substring highlighted
 //
-// A corrected mark says what it was; a failed one says why, in red, with the evidence the check gave when it is real.
-// The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The pane reads the
-// reply's marks in the state, so it draws again when the check settles.
+// A corrected mark says what it was; a wrong one says why, in red, and one the check could not confirm says why, in
+// the warning color, with the evidence the check gave when it is real. What the check found wrong in the rest of the
+// sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
+// pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
 import { plainSentence } from './message.js'
-import { type Evidence, type MarkItem, rowMarks } from './store'
+import { type Evidence, type MarkItem, type Place, rowMarks } from './store'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -22,7 +24,8 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   checking: { word: 'checking', dim: true },
   verified: { word: 'verified', color: 'success' },
   corrected: { word: 'corrected', color: 'warning' },
-  failed: { word: 'failed', color: 'error' },
+  failed: { word: 'wrong', color: 'error' },
+  unconfirmed: { word: 'not confirmed', color: 'warning' },
   unchecked: { word: 'not checked', dim: true },
 }
 
@@ -88,24 +91,33 @@ export function wrapCode(code: string, width: number): string {
   }).join('\n')
 }
 
+/** One cited place: `path:line`, then its lines, the cited ones in full color. */
+function placeRows(els: Any, p: Place, key: string): Any[] {
+  const { Box, Text } = els
+  const gutter = Math.max(...p.lines.map(l => String(l.n).length))
+  return [
+    Text({ key: `${key}at`, bold: true, wrap: 'wrap', children: `${p.file}:${p.line}` }),
+    ...p.lines.map(l => Box({ key: `${key}l${l.n}`, flexDirection: 'row', children: [
+      Text({ dimColor: true, children: `${String(l.n).padStart(gutter)} ${l.decoded ? '›' : '│'} ` }),
+      Box({ flexShrink: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't') : Text({ wrap: 'wrap', dimColor: !inRange(l.n, p.line), children: l.text || ' ' })] }),
+    ] })),
+  ]
+}
+
 function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
   if (ev.kind === 'computed') {
     return [
-      Text({ key: 'ch', bold: true, children: ev.by === 'main' ? 'Code Claude ran for the reply' : 'Code the check ran' }),
-      Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),
-      Text({ key: 'oh', bold: true, children: 'Its output' }),
+      Text({ key: 'oh', bold: true, children: ev.by === 'main' ? 'Output of the code Claude ran for the reply' : 'Output of the code the check ran' }),
       Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight) }),
+      Text({ key: 'ch', bold: true, children: 'The code' }),
+      Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),
     ]
   }
-  const gutter = Math.max(...ev.lines.map(l => String(l.n).length))
+  const places = [ev, ...(ev.more ?? [])]
   return [
-    Text({ key: 'at', bold: true, children: `${ev.file}:${ev.line}` }),
-    ...ev.lines.map(l => Box({ key: `l${l.n}`, flexDirection: 'row', children: [
-      Text({ dimColor: true, children: `${String(l.n).padStart(gutter)} ${l.decoded ? '›' : '│'} ` }),
-      Box({ flexShrink: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't') : Text({ wrap: 'wrap', dimColor: !inRange(l.n, ev.line), children: l.text || ' ' })] }),
-    ] })),
-    ...(ev.lines.some(l => l.decoded) ? [Text({ key: 'dec', dimColor: true, children: '› the line\'s JSON text, decoded' })] : []),
+    ...places.flatMap((p, k) => [...(k ? [Text({ key: `gap${k}`, children: ' ' })] : []), ...placeRows(els, p, `p${k}`)]),
+    ...(places.some(p => p.lines.some(l => l.decoded)) ? [Text({ key: 'dec', dimColor: true, children: '› the line\'s JSON text, decoded' })] : []),
   ]
 }
 
@@ -116,14 +128,16 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This mark is no longer in the session.' })
-  const st = STATUS[m.status] ?? STATUS.unchecked!
+  const unconfirmed = m.status === 'failed' && m.failedBy === 'evidence'
+  const st = STATUS[unconfirmed ? 'unconfirmed' : m.status] ?? STATUS.unchecked!
   const head = Text({ key: 'head', wrap: 'wrap', children: [
     Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
     Text({ key: 'w', children: `  ${m.shown}` }),
   ] })
   const rows: Any[] = [head]
   if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `was ${m.was}` }))
-  if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: 'error' } : { dimColor: true }), children: m.reason }))
+  if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: m.reason }))
+  if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'warning', children: `The rest of the sentence: ${m.note}` }))
   // the sentence as the person read it, the mark's own words in bold
   const sentence = plainSentence(m.sentence)
   const at = sentence.indexOf(m.words.replace(/`/g, ''))

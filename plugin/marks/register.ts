@@ -87,12 +87,12 @@ export const registerMarks: Register = on => {
     if (!marks.length && !reply?.last) return next(e)
     if (!featureOn('marks')) return marks.length ? next({ ...e, props: { ...e.props, text: withoutMarks(text) } }) : next(e)
     const els = $.ui.resolve(e) as Any
-    // the turning glyph follows the bar's busy line, which ticks while `checking marks` runs
+    // the turning glyph follows the bar's busy line, which ticks while `checking N marks` runs
     const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
     const spin = SPIN[frame % SPIN.length]!
     const looks: MarkLook[] = marks.map((_m: Any, k: number) => {
       const it = reply?.items[k]
-      return it ? { n: it.n, status: it.status, shown: it.shown } : { n: k + 1, status: turnRuns ? 'pending' : 'unchecked' }
+      return it ? { n: it.n, status: it.status === 'failed' && it.failedBy === 'evidence' ? 'unconfirmed' : it.status, shown: it.shown } : { n: k + 1, status: turnRuns ? 'pending' : 'unchecked' }
     })
     const body = marks.length
       ? messageEl(els, {
@@ -101,7 +101,7 @@ export const registerMarks: Register = on => {
       })
       : await next(e)
     const foot = reply?.last ? footerEl(els, {
-      key: `mf-${e.requestId}`, spin, checking: reply.checking ? reply.total : 0, failed: reply.failed, unchecked: reply.unchecked,
+      key: `mf-${e.requestId}`, spin, checking: reply.checking ? reply.total : 0, wrong: reply.wrong, unconfirmed: reply.unconfirmed, corrected: reply.corrected, unchecked: reply.unchecked,
     }) : null
     return foot ? els.Box({ flexDirection: 'column', children: [body, foot] }) : body
   })

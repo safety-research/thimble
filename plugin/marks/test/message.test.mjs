@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { blocks, inline, marksIn, runsText, sentenceOf, tableOf, withoutMarks, wrapRuns } from '../message.js'
+import { blocks, inline, marksIn, plainSentence, runsText, sentenceOf, tableOf, withoutMarks, wrapRuns } from '../message.js'
 
 const words = text => marksIn(text).map(m => m.words)
 
@@ -55,6 +55,19 @@ test('a mark and the stop after it stay on one line; a mark wider than the line 
   assert.deepEqual(wrapRuns(inline(long, 0, long.length, marksIn(long)), 10).map(runsText), ['one two', 'three four', 'five six'])
 })
 
+test('a mark breaks at its spaces where the line ends, its glyph with its last word; its _ are letters', () => {
+  const text = 'The pipeline ran [nine of the ten steps](#) today.'
+  const runs = inline(text, 0, text.length, marksIn(text))
+  runs.splice(runs.findIndex(r => r.mark === 0 && r.s.endsWith('steps')) + 1, 0, { s: ' ×', mark: 0, tag: 'x' })
+  assert.deepEqual(wrapRuns(runs, 24).map(runsText), ['The pipeline ran nine of', 'the ten steps × today.'])
+  const quote = 'It reads ["covers the same _bin_edges/_adjust_bin_edges in __init__.py"](#).'
+  assert.equal(runsText(inline(quote, 0, quote.length, marksIn(quote))), 'It reads "covers the same _bin_edges/_adjust_bin_edges in __init__.py".')
+})
+
+test('a sentence as read keeps the brackets inside a mark\'s words', () => {
+  assert.equal(plainSentence('agent-28 wrote [agent-28: "assignment [219] is moot"] at [14:02].'), 'agent-28 wrote agent-28: "assignment [219] is moot" at 14:02.')
+})
+
 test('a table splits its cells at | outside code and marks, each cell its runs', () => {
   const text = '| run | result |\n|---|---|\n| [a|b](#) | `x|y` passed |'
   const b = blocks(text)[0]
@@ -62,4 +75,7 @@ test('a table splits its cells at | outside code and marks, each cell its runs',
   const rows = tableOf(text, b, marksIn(text))
   assert.deepEqual(rows.map(r => r.map(runsText)), [['run', 'result'], ['a|b', 'x|y passed']])
   assert.equal(rows[1][0][0].mark, 0)
+  // a bracket that opens no link is a letter of its cell
+  const named = '| agent | last |\n|---|---|\n| [Temporary] Leader | [13:27](#) |'
+  assert.deepEqual(tableOf(named, blocks(named)[0], marksIn(named)).map(r => r.map(runsText)), [['agent', 'last'], ['[Temporary] Leader', '13:27']])
 })

@@ -37,9 +37,10 @@ const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
 const ROWS = { plugin: 'thimble', key: 'marksRows' } as const
 
 /** A reply with many marks is split between forks, each with about PER_FORK marks (at most MAX_FORKS forks): a fork's
- *  time grows with its marks, and the forks run at once, each from main's cached conversation. */
-export const PER_FORK = 10
-export const MAX_FORKS = 4
+ *  time grows with its marks (about 10 s to start, then 3 to 9 s a mark, by how much its code has to compute), and the
+ *  forks run at once, each from main's cached conversation, so the reply settles when its slowest share does. */
+export const PER_FORK = 5
+export const MAX_FORKS = 6
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'Bash'])
 
@@ -125,7 +126,9 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     failNotice($, `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}), so the marks are not checked. Reinstall thimble.`)
     return
   }
-  for (const share of splitMarks(items)) {
+  const shares = splitMarks(items)
+  const started: string[] = []
+  for (const share of shares) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
     const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd), description: 'checking marks' })
     if (!fork.agentId) {
@@ -136,7 +139,13 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     const agentId = fork.agentId
     const spawnedAt = Number(await $.clock.now())
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...c, agentId, spawnedAt } }))
-    await busyWhile($, 'checking marks', async () => !!(await running($))[agentId])
+    started.push(agentId)
+  }
+  if (started.length) {
+    await busyWhile($, `checking ${items.length} mark${items.length === 1 ? '' : 's'}`, async () => {
+      const now = await running($)
+      return started.some(id => !!now[id])
+    })
   }
 }
 
@@ -162,17 +171,23 @@ async function python($: Engine): Promise<string> {
   return (await $.fs.exists(venv)) ? venv : 'python3'
 }
 
-/** What main reads with the person's next prompt: each mark the check corrected or flagged, as the person reads it. A
- *  mark whose evidence did not hold is not shown to be wrong, and main hears it that way. */
+/** What main reads with the person's next prompt: each mark the check corrected or flagged, as the person reads it,
+ *  and what the check found wrong in a sentence outside its marks. A mark whose evidence did not hold is not shown to
+ *  be wrong, and main hears it that way. */
 export function tellText(items: MarkItem[]): string {
   const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
   const said = items.filter(m => m.status === 'corrected' || m.status === 'failed').map(m => {
     if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${m.reason ? `: ${m.reason}` : ''}`
-    if (m.failedBy === 'evidence') return `- ${q(m.words)} is flagged: the check could not confirm it`
-    return `- ${q(m.words)} is flagged as wrong${m.reason ? `: ${m.reason}` : ''}`
+    if (m.failedBy === 'evidence') return `- ${q(m.words)} is marked as not confirmed: the check could not show it from the data`
+    return `- ${q(m.words)} is marked as wrong${m.reason ? `: ${m.reason}` : ''}`
   })
-  if (!said.length) return ''
-  return `thimble checked the marks of your last reply against the data. The analyst now sees these changes in it:\n${said.join('\n')}\nUse the corrected words from now on. A claim flagged as wrong is wrong as the check read the data. A claim the check could not confirm may still be true: when you need it again, check it first.`
+  const seen = new Set<string>()
+  const notes = items.filter(m => m.note && !seen.has(m.sentence) && seen.add(m.sentence)).map(m => `- In "${m.sentence}": ${m.note}`)
+  if (!said.length && !notes.length) return ''
+  const parts = ['thimble checked the marks of your last reply against the data.']
+  if (said.length) parts.push(`The analyst now sees these changes in it:\n${said.join('\n')}\nUse the corrected words from now on. A claim marked as wrong is wrong as the check read the data. A claim the check could not confirm may still be true: when you need it again, check it first.`)
+  if (notes.length) parts.push(`The check also found these statements wrong, which no mark carried, so the analyst does not see a flag on them:\n${notes.join('\n')}\nCorrect them for the analyst when you next write about them.`)
+  return parts.join('\n')
 }
 
 /** The person's line when a check gave no answer, by why its turn ended. */
@@ -200,7 +215,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     const plugin = $.plugin.root.replace(/\/+$/, '')
     const ran = await $.process.run([await python($), `${plugin}/engine/validate.py`], {
       cwd: c.cwd, timeoutMs: 120000,
-      stdin: JSON.stringify({ cwd: c.cwd, root: c.root, marks: items.map(m => ({ n: m.n, words: m.words })), answer: e.answer, calls }),
+      stdin: JSON.stringify({ cwd: c.cwd, root: c.root, marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
     })
     let out: { parsed: boolean; results: Any[] } | null = null
     try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }

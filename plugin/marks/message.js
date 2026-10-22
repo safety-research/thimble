@@ -11,7 +11,7 @@
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
 //   inline(text, from, to, marks) -> one block's content as runs: words with their style, and each mark as one run
-//   wrapRuns(runs, width)      -> the runs cut into lines at spaces; a mark never breaks unless wider than a line
+//   wrapRuns(runs, width)      -> the runs cut into lines at spaces, a mark's words as plain words are
 //   tableOf(text, block, marks) -> a table block's cells as runs
 //   width(str), runsText(runs)
 
@@ -102,7 +102,27 @@ export function plainSentence(sentence) {
   let s = String(sentence || '').trim()
   if (s.startsWith('|')) s = s.split('|').map(c => c.trim()).filter(Boolean).join(' · ')
   s = s.replace(/^(#{1,6}\s+|>\s*|[-*+]\s+|\d{1,9}[.)]\s+)+/, '')
-  return s.replace(/\[([^\]\n]+)\](?!\()/g, '$1').replace(/`/g, '').replace(/\s+/g, ' ').trim()
+  return unbracket(s).replace(/`/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/** A sentence of sentenceOf with each mark's `[` and `]` taken off: a `[` and the `]` that balances it, the brackets
+ *  inside the words left as written (`[agent-28: "assignment [219] is moot"]`). */
+function unbracket(s) {
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    if (s[i] !== '[') { out += s[i++]; continue }
+    let depth = 0
+    let close = -1
+    for (let j = i; j < s.length; j++) {
+      if (s[j] === '[') depth++
+      else if (s[j] === ']' && --depth === 0) { close = j; break }
+    }
+    if (close < 0 || s[close + 1] === '(') { out += s[i++]; continue }
+    out += s.slice(i + 1, close)
+    i = close + 1
+  }
+  return out
 }
 
 // ------------------------------------------------------------------------------------------------ blocks
@@ -188,8 +208,9 @@ function linkAt(s) {
 
 /**
  * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, dim?, mark?, tag?}` where `mark` is the
- * mark's index among the text's marks (`tag` is the drawing's own: a glyph after a mark's words). Bold, italic and inline code as Claude Code draws them; a mark's words keep their
- * own bold, italic and code; a link that is no mark reads as its words then its target, as Claude Code draws one.
+ * mark's index among the text's marks (`tag` is the drawing's own: a glyph after a mark's words). Bold, italic and
+ * inline code as Claude Code draws them; a mark's words keep their own bold, `*` italic and code, and draw each `_` as
+ * written; a link that is no mark reads as its words then its target, as Claude Code draws one.
  */
 export function inline(text, from, to, marks = []) {
   const s = String(text || '')
@@ -231,8 +252,9 @@ export function inline(text, from, to, marks = []) {
         const m = /^(`+)([\s\S]*?[^`])\1(?!`)/.exec(s.slice(i, end))
         if (m) { push(m[2].replace(/\n/g, ' ').trim() || m[2], { ...extra, code: true }); i += m[0].length; continue }
       }
-      // a run of `_` between two letters or digits is part of the word (`chess-nano__goal`), never emphasis
-      if (c === '_' && intraword(i)) { let e = i; while (s[e] === '_') e++; push(s.slice(i, e), extra); i = e; continue }
+      // a run of `_` between two letters or digits is part of the word (`chess-nano__goal`), never emphasis; inside a
+      // mark, every `_` is a letter, since a mark's words are often a quote or a name (`__init__.py`, `_bin_edges`)
+      if (c === '_' && (intraword(i) || extra.mark !== undefined)) { let e = i; while (s[e] === '_') e++; push(s.slice(i, e), extra); i = e; continue }
       // bold and italic close only on the delimiter that opened them, so a `__` never closes a `**`
       if ((c === '*' || c === '_') && s[i + 1] === c) {
         if (style.b === c + c) { style.b = false; i += 2; continue }
@@ -277,22 +299,16 @@ export function width(str) {
 export const runsText = runs => runs.map(r => r.s).join('')
 
 /**
- * The runs cut into lines of at most `w` cells, at spaces. A mark's runs (`mark` set) stay on one line when they fit
- * on one; a mark wider than a line breaks at its spaces as plain words do. Only a word wider than a line is cut where
- * the line ends. Each line is a list of runs; the space a line breaks on is dropped.
+ * The runs cut into lines of at most `w` cells, at spaces, a mark's words as plain words are, so a long mark does not
+ * leave a short line before it; the glyph after a mark (`tag`) stays with its last word. Only a word wider than a line
+ * is cut where the line ends. Each line is a list of runs; the space a line breaks on is dropped.
  */
 export function wrapRuns(runs, w) {
   const W = Math.max(8, w)
-  // pieces: words with their spaces; a mark's runs one piece when they fit on a line
+  // pieces: words and the spaces between them
   const pieces = []
-  for (let k = 0; k < runs.length; k++) {
-    const r = runs[k]
-    if (r.mark !== undefined) {
-      let e = k
-      while (e + 1 < runs.length && runs[e + 1].mark === r.mark) e++
-      const group = runs.slice(k, e + 1)
-      if (width(runsText(group)) <= W) { pieces.push({ group, sp: false }); k = e; continue }
-    }
+  for (const r of runs) {
+    if (r.tag && pieces.length) { pieces[pieces.length - 1].group.push(r); continue }
     for (const part of r.s.split(/( +)/)) if (part) pieces.push({ group: [{ ...r, s: part }], sp: /^ +$/.test(part) })
   }
   // words with no space between them stay together (a mark and the stop after it), as long as they fit on a line
@@ -352,16 +368,16 @@ export function tableOf(text, block, marks = []) {
     const cells = []
     let a = r.start + (line.match(/^\s*\|/) ? line.indexOf('|') + 1 : 0)
     const endAt = r.start + line.replace(/\|\s*$/, '').length
-    let depth = 0
     let tick = false
     for (let i = a; i <= endAt; i++) {
       const mk = i < endAt && (marks || []).find(m => i >= m.start && i < m.end)
       if (mk) { i = Math.min(endAt, mk.end) - 1; continue }
       const c = s[i]
       if (c === '`') tick = !tick
-      if (!tick && c === '[') depth++
-      if (!tick && c === ')' && depth > 0 && s[i - 1] !== '\\') depth = Math.max(0, depth - 1)
-      if (i === endAt || (c === '|' && !tick && depth === 0 && s[i - 1] !== '\\')) {
+      // a link is one span; a bracket that opens no link is a letter of the cell (`[Temporary] Leader`)
+      const link = !tick && c === '[' && i < endAt ? linkAt(s.slice(i, endAt)) : null
+      if (link) { i += link[0].length - 1; continue }
+      if (i === endAt || (c === '|' && !tick && s[i - 1] !== '\\')) {
         let x = a
         let y = i
         while (x < y && /\s/.test(s[x])) x++

@@ -2,7 +2,7 @@
 // Code's spinner covers only Claude's main turn; this one line covers the rest, and it is thimble's only sign of work:
 // no pane, message or panel draws a spinner of its own. Each job is a step named in plain words:
 //
-//   checking marks              the checker fork over a reply's marks (marks/checker.ts)
+//   checking 12 marks           the checker forks over a reply's marks (marks/checker.ts)
 //   drawing a card              the designer fork v started, until it ends (designer/v.ts)
 //   counting coverage           `thimble coverage`: the bar's count, the coverage pane (bar/counts.ts)
 //   labeling <name>             a --prompt label's model reads (labels/labels.ts)
