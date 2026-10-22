@@ -3,37 +3,49 @@ import it too.
 
 A reply marks its claims as `[words](#)`. After the reply, the checker (a fork of the session, prompts/checker.md) gives
 one answer per mark: a status (`verified`, `corrected`, `failed`), the evidence, and for a correction the new words.
-check_mark() decides what the person sees of that mark; its result wins over the checker's status:
+check_mark() decides what the person sees of that mark; its result wins over the checker's status.
+
+What it guarantees. The checker judges what a claim means; this module makes sure the evidence it gave is real and
+shows the words, so a mark is never verified on evidence the checker made up:
 
   computed  the evidence is code. One of the real calls of the session (the checker's or main's Bash calls, as the
             transcript stored their output) ran that code: the call's command holds the code's lines, in order. That
             call's output shows the marked words (or the corrected words): the words whole, the same words with number
             words as digits ("five" is 5), each quoted part of the words, or every day and every number of the words,
-            each number a whole number of the output (a 3 never matches inside 2,301). The code does not type in a
-            number of the words where it can be the printed value (assigned, printed or returned); a number in the
-            fixed text of an f-string counts as typed only when the output shows it nowhere else. A bound in a
-            comparison, a key, an index, an operand of arithmetic, an argument of another call and the words of a line
-            printed only when a condition holds are conditions. The check reads the output the call really printed,
-            never the output the checker wrote down.
+            each number a whole number of the output (a 3 never matches inside 2,301). The check reads the output the
+            call really printed, never the output the checker wrote down.
+            The code does not type in a number of the words where it is the printed value: assigned, returned,
+            printed, in a list, tuple, set or dict that is assigned or printed, or given to a call that passes it on
+            (max, sum, int, ...). A number in the fixed text of an f-string counts as typed only when the output shows
+            it nowhere else. A number that is a condition may also stand in the printed words (`age < 12` and "children
+            under 12"): a bound of a comparison, an index or a slice, an operand of arithmetic, an argument of another
+            call (`head(5)`, `round(x, 2)`), and the words of a line printed only when a condition holds. Not caught: a
+            value computed from typed numbers alone (`print(350 + 2)`).
   quote     one place or several: the file is inside the working folder or the folder the session started in (for
-  code      what code does, also the temp folder, where Claude keeps its own code), the line (or a range of at most 50
-            lines) exists, and the place's substring is in it: in the raw line or in the line's JSON strings decoded,
-            runs of white space as one space (or as none: JSON written with no space after its colons), and `**` and
-            backticks as formatting. The quoted words of a direct quote (the case of their first letter aside), and the
-            days and numbers of the words, are in the cited lines too. Big files are read line by line.
+  code      what code does, also the temp folder, where Claude keeps its own code), compared by real paths, a regular
+            file, the line (or a range of at most 50 lines) exists, and the place's substring is in it: in the raw line
+            or in the line's JSON strings decoded, runs of white space as one space (or as none: JSON written with no
+            space after its colons), and `**` and backticks as formatting. The quoted words of a direct quote (the case
+            of their first letter aside), and the days and numbers of the words, are in the cited lines too.
+            Not checked: that a substring means what a paraphrase of it says ("agent-3 deleted the page" on a line that
+            holds "page"). That is the checker's judgment; the person sees the line next to the claim.
 
 A number with a scale (8k) matches the values it rounds from, and after "about" a whole number matches the values that
 round to its zeros (about 250 is 248). A calendar day or a range of days ("8–12 June 2026") matches the same days
 however they are written (2026-06-08 … 2026-06-12); another number inside a date matches only a number of the words'
-own dates, and a time to the second matches its fractions. A cited line a few lines off from the one that holds the words is moved to
-it. A correction is the words that replace the mark: words of the sentence the checker repeated around them go.
+own dates, and a time to the second matches its fractions. A cited line a few lines off from the one that holds the
+words is moved to it. A correction is the words that replace the mark: words of the sentence the checker repeated
+around them go.
 
 A mark the checker verified or corrected whose evidence does not hold here fails as not confirmed, with the reason; a
 correction whose evidence shows the marked words instead leaves them verified. A mark the checker failed keeps its
-reason. A mark with no answer stays unchecked. A checker's note on the rest of the sentence stays beside the mark.
+reason: the checker fails a mark also for the words around it (a wrong condition), which evidence that prints the
+marked words does not answer. A mark with no answer, or one this module cannot judge, stays unchecked. A checker's
+note on the rest of the sentence stays beside the mark.
 
-  check_mark(mark, item, calls, cwd, root)  -> {n, status, shown, reason, failedBy?, evidence?, note?}
-  parse_answer(text)                  -> the last ```json array of the checker's answer, or None
+  check_all(marks, answer, calls, cwd, root, tmp)  -> {parsed, results}: every mark of a reply
+  check_mark(mark, item, calls, cwd, root, tmp)    -> {n, status, shown, reason, failedBy?, evidence?, note?}
+  parse_answer(text)                               -> the last ```json array of the checker's answer, or None
 """
 from __future__ import annotations
 
@@ -112,7 +124,12 @@ WORDNUM = {w: str(i) for i, w in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen "
     "eighteen nineteen twenty".split())}
 PRINTERS = {"print", "str", "format", "repr", "f"}
+# calls whose arguments pass on to their value (`print(max(352, 1))` prints 352): a number in them is in the place of
+# the call itself
+PASSING = {"max", "min", "sum", "abs", "int", "float", "sorted", "list", "tuple", "set", "dict"}
 MAX_RANGE = 50
+BLOCK = 1 << 20  # bytes read at a time while counting the lines before a cited one
+LINE_BYTES = 1 << 20  # bytes of a cited line the check reads; a longer line is cut there
 SHIFT_MAX = 5  # lines a cited line may be off by and still name the line that holds the words
 OUTPUT_MAX = 20000  # characters of a call's output the evidence keeps, around its first highlight
 LINE_MAX = 600  # characters of a cited line the evidence keeps, around its highlight
@@ -137,6 +154,9 @@ def num_value(tok: str, scale: str | None = None) -> str:
     try:
         v = float(t)
     except ValueError:
+        return t
+    if not math.isfinite(v):
+        # more digits than a float holds: the digits as written are its one form
         return t
     one = str(int(v)) if v == int(v) and "." not in t.rstrip("0").rstrip(".") else repr(v)
     return one + SCALE_OF[scale.strip()] if scale else one
@@ -439,13 +459,17 @@ def literals(code: str) -> list[tuple[str, str, str]]:
             stack.append(opener_of(t, prev))
         elif t.type == tokenize.OP and t.string in ")]}" and stack:
             stack.pop()
-        call = next((x for x in reversed(stack) if x not in ("(", "[", "{", "cond")), None)
-        printed = call in PRINTERS
+        # the place a value here takes: the innermost call, index, compared list or assigned list around it, passing
+        # through plain brackets and through calls that pass their arguments on
+        call = next((x for x in reversed(stack) if x not in ("(", "[", "{") and x not in PASSING), None)
+        printed = call in PRINTERS or call == "value"
         if t.type == tokenize.NUMBER:
             v = num_value(t.string.replace("_", ""))
             ends = nxt is None or nxt.type in (tokenize.NEWLINE, tokenize.NL, tokenize.ENDMARKER, tokenize.COMMENT) or (nxt.type == tokenize.OP and nxt.string in (";", ","))
             assigned = prev is not None and prev.type == tokenize.OP and prev.string in ("=", "+=") and ends
-            bound = prev is not None and prev.type == tokenize.OP and prev.string in ("<", ">", "<=", ">=", "==", "!=", "[", ":")
+            # (a `[` or `:` is an index or a slice's bound inside an index; in a list or a dict it opens a value)
+            bound = prev is not None and prev.type == tokenize.OP and (prev.string in ("<", ">", "<=", ">=", "==", "!=")
+                                                                       or (prev.string in ("[", ":") and stack[-1:] == ["sub"]))
             returned = prev is not None and prev.type == tokenize.NAME and prev.string in ("return", "yield")
             if (assigned or (printed and not bound) or returned) and not operand(toks, i):
                 out.append(("number", v, ""))
@@ -460,7 +484,7 @@ def literals(code: str) -> list[tuple[str, str, str]]:
                 kind = "fixed" if fs and fs[1] else "string"
                 for k, raw in enumerate(texts):
                     text = PATHLIKE.sub(lambda m: " " * len(m.group(0)), raw)
-                    out += [(kind, v, raw) for m in NUM.finditer(text) if not re.search(r"[A-Za-z][-_]$", text[:m.start()]) and not in_range(text, m) and not (k == 0 and label(text, m))
+                    out += [(kind, v, raw) for m in NUM.finditer(text) if not re.search(r"[A-Za-z][-_]$", text[:m.start()]) and not in_range(text, m) and not (k == 0 and opens_label(text, m))
                             for v in [number_at(m)] if v is not None]
                 for expr in fs[1] if fs else []:
                     out += literals(f"print({expr})")
@@ -470,9 +494,12 @@ def literals(code: str) -> list[tuple[str, str, str]]:
 
 def opener_of(t: tokenize.TokenInfo, prev: Any) -> str:
     """What an opening bracket opens, for the stack literals() keeps: `cond` for a tuple or list a value is compared with
-    (`r["c"] in ("1", "2")`), `sub` for an index or a key (`rows[2]`, `n["01"]`), a call's name, or the bracket."""
+    (`r["c"] in ("1", "2")`), `sub` for an index or a key (`rows[2]`, `n["01"]`), a call's name, `value` for a list,
+    tuple, set or dict assigned or returned (`vals = [352]`), whose numbers are values, or the bracket."""
     if is_comparison(prev):
         return "cond"
+    if prev is not None and ((prev.type == tokenize.OP and prev.string in ("=", "+=")) or (prev.type == tokenize.NAME and prev.string in ("return", "yield"))):
+        return "value"
     if prev is not None and t.string == "[" and (prev.type == tokenize.STRING or (prev.type == tokenize.OP and prev.string in ")]") or (prev.type == tokenize.NAME and not keyword.iskeyword(prev.string))):
         return "sub"
     if prev is not None and prev.type == tokenize.NAME and t.string == "(":
@@ -498,7 +525,7 @@ def is_comparison(tok: Any) -> bool:
     return tok is not None and (tok.type == tokenize.OP and tok.string in ("==", "!=", "<", ">", "<=", ">=") or tok.type == tokenize.NAME and tok.string == "in")
 
 
-def label(s: str, m: re.Match) -> bool:
+def opens_label(s: str, m: re.Match) -> bool:
     """The number opens the string as a label, `"9: "`, as code numbers what it prints (unlabeled() takes such labels
     off the output, so a label never shows a value)."""
     return bool(re.match(r"^[\s\"'f]*$", s[:m.start()]) and re.match(r":\s", s[m.end():]))
@@ -620,11 +647,12 @@ def scripts(command: str) -> list[str]:
     return [m.group(3) for m in HEREDOC.finditer(command)] + [command]
 
 
-RUNS_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;)\s*)?\S*python[\d.]*\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\1[ \t]*")
+RUNS_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;|\n)\s*)?\S*python[\d.]*\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\1[ \t]*")
 
 
 def only_script(command: str, script: str) -> bool:
-    """The command does nothing but run the script: `python3 - <<'PY'`, the script, `PY` (after a `cd` at most)."""
+    """The command does nothing but run the script: `python3 - <<'PY'`, the script, `PY` (after a `cd` at most, with
+    `&&`, `;` or on a line of its own)."""
     m = HEREDOC.search(command)
     if not m or m.group(3) != script or command[m.end():].strip():
         return False
@@ -740,16 +768,38 @@ def line_span(line: Any) -> tuple[int, int] | None:
 
 
 def read_lines(path: str, a: int, b: int, partial: bool = False) -> tuple[int, list[str]] | None:
-    """Lines a to b of a file, read line by line, as (a, lines); None when the file cannot be read, or, unless
-    `partial`, has no line b."""
-    out = []
+    """Lines a to b of a regular file, as (a, lines), each cut at LINE_BYTES; None when the file cannot be read, is no
+    regular file (a pipe would never end), or, unless `partial`, has no line b. The lines before line a are counted in
+    blocks, not read one by one, so a line deep in a big file is found quickly."""
+    if not os.path.isfile(path):
+        return None
+    out: list[str] = []
     try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for i, line in enumerate(f, start=1):
-                if i >= a:
-                    out.append(line.rstrip("\n"))
-                if i >= b:
+        with open(path, "rb") as f:
+            line = 1
+            while line < a:
+                block = f.read(BLOCK)
+                if not block:
+                    return None
+                n = block.count(b"\n")
+                if line + n < a:
+                    line += n
+                    continue
+                at = -1
+                for _ in range(a - line):
+                    at = block.index(b"\n", at + 1)
+                f.seek(f.tell() - (len(block) - at - 1))
+                line = a
+            for _ in range(a, b + 1):
+                raw = f.readline(LINE_BYTES)
+                if not raw:
                     break
+                more = raw
+                while not more.endswith(b"\n"):
+                    more = f.readline(LINE_BYTES)
+                    if not more:
+                        break
+                out.append(raw.decode("utf-8", errors="replace").rstrip("\n").removesuffix("\r"))
     except OSError:
         return None
     return (a, out) if out and (partial or len(out) == b - a + 1) else None
@@ -813,12 +863,14 @@ def find_loose(sub: str, text: str) -> list[int] | None:
 
 
 def inside(cwd: str, file: str, root: str | None = None, tmp: str | None = None) -> str | None:
-    """The file's path, from the working folder, when it lies inside the working folder, the folder the session
-    started in, or `tmp` when given (no symbolic link is followed, so a folder of links reads as the person sees it),
-    else None."""
+    """The file's path as the person sees it (absolute, its links not followed), when the file it names lies inside the
+    working folder, the folder the session started in, or `tmp` when given, compared by real paths: a link inside the
+    folder to a file outside it is outside. Else None."""
     p = os.path.abspath(file if os.path.isabs(file) else os.path.join(cwd, file))
-    for r in {os.path.abspath(cwd), os.path.abspath(root or cwd)} | ({os.path.abspath(tmp)} if tmp else set()):
-        if p == r or p.startswith(r + os.sep):
+    real = os.path.realpath(p)
+    for r in {cwd, root or cwd} | ({tmp} if tmp else set()):
+        rr = os.path.realpath(r)
+        if real == rr or real.startswith(rr + os.sep):
             return p
     return None
 
@@ -1063,7 +1115,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
 
 def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
-    folder."""
+    folder. A mark the validator fails on stays unchecked, with why; the other marks are judged."""
     items = parse_answer(answer)
     by_n: dict[int, dict[str, Any]] = {}
     for it in items or []:
@@ -1071,4 +1123,11 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
             by_n.setdefault(int(it.get("mark")), it)
         except (TypeError, ValueError):
             continue
-    return {"parsed": items is not None, "results": [check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp) for m in marks]}
+    results = []
+    for m in marks:
+        try:
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp))
+        except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
+            results.append({"n": m.get("n"), "status": "unchecked", "shown": str(m.get("words", "")),
+                            "reason": f"thimble could not validate this mark ({type(e).__name__}: {str(e)[:120]})"})
+    return {"parsed": items is not None, "results": results}

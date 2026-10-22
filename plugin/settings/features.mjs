@@ -48,12 +48,7 @@ export function noteChange(key, value) {
   if (BY_KEY.has(key) && typeof value === 'boolean') current = { ...current, [key]: value }
 }
 
-/** The feature's own value: the option when it is a boolean, else the default. */
-export function ownValue(key) {
-  return switchesFrom(current)(key)
-}
-
-/** Whether a feature acts now. */
+/** Whether a feature acts now: its option when it is a boolean, else its default. */
 export function featureOn(key) {
   return switchesFrom(current)(key)
 }

@@ -1,22 +1,21 @@
 // store.ts: what thimble keeps of each card, in $.state for drawing and on disk for a resumed session or a runner
 // that starts again.
 //
-//   <THIMBLE_HOME>/cards/<conversation>/<card id>/
+//   <conversation folder>/cards/<card id>/   (core/layout.mjs)
 //     meta.json           the card: id, version, title, the call that drew it first, its anchor, keys, rows, ...
 //     v<version>/view.js   the view of the version on screen
 //     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away)
-//     state.json          the person's state of that version (what the view set with setState) and its search
+//     state.json          the person's state of that version (what the view set with setState)
 //
 //   $.state: card (meta, by id), cardTree (the runner's drawing, by id), cardFocus (the card that takes keys first),
-//   cardSeen (the cards drawn on screen since the plugin loaded), cardSearch (the card a `/` search types into),
-//   cardsAt (the cards drawn under an answer, by the answer's row), cardCall (the card each call drew or changed, by the
-//   call's tool_use_id)
+//   cardSeen (the cards drawn on screen since the plugin loaded), cardsAt (the cards drawn under an answer, by the
+//   answer's row), cardCall (the card each call drew or changed, by the call's tool_use_id)
 //
 // A card's id comes from the call that first drew it, so a resumed session finds a card from its call's row alone.
 import { update, type EngineInterface } from 'claude-code'
 
-import { thimbleHome } from '../core/env'
-import { sessionKey } from '../hooks/conversation'
+import { keptDir } from '../core/env'
+import { shortHash } from '../core/layout.mjs'
 
 type Engine = EngineInterface
 
@@ -45,7 +44,6 @@ const CARD = { plugin: 'thimble', key: 'card' } as const
 const TREE = { plugin: 'thimble', key: 'cardTree' } as const
 const FOCUS = { plugin: 'thimble', key: 'cardFocus' } as const
 const SEEN = { plugin: 'thimble', key: 'cardSeen' } as const
-const SEARCH = { plugin: 'thimble', key: 'cardSearch' } as const
 const AT = { plugin: 'thimble', key: 'cardsAt' } as const
 const CALL = { plugin: 'thimble', key: 'cardCall' } as const
 
@@ -53,22 +51,11 @@ const ID = /^c[0-9a-f]{8,16}$/
 export const isCardId = (id: string) => ID.test(id)
 
 /** A card's id from the tool_use_id of the call that first drew it. */
-export function cardIdOf(toolUseId: string): string {
-  let h1 = 0x811c9dc5
-  let h2 = 0x9747b28c
-  for (let i = 0; i < toolUseId.length; i++) {
-    const c = toolUseId.charCodeAt(i)
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0
-    h2 = Math.imul(h2 ^ c, 0x5bd1e995) >>> 0
-  }
-  return `c${h1.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0').slice(0, 4)}`
-}
-
-const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 80) || 'none'
+export const cardIdOf = (toolUseId: string): string => `c${shortHash(toolUseId)}`
 
 /** The folder of this conversation's cards. */
 export async function cardsDir($: Engine): Promise<string> {
-  return `${await thimbleHome($)}/cards/${safe(await sessionKey($))}`
+  return `${await keptDir($)}/cards`
 }
 
 export async function cardDir($: Engine, id: string): Promise<string> {
@@ -77,13 +64,6 @@ export async function cardDir($: Engine, id: string): Promise<string> {
 
 export async function versionDir($: Engine, id: string, version: number): Promise<string> {
   return `${await cardDir($, id)}/v${version}`
-}
-
-// the cards under each answer, as v asks for them while it writes main's note (cardsUnder); $.state holds the same
-const under = new Map<string, string[]>()
-
-export function cardsAtNow(row: string): string[] {
-  return under.get(row) ?? []
 }
 
 // ------------------------------------------------------------------------------------------------- $.state
@@ -105,7 +85,7 @@ export async function seenNow($: Engine): Promise<string[]> {
 }
 
 export async function markSeen($: Engine, id: string): Promise<void> {
-  await update($, SEEN, cur => ((cur ?? []).includes(id) ? cur : [...(cur ?? []), id]))
+  await update($, SEEN, cur => ((cur ?? []).includes(id) ? cur ?? [] : [...(cur ?? []), id]))
 }
 
 export async function focusNow($: Engine): Promise<string | null> {
@@ -116,22 +96,12 @@ export async function setFocus($: Engine, id: string): Promise<void> {
   if ((await $.state.get(FOCUS)).value !== id) await $.state.set(FOCUS, id)
 }
 
-export type CardSearch = { id: string; text: string; kept?: boolean }
-
-export async function searchNow($: Engine): Promise<CardSearch | null> {
-  return (await $.state.get(SEARCH)).value ?? null
-}
-
-export async function setSearch($: Engine, s: CardSearch | null): Promise<void> {
-  await $.state.set(SEARCH, s)
-}
-
 /** The card a call of the card tool drew or changed. */
 export async function callOf($: Engine, toolUseId: string): Promise<string | null> {
   return (((await $.state.get({ ...CALL, id: toolUseId })).value as { id?: string } | undefined)?.id) ?? null
 }
 
-/** The cards drawn under an answer, by its row. */
+/** The cards drawn under an answer, by its row, oldest first. */
 export async function anchoredAt($: Engine, row: string): Promise<string[]> {
   return (((await $.state.get(AT)).value ?? {}) as Record<string, string[]>)[row] ?? []
 }
@@ -151,27 +121,22 @@ export async function saveMeta($: Engine, meta: CardMeta): Promise<void> {
   if (meta.anchorRow && meta.version > 0) {
     const all = ((await $.state.get(AT)).value ?? {}) as Record<string, string[]>
     const ids = all[meta.anchorRow] ?? []
-    if (!ids.includes(meta.id)) {
-      const next = { ...all, [meta.anchorRow]: [...ids, meta.id] }
-      under.set(meta.anchorRow, next[meta.anchorRow]!)
-      await $.state.set(AT, next)
-    }
+    if (!ids.includes(meta.id)) await $.state.set(AT, { ...all, [meta.anchorRow]: [...ids, meta.id] })
   }
   await $.fs.write(`${await cardDir($, meta.id)}/meta.json`, JSON.stringify(meta))
 }
 
-/** The person's state of a card's version on screen, and its search, as the runner last answered them. */
-export async function saveState($: Engine, id: string, version: number, state: string, query: string | null): Promise<void> {
-  await $.fs.write(`${await cardDir($, id)}/state.json`, JSON.stringify({ version, state, query }))
+/** The person's state of a card's version on screen, as the runner last answered it (JSON text). */
+export async function saveState($: Engine, id: string, version: number, state: string): Promise<void> {
+  await $.fs.write(`${await cardDir($, id)}/state.json`, JSON.stringify({ version, state }))
 }
 
-export async function readState($: Engine, id: string, version: number): Promise<{ state: unknown; query: string | null }> {
+export async function readState($: Engine, id: string, version: number): Promise<unknown> {
   try {
     const s = JSON.parse(String(await $.fs.read(`${await cardDir($, id)}/state.json`)))
-    if (s?.version !== version) return { state: null, query: null }
-    return { state: typeof s.state === 'string' ? JSON.parse(s.state) : null, query: typeof s.query === 'string' ? s.query : null }
+    return s?.version === version && typeof s.state === 'string' ? JSON.parse(s.state) : null
   } catch {
-    return { state: null, query: null }
+    return null
   }
 }
 
@@ -192,8 +157,6 @@ export async function restoreCards($: Engine): Promise<void> {
     for (const call of Object.keys(m.calls ?? {})) await $.state.set({ ...CALL, id: call }, { id: m.id })
     if (m.anchorRow && m.version > 0) (at[m.anchorRow] ??= []).push(m.id)
   }
-  under.clear()
-  for (const [row, ids] of Object.entries(at)) under.set(row, ids)
   await $.state.set(AT, at)
   const newest = metas.filter(m => m.version > 0).pop()
   if (newest && !(await $.state.get(FOCUS)).value) await $.state.set(FOCUS, newest.id)

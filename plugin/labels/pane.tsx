@@ -18,6 +18,7 @@ import type { EngineInterface } from 'claude-code'
 import { failNotice } from '../bar/fix'
 import { rootHere, startDir } from '../core/env'
 import { openPane, PANE_ID } from '../core/pane'
+import { cut, textWidth } from '../core/text.js'
 import { checkRecord, labelsData } from './labels'
 
 type Engine = EngineInterface
@@ -32,8 +33,7 @@ const NONE = '-'
 const colorOf = (values: string[], v: string) => (v === NONE ? 'inactive' : COLORS[Math.max(0, values.indexOf(v)) % COLORS.length]!)
 
 const n = (x: unknown) => Number(x || 0).toLocaleString('en-US')
-const width = (s: string) => [...s].length
-const cut = (s: string, k: number) => (width(s) <= k ? s : `${[...s].slice(0, Math.max(0, k - 1)).join('')}…`)
+const width = textWidth
 const pad = (s: string, k: number) => cut(s, k) + ' '.repeat(Math.max(0, k - width(cut(s, k))))
 /** Text on one line: a line break as ⏎, each run of spaces as one; `trim` false keeps a space at either end. */
 const oneLine = (s: unknown, trim = true) => { const t = String(s ?? '').replace(/\s*\n\s*/g, ' ⏎ ').replace(/\s+/g, ' '); return trim ? t.trim() : t }

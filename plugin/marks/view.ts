@@ -16,7 +16,8 @@
 //   failed       wrong as the check read the data: red, with ` ×` after it
 //   unconfirmed  failed because the check's evidence did not hold: the warning color, with ` ?` after it
 //   unchecked    underlined in the text's color: no check could run
-import { blocks, inline, marksWithin, runsText, tableOf, width, wrapRuns } from './message.js'
+import { textWidth } from '../core/text.js'
+import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -106,7 +107,7 @@ function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
   if (b.type === 'quote') runs.forEach(r => { r.it = true })
   if (b.type === 'item') {
     const head = `${' '.repeat(b.indent)}${b.marker} `
-    return wrapRuns(runs, w - width(head)).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ children: k === 0 ? head : ' '.repeat(width(head)) })]))
+    return wrapRuns(runs, w - textWidth(head)).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ children: k === 0 ? head : ' '.repeat(textWidth(head)) })]))
   }
   if (b.type === 'quote') return wrapRuns(runs, w - 2).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`, [els.Text({ dimColor: true, children: '▎ ' })]))
   return wrapRuns(runs, w).map((l: Run[], k: number) => lineEl(els, o, l, `${key}-${k}`))
@@ -119,12 +120,12 @@ function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
 function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): Any[] {
   const rows: Run[][][] = tableOf(o.text, b, o.marks).map((cells: Run[][]) => cells.map(c => withLooks(c, o)))
   const n = Math.max(...rows.map(r => r.length))
-  const widths = Array.from({ length: n }, (_, c) => Math.max(1, ...rows.map(r => width(runsText(r[c] || [])))))
+  const widths = Array.from({ length: n }, (_, c) => Math.max(1, ...rows.map(r => textWidth(runsText(r[c] || [])))))
   const total = widths.reduce((s, x) => s + x + 3, 1)
   if (total > w) {
     const heads: Run[][] = rows.length > 1 ? rows[0]!.map(h => (runsText(h).trim() ? [...h.map(r => ({ ...r, b: true })), { s: ':', b: true }] : [])) : []
     const body = rows.length > 1 ? rows.slice(1) : rows
-    const hw = Math.max(0, ...heads.map(h => (h.length ? width(runsText(h)) + 1 : 0)))
+    const hw = Math.max(0, ...heads.map(h => (h.length ? textWidth(runsText(h)) + 1 : 0)))
     const beside = hw <= Math.floor(w / 2)
     const out: Any[] = []
     body.forEach((cells, k) => {
@@ -137,7 +138,7 @@ function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
         if (beside) {
           // the header and its padding on the cell's first line, the cell's other lines indented as far
           const pad = head.length ? hw : 0
-          const fill = { s: ' '.repeat(Math.max(0, pad - width(runsText(head)))) }
+          const fill = { s: ' '.repeat(Math.max(0, pad - textWidth(runsText(head)))) }
           wrapRuns(runs, w - pad).forEach((l: Run[], j: number) => out.push(lineEl(els, o, j === 0 ? [...head, ...(pad ? [fill] : []), ...l] : [{ s: ' '.repeat(pad) }, ...l], `${id}-${j}`)))
         } else {
           wrapRuns(head, w).forEach((l: Run[], j: number) => out.push(lineEl(els, o, l, `${id}-h${j}`)))
@@ -153,7 +154,7 @@ function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
     const kids: Any[] = [els.Text({ children: '│' })]
     for (let c = 0; c < n; c++) {
       const runs = (cells[c] || []).map(r => (k === 0 ? { ...r, b: true } : r))
-      const pad = widths[c]! - width(runsText(runs))
+      const pad = widths[c]! - textWidth(runsText(runs))
       const left = k === 0 ? Math.floor(pad / 2) : 0
       kids.push(els.Text({ children: ' ' + ' '.repeat(left) }))
       runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-t${k}-${c}-${j}`) : runText(els, r)))

@@ -4,17 +4,20 @@
 // busy line says `drawing a card` while it works; its last message never reaches main, but main reads the cards it drew
 // with the person's next prompt.
 //
-// v is a letter too. A letter typed within WORD_MS after v means the person types a word that starts with v ("very"):
-// the prompt gets v and that letter back, and no fork starts. The fork is spawned inside v's own prompt.edit hook, so
-// Claude Code skips only that hook for the fork and this plugin's other hooks serve it (its card calls, its end). The
-// spawn waits out the word window in this module's agent.spawn hook, which runs for the spawn like any other hook, and
-// refuses the spawn when a letter came. So a word typed after v starts nothing at all.
+// v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
+// "very"). The fork is spawned inside the keys' prompt.edit hook, so Claude Code skips only that hook for the fork and
+// this plugin's other hooks serve it (its card calls, its end). This module's agent.spawn hook holds the spawn until the
+// word window closes, and refuses it when a letter came: so a word typed after v starts nothing at all.
 //
 // v starts a design only when there is an answer to draw (main's last text row, as session.append stored it), main is
-// not working, Cards is on, and no other design runs. Otherwise v types as any letter.
+// not working, Cards is on, and no other design runs. Otherwise v types as any letter. A design whose fork Claude Code
+// no longer runs (its end was missed, say in a reload of the plugin) ends as failed: at session start, with a notice,
+// and when v is pressed again.
 //
-//   designAnchor(agentId)  the answer row the cards of that designer fork draw under (the card tool asks it)
-//   designNow($)           the design that runs now, or null
+// The fork may read, run code and draw cards; it writes only into the temp folder, where its rows go.
+//
+//   vKey($, key, until)    what v does at an empty prompt now (hooks/keys.ts asks), or null when it types
+//   designAnchor($, id)    the answer row the cards of that designer fork draw under (the card tool asks it)
 //   vReady($)              whether v would start a design now (the bar names v only then)
 //
 //   state: designs (each design, by key), designNow (the key of the design that runs), answerRow (main's last answer
@@ -23,12 +26,14 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
 import { failCleared, failNotice } from '../bar/fix'
-import { WORD_MS } from '../bar/register'
-import { cardsUnder, cardText } from '../cards/draw'
-import { type CardMeta, metaOf } from '../cards/store'
+import { cardText } from '../cards/draw'
+import { anchoredAt, type CardMeta, metaOf } from '../cards/store'
 import { readKept, writeKept } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
+import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
+import { cut } from '../core/text.js'
+import { mainRuns } from '../core/turn'
 import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
@@ -44,6 +49,8 @@ export type Design = {
   /** held: the word window is open; running: the fork works; the rest: it ended */
   status: 'held' | 'running' | 'done' | 'failed' | 'cancelled'
   at: number
+  /** when the word window closes: the spawn waits until then */
+  until: number
   error?: string
   /** the cards the design drew */
   cards: string[]
@@ -53,38 +60,27 @@ export type Design = {
 const DESCRIPTION = 'card of the last answer (v)'
 /** The most of a card's text copy main reads. */
 const TELL_CHARS = 3000
+/** The tools the fork may call. Write only into the temp folder. */
+const TOOLS = new Set(['Read', 'Grep', 'Glob', 'Bash', 'Write', 'mcp__thimble__card'])
 
 const DESIGNS = { plugin: 'thimble', key: 'designs' } as const
 const NOW = { plugin: 'thimble', key: 'designNow' } as const
 const ANSWER = { plugin: 'thimble', key: 'answerRow' } as const
 const ANSWER_FILE = 'answer.json'
 
-/** Main's last answer row, and whether main works now. */
-let answerRow: string | null = null
-let mainWorks = false
-/** The design that runs (one at a time). */
+/** The design that runs (one at a time), as this load of the module holds it; its state is in $.state too. */
 let current: Design | null = null
-/** The word window of the last v: open until WORD_MS has passed or a letter came. */
-let wordWindow: { at: number; cancelled: boolean } | null = null
 
-const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
 const firstLine = (s: string) => String(s || '').split('\n').map(l => l.trim()).find(Boolean) || ''
 const reason = (err: unknown) => cut(String((err as Error)?.message || err), 200)
+const running = () => current?.status === 'held' || current?.status === 'running'
 
 async function save($: Engine, d: Design): Promise<void> {
   await $.state.set({ ...DESIGNS, id: d.key }, d)
 }
 
-export function designAnchor(agentId: string | undefined): string | null {
-  return agentId && current?.agentId === agentId ? current.anchorRow : null
-}
-
-/** Whether v would draw a card now: an answer exists and no design runs (the bar's `v card`). Read from the state, so a
- *  drawing that asks draws again when it changes. */
-export async function vReady($: Engine): Promise<boolean> {
-  if (!(await $.state.get(ANSWER)).value) return false
-  const d = await designNow($)
-  return d?.status !== 'held' && d?.status !== 'running'
+async function answerNow($: Engine): Promise<string | null> {
+  return ((await $.state.get(ANSWER)).value ?? null) as string | null
 }
 
 export async function designNow($: Engine): Promise<Design | null> {
@@ -92,7 +88,18 @@ export async function designNow($: Engine): Promise<Design | null> {
   return key ? (((await $.state.get({ ...DESIGNS, id: key })).value ?? null) as Design | null) : null
 }
 
-const running = () => current?.status === 'held' || current?.status === 'running'
+export async function designAnchor($: Engine, agentId: string | undefined): Promise<string | null> {
+  const d = await designNow($)
+  return agentId && d?.agentId === agentId && d.status === 'running' ? d.anchorRow : null
+}
+
+/** Whether v would draw a card now: an answer exists and no design runs (the bar's `v card`). Read from the state, so a
+ *  drawing that asks draws again when it changes. */
+export async function vReady($: Engine): Promise<boolean> {
+  if (!(await answerNow($))) return false
+  const d = await designNow($)
+  return d?.status !== 'held' && d?.status !== 'running'
+}
 
 /** The design's end: its state, the bar, and the failure line when it failed; one that drew takes away the line an
  *  earlier v left. */
@@ -106,6 +113,20 @@ async function end($: Engine, d: Design, status: Design['status'], error?: strin
   if (status === 'done') await failCleared($, 'v')
 }
 
+/** Whether Claude Code still runs the design's fork. */
+async function forkAlive($: Engine, d: Design): Promise<boolean> {
+  if (d.status === 'held' || !d.agentId) return true
+  const a = (await $.agent.list()).find(x => x.id === d.agentId)
+  return !!a && !['completed', 'failed', 'killed'].includes(a.status)
+}
+
+/** A fenced block of text from the records, so it reads as data and not as words to act on. */
+function fenced(text: string): string {
+  const longest = Math.max(2, ...[...String(text).matchAll(/`+/g)].map(m => m[0].length))
+  const fence = '`'.repeat(longest + 1)
+  return `${fence}text\n${text}\n${fence}`
+}
+
 /** What the check of the answer's marks changed since main wrote it, for the fork, whose copy of the conversation
  *  ends at that answer: a card must not repeat a value the check corrected or flagged. */
 async function checkedSince($: Engine, row: string): Promise<string> {
@@ -113,13 +134,13 @@ async function checkedSince($: Engine, row: string): Promise<string> {
   const changed = (reply?.items ?? []).filter(m => m.status === 'corrected' || m.status === 'failed')
   if (!changed.length) return ''
   const lines = changed.map(m => (m.status === 'corrected' ? `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
-  return `\n\nSince that answer, thimble checked its marks against the data and found:\n${lines.join('\n')}\nThe card shows the corrected values, computed from the records.`
+  return `\n\nSince that answer, thimble checked its marks against the data. The check found (its words quote the records):\n${fenced(lines.join('\n'))}\nThe card shows the corrected values, computed from the records.`
 }
 
 /** The card an earlier v drew under this answer, for the fork to draw a new version of: v again on the same answer
  *  changes that card rather than adding a second one. */
 async function earlierCard($: Engine, row: string): Promise<string> {
-  for (const id of [...cardsUnder(row)].reverse()) {
+  for (const id of [...(await anchoredAt($, row))].reverse()) {
     const meta = await metaOf($, id)
     if (meta && meta.version > 0 && meta.anchorRow === row) {
       return `\n\nAn earlier press of v drew the card “${meta.title}” under this answer. Draw your card as a new version of it, with \`id\` "${meta.id}", so the answer keeps one card.`
@@ -150,34 +171,72 @@ async function finish($: Engine, d: Design, e: { reason: string; answer: string 
   const said = cut(firstLine(e.answer), 160)
   if (e.reason === 'error') return end($, d, 'failed', `× v could not draw a card: the model call failed${said ? ` (${said})` : ''}.`)
   const drawn: CardMeta[] = []
-  for (const id of cardsUnder(d.anchorRow)) {
+  for (const id of await anchoredAt($, d.anchorRow)) {
     const meta = await metaOf($, id)
     if (meta && meta.agentId === d.agentId) drawn.push(meta)
   }
   d.cards = drawn.map(m => m.id)
   if (!drawn.length) return end($, d, 'failed', `× v drew no card.${said ? ` The copy that drew it ended with: “${said}”` : ''}`)
   const copies: string[] = []
-  for (const m of drawn) copies.push(`“${m.title}” (id "${m.id}")\n${cut(await cardText($, m.id), TELL_CHARS)}`)
+  for (const m of drawn) copies.push(`“${m.title}” (id "${m.id}"), as drawn now:\n${fenced(cut(await cardText($, m.id), TELL_CHARS))}`)
   const what = drawn.length === 1 ? 'a card' : `${drawn.length} cards`
-  await tellAtNextPrompt($, `v:${d.key}`, `The person pressed v on your last answer, and a copy of you drew ${what} under it. To change one, call card with its id. As drawn now:\n\n${copies.join('\n\n')}`)
+  await tellAtNextPrompt($, `v:${d.key}`, `The analyst pressed v on your last answer, and a copy of you drew ${what} under it. To change one, call card with its id. The text of a card shows the records' own words.\n\n${copies.join('\n\n')}`)
   await end($, d, 'done')
 }
 
+/** v at an empty prompt: a design of the last answer, or null when v types (hooks/keys.ts). Its prompt is made here,
+ *  before anything starts, so a prompt that cannot be made starts nothing. `until`: when the word window closes. */
+export async function vKey($: Engine, key: string, until: number): Promise<{ now: () => Promise<unknown>; undo: () => Promise<unknown> } | null> {
+  if (key !== 'v' || !featureOn('cards')) return null
+  const row = await answerNow($)
+  if (!row || (await mainRuns($))) return null
+  if (current && running()) {
+    if (await forkAlive($, current)) return null
+    await end($, current, 'failed')
+  }
+  const prompt = `${fill(await promptText($, 'designer'), { TMPDIR: await tempDir($) })}${await checkedSince($, row)}${await earlierCard($, row)}`
+  const at = Number(await $.clock.now())
+  const d: Design = { key: `d${at.toString(36)}`, anchorRow: row, agentId: null, status: 'held', at, until, cards: [] }
+  return {
+    now: async () => {
+      current = d
+      await save($, d)
+      await $.state.set(NOW, d.key)
+      void start($, d, prompt)
+    },
+    undo: async () => {
+      if (d.status === 'held') await end($, d, 'cancelled')
+    },
+  }
+}
+
+/** Why the designer fork may not make this call, or null when it may: it reads, runs code, draws cards, and writes
+ *  only in the temp folder. */
+async function denial($: Engine, e: { tool: string; file_path?: unknown }): Promise<string | null> {
+  const tool = String(e.tool)
+  if (!TOOLS.has(tool)) return `The card's copy uses ${[...TOOLS].join(', ')} only.`
+  if (tool !== 'Write') return null
+  const path = String(e.file_path ?? '')
+  const tmp = await tempDir($)
+  return path.startsWith(`${tmp}/`) && !path.split('/').includes('..') ? null : `The card's copy writes only in the temp folder, ${tmp}.`
+}
+
 export const registerDesigner: Register = on => {
-  // a reload of the plugin: the answer and the design that runs are known again
+  // a reload of the plugin, or a resumed session: the answer and the design that runs are known again; a design whose
+  // fork is gone ends as failed, and says so
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
     try {
-      answerRow = ((await $.state.get(ANSWER)).value ?? null) as string | null
-      if (!answerRow) {
+      if (!(await answerNow($))) {
         // a resumed session: the conversation's last answer, as the session that wrote it kept it
-        answerRow = (await readKept<{ row?: string }>($, ANSWER_FILE))?.row ?? null
-        if (answerRow) await $.state.set(ANSWER, answerRow)
+        const kept = (await readKept<{ row?: string }>($, ANSWER_FILE))?.row
+        if (kept) await $.state.set(ANSWER, kept)
       }
       const d = await designNow($)
       if (d && (d.status === 'held' || d.status === 'running')) {
         current = d
-        if (d.status === 'running') await busyWhile($, 'drawing a card', () => current === d)
+        if (d.status === 'held' || !(await forkAlive($, d))) await end($, d, 'failed', '× v stopped drawing its card: thimble lost the copy that drew it. Press v to draw it again.')
+        else await busyWhile($, 'drawing a card', () => current === d)
       }
     } catch {
       // v waits for the next answer
@@ -191,22 +250,15 @@ export const registerDesigner: Register = on => {
     const r = await next(e)
     const synthetic = e.origin.kind === 'model' && e.origin.model === '<synthetic>'
     if (e.agentId === undefined && !synthetic && r.uuid && e.message.content.some(b => b.type === 'text' && String(b.text || '').trim())) {
-      answerRow = r.uuid
       void $.state.set(ANSWER, r.uuid).catch(() => undefined)
       void writeKept($, ANSWER_FILE, { row: r.uuid }).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  on('turn.start', { turnId: /./ }, async ($, e, next) => {
-    if (e.agentId === undefined) mainWorks = true
-    return next(e)
-  }).catch(($, e, next) => next(e))
-
-  on('turn.complete', { turnId: /./ }, async ($, e, next) => {
+  on('turn.complete', { agentId: /\S/ }, async ($, e, next) => {
     const r = await next(e)
-    if (e.agentId === undefined) mainWorks = false
-    else if (current && current.agentId === e.agentId && forkOf(e.agentId)?.kind === 'designer') {
+    if (current && current.agentId === e.agentId && forkOf(e.agentId)?.kind === 'designer') {
       const d = current
       try {
         await finish($, d, e)
@@ -217,38 +269,21 @@ export const registerDesigner: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  on('prompt.edit', { origin: { kind: 'composer' }, text: '' }, async ($, e, next) => {
-    const k = e.key
-    if (!k || k.ctrl || k.meta) return next(e)
-    const now = Number(await $.clock.now())
-    // a letter straight after v: the person types a word, and the design that waited is cancelled
-    const w = wordWindow
-    if (w && !w.cancelled && now - w.at < WORD_MS && /^\p{L}$/u.test(k.key)) {
-      w.cancelled = true
-      wordWindow = null
-      if (current?.status === 'held') await end($, current, 'cancelled')
-      return { text: `v${e.inputText}`, cursor: 1 + e.inputText.length }
-    }
-    if (k.key !== 'v' || !answerRow || mainWorks || running() || !featureOn('cards')) return next(e)
-    const d: Design = { key: `d${now.toString(36)}`, anchorRow: answerRow, agentId: null, status: 'held', at: now, cards: [] }
-    current = d
-    wordWindow = { at: now, cancelled: false }
-    const tmp = String((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')
-    const prompt = `${fill(await promptText($, 'designer'), { TMPDIR: tmp })}${await checkedSince($, d.anchorRow)}${await earlierCard($, d.anchorRow)}`
-    await save($, d)
-    await $.state.set(NOW, d.key)
-    void start($, d, prompt)
-    return { text: '', cursor: 0 }
-  }).catch(($, e, next) => next(e))
+  // the fork's calls: it reads, runs code, draws cards, and writes only in the temp folder
+  on('tool.call', { agentId: /\S/ }, async ($, e, next) => {
+    if (forkOf(e.agentId)?.kind !== 'designer') return next(e)
+    const no = await denial($, e as never)
+    return no ? { deny: no } : next(e)
+  }).catch(($, e, next) => (next.called ? next(e) : forkOf(e.agentId)?.kind === 'designer' ? { deny: "thimble could not check this call of the card's copy" } : next(e)))
 
   // v's spawn waits out the word window, and is refused when a letter came in it
   on('agent.spawn', { description: DESCRIPTION }, async ($, e, next) => {
-    const w = wordWindow
-    if (next.origin.plugin !== 'thimble' || !w) return next(e)
-    const left = w.at + WORD_MS - Number(await $.clock.now())
+    const d = current
+    if (next.origin.plugin !== 'thimble' || !d || d.status !== 'held') return next(e)
+    const left = d.until - Number(await $.clock.now())
     if (left > 0) await $.clock.sleep(left)
-    if (w.cancelled) return { deny: 'the person typed a word that starts with v' }
-    if (wordWindow === w) wordWindow = null
+    // a word typed after v ended the design (end() lets go of it)
+    if (current !== d) return { deny: 'the person typed a word that starts with v' }
     return next(e)
   }).catch(($, e, next) => next(e))
 }

@@ -3,11 +3,16 @@
 # as a bare command, through the session's permission mode like any other. The Python it runs: THIMBLE_PYTHON, else the
 # plugin's own .venv, else python3. The kernel needs Python 3.10 or later and nothing else.
 here=$(cd "$(dirname "$0")/.." && pwd)
-# for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs), and
-# `thimble dev stats`, the session's cost and time per feature (telemetry/stats.mjs)
-if [ "$1" = dev ]; then
-  case "$2" in prompts) shift; exec node "$here/prompts/node.mjs" "$@";; stats) shift 2; exec node "$here/telemetry/stats.mjs" "$@";; esac
-fi
 py=${THIMBLE_PYTHON:-}
 if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
+# for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs);
+# `thimble dev stats`, the session's cost and time per feature (telemetry/stats.mjs); and `thimble dev validate`, the
+# check of a checker's answer that the plugin runs after each reply (engine/validate.py)
+if [ "$1" = dev ]; then
+  case "$2" in
+    prompts) shift; exec node "$here/prompts/node.mjs" "$@";;
+    stats) shift 2; exec node "$here/telemetry/stats.mjs" "$@";;
+    validate) exec "${py:-python3}" "$here/engine/validate.py";;
+  esac
+fi
 exec "${py:-python3}" "$here/engine/thimble.py" "$@"

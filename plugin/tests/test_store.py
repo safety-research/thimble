@@ -43,7 +43,7 @@ def test_a_folder_thimble_may_not_write_in_is_found_by_the_records_kept_for_it(t
     data.chmod(0o555)
     try:
         st = STORE.Store(data)
-        assert st.dir == STORE.kept_dir(data.resolve()) and str(st.dir).startswith(str(tmp_path / "th" / "lean" / "folders"))
+        assert st.dir == STORE.kept_dir(data.resolve()) and str(st.dir).startswith(str(tmp_path / "th" / "folders"))
         st.sub("labels")
         assert not (data / "thimble").exists()
         # a later command in a subfolder finds the root by its kept records
@@ -52,3 +52,11 @@ def test_a_folder_thimble_may_not_write_in_is_found_by_the_records_kept_for_it(t
         data.chmod(0o755)
     # once kept there, they stay there, though the folder may be written now
     assert STORE.Store(data).dir == STORE.kept_dir(data.resolve())
+
+
+def test_folder_names_keep_folders_apart_and_match_the_plugin() -> None:
+    # two folders whose paths differ only in characters a name cannot hold get names of their own
+    assert len({STORE.folder_name(p) for p in ("/w/run.1", "/w/run-1", "/w-run/1")}) == 3
+    # the plugin's core/layout.mjs makes the same names (core/test/layout.test.mjs checks these two values)
+    assert STORE.folder_name("/w/run.1") == "w-run-1-b8a5493c96fe"
+    assert STORE.short_hash("toolu_01ABC") == "12a499106e46"

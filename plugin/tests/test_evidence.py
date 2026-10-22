@@ -310,3 +310,37 @@ def test_emphasis_in_the_output_is_formatting():
     code = 'import sqlite3\nprint(sqlite3.connect("f").execute("select body from r where id=605").fetchone()[0])'
     r = check_mark(mark('"one token away from an approval"'), computed(code), [call(code, "It is **one token away from an approval**.")], "/data")
     assert r["status"] == "verified"
+
+
+def test_a_typed_value_in_a_list_a_dict_or_a_passing_call_is_not_evidence():
+    for code in ('d = {"a": 352}\nprint(d["a"])', "vals = [352]\nprint(vals[0])", "print(max(352, 1))"):
+        r = check_mark(mark("352 rows"), computed(code), [call(code, "352")], "/data")
+        assert r["status"] == "failed" and r["failedBy"] == "evidence" and "352 in by hand" in r["reason"], code
+    # an index, a slice and a digits argument stay conditions
+    code = 'rows = open("t.csv").read().split("\\n")[:352]\nprint(round(len(rows) / 1, 352))'
+    assert check_mark(mark("352 rows"), computed(code), [call(code, "352")], "/data")["status"] == "verified"
+
+
+def test_one_mark_the_validator_cannot_judge_leaves_the_others_judged(monkeypatch):
+    import kernel.evidence as E
+    code = "print(len(open('t.txt').read()))"
+    big = "9" * 400
+    answer = "```json\n" + json.dumps([computed(code) | {"mark": 1}, computed(code) | {"mark": 2}]) + "\n```"
+    # a number of more digits than a float holds is its digits
+    assert [r["status"] for r in check_all([mark(big, 1), mark("12", 2)], answer, [call(code, f"{big} 12")], "/data")["results"]] == ["verified", "verified"]
+    real = E.check_mark
+    monkeypatch.setattr(E, "check_mark", lambda m, *a: (_ for _ in ()).throw(ValueError("made up")) if m["n"] == 1 else real(m, *a))
+    out = E.check_all([mark(big, 1), mark("12", 2)], answer, [call(code, f"{big} 12")], "/data")["results"]
+    assert [r["status"] for r in out] == ["unchecked", "verified"] and "made up" in out[0]["reason"]
+
+
+def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path: Path):
+    import os
+    outside = tmp_path / "outside.txt"
+    outside.write_text("the secret line\n")
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "link.txt").symlink_to(outside)
+    os.mkfifo(data / "pipe")
+    assert "outside the folder" in check_mark(mark('"the secret line"'), quote("link.txt", 1, "the secret line"), [], str(data))["reason"]
+    assert check_mark(mark('"x"'), quote("pipe", 1, "x"), [], str(data))["status"] == "failed"

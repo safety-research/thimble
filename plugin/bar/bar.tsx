@@ -1,8 +1,8 @@
 // bar.tsx: the bar, thimble's line above the prompt, as one drawing. Its rows, top down:
 //
-//   the fix line   only while there is one (bar/fix.ts fixLineNow): a failure in red with `f fix this · F report only`,
-//                  a fix the person's thimble now has with `p submit · u undo`, or a notice that a fix went off. It
-//                  wraps, so the whole failure shows
+//   the failure line  only while there is one (bar/fix.ts failLineNow): a failure in red with `f fix this · F report
+//                  only`, or a notice. It wraps, so the whole failure shows
+//   the fix line   only while the person's thimble has a fix (bar/fix.ts fixLineNow), with `p submit · u undo`
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
 //                  Cards is on, an answer exists and no design runs; at its right `r coverage 43% (3/7 files)` and
 //                  `l 2 labels` while Labels and coverage is on (a click or the key opens the pane; register.ts says how
@@ -12,11 +12,12 @@
 // work shows. Card keys are never named here: a focused card names its own keys under its frame.
 import type { EngineInterface } from 'claude-code'
 
+import { textWidth } from '../core/text.js'
 import { vReady } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, needCounts } from './counts'
-import { fixLineNow, pressFix } from './fix'
+import { failLineNow, fixLineNow, pressFix } from './fix'
 import { FAIL_KEYS, USE_KEYS } from './fixask.js'
 
 type Engine = EngineInterface
@@ -34,7 +35,7 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
 /** One item of the bar: an optional key and its words, and the press that does what the key does. */
 type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown }
 
-const len = (s: string) => [...s].length
+const len = textWidth
 const itemLen = (x: Item) => (x.key ? len(x.key) + 1 : 0) + len(x.words)
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood. */
@@ -93,15 +94,15 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
     ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
   ] })
-  const line = preview ? null : await fixRow($, els, width)
-  return line ? [line, bar] : [bar]
+  return [...(preview ? [] : await lineRows($, els, width)), bar]
 }
 
-/** The fix line: what failed or what changed, whole, then its keys, each a press that does what the key does. */
-async function fixRow($: Engine, els: Any, width: number): Promise<Any | null> {
+/** The failure line and the fix line: what failed or what changed, whole, then its keys, each a press that does what
+ *  the key does. */
+async function lineRows($: Engine, els: Any, width: number): Promise<Any[]> {
   const { Box, Button, Text } = els
-  const l = await fixLineNow($)
-  if (!l) return null
+  const fail = await failLineNow($)
+  const fix = await fixLineNow($)
   const keys = (spec: string) => spec.split(' · ').flatMap((seg, i) => {
     const [k, ...rest] = seg.split(' ')
     const what = { f: 'fix', F: 'report', p: 'share', u: 'undo' }[k!] as 'fix' | 'report' | 'share' | 'undo'
@@ -110,8 +111,10 @@ async function fixRow($: Engine, els: Any, width: number): Promise<Any | null> {
       Button({ key: `fix-${what}`, plain: true, label: seg, onPress: () => pressFix($, what), children: [Text({ key: `fk${i}`, color: KEY_COLOR, bold: true, children: k }), Text({ key: `fw${i}`, dimColor: true, children: ` ${rest.join(' ')}` })] }),
     ]
   })
-  const row = (text: Any, spec: string | null) => Box({ key: 'fix-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [text, ...(spec ? [Text({ key: 'fix-gap', children: '   ' }), ...keys(spec)] : [])] })
-  if (l.kind === 'failed') return row(Text({ key: 'fix-text', color: 'error', wrap: 'wrap', children: `× ${l.text.replace(/^[×!]\s*/, '')}` }), FAIL_KEYS)
-  if (l.kind === 'applied') return row(Text({ key: 'fix-text', color: 'success', wrap: 'wrap', children: `✓ Your thimble has the fix: ${l.title}` }), USE_KEYS)
-  return row(Text({ key: 'fix-text', color: 'warning', wrap: 'wrap', children: l.text }), null)
+  const row = (key: string, text: Any, spec: string | null) => Box({ key, flexDirection: 'row', flexWrap: 'wrap', width, children: [text, ...(spec ? [Text({ key: `${key}-gap`, children: '   ' }), ...keys(spec)] : [])] })
+  const out: Any[] = []
+  if (fail?.kind === 'failed') out.push(row('fail-line', Text({ key: 'fail-text', color: 'error', wrap: 'wrap', children: `× ${fail.text.replace(/^[×!]\s*/, '')}` }), FAIL_KEYS))
+  else if (fail) out.push(row('fail-line', Text({ key: 'fail-text', color: 'warning', wrap: 'wrap', children: fail.text }), null))
+  if (fix) out.push(row('fix-line', Text({ key: 'fix-text', color: 'success', wrap: 'wrap', children: `✓ Your thimble has the fix: ${fix.title}` }), USE_KEYS))
+  return out
 }

@@ -1,21 +1,19 @@
-"""Where the kernel keeps its records.
+"""Where the kernel keeps its records: the layout of $THIMBLE_HOME that the plugin's core/layout.mjs writes down, with
+the same names (safe_name, folder_name; a test on each side checks one name).
 
-The folder under analysis (the root) is the person's record, and thimble writes nothing in it. Its records are kept
-under $THIMBLE_HOME/lean/folders/<the root's path as a name>/thimble/:
+The folder under analysis (the root) is the person's record, and thimble writes nothing in it. Under $THIMBLE_HOME
+(default ~/.thimble):
 
-    thimble/labels/<name>.json              each label with every version of its values (labels.py)
+    folders/<folder>/labels/<name>.json   each label of a root with every version of its values (labels.py)
+    cache/<folder>/                       the root's files' row counts, safe to delete
+    events/<conversation>.jsonl           the session's change feed: one line per change the plugin acts on (a label
+                                          whose records wait for the model, a fix's share that waits for the person),
+                                          so the plugin learns of it from the kernel, not from what a command printed
+    seen/<conversation>.jsonl             the files that Claude's own Read, Grep and Bash calls touched (the hooks
+                                          module writes it, coverage reads it)
 
-A root that already holds a thimble/labels folder of its own (the person made it, or an earlier thimble wrote it there)
-keeps its labels there.
-
-Under $THIMBLE_HOME/lean/events/<session>.jsonl the session's change feed: one line per change the plugin acts on (a
-label whose records wait for the model, a fix's share that waits for the person), so the plugin learns of it from the
-kernel, not from what a command printed.
-
-Outside it, under $THIMBLE_HOME/lean (default ~/.thimble/lean): seen/<session>.jsonl, where the hooks module keeps the
-files that Claude's own Read, Grep and Bash calls touched in each session (so a coding session in another folder never
-gets a thimble/ folder), and cache/<folder>/, the files' row counts, safe to delete. Nothing here writes into a source
-file.
+<folder> is folder_name of the root's real path. A root that already holds a thimble/labels folder of its own (the
+person made it, or an earlier thimble wrote it there) keeps its labels there. Nothing here writes into a source file.
 """
 from __future__ import annotations
 
@@ -34,10 +32,32 @@ def thimble_home() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or os.path.expanduser("~/.thimble"))
 
 
+def safe_name(s: str) -> str:
+    """A name for a file or a folder: letters, digits, - and _, at most 80 characters (layout.mjs safeName)."""
+    return re.sub(r"[^A-Za-z0-9_-]", "-", s)[:80] or "none"
+
+
+def short_hash(s: str) -> str:
+    """12 hex digits made from any text, two FNV-1a hashes over its code points (layout.mjs shortHash). Not for
+    security: it only keeps names apart."""
+    h1, h2 = 0x811C9DC5, 0x9747B28C
+    for ch in s:
+        h1 = ((h1 ^ ord(ch)) * 0x01000193) & 0xFFFFFFFF
+        h2 = ((h2 ^ ord(ch)) * 0x5BD1E995) & 0xFFFFFFFF
+    return f"{h1:08x}{h2:08x}"[:12]
+
+
+def folder_name(real: str) -> str:
+    """A folder's name under folders/ and cache/: the end of its path, to read, and a hash of the whole path, so two
+    folders never share one (layout.mjs folderName)."""
+    tail = re.sub(r"[^A-Za-z0-9_-]", "-", real)[-40:].lstrip("-")
+    return f"{tail or 'root'}-{short_hash(real)}"
+
+
 def kept_dir(root: Path) -> Path:
-    """Where a root's records are kept: under THIMBLE_HOME, named by the end of the root's path (the plugin's
-    core/env.ts finds them by the same name)."""
-    return thimble_home() / "lean" / "folders" / re.sub(r"[^A-Za-z0-9_-]", "-", str(root))[-120:] / DIR
+    """Where a root's labels are kept: folders/<folder_name of its real path>/ (the plugin's core/home.ts finds them by
+    the same name)."""
+    return thimble_home() / "folders" / folder_name(str(Path(root).resolve()))
 
 
 def records_dir(root: Path) -> Path:
@@ -92,7 +112,7 @@ class Store:
         self.root = Path(root).resolve() if root else find_root()
         self.session = session or session_id()
         self.dir = records_dir(self.root)
-        self.cache = thimble_home() / "lean" / "cache" / safe(str(self.root))[-100:]
+        self.cache = thimble_home() / "cache" / folder_name(str(self.root))
 
     def sub(self, name: str) -> Path:
         d = self.dir / name
@@ -102,15 +122,15 @@ class Store:
     # ---------------------------------------------------------------- the change feed
 
     def emit(self, row: dict[str, Any]) -> None:
-        """One event of the session's change feed: $THIMBLE_HOME/lean/events/<session>.jsonl, one JSON line each,
+        """One event of the session's change feed: $THIMBLE_HOME/events/<session>.jsonl, one JSON line each,
         appended in one write. A surface follows the file by its size; an event names its folder, so the reader needs
         no other context."""
         try:
-            d = thimble_home() / "lean" / "events"
+            d = thimble_home() / "events"
             d.mkdir(parents=True, exist_ok=True)
             row = {"t": round(time.time(), 3), "session": self.session, "root": str(self.root), **row}
             line = json.dumps(row, ensure_ascii=False, default=str) + "\n"
-            fd = os.open(d / f"{safe(self.session)}.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+            fd = os.open(d / f"{safe_name(self.session)}.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
             try:
                 os.write(fd, line.encode())
             finally:
@@ -123,9 +143,9 @@ class Store:
     def seen(self, session: str | None = "") -> list[dict[str, Any]]:
         """The Read, Grep and Bash calls the hooks module kept for this session (or `session`, or every session when
         None) whose working folder is under the root, with absolute paths."""
-        d = thimble_home() / "lean" / "seen"
+        d = thimble_home() / "seen"
         want = self.session if session == "" else session
-        files = sorted(d.glob("*.jsonl")) if want is None else [d / f"{safe(want)}.jsonl"]
+        files = sorted(d.glob("*.jsonl")) if want is None else [d / f"{safe_name(want)}.jsonl"]
         out = []
         root = str(self.root)
         for f in files:
@@ -169,8 +189,3 @@ class Store:
         tmp = p.with_name(p.name + ".tmp")
         tmp.write_text(json.dumps(obj, indent=1, ensure_ascii=False, default=str) + "\n")
         os.replace(tmp, p)
-
-
-def safe(s: str) -> str:
-    """A name for a file or folder: letters, digits, - and _ (the plugin's core/env.ts and core/feed.ts make the same)."""
-    return re.sub(r"[^A-Za-z0-9_-]", "-", s)[:120] or "none"

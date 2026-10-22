@@ -9,6 +9,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { fixAction, fixStore } from '../bar/fix'
+import { cut, textWidth } from '../core/text.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -24,8 +25,7 @@ const KIND_WORDS: Record<string, string> = {
 /** Keys and tokens are never kept. */
 const keepable = (h: Any) => !!h && h.kind !== 'key' && h.kind !== 'token'
 
-const len = (s: string) => [...s].length
-const cut = (s: string, n: number) => (len(s) <= n ? s : `${[...s].slice(0, Math.max(1, n - 1)).join('')}…`)
+const len = textWidth
 
 /** The files a diff changes, each with its lines added and removed, in the diff's order. */
 function diffFiles(patch: string): { file: string; add: number; del: number }[] {

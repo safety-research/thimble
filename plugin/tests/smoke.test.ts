@@ -15,7 +15,7 @@ function textOf(n: Any): string {
 }
 
 function world(on: Any) {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', PATH: '/usr/bin' })
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', PATH: '/usr/bin', TMPDIR: '/made-up/tmp' })
   const clock = mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-smoke' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))

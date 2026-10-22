@@ -1,10 +1,10 @@
 // events.mjs: the lines thimble's telemetry writes to the session's events, and how `thimble dev stats` reads them.
 // Pure.
 //
-// The session's events are one file, $THIMBLE_HOME/lean/events/<session>.jsonl: the one append-only log of the session,
-// which the kernel writes its change feed to (core/feed.ts reads it) and telemetry writes its lines to. It is under
-// THIMBLE_HOME, not the data folder's thimble/, because a session's log starts before any data folder is known, and
-// because the kernel writes nothing into a folder that holds no data (a coding session gets no thimble/ folder).
+// The session's events are one file, $THIMBLE_HOME/events/<conversation>.jsonl (core/layout.mjs eventsFile): the one
+// append-only log of the session, which the kernel writes its change feed to (core/feed.ts reads it) and telemetry
+// writes its lines to. It is under THIMBLE_HOME, not the data folder, because a session's log starts before any data
+// folder is known, and because the kernel writes nothing into the folder under analysis.
 // Readers skip the kinds they do not know. Telemetry adds:
 //
 //   {kind: 'call', feature, prompt, model, usage, ms, blocked, ok, ...}   one model call thimble made (a label's read).
@@ -33,11 +33,6 @@ export function usageOf(u) {
   const n = k => (Number.isFinite(x[k]) ? x[k] : 0)
   return { input_tokens: n('input_tokens'), cache_creation_input_tokens: n('cache_creation_input_tokens'), cache_read_input_tokens: n('cache_read_input_tokens'), output_tokens: n('output_tokens') }
 }
-
-export const safeName = s => String(s || '').replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
-
-/** Where a session's events are. */
-export const eventsFile = (home, session) => `${String(home).replace(/\/+$/, '')}/lean/events/${safeName(session)}.jsonl`
 
 /** One call's line. */
 export function callLine({ feature, prompt = null, model = null, usage = null, ms = 0, blocked = false, ok = true, ...rest }) {

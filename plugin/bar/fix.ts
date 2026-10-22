@@ -2,13 +2,15 @@
 // thimble, load it into the person's thimble, and build the share (plugin/engine/kernel/fix.py); this module shows
 // what the person needs to see of that and gives them its keys.
 //
-//   failNotice    a failure line: the notice, whole, with `f fix this · F report only` (bar.tsx draws it), until the
+//   failNotice    the failure line: the notice, whole, with `f fix this · F report only` (bar.tsx draws it), until the
 //                 person types their next prompt, or until what failed works again (failCleared, by the notice's
-//                 `about`: a card that draws again). f or F sends a turn to main (fixask.js)
+//                 `about`: a card that draws again). f or F sends a turn to main (fixask.js). noticeLine is the same
+//                 line with no keys
 //   refreshFixes  $THIMBLE_HOME/fixes/*/fix.json: a fix that works shows in the bar (`fixing: <title>`); one that the
-//                 person's thimble now uses shows one line, `✓ Your thimble now has the fix: <title>`, with
-//                 `p share it · u undo`. u runs `thimble fix undo` as the person. Each switch it sees (a fix on, a new
-//                 round, the fix off) loads the plugins once, so the person never types /reload-plugins
+//                 person's thimble now uses shows the fix line, `✓ Your thimble now has the fix: <title>`, with
+//                 `p share it · u undo`, under the failure line and apart from it, so a failure never takes its keys.
+//                 u runs `thimble fix undo` as the person. Each switch it sees (a fix on, a new round, the fix off)
+//                 loads the plugins once, so the person never types /reload-plugins
 //   fixCommand    /thimble:fix, the one way in: words are the change the person wants (the command's text asks Claude,
 //                 commands/fix.md); submit, undo and try do what p and u do, for the fix that is on or the newest;
 //                 remove turns a fix off and deletes its copy and its record
@@ -18,29 +20,33 @@
 //                 writes its sha256 into share/ask.json and gives the secret on stdin. No file, argument or feed line holds it, so Claude's
 //                 shell cannot send
 //
-//   state: fixLine (the line whose keys the bar names: a failure, a fix in use, or a notice that a fix went off),
-//   fixes (the fixes that work), fixSeen (what refreshFixes last saw), fixShare (a fix's share, by slug)
+//   state: failLine (a failure, or a notice), fixLine (the fix in use), fixes (the fixes that work), fixSeen (what
+//   refreshFixes last saw), fixShare (a fix's share, by slug)
 import type { EngineInterface } from 'claude-code'
 
-import { rootHere, runThimble, thimbleHome } from '../core/env'
+import { rootHere, runThimble } from '../core/env'
+import { thimbleHome } from '../core/home'
+import { fixesDir } from '../core/layout.mjs'
 import { closePane, openPane, paneNow } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
-import { FAIL_KEYS, fixRequest, fixVerb, lineKey, shareRequest, USE_KEYS } from './fixask.js'
+import { cut } from '../core/text.js'
 import { busy, busySteps, busyWhile } from './busy'
+import { FAIL_KEYS, fixRequest, fixVerb, lineKey, shareRequest, USE_KEYS } from './fixask.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
+const FAIL = { plugin: 'thimble', key: 'failLine' } as const
 const LINE = { plugin: 'thimble', key: 'fixLine' } as const
 const FIXES = { plugin: 'thimble', key: 'fixes' } as const
 const SHARE = { plugin: 'thimble', key: 'fixShare' } as const
 const SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/
 
-export type FixLine = { kind: 'failed'; text: string; about?: string } | { kind: 'applied'; slug: string; title: string; said?: string } | { kind: 'notice'; text: string; about?: string }
+export type FailLine = { kind: 'failed' | 'notice'; text: string; about?: string }
+export type FixLine = { slug: string; title: string; said?: string }
 type Fix = { slug: string; title: string; kind: string; status: string; created: number; used: number }
 
-const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
 
 
 async function readText($: Engine, path: string): Promise<string | null> {
@@ -103,49 +109,55 @@ async function reloadPlugins($: Engine): Promise<void> {
 export function failNotice($: Engine, text: string, about?: string): void {
   const t = String(text || '').trim()
   if (!t) return
-  void $.state.set(LINE, { kind: 'failed', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
+  void $.state.set(FAIL, { kind: 'failed', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
 }
 
-/** A notice the person should read, with no keys: one line above the prompt, until the person's next prompt, or
- *  until what it is about is done (failCleared with the same `about`). */
+/** A notice the person should read, with no keys: the failure line's place, until the person's next prompt, or until
+ *  what it is about is done (failCleared with the same `about`). */
 export function noticeLine($: Engine, text: string, about?: string): void {
   const t = String(text || '').trim()
-  if (t) void $.state.set(LINE, { kind: 'notice', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
+  if (t) void $.state.set(FAIL, { kind: 'notice', text: t, ...(about ? { about } : {}) }).catch(() => undefined)
 }
 
 /** What a failure line or a notice was about works again: the line goes, when it is still about that. */
 export async function failCleared($: Engine, about: string): Promise<void> {
-  const l = await fixLineNow($)
-  if ((l?.kind === 'failed' || l?.kind === 'notice') && l.about === about) await $.state.set(LINE, null)
+  if ((await failLineNow($))?.about === about) await $.state.set(FAIL, null)
 }
 
-/** The line whose keys the bar names now, if any. */
+/** The failure line or notice the bar shows now, if any. */
+export async function failLineNow($: Engine): Promise<FailLine | null> {
+  return ((await $.state.get(FAIL)).value ?? null) as FailLine | null
+}
+
+/** The fix in use the bar shows now, if any. */
 export async function fixLineNow($: Engine): Promise<FixLine | null> {
   return ((await $.state.get(LINE)).value ?? null) as FixLine | null
 }
 
-/** The person typed their next prompt: a failure line's keys go, and a notice that a fix went off (they have seen it).
- *  A fix's line stays until p or u. */
+/** The person typed their next prompt: the failure line goes (they have seen it, and its keys with it). The fix line
+ *  stays until p or u. */
 export async function promptTyped($: Engine): Promise<void> {
-  const l = await fixLineNow($)
-  if (l?.kind === 'failed' || l?.kind === 'notice') await $.state.set(LINE, null)
+  if (await failLineNow($)) await $.state.set(FAIL, null)
 }
 
-/** What a key does to the fix line now, or null: f and F on a failure, p and u on a fix in use. */
-export async function fixKeyOf($: Engine, k: string): Promise<'fix' | 'report' | 'share' | 'undo' | null> {
-  return lineKey(await fixLineNow($), k) as 'fix' | 'report' | 'share' | 'undo' | null
+/** A key at an empty prompt that the two lines take now: f and F on a failure, p and u on a fix in use; its work runs
+ *  once the word window closed (hooks/keys.ts). */
+export async function fixKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
+  const what = lineKey({ fail: await failLineNow($), fix: await fixLineNow($) }, k) as 'fix' | 'report' | 'share' | 'undo' | null
+  return what ? { later: () => pressFix($, what) } : null
 }
 
 /** The key's work: a turn to main (f, F, p with no draft), the preview (p), or undo (u). */
 export async function pressFix($: Engine, what: 'fix' | 'report' | 'share' | 'undo'): Promise<void> {
-  const l = await fixLineNow($)
-  if (!l) return
-  if (l.kind === 'failed' && (what === 'fix' || what === 'report')) {
-    await $.state.set(LINE, null)
+  if (what === 'fix' || what === 'report') {
+    const l = await failLineNow($)
+    if (l?.kind !== 'failed') return
+    await $.state.set(FAIL, null)
     await $.prompt.submit({ text: fixRequest({ failure: l.text, kind: what }) })
     return
   }
-  if (l.kind !== 'applied') return
+  const l = await fixLineNow($)
+  if (!l) return
   if (what === 'undo') { await undoFix($, l.slug, l.title); return }
   await submitFix($, l.slug, l.title)
 }
@@ -179,8 +191,7 @@ async function removeFix($: Engine, slug: string, title = slug): Promise<string>
   // a fix that was on went off: refreshFixes loads the release
   void refreshFixes($).catch(() => undefined)
   if (!r.ok) return `× The fix was not removed: ${cut(said(r.out) || 'thimble fix remove gave nothing', 220)}`
-  const l = await fixLineNow($)
-  if (l?.kind === 'applied' && l.slug === slug) await $.state.set(LINE, null)
+  if ((await fixLineNow($))?.slug === slug) await $.state.set(LINE, null)
   const out = lastLine(r.out)
   await tellAtNextPrompt($, 'fix', `The analyst removed the fix ${slug}. ${out}`)
   const size = /\(([^()]+)\)\.?$/.exec(out)?.[1]
@@ -192,7 +203,7 @@ async function removeFix($: Engine, slug: string, title = slug): Promise<string>
  *  draft and the review opens on its fix_ask line. */
 async function submitFix($: Engine, slug: string, title: string): Promise<string> {
   const h = await thimbleHome($)
-  if (await readJson($, `${h}/fixes/${slug}/share/ask.json`)) { await openShare($, slug); return '' }
+  if (await readJson($, `${fixesDir(h)}/${slug}/share/ask.json`)) { await openShare($, slug); return '' }
   // the draft may come from a subagent, whose calls do not reach this plugin: its ask is looked for until it opens
   shareWait.add(slug)
   await $.prompt.submit({ text: shareRequest({ slug, title }) })
@@ -203,7 +214,7 @@ async function submitFix($: Engine, slug: string, title: string): Promise<string
 /** The fix this session runs from, when thimble was started with --plugin-dir on a fix's copy. */
 async function ownFix($: Engine): Promise<string | null> {
   const root = String($.plugin.root || '').replace(/\/+$/, '')
-  const pre = `${await thimbleHome($)}/fixes/`
+  const pre = `${fixesDir(await thimbleHome($))}/`
   if (!root.startsWith(pre)) return null
   const m = /^([a-z0-9][a-z0-9-]{0,79})\/worktree\/plugin$/.exec(root.slice(pre.length))
   return m ? m[1]! : null
@@ -225,7 +236,7 @@ async function currentFix($: Engine, fixes: Fix[], active: string | null, verb =
 export async function fixCommand($: Engine, args: string): Promise<{ text?: string } | null> {
   const v = fixVerb(args) as { verb: string; slug?: string; text?: string }
   // the person acts on their fixes: a notice that one went off has been seen
-  if ((await fixLineNow($))?.kind === 'notice') await $.state.set(LINE, null)
+  if ((await failLineNow($))?.kind === 'notice') await $.state.set(FAIL, null)
   if (v.verb === 'change') return null
   const { fixes, active } = await listFixes($)
   if (v.verb === 'status') {
@@ -299,14 +310,14 @@ export function forgetFixes(): void {
 /** The fixes in $THIMBLE_HOME/fixes, and which is in use. */
 async function listFixes($: Engine): Promise<{ fixes: Fix[]; active: string | null }> {
   const h = await thimbleHome($)
-  const r = await $.process.run(['ls', '-1', `${h}/fixes`], { timeoutMs: 5000 }).catch(() => null)
+  const r = await $.process.run(['ls', '-1', `${fixesDir(h)}`], { timeoutMs: 5000 }).catch(() => null)
   const names = r && r.exitCode === 0 ? String(r.stdout || '').split('\n').map(s => s.trim()).filter(s => SLUG.test(s)) : []
   const fixes: Fix[] = []
   for (const slug of names) {
-    const f = await readJson($, `${h}/fixes/${slug}/fix.json`)
+    const f = await readJson($, `${fixesDir(h)}/${slug}/fix.json`)
     if (f && typeof f === 'object') fixes.push({ slug, title: String(f.title || slug), kind: String(f.kind || 'fix'), status: String(f.status || ''), created: Number(f.created) || 0, used: Number(f.used) || 0 })
   }
-  const active = ((await readText($, `${h}/fixes/active`)) || '').trim() || null
+  const active = ((await readText($, `${fixesDir(h)}/active`)) || '').trim() || null
   return { fixes, active }
 }
 
@@ -349,7 +360,7 @@ export async function refreshFixes($: Engine): Promise<void> {
     if (was?.status !== 'applied' || was.used !== f.used) {
       // a fix turned on, or a later round of the same fix: the person tries the newest copy at once
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
-      await $.state.set(LINE, { kind: 'applied', slug: f.slug, title: f.title })
+      await $.state.set(LINE, { slug: f.slug, title: f.title })
       // the marketplace points at the copy (fixes/active), which Claude Code reads in place: the plugins load again
       // once the session is idle, so the person tries this round at once. That holds when the session already runs
       // the copy, from an earlier round
@@ -358,7 +369,7 @@ export async function refreshFixes($: Engine): Promise<void> {
       // a round changed what the fix does, and its title says so now (`thimble fix title`)
       $.ui.toast(`✓ Your thimble now has the fix: ${f.title}   ${USE_KEYS}`)
       const l = await fixLineNow($)
-      if (l?.kind === 'applied' && l.slug === f.slug) await $.state.set(LINE, { ...l, title: f.title })
+      if (l?.slug === f.slug) await $.state.set(LINE, { ...l, title: f.title })
     }
   }
   looked = true
@@ -379,28 +390,29 @@ export async function refreshFixes($: Engine): Promise<void> {
  *  one line: still on (`thimble 0.11 + your fix '…' · u undo`), in the release now, or no longer fitting. The line
  *  shows once per session, also across a reload; a switch loads the plugin again, so the session runs what it says. */
 async function followFix($: Engine, f: Fix): Promise<void> {
-  const before = await readJson($, `${await thimbleHome($)}/fixes/${f.slug}/fix.json`)
+  const before = await readJson($, `${fixesDir(await thimbleHome($))}/${f.slug}/fix.json`)
   const r = await kernel($, ['follow'])
   const line = lastLine(r.out)
   if (!line) return
   const off = /you are on the release/.test(line)
   const was = await fixLineNow($)
-  const shown = was?.kind === 'applied' && was.slug === f.slug ? was.said : undefined
+  const shown = was?.slug === f.slug ? was.said : undefined
   if (off) {
     // the fix went off (no longer fits, or in the release now): the whole line, once, as a row of the transcript, and
     // on the bar until the person's next prompt; never a toast, which cuts it and goes by itself
-    await $.state.set(LINE, { kind: 'notice', text: line })
+    await $.state.set(LINE, null)
+    noticeLine($, line)
     $.ui.log(line)
   } else {
-    await $.state.set(LINE, { kind: 'applied', slug: f.slug, title: f.title, said: line })
+    await $.state.set(LINE, { slug: f.slug, title: f.title, said: line })
     if (shown !== line) sayLine($, r.ok ? line : `× ${cut(line, 200)}`)
   }
-  const after = await readJson($, `${await thimbleHome($)}/fixes/${f.slug}/fix.json`)
+  const after = await readJson($, `${fixesDir(await thimbleHome($))}/${f.slug}/fix.json`)
   const moved = off || (before?.base && after?.base && before.base !== after.base)
   if (moved) {
     await tellAtNextPrompt($, 'fix', `thimble's fix ${f.slug} followed the newest release: ${line}`)
     // this load is the switch's one: refreshFixes does not load it again when it sees the fix off
-    wasActive = ((await readText($, `${await thimbleHome($)}/fixes/active`)) || '').trim() || null
+    wasActive = ((await readText($, `${fixesDir(await thimbleHome($))}/active`)) || '').trim() || null
     await $.state.set(SEEN, { fixes: Object.fromEntries(seen), active: wasActive }).catch(() => undefined)
     reloadDue = true
     await reloadPlugins($)
@@ -416,7 +428,7 @@ async function fixesWorking($: Engine): Promise<{ slug: string; title: string; k
 
 /** A fix's share as the preview reads it: never the ask's id, only whether an ask waits. */
 async function loadShare($: Engine, slug: string): Promise<void> {
-  const d = `${await thimbleHome($)}/fixes/${slug}`
+  const d = `${fixesDir(await thimbleHome($))}/${slug}`
   const fix = await readJson($, `${d}/fix.json`)
   if (!fix) { await $.state.set({ ...SHARE, id: slug }, { problem: `There is no fix ${slug} in this thimble.` }); return }
   const scan = await readJson($, `${d}/share/scan.json`)
@@ -450,7 +462,7 @@ export async function openShare($: Engine, slug: string): Promise<boolean> {
 /** The asks whose preview opened, by fix and the ask's time (never its id), so each opens once. */
 const asked = new Set<string>()
 async function openAskOnce($: Engine, slug: string, quiet = false): Promise<void> {
-  const a = await readJson($, `${await thimbleHome($)}/fixes/${slug}/share/ask.json`)
+  const a = await readJson($, `${fixesDir(await thimbleHome($))}/${slug}/share/ask.json`)
   if (!a) return
   const key = `${slug}|${a.created ?? ''}`
   if (asked.has(key)) return
@@ -475,7 +487,7 @@ async function closeShare($: Engine, slug: string): Promise<void> {
  *  share/ask.json for the kernel to check. The secret itself goes to the kernel on stdin, so no file, argument or line
  *  of the change feed holds it; null when no draft waits. */
 async function keyPress($: Engine, slug: string): Promise<string | null> {
-  const path = `${await thimbleHome($)}/fixes/${slug}/share/ask.json`
+  const path = `${fixesDir(await thimbleHome($))}/${slug}/share/ask.json`
   const a = await readJson($, path)
   if (!a || typeof a !== 'object') return null
   const bytes = crypto.getRandomValues(new Uint8Array(32))
@@ -509,7 +521,7 @@ export async function fixAction($: Engine, args: Record<string, unknown>, a: Rec
     // after the preview has drawn its answer to the key
     $.clock.after(300, () => { void closeShare($, slug).catch(() => undefined) })
     // the line after the send, in the person's words: where it went
-    const fx = await readJson($, `${await thimbleHome($)}/fixes/${slug}/fix.json`) || {}
+    const fx = await readJson($, `${fixesDir(await thimbleHome($))}/${slug}/fix.json`) || {}
     const line = answer === 'file' ? `✓ Saved as one file, nothing sent: ${fx.file || ''}`
       : fx.pr_url ? `✓ Sent under your GitHub login: draft pull request ${fx.pr_url} · issue ${fx.issue_url || ''}`
         : `✓ Sent under your GitHub login: issue ${fx.issue_url || ''}`

@@ -1,55 +1,25 @@
-// register.ts: the bar above the prompt, its keys, and its panes.
+// register.ts: the bar above the prompt, and its panes.
 //
-//   registerFixKeys  f and F on a failure line, p and u on a fix in use, at an empty prompt (bar/fix.ts). It comes
-//                    before the cards' keys, so a failure's keys win while its line shows.
-//   registerBar      the bar (bar.tsx) in the AbovePrompt band; r and l at an empty prompt open coverage and the labels
-//                    while the bar names them. Coverage leaves the keys at the prompt, so r again closes it; the labels
-//                    pane takes the keys (its number keys check records), and esc closes it. /thimble-settings and a
-//                    click on `thimble` open the settings; the fixes' lifecycle (a `thimble fix` call, /thimble:fix, the
-//                    person's next prompt; a `fix_ask` line of the change feed is core/feed.ts's); the counts after each
-//                    of main's turns (counts.ts).
-//
-// A bar key acts WORD_MS after it is pressed: a letter typed in that time means the person is typing a word that starts
-// with it, so the key and the letter go back to the prompt and nothing runs. One key waits at a time, for every key the
-// bar names; the fix keys' hook sees each letter at an empty prompt first, so it gives the word back.
+//   registerBar  the bar (bar.tsx) in the AbovePrompt band. /thimble-settings and a click on `thimble` open the
+//                settings; the fixes' lifecycle (a `thimble fix` call, /thimble:fix, the person's next prompt; a
+//                `fix_ask` line of the change feed is core/feed.ts's); the counts after each of main's turns (counts.ts)
+//   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
+//                Coverage leaves the keys at the prompt, so r again closes it; the labels pane takes the keys (its
+//                number keys check records), and esc closes it
 import type { EngineInterface, Register } from 'claude-code'
 
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { recount } from './counts'
-import { failCleared, failNotice, fixCommand, fixKeyOf, noticeLine, pressFix, promptTyped, refreshFixes } from './fix'
+import { failCleared, fixCommand, noticeLine, promptTyped, refreshFixes } from './fix'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** How long after a key a letter means the person is typing a word that starts with it. */
-export const WORD_MS = 350
-
-/** The bar key pressed last, until WORD_MS has passed or a letter came. */
-let waiting: { key: string; at: number; cancelled: boolean } | null = null
-
-/** A letter straight after a bar key: the key began a word, which goes back to the prompt whole. */
-function wordGoesOn(k: string, now: number, inputText: string): { text: string; cursor: number } | null {
-  const w = waiting
-  if (!w || w.cancelled || now - w.at >= WORD_MS || !/^\p{L}$/u.test(k)) return null
-  w.cancelled = true
-  waiting = null
-  return { text: `${w.key}${inputText}`, cursor: w.key.length + inputText.length }
-}
-
-/** Take the key: its work runs WORD_MS later, unless a letter came first. */
-function holdKey($: Engine, key: string, now: number, work: () => Promise<unknown>): { text: string; cursor: number } {
-  const mine = { key, at: now, cancelled: false }
-  waiting = mine
-  $.clock.after(WORD_MS, () => {
-    if (mine.cancelled) return
-    if (waiting === mine) waiting = null
-    void work().catch(err => failNotice($, `The ${key} key did not run: ${String((err as Error)?.message || err).slice(0, 200)}`))
-  })
-  return { text: '', cursor: 0 }
-}
+/** The keys the bar takes, while it names them. */
+export const BAR_KEYS = ['r', 'l']
 
 const TITLES = { coverage: 'Coverage', labels: 'Labels', settings: 'thimble settings' } as const
 
@@ -76,17 +46,10 @@ export async function openSettings($: Engine): Promise<void> {
   if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) noticeLine($, 'Claude Code did not open the settings pane here. Type /thimble-settings to open it.')
 }
 
-export const registerFixKeys: Register = on => {
-  on('prompt.edit', { origin: { kind: 'composer' }, text: /^$/ }, async ($, e, next) => {
-    const k = e.key
-    if (!k || k.ctrl || k.meta) return next(e)
-    const now = Number(await $.clock.now())
-    const word = wordGoesOn(k.key, now, e.inputText)
-    if (word) return word
-    const what = await fixKeyOf($, k.key)
-    if (!what) return next(e)
-    return holdKey($, k.key, now, () => pressFix($, what))
-  }).catch(($, e, next) => next(e))
+/** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. */
+export async function barKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
+  if (!BAR_KEYS.includes(k) || !(await barKeys($)).has(k)) return null
+  return { later: () => togglePane($, k === 'r' ? 'coverage' : 'labels') }
 }
 
 export const registerBar: Register = on => {
@@ -136,14 +99,6 @@ export const registerBar: Register = on => {
   on('command.run', { command: /^(thimble:)?fix$/ }, async ($, e, next) => {
     const r = await fixCommand($, e.args)
     return r ?? next(e)
-  }).catch(($, e, next) => next(e))
-
-  // r and l at an empty prompt, while the bar names them
-  on('prompt.edit', { origin: { kind: 'composer' }, text: /^$/, key: { key: /^[rl]$/ } }, async ($, e, next) => {
-    const k = e.key!
-    if (k.ctrl || k.meta || !(await barKeys($)).has(k.key)) return next(e)
-    const kind = k.key === 'r' ? 'coverage' : 'labels'
-    return holdKey($, k.key, Number(await $.clock.now()), () => togglePane($, kind))
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

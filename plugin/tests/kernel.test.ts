@@ -26,7 +26,7 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   })
   on('fs.exists', (_$, e) => ({ value: e.path in files }))
   on('fs.read', (_$, e) => ({ value: files[e.path] ?? '' }))
-  mock.env(on, { THIMBLE_HOME: '/th', HOME: '/home/t' })
+  mock.env(on, { THIMBLE_HOME: '/th', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   const env: Record<string, string | undefined> = {}
   on('env.set', (_$, e) => {
     env[e.name] = e.value
@@ -46,7 +46,7 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   expect(read.result).toBe('     3\tone\n     4\ttwo\n')
   await $.tool.call({ tool: 'Grep', pattern: 'hit', path: '/data', output_mode: 'content', '-n': true } as never)
   await $.tool.call({ tool: 'Bash', command: 'head -3 events.jsonl' } as never)
-  const kept = Object.entries(files).find(([p]) => p.startsWith('/th/lean/seen/'))
+  const kept = Object.entries(files).find(([p]) => p.startsWith('/th/seen/'))
   expect(kept).toBeDefined()
   const rows = kept![1].trim().split('\n').map(l => JSON.parse(l))
   expect(rows.map(r => r.tool)).toEqual(['Read', 'Grep', 'Bash'])
@@ -56,7 +56,7 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   // and the rows its output named by their refs
   expect(rows[2]).toMatchObject({ command: 'head -3 events.jsonl', out_lines: 3, refs: ['events.jsonl#L2'] })
   expect(String(rows[0].cwd)).toBe('/data')
-  expect(kept![0]).toBe('/th/lean/seen/s-1.jsonl')
+  expect(kept![0]).toBe('/th/seen/s-1.jsonl')
   expect(env.THIMBLE_SESSION).toBe('s-1')
   // the folder the session started in, where `thimble` keeps the records after a `cd` (kernel/store.py find_root)
   expect(env.THIMBLE_START).toBe('/data')

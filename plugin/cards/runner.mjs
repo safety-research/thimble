@@ -1,33 +1,36 @@
 // runner.mjs: the card runner. One Node process per session runs every card's view, keeps each card's state and
 // handlers, and makes the text copy of what a card draws. The hooks (ask.ts) start it and talk to it over a Unix socket.
 //
-//   node --permission --allow-fs-read=<plugin>/cards --allow-fs-read=<cards of the session> --allow-fs-write=<run dir>
+//   env -i PATH=… node --permission --allow-fs-read=<plugin>/cards --allow-fs-read=<plugin>/core/text.js
+//        --allow-fs-read=<cards of the session> --allow-fs-write=<run dir> --disallow-code-generation-from-strings
 //        runner.mjs <socket>
 //
-// The process can read the plugin's cards/ folder and the session's card copies, and write only its socket's folder:
-// no child process, no worker, no network of its own. Each card version runs in a `vm` context of its own that holds
-// only the JavaScript built-ins, the card's rows (JSON text, parsed inside the context) and the view's source compiled
-// as a function. Only strings cross between this process and a context: the request goes in as JSON text, the drawing
-// comes out as JSON text, and every exception is caught inside the context and said as text. Code generation from
-// strings is off (no eval, no Function), there are no timers, and each call has a time limit. The context keeps the
-// card's state and its handlers (a Button's onPress, the onPointer and onKey listeners) between calls.
+// The boundary is the `vm` context each card version runs in: it holds only the JavaScript built-ins, the card's rows
+// (JSON text, parsed inside the context) and the view's source compiled as a function. Only strings cross between this
+// process and a context: the request goes in as JSON text, the drawing comes out as JSON text, and every exception is
+// caught inside the context and said as text. Code generation from strings is off (no eval, no Function), there are no
+// timers, and each call has a time limit. The context keeps the card's state and its handlers (a Button's onPress, the
+// onPointer and onKey listeners) between calls. Node's documentation says a `vm` context is no security mechanism on
+// its own, so the process around it holds little: it starts with an empty environment, Node's permission model lets it
+// read only the plugin's cards/ code and the session's card copies and write only its socket's folder, and it starts
+// no child process or worker. That permission model does not cover the network in Node 22; nothing in a context can
+// reach the network, since no module, `process` or `fetch` is in it.
 //
 // Requests are POST /<op> with a JSON body; each answers JSON: {ok: true, ...} or {ok: false, error}.
-//   load     {id, version, title, view, rows, state, query, width}  a new version from its view source and rows file;
+//   load     {id, version, title, view, rows, state, width}  a new version from its view source and rows file;
 //            answers the tree, state, keys, the rows' summary and the text copy. A version that fails keeps the old one.
-//   draw     {id, width, text?}       the tree at a width (and its text copy)
+//   draw     {id, width}              the tree at a width, which the card is drawn at from now on
+//   copy     {id, width}              the text copy at a width; the card stays as it is
 //   key      {id, key}                the view's onKey; `handled` says whether it has one
 //   press    {id, button}             a Button's onPress, by the number the tree gives it
 //   pointer  {id, down, up}           a click: the onPointer listener gets the down, then the up
-//   query    {id, text}               the `/` search: props.query (null ends it)
-//   undo     {id, n}                  the state and search as they were before the last n keys
-//   act      {id, actions, width}     keys, clicks and searches in order, a text copy after each, then the card as it was
-//   unload   {id}
+//   undo     {id, n}                  the state as it was before the last n keys
+//   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was
 //   ping
 // Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), and the state
-// and the search to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again
-// from its copy. Every answer carries `seq`, which grows with each request, so the hooks keep the newest drawing when two
-// answers come back out of order.
+// to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again from its copy.
+// Every answer carries `seq`, which grows with each request, so the hooks keep the newest drawing when two answers come
+// back out of order.
 //
 // The tree holds only what Claude Code's Client draws: a Button's children are strings and Text, and a Text's are
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
@@ -116,7 +119,7 @@ export function checkView(src) {
 // ------------------------------------------------------------------------------------------------- inside a context
 
 // The code each context runs first. It defines one global that cannot be changed, __thimble, whose call(op, json)
-// answers JSON text. It holds the rows, the state, the search, the width, the handlers of the last drawing and the
+// answers JSON text. It holds the rows, the state, the width, the handlers of the last drawing and the
 // view's functions. The rows' text is the one value put on the context's global from outside, before any code of the
 // view has run; init takes it off.
 const PRELUDE = new vm.Script(String.raw`
@@ -134,9 +137,9 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     Button: ['label', 'plain', 'dimColor', 'variant'],
   }
   const BORDERS = ['single', 'double', 'round', 'bold', 'singleDouble', 'doubleSingle', 'classic', 'arrow', 'dashed', 'quote']
-  let rows = [], data = null, title = '', state, query = null, columns = 80
+  let rows = [], data = null, title = '', state, columns = 80
   let fns = null, pointer = null, keyListener = null, handlers = [], dirty = false, nodes = 0, notes = []
-  // the state and search before each of the last keys, newest last, for undo; any other event of the person's ends it
+  // the state before each of the last keys, newest last, for undo; any other event of the person's ends it
   let undoable = []
   const element = t => function (props) {
     const p = props && typeof props === 'object' ? props : {}
@@ -153,13 +156,10 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     get state() { return state },
     setState(next) { state = next; dirty = true },
     get columns() { return columns },
-    rows: 0,
     onPointer(fn) { pointer = typeof fn === 'function' ? fn : null; return () => { pointer = null } },
     onKey(fn) { keyListener = typeof fn === 'function' ? fn : null; return () => { keyListener = null } },
-    every() { return () => {} },
-    post() {},
   })
-  const props = () => ({ title, rows, data, query, columns })
+  const props = () => ({ title, rows, data, columns })
   // the characters a terminal would act on instead of drawing: C0 and C1 controls but the line break; a tab is a space
   const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
   const clean = v => Str(v).replace(/\t/g, ' ').replace(CONTROL, '')
@@ -264,7 +264,6 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       try { rows = parseRows(text) } catch (e) { return { ok: false, phase: 'rows', error: errorOf(e) } }
       title = Str(a.title || '')
       columns = a.width
-      query = typeof a.query === 'string' ? a.query : null
       state = a.state == null ? undefined : a.state
       let got
       try { got = view() } catch (e) { return { ok: false, phase: 'view', error: errorOf(e) } }
@@ -273,6 +272,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       return { summary: summary(), keys: typeof got.keys === 'string' ? got.keys : '' }
     },
     draw(a) { if (a.width) columns = a.width; return {} },
+    copy() { return {} },
     key(a) {
       const f = typeof fns.onKey === 'function' ? fns.onKey : keyListener
       if (!f) return { handled: false }
@@ -292,33 +292,37 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       if (pointer) pointer({ type: 'up', x: a.up.x, y: a.up.y, button: b })
       return { handled: true }
     },
-    query(a) { query = typeof a.text === 'string' ? a.text : null; return {} },
     undo(a) {
       const n = Math.min(undoable.length, Math.max(0, Math.trunc(Number(a.n) || 0)))
       if (!n) return {}
       const b = undoable.splice(undoable.length - n)[0]
-      state = b.state === 'null' ? undefined : parse(b.state)
-      query = b.query
+      state = b === 'null' ? undefined : parse(b)
       return {}
     },
-    save() { return { saved: saved(), query } },
-    restore(a) { state = a.saved == null ? undefined : parse(a.saved); query = a.query; undoable = []; return {} },
+    save() { return { saved: saved() } },
+    restore(a) { state = a.saved == null ? undefined : parse(a.saved); undoable = []; return {} },
   }
-  // an event the view fails on is undone: the card keeps the state and search it had before it
+  // a drawing at another width, for a text copy: the card keeps its width and the handlers of the tree on screen
+  function peek(width) {
+    const was = columns, kept = handlers
+    columns = width
+    try { return draw() } finally { columns = was; handlers = kept }
+  }
+  // an event the view fails on is undone: the card keeps the state it had before it
   function call(op, json) {
     let before = null
     try {
-      if (op === 'key' || op === 'press' || op === 'pointer' || op === 'query') before = { state: saved(), query }
+      if (op === 'key' || op === 'press' || op === 'pointer') before = saved()
       const a = parse(json)
       const r = OPS[op](a)
       if (r.ok === false) return stringify(r)
       if (op === 'key') undoable = undoable.concat([before]).slice(-16)
       else if (before) undoable = []
-      const d = draw()
-      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, notes: d.notes, state: saved(), query }))
+      const d = op === 'copy' ? peek(a.width) : draw()
+      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, notes: d.notes, state: saved() }))
     } catch (e) {
       try {
-        if (before) { state = before.state === 'null' ? undefined : parse(before.state); query = before.query }
+        if (before) state = before === 'null' ? undefined : parse(before)
         return stringify({ ok: false, phase: op === 'init' ? 'view' : op, error: errorOf(e) })
       } catch (_) { return '{"ok":false,"error":"the view failed"}' }
     }
@@ -393,19 +397,28 @@ function load(a) {
     return { ok: false, phase: 'view', error: `the view does not parse${line ? ` (line ${line})` : ''}: ${e.message}` }
   }
   const card = { ctx, version: a.version, width: a.width, tree: null, view }
-  const r = inContext(card, 'init', { title: a.title, state: a.state ?? null, query: a.query ?? null, width: a.width }, LOAD_MS)
+  const r = inContext(card, 'init', { title: a.title, state: a.state ?? null, width: a.width }, LOAD_MS)
   if (!r.ok) return r
   card.tree = r.tree
   cards.set(a.id, card)
   return { ...r, ...copy(r.tree, a.width) }
 }
 
-function event(a, op, args, withText) {
+function event(a, op, args) {
   const card = cards.get(a.id)
   if (!card) return { ok: false, missing: true }
   const r = inContext(card, op, args, EVENT_MS)
   if (r.ok) card.tree = r.tree
-  return r.ok && withText ? { ...r, ...copy(r.tree, card.width) } : r
+  return r
+}
+
+/** The text copy of a card at a width; the card stays as it is. */
+function textCopy(a) {
+  const card = cards.get(a.id)
+  if (!card) return { ok: false, missing: true }
+  const width = Number(a.width) || card.width
+  const r = inContext(card, 'copy', { width }, EVENT_MS)
+  return r.ok ? { ok: true, ...copy(r.tree, width) } : r
 }
 
 /** The first Button whose words hold `words`, in a plain tree: its onPress number. */
@@ -437,10 +450,6 @@ function act(a) {
       what = `click on "${x.click.slice(0, 60)}"`
       const button = buttonWith(card.tree, x.click)
       r = button === null ? { ok: true, tree: card.tree, note: `no Button shows "${x.click.slice(0, 60)}"` } : inContext(card, 'press', { button }, EVENT_MS)
-    } else if (x && typeof x.search === 'string') {
-      what = `the search "${x.search.slice(0, 60)}"`
-      r = inContext(card, 'query', { text: x.search }, EVENT_MS)
-      if (r.ok && !/\bquery\b/.test(card.view)) r.note = 'the view does not read props.query'
     } else if (x && Array.isArray(x.click) && x.click.length === 2) {
       const at = { x: Math.trunc(Number(x.click[0]) || 0), y: Math.trunc(Number(x.click[1]) || 0) }
       what = `click at ${at.x},${at.y}`
@@ -455,7 +464,7 @@ function act(a) {
       copies.push({ what, note: r.note, ...copy(r.tree, card.width) })
     } else copies.push({ what, error: r.error })
   }
-  const back = inContext(card, 'restore', { saved: before.saved, query: before.query }, EVENT_MS)
+  const back = inContext(card, 'restore', { saved: before.saved }, EVENT_MS)
   if (back.ok) card.tree = back.tree
   return { ok: true, copies, tree: card.tree, state: back.ok ? back.state : before.saved }
 }
@@ -466,15 +475,14 @@ const OPS = {
   draw: a => {
     const card = cards.get(a.id)
     if (card && a.width) card.width = a.width
-    return event(a, 'draw', { width: a.width }, !!a.text)
+    return event(a, 'draw', { width: a.width })
   },
+  copy: textCopy,
   key: a => event(a, 'key', { key: String(a.key ?? '').slice(0, 1) }),
   press: a => event(a, 'press', { button: Number(a.button) }),
   pointer: a => event(a, 'pointer', { down: a.down, up: a.up ?? a.down, button: a.button }),
-  query: a => event(a, 'query', { text: typeof a.text === 'string' ? a.text : null }),
   undo: a => event(a, 'undo', { n: Number(a.n) || 0 }),
   act,
-  unload: a => ({ ok: cards.delete(a.id) }),
 }
 
 // ------------------------------------------------------------------------------------------------- the socket

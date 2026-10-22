@@ -10,7 +10,7 @@ import { rootHere, runThimble, startDir, type Ran } from '../core/env'
 import { featureOn } from '../settings/features.mjs'
 import { sessionKey } from '../hooks/conversation'
 import { busy } from './busy'
-import { failNotice } from './fix'
+import { failCleared, failNotice } from './fix'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,7 +29,6 @@ const counting = new Map<string, Promise<Ran>>()
 const queued = new Map<string, Promise<Ran>>()
 let last: Any = null
 let asked = false
-let failedOnce = false
 
 /** `thimble coverage --json` of the session's reads in `root`, one count at a time per folder. A count asked for
  *  while one runs is one more count after it (that one began before the newest reads), shared by everyone who asks
@@ -93,8 +92,8 @@ async function countLabels($: Engine, root: string): Promise<number> {
   }
 }
 
-/** Count again: the bar's coverage and labels, while Labels and coverage is on. A count that fails says so once per
- *  load of the plugin, on the failure line; the pane shows its reason until a count works. */
+/** Count again: the bar's coverage and labels, while Labels and coverage is on. A count that fails says so on the
+ *  failure line, and the pane shows its reason until a count works. */
 export async function recount($: Engine): Promise<void> {
   if (!featureOn('counts')) return
   asked = true
@@ -119,10 +118,10 @@ export async function recount($: Engine): Promise<void> {
     labels = await countLabels($, root)
   } catch (err) {
     error = String((err as Error)?.message || err).slice(0, 200)
-    if (!failedOnce) failNotice($, `Coverage could not be counted: ${error}`)
-    failedOnce = true
+    failNotice($, `Coverage could not be counted: ${error}`, 'coverage')
   }
   await $.state.set(COUNTS, { coverage, labels, gen: (was?.gen ?? 0) + 1, error })
+  if (!error) await failCleared($, 'coverage')
 }
 
 /** The bar found nothing counted in this load of the plugin (a new session, a reload, the switch just turned on):

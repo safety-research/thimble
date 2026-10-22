@@ -17,9 +17,10 @@ sys.path.insert(0, str(ENGINE))
 
 from kernel import coverage as CV  # noqa: E402
 from kernel import labels as LB  # noqa: E402
+from kernel import store as STORE  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
-LEAN = Path(__file__).resolve().parents[1] / "bin" / "thimble"
+THIMBLE = Path(__file__).resolve().parents[1] / "bin" / "thimble"
 
 MESSAGES = [
     ("wren", "I'm sorry, I broke the build with my last commit."),
@@ -46,11 +47,11 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def run(root: Path, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
     env = {**os.environ, "THIMBLE_ROOT": str(root), "THIMBLE_PYTHON": sys.executable}
-    return subprocess.run([str(LEAN), *args], input=stdin, capture_output=True, text=True, env=env, cwd=root, timeout=120)
+    return subprocess.run([str(THIMBLE), *args], input=stdin, capture_output=True, text=True, env=env, cwd=root, timeout=120)
 
 
 def feed(tmp: Path) -> list[dict]:
-    p = Path(os.environ["THIMBLE_HOME"]) / "lean" / "events" / "s-test.jsonl"
+    p = Path(os.environ["THIMBLE_HOME"]) / "events" / "s-test.jsonl"
     return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
 
 
@@ -212,7 +213,7 @@ def test_csv_gives_every_record_with_the_analysts_check_in_place_of_the_labels_v
     many.write_text("".join(json.dumps({"text": f"sorry {i}"}) + "\n" for i in range(20000)))
     run(root, "label", "many", "--in", "big/many.jsonl", "--regex", "sorry")
     env = {**os.environ, "THIMBLE_ROOT": str(root), "THIMBLE_PYTHON": sys.executable}
-    head = subprocess.run(f"'{LEAN}' label many --csv | head -2", shell=True, capture_output=True, text=True, env=env, cwd=root)
+    head = subprocess.run(f"'{THIMBLE}' label many --csv | head -2", shell=True, capture_output=True, text=True, env=env, cwd=root)
     assert head.stdout.splitlines() == ["ref,value,confidence,by,checked", "big/many.jsonl#L1,yes,1.0,regex,false"]
     assert "Traceback" not in head.stderr
     # a record that waits for the model has no value yet
@@ -226,7 +227,7 @@ def test_labels_are_kept_under_thimble_home_and_nothing_is_written_in_the_folder
     before = sorted(p.name for p in root.rglob("*"))
     r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     assert r.returncode == 0, r.stdout + r.stderr
-    kept = tmp_path / "th" / "lean" / "folders" / str(root.resolve()).replace("/", "-").replace(".", "-") / "thimble"
+    kept = tmp_path / "th" / "folders" / STORE.folder_name(str(root.resolve()))
     assert (kept / "labels" / "sorry.json").is_file()
     assert "  sorry: yes 2 · no 4 of 6 records" in r.stdout
     # the label reads back, checks and CSV work there

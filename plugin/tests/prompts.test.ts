@@ -10,7 +10,7 @@ type Json = Record<string, unknown>
 type Any = any
 
 function world(on: Any) {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble' })
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' })
   const clock = mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-1' }))
   on('session.cwd', () => ({ value: '/data' }))

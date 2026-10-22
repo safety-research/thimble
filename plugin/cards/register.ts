@@ -1,34 +1,28 @@
 // register.ts: cards. Claude writes rows as a JSON file and calls the `card` tool with the file and a short view; the
-// plugin runs the view in its runner, draws the card under the call (or under the answer v was pressed on), takes the
-// cards' keys at an empty prompt, and gives Claude a text copy of what it drew.
+// plugin runs the view in its runner, draws the card under the call (or under the answer v was pressed on), and gives
+// Claude a text copy of what it drew. The cards' keys at an empty prompt reach them through hooks/keys.ts.
 //
 //   tool.ts      the card tool: one call draws a card, or a new version of one, and answers its text copy
 //   runner.mjs   the runner, one Node process per session: each card's view in a sandbox, its state and handlers
+//   argv.mjs     the command that starts the runner
 //   ask.ts       the runner from the hooks: started when first needed, again when it stopped
 //   layout.js    a tree laid out on a grid of cells: the text copy
 //   client.tsx   the one Client module that draws a card's tree in the terminal
-//   draw.ts      the frame, the drawing at the screen's width, the person's keys, clicks and search
+//   draw.ts      the frame, the drawing at the screen's width, the person's keys and clicks
 //   store.ts     each card in $.state and on disk, for a resumed session
 //
 // With the Cards switch off (featureOn('cards')), no tool is registered and nothing is drawn.
 import type { Register } from 'claude-code'
 
 import { failNotice } from '../bar/fix'
+import { cut } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
-import { WORD_MS } from '../bar/register'
-import { cardKey, cardPost, clientFault, frame, framesUnder, keepSearch, keyOwner, noteShown, noteViewport, searchRestored, searchTyped, undoKeys } from './draw'
-import { callOf, cardIdOf, metaOf, restoreCards, searchNow } from './store'
+import { cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
+import { callOf, cardIdOf, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-
-const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
-// the keys cards took since the person last typed into the box, in the order pressed
-let taken = ''
-// the keys cards took within WORD_MS of each other, the last at `at`: a letter typed within WORD_MS after them means
-// the person types a word that starts with them
-let word: { at: number; keys: { key: string; id: string }[] } | null = null
 
 export const registerCards: Register = on => {
   // the tool, and the cards this conversation drew before (a resumed session, a reload of the plugin)
@@ -101,63 +95,5 @@ export const registerCards: Register = on => {
   on('ui.fault', { element: /^card-c[0-9a-f]+$/ }, async ($, e, next) => {
     await clientFault($, String(e.element).slice(5), String(e.reason ?? ''))
     return next(e)
-  }).catch(($, e, next) => next(e))
-
-  // keys at an empty prompt reach the card on screen that takes them (v and the failure line's keys come first). Keys
-  // that come quickly arrive as one edit with several letters: when each is a card's key, each goes to its card in
-  // turn. Claude Code makes an edit from the box as it would be with the keys still waiting for an answer typed into
-  // it, and asks the hooks once those answers came: so a box that holds only keys the cards took (the last of them) is
-  // empty too. A key the cards do not take, typed within WORD_MS after keys they took, means the person types a word
-  // that starts with those keys: the cards undo them, and the word goes into the box whole. While a `/` search is
-  // typed, what the prompt box holds is the search.
-  on('prompt.edit', { origin: { kind: /^composer$/ } }, async ($, e, next) => {
-    if (!featureOn('cards')) return next(e)
-    const search = await searchNow($)
-    if (search && !search.kept) {
-      const r = await next(e)
-      await searchTyped($, r.text)
-      return r.text ? { ...r, decorations: [...(r.decorations ?? []), { start: 0, end: 0, virtualText: 'search: ', dimColor: true }] } : r
-    }
-    if (e.text !== '' && !(taken && taken.endsWith(e.text))) { taken = ''; word = null; return next(e) }
-    const now = Number(await $.clock.now())
-    const k = e.key
-    // what the person typed after keys a card took goes in an empty box, or, typed straight after them, with them
-    const typed = async () => {
-      const w = word
-      taken = ''
-      word = null
-      if (w && e.inputText && !k?.ctrl && !k?.meta && now - w.at < WORD_MS) {
-        await undoKeys($, w.keys.map(x => x.id))
-        const text = w.keys.map(x => x.key).join('') + e.inputText
-        return { text, cursor: text.length }
-      }
-      return next(e.text ? { ...e, text: '', cursor: 0, start: 0, end: 0 } : e)
-    }
-    if (k && (k.ctrl || k.meta || [...k.key].length !== 1)) return typed()
-    const keys = k ? [k.key] : [...e.inputText]
-    if (!keys.length || (keys.length > 1 && keys.includes('/'))) return typed()
-    for (const key of keys) if (!(await keyOwner($, key))) return typed()
-    taken = (taken + keys.join('')).slice(-64)
-    const got: { key: string; id: string }[] = []
-    for (const key of keys) {
-      const id = await cardKey($, key)
-      if (id && key !== '/') got.push({ key, id })
-    }
-    word = keys.includes('/') ? null : { at: now, keys: [...(word && now - word.at < WORD_MS ? word.keys : []), ...got] }
-    return { text: '', cursor: 0 }
-  }).catch(($, e, next) => next(e))
-
-  // Enter while a search is typed keeps the search on the card and sends nothing; Claude Code then puts the words back
-  // in the box, and they are cleared there
-  on('prompt.submit', { origin: { kind: 'composer' } }, async ($, e, next) => {
-    const search = await searchNow($)
-    if (!search || search.kept || e.command || !featureOn('cards') || e.text !== search.text) return next(e)
-    return { drop: await keepSearch($) }
-  }).catch(($, e, next) => next(e))
-
-  on('prompt.change', { origin: { kind: 'engine' } }, async ($, e, next) => {
-    const r = await next(e)
-    await searchRestored($, e.text)
-    return r
   }).catch(($, e, next) => next(e))
 }

@@ -1,7 +1,7 @@
 // draw.ts: cards on screen. A card draws in a frame under the call of main's that drew its newest version (an earlier
 // call of the same card shows one line that points to it), or under the answer v was pressed on when the designer
 // fork drew it. Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
-// person's keys, clicks and `/` search go to the runner, and its new tree is drawn.
+// person's keys and clicks go to the runner, and its new tree is drawn.
 //
 //   frame         the card's frame: its title, the Client, a failure, and the keys that reach it now
 //   framesUnder   the frames of the cards drawn under an answer
@@ -10,12 +10,9 @@
 //   noteShown     which of a row's cards the screen shows now, from the row's `onScreen` and each card's height
 //   keyOwner      the card a key at an empty prompt goes to: among the cards the screen shows, the focused card when it
 //                 lists the key, else the newest that lists it
-//   cardKey       a key at an empty prompt to its card; `/` starts a search typed in the prompt box, whose words reach
-//   undoKeys      the cards undo the keys they just took (the person typed a word that starts with them)
-//   searchTyped   the card as props.query at each keystroke; Enter keeps it (keepSearch), and the box is cleared when
-//   keepSearch    Claude Code puts the kept words back in it (searchRestored); an empty box ends a search
+//   cardTake      a letter at an empty prompt that a card takes (hooks/keys.ts asks): the key at once, and its undo when
+//                 the person was typing a word
 //   cardPost      what a card's Client sends: Button presses and clicks
-//   cardsUnder    the cards drawn under an answer (for v)
 //   cardText      a card's text copy as it draws now (for v)
 //
 // The width a card is drawn at is the screen's columns less its frame. A drawing hook may not write the session's
@@ -24,8 +21,10 @@
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/fix'
+import { cut } from '../core/text.js'
+import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
-import { type CardMeta, anchoredAt, cardsAtNow, focusNow, markSeen, metaOf, readState, saveMeta, saveState, searchNow, seenNow, setFocus, setSearch, setTree, treeOf, versionDir } from './store'
+import { type CardMeta, anchoredAt, focusNow, markSeen, metaOf, readState, saveMeta, saveState, seenNow, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,7 +62,6 @@ export function cardWidth(columns?: number): number {
   return Math.max(MIN_WIDTH, (columns || columnsSeen || 100) - FRAME)
 }
 
-const cut = (s: string, n: number) => ([...s].length <= n ? s : `${[...s].slice(0, n - 1).join('')}…`)
 const about = (id: string) => `card:${id}`
 
 /** Load a card's version on screen into the runner, from its copy on disk. */
@@ -71,8 +69,7 @@ async function loadCard($: Engine, meta: CardMeta, width: number): Promise<Any> 
   const dir = await versionDir($, meta.id, meta.version)
   let view = ''
   try { view = String(await $.fs.read(`${dir}/view.js`)) } catch { return { ok: false, error: `the copy of “${meta.title}” is gone (${dir})` } }
-  const { state, query } = await readState($, meta.id, meta.version)
-  return ask($, 'load', { id: meta.id, version: meta.version, title: meta.title, view, rows: `${dir}/rows.json`, state, query, width })
+  return ask($, 'load', { id: meta.id, version: meta.version, title: meta.title, view, rows: `${dir}/rows.json`, state: await readState($, meta.id, meta.version), width })
 }
 
 /** A request about a card: when the runner does not hold the card (it started again, the session was resumed), the
@@ -83,7 +80,7 @@ export async function askCard($: Engine, meta: CardMeta, op: string, body: Recor
   const width = Number(body.width) || ((await treeOf($, meta.id))?.width ?? cardWidth())
   const loaded = await loadCard($, meta, width)
   if (!loaded.ok) return loaded
-  return op === 'draw' && !body.text ? loaded : ask($, op, { id: meta.id, ...body })
+  return op === 'draw' ? loaded : ask($, op, { id: meta.id, ...body })
 }
 
 /** The runner's answer to an event of the person's: the new tree drawn, the state kept, and a failure line about the
@@ -92,7 +89,7 @@ export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: num
   if (r?.ok) {
     const before = await treeOf($, meta.id)
     await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0 })
-    if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state, typeof r.query === 'string' ? r.query : null).catch(() => undefined)
+    if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state).catch(() => undefined)
     if (meta.error) await saveMeta($, { ...meta, error: null })
     await failCleared($, about(meta.id))
     return
@@ -144,7 +141,6 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
   const width = cardWidth(e.viewport?.columns)
   const t = await treeOf($, meta.id)
   const focused = (await focusNow($)) === meta.id
-  const search = await searchNow($)
   const current = t && t.gen === meta.gen ? t : null
   const f = faulted.get(meta.id)
   const fault = f && current && f.seq === current.seq ? f.reason : null
@@ -162,16 +158,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
   if (meta.error) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   const mine: string[] = []
   for (const k of meta.keys) if ((await keyOwner($, k))?.id === meta.id) mine.push(k)
-  const searching = search?.id === meta.id
-  if (mine.length || searching) {
-    const words = searching && !search.kept
-      ? `search “${search.text}” · Enter keeps it · an empty prompt ends it`
-      : [
-          mine.some(k => k !== '/') ? `keys ${mine.filter(k => k !== '/').join(' ')} at an empty prompt` : '',
-          mine.includes('/') ? (searching ? `search “${search!.text}” kept · / searches again` : '/ searches') : '',
-        ].filter(Boolean).join(' · ')
-    rows.push(E.Text({ key: 'keys', dimColor: true, wrap: 'truncate-end', children: words }))
-  }
+  if (mine.length) rows.push(E.Text({ key: 'keys', dimColor: true, wrap: 'truncate-end', children: `keys ${mine.join(' ')} at an empty prompt` }))
   return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'claude' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: width + 4, children: rows })
 }
 
@@ -186,17 +173,12 @@ export async function clientFault($: Engine, id: string, reason: string): Promis
   failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
 }
 
-/** The cards drawn under an answer, by the answer's row, oldest first. */
-export function cardsUnder(row: string): string[] {
-  return cardsAtNow(row)
-}
-
 /** A card's text copy as it draws now: what its newest version shows, at the width it is drawn at. */
 export async function cardText($: Engine, id: string): Promise<string> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return ''
   const t = await treeOf($, id)
-  const r = await askCard($, meta, 'draw', { width: t?.width ?? cardWidth(), text: true })
+  const r = await askCard($, meta, 'copy', { width: t?.width ?? cardWidth() })
   return r?.ok ? (r.lines as string[]).join('\n') : `(the card did not draw: ${r?.error ?? 'no answer'})`
 }
 
@@ -218,62 +200,25 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
 // run at the same time and their requests could reach the runner in the other order
 let keys: Promise<unknown> = Promise.resolve()
 
-/** A key at an empty prompt to the card it reaches, if any, after the keys pressed before it: the card's id, or null.
- *  `/` starts a search. */
-export function cardKey($: Engine, key: string): Promise<string | null> {
-  const done = keys.then(async () => {
-    const meta = await keyOwner($, key)
-    if (!meta) return null
-    if (key === '/') {
-      await setSearch($, { id: meta.id, text: '' })
-      await applyAnswer($, meta, await askCard($, meta, 'query', { text: '' }))
-    }
-    await applyAnswer($, meta, await askCard($, meta, 'key', { key }))
-    return meta.id
-  })
+/** One request about a key, after the requests of the keys pressed before it. */
+function inOrder(work: () => Promise<void>): Promise<void> {
+  const done = keys.then(work)
   keys = done.catch(() => undefined)
   return done
 }
 
-/** The cards undo the keys they took last, one undo per key, after the keys pressed before. */
-export function undoKeys($: Engine, ids: string[]): Promise<void> {
-  const done = keys.then(async () => {
-    const n = new Map<string, number>()
-    for (const id of ids) n.set(id, (n.get(id) ?? 0) + 1)
-    for (const [id, count] of n) {
-      const meta = await metaOf($, id)
-      if (meta) await applyAnswer($, meta, await askCard($, meta, 'undo', { n: count }))
-    }
-  })
-  keys = done.catch(() => undefined)
-  return done
-}
-
-/** The search's words as the prompt box holds them: the card's props.query; an empty box ends the search. */
-export async function searchTyped($: Engine, text: string): Promise<void> {
-  const search = await searchNow($)
-  if (!search || search.kept) return
-  const meta = await metaOf($, search.id)
-  if (!meta) { await setSearch($, null); return }
-  await setSearch($, text ? { id: meta.id, text } : null)
-  await applyAnswer($, meta, await askCard($, meta, 'query', { text: text || null }))
-}
-
-/** Enter while a search is typed: the card keeps the search. Answers the line Claude Code shows for the prompt it does
- *  not send. */
-export async function keepSearch($: Engine): Promise<string> {
-  const search = await searchNow($)
-  if (!search) return ''
-  await setSearch($, { ...search, kept: true })
-  const meta = await metaOf($, search.id)
-  return `The card “${cut(meta?.title ?? '', 40)}” keeps the search “${cut(search.text, 40)}”; nothing was sent to Claude.`
-}
-
-/** Claude Code put a prompt a hook did not send back in the box: when it is the kept search's words, the box is
- *  cleared, so the next key reaches the card and the next prompt starts empty. */
-export async function searchRestored($: Engine, text: string): Promise<void> {
-  const search = await searchNow($)
-  if (search?.kept && text === search.text) await $.prompt.fill({ text: '', mode: 'replace' })
+/** A letter at an empty prompt that a card on screen takes: the key reaches it at once, and the undo takes it back
+ *  when the person was typing a word (hooks/keys.ts). Null when no card takes it, and it types. */
+export async function cardTake($: Engine, key: string): Promise<{ card: string; now: () => Promise<unknown>; undo: () => Promise<unknown> } | null> {
+  if (!featureOn('cards') || !/^\p{L}$/u.test(key)) return null
+  const meta = await keyOwner($, key)
+  if (!meta) return null
+  const id = meta.id
+  const again = async (op: string, body: Record<string, unknown>) => {
+    const m = await metaOf($, id)
+    if (m) await applyAnswer($, m, await askCard($, m, op, body))
+  }
+  return { card: id, now: () => inOrder(() => again('key', { key })), undo: () => inOrder(() => again('undo', { n: 1 })) }
 }
 
 // the last event handled, by the Client instance that sent it

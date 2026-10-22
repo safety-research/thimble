@@ -7,7 +7,7 @@
 //                          the plugin again with the new options; a refusal is one line with its fix
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
-import { SWITCHES, noteChange, ownValue, setOptions, switchOf } from './features.mjs'
+import { SWITCHES, featureOn, noteChange, setOptions, switchOf } from './features.mjs'
 
 type Engine = EngineInterface
 
@@ -30,7 +30,7 @@ export async function heldValues($: Engine): Promise<Record<string, boolean>> {
   const rows = await configRows($).catch(() => new Map<string, ConfigRow>())
   return Object.fromEntries(SWITCHES.map(s => {
     const r = rows.get(s.key)
-    return [s.key, r && typeof r.value === 'boolean' ? r.value : ownValue(s.key)]
+    return [s.key, r && typeof r.value === 'boolean' ? r.value : featureOn(s.key)]
   }))
 }
 
@@ -42,7 +42,7 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   const r = (await configRows($)).get(s.key)
   if (!r) return `× Claude Code has not loaded thimble's settings, so ${s.title} cannot change now. Load thimble again in /plugin, then try once more.`
   if (r.isLocked) return `× ${s.title} is set by your organization's settings, so it cannot change here.`
-  const to = !(typeof r.value === 'boolean' ? r.value : ownValue(s.key))
+  const to = !(typeof r.value === 'boolean' ? r.value : featureOn(s.key))
   const res = await $.config.set({ key: r.key, value: to })
   if (res.deny) return `× ${s.title} stayed ${to ? 'off' : 'on'}: ${res.deny}`
   // acted on at once, before the plugin loads again with it

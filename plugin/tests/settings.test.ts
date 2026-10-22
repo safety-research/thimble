@@ -8,7 +8,7 @@ type Any = any
 const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'thimble settings', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } } as never
 
 test('/thimble-settings opens the switches; a press turns one off through Claude Code, and its items leave the preview', async ($, on) => {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home' })
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
   const rows: Record<string, boolean> = { marks: true, cards: true, counts: true }
   const set: Any[] = []

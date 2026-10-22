@@ -2,7 +2,7 @@
 // of the session (or of a subagent, the v designer fork included) it keeps which file was touched and which lines, so
 // `thimble coverage` can say what Claude read and what it did not. The checker fork's calls are not kept: it reads
 // files to check a reply, not to answer the analyst. It never answers, allows or refuses a call, never shows anything, and starts no process. What it keeps:
-// one JSON line per call in $THIMBLE_HOME/lean/seen/<session>.jsonl (default ~/.thimble), never the file's content:
+// one JSON line per call in $THIMBLE_HOME/seen/<conversation>.jsonl (core/layout.mjs), never the file's content:
 //
 //   Read  {tool, file, from, to, pages?}  the first and last line the result showed (none for a picture or a PDF), and
 //                                       the pages it asked for of a PDF (`1-5`)
@@ -18,8 +18,10 @@
 // conversation's first turn it notes the conversation's key (conversation.ts), so a continuation keeps its records.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { noteConversation, sessionKey } from './conversation'
 import { forkOf } from '../core/forks'
+import { thimbleHome } from '../core/home'
+import { seenFile } from '../core/layout.mjs'
+import { noteConversation, sessionKey } from './conversation'
 
 type Row = Record<string, unknown>
 type Engine = EngineInterface
@@ -76,8 +78,6 @@ export function rowRefs(text: string): string[] {
   return [...out]
 }
 
-const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
-
 async function bind($: Engine): Promise<void> {
   const id = await sessionKey($)
   if (id === S.session && S.file) return
@@ -86,8 +86,8 @@ async function bind($: Engine): Promise<void> {
   S.rows = []
   S.size = 0
   S.loaded = false
-  if (!S.home) S.home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
-  S.file = `${S.home}/lean/seen/${safe(id)}.jsonl`
+  if (!S.home) S.home = await thimbleHome($)
+  S.file = seenFile(S.home, id)
   await $.env.set('THIMBLE_SESSION', id)
 }
 
@@ -104,13 +104,13 @@ async function keep($: Engine, row: Row): Promise<void> {
         break
       }
       S.part += 1
-      S.file = `${S.home}/lean/seen/${safe(S.session)}.${S.part}.jsonl`
+      S.file = seenFile(S.home, S.session, S.part)
     }
   }
   const line = JSON.stringify({ t: Date.now() / 1000, session: S.session, cwd: await $.session.cwd(), ...row })
   if (S.size + line.length + 1 > PART_MAX) {
     S.part += 1
-    S.file = `${S.home}/lean/seen/${safe(S.session)}.${S.part}.jsonl`
+    S.file = seenFile(S.home, S.session, S.part)
     S.rows = []
     S.size = 0
   }

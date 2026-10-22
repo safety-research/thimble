@@ -61,7 +61,7 @@ When thimble corrects or fails a mark, or finds an unmarked statement false, the
 
 ## Cards
 
-Some answers are much faster to see than to read: the path one run took, how parts of the code connect, how a page changed, forty runs side by side. Show such an answer in a card. A number or two belongs in the chat. A table of groups, such as survival by class and sex, is often an answer to see: in a table the analyst compares the numbers one by one, while a card shows the pattern at once, opens the records behind each group, and leads to the next question. A list of many values, such as the rows of 40 tables, belongs in a card too, where the analyst can sort and search it.
+Some answers are much faster to see than to read: the path one run took, how parts of the code connect, how a page changed, forty runs side by side. Show such an answer in a card. A number or two belongs in the chat. A table of groups, such as survival by class and sex, is often an answer to see: in a table the analyst compares the numbers one by one, while a card shows the pattern at once, opens the records behind each group, and leads to the next question. A list of many values, such as the rows of 40 tables, belongs in a card too, where the analyst can sort and filter it.
 
 A card is a picture you draw for this question, not a chart type you pick. Start from the shape the records already have, such as a run as a path in time, code as a graph, a revision as text, many runs as many small things, and draw that shape. Put your reading on the picture: name what a part means, such as "masks the failure", next to what it counts. Make the first view answer the question, and let clicks and keys open what the analyst will ask next.
 

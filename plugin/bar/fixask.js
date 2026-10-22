@@ -4,17 +4,20 @@
 //
 //   fixRequest({failure, kind})   f (kind 'fix') or F (kind 'report') on a failure line
 //   shareRequest({slug, title})   p on a fix with no draft yet
-//   lineKey(line, k)              what a key does to the line the bar names: fix, report, share, undo, or null
+//   lineKey(lines, k)             what a key does to the lines the bar names: fix, report, share, undo, or null
 //   fixVerb(args)                 what /thimble:fix's words ask for: the fixes, submit, undo, try, remove, or a change
 
 /** The keys a failure line carries, and the keys of a fix now in the person's thimble. */
 export const FAIL_KEYS = 'f fix this · F report only'
 export const USE_KEYS = 'p submit · u undo'
+/** Every key the two lines can carry (a card never gets them). */
+export const FIX_KEYS = ['f', 'F', 'p', 'u']
 
-/** What key `k` does to the line the bar names (a failure, or a fix in use), or null: it types. */
-export function lineKey(line, k) {
-  if (line?.kind === 'failed') return k === 'f' ? 'fix' : k === 'F' ? 'report' : null
-  if (line?.kind === 'applied') return k === 'p' ? 'share' : k === 'u' ? 'undo' : null
+/** What key `k` does to the lines the bar names (`fail`: a failure or a notice; `fix`: a fix in use), or null: it
+ *  types. */
+export function lineKey({ fail = null, fix = null } = {}, k) {
+  if (fail?.kind === 'failed' && (k === 'f' || k === 'F')) return k === 'f' ? 'fix' : 'report'
+  if (fix && (k === 'p' || k === 'u')) return k === 'p' ? 'share' : 'undo'
   return null
 }
 

@@ -21,7 +21,7 @@ test('binFirst puts the folder first, keeps the rest in its order, and never add
 })
 
 function world(on: Any, path: string, deny = '') {
-  mock.env(on, { PATH: path, THIMBLE_HOME: '/th', HOME: '/home/t' })
+  mock.env(on, { PATH: path, THIMBLE_HOME: '/th', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   const sets: Record<string, string | undefined>[] = []
   on('env.set', (_$: unknown, e: { name: string; value?: string }) => {
     if (e.name === 'PATH') sets.push({ [e.name]: e.value })

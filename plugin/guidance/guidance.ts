@@ -9,6 +9,7 @@
 // conversation or compaction.
 import type { Register } from 'claude-code'
 
+import { tempDir } from '../core/home'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
@@ -29,8 +30,7 @@ export function guidanceFor(text: string, on: (feature: string) => boolean): str
 export const registerGuidance: Register = on => {
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    const tmp = String((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')
-    const text = guidanceFor(fill(await promptText($, 'guidance'), { TMPDIR: tmp }), featureOn)
+    const text = guidanceFor(fill(await promptText($, 'guidance'), { TMPDIR: await tempDir($) }), featureOn)
     return { ...r, blocks: [...r.blocks.filter(b => b.name !== 'thimble'), { name: 'thimble', text }] }
   }).catch(($, e, next) => next(e))
 }

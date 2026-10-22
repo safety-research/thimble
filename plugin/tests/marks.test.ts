@@ -1,11 +1,12 @@
 // Marks across one reply (marks/checker.ts, view.ts): a reply with marks starts one checker fork with the marks filled
 // into its text; the fork's answer, once validated, gives each mark its status, the footer and what main reads next; a
-// refusal leaves the marks unchecked with one failure line; the checker may only read. All data is made up.
+// refusal, a validator that fails and a fork that is gone leave the marks unchecked with one failure line; the checker
+// may only read, and run code as one Python script. All data is made up.
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { fixLineNow } from '../bar/fix'
-import { allowedTool, endCheck, noteRow, PER_FORK, splitMarks, startCheck } from '../marks/checker'
+import { failLineNow } from '../bar/fix'
+import { checkerDenial, checkerPrompt, endCheck, noteRow, PER_FORK, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { footerEl, messageEl } from '../marks/view'
@@ -21,14 +22,15 @@ const VALIDATED = { parsed: true, results: [
   { n: 3, status: 'failed', shown: '"ship it"', reason: 'no record holds these words' },
 ] }
 
-/** An engine with versioned state, files, forks that start, and a validator that answers `validated`. */
+/** An engine with versioned state, files, forks that start, and a validator that answers `validated` (a function: what
+ *  the validator does with its input). */
 function engine(validated: Any, files = new Map<string, string>()) {
   const state = new Map<string, { value: unknown; version: number }>()
   let forks = 0
   const seen = { spawned: [] as Any[], stdin: [] as string[] }
   let now = 1000
   const $: Any = {
-    env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', THIMBLE_PYTHON: '/made-up/python3' } as Any)[k] },
+    env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' } as Any)[k] },
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     session: {
       cwd: async () => '/made-up/data',
@@ -39,7 +41,7 @@ function engine(validated: Any, files = new Map<string, string>()) {
     },
     fs: {
       read: async (p: string) => {
-        if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{marks}\nIN {cwd}'
+        if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{{MARKS}}\nIN {{CWD}}'
         if (files.has(p)) return files.get(p)
         throw new Error(`no file ${p}`)
       },
@@ -47,8 +49,8 @@ function engine(validated: Any, files = new Map<string, string>()) {
       list: async (dir: string) => [...files.keys()].filter(p => p.startsWith(`${dir}/`)).map(p => ({ name: p.slice(dir.length + 1), kind: 'file' })),
       exists: async () => false,
     },
-    agent: { spawn: async (a: Any) => { seen.spawned.push(a); const agentId = forks ? `${FORK}${forks}` : FORK; forks++; return { model: 'claude-opus-5-5', agentId } } },
-    process: { run: async (_argv: string[], init: Any) => { seen.stdin.push(String(init?.stdin ?? '')); return { exitCode: 0, stdout: JSON.stringify(validated), stderr: '' } } },
+    process: { run: async (_argv: string[], init: Any) => { seen.stdin.push(String(init?.stdin ?? '')); return typeof validated === 'function' ? validated(init) : { exitCode: 0, stdout: JSON.stringify(validated), stderr: '' } } },
+    agent: { spawn: async (a: Any) => { seen.spawned.push(a); const agentId = forks ? `${FORK}${forks}` : FORK; forks++; return { model: 'claude-opus-5-5', agentId } }, list: async () => [] },
     state: {
       get: async (k: Any) => state.get(JSON.stringify(k)) ?? { value: undefined, version: 0 },
       set: async (k: Any, value: unknown, o?: { ifVersion?: number }) => {
@@ -109,10 +111,10 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(settled).not.toContain('checking')
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('"15 of 40" is corrected to "12 of 40"')
-  expect(told).toContain('"ship it" is marked as wrong: no record holds these words')
-  expect(told).toContain('- agent-07 merged none of them alone: agent-02 approved each one.')
+  expect(told).toContain('"ship it" is marked as wrong (the check: "no record holds these words")')
+  expect(told).toContain('- "agent-07 merged none of them alone: agent-02 approved each one."')
   expect(told).toContain('would tell them twice')
-  expect(await fixLineNow($)).toBe(null)
+  expect(await failLineNow($)).toBe(null)
 })
 
 test('a refused check leaves the marks unchecked, says so once, and nothing spins', async () => {
@@ -124,14 +126,37 @@ test('a refused check leaves the marks unchecked, says so once, and nothing spin
   expect(out).toContain('3 marks not checked')
   expect(out).not.toContain('checking')
   expect(out).not.toContain('×')
-  const line = String((await fixLineNow($))?.text ?? '')
+  const line = String((await failLineNow($))?.text ?? '')
   expect(line).toContain("safeguards refused the check of the marks")
   expect(line).toContain('/model')
 })
 
-test('the checker reads only: Read, Grep, Glob and Bash, never Edit or Write', () => {
-  expect(['Read', 'Grep', 'Glob', 'Bash'].every(allowedTool)).toBe(true)
-  expect(['Edit', 'Write', 'NotebookEdit', 'Agent'].some(allowedTool)).toBe(false)
+test('a validator that cannot run, or a fork that is gone, leaves no mark checking and says so', async () => {
+  const { $ } = engine(() => { throw new Error('made-up: the command ran past its time limit') })
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['unchecked', 'unchecked', 'unchecked'])
+  expect(String((await failLineNow($))?.text)).toContain('thimble could not validate the check of the marks (made-up: the command ran past its time limit)')
+  expect((await $.state.get({ plugin: 'thimble', key: 'marksRunning' })).value).toEqual({})
+  // a reload of the plugin finds a check whose fork Claude Code no longer runs
+  const { $: other } = engine(VALIDATED)
+  await noteRow(other, 'row-1', REPLY)
+  await startCheck(other, { turnId: 't-1', reason: 'answer' })
+  await resumeChecks(other)
+  expect((await rowMarks(other, 'row-1'))!.checking).toBe(false)
+  expect(String((await failLineNow(other))?.text)).toContain('thimble lost the copy that checked them')
+})
+
+test("the checker reads files, and runs code only as one Python script; a mark's sentence goes in its prompt as written", () => {
+  const call = (tool: string, command?: string) => checkerDenial({ tool, command })
+  expect(['Read', 'Grep', 'Glob'].map(t => call(t))).toEqual([null, null, null])
+  expect(call('Bash', "cd /made-up/data && python3 - <<'PY'\nprint(1)\nPY")).toBe(null)
+  expect(call('Bash', "cd /made-up/data\npython3 - <<'PY'\nprint(1)\nPY")).toBe(null)
+  for (const t of ['Edit', 'Write', 'NotebookEdit', 'Agent']) expect(call(t)).toContain('only reads')
+  for (const c of ['rm -rf data', "python3 - <<'PY'\nprint(1)\nPY\nrm -rf data", "python3 - <<'PY'\nprint(1)\nPY\nrm x\nPY", 'curl https://example.invalid']) expect(call('Bash', c)).toContain('one Python script')
+  const item = { n: 1, row: 'r', words: '$5', start: 0, end: 0, sentence: "It cost [$5] and $' more, $$ and $&.", status: 'checking' as const, shown: '$5' }
+  expect(checkerPrompt('A\n{{MARKS}}\nB {{CWD}}', [item], '/made-up/data')).toBe("A\n1. [$5] in: It cost [$5] and $' more, $$ and $&.\nB /made-up/data")
 })
 
 test('a reply with many marks is split between forks of about equal size, a sentence in one share up to its size', () => {
@@ -149,16 +174,19 @@ test('a reply with many marks is split between forks of about equal size, a sent
   expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(3)
 })
 
-test('two checker forks that end at the same moment both settle their marks', async () => {
+test('checker forks that end at the same moment all settle their marks, and main is told every correction once', async () => {
   const many = Array.from({ length: 12 }, (_, i) => `Sentence ${i} has [${i + 10}](#).`).join(' ')
-  const results = Array.from({ length: 12 }, (_, i) => ({ n: i + 1, status: 'verified', shown: String(i + 10), reason: 'counted' }))
+  const results = Array.from({ length: 12 }, (_, i) => ({ n: i + 1, status: 'corrected', shown: String(i + 100), was: String(i + 10), reason: 'counted' }))
   const { $ } = engine({ parsed: true, results })
   await noteRow($, 'row-1', many)
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await Promise.all([FORK, `${FORK}1`, `${FORK}2`].map(agentId => endCheck($, { agentId, reason: 'answer', answer: '```json\n[]\n```' })))
   const reply = await rowMarks($, 'row-1')
   expect(reply!.checking).toBe(false)
-  expect(reply!.items.map(m => m.status)).toEqual(Array(12).fill('verified'))
+  expect(reply!.items.map(m => m.status)).toEqual(Array(12).fill('corrected'))
+  const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>)
+  expect(told.length).toBe(1)
+  for (let i = 0; i < 12; i++) expect(told[0]).toContain(`"${i + 10}" is corrected to "${i + 100}"`)
 })
 
 test('a resumed session draws the marks as their check left them; a check the session ended is not checked', async () => {

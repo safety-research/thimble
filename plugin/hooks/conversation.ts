@@ -4,11 +4,14 @@
 // continuation finds it again under the same key: the id of the conversation's first session.
 //
 // The link is the conversation's first launch ($.session.usage().startedAt), which Claude Code keeps the same in every
-// continuation. $THIMBLE_HOME/lean/conversations/<startedAt>.json holds {key, sessions}: written at the first turn of a
+// continuation. $THIMBLE_HOME/starts/<startedAt>.json (core/layout.mjs) holds {key, sessions}: written at the first turn of a
 // conversation, and joined by a later session that starts with the conversation's transcript already in it. A session
 // that starts empty is a conversation of its own, whatever file it finds. Where any of it cannot be read, the key is
 // the session's own id, as before.
 import type { EngineInterface } from 'claude-code'
+
+import { thimbleHome } from '../core/home'
+import { startsFile } from '../core/layout.mjs'
 
 type Engine = EngineInterface
 type Conversation = { key: string; sessions: string[] }
@@ -16,14 +19,11 @@ type Conversation = { key: string; sessions: string[] }
 const C = { id: '', key: '', pending: null as Promise<string> | null, noted: '' }
 const MAX_SESSIONS = 50
 
-const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
-
 /** The file of this session's conversation, or null where Claude Code says no first launch. */
 async function conversationFile($: Engine): Promise<string | null> {
   const at = Number((await $.session.usage())?.startedAt)
   if (!Number.isFinite(at) || at <= 0) return null
-  const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
-  return `${home.replace(/\/+$/, '')}/lean/conversations/${safe(String(Math.round(at)))}.json`
+  return startsFile(await thimbleHome($), String(Math.round(at)))
 }
 
 async function readConversation($: Engine, file: string): Promise<Conversation | null> {

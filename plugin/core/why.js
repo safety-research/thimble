@@ -6,12 +6,7 @@
 // fix, so the reason is said as what happened, never as the code alone.
 
 /** What fixes a sign-in that failed or expired, for a person signed in to Claude Code. */
-export const SIGN_IN_AGAIN = 'Sign in again with /login'
-
-/** Whether a model call failed because the sign-in failed or expired: HTTP 401, or Claude Code's authentication_failed. */
-export function signInFailed(r) {
-  return !!r && r.isAnswered === false && r.reason === 'api-error' && (r.error === 'authentication_failed' || r.status === 401)
-}
+const SIGN_IN_AGAIN = 'Sign in again with /login'
 
 /** The API's failure as words, from its HTTP status (null: no reply came) and Claude Code's kind of error. A failed
  *  sign-in says its fix too, since trying again cannot help until the person signs in. */

@@ -373,65 +373,82 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
             raise LabelError(f"the regex does not compile: {e}") from e
     fn = _code_fn(rule) if kind == "code" else None
     rows, matched, files = records(st, glob, where, within, limit, seed)
+    # the values are computed outside the lock, which other writers wait on; when one of them changed the label
+    # meanwhile, they are computed again on its newer state, under the lock
+    job = {"kind": kind, "rule": rule, "glob": glob, "values": values, "given": given, "where": where, "within": within,
+           "limit": limit, "reason": reason, "fn": fn, "rows": rows, "matched": matched, "files": files}
+    old = load(st, name)
+    lab, added, errors, same = _apply(st, old, name, job)
     with locked(st, name):
-        old = load(st, name)
-        d = _definition(kind, rule, glob, values, where, within)
-        # code may add values it found; the same definition keeps them
-        same = bool(old) and all(old.get(k) == d[k] for k in d if k != "values") \
-            and list(old.get("values") or [])[:len(values)] == values
-        if same:
-            lab = old
-        else:
-            lab = {"name": name, "version": (int(old.get("version") or 1) + 1) if old else 1, **d, "units": {},
-                   "checks": {}, "created": time.time(), "rev": int(old.get("rev") or 0) if old else 0,
-                   "sessions": list(old.get("sessions") or []) if old else []}
-            if old:
-                # (code with no values: the checks whose value it still returns, once it has run)
-                keep = {r: c for r, c in (old.get("checks") or {}).items() if c.get("v") in values or not given}
-                lab["checks_kept"] = len(keep)
-                lab["checks"] = keep
-        if kind == "code" and (not same or given or "given" not in lab):
-            lab["given"] = given
-        lab["reason"] = bool(reason) or bool(lab.get("reason"))
-        lab["trial"] = bool(limit)
-        lab["matched"] = matched
-        lab["files"] = files
-        units = lab["units"]
-        kinds = {f: S.kind_of_file(st.root, f) for f in files} if kind == "regex" else {}
-        added, errors = 0, []
-        for row in rows:
-            if row.ref in units and not units[row.ref].get("wait") and (units[row.ref].get("v") is not None
-                                                                          or units[row.ref].get("out")):
-                continue
-            if row.ref in units and kind == "prompt":
-                continue
-            added += 1
-            if kind == "regex":
-                hit = re.search(rule, regex_text(row, _kind_of_ref(kinds, row.ref))) is not None
-                units[row.ref] = {"v": values[0] if hit else values[-1], "c": 1.0, "by": "regex"}
-            elif kind == "code":
-                try:
-                    v, c = _as_value(lab, fn(_unit_of(row)))
-                    # a None the code returns on purpose: the record is outside the label, not one without a value
-                    units[row.ref] = ({"v": v, "c": c if c is not None else 1.0, "by": "code"} if v is not None
-                                      else {"v": None, "by": "code", "out": True})
-                    if v is not None and v not in lab["values"]:
-                        lab["values"].append(v)
-                except Exception as e:  # noqa: BLE001 — a record the code cannot label has no value, and says why
-                    units[row.ref] = {"v": None, "by": "code", "err": f"{type(e).__name__}: {e}"[:200]}
-                    if len(errors) < 3:
-                        errors.append(f"{row.ref}: {type(e).__name__}: {e}")
-            else:
-                units[row.ref] = {"v": None, "wait": True}
-        if kind == "code" and not lab.get("given"):
-            _values_by_count(lab)
-        if kind == "prompt":
-            waiting = sum(1 for u in units.values() if u.get("wait"))
-            lab["run"] = {"state": "asked" if waiting else "done", "asked": time.time(), "waiting": waiting}
-        # the sessions that applied it, which coverage counts as having gone over its records
-        lab["sessions"] = [s for s in lab.get("sessions") or [] if s != st.session][-(SESSIONS_MAX - 1):] + [st.session]
+        now = load(st, name)
+        if (now or {}).get("rev") != (old or {}).get("rev"):
+            lab, added, errors, same = _apply(st, now, name, job)
         write(st, lab)
     return {"label": lab, "added": added, "applied": len(rows), "matched": matched, "errors": errors, "same": same}
+
+
+def _apply(st: Store, old: dict[str, Any] | None, name: str,
+           job: dict[str, Any]) -> tuple[dict[str, Any], int, list[str], bool]:
+    """The label `old` (or a new one) with define()'s definition (`job`) applied to its rows: (label, records added,
+    errors, whether the definition is the same)."""
+    kind, rule, values, given, fn = job["kind"], job["rule"], job["values"], job["given"], job["fn"]
+    rows, files = job["rows"], job["files"]
+    d = _definition(kind, rule, job["glob"], values, job["where"], job["within"])
+    # code may add values it found; the same definition keeps them
+    same = bool(old) and all(old.get(k) == d[k] for k in d if k != "values") \
+        and list(old.get("values") or [])[:len(values)] == values
+    if same:
+        lab = old
+    else:
+        lab = {"name": name, "version": (int(old.get("version") or 1) + 1) if old else 1, **d, "units": {},
+               "checks": {}, "created": time.time(), "rev": int(old.get("rev") or 0) if old else 0,
+               "sessions": list(old.get("sessions") or []) if old else []}
+        if old:
+            # (code with no values: the checks whose value it still returns, once it has run)
+            keep = {r: c for r, c in (old.get("checks") or {}).items() if c.get("v") in values or not given}
+            lab["checks_kept"] = len(keep)
+            lab["checks"] = keep
+    if kind == "code" and (not same or given or "given" not in lab):
+        lab["given"] = given
+    lab["reason"] = bool(job["reason"]) or bool(lab.get("reason"))
+    lab["trial"] = bool(job["limit"])
+    lab["matched"] = job["matched"]
+    lab["files"] = files
+    units = lab["units"]
+    kinds = {f: S.kind_of_file(st.root, f) for f in files} if kind == "regex" else {}
+    added, errors = 0, []
+    for row in rows:
+        if row.ref in units and not units[row.ref].get("wait") and (units[row.ref].get("v") is not None
+                                                                      or units[row.ref].get("out")):
+            continue
+        if row.ref in units and kind == "prompt":
+            continue
+        added += 1
+        if kind == "regex":
+            hit = re.search(rule, regex_text(row, _kind_of_ref(kinds, row.ref))) is not None
+            units[row.ref] = {"v": values[0] if hit else values[-1], "c": 1.0, "by": "regex"}
+        elif kind == "code":
+            try:
+                v, c = _as_value(lab, fn(_unit_of(row)))
+                # a None the code returns on purpose: the record is outside the label, not one without a value
+                units[row.ref] = ({"v": v, "c": c if c is not None else 1.0, "by": "code"} if v is not None
+                                  else {"v": None, "by": "code", "out": True})
+                if v is not None and v not in lab["values"]:
+                    lab["values"].append(v)
+            except Exception as e:  # noqa: BLE001 — a record the code cannot label has no value, and says why
+                units[row.ref] = {"v": None, "by": "code", "err": f"{type(e).__name__}: {e}"[:200]}
+                if len(errors) < 3:
+                    errors.append(f"{row.ref}: {type(e).__name__}: {e}")
+        else:
+            units[row.ref] = {"v": None, "wait": True}
+    if kind == "code" and not lab.get("given"):
+        _values_by_count(lab)
+    if kind == "prompt":
+        waiting = sum(1 for u in units.values() if u.get("wait"))
+        lab["run"] = {"state": "asked" if waiting else "done", "asked": time.time(), "waiting": waiting}
+    # the sessions that applied it, which coverage counts as having gone over its records
+    lab["sessions"] = [s for s in lab.get("sessions") or [] if s != st.session][-(SESSIONS_MAX - 1):] + [st.session]
+    return lab, added, errors, same
 
 
 def _values_by_count(lab: dict[str, Any]) -> None:

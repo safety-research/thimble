@@ -1,5 +1,5 @@
 // telemetry.ts: every model call thimble makes, and every turn, as one line in the session's events
-// ($THIMBLE_HOME/lean/events/<session>.jsonl, events.mjs says the lines). `thimble dev stats` reads them back.
+// ($THIMBLE_HOME/events/<conversation>.jsonl, core/layout.mjs; events.mjs says the lines). `thimble dev stats` reads them back.
 //
 // - A call: `tracked($, {feature, prompt, model}, () => $.model.complete(...))` times it and writes its line: the
 //   feature (labels), the prompt it used, the model, the four token counts, the seconds, and whether the main turn
@@ -14,7 +14,9 @@
 // Lines are appended by a Node child (append.mjs) a moment after they are made, batched, never inside a turn's path.
 import type { EngineInterface } from 'claude-code'
 
-import { callLine, eventsFile, turnLine } from './events.mjs'
+import { thimbleHome } from '../core/home'
+import { eventsFile } from '../core/layout.mjs'
+import { callLine, turnLine } from './events.mjs'
 import { sessionKey } from '../hooks/conversation'
 import { busy } from '../bar/busy'
 
@@ -50,7 +52,7 @@ async function where($: Engine): Promise<string> {
   const id = await sessionKey($)
   if (id !== T.session || !T.home) {
     T.session = id
-    T.home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+    T.home = await thimbleHome($)
   }
   return eventsFile(T.home, T.session)
 }

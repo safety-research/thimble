@@ -113,7 +113,7 @@ def test_new_draft_keep_send(env: Path, capsys, monkeypatch):
     assert str(wt).startswith(os.environ["THIMBLE_HOME"])
     change(fx)
     # the session read the file's rows and fields (the hooks module's record of a Read call)
-    seen = Path(os.environ["THIMBLE_HOME"]) / "lean" / "seen"
+    seen = Path(os.environ["THIMBLE_HOME"]) / "seen"
     seen.mkdir(parents=True, exist_ok=True)
     (seen / "s1.jsonl").write_text(json.dumps({"tool": "Read", "file": str(env / "support" / "tickets.csv"), "from": 1, "to": 3, "cwd": str(env / "support")}) + "\n")
     f = env / "draft.md"
@@ -128,7 +128,7 @@ def test_new_draft_keep_send(env: Path, capsys, monkeypatch):
     for private in ("tickets.csv", "queue_owner", "wren.example@example.org", "ghp_", "/ho" + "me/dana"):
         assert private not in issue + pr + diff, private
     assert "‹data file›" in issue and "‹field›" in issue and "‹secret›" in issue and "test_semicolon.py" in diff
-    feed = (Path(os.environ["THIMBLE_HOME"]) / "lean" / "events" / "s1.jsonl").read_text().splitlines()
+    feed = (Path(os.environ["THIMBLE_HOME"]) / "events" / "s1.jsonl").read_text().splitlines()
     assert json.loads(feed[-1])["kind"] == "fix_ask" and json.loads(feed[-1])["slug"] == fx["slug"]
     hits = json.loads((share / "scan.json").read_text())
     field = next(h for h in hits if h["found"] == "queue_owner" and h["where"] == "issue")

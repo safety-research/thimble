@@ -13,6 +13,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { countsNow, lastCoverage, percent, shareOfFiles } from '../bar/counts'
+import { cut, textWidth } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,8 +42,7 @@ const TOUCHED = 9
 const short = (n: number) => (n < 10000 ? n.toLocaleString('en-US') : n < 1e6 ? `${Math.round(n / 1000)}k` : `${(n / 1e6).toFixed(1)}M`)
 
 const node = (path: string): Node => ({ path, files: 0, touched: 0, units: new Map(), readSum: 0, countedSum: 0, kids: new Map() })
-const len = (s: string) => [...s].length
-const cut = (s: string, n: number) => (len(s) <= n ? s : `${[...s].slice(0, Math.max(0, n - 1)).join('')}…`)
+const len = textWidth
 const pad = (s: string, n: number, right = false) => { const t = cut(s, n); const sp = ' '.repeat(Math.max(0, n - len(t))); return right ? sp + t : t + sp }
 /** A file's folder as the kernel names it (`runs/r04/`, `./` at the top). */
 const folderOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : './')

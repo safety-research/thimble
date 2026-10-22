@@ -20,7 +20,7 @@ function engine(files: Map<string, string>, toasts: string[], commands: string[]
     fs: { read: async (p: string) => { if (!files.has(p)) throw new Error(`no ${p}`); return files.get(p) } },
     state: {
       get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }),
-      set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v) },
+      set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } },
     },
     ui: { toast: (t: string) => { toasts.push(t) } },
     command: { run: async (c: Any) => { commands.push(c.command) } },
@@ -46,7 +46,7 @@ test('a second round of the same fix loads the plugins again, and its new title 
   expect(toasts.length).toBe(1)
   expect(toasts[0]).toContain('Draw card titles in violet')
   expect(commands).toEqual(['reload-plugins'])
-  expect((await fixLineNow($))?.kind).toBe('applied')
+  expect((await fixLineNow($))?.slug).toBe('round-two')
   // nothing new: nothing said, nothing loaded
   await refreshFixes($)
   expect(toasts.length).toBe(1)

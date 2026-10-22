@@ -37,7 +37,7 @@ def code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def saw(tmp_path: Path, root: Path, rows: list[dict]) -> None:
-    seen = tmp_path / "th" / "lean" / "seen"
+    seen = tmp_path / "th" / "seen"
     seen.mkdir(parents=True, exist_ok=True)
     (seen / "s-cov.jsonl").write_text("\n".join(json.dumps({"cwd": str(root), **r}) for r in rows) + "\n")
 

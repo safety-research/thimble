@@ -1,5 +1,5 @@
-"""The citation healing pass of the browser workbench: the terminal plugin's pass (plugin/engine/kernel/heal.py) over
-the citations of a card's values, `[31](card:<id>#<column>/<row>)`. Deterministic, with no model call.
+"""The citation healing pass of the browser workbench, over the citations of a card's values,
+`[31](card:<id>#<column>/<row>)` (the terminal plugin had the same pass until 0.11). Deterministic, with no model call.
 
 For each citation whose words state a value its cited cell does not show:
   (a) the cited card's tables and charts are searched for the value, and the citation is re-pointed only when one place

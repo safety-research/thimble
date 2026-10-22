@@ -2,14 +2,15 @@
 // Claude Code transcript when given one. Cost is price-weighted tokens: input 1, cache write 1.25, cache read 0.1,
 // output 5.
 //
-//   thimble dev stats                         the newest session under $THIMBLE_HOME/lean/events
+//   thimble dev stats                         the newest session under $THIMBLE_HOME/events
 //   thimble dev stats SESSION|FILE            that session (an id, or its events file)
 //   thimble dev stats ... --against PLAIN     beside a plain Claude Code transcript (.jsonl) of the same questions
 //   thimble dev stats ... --json              the numbers as JSON
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseLines, plainTurns, safeName, summarize, weighted } from './events.mjs'
+import { eventsFile, safeName } from '../core/layout.mjs'
+import { parseLines, plainTurns, summarize, weighted } from './events.mjs'
 
 const k = n => `${(n / 1000).toFixed(1)}k`
 const sec = ms => `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`
@@ -17,7 +18,7 @@ const pad = (s, n) => String(s).padEnd(n)
 const lpad = (s, n) => String(s).padStart(n)
 
 export function eventsDir(env = process.env) {
-  return join(env.THIMBLE_HOME || join(env.HOME || '.', '.thimble'), 'lean', 'events')
+  return dirname(eventsFile(env.THIMBLE_HOME || join(env.HOME || '.', '.thimble'), 'x'))
 }
 
 /** The events file a word names: a file, a session id, or (none) the newest. */

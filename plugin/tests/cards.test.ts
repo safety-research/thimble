@@ -31,7 +31,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any) {
+function world(on: Any, o: { crash?: string } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -49,7 +49,7 @@ function world(on: Any) {
   const dirs: Record<string, string[]> = {}
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: (dirs[e.path ?? ''] ?? []).map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }))
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
-    value: e.path === `${DATA}/runs.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
+    value: e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
       : e.path === DATA || e.path === '/made-up/tmp' ? { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path }
         : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
   }))
@@ -59,16 +59,21 @@ function world(on: Any) {
   on('http.fetch', (_$: unknown, e: { url: string; init?: { body?: string } }) => {
     const op = e.url.replace('http://runner/', '')
     asked.push(op)
+    // a view that takes all the runner's memory: the socket closes while it answers
+    if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
     const answers: Record<string, unknown> = {
       ping: { ok: true },
-      load: { ok: true, tree: TREE, state: 'null', query: null, keys: 's', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
-      key: { ok: true, handled: body.key === 's', tree: SORTED, state: '{"sorted":true}', query: null },
-      draw: { ok: true, tree: TREE, state: 'null', query: null, lines: ['ada 3', 'bram 5'], cut: [] },
-      undo: { ok: true, tree: TREE, state: 'null', query: null },
+      load: { ok: true, tree: TREE, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
+      key: { ok: true, handled: body.key === 's', tree: SORTED, state: '{"sorted":true}' },
+      draw: { ok: true, tree: TREE, state: 'null' },
+      copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
+      undo: { ok: true, tree: TREE, state: 'null' },
     }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answers[op] ?? { ok: false, error: 'no such request' }) } }
   })
+  // the person's permission rules: a deny rule for reading `secret.json`
+  on('tool.check', (_$: unknown, e: Any) => (e.tool === 'Read' && String(e.input?.file_path).endsWith('secret.json') ? { decision: 'deny', reason: 'a made-up deny rule', rule: 'Read(./secret.json)' } : { decision: 'allow' }) as never)
   on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   return { files, asked, dirs, clock }
@@ -92,8 +97,8 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(text).toContain('“Scores” is drawn where this call stands')
   expect(text).toContain('It read 2 rows from runs.json, with the columns name, score.')
   expect(text).toContain('ada 3\nbram 5')
-  // the copy is also drawn at a narrow width, then the card is drawn at its own width again
-  expect(w.asked).toEqual(['ping', 'load', 'draw', 'draw'])
+  // the copy is also made at a narrow width, in one request that leaves the card as it is
+  expect(w.asked).toEqual(['ping', 'load', 'copy'])
   const meta = Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))
   expect(JSON.parse(meta![1]).keys).toEqual(['s'])
   expect(Object.keys(w.files).filter(p => /\/v1\/view\.js$/.test(p))).toEqual([expect.any(String)])
@@ -163,11 +168,11 @@ test('a card scrolled out of view takes no keys, and the one in view does', asyn
 test('a card the designer fork drew draws under the answer v was pressed on, also in a resumed session', async ($, on) => {
   const w = world(on)
   // the card as tool.ts keeps a designer fork's call: its anchor is the answer's row
-  const dir = '/made-up/.thimble/cards/s-cards/c0123456789ab'
+  const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
   const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['s'], rows: 2, columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
   w.files[`${dir}/meta.json`] = JSON.stringify(meta)
   w.files[`${dir}/v1/view.js`] = VIEW
-  w.dirs['/made-up/.thimble/cards/s-cards'] = ['c0123456789ab']
+  w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const answer = (requestId: string) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.', isFirstOfReply: true } } as never)
   // with no drawing yet, its Client asks for one at its width; the runner loads the card from its copy
@@ -181,4 +186,42 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   // its call's row in the fork draws no second card
   const row = await $.ui.render(callRow('toolu_made_up_3', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).some(n => n.type === 'Client')).toBe(false)
+})
+
+test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {
+  const w = world(on)
+  w.files[`${DATA}/secret.json`] = '[]'
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_5', title: 'Secret', data: 'secret.json', view: VIEW } as never)) as Any
+  expect(String(r.result)).toBe('The card did not draw: a made-up deny rule.')
+  expect(w.asked).not.toContain('load')
+})
+
+test('keys at an empty prompt: letters only, never a slash command; a word that starts with a card key and v goes back whole', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // the view asks for "a" and "/"; the card gets the letter only
+  const view = 'const keys = "a/"\nfunction onKey(k, s) {}\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_6', title: 'Scores', data: 'runs.json', view } as never)) as Any
+  expect(String(r.result)).toContain('a card takes letters only, so it does not get /')
+  await shown($, callRow('toolu_made_up_6', { title: 'Scores', data: 'runs.json', view }))
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  const meta = JSON.parse(Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))![1])
+  expect(meta.keys).toEqual(['a'])
+  expect((await edit('/')).text).toBe('/')
+  await w.clock.advance(1000)
+  // "a" then "v" straight after (the person types "available"): a word, and v starts nothing
+  expect(await edit('a')).toEqual({ text: '', cursor: 0 })
+  expect((await edit('v')).text).toBe('av')
+  expect(w.asked).toContain('undo')
+})
+
+test('a view that stops the runner is not sent again, and the call says to draw less', async ($, on) => {
+  const w = world(on, { crash: 'load' })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_7', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  expect(w.asked.filter(x => x === 'load').length).toBe(1)
+  expect(String(r.result)).toContain('the card stopped the card runner, most likely by using too much memory')
+  expect(String(r.result)).toContain('Fix the view')
+  expect(String(r.result)).not.toContain('cannot draw in this session')
 })

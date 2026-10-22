@@ -47,16 +47,16 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | What | Where |
 |---|---|
 | the manifest: name, version, the three switches (Marks, Cards, Labels and coverage on the bar) | `plugin/.claude-plugin/plugin.json` |
-| the `thimble` command (`label`, `coverage`, `fix`; `thimble dev prompts`, `thimble dev stats`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
+| the `thimble` command (`label`, `coverage`, `fix`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
-| the hooks module, its order, the session's PATH, and which files Claude read (for coverage) | `plugin/hooks/` |
-| shared parts: the forks (checker, designer), what thimble tells Claude with the next prompt, the change feed, the one side pane | `plugin/core/` |
+| the hooks module, its order, the session's PATH and TMPDIR, which files Claude read (for coverage), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
+| shared parts: where thimble keeps its records (`layout.mjs`, the same names as `engine/kernel/store.py`), a text's width, whether main's turn runs, the forks (checker, designer), what thimble tells Claude with the next prompt, the change feed, the one side pane | `plugin/core/` |
 | the guidance: the `thimble` context block in every conversation | `plugin/guidance/` |
 | the texts the model reads, and their registry | `plugin/prompts/` |
 | marks: find `[words](#)` in a reply, draw them, run the checker fork and the validator, the evidence pane | `plugin/marks/` |
-| cards: the `card` tool, the runner that runs a card's view in a sandbox (`runner.mjs`), drawing, keys | `plugin/cards/` |
+| cards: the `card` tool, the runner that runs a card's view in a sandbox (`runner.mjs`), drawing, a card's keys | `plugin/cards/` |
 | `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
-| the line above the prompt: busy step, failure line, fix keys, counts | `plugin/bar/` |
+| the line above the prompt: busy step, failure line, fix line, counts | `plugin/bar/` |
 | the settings, coverage and fix-share panes | `plugin/panes/` |
 | the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
 | a `--prompt` label's model reads, and the labels pane | `plugin/labels/` |

@@ -12,7 +12,10 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { layoutLines, textWidth, wrapText } from '../layout.js'
+import { runnerArgv } from '../argv.mjs'
+
+import { textWidth } from '../../core/text.js'
+import { layoutLines, wrapText } from '../layout.js'
 import { GALLERY, GOLDEN_WIDTHS } from './gallery.mjs'
 
 const HERE = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
@@ -33,7 +36,8 @@ const ask = (op, body) => new Promise((resolve, reject) => {
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), 'thimble-layout-'))
   sock = join(dir, 'r.sock')
-  child = spawn('node', ['--permission', `--allow-fs-read=${HERE}`, `--allow-fs-read=${dir}`, `--allow-fs-write=${dir}`, join(HERE, 'runner.mjs'), sock], { stdio: 'ignore' })
+  const [cmd, ...args] = runnerArgv({ plugin: join(HERE, '..'), cards: dir, run: dir, sock, path: process.env.PATH })
+  child = spawn(cmd, args, { stdio: 'ignore' })
   for (let i = 0; i < 100; i++) {
     try { if ((await ask('ping', {})).ok) return } catch { /* not yet */ }
     await new Promise(r => setTimeout(r, 20))

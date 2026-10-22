@@ -4,6 +4,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
+import { failNotice, promptTyped } from '../bar/fix'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,7 +38,7 @@ function textOf(n: Any): string {
 
 /** A made-up session: the folder's coverage counts as `coverage` says (a JSON text, or a failure), with two labels. */
 function world(on: Any, coverage: { ok: boolean; out: string }) {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: string[] = []
   const opened: string[] = []
@@ -159,4 +160,20 @@ test('each switch takes its items off the bar, and v waits while a design runs',
   const narrow = textOf(await barRows(stateOnly(state), ELS, 40, { on: () => true }))
   expect(narrow).toContain('r coverage 43%')
   expect(narrow).not.toContain('labels')
+})
+
+test('a failure while the person tries a fix keeps the fix line and its keys; the next prompt takes the failure away only', async () => {
+  const state: Record<string, unknown> = { fixLine: { slug: 'made-up-fix', title: 'Titles in teal' } }
+  const $ = stateOnly(state)
+  failNotice($, 'A made-up card failed.')
+  await new Promise(r => setTimeout(r, 1))
+  const both = textOf(await barRows($, ELS, 100, { on: () => true }))
+  expect(both).toContain('A made-up card failed.')
+  expect(both).toContain('f fix this')
+  expect(both).toContain('✓ Your thimble has the fix: Titles in teal')
+  expect(both).toContain('p submit · u undo')
+  await promptTyped($)
+  const after = textOf(await barRows($, ELS, 100, { on: () => true }))
+  expect(after).not.toContain('A made-up card failed.')
+  expect(after).toContain('p submit · u undo')
 })

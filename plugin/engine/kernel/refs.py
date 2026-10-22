@@ -50,20 +50,6 @@ def parse_nums(s: str) -> list[int]:
     return out
 
 
-def format_nums(nums: list[int]) -> str:
-    """Sorted unique numbers as ranges: [1, 2, 3, 7, 9, 10] -> '1-3,7,9-10'."""
-    xs = sorted(set(nums))
-    parts: list[str] = []
-    i = 0
-    while i < len(xs):
-        j = i
-        while j + 1 < len(xs) and xs[j + 1] == xs[j] + 1:
-            j += 1
-        parts.append(str(xs[i]) if i == j else f"{xs[i]}-{xs[j]}")
-        i = j + 1
-    return ",".join(parts)
-
-
 def parse(ref: str) -> dict[str, Any]:
     """A ref as a dict with `kind`: file, lines, pointer, csvrows, dbrows, table.
 

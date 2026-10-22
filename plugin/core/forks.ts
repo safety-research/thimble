@@ -13,8 +13,9 @@
 // forkOf(e.agentId) names the kind. (Claude Code follows `$` only into functions a file declares or imports, so a
 // list of handlers that take `$` cannot be called from here.)
 // A fork's end never reaches main's conversation: its task notification or hand-back is dropped at prompt.submit.
-// Each fork's turns are filed under its kind in the session's events (telemetry claimAgent). Which agent is which
-// fork is kept in $.state as soon as Claude Code names the agent, so a reload of the plugin still knows them.
+// Each fork's turns are filed under its kind in the session's events (telemetry claimAgent). Which agent is which fork
+// is kept in $.state as soon as Claude Code names the agent, so a reload of the plugin still knows them; the newest
+// KEPT forks are kept, long enough for any report of theirs to come.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { claimAgent } from '../telemetry/telemetry'
@@ -24,6 +25,7 @@ type Engine = EngineInterface
 export type ForkKind = 'checker' | 'designer'
 
 const FORKS = { plugin: 'thimble', key: 'forks' } as const
+const KEPT = 64
 const known = new Map<string, ForkKind>()
 
 /** The forks a reload of the plugin left running, known again. */
@@ -48,6 +50,7 @@ export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; 
   if (!r.agentId) return { deny: 'Claude Code did not name the agent it started' }
   const agentId = String(r.agentId)
   known.set(agentId, o.kind)
+  for (const old of [...known.keys()].slice(0, Math.max(0, known.size - KEPT))) known.delete(old)
   claimAgent(agentId, o.kind, o.kind)
   try { await $.state.set(FORKS, Object.fromEntries(known)) } catch { /* known for this load of the module */ }
   return { agentId }

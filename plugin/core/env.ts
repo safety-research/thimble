@@ -1,6 +1,5 @@
-// env.ts: where thimble's records are, and how the plugin runs its own `thimble` calls.
+// env.ts: the session's folders as thimble reads them, and how the plugin runs its own `thimble` calls.
 //
-//   thimbleHome($)          $THIMBLE_HOME, else ~/.thimble
 //   keptDir($), readKept, writeKept  what thimble keeps of this conversation for a resumed session, as JSON files
 //   startDir($)             the folder the session started in, which a shell `cd` does not move
 //   rootHere($)             the folder under analysis as the kernel finds it (engine/kernel/store.py find_root), or null
@@ -10,17 +9,15 @@
 import type { EngineInterface } from 'claude-code'
 
 import { sessionKey } from '../hooks/conversation'
+import { thimbleHome } from './home'
+import { conversationDir, labelsDirOf } from './layout.mjs'
 
 type Engine = EngineInterface
 
-export async function thimbleHome($: Engine): Promise<string> {
-  return String((await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`).replace(/\/+$/, '')
-}
-
-/** The folder of what thimble keeps of this conversation for a resumed session: the marks' checks, the texts Claude
- *  reads with the next prompt, the answer v draws under. Its name is the conversation's key (hooks/conversation.ts). */
+/** The folder of what thimble keeps of this conversation for a resumed session (core/layout.mjs): the marks' checks,
+ *  the cards, the texts Claude reads with the next prompt, the answer v draws under. */
 export async function keptDir($: Engine): Promise<string> {
-  return `${await thimbleHome($)}/kept/${(await sessionKey($)).replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 80) || 'none'}`
+  return conversationDir(await thimbleHome($), await sessionKey($))
 }
 
 /** A JSON value kept in the conversation's folder, or null when there is none or it cannot be read. */
@@ -52,11 +49,11 @@ export async function startDir($: Engine): Promise<string> {
   return start.replace(/\/+$/, '')
 }
 
-/** The folder that holds the labels of `root`: the one kept under $THIMBLE_HOME/lean/folders/, named by the end of the
- *  folder's real path, else <root>/thimble/labels when the folder holds labels of its own. Null when neither is there. */
+/** The folder that holds the labels of `root`: the one kept under $THIMBLE_HOME/folders/ for the folder's real path
+ *  (core/layout.mjs), else <root>/thimble/labels when the folder holds labels of its own. Null when neither is there. */
 export async function labelsDir($: Engine, root: string): Promise<string | null> {
   const real = (await $.fs.stat(root, { resolve: true }).catch(() => null))?.realPath ?? root
-  const kept = `${await thimbleHome($)}/lean/folders/${real.replace(/[^A-Za-z0-9_-]/g, '-').slice(-120)}/thimble/labels`
+  const kept = labelsDirOf(await thimbleHome($), real)
   if (await $.fs.exists(kept)) return kept
   const own = `${root.replace(/\/+$/, '')}/thimble/labels`
   return (await $.fs.exists(own)) ? own : null

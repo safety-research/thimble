@@ -1,7 +1,7 @@
 // store.ts: each reply's marks and their checks, in $.state for drawing and on disk, so a resumed session draws the
 // marks as their check left them and the evidence pane still opens.
 //
-//   <THIMBLE_HOME>/kept/<conversation>/marks/<reply>.json   one reply (Reply), written after each change
+//   <conversation folder>/marks/<reply>.json   one reply (Reply), written after each change (core/layout.mjs)
 //   $.state: marks (Reply, by its key: the reply's last text row), marksRow (the reply's key, by each of its rows)
 //
 //   newReply($, reply)       a reply's marks, all `checking`, at the end of main's turn
@@ -12,6 +12,7 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import { keptDir } from '../core/env'
+import { safeName } from '../core/layout.mjs'
 
 type Engine = EngineInterface
 
@@ -40,7 +41,7 @@ const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
 
 async function fileOf($: Engine, key: string): Promise<string> {
-  return `${await keptDir($)}/marks/${key.replace(/[^A-Za-z0-9_-]/g, '-')}.json`
+  return `${await keptDir($)}/marks/${safeName(key)}.json`
 }
 
 // the disk follows the state: one write at a time, each of the reply as it stands then, so the last write is the newest

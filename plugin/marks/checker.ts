@@ -1,14 +1,20 @@
 // checker.ts: the check of a reply's marks. After each of main's turns that answered with marks, a fork of the
 // session (core/forks.ts, kind `checker`; for a reply with many marks, up to MAX_FORKS forks at once, each with a share
 // of the marks) reads prompts/checker.md with its marks filled in and gives one answer per mark: verified, corrected or
-// failed, with its evidence. engine/validate.py then checks that evidence without a model and without running code
-// (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence must be code that one of the
-// session's real Bash calls ran, whose real output shows the words. Its result is what the person sees.
+// failed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
+// without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence must be
+// code that one of the session's real Bash calls ran, whose real output shows the words. Its result is what the person
+// sees.
 //
 //   noteRow($, row, text)     a text row of main's reply, as session.append stored it
 //   startCheck($, e)          at the end of main's turn: the reply's marks (store.ts, all `checking`), the forks
-//   endCheck($, e)            at the end of a checker's turn: the validator, its marks' statuses, what main is told
-//   allowedTool(tool)         the tools the checker may call: it only reads
+//   endCheck($, e)            at the end of a checker's turn: the validator, its marks' statuses
+//   resumeChecks($)           at session start: the checks a reload of the plugin left running, on the busy line again;
+//                             a check whose fork is gone gives up, and says so
+//   checkerDenial(e)          why the checker may not make a call: it reads files, and runs code only as one Python script
+//
+// Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
+// mark of its share `checking`. When a reply's last mark settles, main is told what changed (tellText), once.
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent);
 // the marks themselves are in store.ts
@@ -18,8 +24,10 @@ import { busyWhile } from '../bar/busy'
 import { failNotice } from '../bar/fix'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
+import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { promptText } from '../prompts/prompts'
+import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
 import { marksIn, sentenceOf } from './message.js'
@@ -44,9 +52,25 @@ export const MAX_FORKS = 6
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'Bash'])
 
-/** The checker reads files and runs code that prints; it changes nothing. */
-export const allowedTool = (tool: string) => READS.has(String(tool))
-export const DENIED = 'The check of the marks only reads: it can use Read, Grep, Glob and Bash.'
+/** A Bash command that only runs one Python script from a here-document (`python3 - <<'PY'`, the script, `PY`), after a
+ *  `cd` at most (with `&&`, `;` or a line of its own): the form checker.md asks for, and the one
+ *  engine/kernel/evidence.py shows as a call's code. */
+function oneScript(command: string): boolean {
+  const lines = String(command).trimEnd().replace(/^\s*cd\s+\S+[ \t]*\n/, m => m.replace('\n', '; ')).split('\n')
+  const m = /^(?:cd\s+\S+\s*(?:&&|;)\s*)?\S*python[\d.]*\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['"]?)(\w+)\1[ \t]*$/.exec(lines[0] ?? '')
+  if (!m || lines.length < 3) return false
+  const end = (l: string) => l.trim() === m[2]
+  return end(lines[lines.length - 1]!) && !lines.slice(1, -1).some(end)
+}
+
+/** Why the checker may not make this call, or null when it may: it reads files with Read, Grep and Glob, and runs code
+ *  only as one Python script, whose output is its evidence. */
+export function checkerDenial(e: { tool: unknown; command?: unknown }): string | null {
+  const tool = String(e.tool)
+  if (!READS.has(tool)) return 'The check of the marks only reads: it can use Read, Grep, Glob, and Bash to run one Python script.'
+  if (tool === 'Bash' && !oneScript(String(e.command ?? ''))) return "The check runs code only as one Python script: python3 - <<'PY', the code, PY, and nothing else in the call. Read, Grep and Glob read files."
+  return null
+}
 
 /** One of main's text rows, as session.append stored it: kept until main's turn ends (in the state, so a reload of the
  *  plugin mid-turn keeps them). */
@@ -69,8 +93,7 @@ function itemsOf(reply: { row: string; text: string }[]): MarkItem[] {
 
 /** The checker's prompt: checker.md with the marks (`n. [words] in: <sentence>`) and the working folder filled in. */
 export function checkerPrompt(template: string, items: MarkItem[], cwd: string): string {
-  const lines = items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`)
-  return template.replace('{marks}', lines.join('\n')).replaceAll('{cwd}', cwd)
+  return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd })
 }
 
 /** The reply with its items changed, and the time it settled once no mark is checked. */
@@ -78,10 +101,47 @@ function settle(r: Reply, now: number, items: MarkItem[]): Reply {
   return { ...r, items, settledAt: items.some(m => m.status === 'checking') ? null : now }
 }
 
+/** What main reads with the person's next prompt: each mark the check corrected or flagged, and each note, as the
+ *  person reads them. The person has read them in the reply, so main uses them from now on and need not say them
+ *  again. A mark whose evidence did not hold is not shown to be wrong, and main hears it that way. The check's own
+ *  words (its reason, its note) are quoted, since they may quote the records. */
+export function tellText(items: MarkItem[]): string {
+  const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
+  const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
+  const said = items.filter(m => m.status === 'corrected' || m.status === 'failed').map(m => {
+    if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`
+    if (m.failedBy === 'evidence') return `- ${q(m.words)} is marked as not confirmed: the check could not show it from the data`
+    return `- ${q(m.words)} is marked as wrong${why(m)}`
+  })
+  const notes = notesOf(items).map(n => `- ${q(n)}`)
+  if (!said.length && !notes.length) return ''
+  const parts = ['thimble checked the marks of your last reply against the data.']
+  if (said.length) parts.push(`The analyst sees these changes in the reply:\n${said.join('\n')}`)
+  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its unmarked statements:\n${notes.join('\n')}`)
+  parts.push('Use the corrected facts from now on. The analyst has read these where they stand, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
+  return parts.join('\n')
+}
+
+/** A change of the reply's marks; when it settled the reply's last mark, main is told what the check changed. Two forks
+ *  that end at once edit in turn (store.ts editReply), so exactly one of them settles the reply. */
+async function edit($: Engine, c: Check, change: (r: Reply) => Reply): Promise<Reply | null> {
+  let open = false
+  const reply = await editReply($, c.key, r => {
+    open = r.items.some(m => m.status === 'checking')
+    return change(r)
+  })
+  if (reply && open && reply.settledAt != null) {
+    const text = tellText(reply.items)
+    if (text) await tellAtNextPrompt($, `marks:${c.key}`, text)
+  }
+  return reply
+}
+
 /** Every mark of a check that is still checked becomes unchecked: no check could give an answer. */
 async function giveUp($: Engine, c: Check, why: string, now: number): Promise<void> {
   const mine = new Set(c.marks)
-  await editReply($, c.key, r => settle(r, now, r.items.map(m => (mine.has(m.n) && m.status === 'checking' ? { ...m, status: 'unchecked' as MarkStatus, reason: why } : m))))
+  if (!((await replyOf($, c.key))?.items ?? []).some(m => mine.has(m.n) && m.status === 'checking')) return
+  await edit($, c, r => settle(r, now, r.items.map(m => (mine.has(m.n) && m.status === 'checking' ? { ...m, status: 'unchecked' as MarkStatus, reason: why } : m))))
 }
 
 /** The marks split into the forks' shares, in order: one share up to PER_FORK marks, else as many as PER_FORK gives
@@ -103,6 +163,14 @@ export function splitMarks<M extends { sentence: string }>(items: M[]): M[][] {
     before += run.length
   }
   return out.filter(s => s.length)
+}
+
+/** The busy line's step while a reply's forks run, until none of them does. */
+async function showRunning($: Engine, total: number, agents: string[]): Promise<void> {
+  await busyWhile($, `checking ${total} mark${total === 1 ? '' : 's'}`, async () => {
+    const now = await running($)
+    return agents.some(id => !!now[id])
+  })
 }
 
 /** At the end of one of main's turns: when its reply holds marks, the reply's marks go in the store, and the checker
@@ -133,9 +201,8 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     failNotice($, `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}), so the marks are not checked. Reinstall thimble.`)
     return
   }
-  const shares = splitMarks(items)
   const started: string[] = []
-  for (const share of shares) {
+  for (const share of splitMarks(items)) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
     const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd), description: 'checking marks' })
     if (!fork.agentId) {
@@ -148,12 +215,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...c, agentId, spawnedAt } }))
     started.push(agentId)
   }
-  if (started.length) {
-    await busyWhile($, `checking ${items.length} mark${items.length === 1 ? '' : 's'}`, async () => {
-      const now = await running($)
-      return started.some(id => !!now[id])
-    })
-  }
+  if (started.length) await showRunning($, items.length, started)
 }
 
 /** The real Bash calls of a conversation, with their output as the model read it: a call that ended with an error
@@ -169,32 +231,19 @@ function bashCalls(msgs: Any, by: 'checker' | 'main'): { command: string; output
   return out
 }
 
-/** The Python that runs the kernel, as bin/thimble picks it: THIMBLE_PYTHON, else the plugin's own .venv, else
- *  python3. */
-async function python($: Engine): Promise<string> {
-  const own = await $.env.get('THIMBLE_PYTHON')
-  if (own) return own
-  const venv = `${$.plugin.root.replace(/\/+$/, '')}/.venv/bin/python`
-  return (await $.fs.exists(venv)) ? venv : 'python3'
-}
-
-/** What main reads with the person's next prompt: each mark the check corrected or flagged, and each note, as the
- *  person reads them. The person has read them in the reply, so main uses them from now on and need not say them
- *  again. A mark whose evidence did not hold is not shown to be wrong, and main hears it that way. */
-export function tellText(items: MarkItem[]): string {
-  const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
-  const said = items.filter(m => m.status === 'corrected' || m.status === 'failed').map(m => {
-    if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${m.reason ? `: ${m.reason}` : ''}`
-    if (m.failedBy === 'evidence') return `- ${q(m.words)} is marked as not confirmed: the check could not show it from the data`
-    return `- ${q(m.words)} is marked as wrong${m.reason ? `: ${m.reason}` : ''}`
-  })
-  const notes = notesOf(items).map(n => `- ${n}`)
-  if (!said.length && !notes.length) return ''
-  const parts = ['thimble checked the marks of your last reply against the data.']
-  if (said.length) parts.push(`The analyst sees these changes in the reply:\n${said.join('\n')}`)
-  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its unmarked statements:\n${notes.join('\n')}`)
-  parts.push('Use the corrected facts from now on. The analyst has read these where they stand, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
-  return parts.join('\n')
+/** The first line of each code the checker's answer gives as evidence (`"code": "…"`), white space as one space: a
+ *  call of main's whose command holds none of them cannot be a mark's evidence, so the validator is not sent it. */
+function codeHeads(answer: string): string[] {
+  const out = new Set<string>()
+  for (const m of String(answer).matchAll(/"code"\s*:\s*("(?:[^"\\]|\\.)*")/g)) {
+    try {
+      const head = String(JSON.parse(m[1]!)).split('\n').map(l => l.trim().replace(/\s+/g, ' ')).find(Boolean)
+      if (head) out.add(head)
+    } catch {
+      // not a JSON string: no code
+    }
+  }
+  return [...out]
 }
 
 /** The person's line when a check gave no answer, by why its turn ended. */
@@ -204,8 +253,24 @@ function giveUpLine(reason: string): string {
   return 'The check of the marks stopped on an error, so they are not checked. The next reply is checked again.'
 }
 
-/** At the end of the checker's turn: its answer validated, each mark's status written, main told what changed, and
- *  the timings recorded. */
+/** The validator's result for a fork's answer, or why there is none. */
+async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
+  const heads = codeHeads(e.answer)
+  const flat = (s: string) => s.replace(/\s+/g, ' ')
+  const main = bashCalls(await $.session.messages(), 'main').filter(x => heads.some(h => flat(x.command).includes(h)))
+  const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...main]
+  const ran = await $.process.run([`${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`, 'dev', 'validate'], {
+    cwd: c.cwd, timeoutMs: 120000,
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: await tempDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
+  })
+  let out: { parsed: boolean; results: Any[] } | null = null
+  try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
+  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the marks (${String(ran.stderr || 'no output').trim().split('\n').pop()?.slice(0, 80)}), so they are not checked.` }
+  if (!out.parsed) return { problem: 'The check of the marks gave no answer thimble could read, so they are not checked.' }
+  return { results: out.results }
+}
+
+/** At the end of the checker's turn: its answer validated, each mark's status written, and the timings recorded. */
 export async function endCheck($: Engine, e: { agentId: string; reason: string; answer: string; usage?: unknown }): Promise<void> {
   const c = (await running($))[e.agentId]
   if (!c) return
@@ -218,36 +283,27 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const mine = new Set(c.marks)
     const items = ((await replyOf($, c.key))?.items ?? []).filter(m => mine.has(m.n))
-    const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(), 'main')]
-    const plugin = $.plugin.root.replace(/\/+$/, '')
-    const ran = await $.process.run([await python($), `${plugin}/engine/validate.py`], {
-      cwd: c.cwd, timeoutMs: 120000,
-      stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: (await $.env.get('TMPDIR')) || null, marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
-    })
-    let out: { parsed: boolean; results: Any[] } | null = null
-    try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
-    if (!out || ran.exitCode !== 0) {
+    let v: { results?: Any[]; problem?: string }
+    try {
+      v = await validate($, c, e, items)
+    } catch (err) {
+      v = { problem: `thimble could not validate the check of the marks (${String((err as Error)?.message || err).slice(0, 80)}), so they are not checked.` }
+    }
+    if (!v.results) {
       await giveUp($, c, 'thimble could not validate the check', forkEnd)
-      failNotice($, `thimble could not validate the check of the marks (${String(ran.stderr || 'no output').trim().split('\n').pop()?.slice(0, 80)}), so they are not checked.`)
+      failNotice($, v.problem!)
       return
     }
-    if (!out.parsed) {
-      await giveUp($, c, 'the check gave no answer thimble could read', forkEnd)
-      failNotice($, 'The check of the marks gave no answer thimble could read, so they are not checked.')
-      return
-    }
-    const byN = new Map(out.results.map(r => [Number(r.n), r]))
+    const byN = new Map(v.results.map(r => [Number(r.n), r]))
     const settled = Number(await $.clock.now())
-    const reply = await editReply($, c.key, r => settle(r, settled, r.items.map(m => {
+    const reply = await edit($, c, r => settle(r, settled, r.items.map(m => {
       if (!mine.has(m.n)) return m
-      const v = byN.get(m.n)
-      if (!v) return { ...m, status: 'unchecked' as MarkStatus, reason: 'the check gave no answer for this mark' }
-      const { n: _n, ...rest } = v
-      return { ...m, ...rest, shown: String(v.shown ?? m.words) }
+      const res = byN.get(m.n)
+      if (!res) return { ...m, status: 'unchecked' as MarkStatus, reason: 'the check gave no answer for this mark' }
+      const { n: _n, ...rest } = res
+      return { ...m, ...rest, shown: String(res.shown ?? m.words) }
     })))
     if (!reply) return
-    const text = tellText(reply.items)
-    if (text) await tellAtNextPrompt($, `marks:${c.key}`, text)
     const count = (s: string) => reply.items.filter(m => mine.has(m.n) && m.status === s).length
     await record($, {
       kind: 'marks', feature: 'checker', marks: c.marks.length, reply_marks: reply.items.length, verified: count('verified'), corrected: count('corrected'), failed: count('failed'), unchecked: count('unchecked'),
@@ -255,6 +311,26 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       reply_settled: !counts(reply).checking, usage: e.usage ?? null,
     })
   } finally {
+    // whatever ended the check, none of its marks stays checked
+    await giveUp($, c, 'the check ended before it judged this mark', Number(await $.clock.now())).catch(() => undefined)
     await update($, RUNNING, cur => Object.fromEntries(Object.entries(cur ?? {}).filter(([id]) => id !== e.agentId)))
   }
+}
+
+/** At session start (a reload of the plugin, a resumed session): each check still running is on the busy line again,
+ *  and a check whose fork Claude Code no longer runs gives up, with a notice. */
+export async function resumeChecks($: Engine): Promise<void> {
+  const now = await running($)
+  if (!Object.keys(now).length) return
+  const agents = new Map((await $.agent.list()).map(a => [a.id, a.status]))
+  const alive = (id: string) => agents.has(id) && !['completed', 'failed', 'killed'].includes(String(agents.get(id)))
+  const gone = Object.values(now).filter(c => !alive(c.agentId))
+  for (const c of gone) await giveUp($, c, 'the check stopped: thimble lost the copy that checked it', Number(await $.clock.now()))
+  if (gone.length) {
+    await update($, RUNNING, cur => Object.fromEntries(Object.entries(cur ?? {}).filter(([id]) => !gone.some(c => c.agentId === id))))
+    failNotice($, 'A check of the marks stopped: thimble lost the copy that checked them, so they are not checked. The next reply is checked again.')
+  }
+  const byReply = new Map<string, string[]>()
+  for (const c of Object.values(now).filter(c => alive(c.agentId))) byReply.set(c.key, [...(byReply.get(c.key) ?? []), c.agentId])
+  for (const [key, ids] of byReply) await showRunning($, (await replyOf($, key))?.items.length ?? ids.length, ids)
 }

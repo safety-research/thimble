@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { runnerArgv } from '../argv.mjs'
 import { checkView } from '../runner.mjs'
 
 const HERE = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
@@ -35,7 +36,7 @@ function view(props, surface) {
   const { Box, Text, Button } = surface.elements
   const st = surface.state || { n: 0 }
   surface.onPointer(e => { if (e.type === 'up') surface.setState({ ...st, at: e.x + ',' + e.y }) })
-  const rows = props.rows.filter(r => !props.query || r.name.includes(props.query))
+  const rows = st.n >= 7 ? props.rows.filter(r => r.score < 3) : props.rows
   return Box({ flexDirection: 'column', children: [
     Text({ children: 'count ' + st.n + (st.at ? ' clicked ' + st.at : '') }),
     ...rows.map(r => Text({ children: r.name + ' ' + r.score })),
@@ -54,7 +55,8 @@ before(async () => {
   dir = mkdtempSync(join(tmpdir(), 'thimble-runner-'))
   writeFileSync(join(dir, 'rows.json'), JSON.stringify(ROWS))
   sock = join(dir, 'r.sock')
-  child = spawn('node', ['--permission', `--allow-fs-read=${HERE}`, `--allow-fs-read=${dir}`, `--allow-fs-write=${dir}`, join(HERE, 'runner.mjs'), sock], { stdio: 'ignore' })
+  const [cmd, ...args] = runnerArgv({ plugin: join(HERE, '..'), cards: dir, run: dir, sock, path: process.env.PATH })
+  child = spawn(cmd, args, { stdio: 'ignore' })
   for (let i = 0; i < 100; i++) {
     try { if ((await ask('ping', {})).ok) return } catch { /* not yet */ }
     await new Promise(r => setTimeout(r, 20))
@@ -85,11 +87,21 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.deepEqual(JSON.parse(r.state), { n: 11 })
   r = await ask('pointer', { id, down: { x: 2, y: 1 }, up: { x: 2, y: 1 } })
   assert.equal(r.handled, true)
-  r = await ask('draw', { id, width: 40, text: true })
+  r = await ask('copy', { id, width: 40 })
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
-  r = await ask('query', { id, text: 'br' })
-  assert.equal(r.query, 'br')
-  assert.deepEqual((await ask('draw', { id, width: 40, text: true })).lines.slice(1, 3), ['bram 5', '[ add ten ]'])
+})
+
+test('a text copy at another width leaves the card as it was: its width and its Buttons', async () => {
+  const wide = `function view(p, s) { const { Box, Text, Button } = s.elements
+  const st = s.state || { n: 0 }
+  return Box({ flexDirection: 'column', children: [Text({ children: 'n ' + st.n }),
+    s.columns > 30 ? Button({ onPress: () => s.setState({ n: st.n + 1 }), children: 'one' }) : Button({ onPress: () => s.setState({ n: st.n + 100 }), children: 'hundred' })] }) }`
+  const { id, r } = await load(wide)
+  const button = r.tree.c.find(x => x.t === 'Button').p.onPress
+  assert.deepEqual((await ask('copy', { id, width: 20 })).lines, ['n 0', '[ hundred ]'])
+  const p = await ask('press', { id, button })
+  assert.deepEqual(JSON.parse(p.state), { n: 1 })
+  assert.deepEqual((await ask('copy', { id })).lines, ['n 1', '[ one ]'])
 })
 
 test('the tree holds only what Claude Code draws: a Button of words, and strings with no control character', async () => {
@@ -115,7 +127,7 @@ test('a file that is an object gives its rows as props.rows and the whole object
 })
 
 test('a card loads again with the state it kept', async () => {
-  const { r } = await load(COUNTER, { state: { n: 7 }, query: 'cl' })
+  const { r } = await load(COUNTER, { state: { n: 7 } })
   assert.deepEqual(r.lines.slice(0, 2), ['count 7', 'cleo 1'])
 })
 
@@ -142,7 +154,7 @@ function onKey(k, s) { if (k === 'x') { while (true) {} } }
 function view(p, s) { return s.elements.Text({ children: 'ok' }) }`)
   const k = await ask('key', { id, key: 'x' })
   assert.match(k.error, /ran past its 1 s limit/)
-  assert.deepEqual((await ask('draw', { id, width: 20, text: true })).lines, ['ok'])
+  assert.deepEqual((await ask('copy', { id, width: 20 })).lines, ['ok'])
   assert.equal((await ask('draw', { id: 'c0000ffff', width: 20 })).missing, true)
 })
 
@@ -153,9 +165,8 @@ function view(p, s) { if (s.state && s.state.broken) return p.rows[99].name; ret
   assert.deepEqual(r.notes, ['borderStyle "wavy" is not a border style (single, double, round, bold, singleDouble, doubleSingle, classic, arrow, dashed, quote), so that Box has no border'])
   const k = await ask('key', { id, key: 'x' })
   assert.equal(k.ok, false)
-  const d = await ask('draw', { id, width: 20, text: true })
-  assert.deepEqual(d.lines, ['whole'])
-  assert.equal(d.state, 'null')
+  assert.deepEqual((await ask('copy', { id, width: 20 })).lines, ['whole'])
+  assert.equal((await ask('draw', { id, width: 20 })).state, 'null')
 })
 
 test('the sandbox: no process, require, import, fetch or timers, and no code from strings by any path', async () => {

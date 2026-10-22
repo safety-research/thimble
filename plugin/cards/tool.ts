@@ -1,6 +1,11 @@
 // tool.ts: the `card` tool. Claude writes its rows as a JSON file with its own code and calls card with the file's
 // path, a title and a short JavaScript view. One call:
 //
+//   0. asks the person's permission rules: a deny rule for the card tool, or for reading the data file, refuses the
+//      call, as plan mode's refusal does. An `ask` that a rule of the person's makes refuses it too, since Claude Code
+//      cannot put its dialog in front of a plugin's own tool; one that comes only from the mode (a tool of a plugin, a
+//      file outside the working folder) lets it go on, since the card reads only a file of the session's folders or
+//      temp folder, and runs its view in the runner's sandbox
 //   1. checks the file is in the session's folder or the temp folder, and copies it into the card's folder
 //   2. loads the view and the copy into the runner (runner.mjs), which draws the card and makes its text copy
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
@@ -18,13 +23,15 @@ import type { EngineInterface } from 'claude-code'
 import { failCleared, failNotice } from '../bar/fix'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
+import { tempDir } from '../core/home'
 import { designAnchor } from '../designer/v'
+import { OWN_KEYS } from '../hooks/keys'
 import { promptText } from '../prompts/prompts'
-import { record } from '../telemetry/telemetry'
 import { fill } from '../prompts/registry.mjs'
-import { askCard, applyAnswer, cardWidth, screenRows } from './draw'
+import { record } from '../telemetry/telemetry'
 import { ask } from './ask'
-import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, searchNow, setFocus, setSearch, setTree, treeOf, versionDir } from './store'
+import { applyAnswer, askCard, cardWidth, screenRows } from './draw'
+import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,9 +44,6 @@ const AROUND_ROWS = 14
 /** The conversation's width beside a side pane on a terminal of 120 columns, which the card is also drawn at for its
  *  text copy. */
 const NARROW_COLUMNS = 68
-/** thimble's own keys at an empty prompt, which a card never gets: v (designer/v.ts), r and l (bar/register.ts), f F
- *  on a failure and p u on a fix in use (bar/fix.ts). */
-export const KEPT_KEYS = ['v', 'r', 'l', 'f', 'F', 'p', 'u']
 
 const SCHEMA = {
   type: 'object',
@@ -52,20 +56,26 @@ const SCHEMA = {
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
-      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'the words on a Button, or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] }, search: { type: 'string', description: 'words typed after /' } } },
+      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'the words on a Button, or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
     },
   },
 }
 
-async function tempDir($: Engine): Promise<string> {
-  return String((await $.env.get('TMPDIR')) || '/tmp').replace(/\/+$/, '')
-}
-
-/** The tool, as the model reads it: card-tool.md with the temp folder filled in. */
+/** The tool, as the model reads it: card-tool.md with the temp folder and thimble's own keys filled in. */
 export async function registerCardTool($: Engine): Promise<void> {
   const text = await promptText($, 'card-tool')
-  const kept = `${KEPT_KEYS.slice(0, -1).join(', ')} or ${KEPT_KEYS[KEPT_KEYS.length - 1]}`
+  const kept = `${OWN_KEYS.slice(0, -1).join(', ')} or ${OWN_KEYS[OWN_KEYS.length - 1]}`
   await $.tool.register({ name: 'card', isDeferred: false, description: fill(text, { TMPDIR: await tempDir($), KEPT: kept }).trim(), inputSchema: SCHEMA })
+}
+
+/** Why the person's permission rules refuse this call, or null (step 0 above). */
+async function refused($: Engine, input: Record<string, unknown>, file: string): Promise<string | null> {
+  const says = (v: { decision: string; reason?: string; rule?: string }) => v.decision === 'deny' || (v.decision === 'ask' && !!v.rule)
+  const card = await $.tool.check({ tool: 'mcp__thimble__card', input })
+  if (says(card)) return card.reason || `the permission rule ${card.rule ?? ''} refuses the card tool`.replace('  ', ' ')
+  const read = await $.tool.check({ tool: 'Read', input: { file_path: file } })
+  if (says(read)) return read.reason || `the permission rule ${read.rule ?? ''} refuses reading ${file}`.replace('  ', ' ')
+  return null
 }
 
 /** The folders a data file may be in, each as its real path: the session's folders and the temp folder. */
@@ -104,8 +114,8 @@ function copyText(lines: string[], cut: number[], width: number): string[] {
   return out
 }
 
-/** What a call answers when the version did not draw: what to fix, or, when the runner itself cannot run, that the
- *  card is not the cause (the person sees why in the failure line). */
+/** What a call answers when the version did not draw: what to fix, or, when the runner cannot start, that the card is
+ *  not the cause (the person sees why in the failure line). */
 function failed(id: string, r: Any, update: boolean): string {
   const error = String(r?.error || 'no answer').slice(0, 800)
   if (r?.down) return `The card did not draw: ${error}. The view is not the cause, and cards cannot draw in this session until the analyst fixes it; answer in words.`
@@ -131,7 +141,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // a card stands at a call of main's, or under the answer the running designer fork draws for; another agent's call
   // stands in that agent's own transcript, where the person never sees a card
   const fork = forkOf(input.agentId)
-  const anchorRow = fork?.kind === 'designer' ? designAnchor(input.agentId) : null
+  const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : null
   if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation and the copy that v starts draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
   const meta: CardMeta = before ?? {
     id, version: 0, title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
@@ -144,6 +154,11 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     await remember(meta, { version: meta.version, error: data.bad })
     return { result: `The card did not draw: ${data.bad}.` }
   }
+  const no = await refused($, { title: input.title, data: input.data, view: input.view, ...(input.id ? { id: input.id } : {}) }, data.path!)
+  if (no) {
+    await remember(meta, { version: meta.version, error: no })
+    return { result: `The card did not draw: ${no}.` }
+  }
   const version = meta.version + 1
   const dir = await versionDir($, id, version)
   await $.fs.write(`${dir}/view.js`, view)
@@ -155,7 +170,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   }
 
   const width = (await treeOf($, id))?.width ?? cardWidth()
-  const r = await ask($, 'load', { id, version, title, view, rows: `${dir}/rows.json`, state: null, query: null, width })
+  const r = await ask($, 'load', { id, version, title, view, rows: `${dir}/rows.json`, state: null, width })
   if (!r?.ok) {
     await $.process.run(['rm', '-rf', '--', dir])
     await remember(meta, { version: meta.version, error: String(r?.error || 'no answer') })
@@ -163,8 +178,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     return { result: failed(id, r, update && meta.version > 0) }
   }
 
-  const asked = [...new Set([...String(r.keys || '')].filter(k => /^[\p{L}\p{N}\p{P}\p{S}]$/u.test(k)))]
-  const keys = asked.filter(k => !KEPT_KEYS.includes(k))
+  const asked = [...new Set([...String(r.keys || '')].filter(k => !/\s/.test(k)))]
+  const keys = asked.filter(k => /^\p{L}$/u.test(k) && !OWN_KEYS.includes(k))
   // a card draws under the call of main's that drew this version, or under the answer v was pressed on when the
   // designer fork drew it
   const next: CardMeta = {
@@ -177,9 +192,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
   await setFocus($, id)
   await failCleared($, `card:${id}`)
-  if ((await searchNow($))?.id === id) await setSearch($, null)
   const drawnMs = Date.now() - t0
-  await saveState($, id, version, r.state, null)
+  await saveState($, id, version, r.state)
   if (meta.version > 0) void $.process.run(['rm', '-rf', '--', await versionDir($, id, meta.version)]).catch(() => undefined)
 
   const where = next.anchorRow ? 'under the answer v was pressed on' : 'where this call stands, above the words you write after it'
@@ -192,14 +206,14 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (r.summary.other) out.push(`The file is an object: props.rows is its "rows" list, and props.data the whole object, with ${(r.summary.other as string[]).join(', ')} too.`)
   if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
   for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
-  const taken = asked.filter(k => KEPT_KEYS.includes(k))
-  if (taken.length) out.push(`Note on the view: ${taken.join(' ')} ${taken.length > 1 ? 'are' : 'is'} thimble's own, so the card does not get ${taken.length > 1 ? 'them' : 'it'}; give the card other keys. The analyst has not seen ${taken.length > 1 ? 'these keys' : 'this key'} on the card.`)
-  if (/\bquery\b/.test(view) && !keys.includes('/')) out.push('Note: the view reads props.query, but keys has no "/", so the analyst cannot type a search.')
+  const own = asked.filter(k => OWN_KEYS.includes(k))
+  if (own.length) out.push(`Note on the view: ${own.join(' ')} ${own.length > 1 ? 'are' : 'is'} thimble's own, so the card does not get ${own.length > 1 ? 'them' : 'it'}; give the card other keys. The analyst has not seen ${own.length > 1 ? 'these keys' : 'this key'} on the card.`)
+  const other = asked.filter(k => !/^\p{L}$/u.test(k))
+  if (other.length) out.push(`Note on the view: a card takes letters only, so it does not get ${other.join(' ')}. The analyst has not seen ${other.length > 1 ? 'these keys' : 'this key'} on the card.`)
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
   const narrowWidth = cardWidth(NARROW_COLUMNS)
   if (width > narrowWidth) {
-    const narrow = await askCard($, next, 'draw', { width: narrowWidth, text: true })
-    await askCard($, next, 'draw', { width })
+    const narrow = await askCard($, next, 'copy', { width: narrowWidth })
     // shown when the narrow drawing cuts or wraps lines (it has more lines), so Claude sees what the person would
     if (narrow?.ok && (narrow.cut?.length || narrow.lines.length > r.lines.length)) out.push('', `At ${narrowWidth} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, narrowWidth))
   }

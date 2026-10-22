@@ -4,9 +4,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
-import { failNotice, fixLineNow } from '../bar/fix'
+import { failLineNow, failNotice } from '../bar/fix'
 import { saveMeta } from '../cards/store'
-import { designAnchor, registerDesigner } from '../designer/v'
+import { designAnchor, registerDesigner, vKey } from '../designer/v'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,7 +32,7 @@ function setup() {
     fs: { read: async (p: string) => promptStub(p) ?? '' },
     state: {
       get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }),
-      set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v) },
+      set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } },
     },
     clock: { now: async () => (now += 1000), sleep: async () => undefined, after: () => ({ cancel() {} }) },
     agent: { spawn: async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-${spawns.length}` } } },
@@ -44,17 +44,19 @@ function setup() {
   $.fs.write = async () => undefined
   const pass = async (e: Any) => e
   const call = (event: string, e: Any, next: Any = pass) => hooks[event]($, e, next)
-  const failLine = async () => String((await fixLineNow($))?.text ?? '')
+  const failLine = async () => String((await failLineNow($))?.text ?? '')
   return { $, call, failLine, spawns }
 }
 
 const settle = () => new Promise(r => setTimeout(r, 5))
 
-/** Main answers, then the person presses v: the design runs. */
+/** Main answers, then the person presses v (hooks/keys.ts runs what vKey gives): the design runs. */
 async function pressV(s: ReturnType<typeof setup>) {
   await s.call('session.append', { door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, message: { content: [{ type: 'text', text: 'The revert undid a change.' }] } }, async () => ({ uuid: ROW }))
-  const r = await s.call('prompt.edit', { origin: { kind: 'composer' }, key: { key: 'v' }, text: '', inputText: 'v' })
-  expect(r.text).toBe('')
+  await settle()
+  const take = await vKey(s.$, 'v', 0)
+  expect(take).not.toBe(null)
+  await take!.now()
   await settle()
   expect(s.spawns.length).toBe(1)
 }
@@ -68,15 +70,15 @@ test("the fork's cards anchor to the answer v was pressed on, and a fork that dr
   const s = setup()
   await pressV(s)
   expect(s.spawns[0].prompt).toBe('PROMPT designer')
-  expect(designAnchor('agent-1')).toBe(ROW)
-  expect(designAnchor('agent-2')).toBe(null)
+  expect(await designAnchor(s.$, 'agent-1')).toBe(ROW)
+  expect(await designAnchor(s.$, 'agent-2')).toBe(null)
   expect(busySteps()).toContain('drawing a card')
   // a later answer does not move the design's anchor
   await s.call('session.append', { door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, message: { content: [{ type: 'text', text: 'A later answer.' }] } }, async () => ({ uuid: 'row-answer-2' }))
-  expect(designAnchor('agent-1')).toBe(ROW)
+  expect(await designAnchor(s.$, 'agent-1')).toBe(ROW)
   await s.call('turn.complete', end('answer', 'The records hold no times to draw.\nMore words.'), async () => ({ text: '' }))
   expect(await s.failLine()).toContain('v drew no card. The copy that drew it ended with: “The records hold no times to draw.”')
-  expect(designAnchor('agent-1')).toBe(null)
+  expect(await designAnchor(s.$, 'agent-1')).toBe(null)
 })
 
 test("a refused design says that the model's safeguards refused it, and how to switch models", async () => {
@@ -84,7 +86,7 @@ test("a refused design says that the model's safeguards refused it, and how to s
   await pressV(s)
   await s.call('turn.complete', end('refusal', '', { refusal: { category: null, explanation: null } }), async () => ({ text: '' }))
   expect(await s.failLine()).toContain("The model's safeguards refused to draw this card. /model can switch to another model")
-  expect(designAnchor('agent-1')).toBe(null)
+  expect(await designAnchor(s.$, 'agent-1')).toBe(null)
 })
 
 test('a fork that drew a card ends done, and main reads the card with the next prompt', async () => {
@@ -98,5 +100,6 @@ test('a fork that drew a card ends done, and main reads the card with the next p
   expect(await s.failLine()).toBe('')
   const told = Object.values(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('a copy of you drew a card under it')
-  expect(told).toContain('“Runs of the failing test” (id "c0000000000001")\nWho ran the failing test\n✕ ✕ ● ✕')
+  // the card's text, fenced as the records' own words
+  expect(told).toContain('“Runs of the failing test” (id "c0000000000001"), as drawn now:\n```text\nWho ran the failing test\n✕ ✕ ● ✕\n```')
 })

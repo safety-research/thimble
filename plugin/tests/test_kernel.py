@@ -60,7 +60,7 @@ def test_refs_parse_rows_and_row_sets() -> None:
     kinds = {"a.jsonl#L3": "lines", "a.jsonl#L1-3,7": "lines", "x.csv#row=2": "csvrows", "f.db#prs/2": "dbrows",
              "f.db#prs": "table", "r.json#/messages/1": "pointer", "notes.md": "file", "budget.xlsx#Q3!B2": "file"}
     assert {ref: R.parse(ref)["kind"] for ref in kinds} == kinds
-    assert R.parse("a.jsonl#L1-3,7")["nums"] == [1, 2, 3, 7] and R.format_nums([1, 2, 3, 7]) == "1-3,7"
+    assert R.parse("a.jsonl#L1-3,7")["nums"] == [1, 2, 3, 7]
     assert R.parse("a.jsonl#L3-L9")["nums"] == list(range(3, 10))
     with pytest.raises(R.RefError):
         R.parse("a.jsonl#L3-x")  # a mistyped line ref is an error, not the whole file
@@ -93,7 +93,7 @@ def test_every_kind_has_rows_with_stable_ids(root: Path) -> None:
 
 def test_coverage_merges_what_the_hook_saw(root: Path, tmp_path: Path) -> None:
     st = Store(root)
-    seen = tmp_path / "th" / "lean" / "seen"
+    seen = tmp_path / "th" / "seen"
     seen.mkdir(parents=True)
     rows = [{"tool": "Read", "file": str(root / "saves.jsonl"), "from": 1, "to": 4, "cwd": str(root)},
             {"tool": "Grep", "path": str(root), "glob": "*.md", "mode": "content", "files": [str(root / "notes.md")],

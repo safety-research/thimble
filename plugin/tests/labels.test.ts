@@ -11,7 +11,7 @@ import { promptStub } from './stubs'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-const FEED = '/made-up/th/lean/events/s-label.jsonl'
+const FEED = '/made-up/th/events/s-label.jsonl'
 const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 
 function textOf(n: Any): string {
@@ -24,10 +24,10 @@ const UNITS = [{ ref: 'chat.jsonl#L1', text: 'Sorry, my mistake.' }, { ref: 'cha
 
 /** A session over a made-up folder whose `thimble` is a stand-in: one wave of two records, then nothing waits. */
 function world(on: Any, reply: () => Promise<Any>) {
-  mock.env(on, { THIMBLE_HOME: '/made-up/th', HOME: '/made-up/home', PATH: '/usr/bin' })
+  mock.env(on, { THIMBLE_HOME: '/made-up/th', HOME: '/made-up/home', PATH: '/usr/bin', TMPDIR: '/made-up/tmp' })
   const clock = mock.clock(on, { now: 0 })
   const session = mock.session(on)
-  const w = { feed: '', answers: [] as Any[] }
+  const w = { feed: '', answers: [] as Any[], context: [] as string[] }
   let waited = false
   on('session.id', () => ({ value: 's-label' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
@@ -61,7 +61,7 @@ function world(on: Any, reply: () => Promise<Any>) {
   })
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('tool.call', () => ({ result: '' }) as never)
-  on('prompt.submit', (_$: unknown, e: { text: string }) => ({ text: e.text }))
+  on('prompt.submit', (_$: unknown, e: { text: string; context?: string[] }) => { w.context.push(...(e.context ?? [])); return { text: e.text } })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
   return { w, clock, session }
 }
@@ -74,7 +74,7 @@ async function claudeLabels($: Any, w: Any): Promise<void> {
 
 test('a label line starts the reads: the busy line names the label, and Claude hears the counts with the next prompt', async ($, on) => {
   let answer: (v: Any) => void = () => undefined
-  const { w, clock, session } = world(on, () => new Promise(resolve => { answer = resolve }))
+  const { w, clock } = world(on, () => new Promise(resolve => { answer = resolve }))
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   await claudeLabels($, w)
   await clock.advance(500)
@@ -85,9 +85,10 @@ test('a label line starts the reads: the busy line names the label, and Claude h
   expect(w.answers[0].values).toEqual({ 'chat.jsonl#L1': { value: 'yes', confidence: 0.9 }, 'chat.jsonl#L2': { value: 'no', confidence: 0.8 } })
   expect(textOf(await $.ui.render(BAND))).not.toContain('labeling apology')
   expect(textOf(await $.ui.render(BAND))).not.toContain('f fix this')
-  // the next prompt carries what the reads gave, in a row the person does not see
+  // the next prompt carries what the reads gave, as context beside it that the person does not see
   await $.prompt.submit({ text: 'How many apologized?', origin: { kind: 'composer' } } as never)
-  const told = session.appended().map(r => JSON.stringify(r.message)).join('\n')
+  const told = w.context.join('\n')
+  expect(told).toContain("thimble's report")
   expect(told).toContain('The model finished reading the records of the label apology (1 call). apology: 2 of 2 records have a value (1 yes, 1 no).')
 })
 
@@ -119,7 +120,7 @@ function paneEngine(ran: string[][]): Any {
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     session: { id: async () => 's-pane', cwd: async () => '/made-up/data', root: async () => '/made-up/data', messages: async () => [] },
     fs: { exists: async () => false, stat: async () => ({ kind: 'dir' }) },
-    state: { get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }), set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v) } },
+    state: { get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }), set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } } },
     ui: { open: async () => ({ isPlaced: true }), toast: () => undefined },
     // what runs a moment later runs at once; a wait never ends, so a drawing waits for its kernel answer
     clock: { after: (ms: number, fn: () => void) => { if (!ms) void Promise.resolve().then(fn); return { cancel() {} } } },

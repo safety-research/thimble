@@ -31,7 +31,7 @@ const GUIDANCE = [
 
 function world(on: Any) {
   resetPrompts()
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble' })
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' })
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? GUIDANCE : '' }))
   // the engine's own blocks, which the plugin keeps
   on('prompt.context', (_$: unknown, e: Any) => ({ blocks: e.blocks }))

@@ -144,7 +144,12 @@ export async function labelsSettled($: Engine): Promise<void> {
  *  next prompt, every check of the label that changed a value, as the label holds them. Returns a line for the person
  *  when the check was not kept, else null. */
 export async function checkRecord($: Engine, root: string, label: string, ref: string, value: string | null): Promise<string | null> {
-  const r = await runThimble($, root, ['label', label, '--check', ref, value ?? '-', '--json'])
+  let r: Ran
+  try {
+    r = await runThimble($, root, ['label', label, '--check', ref, value ?? '-', '--json'])
+  } catch (err) {
+    return `× The check was not kept: ${String((err as Error)?.message || err).slice(0, 200)}`
+  }
   let got: Any = null
   try { got = JSON.parse(r.stdout) } catch { got = null }
   if (r.code !== 0 || !got) return `× The check was not kept: ${said(r) || 'thimble label gave nothing'}`

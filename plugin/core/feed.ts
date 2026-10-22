@@ -1,4 +1,4 @@
-// feed.ts: the kernel's change feed, $THIMBLE_HOME/lean/events/<session>.jsonl, one JSON line per change the plugin
+// feed.ts: the kernel's change feed, $THIMBLE_HOME/events/<conversation>.jsonl (core/layout.mjs), one JSON line per change the plugin
 // acts on: a `label` whose records wait for the model (labels/labels.ts), a `fix_ask` whose share waits for the person
 // (bar/fix.ts). The feed is read after each Bash call (main's or a subagent's), each second while one runs (`thimble label … --prompt … && thimble label … --wait` waits on the
 // model's reads, which start from the feed), and at the end of each turn. Lines the kernel wrote before this session
@@ -8,7 +8,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import { fixAskFromFeed } from '../bar/fix'
 import { sessionKey } from '../hooks/conversation'
 import { labelFromFeed } from '../labels/labels'
-import { thimbleHome } from './env'
+import { thimbleHome } from './home'
+import { eventsFile } from './layout.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -17,10 +18,8 @@ type Any = any
 const READ = { plugin: 'thimble', key: 'feed' } as const
 let reading: Promise<void> | null = null
 
-const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
-
 async function feedFile($: Engine): Promise<string> {
-  return `${await thimbleHome($)}/lean/events/${safe(await sessionKey($))}.jsonl`
+  return eventsFile(await thimbleHome($), await sessionKey($))
 }
 
 async function size($: Engine, file: string): Promise<number> {

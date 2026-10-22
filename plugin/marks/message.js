@@ -13,7 +13,11 @@
 //   inline(text, from, to, marks) -> one block's content as runs: words with their style, and each mark as one run
 //   wrapRuns(runs, width)      -> the runs cut into lines at spaces, a mark's words as plain words are
 //   tableOf(text, block, marks) -> a table block's cells as runs
-//   width(str), runsText(runs)
+//   runsText(runs)             -> the plain words of runs
+//
+// A text's width in cells is core/text.js's, as everywhere in thimble.
+
+import { textWidth } from '../core/text.js'
 
 /** Where code stands in markdown: fenced blocks and inline code spans, as [start, end) ranges. */
 export function codeRanges(text) {
@@ -285,16 +289,6 @@ export function inline(text, from, to, marks = []) {
 /** Two runs that draw alike (the same mark, or none, the same tag and the same styles), so one can hold both. */
 const same = (x, y) => x.mark === y.mark && x.tag === y.tag && !!x.b === !!y.b && !!x.it === !!y.it && !!x.code === !!y.code && !!x.link === !!y.link && !!x.dim === !!y.dim
 
-/** A run's width in cells (a wide character counts two). */
-export function width(str) {
-  let n = 0
-  for (const ch of String(str)) {
-    const cp = ch.codePointAt(0)
-    n += (cp >= 0x1100 && (cp <= 0x115f || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1faff))) ? 2 : 1
-  }
-  return n
-}
-
 /** The plain words of runs, as drawn. */
 export const runsText = runs => runs.map(r => r.s).join('')
 
@@ -315,7 +309,7 @@ export function wrapRuns(runs, w) {
   for (let k = pieces.length - 1; k > 0; k--) {
     const a = pieces[k - 1]
     const b = pieces[k]
-    if (!a.sp && !b.sp && width(runsText(a.group)) + width(runsText(b.group)) <= W) { a.group = [...a.group, ...b.group]; pieces.splice(k, 1) }
+    if (!a.sp && !b.sp && textWidth(runsText(a.group)) + textWidth(runsText(b.group)) <= W) { a.group = [...a.group, ...b.group]; pieces.splice(k, 1) }
   }
   const lines = []
   let cur = []
@@ -327,7 +321,7 @@ export function wrapRuns(runs, w) {
     n = 0
   }
   for (const p of pieces) {
-    const pw = width(runsText(p.group))
+    const pw = textWidth(runsText(p.group))
     if (p.sp) { if (n === 0) continue; if (n + pw > W) { flush(); continue } cur.push(p); n += pw; continue }
     if (n + pw <= W) { cur.push(p); n += pw; continue }
     if (n > 0 && pw <= W) { flush(); cur.push(p); n = pw; continue }
@@ -338,7 +332,7 @@ export function wrapRuns(runs, w) {
       const chars = [...rest]
       const head = chars.slice(0, Math.max(1, room)).join('')
       cur.push({ group: [{ ...p.group[0], s: head }], sp: false })
-      n += width(head)
+      n += textWidth(head)
       rest = chars.slice(Math.max(1, room)).join('')
       if (rest) flush()
     }

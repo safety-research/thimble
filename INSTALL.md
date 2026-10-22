@@ -32,7 +32,8 @@ For the browser workbench:
 
 thimble 0.11 no longer runs Claude's queries itself, so it needs no pandas: you can delete the Python that 0.10 made in
 `~/.thimble/python`. The `thimble/` folder in a data folder keeps only labels now; 0.11 reads none of its other files
-(the queries, the cards and the record of each reply).
+(the queries, the cards and the record of each reply). 0.11 keeps its own records in new folders of `~/.thimble`, so
+you can also delete `~/.thimble/lean`.
 
 ## If you used thimble 0.9
 
