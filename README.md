@@ -45,10 +45,10 @@ thimble adds these to the session:
   question, quotes, and what code does. A mark is underlined in purple. After the reply, a second Claude, a fork of
   the session, checks each mark against the files: a number with code whose printed output holds it, a quote or a
   claim about code with the line of the file that holds it. A spinner follows each mark while it checks. A mark that
-  holds stays as it is; a wrong one shows the corrected words in its place; one that nothing supports turns red with
-  `×`, and the line under the reply says how many failed. A click on a mark opens its evidence beside the chat: the
-  code and its output for a number, the file at its line for a quote. Claude learns of each correction with your next
-  prompt.
+  holds stays as it is; a wrong one shows the corrected words in its place; one the data shows wrong turns red with
+  `×`, and one the check could not confirm gets a `?`. The line under the reply counts the wrong, unconfirmed and
+  corrected marks. A click on a mark opens its evidence beside the chat: the output and the code for a number, the
+  file at its line for a quote. Claude learns of each correction with your next prompt.
 - **Cards.** When an answer is much faster to see than to read, such as the path one run took or forty runs side by
   side, Claude draws an interactive card in the conversation. A card takes clicks, and the letter keys it names while
   the prompt is empty.
