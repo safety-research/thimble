@@ -218,13 +218,61 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
   const clean = v => Str(v).replace(/\t/g, ' ').replace(CONTROL, '')
   const said = n => n && typeof n === 'object' && typeof n.type === 'string' ? '<' + n.type + '>' : typeof n
 
+  // On the light theme a terminal draws the shade glyphs ░ ▒ ▓ as a quarter, a half and three quarters of
+  // the text's color over the white background, so a ░ in a light color (gray, the start of seq) almost vanishes.
+  // There each run of shade glyphs is drawn as █ in a mixed color instead: ░ the least share of the color that keeps
+  // 2:1 contrast on white, ▒ and ▓ evenly between it and the color, so the shades keep their order and the faintest
+  // shows. Text without a color mixes the light theme's ink. The dark theme keeps the glyphs.
+  const SHADES = /[\u2591-\u2593]+/g, SHADE = /[\u2591-\u2593]/, HEX = /^#[0-9a-fA-F]{6}$/, INK = '#000000', WHITE = '#ffffff'
+  const lum = h => {
+    let s = 0
+    for (let i = 0; i < 3; i++) {
+      const v = parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16) / 255
+      s += [0.2126, 0.7152, 0.0722][i] * (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+    }
+    return s
+  }
+  const onWhite = h => 1.05 / (lum(h) + 0.05)
+  const shadeCache = Object.create(null)
+  function shades(color) {
+    if (shadeCache[color]) return shadeCache[color]
+    let lo = 0, hi = 1
+    if (onWhite(color) < 2) lo = 0.55
+    else for (let i = 0; i < 20; i++) { const m = (lo + hi) / 2; if (onWhite(hex2(WHITE, color, m)) >= 2) hi = m; else lo = m }
+    const a = onWhite(color) < 2 ? lo : hi
+    return (shadeCache[color] = [0, 1, 2].map(k => hex2(WHITE, color, a + (1 - a) * k / 3)))
+  }
+  function shaded(c, ink) {
+    if (theme !== 'light' || !ink || ink.plain) return c
+    const color = ink.color === undefined ? INK : ink.color
+    if (!HEX.test(color)) return c
+    const out = []
+    for (const x of c) {
+      if (typeof x !== 'string' || !SHADE.test(x)) { out.push(x); continue }
+      let at = 0
+      x.replace(SHADES, (run, i) => {
+        if (i > at) out.push(x.slice(at, i))
+        let k = 0
+        while (k < run.length) {
+          let j = k
+          while (j < run.length && run[j] === run[k]) j++
+          out.push({ t: 'Text', p: { color: shades(color)[run.charCodeAt(k) - 0x2591] }, c: ['\u2588'.repeat(j - k)] })
+          k = j
+        }
+        at = i + run.length
+        return run
+      })
+      if (at < x.length) out.push(x.slice(at))
+    }
+    return out
+  }
   // the view's drawing as a plain tree: Box, Text and Button nodes with the props each takes; a Button's onPress
   // becomes a number, the handler kept here
-  function kids(c, depth, inText, out) {
+  function kids(c, depth, inText, out, ink) {
     if (c == null || c === false || c === true) return out
-    if (isArray(c)) { for (const x of c) kids(x, depth, inText, out); return out }
-    if (typeof c === 'string' || typeof c === 'number' || typeof c === 'bigint') { out.push(inText ? clean(c) : { t: 'Text', p: {}, c: [clean(c)] }); return out }
-    const n = node(c, depth, inText)
+    if (isArray(c)) { for (const x of c) kids(x, depth, inText, out, ink); return out }
+    if (typeof c === 'string' || typeof c === 'number' || typeof c === 'bigint') { out.push(inText ? clean(c) : { t: 'Text', p: {}, c: shaded([clean(c)], {}) }); return out }
+    const n = node(c, depth, inText, ink)
     if (n) out.push(n)
     return out
   }
@@ -234,7 +282,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     if (isArray(c)) { for (const x of c) if (holdsBoxes(x)) return true; return false }
     return !!c && typeof c === 'object' && (c.type === 'Box' || c.type === 'Button')
   }
-  function node(n, depth, inText) {
+  function node(n, depth, inText, ink) {
     if (!n || typeof n !== 'object' || depth > 30) return null
     let t = n.type
     if (t !== 'Box' && t !== 'Text' && t !== 'Button') return null
@@ -263,7 +311,10 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       const c = kids(src.children, depth + 1, false, [])
       return { t: 'Box', p: Object.assign({ flexDirection: 'column' }, 'onPress' in p ? { onPress: p.onPress } : {}), c }
     }
-    const c = kids(src.children, depth + 1, t === 'Box' ? false : t, [])
+    // the color a Text's strings draw in, which its Texts inherit; on a background or inverted, shades stay glyphs
+    const own = t === 'Text' ? { color: 'color' in p ? p.color : ink && ink.color, plain: !!(p.backgroundColor || p.inverse || (ink && ink.plain)) } : undefined
+    let c = kids(src.children, depth + 1, t === 'Box' ? false : t, [], own)
+    if (own) c = shaded(c, own)
     if (t === 'Button' && !words(c) && !(typeof p.label === 'string' && p.label.trim())) throw new Error('a Button has no words: give it a label, or strings or Text as its children')
     return { t, p, c }
   }
