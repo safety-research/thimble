@@ -353,3 +353,34 @@ async def test_extension_programs_start_no_claude_code_with_an_api_key(on):
 
 def test_the_runtime_is_off_for_0_8s_own_tests():
     assert not runtime.enabled()
+
+
+async def test_the_checker_and_proposer_forks_run_on_the_messages_api_without_claude(on, monkeypatch):
+    """With an API key the citation checker's and the view proposer's forks copy main's conversation and run here: no
+    `claude` starts, and the checker runs only Read, Grep, Glob and python."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app import marks, proposer
+
+    real = asyncio.create_subprocess_exec
+
+    async def no_claude(*a: Any, **k: Any) -> Any:
+        assert not str(a[0]).rsplit("/", 1)[-1].startswith("claude"), "a claude process started"
+        return await real(*a, **k)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", no_claude)
+    client = api_key(monkeypatch, [text("Two incidents happened."),
+                                   call("Bash", {"command": "rm -rf ."}, "toolu_x") + call("Bash", {"command": "python3 -c 'print(2)'"}, "toolu_y"),
+                                   text('{"n": 1, "output": "2"}'),
+                                   text('{"show": false, "why": "nothing to show"}')])
+    await main_turn("What happened?")
+    got = await marks.run_fork(CORPUS, {"model": "claude-opus-5-5", "effort": "low"}, "cut", "Check [2](#).")
+    assert "Check [2](#)." in json.dumps(client.bodies[1]["messages"][-1])
+    assert any("Two incidents happened." in json.dumps(m) for m in client.bodies[1]["messages"])
+    results = client.bodies[2]["messages"][-1]["content"]
+    assert results[0]["is_error"] and results[0]["content"] == "This check may not use that tool."
+    assert [c["command"] for c in got["calls"]] == ["rm -rf .", "python3 -c 'print(2)'"]
+    assert got["answer"] == '{"n": 1, "output": "2"}' and not got["error"]
+    res = await proposer._fork(SimpleNamespace(c=CORPUS, sid="s", cwd="."), "cut", "Propose.", "claude-opus-5-5", "low", "")
+    assert proposer.answer_text(proposer.read_stream(res["stdout"])) == '{"show": false, "why": "nothing to show"}'

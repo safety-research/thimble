@@ -1,0 +1,74 @@
+/* A mark on the words of a claim (marks/Mark.tsx), as the terminal draws it (plugin/marks/view.ts): violet and
+   underlined while it is checked and once it held; the corrected words in the warning color; a wrong one red with ×,
+   one the check could not confirm in the warning color with ?; one no check could run underlined in the text's color.
+   A click opens its evidence under the words. */
+.mark { position: relative; --mark-ink: var(--viz-violet-4); }
+:root[data-paper='dark'] .mark { --mark-ink: var(--viz-violet-2); }
+.mark-words {
+  display: inline;
+  color: var(--mark-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: var(--radius-hl);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.mark-words:hover, .mark.is-open .mark-words { background: color-mix(in oklab, var(--mark-ink) 10%, transparent); }
+.mark.is-corrected .mark-words, .mark.is-unconfirmed .mark-words, .mark.is-unconfirmed .mark-glyph { color: var(--status-warning); }
+.mark.is-failed .mark-words, .mark.is-failed .mark-glyph { color: var(--status-negative); }
+.mark.is-unchecked .mark-words { color: inherit; text-decoration-color: var(--ink-400); }
+.mark-spin { margin-left: 3px; vertical-align: -1px; color: var(--mark-ink); }
+.mark-card {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(520px, 80vw);
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-float);
+  font: var(--type-body-sm);
+  color: var(--text-primary);
+  white-space: normal;
+  text-align: left;
+  overflow-y: auto;
+}
+.mark-card.is-above { top: auto; bottom: calc(100% + 6px); }
+.mark-card-status { font: 600 var(--text-sm) / 1.3 var(--font-body); }
+.mark-card-status.is-verified { color: var(--status-positive); }
+.mark-card-status.is-corrected, .mark-card-status.is-unconfirmed { color: var(--status-warning); }
+.mark-card-status.is-failed { color: var(--status-negative); }
+.mark-card-status.is-unchecked, .mark-card-status.is-checking, .mark-card-status.is-pending { color: var(--text-tertiary); }
+.mark-card-was, .mark-card-why { color: var(--text-secondary); }
+.mark-card-note { padding-top: 6px; border-top: 1px solid var(--border-hairline); color: var(--status-negative); }
+.mark-ev { display: flex; flex-direction: column; gap: 4px; }
+.mark-ev-place { display: flex; flex-direction: column; gap: 4px; }
+.mark-ev-head { font: var(--type-label); color: var(--text-tertiary); }
+.mark-ev pre {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 16em;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--paper-1);
+  font: var(--type-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mark-ev mark { background: color-mix(in oklab, var(--status-warning) 28%, transparent); color: inherit; border-radius: 2px; }
+.mark-ev-n { display: inline-block; min-width: 3.5ch; margin-right: 1ch; color: var(--text-tertiary); text-align: right; user-select: none; }
+
+/* the line under a reply whose check changed something: its counts, then what the check found false around the marks */
+.marks-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font: var(--type-body-sm); }
+.marks-foot-counts { display: flex; gap: 10px; color: var(--text-tertiary); }
+.marks-foot-n.is-corrected, .marks-foot-n.is-unconfirmed { color: var(--status-warning); }
+.marks-foot-n.is-failed { color: var(--status-negative); }
+.marks-foot-note { color: var(--status-negative); }
+.marks-foot-note::before { content: '× '; }

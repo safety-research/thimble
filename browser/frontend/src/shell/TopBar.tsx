@@ -18,6 +18,8 @@ import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
+import { listedLabels } from './LabelsSidebar'
+import { useConcepts } from '../canvas/concepts'
 
 export interface SurfaceTab extends TabOption<Tab> {
   /** `focus`: the focused pane shows it; `shown`: another pane does; `hidden`: no pane does */
@@ -29,9 +31,26 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
+  /** whether the Labels sidebar is open (shell/LabelsSidebar.tsx), and how to open or close it */
+  side?: boolean
+  onSide?: (open: boolean) => void
 }
 
-export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
+/** The top bar's quiet button that opens the Labels sidebar, with the count of labels. */
+function LabelsButton({ ws, open, onSide }: { ws: string; open: boolean; onSide: (open: boolean) => void }) {
+  const n = listedLabels(useConcepts(ws)).length
+  return (
+    <span className="shell-side-btns">
+      <button type="button" className={`shell-side-btn${open ? ' on' : ''}`} aria-pressed={open} data-side="labels" onClick={() => onSide(!open)}>
+        <Icon name="label" size={14} />
+        Labels
+        <span className="shell-side-n">{n}</span>
+      </button>
+    </span>
+  )
+}
+
+export function TopBar({ ws, tabs, onTab, onTabDrag, side = false, onSide }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)
@@ -97,6 +116,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
         ))}
       </nav>
       <span className="shell-spacer" />
+      {onSide && <LabelsButton ws={ws} open={side} onSide={onSide} />}
       <span ref={setTools} className="shell-tools">
         <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />
         <Button variant="icon" icon="redo" title={history.labels.redo ? `Redo: ${history.labels.redo}` : 'Redo'} aria-label="Redo" disabled={!history.labels.redo} onClick={history.redo} data-tel="redo" />

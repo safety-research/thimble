@@ -122,6 +122,70 @@ async def _call(conv: Any, box: runtime_tools.Box, block: dict[str, Any]) -> tup
     return rec, msg
 
 
+REFUSED = "This check may not use that tool."
+
+
+def _line(rec: dict[str, Any]) -> str:
+    return json.dumps(rec, ensure_ascii=False)
+
+
+async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, allow: Any = None) -> str:
+    """A fork of main's conversation at its last finished turn, on `prompt`, written nowhere: what `claude -p --resume
+    <main> --fork-session --output-format stream-json` prints, so the view proposer and the citation checker read it
+    the same way on both runtimes. Main's system prompt and tool list are sent as they are, so the cache holds; a call
+    `allow(name, input)` refuses gets an error result and nothing runs."""
+    from . import runtime  # noqa: PLC0415
+
+    sp = runtime.ensure(c)
+    spec = sp.main.spec()
+    spec.model, spec.effort, spec.fast = model, effort or "", False
+    messages = complete_prefix(_load(sp.main.state_path("api")))
+    messages.append({"role": "user", "content": prompt})
+    box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
+                            write_roots=spec.write_roots, private=spec.private, home=spec.home)
+    client = llm.client()
+    out: list[str] = []
+    texts: list[str] = []
+    while True:
+        final = await _stream(client, request(spec, messages))
+        content = [b.model_dump(mode="json", exclude_none=True) for b in final.content]
+        messages.append({"role": "assistant", "content": content})
+        out.append(_line({"type": "assistant", "message": {"model": str(getattr(final, "model", "") or model),
+                                                            "content": content, "stop_reason": final.stop_reason}}))
+        texts += [str(b.get("text") or "") for b in content if b.get("type") == "text"]
+        if final.stop_reason == "pause_turn":
+            continue
+        calls = [b for b in content if b.get("type") == "tool_use"]
+        if not calls or final.stop_reason in ("max_tokens", "refusal"):
+            break
+        results = []
+        for b in calls:
+            name, args = str(b["name"]), b.get("input") if isinstance(b.get("input"), dict) else {}
+            if allow is None or not allow(name, args):
+                results.append({"type": "tool_result", "tool_use_id": b["id"], "is_error": True, "content": REFUSED})
+                continue
+            got = await runtime_tools.call(box, name, args)
+            results.append({"type": "tool_result", "tool_use_id": b["id"], "content": got.text or "(no output)",
+                            **({"is_error": True} if got.is_error else {})})
+        messages.append({"role": "user", "content": results})
+        out.append(_line({"type": "user", "message": {"role": "user", "content": results}}))
+    ok = final.stop_reason not in ("max_tokens", "refusal")
+    out.append(_line({"type": "result", "subtype": "success" if ok else "error_during_execution", "is_error": not ok,
+                      "result": "\n".join(texts) if ok else f"the fork stopped: {final.stop_reason}"}))
+    return "\n".join(out) + "\n"
+
+
+def cc_main_session(c: str) -> str | None:
+    """Main's Claude Code session id on the Claude Code sign-in runtime (runtime_cc), which a fork resumes."""
+    from . import runtime  # noqa: PLC0415
+
+    try:
+        got = json.loads(runtime.ensure(c).main.state_path("cc").read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return str(got.get("session_id") or "") or None if isinstance(got, dict) else None
+
+
 async def turn(conv: Any, text: str) -> Any:
     from . import runtime  # noqa: PLC0415
 

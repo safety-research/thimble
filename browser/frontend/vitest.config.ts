@@ -9,6 +9,8 @@ export default defineConfig({
   esbuild: { jsx: 'automatic' },
   // the plugin's hooks module test imports Claude Code's test kit, which `claude plugin test` gives it; here its
   // describe, test and expect are vitest's
+  // the terminal plugin's modules the page reads as they are (src/marks: plugin/marks/message.js)
+  server: { fs: { allow: ['.', '../../plugin'] } },
   resolve: { alias: { 'claude-code/testing': fileURLToPath(new URL('./tests/public/claude-code-testing.ts', import.meta.url)) } },
   test: {
     // and the plugin's hooks module (plugin/hooks/thimble.ts), against a fake Claude Code engine

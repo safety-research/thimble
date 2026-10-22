@@ -132,7 +132,7 @@ describe('one label editor in the sidebar and in the popover', () => {
     const inPop = pop.querySelector('.label-card')!
     // compact: the type and scope, the prompt and the classes; no highlight switch and no foot until something changes
     expect(shape(inPop)).toEqual(shape(side))
-    expect(shape(inPop)).toEqual({ keys: ['Type', 'Scope'], facts: ['Prompt', 'transcript.jsonl · 1,815 records'], name: 'activity type', prompt: 'What the agent is doing in this message.', classes: ['reading', 'writing', 'other'], switches: 0, foot: [] })
+    expect(shape(inPop)).toEqual({ keys: ['Type', 'Scope'], facts: ['read by Claude', 'transcript.jsonl · 1,815 records'], name: 'activity type', prompt: 'What the agent is doing in this message.', classes: ['reading', 'writing', 'other'], switches: 0, foot: [] })
     for (const card of [side, inPop]) {
       expect(card.querySelector('.label-card-more')?.getAttribute('aria-expanded')).toBe('false')
       expect(card.querySelector('.label-card-head [aria-label="Close"]')).not.toBeNull()

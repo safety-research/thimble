@@ -2,6 +2,8 @@
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
 import type { ChatRecord } from '../lib/types'
+import { marksIn } from '../../../../plugin/marks/message.js'
+import type { MarkItem } from '../marks/marks'
 import { shortStepNames, stepParts } from './threads'
 
 export interface UserRow {
@@ -28,6 +30,10 @@ export interface TextRow {
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
+  /** the check of this row's marks, by their order in its text (backend marks.py) */
+  checks?: (MarkItem | undefined)[]
+  /** the turn's marks, on the turn's last text row (its reply), for the footer under it */
+  turnMarks?: MarkItem[]
 }
 export interface ToolResult {
   summary: string
@@ -190,6 +196,11 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     if (e.type === 'tool_use' && !skip?.has(index) && typeof e.parent_tool_use_id !== 'string') calls.set(e.id, index)
   })
   const held = new Map<string, AgentRow[]>() // the agent rows that wait for their call's row
+  // a turn of main's: its top-level text rows, closed by its `done` record, which names the turn its marks name
+  let turnTexts: TextRow[] = []
+  let afterDone = false
+  const turns = new Map<string, TextRow[]>()
+  const marks = new Map<string, MarkItem[]>() // each turn's marks, the newest record of each
   records.forEach((e, index) => {
     if (skip?.has(index)) return
     const parent = 'parent_tool_use_id' in e && typeof e.parent_tool_use_id === 'string' ? findTool(rows, e.parent_tool_use_id) : undefined
@@ -214,8 +225,14 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
           return
         }
         const last = into[into.length - 1]
-        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e)) last.text += e.delta
-        else into.push({ kind: 'text', index, text: e.delta })
+        // a turn's text never extends the last turn's: the marks of each turn go to its own rows
+        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e) && !(into === rows && afterDone)) last.text += e.delta
+        else {
+          const row: TextRow = { kind: 'text', index, text: e.delta }
+          into.push(row)
+          if (into === rows) turnTexts.push(row)
+        }
+        if (into === rows) afterDone = false
         return
       }
       case 'tool_use':
@@ -271,11 +288,38 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         rows.push(row)
         return
       }
+      case 'done':
+        if (typeof e.turn === 'string' && e.turn) turns.set(e.turn, turnTexts)
+        turnTexts = []
+        afterDone = true
+        return
+      case 'marks':
+        marks.set(e.turn, e.items)
+        return
       default:
         return
     }
   })
+  withMarks(turns, marks)
   return rows
+}
+
+/** Each turn's marks on its text rows: the marks are numbered in the order they stand in the turn's texts (backend
+ * marks.py), so a row's checks are the next as many items as its text has marks. The turn's last text row, its reply,
+ * gets the turn's marks for its footer. */
+function withMarks(turns: ReadonlyMap<string, TextRow[]>, marks: ReadonlyMap<string, MarkItem[]>): void {
+  for (const [turn, items] of marks) {
+    const texts = turns.get(turn)
+    if (!texts?.length || !items.length) continue
+    const byN = [...items].sort((a, b) => a.n - b.n)
+    let at = 0
+    for (const row of texts) {
+      const n = marksIn(row.text).length
+      if (n) row.checks = byN.slice(at, at + n)
+      at += n
+    }
+    texts[texts.length - 1].turnMarks = byN
+  }
 }
 
 /** Every tool call in `rows`, nested ones included. */

@@ -42,6 +42,7 @@ import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from . import agents, capture, config, ledger, model, notices, prompts, sdk, views
@@ -534,10 +535,11 @@ def _model(c: str, lv: Any, prompt: str) -> tuple[str, str, str]:
     return m, conf["effort"], conf["speed"]
 
 
-def _argv(lv: Any, cut: str, model_id: str, effort: str, speed: str) -> list[str]:
+def _argv(lv: Any, cut: str | None, model_id: str, effort: str, speed: str) -> list[str]:
     sent = effort if config.has_effort(model_id) else None
     settings = {**json.loads(sdk.cli_settings(model_id, sent, speed)), "advisorModel": "off"}
-    return [str(config.CLI_PATH or config.CLAUDE_BIN), "-p", "--resume", str(lv.sid), "--resume-session-at", cut,
+    at = ["--resume-session-at", cut] if cut else []
+    return [str(config.CLI_PATH or config.CLAUDE_BIN), "-p", "--resume", str(lv.sid), *at,
             "--fork-session", "--no-session-persistence", "--model", model_id, *(["--effort", sent] if sent else []),
             "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--safe-mode", "--setting-sources", "user",
             "--permission-mode", "dontAsk", "--settings", json.dumps(settings), "--output-format", "stream-json",
@@ -565,7 +567,33 @@ def _kill(proc: asyncio.subprocess.Process) -> None:
 
 
 async def _fork(lv: Any, cut: str, prompt: str, model_id: str, effort: str, speed: str) -> dict[str, Any]:
-    """Run the fork (_argv) with the prompt on stdin: {code, stdout, stderr, timed_out, seconds}. Tests replace it."""
+    """Run the fork (_argv) with the prompt on stdin: {code, stdout, stderr, timed_out, seconds}. Tests replace it.
+    On the runtime the person's way to reach Claude chose (runtime.py): for an API key or WIF the fork runs on the
+    Messages API in this process with no tools (runtime_api.fork_stream), and no `claude` starts; for a Claude Code
+    sign-in it forks main's Claude Code session."""
+    from . import runtime, runtime_api  # noqa: PLC0415
+
+    if runtime.enabled():
+        kind = runtime.engine()
+        if kind == "api":
+            t0 = time.monotonic()
+            res: dict[str, Any] = {"code": 0, "stdout": "", "stderr": "", "timed_out": False}
+            try:
+                res["stdout"] = await asyncio.wait_for(
+                    runtime_api.fork_stream(lv.c, prompt, model=model_id, effort=effort), FORK_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                res["timed_out"] = True
+            except Exception as e:  # noqa: BLE001 — the run's error line says why, in words
+                from . import llm  # noqa: PLC0415
+
+                res.update(code=1, stderr=llm.failure(e))
+            res["seconds"] = round(time.monotonic() - t0, 1)
+            return res
+        sid = runtime_api.cc_main_session(lv.c) if kind == "cc" else None
+        if not sid:
+            return {"code": 1, "stdout": "", "stderr": "thimble cannot reach Claude yet", "timed_out": False,
+                    "seconds": 0.0}
+        lv, cut = SimpleNamespace(sid=sid, cwd=lv.cwd, config=None, config_known=False, c=lv.c), None
     argv = _argv(lv, cut, model_id, effort, speed)
     cap = capture.begin("view-propose", model=model_id, effort=effort, speed=speed, path="fork")
     cap.fenced("Command", [a if a else '""' for a in argv])
