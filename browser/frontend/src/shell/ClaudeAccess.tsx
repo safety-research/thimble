@@ -86,7 +86,6 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
     <div className="access-scrim" role="presentation">
       <div className="access" role="dialog" aria-modal="true" aria-label="How thimble reaches Claude">
         <h2 className="access-title">How should thimble reach Claude?</h2>
-        {first && <p className="access-lead">Choose once; you can change it later in Settings.</p>}
         <div className="access-choices" role="radiogroup">
           {CHOICES.map((c) => (
             <label key={c.how} className={`access-choice${how === c.how ? ' on' : ''}`} data-how={c.how}>
@@ -98,7 +97,7 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
         </div>
         {how === 'api-key' && (
           <div className="access-field">
-            <TextInput block mono type="password" value={key} onChange={setKey} placeholder={status?.key_saved ? 'A key is saved; paste a new one to replace it' : 'sk-ant-…'} aria-label="Anthropic API key" autoComplete="off" spellCheck={false} />
+            <TextInput block mono type="password" value={key} onChange={setKey} placeholder={status?.key_saved ? 'A key is saved' : 'sk-ant-…'} aria-label="Anthropic API key" autoComplete="off" spellCheck={false} />
           </div>
         )}
         {how === 'wif' && (

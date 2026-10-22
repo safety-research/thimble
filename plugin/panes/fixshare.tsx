@@ -118,7 +118,6 @@ export async function drawFixShare($: EngineInterface, e: Any, args: unknown, el
       Button({ key: 'file', plain: true, hotkey: 'w', label: 'save as a file', onPress: act({ do: 'send', answer: 'file' }) }),
       Text({ key: 's2', dimColor: true, children: ' · esc not now' }),
     ] }))
-    out.push(Text({ key: 'edit', dimColor: true, wrap: 'wrap', children: 'To change it, say so in the chat.' }))
   }
   return Box({ flexDirection: 'column', width: W, children: out })
 }

@@ -1,6 +1,6 @@
 // settings.tsx: the settings pane (core/pane.ts kind `settings`): /thimble-settings, or a click on `thimble` in the
 // bar, opens it. At its top the bar as these switches leave it (bar.tsx, drawn as a preview: nothing in it presses),
-// then the three switches, each named by what the person gets, with one line on what that is. ↵ on a switch or a click
+// then the switches, each named by what the person gets. ↵ on a switch or a click
 // turns it on or off through Claude Code (settings/term.ts settingsAction), which keeps the value and loads the plugin
 // again with it; the pane and the bar draw the change at once. Tab walks the switches, esc closes the pane.
 import type { EngineInterface } from 'claude-code'
@@ -31,11 +31,9 @@ export async function drawSettings($: EngineInterface, e: Any, _args: unknown, e
         Text({ key: 'state', ...(on ? { color: 'success' } : { dimColor: true }), children: (on ? '● on' : '○ off').padEnd(IN) }),
         Text({ key: 'title', ...(on ? { bold: true } : { dimColor: true }), children: s.title }),
       ] }),
-      Box({ key: 'does', marginLeft: IN, children: [Text({ dimColor: true, wrap: 'wrap', children: s.does })] }),
     ] })
   })
   return Box({ flexDirection: 'column', width, children: [
-    Text({ key: 'head', dimColor: true, children: 'The bar, with these settings' }),
     Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar }),
     ...rows,
   ] })

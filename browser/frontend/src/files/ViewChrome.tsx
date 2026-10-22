@@ -197,7 +197,7 @@ export function ViewHeadLine({ ws, name, notes, shownLabels, residueOpen, onResi
   const items: [string, ReactNode][] = []
   if (files && files.n) items.push(['files', <ViewFiles name={name} {...files} clean={clean} />])
   const packages = libPackages(libs ?? [])
-  if (packages.length) items.push(['libs', <span className="view-pane-libs" title="The npm packages the page loads, bundled into the view">{`Uses ${packages.join(', ')}`}</span>])
+  if (packages.length) items.push(['libs', <span className="view-pane-libs">{`Uses ${packages.join(', ')}`}</span>])
   for (const w of words)
     items.push([
       w,

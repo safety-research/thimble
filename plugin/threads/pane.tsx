@@ -40,7 +40,7 @@ import { rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
-import { aboutOf, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
+import { aboutOf, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -127,7 +127,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     const sent = (t.sent ?? -1) >= turns.length
     out.push(Text({ key: 'conv-m-gap', children: ' ' }))
     out.push(sent
-      ? Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude: it reads this answer with your next message' })
+      ? Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude' })
       // a plain Button draws its key and label itself (`m: send this answer to Claude`); children would draw them twice
       : Button({ key: 'conv-m', plain: true, dimColor: true, hotkey: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } }))
   }
@@ -141,7 +141,7 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
   const key = threadKey(scope)
   const gen = fieldGen.get(key) ?? 0
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
-  const what = cut(aboutOf(scope), Math.max(20, w - 24))
+  const what = cut(askWords(scope), Math.max(20, w - 24))
   return [
     Text({ key: 'entry-gap', children: ' ' }),
     rule('entry-top'),
@@ -247,14 +247,14 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
   const s = t.scope
   if (s.card) {
     const meta = await metaOf($, s.card).catch(() => null)
-    if (meta && meta.version > 0) return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'a card in the conversation'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta)]), rows: 14 }
+    if (meta && meta.version > 0) return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta)]), rows: 14 }
     return { el: subjectBlock(els, 'subject', aboutOf(s), 'a card that is no longer in the session'), rows: 3 }
   }
   if (s.mark && s.mark.kind !== 'citation') {
     const m = s.mark as { row: string; kind: string; id: string }
     const g = (await partOf<Any>($, m.row, 'explain').catch(() => null))?.items?.[m.id]
     const more = g ? [g.body, g.here, ...((g.bullets ?? []) as string[]).map(b => `· ${b}`)].filter(Boolean).map(String) : []
-    return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'an important detail in Claude\'s reply' : 'an explainer in Claude\'s reply', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W), 0) }
+    return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'important detail' : 'explainer', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W), 0) }
   }
   if (s.passage) {
     const runs = passageRuns(String(s.passage.text))
@@ -263,7 +263,7 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
   }
   if (s.mark) {
     const it = (await rowMarks($, s.mark.row).catch(() => null))?.items.find(x => x.n === (s.mark as Any).n)
-    return { el: subjectBlock(els, 'subject', it ? it.shown : aboutOf(s), 'a citation in Claude\'s reply'), rows: 3 }
+    return { el: subjectBlock(els, 'subject', it ? it.shown : aboutOf(s), 'citation'), rows: 3 }
   }
   return { el: subjectBlock(els, 'subject', t.subject, 'side thread'), rows: 3 }
 }

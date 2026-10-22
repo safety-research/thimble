@@ -85,7 +85,6 @@ function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: Return
     return (
       <>
         <span className={`mark-card-status is-${look}`}>{LOOK_WORD[look]}</span>
-        <span className="mark-card-why">thimble checks this claim against the data after the reply.</span>
       </>
     )
   const evs = item.evidence ? (Array.isArray(item.evidence) ? item.evidence : [item.evidence]) : []

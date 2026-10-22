@@ -9,7 +9,7 @@
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, the View proposals switch (PROPOSE_NOTE), which a view proposal's Don't ask again turns off; the
+// Under the table, the View proposals switch, which a view proposal's Don't ask again turns off; the
 // Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
 // canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the
 // analyst's Claude Code session (web, edits of the data, and whether the session's shell runs in Claude Code's
@@ -229,9 +229,7 @@ export const ROLE_LABEL: Record<string, string> = {
 }
 /** A row's note under its name: what it covers, where its id does not say. */
 export const ROLE_NOTE: Record<string, string> = {
-  subagents: "for subagents the orientation starts as thimble:orient-helper; others run on the orientation's own model and effort",
   dev: 'view builds, view reviews and code tickets',
-  refusal: "if a classifier's model refuses: run again on this, or switch it off",
 }
 /** thimble's agents, whose rows apply to their next start. */
 export const AGENT_ROLES = ['orient', 'subagents', 'critic', 'writer', 'dev', 'checks'] as const
@@ -252,17 +250,14 @@ export const cardWaitLine = (minutes: number): string =>
   `A code ticket asks you before its change reaches thimble's own code; its card waits ${minutes} min (cardWait).`
 /** The line under the table. */
 export const NEXT_START_LINE = "An agent's row applies to its next start; a run that goes on keeps its own model and effort."
-/** The View proposals switch's name and note. */
+/** The View proposals switch's name. */
 export const PROPOSE_LABEL = 'View proposals'
-export const PROPOSE_NOTE = 'thimble may propose a view for your task above the reply box. Nothing builds until you accept it.'
 
-/** The Ask key choice's name, its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
- * Alt-click elsewhere), and its note: what the other key does. */
+/** The Ask key choice's name and its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
+ * Alt-click elsewhere). */
 export const ASK_KEY_LABEL = 'Ask key'
 export const askKeyOptions = (mac: boolean): { value: AskKey; label: string }[] =>
   (['meta', 'alt'] as const).map((k) => ({ value: k, label: `${askKeyLabel(mac, k)}-click` }))
-export const askKeyNote = (mac: boolean, key: AskKey): string =>
-  `${askKeyLabel(mac, key)}-click asks about anything in thimble; ${askKeyLabel(mac, key === 'alt' ? 'meta' : 'alt')}-drag places a card freely on the canvas.`
 
 /** What a save sends for the ask key: "alt", null to put back the default (⌘), nothing when the choice did not change.
  * Pure. */
@@ -620,7 +615,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               <span className="settings-web" data-on={propose}>
                 <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
               </span>
-              <span className="settings-agent-line">{PROPOSE_NOTE}</span>
             </div>
           </div>
         )}
@@ -632,7 +626,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             <div className="settings-row" role="row" data-auto="ask-key" data-key={ask}>
               <span className="settings-role">{ASK_KEY_LABEL}</span>
               <Segmented className="settings-ask-key" size="sm" track label={ASK_KEY_LABEL} options={askKeyOptions(mac)} value={ask} onChange={setAsk} />
-              <span className="settings-agent-line">{askKeyNote(mac, ask)}</span>
             </div>
           </div>
         )}
@@ -645,7 +638,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             <div className="settings-row" role="row" data-fence="main">
               <span className="settings-role">Main and its agents</span>
               <FenceLine fence={fence} sandbox={attached?.sandbox} />
-              <span className="settings-agent-line settings-fence-note">Your Claude Code session and thimble's agents, its subagents.</span>
             </div>
             {(['writer', 'checks'] as const).map((agent) => {
               const row = settings.agents?.[agent]

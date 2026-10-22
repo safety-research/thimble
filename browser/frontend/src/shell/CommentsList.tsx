@@ -105,7 +105,7 @@ export function CommentsList({ ws }: { ws: string }) {
       .then(() => report.reload())
       .catch((e: Error) => bus.emit('toast', { text: `Could not resolve the comment. ${e.message}`, kind: 'error' }))
   }
-  if (!items.length) return <p className="lside-none">No open comments. The checks leave theirs on the cards and in the report.</p>
+  if (!items.length) return <p className="lside-none">No open comments.</p>
   return (
     <>
       {items.map((c) => (

@@ -37,7 +37,7 @@ export function emptyFolderNote(root: FolderState | undefined): string | null {
   if (root?.state !== 'ok') return null
   const { n_files: n, files, folders } = root.listing
   if (n != null ? n > 0 : files.length > 0 || folders.length > 0) return null
-  return 'This folder has no files. thimble shows the folder it was started in. To look at another folder, run thimble there.'
+  return 'This folder has no files.'
 }
 
 export interface DirNode {

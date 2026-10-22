@@ -22,7 +22,7 @@ import { fitViews } from './viewsFit'
 
 export const BROWSER = 'browser'
 /** What the New view field says while it is empty: what to type, and where it goes. */
-export const NEW_VIEW_PLACEHOLDER = 'Describe a view; Enter asks main'
+export const NEW_VIEW_PLACEHOLDER = 'New view…'
 
 /** The confirm of a view's delete, by the option whose × asked for it (`at`). It takes the focus, and gives it back to
  * that × when it closes, unless the focus has moved elsewhere. */
