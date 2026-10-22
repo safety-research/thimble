@@ -22,10 +22,12 @@ import csv
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 from collections import defaultdict
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -193,12 +195,23 @@ def _pointer_get(v: Any, pointer: str) -> Any:
     return v
 
 
-def open_db(p: Path) -> closing[sqlite3.Connection]:
-    """A database opened to read only, so that no file appears beside it. To read a database in WAL mode, SQLite makes
-    its -wal and -shm files and leaves them; `immutable=1` reads the database file alone and makes none. A database whose
-    -wal file is already there may hold rows in it, so it is read with that file (mode=ro), which makes nothing new."""
-    uri = f"file:{quote(str(p))}?mode=ro" + ("" if Path(f"{p}-wal").exists() else "&immutable=1")
-    return closing(sqlite3.connect(uri, uri=True))
+@contextmanager
+def open_db(p: Path) -> Iterator[sqlite3.Connection]:
+    """A database opened to read only, so that nothing beside it is made or changed. SQLite reads a database in WAL mode
+    with its -wal and -shm files, and makes or rewrites them even with `mode=ro`; `immutable=1` reads the database file
+    alone and touches none. A -wal file that holds rows not yet in the database is read from a copy: the database and
+    its -wal file copied to a temporary folder, which SQLite may write in, and which is deleted after."""
+    wal = Path(f"{p}-wal")
+    if wal.is_file() and wal.stat().st_size > 0:
+        with tempfile.TemporaryDirectory(prefix="thimble-db-") as d:
+            copy = Path(d) / "db"
+            shutil.copyfile(p, copy)
+            shutil.copyfile(wal, f"{copy}-wal")
+            with closing(sqlite3.connect(f"file:{quote(str(copy))}?mode=ro", uri=True)) as con:
+                yield con
+        return
+    with closing(sqlite3.connect(f"file:{quote(str(p))}?immutable=1", uri=True)) as con:
+        yield con
 
 
 def table_names(root: Path, rel: str) -> list[str]:

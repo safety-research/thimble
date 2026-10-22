@@ -52,8 +52,8 @@ export async function startDir($: Engine): Promise<string> {
   return start.replace(/\/+$/, '')
 }
 
-/** The folder that holds the labels of `root`: <root>/thimble/labels, or, for a folder thimble may not write in, the
- *  one kept under $THIMBLE_HOME/lean/folders/, named by the end of the folder's real path. Null when neither is there. */
+/** The folder that holds the labels of `root`: the one kept under $THIMBLE_HOME/lean/folders/, named by the end of the
+ *  folder's real path, else <root>/thimble/labels when the folder holds labels of its own. Null when neither is there. */
 export async function labelsDir($: Engine, root: string): Promise<string | null> {
   const real = (await $.fs.stat(root, { resolve: true }).catch(() => null))?.realPath ?? root
   const kept = `${await thimbleHome($)}/lean/folders/${real.replace(/[^A-Za-z0-9_-]/g, '-').slice(-120)}/thimble/labels`

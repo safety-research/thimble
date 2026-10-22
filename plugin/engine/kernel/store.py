@@ -1,12 +1,12 @@
 """Where the kernel keeps its records.
 
-In the folder under analysis (the root), the `thimble/` folder holds what the person may keep, share or diff:
+The folder under analysis (the root) is the person's record, and thimble writes nothing in it. Its records are kept
+under $THIMBLE_HOME/lean/folders/<the root's path as a name>/thimble/:
 
     thimble/labels/<name>.json              each label with every version of its values (labels.py)
 
-A root thimble may not write in (a read-only dataset, a folder the person's sandbox protects) keeps that folder under
-$THIMBLE_HOME/lean/folders/<the root's path as a name>/thimble/ instead, and the kernel says so once, when it first
-writes there. Nothing is ever written inside such a root.
+A root that already holds a thimble/labels folder of its own (the person made it, or an earlier thimble wrote it there)
+keeps its labels there.
 
 Under $THIMBLE_HOME/lean/events/<session>.jsonl the session's change feed: one line per change the plugin acts on (a
 label whose records wait for the model, a fix's share that waits for the person), so the plugin learns of it from the
@@ -35,18 +35,19 @@ def thimble_home() -> Path:
 
 
 def kept_dir(root: Path) -> Path:
-    """Where the records of a root thimble may not write in are kept: under THIMBLE_HOME, named by the end of the root's
-    path (the plugin's core/env.ts finds them by the same name)."""
+    """Where a root's records are kept: under THIMBLE_HOME, named by the end of the root's path (the plugin's
+    core/env.ts finds them by the same name)."""
     return thimble_home() / "lean" / "folders" / re.sub(r"[^A-Za-z0-9_-]", "-", str(root))[-120:] / DIR
 
 
 def records_dir(root: Path) -> Path:
-    """The root's record folder: root/thimble/ when thimble may write there, else kept_dir(root). Once a root's records
-    are kept under THIMBLE_HOME they stay there, so its labels never split between two folders."""
+    """The root's record folder: kept_dir(root), or root/thimble/ when the root holds labels of its own there and none
+    are kept, so a root's labels never split between two folders. A folder the person can write in may still be a
+    record no tool should change (a shared dataset), so writing in it is never the default."""
     own, kept = root / DIR, kept_dir(root)
-    if kept.is_dir():
-        return kept
-    return own if os.access(own if own.exists() else root, os.W_OK) else kept
+    if not kept.is_dir() and (own / "labels").is_dir():
+        return own
+    return kept
 
 
 def _holding(start: Path) -> Path | None:
@@ -94,8 +95,6 @@ class Store:
         self.cache = thimble_home() / "lean" / "cache" / safe(str(self.root))[-100:]
 
     def sub(self, name: str) -> Path:
-        if not self.dir.is_dir() and self.dir != self.root / DIR:
-            print(f"thimble: {self.root} is read-only here, so its labels are kept in {self.dir}", file=sys.stderr)
         d = self.dir / name
         d.mkdir(parents=True, exist_ok=True)
         return d

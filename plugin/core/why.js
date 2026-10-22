@@ -37,7 +37,11 @@ export function modelWhy(r) {
   if (r.isAnswered) return ''
   switch (r.reason) {
     case 'api-error': return apiWhy(r.status, r.error)
-    case 'empty-reply': return 'the model answered with no text'
+    // a reply with no text and no output tokens is how a model's safeguards refuse a request: the same records get the
+    // same reply, so the person learns the likely cause and what else can label them
+    case 'empty-reply': return Number(r.usage?.output_tokens) === 0
+      ? 'the model answered with no text, as it does when its safeguards refuse the records; a rule (--regex or --code) can label them'
+      : 'the model answered with no text'
     case 'aborted': return 'the call was stopped before an answer came (it took too long, or the turn was stopped)'
     case 'nothing-to-fork': return 'there is no finished turn yet to ask from'
     case 'refused': return r.error ? `Claude Code did not send the call: ${String(r.error)}` : 'Claude Code did not send the call'

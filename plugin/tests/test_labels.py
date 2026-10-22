@@ -221,25 +221,18 @@ def test_csv_gives_every_record_with_the_analysts_check_in_place_of_the_labels_v
     assert len(waiting) == 6 and {x["value"] for x in waiting} == {""}
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
-def test_a_folder_thimble_may_not_write_in_keeps_its_labels_under_thimble_home(root: Path, tmp_path: Path):
+def test_labels_are_kept_under_thimble_home_and_nothing_is_written_in_the_folder(root: Path, tmp_path: Path):
     # (THIMBLE_ROOT pins the root, so a folder found by its records would be the same)
     before = sorted(p.name for p in root.rglob("*"))
-    root.chmod(0o555)
-    try:
-        r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
-        assert r.returncode == 0, r.stdout + r.stderr
-        kept = tmp_path / "th" / "lean" / "folders" / str(root.resolve()).replace("/", "-").replace(".", "-") / "thimble"
-        assert (kept / "labels" / "sorry.json").is_file()
-        assert f"is read-only here, so its labels are kept in {kept}" in r.stderr
-        assert "  sorry: yes 2 · no 4 of 6 records" in r.stdout
-        # said once; the label reads back, checks and CSV work there
-        again = run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
-        assert again.returncode == 0 and "read-only" not in again.stderr
-        assert "  sorry: yes 3 · no 3 of 6 records" in run(root, "label", "sorry").stdout
-        assert run(root, "label", "sorry", "--csv").stdout.count("\n") == 7
-    finally:
-        root.chmod(0o755)
+    r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    assert r.returncode == 0, r.stdout + r.stderr
+    kept = tmp_path / "th" / "lean" / "folders" / str(root.resolve()).replace("/", "-").replace(".", "-") / "thimble"
+    assert (kept / "labels" / "sorry.json").is_file()
+    assert "  sorry: yes 2 · no 4 of 6 records" in r.stdout
+    # the label reads back, checks and CSV work there
+    assert run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes").returncode == 0
+    assert "  sorry: yes 3 · no 3 of 6 records" in run(root, "label", "sorry").stdout
+    assert run(root, "label", "sorry", "--csv").stdout.count("\n") == 7
     assert sorted(p.name for p in root.rglob("*")) == before
 
 
