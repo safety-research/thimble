@@ -10,7 +10,7 @@ Answer    Refunds fell 40% in March, after the new policy.
 Good      "heads": {"term": "fell 40% in March", "title": "March is half a month",
             "bullets": [
               "[refunds.csv ends on Mar 14](refunds.csv), so March counts 14 days and February 28.",
-              "Per day, refunds fell [12%](r4#month=03@per_day), not 40%."],
+              "Per day, refunds fell 12%, not 40%."],
             "todo": "Quote the per-day drop, or count again once the rest of March is in."}
 Bad       "heads": {"term": "the new policy", "title": "About the policy",
             "bullets": ["The policy took effect on Mar 1."], "todo": "Keep this in mind."}
@@ -18,7 +18,7 @@ Bad       "heads": {"term": "the new policy", "title": "About the policy",
 
 The bad heads-up repeats the answer and asks nothing of the analyst. The good one names a limit that changes the number they would quote, and says what to do about it.
 
-In the reply, "heads" is null, or one heads-up, which the analyst opens as a short card: {"term": "<exact words from the answer>", "title": "<a few words>", "bullets": ["<a point, with its citation>"], "todo": "<what to do>"}.
+In the reply, "heads" is null, or one heads-up, which the analyst opens as a short card: {"term": "<exact words from the answer>", "title": "<a few words>", "bullets": ["<a point, its words linked to the lines of a file that show it, where a file does>"], "todo": "<what to do>"}.
 
 <!-- digest -->
 Heads-ups the analyst already saw:
