@@ -455,7 +455,8 @@ function paint(node, g, x0, y0, clip) {
   for (const k of node.kids) if (k.lay) paint(k, g, x, y, inner)
 }
 
-/** The tree as the card's region holds it: a column Box `width` cells wide. */
+/** The tree as the card's region holds it: a column Box `width` cells wide. What is wider is cut at the grid's edge,
+ *  as client.tsx's region cuts it, and the lines it cuts are named. */
 function cardRoot(tree, width) {
   return { t: 'Box', p: { flexDirection: 'column', width }, c: [tree] }
 }

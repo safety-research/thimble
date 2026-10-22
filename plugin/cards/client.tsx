@@ -101,9 +101,11 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     return null
   }
 
-  // the region the card's tree is laid out in, as layout.js's cardRoot lays it out for the text copy
+  // the region the card's tree is laid out in, as layout.js's cardRoot lays it out for the text copy: what is wider is
+  // cut at its edge, as the copy says, so a view laid out for a wider card never draws over the frame (a side pane
+  // that opens narrows the card before the view draws again)
   const tree = props?.tree ? draw(props.tree, false) : E.Text({ dimColor: true, children: 'drawing…' })
-  return E.Box({ flexDirection: 'column', width, children: [tree] })
+  return E.Box({ flexDirection: 'column', width, overflow: 'hidden', children: [tree] })
 }
 
 export default Card
