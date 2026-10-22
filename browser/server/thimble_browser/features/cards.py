@@ -200,12 +200,12 @@ def notice(ws: str, chat: str, text: str) -> None:
 def view_of(args: dict[str, Any], last: Path | None) -> tuple[str, str | None]:
     """(the view of a call, why there is none): the whole `view` it gives, or the view of the card's last call (`last`,
     that call's folder, also when its version did not draw) with the call's `edits` made in order, each `old` text
-    standing once in it (the terminal's viewOf)."""
+    standing once in it, or as it is when the call gives only new rows (the terminal's viewOf)."""
     if str(args.get("view") or "").strip():
         return str(args["view"]), None
     edits = args.get("edits") if isinstance(args.get("edits"), list) else []
-    if not edits:
-        return "", ("give the whole `view`, or `edits` to the view of your last call" if last else
+    if not edits and (last is None or not str(args.get("data") or "").strip()):
+        return "", ("give the whole `view`, `edits` to the view of your last call, or new `data` for it" if last else
                     "`view` is empty: give the JavaScript that defines function view(props, surface)")
     if last is None:
         return "", "`edits` change a card you called card for: give its `id`, or the whole `view` for a new card"
@@ -213,6 +213,7 @@ def view_of(args: dict[str, Any], last: Path | None) -> tuple[str, str | None]:
         text = (last / "view.js").read_text()
     except OSError:
         return "", "the view of your last call cannot be read; give the whole `view`"
+    # with no edits, new rows for the view of the last call as it is
     for k, e in enumerate(edits, 1):
         old = str((e or {}).get("old") or "")
         n = text.count(old) if old else 0

@@ -49,7 +49,7 @@ const SCHEMA = {
   properties: {
     title: { type: 'string', description: 'the card\'s title: what it shows, in a few words; with `id`, leave it out to keep the title' },
     data: { type: 'string', description: 'the path of the JSON file of rows you wrote, in this folder or in $TMPDIR (a path may start with $TMPDIR/); with `id`, leave it out to keep the rows of your last call of that card' },
-    view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, leave it out and give `edits` to change the view of your last call of that card' },
+    view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, leave it out and give `edits` to change the view of your last call of that card, or only new `data` to keep that view' },
     edits: {
       type: 'array',
       description: 'with `id`: changes to the view of your last call of that card (also one that did not draw), in order; each `old` stands once in it',
@@ -72,10 +72,11 @@ export async function registerCardTool($: Engine): Promise<void> {
 }
 
 /** Why the person's permission rules refuse this call, or null (step 0 above). */
-async function refused($: Engine, input: Record<string, unknown>, file: string): Promise<string | null> {
+async function refused($: Engine, input: Record<string, unknown>, file: string | null): Promise<string | null> {
   const says = (v: { decision: string; reason?: string; rule?: string }) => v.decision === 'deny' || (v.decision === 'ask' && !!v.rule)
   const card = await $.tool.check({ tool: 'mcp__thimble__card', input })
   if (says(card)) return card.reason || `the permission rule ${card.rule ?? ''} refuses the card tool`.replace('  ', ' ')
+  if (!file) return null
   const read = await $.tool.check({ tool: 'Read', input: { file_path: file } })
   if (says(read)) return read.reason || `the permission rule ${read.rule ?? ''} refuses reading ${file}`.replace('  ', ' ')
   return null
@@ -108,14 +109,17 @@ async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: 
 
 /** The view of a call: the whole `view` it gives, or the view of the card's last call (in `last`, that call's
  *  folder, also when its version did not draw) with the call's `edits` made in order, each `old` text standing once
- *  in it. */
+ *  in it, or as it is when the call gives only new rows. */
 async function viewOf($: Engine, input: Any, last: string | null): Promise<{ text?: string; bad?: string }> {
   if (typeof input.view === 'string' && input.view.trim()) return { text: input.view }
   const edits = Array.isArray(input.edits) ? input.edits : []
-  if (!edits.length) return { bad: last ? 'give the whole `view`, or `edits` to the view of your last call' : '`view` is empty: give the JavaScript that defines function view(props, surface)' }
+  // new rows for the view on screen: the view of the last call as it is
+  if (!edits.length && last && String(input.data ?? '').trim()) return readView($, last)
+  if (!edits.length) return { bad: last ? 'give the whole `view`, `edits` to the view of your last call, or new `data` for it' : '`view` is empty: give the JavaScript that defines function view(props, surface)' }
   if (!last) return { bad: '`edits` change a card you called card for: give its `id`, or the whole `view` for a new card' }
-  let text = ''
-  try { text = String(await $.fs.read(`${last}/view.js`)) } catch { return { bad: 'the view of your last call cannot be read; give the whole `view`' } }
+  const read = await readView($, last)
+  if (read.bad) return read
+  let text = read.text!
   for (const [k, x] of edits.entries()) {
     const old = String(x?.old ?? '')
     const n = old ? text.split(old).length - 1 : 0
@@ -129,6 +133,10 @@ async function viewOf($: Engine, input: Any, last: string | null): Promise<{ tex
     text = text.replace(old, () => String(x?.new ?? ''))
   }
   return { text }
+}
+
+async function readView($: Engine, last: string): Promise<{ text?: string; bad?: string }> {
+  try { return { text: String(await $.fs.read(`${last}/view.js`)) } } catch { return { bad: 'the view of your last call cannot be read; give the whole `view`' } }
 }
 
 const baseName = (p: string) => String(p).split('/').filter(Boolean).pop() ?? String(p)
@@ -192,10 +200,9 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const keep = !String(input.data ?? '').trim() && last
   const data = keep ? { path: `${last}/rows.json` } : await dataFile($, input.data)
   if (data.bad) return refuse(data.bad)
-  if (!keep) {
-    const no = await refused($, { title, data: input.data, view: view.text, ...(input.id ? { id: input.id } : {}) }, data.path!)
-    if (no) return refuse(no)
-  }
+  // the card tool's rules decide every call; the Read rules, a call with new rows (kept rows were read before)
+  const no = await refused($, { title, data: input.data, view: view.text, ...(input.id ? { id: input.id } : {}) }, keep ? null : data.path!)
+  if (no) return refuse(no)
   const file = keep ? (meta.lastFile ?? meta.file) : String(input.data)
   const version = meta.version + 1
   const dir = await versionDir($, id, version)
