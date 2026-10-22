@@ -765,6 +765,10 @@ def _setup(c: str, body: SessionBody) -> None:
 class MainChoice(BaseModel):
     effort: str | None = None
     fast: bool | None = None
+    model: str | None = None
+
+
+MODEL_ID = re.compile(r"claude-[a-z0-9][a-z0-9.-]{1,62}")  # a model id as the API takes it, without a `[1m]` tag
 
 
 def _choose(c: str, choice: dict[str, Any]) -> None:
@@ -796,6 +800,17 @@ async def effort_route(c: str, body: MainChoice) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from e
     _choose(c, {"effort": choice})
     return {"effort": level, "choice": choice}
+
+
+@router.put("/ws/{c}/session/model")
+async def model_route(c: str, body: MainChoice) -> dict[str, Any]:
+    """The composer's model menu: the model main's next turn runs on (_choose; runtime.Space.spec_of reads it at each
+    turn). 400 for what is no model id."""
+    model = config.base_model(str(body.model or "")).lower()
+    if not MODEL_ID.fullmatch(model):
+        raise HTTPException(400, "choose a model by its id, such as claude-opus-5-5")
+    _choose(c, {"model": model})
+    return {"model": model}
 
 
 @router.put("/ws/{c}/session/fast")

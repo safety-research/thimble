@@ -3,6 +3,9 @@
    one the check could not confirm in the warning color with ?; one no check could run underlined in the text's color.
    A click opens its evidence under the words. */
 .mark { position: relative; --mark-ink: var(--viz-violet-4); }
+/* a claim's mark is words of the sentence: inline in the text's own face, so it wraps with the line and its underline
+   sits under the words, never the small inline-block of the status marks (components.css .mark) */
+.mark[data-mark-look] { display: inline; flex: initial; font: inherit; vertical-align: baseline; }
 :root[data-paper='dark'] .mark { --mark-ink: var(--viz-violet-2); }
 .mark-words {
   display: inline;

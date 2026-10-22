@@ -2061,6 +2061,8 @@ export interface Attached {
   effort?: string
   /** what the composer's chip chose for main's next launch, while this session runs */
   effort_choice?: MainEffort
+  /** the model the composer's menu chose for main's next turn (events.model_route) */
+  model_choice?: string
   /** the effort the analyst's own Claude Code settings choose (cc_settings.analyst_effort), where main's effort menu opens */
   settings_effort?: MainEffort
   /** whether the session's last reply ran in fast mode, as the mirror read it */

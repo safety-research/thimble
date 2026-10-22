@@ -46,6 +46,23 @@
   min-width: var(--h-chip);
   padding: 0 4px;
 }
+/* in a chat reply, a ref as its glyph alone (a card pointed at after a claim) is a small mark in the line, not a boxed
+   chip, so the sentence reads on as in the terminal; its hover and its click are the chip's */
+.chat-text .chip.refchip-icon {
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 0 1px;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  vertical-align: -1px;
+}
+.chat-text .chip.refchip-icon:hover,
+.chat-text .chip.refchip-icon:focus-visible {
+  background: none;
+  color: var(--text-accent);
+}
 /* a ref chip's glyph (a file's type among them) at the stroke the chip glyphs hold at 10 px */
 .refchip .chip-ico,
 .refchip-pop-chip .chip-ico,
