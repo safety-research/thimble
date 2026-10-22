@@ -635,10 +635,6 @@ import type { ReportBlocksBody } from './types'
 export const reportApi = {
   /** `PUT …/types/{slug}/blocks`: the editor's whole document as blocks; answers the stored document. */
   putBlocks: (c: string, slug: DocumentType, body: ReportBlocksBody) => j<Writeup>(`${inv(c, slug)}/blocks`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `GET /lenses`: the lenses whose marks the report draws, each with its color (a viz family name). */
-  lenses: (c: string) => j<{ id: string; name: string; color: string }[]>(`${ws(c)}/lenses`),
-  /** `POST /marks/{id}/dismiss`: a mark the analyst is done with, which no longer shows. */
-  dismissMark: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/marks/${enc(id)}/dismiss`, { method: 'POST' }),
 }
 
 // ---- the problem report (shell/ProblemReport.tsx; backend feedback.py) ----

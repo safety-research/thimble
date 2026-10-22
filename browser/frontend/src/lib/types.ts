@@ -285,8 +285,6 @@ export interface Cell {
   regenerating_for?: string[] | null
   verification?: unknown
   code?: string
-  /** a program card's program, on the terminal plugin's toolkit (kit/KitBody) */
-  program?: string
   outputs?: MimeBundle[]
   status?: CellStatus
   exec_count?: number | null
@@ -1847,22 +1845,6 @@ export interface WriteupFigure {
   lead?: boolean
   /** `claude` while the figure is Claude's, as a paragraph's `by` */
   by?: string
-}
-
-/** A lens's mark on the report (backend features/lenses.py): `term`, the exact words it marks, and what it says. */
-export interface ReportMark {
-  id: string
-  lens: string
-  surface: 'report'
-  term: string
-  title?: string
-  body: string
-  here?: string
-}
-
-export interface Writeup {
-  /** the lenses' marks on the report, served with it */
-  marks?: ReportMark[]
 }
 
 // ---- label cards: the details drawer (canvas/LabelDetails.tsx) ----

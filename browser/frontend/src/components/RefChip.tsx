@@ -407,13 +407,9 @@ export function RefChip({ ref, value, compact, workspace, broken: contradicted, 
   const onClick = (e: React.MouseEvent | React.KeyboardEvent) => {
     // a ⌘-click is the pointer's: it asks about the ref and never leaves the page
     if ('metaKey' in e && pointKeyHeld(e)) return
-    // a citation inside a lens's marked words (components/LensMark): a click opens the mark's card, and the hover's
-    // label still opens the cited place
-    const inMark = !!chipEl.current?.closest('.lens-mark-term') && !popEl.current?.contains(e.target as Node)
-    if (!inMark) e.stopPropagation()
+    e.stopPropagation()
     window.clearTimeout(showTimer.current)
     setPop(null)
-    if (inMark) return
     unmark()
     if (unresolved) return
     if (home && openCited(home, ref)) return

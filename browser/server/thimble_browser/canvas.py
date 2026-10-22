@@ -6,8 +6,8 @@ note, example, custom). The card shapes are those of thimble 0.8, so the 0.8 can
 makes these cards on the Canvas tab, and a label's run leaves one; Claude draws its own cards in the chat
 (features/cards.py).
 
-Citations. Claude writes a citation as a Markdown link, `[31](card:<id>#outcome/merged)` or `[↗](runs/x.jsonl#L4)`,
-in the chat and in a takeaway alike, as the terminal plugin does. A takeaway is stored in the canvas's own form,
+Links. A takeaway or a report links a card's value or a record as a Markdown link, `[31](card:<id>#outcome/merged)` or
+`[↗](runs/x.jsonl#L4)`. A takeaway is stored in the canvas's own form,
 `[[31|card:<id>#outcome/merged]]` and `[[runs/x.jsonl#L4]]`, which the canvas draws as links (to_canvas_links).
 """
 from __future__ import annotations
@@ -210,7 +210,7 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
         cell["payload"] = {"refs": refs}
     elif kind == "custom":
         cell["payload"] = {"html": str(args.get("html") or "")}
-    # a card cites itself as card:<id> before it has an id (the add_card tool says so): its own id goes in
+    # a card's text may name the card as card:<id> before it has an id: its own id goes in
     for k in ("takeaway", "text"):
         if isinstance(cell.get(k), str):
             cell[k] = own_id(cell[k], cell["id"])

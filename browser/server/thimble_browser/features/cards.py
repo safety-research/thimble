@@ -323,6 +323,10 @@ def earlier_card(ws: str, chat: str, turn: str) -> str:
 
 async def start_design(ctx: Any, ws: str, chat: str) -> dict[str, Any]:
     """v on the chat's last answer: the designer's copy of the chat starts; an HTTPException says why it cannot."""
+    from . import is_on  # noqa: PLC0415
+
+    if not is_on("cards"):
+        raise HTTPException(409, "Cards are off in Settings")
     if chat in ctx.sessions.running(ws):
         raise HTTPException(409, "Claude is still answering; v draws a card of the answer once it is done")
     now = DESIGNS.get(ws)

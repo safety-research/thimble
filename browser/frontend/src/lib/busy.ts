@@ -1,13 +1,13 @@
 // thimble's own work while it runs: the one sign of work in the browser, the line above the chat's input box
 // (chat/ChatBusy.tsx). Each job is a step named in plain words, the same words as the terminal's bar
-// (plugin/shell/busy.ts): "answering" (main's turn), "answering: <thread>", "adding explainers, details", "labeling:
-// <label>", "writing the report", "checking citations", "fixing: <title>", "restarting with the fix". No tab, row or
-// button draws a spinner of its own.
+// (plugin/bar/busy.ts): "answering" (main's turn), "answering: <thread>", "checking N marks", "drawing a card",
+// "labeling: <label>", "writing the report", "fixing: <title>", "restarting with the fix". No tab, row or
+// button draws a spinner of its own, but a mark the check reads, which turns after its words as in the terminal.
 //
 // Two sources. The stream's `busy` records (backend busy.py), each a job's start or end, and a document Claude writes
 // (the `report` records); a dropped stream clears these, and a page that reconnects hears the next ones. And the page's
-// own jobs (pageJob): main's turn and a side thread's (ChatBusy), a fix Claude works on and Try it's restart (FixState),
-// the citation check (lib/heal). The page's own outlive a dropped stream, so a restart that drops it still shows.
+// own jobs (pageJob): main's turn and a side thread's (ChatBusy), a fix Claude works on and Try it's restart (FixState).
+// The page's own outlive a dropped stream, so a restart that drops it still shows.
 //
 // The line shows the newest job that has run 300 ms or more (the step the analyst most likely just started), `+1` when
 // another runs beside it, with its seconds from 3 s on.

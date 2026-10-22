@@ -8,7 +8,6 @@ import { api } from './api'
 import { bus } from './bus'
 import { parseNotice } from './notices'
 import { openStream } from './sse'
-import { teleport } from './teleport'
 import type { ViewQuery, WsEvent } from './types'
 
 let replaying = false
@@ -84,11 +83,6 @@ function fanOut(ev: WsEvent): void {
       if (name) bus.emit('layout', { layout: name, surfaces: Array.isArray(rest.surfaces) ? rest.surfaces.filter((x): x is string => typeof x === 'string') : [] })
       return
     }
-    case 'open-card':
-      // the first card a turn of Claude's made (backend features/cards.py): the Canvas tab opens with the card in view
-      // and selected; the turn's later cards are placed on the canvas without moving it
-      if (!replaying && typeof rest.card === 'string') teleport(`card:${rest.card}`)
-      return
     case 'open-view':
       // a view main opened with open_view (backend cardtypes.tool_open_view); the history the stream replays is not
       // opened again

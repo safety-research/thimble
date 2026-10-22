@@ -100,7 +100,7 @@ AGENTS: dict[str, AgentDef] = {
 }
 
 # what runs after each turn of the chat agent, in main or a thread: fn(session, answer, result), `answer` the turn's
-# text and `result` None when the turn ended normally. A feature adds its own (the lenses' one look after a turn); it
+# text and `result` None when the turn ended normally. A feature adds its own (the marks' check after a turn); it
 # must not wait (start a task for work that takes time) and must not raise.
 AFTER_TURN: list[Callable[["Session", str, str | None], None]] = []
 

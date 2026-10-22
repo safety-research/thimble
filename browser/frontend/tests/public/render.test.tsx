@@ -74,10 +74,10 @@ describe('chat rows', () => {
     await settle()
     expect(el.querySelector('.chat-user .chat-message')?.textContent).toMatch(/How did the runs end\?/)
     // the card stands under its call, drawn from the runner's tree
-    const frame = el.querySelector(`.chat-cardcall .card-frame[data-card="${drawn.card}"]`)
-    expect(frame?.querySelector('.card-title')?.textContent).toBe('How the runs ended')
-    expect(frame?.querySelector('.card-body')?.textContent).toContain('a: merged')
-    expect(frame?.querySelector('.card-keys')?.textContent).toBe('keys n')
+    const frame = el.querySelector(`.chat-cardcall .drawn-frame[data-card="${drawn.card}"]`)
+    expect(frame?.querySelector('.drawn-title')?.textContent).toBe('How the runs ended')
+    expect(frame?.querySelector('.drawn-body')?.textContent).toContain('a: merged')
+    expect(frame?.querySelector('.drawn-keys')?.textContent).toBe('keys n')
     expect(asked.some((u) => u.includes(`/cards/${drawn.card}?width=`))).toBe(true)
     // the reply's mark, as the check left it
     const mark = el.querySelector('.chat-text .mark')

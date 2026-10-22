@@ -39,16 +39,6 @@ TOKEN = re.compile(r"\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]")
 BY_MARK = re.compile(r"^<!--\s*by:\s*([a-z]+)\s*-->$")
 ITEM = re.compile(r"^\s*(-|\*|\d+\.)\s+(.*)$")
 CLAUDE = "claude"
-# what feature modules add to the document the page reads (on_serve): fn(ws, doc), such as its comments
-SERVE: list[Callable[[str, dict[str, Any]], None]] = []
-
-
-def on_serve(fn: Callable[[str, dict[str, Any]], None]) -> None:
-    """Have `fn(ws, doc)` add to each document writeup() serves, once however often it is registered."""
-    if fn not in SERVE:
-        SERVE.append(fn)
-
-
 # what feature modules hear of each save (on_save): fn(ws, before, after, by, slug), the Markdown before (None for none)
 # and after, such as the undo history; a hook's failure never stops the save
 SAVED: list[Callable[..., None]] = []
@@ -57,10 +47,6 @@ SAVED: list[Callable[..., None]] = []
 def on_save(fn: Callable[..., None]) -> None:
     if fn not in SAVED:
         SAVED.append(fn)
-
-# what feature modules add to the document as the page reads it, such as the marks of the lenses: fn(ws, doc)
-DECORATE: list[Any] = []
-
 
 def _docs_dir(ws: str) -> Any:
     d = home.workspace_dir(ws) / "docs"
@@ -303,17 +289,13 @@ def parse(md: str) -> dict[str, Any]:
 
 def writeup(ws: str, slug: str = DOC) -> dict[str, Any]:
     """A document as the page reads it; an empty one before anything is written, and while Claude writes it, its draft
-    so far (`drafting`). The report alone takes what feature modules add (SERVE, DECORATE), such as the lenses'
-    marks."""
+    so far (`drafting`)."""
     drafting = _DRAFTS.get((ws, slug))
     md = drafting if drafting is not None else markdown(ws, slug) or ""
     st = _state(ws, slug)
     doc = parse(md)
     out = {"id": slug, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
            "frame": False, "comments": [], **({"drafting": True} if drafting is not None else {})}
-    if slug == DOC:
-        for fn in [*SERVE, *DECORATE]:
-            fn(ws, out)
     return out
 
 

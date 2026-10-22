@@ -4,8 +4,11 @@
 // across rows that many rows (--card-row), so a card lays out as the terminal lays it out. A Box is a flexbox with Ink's
 // defaults (a row, items that shrink); a border is a line through the middle of the cells it takes, as the terminal's
 // box-drawing characters draw it; a Text is a block of its runs, wrapped at words or cut with `…`; a Button is
-// `[ label ]`, or its label alone when plain, and a press sends its number (onPress). Pure but for the elements.
+// `[ label ]`, or its label alone when plain, and a press sends its number (onPress). A character outside ASCII (a dot,
+// a box-drawing line, a mark such as ✕ or ◆) stands in cells of its own, as many as the terminal gives it (the plugin's
+// core/text.js), since a font that lacks it draws it in another font, at another width. Pure but for the elements.
 import type { CSSProperties, ReactNode } from 'react'
+import { textWidth } from '../../../../plugin/core/text.js'
 
 export type TreeNode = string | { t: 'Box' | 'Text' | 'Button'; p?: Record<string, unknown>; c?: TreeNode[] }
 
@@ -85,7 +88,7 @@ function boxStyle(p: Record<string, unknown>): { style: CSSProperties; border: R
   const line = `1px ${BORDER_STYLE[b ?? ''] ?? 'solid'} ${color}`
   const border = b ? (
     <span
-      className="card-border"
+      className="drawn-border"
       aria-hidden="true"
       style={{
         borderTop: sides.Top ? line : 'none',
@@ -100,10 +103,29 @@ function boxStyle(p: Record<string, unknown>): { style: CSSProperties; border: R
   return { style, border }
 }
 
+/** A string as the page draws it: its ASCII as text, each other character in a span as many cells wide as it takes. */
+export function cells(s: string): ReactNode[] {
+  const out: ReactNode[] = []
+  let plain = ''
+  let k = 0
+  for (const ch of s) {
+    if (ch >= ' ' && ch <= '~') {
+      plain += ch
+      continue
+    }
+    if (plain) out.push(plain)
+    plain = ''
+    const w = textWidth(ch)
+    out.push(w ? <span key={k++} className="drawn-cell" style={{ width: `${w}ch` }}>{ch}</span> : ch)
+  }
+  if (plain) out.push(plain)
+  return out
+}
+
 /** A Text's runs: its strings, and its nested Texts with their own color and weight. */
 function runs(c: TreeNode[] | undefined, key: string): ReactNode[] {
   return (c ?? []).map((n, i) => {
-    if (typeof n === 'string') return n
+    if (typeof n === 'string') return cells(n)
     if (n.t !== 'Text') return null
     return (
       <span key={`${key}.${i}`} style={textStyle(n.p ?? {})}>
@@ -129,7 +151,7 @@ function textStyle(p: Record<string, unknown>): CSSProperties {
 
 /** The text a Button draws: `[ label ]`, or the label alone when plain (layout.js buttonText). */
 function buttonLabel(p: Record<string, unknown>, c: TreeNode[] | undefined, key: string): ReactNode {
-  const label = c?.length ? runs(c, key) : String(p.label ?? '')
+  const label = c?.length ? runs(c, key) : cells(String(p.label ?? ''))
   return p.plain ? label : (
     <>
       {'[ '}
@@ -141,12 +163,12 @@ function buttonLabel(p: Record<string, unknown>, c: TreeNode[] | undefined, key:
 
 /** The tree as elements. `onPress(n)` hears a press of the Button whose onPress is `n`. */
 export function Tree({ node, onPress, path = 'n' }: { node: TreeNode; onPress: (n: number) => void; path?: string }): ReactNode {
-  if (typeof node === 'string') return <span className="card-text">{node}</span>
+  if (typeof node === 'string') return <span className="drawn-text">{cells(node)}</span>
   const p = node.p ?? {}
   if (node.t === 'Text') {
     const cut = typeof p.wrap === 'string' && p.wrap.startsWith('truncate')
     return (
-      <span className={`card-text${cut ? ' is-cut' : ''}`} style={{ ...textStyle(p), flexShrink: cut ? 1 : 0 }}>
+      <span className={`drawn-text${cut ? ' is-cut' : ''}`} style={textStyle(p)}>
         {runs(node.c, path)}
       </span>
     )
@@ -154,14 +176,14 @@ export function Tree({ node, onPress, path = 'n' }: { node: TreeNode; onPress: (
   if (node.t === 'Button') {
     const n = num(p.onPress)
     return (
-      <button type="button" className={`card-button${p.plain ? ' is-plain' : ''}`} onClick={(e) => (e.stopPropagation(), n !== undefined && onPress(n))}>
+      <button type="button" className={`drawn-button${p.plain ? ' is-plain' : ''}`} onClick={(e) => (e.stopPropagation(), n !== undefined && onPress(n))}>
         {buttonLabel(p, node.c, path)}
       </button>
     )
   }
   const { style, border } = boxStyle(p)
   return (
-    <span className="card-box" style={style}>
+    <span className="drawn-box" style={style}>
       {border}
       {(node.c ?? []).map((k, i) => (
         <Tree key={i} node={k} onPress={onPress} path={`${path}.${i}`} />

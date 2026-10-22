@@ -12,7 +12,7 @@ import { Tree, type TreeNode } from './tree'
 /** The width of one cell of the card's font, measured once per font size. */
 function cellSize(el: HTMLElement): { w: number; h: number } {
   const probe = document.createElement('span')
-  probe.className = 'card-probe'
+  probe.className = 'drawn-probe'
   probe.textContent = '0'.repeat(20)
   el.appendChild(probe)
   const r = probe.getBoundingClientRect()
@@ -28,12 +28,12 @@ export function columnsOf(width: number, cell: number): number {
 /** The columns a card has in the chat whose flow is `flow`: a frame laid out there and taken away. */
 function chatColumns(flow: HTMLElement): number {
   const frame = document.createElement('div')
-  frame.className = 'card-frame'
+  frame.className = 'drawn-frame'
   frame.style.visibility = 'hidden'
   frame.style.position = 'absolute'
   frame.style.width = `${flow.clientWidth}px`
   const body = document.createElement('div')
-  body.className = 'card-body'
+  body.className = 'drawn-body'
   frame.appendChild(body)
   flow.appendChild(frame)
   const cols = columnsOf(body.clientWidth, cellSize(body).w)
@@ -117,7 +117,7 @@ export function Card({ ws, id, version }: { ws: string; id: string; version?: nu
   return (
     <div
       ref={frame}
-      className="card-frame"
+      className="drawn-frame"
       tabIndex={0}
       data-card={id}
       onPointerDown={() => focusCard(id)}
@@ -127,27 +127,27 @@ export function Card({ ws, id, version }: { ws: string; id: string; version?: nu
         void send('key', { key: e.key })
       }}
     >
-      <div className="card-title">{drawing?.title ?? ' '}</div>
+      <div className="drawn-title">{drawing?.title ?? ' '}</div>
       <div
         ref={body}
-        className="card-body"
+        className="drawn-body"
         onClick={(e) => {
-          if (!tree || (e.target as HTMLElement).closest('.card-button')) return
+          if (!tree || (e.target as HTMLElement).closest('.drawn-button')) return
           const r = body.current!.getBoundingClientRect()
           const at = { x: Math.floor((e.clientX - r.left) / cell.current.w), y: Math.floor((e.clientY - r.top) / cell.current.h) }
           void send('pointer', { down: at, up: at })
         }}
       >
         {tree ? (
-          <span className="card-root" style={{ width: `${cols}ch` }}>
+          <span className="drawn-root" style={{ width: `${cols}ch` }}>
             <Tree node={tree} onPress={(n) => void send('press', { button: n })} />
           </span>
         ) : error ? null : (
-          <span className="card-wait">drawing…</span>
+          <span className="drawn-wait">drawing…</span>
         )}
       </div>
-      {error && <div className="card-error">The card cannot draw: {error}</div>}
-      {keys.length > 0 && <div className="card-keys">keys {keys.join(' ')}</div>}
+      {error && <div className="drawn-error">The card cannot draw: {error}</div>}
+      {keys.length > 0 && <div className="drawn-keys">keys {keys.join(' ')}</div>}
     </div>
   )
 }

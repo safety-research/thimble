@@ -1,7 +1,7 @@
 /* A card Claude drew (cards/Card.tsx), in the chat under its call: a frame with its title, then the runner's tree on a
    grid of character cells (cards/tree.tsx): monospace, a cell 1ch wide and one --card-row tall, so a card lays out as
    the terminal lays it out; a border is a line through the middle of its cells. */
-.card-frame {
+.drawn-frame {
   --card-row: 17px;
   --card-ink: var(--text-primary);
   --card-paper: var(--surface-card);
@@ -12,39 +12,50 @@
   background: var(--card-paper);
   outline: none;
 }
-.card-frame:focus-visible { border-color: var(--accent); }
-.card-title { margin-bottom: 6px; font: 600 var(--text-sm) / 1.3 var(--font-body); color: var(--text-primary); }
-.card-body, .card-probe {
+.drawn-frame:focus-visible { border-color: var(--accent); }
+.drawn-title { margin-bottom: 6px; font: 600 var(--text-sm) / 1.3 var(--font-body); color: var(--text-primary); }
+.drawn-body, .drawn-probe {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: var(--card-row);
   font-variant-ligatures: none;
   color: var(--card-ink);
 }
-.card-probe { position: absolute; visibility: hidden; white-space: pre; }
-.card-body { overflow-x: auto; overflow-y: hidden; }
-.card-root { display: flex; flex-direction: column; }
-.card-box { min-width: 0; }
-.card-border { position: absolute; inset: calc(var(--card-row) / 2) 0.5ch; pointer-events: none; }
-.card-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
-.card-text .card-text { display: inline; }
-.card-text.is-cut { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
-.card-button {
+.drawn-probe { position: absolute; visibility: hidden; white-space: pre; }
+.drawn-body { overflow-x: auto; overflow-y: hidden; }
+.drawn-root { display: flex; flex-direction: column; }
+.drawn-box { min-width: 0; }
+.drawn-border { position: absolute; inset: calc(var(--card-row) / 2) 0.5ch; pointer-events: none; }
+.drawn-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.drawn-text .drawn-text { display: inline; }
+.drawn-text.is-cut { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+/* a character outside ASCII: the cells the terminal gives it, its glyph centered, whatever font draws it */
+.drawn-cell { display: inline-block; height: var(--card-row); line-height: var(--card-row); vertical-align: top; text-align: center; overflow: visible; white-space: pre; }
+.drawn-button {
+  /* a Box that neither shrinks nor stretches, around its text, as Claude Code draws a Button: none of a button's own
+     height, gap or padding (base.css) */
+  display: block;
   flex: none;
   align-self: flex-start;
+  min-height: 0;
+  gap: 0;
   padding: 0;
   border: none;
+  border-radius: 0;
   background: none;
   font: inherit;
   line-height: inherit;
+  text-align: left;
   color: var(--accent-ink);
   cursor: pointer;
   white-space: pre;
+  user-select: text;
+  transition: none;
 }
-.card-button:hover { background: color-mix(in oklab, var(--accent) 12%, transparent); border-radius: 2px; }
-.card-keys { margin-top: 6px; font: var(--type-mono-sm); color: var(--text-tertiary); }
-.card-wait { color: var(--text-tertiary); }
-.card-error { font: var(--type-body-sm); color: var(--status-negative); }
+.drawn-button:hover { background: color-mix(in oklab, var(--accent) 12%, transparent); border-radius: 2px; }
+.drawn-keys { margin-top: 6px; font: var(--type-mono-sm); color: var(--text-tertiary); }
+.drawn-wait { color: var(--text-tertiary); }
+.drawn-error { font: var(--type-body-sm); color: var(--status-negative); }
 .chat-card-moved { margin: 2px 0 4px 18px; font: var(--type-body-sm); color: var(--text-tertiary); }
 
 /* v under the last answer: a quiet button with its key */

@@ -9,15 +9,14 @@ import { track } from '../lib/telemetry'
 import type { Cell, Group, Writeup } from '../lib/types'
 import { ReadProbe, useDock } from '../shell/dock'
 import { usedCells } from './cards'
-import type { Flag, TermMark } from './decorations'
+import type { Flag } from './decorations'
 import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
 import { readableText } from './model'
 import { Sidebar, SidebarShow, useSidebar } from './Sidebar'
 
 const CANVAS_DEBOUNCE_MS = 400
-/** The tints the editor draws over whole passages, by sentence id, and the words it marks: none. */
+/** The tints the editor draws over whole passages, by sentence id: none. */
 const NO_FLAGS: ReadonlyMap<string, Flag> = new Map()
-const NO_TERMS: TermMark[] = []
 
 export interface ReportPageProps {
   ws: string
@@ -127,7 +126,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
       <div className="wu-page" ref={scroller}>
         <div className="wu-page-row">
           <div className="wu-page-col" ref={column}>
-            <ReportEditor ref={editor} ws={ws} slug={slug} doc={doc} flags={NO_FLAGS} marks={NO_TERMS} filter={filter} client={client} onSaved={onSaved} onFigures={setFigures} captionOf={captionOf} />
+            <ReportEditor ref={editor} ws={ws} slug={slug} doc={doc} flags={NO_FLAGS} filter={filter} client={client} onSaved={onSaved} onFigures={setFigures} captionOf={captionOf} />
           </div>
         </div>
       </div>
