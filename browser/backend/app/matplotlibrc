@@ -9,7 +9,7 @@
 # 1.125 pt (--viz-line, 1.5 px). Text is written as SVG text in the page's faces (page_fonts.py), with matplotlib's
 # defaults after them.
 
-axes.prop_cycle: cycler('color', ['5e4bd6', '018d82', 'e26101', '306602', '0471c8', 'c8367b', 'a08319'])
+axes.prop_cycle: cycler('color', ['0471c8', 'e26101', '018d82', 'c8367b', 'a08319', '5e4bd6', '306602'])
 image.cmap: cividis
 
 figure.figsize: 7.2, 4.0

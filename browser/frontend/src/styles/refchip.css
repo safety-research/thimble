@@ -277,11 +277,11 @@ span[data-line].cite-cell-flash {
   border-radius: 2px;
   animation: cite-cell-flash 2.4s var(--ease-out) forwards;
 }
-/* the label for a table's cell: the table around it at a size that reads, the rows cut at the top or the bottom
-   fading out where the table goes on */
+/* the label for a table's cell: a compact table around it, its own column and the row's key, the rows cut at the top
+   or the bottom fading out where the table goes on */
 .refchip-pop-table {
   width: max-content;
-  min-width: 240px;
+  min-width: 160px;
 }
 .refchip-table {
   margin-top: 8px;
@@ -294,12 +294,12 @@ span[data-line].cite-cell-flash {
   overflow-y: hidden;
 }
 .refchip-table .outputs-html table {
-  font-size: 12.5px;
+  font-size: 12px;
 }
 .refchip-table .outputs-html th,
 .refchip-table .outputs-html td {
-  max-width: 180px;
-  padding: 6px 12px;
+  max-width: 240px;
+  padding: 3px 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   background: transparent;
@@ -325,8 +325,8 @@ span[data-line].cite-cell-flash {
   margin-top: 8px;
   max-width: 100%;
   overflow-x: auto;
-  font-size: 12.5px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--text-primary);
   white-space: pre;
 }

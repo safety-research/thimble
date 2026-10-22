@@ -1,7 +1,7 @@
-// The line under a reply once its marks' check settled, when the check changed something: how many marks it corrected,
-// found wrong, could not confirm or could not check. The check's notes (what it found false in the sentences around
-// the marks) are not shown: main reads them with its next event (backend marks.tell_text). Nothing while the check runs
-// (the busy line says it), and nothing when every mark held.
+// The line under a reply once its marks' check settled, when some failed: how many the check could not confirm. The
+// check's notes (what it found false in the sentences around the marks) are not shown: main reads them with its next
+// event (backend marks.tell_text). Nothing while the check runs (the busy line says it), and nothing when every mark
+// held.
 import { footerCounts, LOOK_WORD, type MarkItem } from './marks'
 
 export function MarksFooter({ items }: { items: readonly MarkItem[] }) {

@@ -16,7 +16,7 @@ const MONO_FIRST = /^\s*['"]?(?:DejaVu Sans Mono|Bitstream Vera Sans Mono|Geist 
 
 /** matplotlibrc's color cycle (the Warm paper's --viz-1 to --viz-7 with the default accent), in order: each becomes its
  * series token, so a figure's series follow the paper and the accent as a Vega chart's do */
-export const MPL_CYCLE = ['#5e4bd6', '#018d82', '#e26101', '#306602', '#0471c8', '#c8367b', '#a08319']
+export const MPL_CYCLE = ['#0471c8', '#e26101', '#018d82', '#c8367b', '#a08319', '#5e4bd6', '#306602']
 /** the colors thimble.colours gives a figure colored by a label (kernel_thimble LABEL_COLOURS: --label-none, then
  * --label-1 to --label-18), each its label token, so the figure's classes follow the paper as the Labels pane's do */
 export const MPL_LABELS = ['#a09c93', '#025ac3', '#d0750a', '#06572a', '#1392d4', '#7d6702', '#009c85', '#844500', '#013c77', '#2aa02b', '#025a7c', '#622b01', '#0389a0', '#d0342c', '#8a1c1c', '#7b4fd6', '#4c2a91', '#d23f8b', '#8d1d5c']

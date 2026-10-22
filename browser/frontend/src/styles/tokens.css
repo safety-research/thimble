@@ -201,21 +201,20 @@
   --find-mix-dark-strong: 42%;
 }
 
-/* -------- the chart series and ramps for each accent (lib/vizTheme). The families keep one order, violet, teal, orange,
-   green, blue, pink, gold, and the accent rotates it: series one is the accent's family (blue for graphite, so a chart
-   is never black and white) and the rest follow in order. On every paper and accent, neighbors stay apart, and so do
+/* -------- the chart series and ramps for each accent (lib/vizTheme). The series take one order on every accent: blue,
+   orange, teal, pink, gold, violet, green, so violet, the iris accent's and the citations' hue, comes late. On every paper and accent, neighbors stay apart, and so do
    the first three pairwise, under protan, deutan and tritan vision (tests/public/viz-palette.test.ts). The sequential
    ramp is the accent's family; the diverging ramp runs from a family far from it, through a gray, to the accent's
    family. -------- */
 :root,
 :root[data-accent='iris'] {
-  --viz-1: var(--viz-violet-3);
-  --viz-2: var(--viz-teal-3);
-  --viz-3: var(--viz-orange-3);
-  --viz-4: var(--viz-green-3);
-  --viz-5: var(--viz-blue-3);
-  --viz-6: var(--viz-pink-3);
-  --viz-7: var(--viz-gold-3);
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-orange-3);
+  --viz-3: var(--viz-teal-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
+  --viz-7: var(--viz-green-3);
   --viz-seq-1: var(--viz-violet-1);
   --viz-seq-2: var(--viz-violet-2);
   --viz-seq-3: var(--viz-violet-3);
@@ -225,13 +224,13 @@
   --viz-div-2: var(--viz-orange-2);
 }
 :root[data-accent='pink'] {
-  --viz-1: var(--viz-pink-3);
-  --viz-2: var(--viz-gold-3);
-  --viz-3: var(--viz-violet-3);
-  --viz-4: var(--viz-teal-3);
-  --viz-5: var(--viz-orange-3);
-  --viz-6: var(--viz-green-3);
-  --viz-7: var(--viz-blue-3);
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-orange-3);
+  --viz-3: var(--viz-teal-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
+  --viz-7: var(--viz-green-3);
   --viz-seq-1: var(--viz-pink-1);
   --viz-seq-2: var(--viz-pink-2);
   --viz-seq-3: var(--viz-pink-3);
@@ -241,13 +240,13 @@
   --viz-div-2: var(--viz-green-2);
 }
 :root[data-accent='orange'] {
-  --viz-1: var(--viz-orange-3);
-  --viz-2: var(--viz-green-3);
-  --viz-3: var(--viz-blue-3);
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-orange-3);
+  --viz-3: var(--viz-teal-3);
   --viz-4: var(--viz-pink-3);
   --viz-5: var(--viz-gold-3);
   --viz-6: var(--viz-violet-3);
-  --viz-7: var(--viz-teal-3);
+  --viz-7: var(--viz-green-3);
   --viz-seq-1: var(--viz-orange-1);
   --viz-seq-2: var(--viz-orange-2);
   --viz-seq-3: var(--viz-orange-3);
@@ -257,13 +256,13 @@
   --viz-div-2: var(--viz-blue-2);
 }
 :root[data-accent='yellow'] {
-  --viz-1: var(--viz-gold-3);
-  --viz-2: var(--viz-violet-3);
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-orange-3);
   --viz-3: var(--viz-teal-3);
-  --viz-4: var(--viz-orange-3);
-  --viz-5: var(--viz-green-3);
-  --viz-6: var(--viz-blue-3);
-  --viz-7: var(--viz-pink-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
+  --viz-7: var(--viz-green-3);
   --viz-seq-1: var(--viz-gold-1);
   --viz-seq-2: var(--viz-gold-2);
   --viz-seq-3: var(--viz-gold-3);
@@ -273,13 +272,13 @@
   --viz-div-2: var(--viz-blue-2);
 }
 :root[data-accent='lime'] {
-  --viz-1: var(--viz-green-3);
-  --viz-2: var(--viz-blue-3);
-  --viz-3: var(--viz-pink-3);
-  --viz-4: var(--viz-gold-3);
-  --viz-5: var(--viz-violet-3);
-  --viz-6: var(--viz-teal-3);
-  --viz-7: var(--viz-orange-3);
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-orange-3);
+  --viz-3: var(--viz-teal-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
+  --viz-7: var(--viz-green-3);
   --viz-seq-1: var(--viz-green-1);
   --viz-seq-2: var(--viz-green-2);
   --viz-seq-3: var(--viz-green-3);
@@ -290,11 +289,11 @@
 }
 :root[data-accent='blue'] {
   --viz-1: var(--viz-blue-3);
-  --viz-2: var(--viz-pink-3);
-  --viz-3: var(--viz-gold-3);
-  --viz-4: var(--viz-violet-3);
-  --viz-5: var(--viz-teal-3);
-  --viz-6: var(--viz-orange-3);
+  --viz-2: var(--viz-orange-3);
+  --viz-3: var(--viz-teal-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
   --viz-7: var(--viz-green-3);
   --viz-seq-1: var(--viz-blue-1);
   --viz-seq-2: var(--viz-blue-2);
@@ -306,11 +305,11 @@
 }
 :root[data-accent='graphite'] {
   --viz-1: var(--viz-blue-3);
-  --viz-2: var(--viz-pink-3);
-  --viz-3: var(--viz-gold-3);
-  --viz-4: var(--viz-violet-3);
-  --viz-5: var(--viz-teal-3);
-  --viz-6: var(--viz-orange-3);
+  --viz-2: var(--viz-orange-3);
+  --viz-3: var(--viz-teal-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
   --viz-7: var(--viz-green-3);
   --viz-seq-1: var(--viz-blue-1);
   --viz-seq-2: var(--viz-blue-2);

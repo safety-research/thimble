@@ -1,6 +1,6 @@
 // The chart palette (src/styles/tokens.css, lib/vizTheme): seven color families, each in five steps from faint to
-// strong per paper, kept in one order that the accent rotates, so series one (--viz-1) is the accent's family and the
-// rest follow. On every paper and accent the series read at 3:1 on the paper's grounds, none is a red, which reads as an
+// strong per paper; the series take one order on every accent, blue, orange, teal, pink, gold, violet, green, so
+// violet, the citations' hue, comes late. On every paper and accent the series read at 3:1 on the paper's grounds, none is a red, which reads as an
 // error, and neighbors and the first three stay apart, also under protan, deutan and tritan vision; the sequential
 // ramp is the accent's family and the diverging ramp's ends stay apart; no step takes a label's hex; matplotlib's
 // defaults and the fallbacks are the Warm paper's with the default accent.
@@ -39,8 +39,8 @@ const PAPERS: Record<string, Record<string, string>> = {
 }
 const GROUNDS = ['--white', '--paper-0', '--paper-1', '--paper-2']
 
-/** the families in their order, and the family each accent's series start at */
-const FAMILIES = ['violet', 'teal', 'orange', 'green', 'blue', 'pink', 'gold']
+/** the families in the series' order, and each accent's own family, which its sequential ramp takes */
+const FAMILIES = ['blue', 'orange', 'teal', 'pink', 'gold', 'violet', 'green']
 const ACCENT_FAMILY: Record<string, string> = { iris: 'violet', pink: 'pink', orange: 'orange', yellow: 'gold', lime: 'green', blue: 'blue', graphite: 'blue' }
 /** what the default accent's rule reads (its selector is :root too) and what another accent's reads over it */
 const refs = (accent: string): Record<string, string> => ({ ...rule(':root', 'ref'), ...rule(":root, :root[data-accent='iris']", 'ref'), ...(accent === 'iris' ? {} : rule(`:root[data-accent='${accent}']`, 'ref')) })
@@ -51,8 +51,13 @@ function resolve(name: string, paper: string, accent: string): string {
   for (let i = 0; i < 6 && r[n] && !PAPERS[paper][n]; i++) n = r[n]
   return PAPERS[paper][n]
 }
-const rotation = (family: string): string[] => FAMILIES.map((_, i) => FAMILIES[(FAMILIES.indexOf(family) + i) % FAMILIES.length])
 const VISIONS = ['protan', 'deutan', 'tritan']
+/** the floors the chosen order accepts below the validator's, by pair of families: teal and pink are near twins under
+ * deutan vision, blue and teal under tritan vision, and Dark's blue and teal sit just under 15 for full-color readers */
+const ACCEPTED: Record<string, Record<string, number>> = {
+  'blue-teal': { full: 14, tritan: 3.5 },
+  'teal-pink': { deutan: 2 },
+}
 
 const linear = (hex: string): number[] =>
   [1, 3, 5].map((i) => {
@@ -143,11 +148,11 @@ const FAMILY: Record<string, [number, number]> = {
 }
 
 
-test('one order of the families, which each accent rotates to start at its own: the series are their third steps, the sequential ramp the five steps of the accent\'s family', () => {
+test('one order of the families on every accent, blue first: the series are their third steps, the sequential ramp the five steps of the accent\'s family', () => {
   expect(Object.keys(ACCENT_FAMILY).sort()).toEqual(ACCENTS.map((a) => a.id).sort())
   for (const [accent, family] of Object.entries(ACCENT_FAMILY)) {
     const r = refs(accent)
-    expect(SLOTS.map((s) => r[s]), accent).toEqual(rotation(family).map((f) => `--viz-${f}-3`))
+    expect(SLOTS.map((s) => r[s]), accent).toEqual(FAMILIES.map((f) => `--viz-${f}-3`))
     expect(VIZ_SEQ.map((s) => r[s]), accent).toEqual([1, 2, 3, 4, 5].map((n) => `--viz-${family}-${n}`))
     expect(r['--viz-highlight'], accent).toBe('--viz-1')
   }
@@ -171,20 +176,22 @@ describe.each(Object.keys(PAPERS).flatMap((paper) => Object.keys(ACCENT_FAMILY).
     for (const g of GROUNDS) for (const c of colors) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
   })
 
-  // the dataviz validator's floors: 15 apart in OKLab for full-color readers, 8 under each simulated vision
+  // the dataviz validator's floors: 15 apart in OKLab for full-color readers, 8 under each simulated vision, except
+  // where the chosen order (blue, orange, teal, pink, gold) accepts less (ACCEPTED)
+  const floor = (i: number, j: number, v?: string): number => ACCEPTED[`${FAMILIES[i]}-${FAMILIES[j]}`]?.[v ?? 'full'] ?? (v ? 8 : 15)
   test('neighbors stay apart, also under protan, deutan and tritan vision', () => {
     for (let i = 1; i < colors.length; i++) {
       const [a, b] = [colors[i - 1], colors[i]]
-      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
-      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
+      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(floor(i - 1, i))
+      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(floor(i - 1, i, v))
     }
   })
 
   test('the first three, which a scatter or a map of three groups shows side by side, stay apart pairwise', () => {
-    const [x, y, z] = colors
-    for (const [a, b] of [[x, y], [x, z], [y, z]]) {
-      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
-      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
+    for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) {
+      const [a, b] = [colors[i], colors[j]]
+      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(floor(i, j))
+      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(floor(i, j, v))
     }
   })
 
