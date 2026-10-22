@@ -165,7 +165,7 @@ test('actions give a copy after each, then the card is as it was', async () => {
   assert.deepEqual(JSON.parse(r.state), { n: 1 })
 })
 
-test('a view that fails says where; a view that runs too long is stopped; the card keeps answering after', async () => {
+test('a view that fails says where; a view that runs too long is stopped and leaves the runner, to load again', async () => {
   let { r } = await load('function view(props) { return props.rows[99].name }')
   assert.equal(r.ok, false)
   assert.match(r.error, /^line 1: .*name/)
@@ -178,8 +178,24 @@ function onKey(k, s) { if (k === 'x') { while (true) {} } }
 function view(p, s) { return s.elements.Text({ children: 'ok' }) }`)
   const k = await ask('key', { id, key: 'x' })
   assert.match(k.error, /ran past its 1 s limit/)
-  assert.deepEqual((await ask('copy', { id, width: 20 })).lines, ['ok'])
+  // the time limit stopped the view part way, so the runner holds the card no more: the hooks load it again
+  assert.equal((await ask('copy', { id, width: 20 })).missing, true)
   assert.equal((await ask('draw', { id: 'c0000ffff', width: 20 })).missing, true)
+})
+
+test('a drawing too big at one width leaves the runner, and the card loads again at its width with its state', async () => {
+  const view = `const keys = "+"
+function onKey(k, s) { s.setState({ n: ((s.state || {}).n || 0) + 1 }) }
+function view(p, s) { return s.elements.Text({ children: 'n ' + ((s.state || {}).n || 0) + ' ' + (s.columns === 30 ? 'x'.repeat(96000) : '') }) }`
+  const { id } = await load(view)
+  const k = await ask('key', { id, key: '+' })
+  assert.equal(k.state, '{"n":1}')
+  const big = await ask('draw', { id, width: 30 })
+  assert.match(big.error, /more than 95000 characters/)
+  assert.equal((await ask('key', { id, key: '+' })).missing, true)
+  const again = await ask('load', { id, version: 1, title: 'Scores', view, rows: join(dir, 'rows.json'), width: 40, state: { n: 1 } })
+  assert.equal(again.ok, true)
+  assert.equal((await ask('key', { id, key: '+' })).state, '{"n":2}')
 })
 
 test('a key the view fails on is undone: the card keeps the state it had; a border style Claude Code lacks is noted', async () => {

@@ -360,8 +360,11 @@ const TAIL = "\n;return { view: typeof view === 'function' ? view : undefined, o
 
 /** A JSON answer from inside a context, or the error that stopped it. The request is written into the script as a
  *  string literal, so nothing of this process is put where the view's code could reach it, and only a string comes
- *  out. The context catches every exception of the view; what still arrives here is the vm's own (the time limit), or
- *  a value of the view's, which is never read (reading it could run the view's code outside the time limit). */
+ *  out. The context catches every exception of the view, and undoes the event it failed on; what still arrives here is
+ *  the vm's own (the time limit), or a value of the view's, which is never read (reading it could run the view's code
+ *  outside the time limit). Two failures happen where the context cannot undo them: the time limit stops the view
+ *  part way, and a drawing too big is refused after the context kept it. Then the card leaves the runner (drop), and
+ *  the next request loads it again from its copy on disk, with the state and the width it last drew (draw.ts askCard). */
 function inContext(card, op, args, ms) {
   let out
   try {
@@ -369,12 +372,24 @@ function inContext(card, op, args, ms) {
   } catch (e) {
     // the vm makes its time-limit error in the context's realm: its own `code` is read as data, never through a getter
     const code = e && typeof e === 'object' && !types.isProxy(e) ? Object.getOwnPropertyDescriptor(e, 'code') : undefined
+    drop(card)
     return { ok: false, phase: op, error: code && code.value === 'ERR_SCRIPT_EXECUTION_TIMEOUT' ? `the view ran past its ${ms / 1000} s limit` : 'the view stopped the card' }
   }
-  if (typeof out !== 'string' || out.length > 4 * MAX_TREE) return { ok: false, phase: op, error: 'the view gave no drawing thimble can read' }
+  if (typeof out !== 'string' || out.length > 4 * MAX_TREE) {
+    drop(card)
+    return { ok: false, phase: op, error: 'the view gave no drawing thimble can read' }
+  }
   const r = JSON.parse(out)
-  if (r.ok && drawnSize(r.tree) > MAX_TREE) return { ok: false, phase: op, error: `the drawing is more than ${MAX_TREE} characters as Claude Code holds it, which it does not draw; draw fewer elements: group the rows, or show a page of them` }
+  if (r.ok && drawnSize(r.tree) > MAX_TREE) {
+    drop(card)
+    return { ok: false, phase: op, error: `the drawing is more than ${MAX_TREE} characters as Claude Code holds it, which it does not draw; draw fewer elements: group the rows, or show a page of them` }
+  }
   return r
+}
+
+/** The card out of the runner, when its context may hold what a failed event left. */
+function drop(card) {
+  if (cards.get(card.id) === card) cards.delete(card.id)
 }
 
 /** The characters a plain tree takes as the Client draws it (client.tsx): each node as {type, props: {...p, key?,
@@ -420,7 +435,7 @@ function load(a) {
     const line = /view\.js:(\d+)/.exec(String(e.stack))?.[1]
     return { ok: false, phase: 'view', error: `the view does not parse${line ? ` (line ${line})` : ''}: ${e.message}` }
   }
-  const card = { ctx, version: a.version, width: a.width, tree: null, view }
+  const card = { id: a.id, ctx, version: a.version, width: a.width, tree: null, view }
   const r = inContext(card, 'init', { title: a.title, state: a.state ?? null, width: a.width }, LOAD_MS)
   if (!r.ok) return r
   card.tree = r.tree
