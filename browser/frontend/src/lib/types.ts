@@ -56,6 +56,8 @@ export type ChatRecord =
   | { type: 'done'; ts?: string; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
   | { type: 'error'; ts?: string; message: string; kind?: string }
   | { type: 'marks'; ts?: string; turn: string; items: import('../marks/marks').MarkItem[] }
+  | { type: 'lens_marks'; ts?: string; marks: import('./lensMarks').Mark[] }
+  | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
   | { type: 'card'; ts?: string; card: string; turn: string }
   | { type: 'chip'; ts?: string; kind: string; text: string; ref?: string; view?: string; status?: string }
   | { type: 'notice'; ts?: string; kind?: string; text?: string }
@@ -980,8 +982,21 @@ export interface WriteupComment {
   resolution?: 'done' | 'superseded' | string | null
 }
 /** A written document, or (`frame: true`) the frame of pinned figures and bullets before any write. */
+/** A lens's mark on the report (backend features/lenses.py): `term`, the exact words it marks, and what it says. */
+export interface ReportMark {
+  id: string
+  lens: string
+  surface: 'report'
+  term: string
+  title?: string
+  body: string
+  here?: string
+}
+
 export interface Writeup {
   id?: string
+  /** the lenses' marks on the report, served with it (backend features/lenses.py) */
+  lens_marks?: ReportMark[]
   title: string
   generated_at?: string
   model?: string

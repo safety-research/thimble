@@ -48,6 +48,10 @@ def on_save(fn: Callable[..., None]) -> None:
     if fn not in SAVED:
         SAVED.append(fn)
 
+# what feature modules add to the document as the page reads it, such as the marks of the lenses: fn(ws, doc)
+DECORATE: list[Any] = []
+
+
 def _docs_dir(ws: str) -> Any:
     d = home.workspace_dir(ws) / "docs"
     d.mkdir(parents=True, exist_ok=True)
@@ -289,13 +293,16 @@ def parse(md: str) -> dict[str, Any]:
 
 def writeup(ws: str, slug: str = DOC) -> dict[str, Any]:
     """A document as the page reads it; an empty one before anything is written, and while Claude writes it, its draft
-    so far (`drafting`)."""
+    so far (`drafting`). The report alone takes what feature modules add (DECORATE), such as the lenses' marks."""
     drafting = _DRAFTS.get((ws, slug))
     md = drafting if drafting is not None else markdown(ws, slug) or ""
     st = _state(ws, slug)
     doc = parse(md)
     out = {"id": slug, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
            "frame": False, "comments": [], **({"drafting": True} if drafting is not None else {})}
+    if slug == DOC:
+        for fn in DECORATE:
+            fn(ws, out)
     return out
 
 

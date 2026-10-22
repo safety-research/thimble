@@ -18,6 +18,7 @@ import { parseRef } from '../lib/refs'
 import { Card } from '../cards/Card'
 import { startV } from '../cards/keys'
 import { useFeature } from '../features'
+import { shownMarks, useLenses } from '../lib/lensMarks'
 import { MarksFooter } from '../marks/MarksFooter'
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
 import { callPieces, groupState, groupTools, isRawCall, madeBy, runTools, toolMeta, toolSteps, toolSummary, type BranchRow, type CallsRow, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, type ViewChipRow } from './model'
@@ -124,6 +125,8 @@ export function Rows({ rows, ws, chat, streaming = false, live = false, retry }:
   // a text before a later call of its turn is a step's note, drawn with the steps; the reply is the text after them,
   // or the last text before the last call when nothing follows it
   const notes = midTurnTexts(shown, streaming || live)
+  // the lenses whose marks show in the chat (lib/lensMarks.ts): a lens turned off for the chat hides its marks at once
+  const lenses = useLenses(ws)
   const places = cardPlaces(shown)
   const cardsOn = useFeature('cards')
   // v draws a card of the chat's last reply, once it is whole
@@ -145,7 +148,7 @@ export function Rows({ rows, ws, chat, streaming = false, live = false, retry }:
             return (
               <div key={r.index} className={`chat-msg chat-assistant${notes.has(r.index) ? ' chat-step-note' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} />
+                  <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} marks={shownMarks(r.lensMarks, lenses, 'chat')} lenses={lenses} />
                 </div>
                 {r.turnMarks && <MarksFooter items={r.turnMarks} />}
                 {(r.cards ?? []).map((id) => (

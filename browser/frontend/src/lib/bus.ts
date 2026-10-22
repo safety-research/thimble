@@ -22,8 +22,12 @@ export type Events = {
   /** `accepted`: the first build of a view the analyst accepted from a view proposal (files/viewReady.ts) */
   view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; accepted?: boolean; version?: string; held?: boolean }
   features: Record<string, never>
-  /** open the Labels sidebar, and with `id` that label's detail */
-  openLens: { tab: 'labels'; id?: string | null }
+  /** open the Labels and Checks sidebar on its tab, and with `id` that label's or check's detail */
+  openLens: { tab: 'labels' | 'checks'; id?: string | null }
+  /** a lens's switch or scope changed, or a check of the analyst's own came or went (lib/lensMarks.ts) */
+  lenses: Record<string, never>
+  /** a lens's reading made marks (lib/lensMarks.ts) */
+  lensMarks: Record<string, never>
   /** a card Claude drew is drawn anew after a key the message box gave it (cards/keys.ts) */
   cardDrawn: { id: string; drawing: CardDrawing }
   /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */

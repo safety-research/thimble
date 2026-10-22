@@ -58,7 +58,9 @@ def test_a_question_gets_an_answer_with_a_card_and_a_checked_mark(folder, monkey
     ws = home.open_folder(folder)
     (home.temp_dir(ws) / "runs.json").write_text(json.dumps([{"run": "a", "outcome": "merged"},
                                                              {"run": "b", "outcome": "failed"}]))
-    monkeypatch.setattr(llm, "client", lambda: ScriptedClient(script=claude))
+    # the lenses' reading after the turn (features/lenses.py) finds nothing to explain in this answer
+    lenses_read = lambda system, user: json.dumps({"glosses": [], "heads": []})  # noqa: E731
+    monkeypatch.setattr(llm, "client", lambda: ScriptedClient(script=claude, answer=lenses_read))
     app, auth, _ = build(PORT, unsandboxed=True)
     with TestClient(app, base_url=OWN) as c:
         r = c.post("/api/ui/key", json={"code": auth.mint()}, headers={"origin": OWN})

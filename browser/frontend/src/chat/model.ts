@@ -2,6 +2,7 @@
 // position in the log. The records are the server's (backend agent.py and the features): the analyst's message, the
 // reply's text as it streams, each tool call and its result, a turn's marks and v cards, a label run, a notice, an error,
 // and a view's build ending (a `view` chip).
+import type { Mark as LensMark } from '../lib/lensMarks'
 import type { MarkItem } from '../marks/marks'
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import type { ChatRecord, LabelRunState } from '../lib/types'
@@ -24,6 +25,8 @@ export interface TextRow {
   turnMarks?: MarkItem[]
   /** the cards v drew of this reply, which draw under it */
   cards?: string[]
+  /** the lenses' marks on this row's words: explainers, important details, checks (lib/lensMarks.ts) */
+  lensMarks?: LensMark[]
 }
 export interface ToolResult {
   summary: string
@@ -126,7 +129,16 @@ export function foldRecords(records: readonly ChatRecord[]): Row[] {
         return
       }
       case 'marks':
-        marks.set(e.turn, e.items)
+        // a log of 0.10 kept the lenses' marks under this type: {marks}, not the check's {turn, items}
+        if (Array.isArray((e as { marks?: unknown }).marks)) lensMarksOn(rows, (e as unknown as { marks: LensMark[] }).marks)
+        else marks.set(e.turn, e.items)
+        return
+      case 'lens_marks':
+        lensMarksOn(rows, e.marks ?? [])
+        return
+      case 'glosses':
+        // an explainers' record of an earlier version
+        lensMarksOn(rows, (e.glosses ?? []).map((g, i) => ({ ...g, id: `g${index}-${i}`, lens: 'explain', surface: 'chat' as const })))
         return
       case 'card':
         cards.set(e.turn, [...new Set([...(cards.get(e.turn) ?? []), e.card])])
@@ -149,6 +161,18 @@ export function foldRecords(records: readonly ChatRecord[]): Row[] {
   })
   withTurns(rows, marks, cards)
   return rows
+}
+
+/** A lens's marks after an answer: each goes to the first text row of the turn that holds its words. */
+function lensMarksOn(rows: Row[], got: readonly LensMark[]): void {
+  let from = rows.length
+  while (from > 0 && rows[from - 1].kind !== 'user') from--
+  const texts = rows.slice(from).filter((r): r is TextRow => r.kind === 'text')
+  for (const m of got) {
+    if (!m || typeof m.term !== 'string' || !m.term) continue
+    const row = texts.find((r) => r.text.includes(m.term))
+    if (row) row.lensMarks = [...(row.lensMarks ?? []), m]
+  }
 }
 
 /** Each turn's marks and v cards on its text rows: a turn is the rows after the `user` row that names it, and its texts

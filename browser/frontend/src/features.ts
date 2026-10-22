@@ -5,6 +5,7 @@
 //
 //   marks      the marks on the claims of a reply, and their check (marks/)
 //   cards      the cards Claude draws under its calls and v's cards under an answer (cards/)
+//   lenses     the marks of the explainers, important details and checks (components/LensMark.tsx)
 //   labels     the Labels pane of the Files tab and the colors it gives records (files/FilesTab.tsx)
 //   report     the Report tab (shell/Shell.tsx)
 //   views      the views bar of the Files tab and a view proposal's card (files/FilesTab.tsx, chat/ProposalCard.tsx)
@@ -15,7 +16,7 @@ import { useSyncExternalStore } from 'react'
 import { apiUrl } from './lib/browserKey'
 import { bus } from './lib/bus'
 
-export type FeatureName = 'marks' | 'cards' | 'labels' | 'report' | 'views'
+export type FeatureName = 'marks' | 'cards' | 'lenses' | 'labels' | 'report' | 'views'
 
 /** A feature as Settings lists it (server features.listing). */
 export interface FeatureRow {

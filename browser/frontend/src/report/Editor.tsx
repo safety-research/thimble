@@ -35,7 +35,7 @@ import type { Writeup } from '../lib/types'
 import { blockPos, caretBack, caretInBlock, caretNear } from './caret'
 import { CARD_MIME } from './cards'
 import { ReportContext, type ReportCtx } from './context'
-import { marksExtension, refreshMarks, type Flag, type MarksCtx } from './decorations'
+import { marksExtension, refreshMarks, type Flag, type MarksCtx, type TermMark } from './decorations'
 import { mergeUnsaved } from './merge'
 import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, lastChanged, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
 import { schema, type ReportPartialBlock } from './schema'
@@ -115,6 +115,8 @@ export interface ReportEditorProps {
   doc: Writeup
   /** the tint of every marked passage */
   flags: ReadonlyMap<string, Flag>
+  /** the lenses' marks, highlighted on their words */
+  marks?: readonly TermMark[]
   filter: DocFilter | null
   /** this tab's token, echoed in the `edited` event */
   client: string
@@ -358,10 +360,10 @@ const pointerPressExtension = () =>
     prosemirrorPlugins: [new Plugin({ props: { handleDOMEvents: { mousedown: (_view, e) => e.button === 0 && pointKeyHeld(e) } } })],
   })
 
-export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onFigures, captionOf, ref }: ReportEditorProps) {
+export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSaved, onFigures, captionOf, ref }: ReportEditorProps) {
   const { resolved } = useTheme()
   const docRef = useRef<Writeup | null>(doc)
-  const ctx = useRef<MarksCtx>({ slug, doc, flags, filter: filter?.sets ?? null })
+  const ctx = useRef<MarksCtx>({ slug, doc, flags, marks, filter: filter?.sets ?? null })
   const initial = useMemo(() => editorBlocksFromWire(blocksFromDoc(doc)) as ReportPartialBlock[], []) // eslint-disable-line react-hooks/exhaustive-deps
   // the line where a moved block lands is drawn by report.css as the card's drop line is (`.wu-dropline`), not in
   // BlockNote's pale blue bar, so both drags show one mark and neither reads as Notion's
@@ -600,8 +602,9 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     ctx.current.flags = flags
     ctx.current.filter = filter?.sets ?? null
     ctx.current.slug = slug
+    ctx.current.marks = marks
     refreshMarks(editor)
-  }, [doc, flags, filter, slug, editor])
+  }, [doc, flags, marks, filter, slug, editor])
 
   // a card from the sidebar: a figure block before the block `before` names, else after the document's last block
   // that says something (the trailing empty line stays last)

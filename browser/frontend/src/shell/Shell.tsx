@@ -30,7 +30,7 @@ import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeSto
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
 import { FeatureOff } from './FeatureOff'
-import { LabelsSidebar, type SideTab } from './LabelsSidebar'
+import { LensSidebar, type SideTab } from './LensSidebar'
 import { loadFeatures, useFeature, type FeatureName } from '../features'
 import { tabSignals, useReportTypes, useTabDots, writing } from './dots'
 import { DemoLine } from './DemoLine'
@@ -217,7 +217,7 @@ export function Shell({ ws }: { ws: string }) {
   useEffect(() => void loadFeatures(ws), [ws])
   const reportOn = useFeature('report')
   const featureOn = (t: { feature?: FeatureName }) => !t.feature || reportOn
-  // the Labels sidebar (LabelsSidebar.tsx): its tab while open; it pushes the panes, or the chat when it is the
+  // the Labels and Checks sidebar (LensSidebar.tsx): its tab while open; it pushes the panes, or the chat when it is the
   // only thing open, rather than covering them
   const [side, setSide] = useState<SideTab | null>(null)
   useEffect(() => bus.on('openLens', (e) => setSide(e.tab)), [])
@@ -348,7 +348,7 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
-        {side && <LabelsSidebar ws={ws} tab={side} onClose={() => setSide(null)} />}
+        {side && <LensSidebar ws={ws} tab={side} onClose={() => setSide(null)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />
