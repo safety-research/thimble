@@ -31,7 +31,7 @@ def test_main_reads_corrections_and_notes_and_nothing_when_all_held():
                             {"n": 2, "words": "all", "status": "failed", "failedBy": "evidence", "shown": "all",
                              "note": "Not the only one: b also failed."}])
     assert '"15" is corrected to "12" (the check: "12 merged")' in text
-    assert '"all" is marked as not confirmed' in text and "Not the only one: b also failed." in text
+    assert '"all" is flagged as not confirmed' in text and "Not the only one: b also failed." in text
 
 
 def test_a_run_python_call_reads_as_the_terminals_one_python_script():

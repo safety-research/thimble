@@ -69,7 +69,7 @@ function oneScript(command: string): boolean {
  *  only as one Python script, whose output is its evidence. */
 export function checkerDenial(e: { tool: unknown; command?: unknown }): string | null {
   const tool = String(e.tool)
-  if (!READS.has(tool)) return 'The check of the marks only reads: it can use Read, Grep, Glob, and Bash to run one Python script.'
+  if (!READS.has(tool)) return 'The check of the citations only reads: it can use Read, Grep, Glob, and Bash to run one Python script.'
   if (tool === 'Bash' && !oneScript(String(e.command ?? ''))) return "The check runs code only as one Python script: python3 - <<'PY', the code, PY, and nothing else in the call. Read, Grep and Glob read files."
   return null
 }
@@ -113,14 +113,14 @@ export function tellText(items: MarkItem[]): string {
   const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
   const said = items.filter(m => m.status === 'corrected' || m.status === 'failed').map(m => {
     if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`
-    if (m.failedBy === 'evidence') return `- ${q(m.words)} is marked as not confirmed${why(m)}`
-    return `- ${q(m.words)} is marked as wrong${why(m)}`
+    if (m.failedBy === 'evidence') return `- ${q(m.words)} is flagged as not confirmed${why(m)}`
+    return `- ${q(m.words)} is flagged as wrong${why(m)}`
   })
   const notes = notesOf(items).map(n => `- ${q(n)}`)
   if (!said.length && !notes.length) return ''
-  const parts = ['thimble checked the marks of your last reply against the data. Its words in the blocks below may quote the records.']
+  const parts = ['thimble checked the citations of your last reply against the data. Its words in the blocks below may quote the records.']
   if (said.length) parts.push(`The analyst sees these changes in the reply:\n${fenced(said.join('\n'))}`)
-  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its unmarked statements:\n${fenced(notes.join('\n'))}`)
+  if (notes.length) parts.push(`Under the reply, the analyst also reads what the check found false in its uncited statements:\n${fenced(notes.join('\n'))}`)
   parts.push('Use the corrected facts from now on. The analyst has read these where they stand, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
   return parts.join('\n')
 }

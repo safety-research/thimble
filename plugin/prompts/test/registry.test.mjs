@@ -57,3 +57,11 @@ test('the card tool text fits the 4096 characters Claude Code gives a tool descr
   const text = fill(readFileSync(join(ROOT, fileOf('card-tool')), 'utf8'), { TMPDIR: `/${'x'.repeat(99)}`, KEPT: 'v, r, l, f, F, p or u' }).trim()
   assert.ok(text.length <= 4096, `${text.length} characters`)
 })
+
+test("each section that guidance/guidance.ts leaves out with its feature off is a heading of guidance.md", () => {
+  const src = readFileSync(join(ROOT, 'guidance', 'guidance.ts'), 'utf8')
+  const headings = [...(/const SECTIONS[^{]*\{([^}]*)\}/.exec(src)?.[1] ?? '').matchAll(/'([^']+)'/g)].map(m => m[1])
+  assert.deepEqual(headings, ['Citing claims', 'Cards'])
+  const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
+  for (const h of headings) assert.match(text, new RegExp(`^## ${h}$`, 'm'), `guidance.md has ## ${h}`)
+})

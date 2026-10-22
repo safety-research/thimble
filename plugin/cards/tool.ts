@@ -47,15 +47,15 @@ const AROUND_ROWS = 14
 const SCHEMA = {
   type: 'object',
   properties: {
-    title: { type: 'string', description: 'the card\'s title: what it shows, in a few words; with `id`, leave it out to keep the title' },
-    data: { type: 'string', description: 'the path of the JSON file of rows you wrote, in this folder or in $TMPDIR (a path may start with $TMPDIR/); with `id`, leave it out to keep the rows of your last call of that card' },
-    view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, leave it out and give `edits` to change the view of your last call of that card, or only new `data` to keep that view' },
+    title: { type: 'string', description: 'what the card shows, in a few words; with `id`, leave out to keep the title' },
+    data: { type: 'string', description: 'the path of the JSON file of rows, in this folder or $TMPDIR (may start with $TMPDIR/); with `id`, leave out to keep the rows' },
+    view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, give `edits` instead, or only new `data` to keep the view' },
     edits: {
       type: 'array',
-      description: 'with `id`: changes to the view of your last call of that card (also one that did not draw), in order; each `old` stands once in it',
+      description: 'with `id`: changes to the view of your last call of that card (also one that failed), in order; each `old` occurs once in it',
       items: { type: 'object', required: ['old', 'new'], properties: { old: { type: 'string' }, new: { type: 'string' } } },
     },
-    id: { type: 'string', description: 'the id of a card you drew, to draw a new version of it in its place; leave it out for a new card' },
+    id: { type: 'string', description: 'the id of a card you drew, for a new version in its place' },
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',

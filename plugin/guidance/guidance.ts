@@ -4,7 +4,7 @@
 // copy, and a fork of the conversation inherits it.
 //
 // The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a
-// switched-off feature is left out; with marks off, the marks in the other sections' examples
+// switched-off feature is left out; with citations off, the citations in the other sections' examples
 // read as plain words. The block is made when the conversation starts, so a switch changed later counts from the next
 // conversation or compaction.
 import type { Register } from 'claude-code'
@@ -15,9 +15,9 @@ import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 
 /** The `## ` section of guidance.md that teaches each feature a person can switch off. */
-const SECTIONS: Record<string, string> = { marks: 'Marking claims', cards: 'Cards' }
+const SECTIONS: Record<string, string> = { marks: 'Citing claims', cards: 'Cards' }
 
-/** A mark in the guidance's examples: a markdown link to `#`. */
+/** A citation in the guidance's examples: a markdown link to `#`. */
 const MARK = /\[([^\]]*)\]\(#\)/g
 
 /** guidance.md as a conversation gets it, with `on(feature)` saying which features are on. */

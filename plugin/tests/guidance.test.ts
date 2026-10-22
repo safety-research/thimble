@@ -16,9 +16,9 @@ const GUIDANCE = [
   '',
   'Answer first: [12 of 40](#) runs failed.',
   '',
-  '## Marking claims',
+  '## Citing claims',
   '',
-  'Mark a claim as [words](#).',
+  'Cite a claim as [words](#).',
   '',
   '## Cards',
   '',
@@ -58,15 +58,15 @@ test('with cards off, the Cards section is left out and the rest stays', { optio
   const { text } = await thimbleBlock($)
   expect(text).not.toContain('## Cards')
   expect(text).not.toContain('`card` tool')
-  expect(text).toContain('## Marking claims')
+  expect(text).toContain('## Citing claims')
   expect(text).toContain('[12 of 40](#)')
   expect(text).toContain('## Labels')
 })
 
-test("with marks off, the Marking claims section is left out and the other examples' marks read as plain words", { options: { marks: false } }, async ($, on) => {
+test("with citations off, the Citing claims section is left out and the other examples' citations read as plain words", { options: { marks: false } }, async ($, on) => {
   world(on)
   const { text } = await thimbleBlock($)
-  expect(text).not.toContain('## Marking claims')
+  expect(text).not.toContain('## Citing claims')
   expect(text).not.toContain('](#)')
   expect(text).toContain('Answer first: 12 of 40 runs failed.')
   expect(text).toContain('Sort records with a label: 7 of 30 tickets.')

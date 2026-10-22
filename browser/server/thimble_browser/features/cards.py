@@ -366,7 +366,7 @@ def checked_since(ws: str, chat: str, turn: str) -> str:
         said = "is wrong" if m.get("failedBy") == "check" else "is not confirmed"
         return f"- \"{m['words']}\" {said}" + (f": {m['reason']}" if m.get("reason") else "")
     lines = [line(m) for m in items]
-    return ("\n\nSince that answer, thimble checked its marks against the data. The check found (its words quote the "
+    return ("\n\nSince that answer, thimble checked its citations against the data. The check found (its words quote the "
             f"records):\n{fenced(chr(10).join(lines))}\nThe card shows the corrected values, computed from the records.")
 
 

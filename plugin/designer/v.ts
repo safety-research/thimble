@@ -131,7 +131,7 @@ async function checkedSince($: Engine, row: string): Promise<string> {
   if (!changed.length) return ''
   const lines = changed.map(m => (m.status === 'corrected' ? `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"`
     : m.failedBy === 'check' ? `- "${m.words}" is wrong${m.reason ? `: ${m.reason}` : ''}` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
-  return `\n\nSince that answer, thimble checked its marks against the data. The check found (its words quote the records):\n${fenced(lines.join('\n'))}\nThe card shows the corrected values, computed from the records.`
+  return `\n\nSince that answer, thimble checked its citations against the data. The check found (its words quote the records):\n${fenced(lines.join('\n'))}\nThe card shows the corrected values, computed from the records.`
 }
 
 /** The card an earlier v drew under this answer, for the fork to draw a new version of: v again on the same answer

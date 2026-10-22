@@ -115,7 +115,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(settled).not.toContain('checking')
   const told = Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
   expect(told).toContain('"15 of 40" is corrected to "12 of 40"')
-  expect(told).toContain('"ship it" is marked as wrong (the check: "no record holds these words")')
+  expect(told).toContain('"ship it" is flagged as wrong (the check: "no record holds these words")')
   expect(told).toContain('- "agent-07 merged none of them alone: agent-02 approved each one."')
   expect(told).toContain('would tell them twice')
   expect(await failLineNow($)).toBe(null)

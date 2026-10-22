@@ -3,8 +3,14 @@
   "parts": {
     "databases": {
       "prompt": "guidance",
-      "after": "how to use thimble.",
-      "until": "## Communicating"
+      "after": "with answers they can check.",
+      "until": "## Communicating",
+      "replace": [
+        [
+          "give that path to Write, Edit and Read, because only the shell knows `$TMPDIR`.",
+          "your code sees it as `$TMPDIR`, and the Read tool takes that path as written."
+        ]
+      ]
     },
     "communicating": {
       "prompt": "guidance",
@@ -12,31 +18,23 @@
       "heading": "Communicating",
       "replace": [
         [
-          "A table wider than the conversation draws as one block of lines per row, so give a table only the columns the question needs.",
+          "A wide table draws as one block of lines per row, so give a table only the columns the question needs.",
           "A wide table is hard to read in the chat, so give a table only the columns the question needs."
         ]
       ]
     },
-    "marking": {
+    "citing": {
       "prompt": "guidance",
-      "section": "Marking claims",
-      "heading": "Marking claims",
+      "section": "Citing claims",
+      "heading": "Citing claims",
       "replace": [
         [
-          "The analyst never sees your shell output,",
-          "The analyst rarely opens your code's output,"
+          "The analyst sees your reply, but not the code you ran or what it printed.",
+          "The analyst sees your reply, but rarely opens the code you ran or what it printed."
         ],
         [
-          "Its mark does the work of the `file_path:line_number` reference that Claude Code asks for, because the mark's evidence shows the file at the line that holds that code, and the terminal can open it there.",
-          "The mark's evidence shows the file at the line that holds that code."
-        ],
-        [
-          "```bash\npython3 - <<'PY'\n",
-          "```python\n"
-        ],
-        [
-          "refund requests were approved\")\nPY\n```",
-          "refund requests were approved\")\n```"
+          "A citation of code takes the place of a `file_path:line_number` reference, because the check shows the file at that line.",
+          "The check of a citation of code shows the file at that line."
         ]
       ]
     },
@@ -46,12 +44,8 @@
       "heading": "Cards",
       "replace": [
         [
-          "the Write, Edit and Read tools take that path as written, because only the shell knows `$TMPDIR`.",
-          "your code sees it as `$TMPDIR`, and the Read tool takes that path as written."
-        ],
-        [
-          "press v under an answer,",
-          "press v under an answer (or type v in the empty message box),"
+          "When the analyst presses v under an answer,",
+          "When the analyst presses v under an answer (or types v in the empty message box),"
         ]
       ]
     },
@@ -61,12 +55,20 @@
       "heading": "Labels",
       "replace": [
         [
-          "read its values with `--csv` in the code that counts or draws them,",
-          "read its values with `thimble.labels(name, negatives=True)` in the code that counts or draws them,"
+          "tried with `--limit` first",
+          "tried with a `limit` first"
         ],
         [
-          "(`thimble label refund --in \"tickets/*.jsonl\" --regex \"refund|money back|chargeback|reimburse\"`)",
-          "(apply_label `refund`, paths `[\"tickets/*.jsonl\"]`, a regex `refund|money back|chargeback|reimburse`)"
+          "read its values with `--csv` in your code.",
+          "read its values with `thimble.labels(name, negatives=True)` in your code."
+        ],
+        [
+          "Make a label with `thimble label NAME --in GLOB` and `--regex RE`, `--code FILE` or `--prompt \"DEFINITION\"`; `thimble label --help` says more.",
+          "Make a label with apply_label."
+        ],
+        [
+          "`thimble label refund --in \"tickets/*.jsonl\" --regex \"refund|money back|chargeback|reimburse\"`",
+          "apply_label `refund`, paths `[\"tickets/*.jsonl\"]`, a regex `refund|money back|chargeback|reimburse`"
         ]
       ]
     },
@@ -74,24 +76,16 @@
       "prompt": "card-tool",
       "replace": [
         [
-          "write the rows as a JSON file in this folder or in `$TMPDIR` ({{TMPDIR}})",
-          "write the rows as a JSON file in `$TMPDIR` ({{TMPDIR}})"
-        ],
-        [
-          "which changes when a side pane opens:",
-          "which changes when the analyst makes the chat wider or narrower:"
+          "which changes when a side pane opens.",
+          "which changes when the analyst makes the chat wider or narrower."
         ],
         [
           "the letters the card takes at an empty prompt",
           "the letters the card takes at an empty message box"
         ],
         [
-          " and {{KEPT}} open thimble's designer, fixes and panes:",
-          " and {{KEPT}} are thimble's:"
-        ],
-        [
-          "a digit or a sign types into the prompt",
-          "a digit or a sign types into the message box"
+          "a digit types into the prompt",
+          "a digit types into the message box"
         ]
       ]
     },
@@ -99,16 +93,20 @@
       "prompt": "checker",
       "replace": [
         [
-          "Your shell is in `{{CWD}}`. Run code as one Bash call in the form `python3 - <<'PY'`, then the code, then `PY`, and nothing else in the call.",
+          "Your shell is in `{{CWD}}`. Run code as one Bash call: `python3 - <<'PY'`, the code, `PY`, and nothing else.",
           "Run code as one run_python call, which runs in `{{CWD}}`."
         ],
         [
-          "the evidence is a Bash call whose output shows the claim",
-          "the evidence is a run_python call whose output shows the claim"
+          "The evidence is one Bash call whose output prints the words.",
+          "The evidence is one run_python call whose output prints the words."
         ],
         [
-          "A label's values come from `thimble label NAME --csv`, which the code can read with `subprocess`.",
-          "A label's values come from `thimble.labels(NAME, negatives=True)`, which the code can call."
+          "Label values come from `thimble label NAME --csv`.",
+          "Label values come from `thimble.labels(NAME, negatives=True)`, which the code can call."
+        ],
+        [
+          "its `--code` file or `--regex` command.",
+          "the code or regex its apply_label call gave."
         ]
       ]
     },
@@ -116,16 +114,8 @@
       "prompt": "designer",
       "replace": [
         [
-          "since the card reads its data only from this folder or `$TMPDIR`. The Write and Read tools take that folder's path as written here, because only the shell knows `$TMPDIR`.",
-          "since the card reads its data only from `$TMPDIR`. The Read tool takes that folder's path as written here."
-        ],
-        [
-          "Use only what a terminal can show:",
-          "Use only what a card can show:"
-        ],
-        [
-          "You cannot know if the terminal's background is light or dark,",
-          "You cannot know if the page's background is light or dark,"
+          "Write and Read take that path as written here, because only the shell knows `$TMPDIR`.",
+          "Read takes that path as written here."
         ]
       ]
     },
@@ -134,8 +124,8 @@
       "until": "{{RECORDS}}",
       "replace": [
         [
-          "Reply with one JSON array and nothing else, and return exactly one entry for each record:",
-          "Reply with one JSON object whose `records` array has exactly one entry for each record:"
+          "Reply with one JSON array and nothing else, and give exactly one entry for each record:",
+          "Reply with one JSON object whose `records` array has one entry for each record:"
         ]
       ]
     }

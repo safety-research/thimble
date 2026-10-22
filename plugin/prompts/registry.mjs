@@ -8,7 +8,7 @@
 /** @type {Record<string, Text>} */
 export const TEXTS = {
   guidance: {
-    about: 'what thimble is, how to mark claims, when to draw a card or make a label',
+    about: 'what thimble is, how to cite claims, when to draw a card or make a label',
     reader: 'guidance/guidance.ts',
     use: 'the `thimble` context block of every conversation, sent again after a compaction',
   },
@@ -18,7 +18,7 @@ export const TEXTS = {
     use: 'the description of the card tool',
   },
   checker: {
-    about: 'check each mark of a reply with evidence, and correct or fail it',
+    about: 'check each citation of a reply with evidence, and correct or fail it',
     reader: 'marks/checker.ts',
     use: 'the prompt of the checker fork after each reply',
   },

@@ -7,7 +7,7 @@ Every prompt is a file under browser/prompts/. Three directives join them:
   temp folder (`{{TMPDIR}}`).
 
 Shared parts. The terminal plugin's texts are read from the plugin itself, plugin/ at the top of the repository, when
-the server makes a prompt: its guidance (how to write for the analyst, mark claims, draw cards and make labels), the
+the server makes a prompt: its guidance (how to write for the analyst, cite claims, draw cards and make labels), the
 card tool's description, the checker's and the designer's prompts, and the label classifier. A part names a file of the
 plugin (`file`) or a prompt of its registry (`prompt`, plugin/prompts/registry.mjs), whose one file is the one read.
 prompts/shared.json names each shared part: where it comes from, the `## ` section, which of its bullets (all when not

@@ -78,7 +78,7 @@ the server's first lines say why. `thimble-browser --check-sandbox` tests it, on
 | `samples/agent-runs/` | a made-up folder of agent runs to try it on, written by `samples/make_agent_runs.py` |
 | `scripts/thimble-browser` | the launcher: it rebuilds the page and the sandbox runtime when they changed, then starts the server |
 
-The texts Claude reads are the terminal plugin's own: its guidance (communicating, marking claims, cards, labels), the
+The texts Claude reads are the terminal plugin's own: its guidance (communicating, citing claims, cards, labels), the
 card tool's description, the checker's and the designer's prompts and the label classifier. The server reads them from
 `plugin/` when it makes a prompt, with the few exact-string changes `prompts/shared.json` lists.
 `server/tests/test_prompt_parity.py` fails when one of those changes no longer applies to the plugin's text. The marks'

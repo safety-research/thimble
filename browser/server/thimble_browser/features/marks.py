@@ -1,5 +1,5 @@
 """Marks: the claims of a reply that the analyst would want to check, which Claude writes as `[words](#)` (the terminal's
-guidance, section Marking claims). They are checked after the reply, as the terminal checks them
+guidance, section Citing claims). They are checked after the reply, as the terminal checks them
 (plugin/marks/checker.ts):
 
 1. After a turn of the chat's agent that ended normally, the marks of its texts (marks_of.mjs, with the terminal's
@@ -116,18 +116,18 @@ def tell_text(items: list[dict[str, Any]]) -> str:
         if m["status"] == "corrected":
             said.append(f"- {q(m.get('was') or m['words'])} is corrected to {q(m['shown'])}{why(m)}")
         elif m["status"] == "failed" and m.get("failedBy") == "evidence":
-            said.append(f"- {q(m['words'])} is marked as not confirmed{why(m)}")
+            said.append(f"- {q(m['words'])} is flagged as not confirmed{why(m)}")
         elif m["status"] == "failed":
-            said.append(f"- {q(m['words'])} is marked as wrong{why(m)}")
+            said.append(f"- {q(m['words'])} is flagged as wrong{why(m)}")
     notes = [f"- {q(n)}" for n in dict.fromkeys(m["note"] for m in items if m.get("note"))]
     if not said and not notes:
         return ""
-    parts = ["thimble checked the marks of your last reply against the data. Its words in the blocks below may quote "
+    parts = ["thimble checked the citations of your last reply against the data. Its words in the blocks below may quote "
              "the records."]
     if said:
         parts.append("The analyst sees these changes in the reply:\n" + fenced("\n".join(said)))
     if notes:
-        parts.append("Under the reply, the analyst also reads what the check found false in its unmarked statements:\n"
+        parts.append("Under the reply, the analyst also reads what the check found false in its uncited statements:\n"
                      + fenced("\n".join(notes)))
     parts.append("Use the corrected facts from now on. The analyst has read these where they stand, so a correction of "
                  "them in your next reply would tell them twice. A claim the check could not confirm may still be "
@@ -305,7 +305,7 @@ async def end_check(s: Any, result: str | None) -> None:
 
 agent.AGENTS["checker"] = agent.AgentDef(
     agent.main_prompt, agent.main_tools, finished=check_finished, allowed=CHECKER_TOOLS,
-    denied="The check of the marks only reads: it can use Read, Grep, Glob, and run_python to run Python.")
+    denied="The check of the citations only reads: it can use Read, Grep, Glob, and run_python to run Python.")
 agent.AFTER_TURN.append(after_turn)
 
 
