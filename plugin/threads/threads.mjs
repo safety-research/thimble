@@ -1,13 +1,15 @@
 // threads.mjs: side threads, as pure functions. No `$`, no Node, no DOM (thread.ts and pane.tsx use it).
 //
 // A side thread is the conversation of what the side pane shows: a citation or an explainer of a reply (a mark), a
-// card, or a pane of thimble's (a label, coverage, the claims). The person asks it in the pane's input bar; a fork of
+// passage of a reply (its margin's ?), a card, or a pane of thimble's (a label, coverage, the claims). The person asks it in the pane's input bar; a fork of
 // main answers, and can read and compute over the data. It has its own turns. Main reads each question (core/engaged.ts)
 // and no answer unless the person sends one there (m).
 //
-//   scope        {about, mark?: {row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}, card?, pane?: {kind, args}}
-//   threadKey(scope)              one thread per mark, per card, or per pane: 'mark-<row>-<kind>-<n|id>', 'card-<id>',
-//                                 'pane-<kind>-<its arguments>' (a pane of one citation's evidence is that citation's)
+//   scope        {about, mark?: {row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}, passage?: {row, text},
+//                card?, pane?: {kind, args}}
+//   threadKey(scope)              one thread per mark, per passage, per card, or per pane: 'mark-<row>-<kind>-<n|id>',
+//                                 'passage-<row>-<its words, hashed>', 'card-<id>', 'pane-<kind>-<its arguments>' (a pane
+//                                 of one citation's evidence is that citation's)
 //   aboutOf(scope)                the words "about …" the thread shows under a question
 //   subjectOf(thread)             what it is on, in a few words
 //   nameOf(thread)                its name in the list: 'main/<what it is on>'
@@ -21,6 +23,12 @@
 //   ago(at, now)                  how long ago, in a word: `now`, `4m`, `2h`, `3d`
 
 const safe = s => String(s ?? '').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'x'
+/** A short, stable name for a text. */
+function hashOf(s) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+  return h.toString(36)
+}
 const cutTo = (s, n) => (Array.from(String(s)).length <= n ? String(s) : Array.from(String(s)).slice(0, Math.max(1, n - 1)).join('') + '…')
 
 /** A pane's arguments as a stable key: its fields in order, objects too. */
@@ -41,13 +49,14 @@ function markOf(scope = {}) {
 export function threadKey(scope = {}) {
   const m = markOf(scope)
   if (m) return `mark-${safe(m.row)}-${safe(m.kind)}-${safe(m.kind === 'citation' ? m.n : m.id)}`
+  if (scope.passage) return `passage-${safe(scope.passage.row)}-${hashOf(String(scope.passage.text ?? '').trim())}`
   if (scope.card) return `card-${safe(scope.card)}`
   if (scope.pane) return `pane-${safe(scope.pane.kind)}-${argsKey(scope.pane.args)}`
   return `about-${safe(scope.about)}`
 }
 
 export function aboutOf(scope = {}) {
-  return String(scope.about || (scope.card ? 'this card' : markOf(scope) ? 'this mark' : scope.pane ? scope.pane.kind : 'this'))
+  return String(scope.about || (scope.card ? 'this card' : markOf(scope) ? 'this mark' : scope.passage ? 'this passage' : scope.pane ? scope.pane.kind : 'this'))
 }
 
 /** What a thread is on, in a few words. */
@@ -77,6 +86,7 @@ export function firstMessage({ text, scope = {}, detail = '', root = '' }) {
   if (scope.card) lines.push(`About: the card "${aboutOf(scope)}" (id "${scope.card}").`)
   else if (m && m.kind === 'citation') lines.push(`About: Claude's citation "${aboutOf(scope)}" in its reply.`)
   else if (m) lines.push(`About: the words "${aboutOf(scope)}" in Claude's message${m.kind === 'heads' ? ', which thimble marked as an important detail' : ', which thimble explained'}.`)
+  else if (scope.passage) lines.push("About: this passage of Claude's message:", String(scope.passage.text ?? '').trim())
   else if (scope.pane) lines.push(`About: the panel "${aboutOf(scope)}" beside the conversation.`)
   else lines.push(`About: ${aboutOf(scope)}.`)
   if (String(detail || '').trim()) lines.push(String(detail).trim())

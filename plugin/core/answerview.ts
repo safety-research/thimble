@@ -6,9 +6,11 @@
 //   marks/register.ts  AssistantMessage   textView (the text a row shows), rowDrawing (a row a feature draws whole: a
 //                                         catch-up), spansFor (explainers and heads-ups on its words), markFocus (the
 //                                         citation the tray shows), underText (lines under the row's words),
-//                                         markPressed (a press on a citation)
+//                                         markPressed (a press on a citation), passagesFor (what the margin of
+//                                         each passage asks: a side thread about it)
 //   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the chips)
-//   cards/draw.ts      a card's frame     underCard: lines under one card (its label row)
+//   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
+//                                         margin asks: a side thread about it)
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray, the label ask)
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
@@ -25,7 +27,7 @@ import { explainKey, explainSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelAskBand, labelAskBar, labelAskKey, labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
-import { THREADS_KEYS, threadsBar, threadsKey } from '../threads/seam'
+import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayKey } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 
@@ -110,6 +112,20 @@ export async function markFocus($: Engine, row: string): Promise<number | null> 
 /** A press on citation `n` of the row: whether a feature took it (the tray); else its evidence opens. */
 export async function markPressed($: Engine, row: string, n: number): Promise<boolean> {
   return safe(trayMarkPressed($, row, n), false)
+}
+
+/** What the margin of each passage of a row asks (marks/view.ts passages): a side thread about it; `has` once one was
+ *  asked. Null when the threads cannot say. */
+export async function passagesFor($: Engine, row: string): Promise<{ has: (p: { text: string; label: string }) => boolean; ask: (p: { text: string; label: string }) => unknown } | null> {
+  const p = await safe(threadPassages($, row), null)
+  if (!p) return null
+  return { has: x => { try { return !!p.has(x) } catch { return false } }, ask: x => { try { return p.ask(x) } catch { return undefined } } }
+}
+
+/** What the margin of a card's frame asks: a side thread about the card. Null when the threads cannot say. */
+export async function cardAsk($: Engine, id: string, title: string): Promise<{ label: string; has: boolean; press: () => unknown } | null> {
+  const a = await safe(threadOnCard($, id, title), null)
+  return a && typeof a.label === 'string' && typeof a.press === 'function' ? { label: a.label, has: !!a.has, press: a.press } : null
 }
 
 /** The lines right under a row's words (and its citations' footer): the labels its turn used. */

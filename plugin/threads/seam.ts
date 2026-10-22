@@ -16,6 +16,9 @@
 //                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
+//   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
+//                                      subject; `has` once a question was asked of it, `ask` opens it (openThread)
+//   threadOnCard($, id, title)         what a card's margin asks about (cards/draw.ts): the card, as the tray's `a` asks
 //   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
 //                                      in the thread's pane; null for any other agent (cards/tool.ts)
 //   registerThreads                    its own hooks (/threads, the forks' ends, ...)
@@ -36,7 +39,13 @@ export const THREADS_KEYS = ['t']
 /** What a thread is about, as the feature that opens it names it: in words (`about`, as the list and main read it),
  *  and the thing itself: a mark of a row, a card, or a pane of thimble's with its arguments (a claim of the claims
  *  pane). */
-export type ThreadScope = { about: string; mark?: MarkRef; card?: string; pane?: { kind: string; args: unknown } }
+export type ThreadScope = { about: string; mark?: MarkRef; passage?: { row: string; text: string }; card?: string; pane?: { kind: string; args: unknown } }
+
+/** A passage of a reply (marks/view.ts Passage): its words, and a few of them that name it. */
+type Passage = { text: string; label: string }
+
+/** A thread was asked about `scope` (an opened thread with no question yet was not). */
+const asked = (scope: ThreadScope) => !!threadFor(scope)?.asks.length
 
 /** t with threads: the list in the side pane, once the word window closed with no letter after it (a letter makes t
  *  the start of a word). With no thread, t types. */
@@ -74,6 +83,25 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
 
 export async function openThread($: Engine, scope: ThreadScope): Promise<boolean> {
   return openThreadOn($, scope)
+}
+
+/** A reply's passages as the margin asks about them; read again when a thread changes. */
+export async function threadPassages($: Engine, row: string): Promise<{ has: (p: Passage) => boolean; ask: (p: Passage) => unknown }> {
+  await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
+  await restoreThreads($)
+  const scope = (p: Passage): ThreadScope => ({ about: p.label, passage: { row, text: p.text.slice(0, 4000) } })
+  return {
+    has: p => asked(scope(p)),
+    ask: p => { void openThreadOn($, scope(p)).catch(() => undefined) },
+  }
+}
+
+/** A card as its frame's margin asks about it: the thread the tray's `a` opens on it. */
+export async function threadOnCard($: Engine, id: string, title: string): Promise<{ label: string; has: boolean; press: () => unknown }> {
+  await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
+  await restoreThreads($)
+  const scope: ThreadScope = { about: `the card "${title || id}"`, card: id }
+  return { label: scope.about, has: asked(scope), press: () => { void openThreadOn($, scope).catch(() => undefined) } }
 }
 
 export async function threadCardAnchor($: Engine, agentId: string | undefined, cardId: string): Promise<string | null> {
