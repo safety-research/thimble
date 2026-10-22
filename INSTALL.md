@@ -8,14 +8,14 @@ machine. `scripts/install.sh` installs one or both.
 For both:
 
 - **macOS or Linux.**
-- **Node.js** on your `PATH`: 22 or later for the plugin, 22.12 or later for the browser workbench. Check with
+- **Node.js** on your `PATH`: 22.18 or later for the plugin, 22.12 or later for the browser workbench. Check with
   `node --version`.
 
 For the terminal plugin:
 
-- **Claude Code** 2.1.301 or later. Check with `claude --version`.
-- **Python 3.10 or later.** thimble's kernel runs on `python3`. Its queries need pandas, which thimble installs for
-  itself when `python3` has none; see [Python](#python) below.
+- **Claude Code** 2.1.307 or later. Check with `claude --version`.
+- **Python 3.10 or later**, on `python3` (or the Python that `THIMBLE_PYTHON` names). thimble's kernel needs nothing
+  beyond the standard library.
 
 For the browser workbench:
 
@@ -27,6 +27,12 @@ For the browser workbench:
   [browser/README.md](browser/README.md#credentials). The browser workbench does not use your Claude Code login.
 - **About 600 MB of disk** in the checkout: the page's packages (about 290 MB), the server's Python packages (about
   280 MB), the sandbox runtime and the built page.
+
+## If you used thimble 0.10 or earlier
+
+thimble 0.11 no longer runs Claude's queries itself, so it needs no pandas: you can delete the Python that 0.10 made in
+`~/.thimble/python`. The `thimble/` folder in a data folder keeps only labels now; 0.11 reads none of its other files
+(the queries, the cards and the record of each reply).
 
 ## If you used thimble 0.9
 
@@ -82,21 +88,10 @@ thimble from it.
 
 ### Python
 
-The plugin runs `python3` unless you tell it otherwise. Its queries (`thimble run`) need pandas. When `python3` has
-none, thimble makes its own Python with pandas in `~/.thimble/python` (with uv when it is installed, else
-`python3 -m venv` and pip), and uses it from then on:
-
-- `scripts/install.sh` makes it before it installs the plugin. If that fails, for example with no network or a
-  folder it cannot write, the script stops there and says why; fix it and run the script again.
-- A plugin installed without the script makes it when its first session starts, once per machine. A notice in
-  Claude Code says so while it installs, and you can work in the meantime. If that fails, the line says why and gives the
-  command that makes it, which you run in a terminal.
-
-Claude's queries never install anything. Without pandas, a query stops with one line that gives that command.
-
-To use another Python that has pandas, set `THIMBLE_PYTHON` before you start Claude Code, for example
-`export THIMBLE_PYTHON="$HOME/venvs/data/bin/python"`, or add it under `"env"` in `~/.claude/settings.json`. thimble
-installs nothing into a Python you name.
+The plugin runs `python3`. To use another Python 3.10 or later, set `THIMBLE_PYTHON` before you start Claude Code, for
+example `export THIMBLE_PYTHON="$HOME/venvs/data/bin/python"`, or add it under `"env"` in `~/.claude/settings.json`.
+thimble installs nothing into any Python. The code Claude writes to read your data runs with the Python it chooses, as
+in any Claude Code session.
 
 ## Check that it works
 
@@ -105,8 +100,8 @@ The terminal plugin:
 1. Go to a folder with a CSV or JSONL file and run `claude`. The first time, Claude Code asks whether you trust the
    folder. thimble works only in folders you trust.
 2. Ask: "How many rows does this file have per value of its first column? Show it as a card."
-3. Claude runs `thimble` commands, then answers. A card appears under the answer, and the line above the prompt reads
-   `thimble  v visualize · s squeeze · …`.
+3. Claude answers with a card, and the numbers in its answer are underlined in purple, each with a spinner until the
+   checker is done. The line above the prompt starts with `thimble` and says how much of the folder Claude has read.
 
 The browser workbench:
 
@@ -118,11 +113,9 @@ The browser workbench:
 
 ## Settings
 
-- **The plugin's features.** Cards (`v`), Squeeze and catch-up (`s`), Explainers, Important details, Claims (`c`),
-  and Labels and coverage on the bar can each be turned on or off: click `thimble` at the left of the bar or run
-  `/thimble-settings`. The panel shows the bar as the features leave it. The features that read Claude's replies
-  share one model call per reply, by a side agent that reads each reply with the whole session; with all of them off,
-  it makes none.
+- **The plugin's features.** Marks, Cards (with `v`), and Labels and coverage on the bar can each be turned on or
+  off: click `thimble` at the left of the bar or run `/thimble-settings`. Claude Code keeps the values in its settings
+  (`pluginConfigs`). With Marks off, the checker makes no model call.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).
@@ -146,13 +139,11 @@ alone. To remove what thimble wrote, delete the `thimble/` folder in each data f
 
 The terminal plugin:
 
-- **No line above the prompt, and no cards.** The plugin is not loaded in this session. Check that the folder is
+- **No line above the prompt, and no marks.** The plugin is not loaded in this session. Check that the folder is
   trusted and that thimble is enabled in `/plugin`. Managed settings that set `disableAllHooks` turn thimble off.
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
-- **`thimble run needs pandas`.** thimble's own Python is not there yet. Run the command the line names in a
-  terminal, or see [Python](#python).
-- **`1` does not open a card's detail.** Below 144 columns Claude Code does not open a side pane from a key. Type
-  `/card` instead, or widen the terminal.
+- **A line above the prompt says something failed.** It says what failed and why. `f` asks Claude to fix it in thimble
+  for you, and `F` writes a report only.
 
 The browser workbench:
 

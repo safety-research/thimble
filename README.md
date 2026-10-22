@@ -3,8 +3,9 @@
 thimble helps you and Claude work through a large amount of data, such as the transcripts and logs that agents leave
 behind. It comes in two forms, both in this repository:
 
-- **The terminal plugin** (`plugin/`), for Claude Code. You ask Claude questions in the terminal as usual, and thimble
-  adds cards, citations and a second reader to its replies.
+- **The terminal plugin** (`plugin/`), for Claude Code. You ask Claude questions in the terminal as usual. Claude
+  marks the claims you would check, a second Claude checks each one after the reply, and Claude draws interactive
+  cards when an answer is faster to see than to read.
 - **The browser workbench** (`browser/`), a web page for a folder of files, with a file browser, a chat with Claude, a
   canvas of cards and a report. Run `thimble-browser` in a folder of files to start it. It runs on your machine and
   calls the Claude API with your own credentials.
@@ -21,9 +22,9 @@ scripts/install.sh
 ```
 
 The script installs both. It first checks what they need and says what is missing: Claude Code, Python 3.10 or later
-and Node.js 22 or later for the plugin (it installs pandas into thimble's own Python); Node.js 22.12 or later and
-[uv](https://docs.astral.sh/uv/) for the browser workbench. The browser workbench takes about 600 MB of disk, most of
-it its page's packages and its server's Python packages, so install the plugin alone if that is all you need:
+and Node.js 22.18 or later for the plugin; Node.js 22.12 or later and [uv](https://docs.astral.sh/uv/) for the browser
+workbench. The browser workbench takes about 600 MB of disk, most of it its page's packages and its server's Python
+packages, so install the plugin alone if that is all you need:
 
 - `scripts/install.sh --no-browser` installs the terminal plugin only. So do these two commands, with no clone:
   `claude plugin marketplace add safety-research/thimble`, then `claude plugin install thimble@thimble`.
@@ -34,78 +35,54 @@ works, and what to do when it does not.
 
 ## The terminal plugin
 
-You ask Claude questions as usual. thimble adds three things:
-
-- **Cards.** When a chart or a table shows the answer better than a paragraph, Claude draws a card under its reply.
-  You can open a card to see each of its parts, the rows behind each part, and the code that made it.
-- **Citations.** Numbers in Claude's replies link to the rows they were counted from. You can open each one and read
-  those rows.
-- **A second reader.** After each of Claude's replies, a side agent reads it with the whole session and the work
-  behind it. It suggests another view when one would help, explains terms you may not know, marks the details that
-  are easy to miss, and keeps the session's claims. A click on `thimble` at the bar's left (or `/thimble-settings`)
-  turns each feature on or off, and shows how the bar changes as you do.
-
-### Use
-
-1. Go to a folder with your data: JSONL, CSV, TSV, JSON, SQLite, Markdown or plain text files. Subfolders are fine.
+1. Go to a folder with your data: JSONL, CSV, TSV, JSON, SQLite, Markdown, code or plain text files. Subfolders are
+   fine.
 2. Start Claude Code with `claude`, and ask a question about the data.
 
-Claude reads and queries the files with the `thimble` command. thimble keeps the code, the inputs and the source rows
-behind every value Claude reports, in a `thimble/` folder beside your data, so each number can be traced back.
+thimble adds these to the session:
 
-#### Keys
+- **Marks.** Claude marks the claims in its reply that you would want to check: the numbers that answer your
+  question, quotes, and what code does. A mark is underlined in purple. After the reply, a second Claude, a fork of
+  the session, checks each mark against the files: a number with code whose printed output holds it, a quote or a
+  claim about code with the line of the file that holds it. A spinner follows each mark while it checks. A mark that
+  holds stays as it is; a wrong one shows the corrected words in its place; one that nothing supports turns red with
+  `×`, and the line under the reply says how many failed. A click on a mark opens its evidence beside the chat: the
+  code and its output for a number, the file at its line for a quote. Claude learns of each correction with your next
+  prompt.
+- **Cards.** When an answer is much faster to see than to read, such as the path one run took or forty runs side by
+  side, Claude draws an interactive card in the conversation. A card takes clicks, and the letter keys it names while
+  the prompt is empty.
+- **`v`.** At an empty prompt, `v` asks for a card of the last answer. A background copy of the session lists a few
+  forms that fit, picks one, draws it under that answer and fixes what it sees is unclear, while you go on. The line
+  above the prompt says while it works.
+- **Labels.** When Claude sorts records into categories, it makes a label: a rule (a regular expression or code) or a
+  model's reading (a prompt) that gives each record a value. You can open a label to read its definition and its
+  records per value, and correct a record.
+- **Coverage.** The line above the prompt says how much of the folder Claude has read. `thimble coverage` lists the
+  files Claude read and the ones it only computed over, searched or never touched.
+- **`/thimble:fix`.** Say what you want thimble to do differently, and Claude changes thimble itself, in a copy, for
+  you to try. A failure line above the prompt offers the same (`f`).
 
-When the prompt is empty, a few keys act on Claude's latest reply. The line above the prompt always lists the keys
-that work at that moment, so you do not need to learn them first.
+The line above the prompt names the keys that work at that moment, so you do not need to learn them first. When you type a
+word that starts with one of those keys, thimble gives the letter back to the prompt.
 
-| Key | What it does |
-|---|---|
-| `v` | Asks Claude for another view of the reply, as a card. When the side agent has a view in mind, `v` is lit and offers it. |
-| `s` | Rewrites the reply in place: shorter or longer, more or less interpretation, for a newcomer or an expert, or along a chip in your own words (`+`). When two or more replies came since your last prompt, `s` catches up on them: one message in their place, with the replies one key away (`0`). |
-| `]` `[` | Step through the citations and explained terms in the reply, then its cards. |
-| `a` | Asks about the citation, explained term or card you stepped to: it opens in the side panel with its side thread, and what you type next is your question. |
-| `{` `}` | Pick an earlier or a later reply. |
-| `t` | Lists the side threads of the session in the side panel, each with its last question, and whether it is answering. |
-| `esc` or `0` | Close. Claude Code keeps `esc` at the prompt, so it closes the side panel and what opens over it; `0` closes the rest. |
+### Settings
 
-A citation or an explained term opens in a tray above the prompt: `r` shows the rows behind it, `c` the code, and
-`a` asks about it. `a` opens it in the side panel, its whole source with a side thread that the main conversation
-does not see, and what you type next is your question there.
-
-A card opens in a side panel beside the chat, and so do a label, Coverage and the thread list. The panel works with
-clicks alone, and with the keys you would expect: what you type there is a question for its side thread, `↑` `↓` move
-through its parts, `↵` opens one, and `esc` goes back. What a thing there offers (a card's Rows and Code, a label's
-Definition) is a row of words above the panel's input bar, and what one opens shows right above it.
-
-The right end of the line above the prompt counts what the session has: `t 2 threads` (a thread is listed as soon as
-you ask it), `r coverage 12%` (how much of the folder's rows Claude has seen; it opens Coverage, file by file) and
-`l 2 labels`. A click on a count does what its key does.
-
-A card or an answer that counts by a label shows the label under it, its values in their colors; a click opens the
-label: its values over its records, the records themselves, and how it was made.
-
-If you type a word that starts with one of these letters, thimble gives the letter back to the prompt.
-
-#### Commands
-
-- `/card [name]` opens a card's detail view. On a terminal narrower than 144 columns, use it in place of `1`.
-- `thimble --help`, in your shell, lists the commands Claude uses: `thimble run`, `thimble save`, `thimble rows`,
-  `thimble coverage` and `thimble label`. You can run them too.
+Click `thimble` at the left of the line above the prompt, or run `/thimble-settings`, to turn each feature on or off:
+Marks, Cards (with `v`), and Labels and coverage on the bar. With Marks or Cards off, thimble's guidance to Claude
+leaves that feature out too, from the next conversation or `/compact` on.
 
 ### What it costs
 
-The side agent makes one model call after each of Claude's replies, with your session's model. It is a fork of the
-session, so the prompt cache serves the conversation it reads; replies that come while it reads wait and are read
-together in one call. A `--prompt` label makes one call per 50 records. A rewrite with `s` makes one call. All calls
-go through your Claude Code login and show in your usage like any other. To turn a feature off, click `thimble` at
-the left of the bar (or run `/thimble-settings`). The features that read Claude's replies share the side agent's call:
-with all of them off, it makes none.
+The checker makes one model call after each reply that has marks, with your session's model. It is a fork of the
+session, so the prompt cache serves the conversation it reads. `v` makes one fork per press. A `--prompt` label makes
+one call per 50 records. All calls go through your Claude Code login and show in your usage like any other.
 
 ### What it stores
 
-- `thimble/`, in your data folder: the queries Claude ran, the cards, the labels and a record of each reply.
-- `~/.thimble/` (or the folder in `THIMBLE_HOME`): where each card is drawn, per session, so `claude --resume` shows
-  them again, and a log of thimble's own model calls.
+- `thimble/`, in your data folder: the labels, with every version of their values.
+- `~/.thimble/` (or the folder in `THIMBLE_HOME`): per session, the cards with their rows and state, the files Claude
+  read (for coverage), and a log of thimble's own model calls.
 
 The plugin sends nothing anywhere except through your Claude Code session, and starts no other Claude Code process.
 
@@ -127,7 +104,7 @@ Workload Identity Federation. [browser/README.md](browser/README.md) says how to
 
 | Folder | What it holds |
 |---|---|
-| `plugin/` | the terminal plugin: the `thimble` command and its kernel, the hooks that draw in the terminal, the side agent, and the texts the model reads |
+| `plugin/` | the terminal plugin: the `thimble` command and its kernel, the hooks that draw in the terminal, the checker and the card runner, and the texts the model reads |
 | `browser/` | the browser workbench: the page (`browser/frontend`), the server (`browser/server`), its prompts and its samples |
 | `scripts/` | `install.sh`, `check.sh` (the checks CI runs), `scan.sh` and the git hooks |
 
