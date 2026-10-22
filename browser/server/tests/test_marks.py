@@ -1,6 +1,6 @@
 """Marks: a reply's marks are checked by copies of the chat, each with a share, and the terminal's validator decides what
 the analyst sees: computed evidence holds only when one of the conversation's real run_python calls printed the
-words. A correction is told to main with the analyst's next message; a check that fails leaves no mark checking."""
+output the check cites, and that output shows the words. A correction is told to main with the analyst's next message; a check that fails leaves no mark checking."""
 import asyncio
 import json
 import shutil
@@ -18,7 +18,7 @@ node = pytest.mark.skipif(shutil.which("node") is None, reason="the marks are re
 def test_the_marks_split_into_shares_that_keep_a_sentence_together():
     items = [{"n": i, "sentence": f"s{i // 3}"} for i in range(1, 13)]
     shares = marks.split_marks(items)
-    assert len(shares) == 3 and sum(shares, []) == items  # up to 5 marks a share, in order
+    assert len(shares) == 3 and sum(shares, []) == items  # up to 4 marks a share, in order
     for sentence in {m["sentence"] for m in items}:
         assert sum(any(m["sentence"] == sentence for m in s) for s in shares) == 1
     assert len(marks.split_marks(items[:4])) == 1
@@ -73,7 +73,7 @@ async def checked(folder, monkeypatch, answer, reply="[2 of 2](#) runs merged.",
 
 
 ANSWER = [{"mark": 1, "words": "2 of 2", "kind": "computed",
-           "evidence": {"code": "print(f\"{sum(r.endswith('merged') for r in rows)} of {len(rows)} runs merged\")", "output": "1 of 2 runs merged"},
+           "evidence": {"output": "1 of 2 runs merged"},
            "status": "corrected", "correction": {"words": "1 of 2", "was": "2 of 2"}, "reason": "one run merged"}]
 
 

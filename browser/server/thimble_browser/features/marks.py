@@ -9,9 +9,9 @@ guidance, section Marking claims). They are checked after the reply, as the term
    its evidence. A copy runs main's prompt and tools, so its requests read main's cached conversation, and it may only
    read and run Python.
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py, through kernel.py), checks that evidence with
-   no model call and no code run: a quote must stand in the file's line, and computed evidence must be code that one
-   of the conversation's real run_python calls ran, whose real output shows the words. Its result is what the analyst
-   sees.
+   no model call and no code run: a quote must stand in the file's line, and computed evidence names one of the
+   conversation's real run_python calls (the checker's or main's) by a part of its output, and that call's real output
+   must show the words. Its result is what the analyst sees.
 4. When the reply's last mark settles, the chat's agent reads what the check changed with the analyst's next message
    (agent.tell), in the terminal's words.
 
@@ -40,8 +40,8 @@ log = logging.getLogger("thimble_browser.marks")
 MARKS_OF = Path(__file__).resolve().parents[1] / "marks_of.mjs"
 # A reply with many marks is split between copies, each with about PER_FORK marks (at most MAX_FORKS copies), which run
 # at once, so the reply settles when its slowest share does (the terminal's checker.ts).
-PER_FORK = 5
-MAX_FORKS = 6
+PER_FORK = 4
+MAX_FORKS = 8
 CHECKER_TOOLS = ("Read", "Grep", "Glob", "run_python")
 _locks: dict[tuple[str, str, str], asyncio.Lock] = {}
 
@@ -190,7 +190,8 @@ async def start_check(sessions: Any, ws: str, chat: str, turn: str, texts: list[
         return
     hub.publish(ws, {"type": "busy", "id": busy, "word": f"checking {len(items)} mark{'s' if len(items) != 1 else ''}",
                      "on": True})
-    template = prompts.fill(prompts.shared("checker"), {"CWD": str(home.corpus_of(ws))})
+    folder = str(home.corpus_of(ws))
+    template = prompts.fill(prompts.shared("checker"), {"CWD": folder, "ROOT": folder})
     for share in split_marks(items):
         lines = "\n".join(f"{m['n']}. [{m['words']}] in: {m['sentence']}" for m in share)
         try:
@@ -227,18 +228,16 @@ def run_python_calls(messages: list[dict[str, Any]], by: str) -> list[dict[str, 
     return out
 
 
-def code_heads(answer: str) -> list[str]:
-    """The first line of each code the checker's answer gives as evidence, white space as one space: a call of main's
-    whose code holds none of them cannot be a mark's evidence, so the validator is not sent it."""
-    out: dict[str, None] = {}
-    for m in re.finditer(r'"code"\s*:\s*("(?:[^"\\]|\\.)*")', answer):
+def cited_outputs(answer: str) -> list[str]:
+    """The outputs the checker's answer cites as evidence (`"output": "…"`): a call of main's whose output holds none of
+    them cannot be a mark's evidence, so the validator is not sent it (the terminal's checker.ts citedOutputs)."""
+    out = []
+    for m in re.finditer(r'"output"\s*:\s*("(?:[^"\\]|\\.)*")', answer):
         try:
-            head = next((" ".join(x.split()) for x in str(json.loads(m.group(1))).split("\n") if x.strip()), "")
+            out.append(str(json.loads(m.group(1))))
         except ValueError:
             continue
-        if head:
-            out[head] = None
-    return list(out)
+    return out
 
 
 def check_finished(s: Any, result: str | None) -> None:
@@ -268,10 +267,9 @@ async def end_check(s: Any, result: str | None) -> None:
             return
         answer = "\n".join(s.texts)
         items = [m for m in reply_items(ws, chat, turn) if m["n"] in mine]
-        heads = code_heads(answer)
-        flat = (lambda x: " ".join(x.split()))
+        cited = cited_outputs(answer)
         main = [c for c in run_python_calls(agent.load_messages(ws, chat), "main")
-                if any(h in flat(c["command"]) for h in heads)]
+                if any(evidence.printed(o, c["output"]) is not None for o in cited)]
         calls = run_python_calls(agent.load_messages(ws, s.chat), "checker") + main
         folder = str(home.corpus_of(ws))
         got = await asyncio.to_thread(evidence.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in items],

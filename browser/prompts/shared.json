@@ -95,8 +95,12 @@
       "prompt": "checker",
       "replace": [
         [
-          "Run each piece of code as one Bash call from `{{CWD}}`, in the form `python3 - <<'PY'`, then the code, then `PY`, and nothing else in the call: thimble shows the person that call's whole output.",
-          "Run each piece of code as one run_python call, which runs in `{{CWD}}`: thimble shows the person that call's whole output."
+          "Your shell is in `{{CWD}}`. Run code as one Bash call in the form `python3 - <<'PY'`, then the code, then `PY`, and nothing else in the call.",
+          "Run code as one run_python call, which runs in `{{CWD}}`."
+        ],
+        [
+          "the evidence is a Bash call whose output prints the marked words",
+          "the evidence is a run_python call whose output prints the marked words"
         ],
         [
           "A label's values come from `thimble label NAME --csv`, which the code can read with `subprocess`.",
