@@ -172,20 +172,29 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [Box({ width: 2, flexShrink: 0, children: [Text({ children: dot ? '●' : ' ' })] }), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
-  // a block laid out here: one that holds marks. A code block never is: its lines stay as written, in Claude Code's
+  // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
+  // item keeps its indent beside its siblings. A code block never is: its lines stay as written, in Claude Code's
   // Markdown, whatever lies in it
-  const laidOut = (b: Any) => b.type !== 'code' && marksWithin(o.marks, b.start, b.end).length > 0
+  const laid: boolean[] = bs.map((b: Any) => b.type !== 'code' && marksWithin(o.marks, b.start, b.end).length > 0)
+  for (let a = 0; a < bs.length; a++) {
+    if (bs[a].type !== 'item') continue
+    let z = a
+    while (z + 1 < bs.length && bs[z + 1].type === 'item') z++
+    if (laid.slice(a, z + 1).some(Boolean)) laid.fill(true, a, z + 1)
+    a = z
+  }
+  const laidOut = (k: number) => laid[k]
   let i = 0
   while (i < bs.length) {
     const b = bs[i]
-    if (laidOut(b)) {
+    if (laidOut(i)) {
       push(blockLines(els, o, b, `${o.key}-l${i}`, w), b.gap && i > 0)
       i++
       continue
     }
     // a run of blocks with no mark: Claude Code's own Markdown, whole
     let j = i
-    while (j + 1 < bs.length && !laidOut(bs[j + 1])) j++
+    while (j + 1 < bs.length && !laidOut(j + 1)) j++
     push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0)
     i = j + 1
   }

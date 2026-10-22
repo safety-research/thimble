@@ -7,6 +7,7 @@
 //
 //   marksIn(text)              -> each mark of a text: {start, end, words} (start..end the whole link, words as written)
 //   sentenceOf(text, mark)     -> the sentence that holds a mark, on one line, each mark as `[words]`
+//   plainSentence(sentence)    -> that sentence as a person reads it: no markdown, a table row's cells joined by ` · `
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
 //   inline(text, from, to, marks) -> one block's content as runs: words with their style, and each mark as one run
@@ -93,6 +94,15 @@ export function sentenceOf(text, mark) {
   let at = 0
   for (const m of marksIn(part)) { out += part.slice(at, m.start) + `[${m.words}]`; at = m.end }
   return (out + part.slice(at)).replace(/\*\*|__/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/** A sentence of sentenceOf as a person reads it: no heading, quote or list marker, a table row's cells joined by
+ *  ` · `, each mark's words without its brackets, and no code marks. */
+export function plainSentence(sentence) {
+  let s = String(sentence || '').trim()
+  if (s.startsWith('|')) s = s.split('|').map(c => c.trim()).filter(Boolean).join(' · ')
+  s = s.replace(/^(#{1,6}\s+|>\s*|[-*+]\s+|\d{1,9}[.)]\s+)+/, '')
+  return s.replace(/\[([^\]\n]+)\](?!\()/g, '$1').replace(/`/g, '').replace(/\s+/g, ' ').trim()
 }
 
 // ------------------------------------------------------------------------------------------------ blocks

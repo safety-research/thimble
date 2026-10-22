@@ -5,10 +5,12 @@
 //   quote      the file at its line: `path:line` on top (the terminal opens it), the cited lines with a line or two
 //   code       around them, the substring highlighted
 //
-// A corrected mark says what it was; a failed one says why, in red. The pane reads the reply's marks in the state, so
-// it draws again when the check settles.
+// A corrected mark says what it was; a failed one says why, in red, with the evidence the check gave when it is real.
+// The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The pane reads the
+// reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
+import { plainSentence } from './message.js'
 import { type Evidence, type MarkItem, rowMarks } from './store'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,12 +66,34 @@ function inRange(n: number, line: string): boolean {
   return n >= a! && n <= (b ?? a!)
 }
 
-function evidenceRows(els: Any, ev: Evidence): Any[] {
+/** Code cut into lines that fit `width`, each cut at a break between tokens (after a space, or after `, ( [ { . = :`
+ *  and an operator), the rest indented under its line, so no name breaks in two. A token wider than the line is cut. */
+export function wrapCode(code: string, width: number): string {
+  if (!(width >= 20)) return code
+  return code.split('\n').map(line => {
+    const out: string[] = []
+    const indent = `${/^\s*/.exec(line)![0]}    `.slice(0, Math.floor(width / 2))
+    let rest = line
+    while (rest.length > width) {
+      let cut = -1
+      for (let i = width - 1; i > indent.length; i--) {
+        if (rest[i] === ' ' || ',([{.=:+-*/'.includes(rest[i]!)) { cut = i + 1; break }
+      }
+      if (cut < 0) cut = width
+      out.push(rest.slice(0, cut).trimEnd())
+      rest = indent + rest.slice(cut).trimStart()
+    }
+    out.push(rest)
+    return out.join('\n')
+  }).join('\n')
+}
+
+function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
   if (ev.kind === 'computed') {
     return [
       Text({ key: 'ch', bold: true, children: ev.by === 'main' ? 'Code Claude ran for the reply' : 'Code the check ran' }),
-      Code({ key: 'code', source: ev.code, language: 'python' }),
+      Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),
       Text({ key: 'oh', bold: true, children: 'Its output' }),
       Box({ key: 'out', flexDirection: 'column', children: outputRows(els, ev.output, ev.highlight) }),
     ]
@@ -86,7 +110,7 @@ function evidenceRows(els: Any, ev: Evidence): Any[] {
 }
 
 /** The pane of one mark. */
-export async function drawEvidence($: EngineInterface, _e: Any, args: unknown, els: Any): Promise<unknown> {
+export async function drawEvidence($: EngineInterface, e: Any, args: unknown, els: Any): Promise<unknown> {
   const { Box, Text } = els
   const { row, n } = (args ?? {}) as { row?: string; n?: number }
   const reply = row ? await rowMarks($, row) : null
@@ -100,8 +124,13 @@ export async function drawEvidence($: EngineInterface, _e: Any, args: unknown, e
   const rows: Any[] = [head]
   if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `was ${m.was}` }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: 'error' } : { dimColor: true }), children: m.reason }))
-  rows.push(Text({ key: 'sent', dimColor: true, italic: true, wrap: 'wrap', children: m.sentence }))
+  // the sentence as the person read it, the mark's own words in bold
+  const sentence = plainSentence(m.sentence)
+  const at = sentence.indexOf(m.words.replace(/`/g, ''))
+  rows.push(Text({ key: 'sent', dimColor: true, italic: true, wrap: 'wrap', children: at < 0 ? sentence : [
+    sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + m.words.replace(/`/g, '').length) }), sentence.slice(at + m.words.replace(/`/g, '').length),
+  ] }))
   if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'The check is running; its evidence shows here when it ends.' }))
-  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence) }))
+  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60) }))
   return Box({ flexDirection: 'column', children: rows })
 }
