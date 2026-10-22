@@ -16,12 +16,7 @@
       "prompt": "guidance",
       "section": "Communicating",
       "heading": "Communicating",
-      "replace": [
-        [
-          "A wide table draws as one block of lines per row, so give a table only the columns the question needs.",
-          "A wide table is hard to read in the chat, so give a table only the columns the question needs."
-        ]
-      ]
+      "replace": []
     },
     "citing": {
       "prompt": "guidance",
