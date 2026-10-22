@@ -1,5 +1,5 @@
 // Which records of each chat the analyst has seen: a per-chat count in browser storage, compared with the list
-// route's `n_messages`, the analyst's messages (backend chats.listing).
+// route's `n_messages` (the analyst's messages, finished replies, chips and agent rows).
 import type { ChatRecord } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 
@@ -20,8 +20,12 @@ export function markSeen(ws: string, chatId: string, n: number): SeenMap {
   return next
 }
 
-/** The list route's measure of a log, computed from its records: the analyst's messages. */
-export const countMessages = (records: readonly ChatRecord[]): number => records.filter((r) => r.type === 'user').length
+/** The list route's measure of a log, computed from its records. */
+export function countMessages(records: readonly ChatRecord[]): number {
+  let n = 0
+  for (const r of records) if (r.type === 'user' || r.type === 'done' || r.type === 'chip' || r.type === 'agent') n++
+  return n
+}
 
 export function isUnread(seen: SeenMap, chatId: string, nMessages: number | undefined): boolean {
   if (!nMessages) return false

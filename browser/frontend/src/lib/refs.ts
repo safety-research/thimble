@@ -43,6 +43,8 @@ export type ParsedRef =
 export const CARD = 'card:'
 /** Whether a string is a card's ref, by either prefix. */
 export const isCardRef = (ref: string): boolean => ref.startsWith('card:') || ref.startsWith('cell:')
+/** `card:<id>` for a card id. */
+export const cardRef = (id: string): string => `${CARD}${id}`
 const CELL_RE = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@(out)?(\d+))?(?:#(.*))?$/
 const CELL_LINES_RE = /^L(\d+)(?:-L?(\d+))?$/
 const CELL_TD_RE = /^([^/]+)\/(.+)$/
@@ -86,6 +88,12 @@ function parseCallRef(chat: string, n: number, frag: string | undefined): Parsed
   return end != null && end > line ? { kind: 'call', chat, n, line, endLine: end } : { kind: 'call', chat, n, line }
 }
 
+/** `call:<chat>/<n>`, with `#L<a>` or `#L<a>-L<b>` for lines of its output. */
+export function callRef(chat: string, n: number, line?: number, endLine?: number): string {
+  const base = `call:${chat}/${n}`
+  if (line == null) return base
+  return endLine != null && endLine > line ? `${base}#L${line}-L${endLine}` : `${base}#L${line}`
+}
 
 // A file's path may hold spaces (`run 1/agent one.jsonl`), never at its ends and never a newline or `#`, as refs.py
 // reads it. A path with a space and no line fragment counts only when it looks like a file, so bracketed prose is not
@@ -368,62 +376,6 @@ export function encodeLabel(s: string): string {
 export function tdRef(cellId: string, col: string, row: string): string | null {
   if (!col.trim() || !row.trim()) return null
   return `${CARD}${cellId}#${encodeLabel(col)}/${encodeLabel(row)}`
-}
-
-/** One `[words](target)` of a text: where it starts and ends, its words and its target as written. */
-export interface LinkSpan {
-  start: number
-  end: number
-  words: string
-  target: string
-}
-
-/** Each Markdown link `[words](target)` of a text, not an image's. A target may hold spaces and balanced brackets, so a
- * ref to a row named "(no name)", `[899](card:<id>#edits/(no name))`, is one link (backend cite.link_spans, the kernel's
- * refs.link_spans and the terminal's linkSpans read it the same). Words hold no bracket and no line break. */
-export function linkSpans(text: string): LinkSpan[] {
-  const s = text || ''
-  const out: LinkSpan[] = []
-  let i = 0
-  for (;;) {
-    const a = s.indexOf('[', i)
-    if (a < 0) break
-    const b = s.indexOf(']', a + 1)
-    if (b < 0) break
-    const words = s.slice(a + 1, b)
-    if (s[a - 1] === '!' || /[[\n]/.test(words) || s[b + 1] !== '(') {
-      i = a + 1
-      continue
-    }
-    let depth = 0
-    let j = b + 2
-    for (; j < s.length && s[j] !== '\n'; j++) {
-      if (s[j] === '(') depth++
-      else if (s[j] === ')') {
-        if (depth === 0) break
-        depth--
-      }
-    }
-    const target = s.slice(b + 2, j)
-    if (s[j] !== ')' || !target.trim()) {
-      i = a + 1
-      continue
-    }
-    out.push({ start: a, end: j + 1, words, target })
-    i = j + 1
-  }
-  return out
-}
-
-/** `text` with each link (linkSpans) replaced by what `fn` returns for it. */
-export function mapLinks(text: string, fn: (link: LinkSpan, whole: string) => string): string {
-  let out = ''
-  let at = 0
-  for (const l of linkSpans(text)) {
-    out += text.slice(at, l.start) + fn(l, text.slice(l.start, l.end))
-    at = l.end
-  }
-  return out + text.slice(at)
 }
 
 /** A value-ref token `<display>|<ref>` split at its first `|`; a bare token has no display. */

@@ -1,8 +1,7 @@
-// Assistant markdown: react-markdown with remark-gfm. A mark, `[words](#)`, draws as its check says (marks/Mark.tsx);
-// a link to a card, a label or a record of the folder, and a `[[value|ref]]` token, as a chip. The tokens are hidden
-// from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns the
-// markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta re-parses
-// only the tail.
+// Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips. The tokens are
+// hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
+// the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
+// re-parses only the tail.
 import { Fragment, createContext, memo, useContext, useState, type JSX, type ReactNode } from 'react'
 import Markdown, { type Components, type ExtraProps, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -11,9 +10,7 @@ import { MarkdownCode } from '../components/Code'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
-import { mapLinks, splitValueRef } from '../lib/refs'
-import { Mark, MarkItems } from '../marks/Mark'
-import { MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
+import { splitValueRef } from '../lib/refs'
 
 export interface ChipCtx {
   workspace: string
@@ -41,22 +38,6 @@ const utf8 = new TextEncoder()
 const utf8d = new TextDecoder()
 const toHex = (s: string) => Array.from(utf8.encode(s), (b) => b.toString(16).padStart(2, '0')).join('')
 const fromHex = (h: string) => (h ? utf8d.decode(new Uint8Array((h.match(/../g) ?? []).map((x) => parseInt(x, 16)))) : '')
-
-const WEB_TARGET = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|#|\/)/i
-
-/** `text` with each citation written as a Markdown link turned into the `[[value|ref]]` token the chips read; a link to
- * a web page stays a link. Claude writes a citation so in thimble browser and in the terminal plugin alike:
- * `[31](card:<id>#outcome/merged)`, `["quote"](runs/x.jsonl#L4)`, `[↗](<ref>)`. A ref may hold spaces (a column's
- * name), written as they are or as %20, and balanced brackets (a row named "(no name)"), as linkSpans reads it. Pure. */
-export function citeLinks(text: string): string {
-  if (!text.includes('](')) return text
-  return mapLinks(text, ({ words, target }, whole) => {
-    if (WEB_TARGET.test(target.trim())) return whole
-    const ref = target.trim().replace(/%20/g, ' ')
-    const shown = words.trim()
-    return !shown || shown === '↗' ? `[[${ref}]]` : `[[${shown}|${ref}]]`
-  })
-}
 
 /** `text` with every `[[…]]` token replaced by a private-use marker the markdown parser leaves alone. */
 export function protectTokens(text: string): string {
@@ -144,8 +125,6 @@ function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
 
 function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
   const { node: _node, ...rest } = props
-  const mark = MARK_HREF.exec(props.href ?? '')
-  if (mark) return <Mark k={Number(mark[1])}>{props.children}</Mark>
   return <a {...rest} target="_blank" rel="noreferrer" />
 }
 
@@ -159,32 +138,33 @@ const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
   return (
     <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
-      {protectTokens(citeLinks(text))}
+      {protectTokens(text)}
     </Markdown>
   )
 })
 
-/** Assistant markdown with marks and chips. `streaming`: the text is still growing and renders per completed block.
- * `checks`: what the check found of each of its marks, by their order in the text. A bare citation in it is its
- * target's glyph alone, its name in the hover (components/RefChip GlyphCites). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[] }) {
+/** Assistant markdown with chips. `streaming`: the text is still growing and renders per completed block. A bare
+ * citation in it is its target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming }: { text: string; streaming?: boolean }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
-  // each mark's href names its order in the whole text, so a block cut from it still finds its check
-  const marked = withMarkHrefs(text)
-  return (
-    <MarkItems.Provider value={{ items: checks ?? [], streaming: !!streaming }}>
+  if (!chunked && !streaming) {
+    return (
       <GlyphCites.Provider value={true}>
-        {chunked
-          ? splitMarkdownBlocks(marked).map((chunk, i) => (
-              <Fragment key={i}>
-                {i > 0 && '\n'}
-                <MarkdownBlock text={chunk} />
-              </Fragment>
-            ))
-          : <MarkdownBlock text={marked} />}
+        <MarkdownBlock text={text} />
       </GlyphCites.Provider>
-    </MarkItems.Provider>
+    )
+  }
+  const chunks = splitMarkdownBlocks(text)
+  return (
+    <GlyphCites.Provider value={true}>
+      {chunks.map((chunk, i) => (
+        <Fragment key={i}>
+          {i > 0 && '\n'}
+          <MarkdownBlock text={chunk} />
+        </Fragment>
+      ))}
+    </GlyphCites.Provider>
   )
 })
 

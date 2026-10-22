@@ -1,9 +1,10 @@
 // A card's details in a panel at the right of the board: the question, its provenance (thread, run, files read), the
 // code for a card that runs code (editable; Run or ⌘↵ saves and runs it again), the output and what it printed, the
-// takeaway (editable with RefEditor), and the card's history. What the analyst types is saved when the field is left.
-// The card's History (its button on the card, or a row of the history here) lists its edits, newest first; each opens
-// the card as it was before that edit, to read (VersionView: its question, steps or text, code, output and takeaway as
-// stored then), with Restore, which makes the card that version again as an edit of the analyst's.
+// takeaway (editable with RefEditor), the card check (CheckDetails, with the Undo of its fix), and the card's history.
+// What the analyst types is saved when the field is left. The card's History (its button on the card, or a row of the
+// history here) lists its edits, newest first; each opens the card as it was before that edit, to read (VersionView:
+// its question, steps or text, code, output and takeaway as stored then), with Restore, which makes the card that
+// version again as an edit of the analyst's (backend notebook.restore_version).
 // LabelPanel is the same panel for a label with no card of its own.
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
@@ -24,6 +25,7 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { CardVersion, Cell } from '../lib/types'
 import { shortcutLabel } from '../lib/platform'
+import { CheckDetails } from './CheckDetails'
 import { useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
 import { detailBlocks, fieldWords, formatDuration, groupInputs, historyRows, truncatedSize, type DetailBlock, type HistoryRow } from './details'
@@ -141,7 +143,7 @@ export function DetailPanel({ cell, cite = null, history = 0, onClose }: { cell:
   }
   const ran = runnable && cell.exec_count != null ? [hhmm(cell.ts), formatDuration(cell.duration_s), `run ${cell.exec_count}`].filter(Boolean).join(' · ') : ''
   // you for the analyst's own hand; else the thread or agent, as the card's foot names it (the terminal session is main)
-  const byName = (by: string | null | undefined) => (!by || by === 'user' || by === 'analyst' ? 'you' : ctx.threadOf({ ...cell, created_by: by }).name || by)
+  const byName = (by: string | null | undefined) => (!by || by === 'user' || by === 'analyst' ? 'you' : by === 'check' ? 'the card check' : ctx.threadOf({ ...cell, created_by: by }).name || by)
   const rows = historyRows(cell, byName)
   const open = (back: 'card' | 'history') => (entry: string) => {
     track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'version', entry } })
@@ -267,6 +269,7 @@ export function DetailPanel({ cell, cite = null, history = 0, onClose }: { cell:
             </div>
           </section>
         )}
+        <CheckDetails cell={cell} />
         {rows.length > 0 && (
           <section className="bdetail-sec">
             <span className="bdetail-label">History</span>

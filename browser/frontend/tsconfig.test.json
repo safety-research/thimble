@@ -11,11 +11,9 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
-    "allowJs": true,
-    "checkJs": false,
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["node"]
   },
-  "include": ["tests/public", "src/**/*.d.ts", "vitest.config.ts"]
+  "include": ["tests/public", "src/**/*.d.ts", "vitest.config.ts", "vitest.browser.config.ts"]
 }

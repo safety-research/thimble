@@ -55,14 +55,7 @@ export function useDescribe({ ws, labels, appliesTo, onRun, onManual, onEdit }: 
           const k = await labelApi.create(ws, draftBody(named, nextFreeColour(labels.all), usedColours(labels.all)))
           id = k.id
           track('label-apply', { target: `concept:${k.id}`, detail: { over: named.over, marks: named.marks, kind: named.kind, created: true, described: true } })
-          const r = await labelApi.apply(ws, k.id, {})
-          // a model run over many records waits for the analyst's choice, which the label's edit card shows: it opens
-          // in place of this prompt (false: the editor stays open)
-          if (r.status === 'asked') {
-            onEdit(k.id)
-            return false
-          }
-          onRun(k.id, r)
+          onRun(k.id, await labelApi.apply(ws, k.id, {}))
           return true
         } catch (e) {
           bus.emit('toast', { text: `Could not run ${named.name}. ${(e as Error).message}`, kind: 'error' })

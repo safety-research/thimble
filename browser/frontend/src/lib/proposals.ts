@@ -106,3 +106,8 @@ export function isDropped(proposals: readonly Proposal[] | null, slug: string | 
   return findProposal(proposals, slug, name)?.status === 'dropped'
 }
 
+/** What a run made, less the views whose proposals were dropped (isDropped). Pure. */
+export function withoutDropped<T extends { views: string[]; viewSlugs?: Record<string, string> }>(made: T, proposals: readonly Proposal[] | null): T {
+  const views = made.views.filter((v) => !isDropped(proposals, made.viewSlugs?.[v], v))
+  return views.length === made.views.length ? made : { ...made, views }
+}

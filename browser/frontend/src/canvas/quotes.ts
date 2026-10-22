@@ -412,6 +412,39 @@ function rawParts(r: ResolvedRef): QuotePart[] {
   return [{ kind: 'text', text: r.excerpt, ...(kind === 'md' ? { md: true } : {}) }]
 }
 
+/** Markdown's marks taken off a line of it (bold, italics, code ticks, a code fence's lines, a heading's hashes, a
+ * quote's bar), for a place that shows the words as plain text. */
+export function plainMarkdown(text: string): string {
+  return text
+    .replace(/^\s{0,3}(```|~~~)[^\n]*$/gm, '')
+    .replace(/^\s{0,3}(#{1,6}|>)\s+/gm, '')
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '$2')
+    .replace(/(^|[\s(])([*_])(?=\S)([^*_\n]*?\S)\2(?=[\s).,;:!?]|$)/g, '$1$3')
+    .replace(/`([^`\n]+)`/g, '$1')
+}
+
+/** The parts as one line of plain text, for a place with room for a phrase (a label card's example of a value): the
+ * record's own words first, its fields only when it has no words. */
+export function quoteLine(parts: readonly QuotePart[]): string {
+  const words = parts.filter((p) => p.kind !== 'fields')
+  const pick = words.length ? words : parts
+  const one = (p: QuotePart): string => {
+    switch (p.kind) {
+      case 'fields':
+        return p.pairs.map(([k, v]) => `${k} ${v}`).join(' · ')
+      case 'tool':
+        return `${p.name} ${p.text}`
+      case 'span':
+      case 'text':
+      case 'field':
+        return p.md ? plainMarkdown(p.text) : p.text
+      default:
+        return p.text
+    }
+  }
+  return pick.map(one).join(' · ').replace(/\s+/g, ' ').trim()
+}
+
 /** A record's parts with each quoted passage marked in the first part whose text holds it (findQuote: as written, as
  * JSON writes it, or with its spaces and case folded); a passage no part holds is left out. Pure. */
 export function markQuotes(parts: readonly QuotePart[], quotes: readonly string[]): QuotePart[] {

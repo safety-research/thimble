@@ -1,7 +1,8 @@
-// The report's block editor: BlockNote with the report's schema, the slash menu, a toolbar of text styles, thimble's
-// actions beside a hovered block (kind, ask, delete), prompts (a request to Claude placed in the report), the marks'
-// tints and the filter as decorations, cards dropped from the sidebar or the chat as figure blocks, and one debounced
-// save of the whole document to PUT …/blocks. Loaded on demand, so BlockNote and Mantine stay out of the main chunk.
+// The report's block editor: BlockNote with the report's schema, the slash menu, a toolbar with Comment, thimble's
+// actions beside a hovered block (kind, chat, delete, lock), card prompts, a text block sent to main with ⌘↵
+// (lib/agentKey), the checks' tints and locks as decorations, cards dropped from the sidebar as figure blocks, and one
+// debounced save of the whole document to PUT …/blocks. Loaded on demand, so BlockNote and Mantine stay out of the main
+// chunk.
 import '@blocknote/mantine/style.css'
 import { createExtension, filterSuggestionItems, insertOrUpdateBlockForSlashMenu, SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
 import { en } from '@blocknote/core/locales'
@@ -15,8 +16,10 @@ import {
   SuggestionMenuController,
   getDefaultReactSlashMenuItems,
   useBlockNoteEditor,
+  useComponentsContext,
   useCreateBlockNote,
   useEditorChange,
+  useEditorState,
   useExtension,
   useExtensionState,
   type DefaultReactSuggestionItem,
@@ -33,16 +36,18 @@ import { track } from '../lib/telemetry'
 import { useTheme } from '../lib/theme'
 import type { Writeup } from '../lib/types'
 import { blockPos, caretBack, caretInBlock, caretNear } from './caret'
+import { addAgentZone, askMain, newRequest, whenMainIdle } from '../lib/agentKey'
 import { CARD_MIME } from './cards'
+import type { Flag } from './checkComments'
 import { ReportContext, type ReportCtx } from './context'
-import { marksExtension, refreshMarks, type Flag, type MarksCtx } from './decorations'
-import { mergeUnsaved } from './merge'
-import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, dropSlot, editorBlocksFromWire, kindOf, origTexts, PROMPT_TYPE, lastChanged, readableOf, sameWire, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
+import { marksExtension, refreshMarks, type MarksCtx } from './decorations'
+import { fetchFigureCell } from './FigureBlock'
+import { locksShown, mergeUnsaved } from './merge'
+import { actsTop, anchorAbove, anchorFor, BLOCK_KINDS, blockOfKind, blocksFromDoc, dropSlot, editorBlocksFromWire, kindOf, lockedBlocks, origTexts, PROMPT_TYPE, readableOf, readableText, sameWire, textFromContent, TITLE_ID, wireFromEditor, type BlockKind, type DocBlocks, type EditorBlockLike, type InlinePart, type ReportFilterSets } from './model'
 import { schema, type ReportPartialBlock } from './schema'
+import { sidAt } from './selection'
 
 export const SAVE_DEBOUNCE_MS = 800
-/** a write streaming in stops keeping its growing block in view for this long after the analyst scrolls */
-const FOLLOW_AFTER_SCROLL_MS = 4000
 
 /** Run `fn` once `el` is laid out: on the next frame when it is, else once the hidden tab that holds it is shown (the
  * element's box grows from nothing). Returns the cancel. */
@@ -81,11 +86,10 @@ const DICTIONARY = {
     paragraph: { ...en.slash_menu.paragraph, title: 'Text', subtext: '', group: 'Blocks' },
     bullet_list: { ...en.slash_menu.bullet_list, title: 'Bullets', subtext: '', group: 'Blocks' },
     numbered_list: { ...en.slash_menu.numbered_list, title: 'Numbers', subtext: '', group: 'Blocks' },
-    quote: { ...en.slash_menu.quote, title: 'Quote', subtext: '', group: 'Blocks' },
   },
 }
 /** the default slash items the document can store */
-const KEEP = new Set(['Heading', 'Subheading', 'Text', 'Bullets', 'Numbers', 'Quote'])
+const KEEP = new Set(['Heading', 'Subheading', 'Text', 'Bullets', 'Numbers'])
 
 /** Each kind of text block, named and drawn as the slash menu's items and the kind's menu name and draw them. */
 const KINDS: Record<BlockKind, { label: string; icon: IconName }> = {
@@ -94,7 +98,6 @@ const KINDS: Record<BlockKind, { label: string; icon: IconName }> = {
   subheading: { label: 'Subheading', icon: 'subheading' },
   bullets: { label: 'Bullets', icon: 'bullets' },
   numbers: { label: 'Numbers', icon: 'numbers' },
-  quote: { label: 'Quote', icon: 'cite' },
 }
 
 export interface DocFilter {
@@ -113,7 +116,7 @@ export interface ReportEditorProps {
   ws: string
   slug: string
   doc: Writeup
-  /** the tint of every marked passage */
+  /** the tint of every passage a shown comment is on */
   flags: ReadonlyMap<string, Flag>
   filter: DocFilter | null
   /** this tab's token, echoed in the `edited` event */
@@ -122,6 +125,8 @@ export interface ReportEditorProps {
   onSaved: (doc: Writeup) => void
   /** the cells the blocks show as figures, after every change */
   onFigures?: (cells: string[]) => void
+  /** the toolbar's Comment on a selection inside a stored sentence (or section heading) */
+  onComment?: (sid: string) => void
   /** the caption a card dropped from the sidebar starts with: its takeaway, else its question */
   captionOf?: (cellId: string) => string
   ref?: Ref<EditorHandle>
@@ -185,16 +190,25 @@ function slashItems(editor: AnyEditor, ws: string, slug: string, chat: (blockId:
       },
     },
     {
-      title: 'Ask Claude here',
+      title: 'Card from prompt',
       group: 'Report',
-      aliases: ['prompt', 'request', 'write', 'draw', 'make', 'plot', 'claude'],
+      aliases: ['card', 'new card'],
+      icon: <Icon name="cell-add" size={14} />,
+      onItemClick: () => {
+        insertOrUpdateBlockForSlashMenu(editor, { type: PROMPT_TYPE, props: { mode: 'card' } } as never)
+      },
+    },
+    {
+      title: 'Prompt',
+      group: 'Report',
+      aliases: ['prompt', 'request', 'draw', 'make', 'plot'],
       icon: <Icon name="prompt" size={14} />,
       onItemClick: () => {
         insertOrUpdateBlockForSlashMenu(editor, { type: PROMPT_TYPE } as never)
       },
     },
     {
-      title: 'Ask about this block',
+      title: 'Ask thimble',
       group: 'Report',
       aliases: ['ask', 'thread', 'thimble', 'chat'],
       icon: <Icon name="chat" size={14} />,
@@ -216,17 +230,56 @@ function figureCells(blocks: readonly EditorBlockLike[]): string[] {
   return out
 }
 
-/** What the hovered block's actions reach in the editor: the chat about a block, and its change of kind. */
+/** The stored sentence (or section heading) a selection comments on, from the decorations' `data-sid`: the one under
+ * its start, else the next one in its block, as at a paragraph's first letter (selection.ts sidAt), the block being
+ * the stored block the decorations mark `data-anchor-cell`. */
+function sidAtSelection(editor: AnyEditor): string | null {
+  const view = editor.prosemirrorView
+  if (!view) return null
+  try {
+    const { node, offset } = view.domAtPos(view.state.selection.from)
+    const el = node instanceof Element ? node : node.parentElement
+    return sidAt(node, offset, el?.closest('[data-anchor-cell]') ?? null)
+  } catch {
+    return null
+  }
+}
+
+/** The toolbar's Comment: a card in the margin for the analyst's comment on the sentence the selection starts in. A
+ * selection in text the report has not saved yet (a new paragraph) is in no stored sentence, so the button is off. */
+function CommentButton({ onComment }: { onComment: (sid: string) => void }) {
+  const Components = useComponentsContext()!
+  const editor = useBlockNoteEditor() as AnyEditor
+  const sid = useEditorState({ editor, selector: ({ editor: ed }) => sidAtSelection(ed as AnyEditor) })
+  return (
+    <Components.FormattingToolbar.Button
+      className="bn-button"
+      label="Comment"
+      mainTooltip="Comment"
+      icon={<Icon name="comment" size={16} />}
+      isDisabled={!sid}
+      onClick={() => {
+        const at = sidAtSelection(editor)
+        if (at) onComment(at)
+      }}
+    />
+  )
+}
+
+/** What the hovered block's actions reach in the editor: the locks as it shows them, the analyst's toggle of one, the
+ * chat about a block, and its change of kind. */
 interface ActsCtx {
   slug: string
+  locked: ReadonlySet<string>
+  toggle: (blockId: string, locked: boolean) => void
   chat: (blockId: string) => void
   turn: (blockId: string, kind: BlockKind) => void
 }
 const ActsContext = createContext<ActsCtx | null>(null)
 
-/** A block the document stores, so a thread can anchor on it: the title, a heading, a figure on a card, or text that
- * is not empty (an empty line and a prompt are never saved). */
-const stored = (block: { type: string; props?: unknown; content?: unknown }): boolean =>
+/** A block the document stores, so a lock can hold it and a thread can anchor on it: the title, a heading, a figure on
+ * a card, or text that is not empty (an empty line and a prompt are never saved). */
+const lockable = (block: { type: string; props?: unknown; content?: unknown }): boolean =>
   block.type === 'figure' ? !!(block.props as { cell?: string } | undefined)?.cell : block.type !== PROMPT_TYPE && !!textOfBlock(block)
 
 /** The space (px) between the text's right edge and the hovered block's actions, which clears the dashed outline an
@@ -286,9 +339,10 @@ const ACTS_FLOATING = {
   },
 }
 
-/** The hovered block's actions in the gutter at the right of its first line: its kind menu, then ask and delete.
- * BlockNote's side menu carries them, so they follow the pointer's block. The title has no kind and no delete; a figure
- * and a prompt have no kind; an unstored block has no ask. A drag on the actions moves the block (⌘⇧↑ and ⌘⇧↓ from the keyboard); a figure
+/** The hovered block's actions in the gutter at the right of its first line: its kind menu, then chat, delete and the
+ * lock (a locked block is changed by no model, report_types.set_block_lock). BlockNote's side menu carries them, so
+ * they follow the pointer's block. The title has no kind and no delete; a figure and a prompt have no kind; unstored
+ * blocks have no chat and no lock. A drag on the actions moves the block (⌘⇧↑ and ⌘⇧↓ from the keyboard); a figure
  * also moves by its question line (FigureBlock figureDrag). */
 function BlockActions() {
   const editor = useBlockNoteEditor() as AnyEditor
@@ -296,10 +350,10 @@ function BlockActions() {
   const ctx = useContext(ActsContext)
   const block = useExtensionState(SideMenuExtension, { selector: (s) => s?.block })
   if (!ctx || !block) return null
-  const kept = stored(block)
+  const stored = lockable(block)
   const title = block.id === TITLE_ID
-  // a figure carries its own controls inside its frame (FigureBlock), and moves by its question line
-  if ((title && !kept) || block.type === 'figure') return null
+  if (title && !stored) return null
+  const locked = ctx.locked.has(block.id)
   const kind = kindOf(block)
   return (
     <div
@@ -320,7 +374,7 @@ function BlockActions() {
           items={BLOCK_KINDS.map((k) => ({ id: k, label: KINDS[k].label, icon: KINDS[k].icon, checked: k === kind, onSelect: () => ctx.turn(block.id, k) }))}
         />
       )}
-      {kept && <Button variant="icon" size="sm" icon="chat" title="Ask about this block" tipAlign="start" onClick={() => ctx.chat(block.id)} />}
+      {stored && <Button variant="icon" size="sm" icon="chat" title="Chat about this block" tipAlign="start" onClick={() => ctx.chat(block.id)} />}
       {!title && (
         <Button
           variant="icon"
@@ -345,6 +399,19 @@ function BlockActions() {
           }}
         />
       )}
+      {stored && (
+        <Button
+          variant="icon"
+          size="sm"
+          tipAlign="start"
+          icon={locked ? 'lock' : 'unlock'}
+          title={locked ? 'Locked: no model changes this block' : 'Lock so no model changes this block'}
+          aria-label={locked ? 'Locked' : 'Lock'}
+          active={locked}
+          className="wu-acts-lock"
+          onClick={() => ctx.toggle(block.id, !locked)}
+        />
+      )}
     </div>
   )
 }
@@ -358,16 +425,15 @@ const pointerPressExtension = () =>
     prosemirrorPlugins: [new Plugin({ props: { handleDOMEvents: { mousedown: (_view, e) => e.button === 0 && pointKeyHeld(e) } } })],
   })
 
-export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onFigures, captionOf, ref }: ReportEditorProps) {
+export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onFigures, onComment, captionOf, ref }: ReportEditorProps) {
   const { resolved } = useTheme()
   const docRef = useRef<Writeup | null>(doc)
-  const ctx = useRef<MarksCtx>({ slug, doc, flags, filter: filter?.sets ?? null })
+  const ctx = useRef<MarksCtx>({ slug, doc, flags, filter: filter?.sets ?? null, locked: lockedBlocks(doc), agent: null })
   const initial = useMemo(() => editorBlocksFromWire(blocksFromDoc(doc)) as ReportPartialBlock[], []) // eslint-disable-line react-hooks/exhaustive-deps
   // the line where a moved block lands is drawn by report.css as the card's drop line is (`.wu-dropline`), not in
   // BlockNote's pale blue bar, so both drags show one mark and neither reads as Notion's
   const editor = useCreateBlockNote({ schema, initialContent: initial, dictionary: DICTIONARY as typeof en, extensions: [marksExtension(ctx.current), pointerPressExtension()], trailingBlock: true, dropCursor: { color: false, width: 3 }, domAttributes: { editor: { spellcheck: 'false' } } }, [])
 
-  // the words the citations in the text are checked against: the document as last stored
   const lastSaved = useRef<DocBlocks>(blocksFromDoc(doc))
   const orig = useRef<Map<string, string>>(origTexts(lastSaved.current))
   const own = useRef<Writeup | null>(null)
@@ -382,11 +448,6 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
       timer.current = null
     }
     if (!dirty.current) return
-    // a draft streaming in is Claude's, not the analyst's: the page never saves it
-    if (docRef.current?.drafting) {
-      dirty.current = false
-      return
-    }
     if (inflight.current) {
       queued.current = true
       return
@@ -424,9 +485,10 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     timer.current = window.setTimeout(() => void flush(), SAVE_DEBOUNCE_MS)
   }, [flush])
 
-  // a prompt block's Enter: the document is saved first, then the request goes to Claude in the chat (POST /write) with
-  // the words of the passage above it, so Claude answers it there (a figure or a paragraph after it, or the passage
-  // changed); the prompt block, which is never saved, gives way, and the stream's `report` events bring the change back
+  // a prompt block's Enter: the document is saved first (so the passage above exists on the server under the id the
+  // editor gave it), then the request goes to the analyst's session as a `write` event naming that passage, whose
+  // writer answers it there (a figure or a paragraph inserted after it, or the passage changed); the prompt block,
+  // which is never saved, gives way, and the stream's `report` events bring the change back
   const submitPrompt = useCallback(
     async (blockId: string, request: string) => {
       const blocks = editor.document as EditorBlockLike[]
@@ -438,13 +500,12 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
         }
         return undefined
       }
-      const block = above ? find(blocks) : undefined
-      const afterText = block ? textOfBlock(block) : ''
+      const kind = above ? find(blocks)?.type : undefined
+      const after = above ? `report:${slug}#${kind === 'paragraph' ? 'p' : ''}${above}` : undefined
       if (inflight.current) await inflight.current.catch(() => undefined)
       await flush()
-      const got = await api.write(ws, slug, { text: request, ...(afterText ? { after_text: afterText } : {}) })
-      if (got.kind === 'busy') throw new Error(got.reason || 'Claude is still answering in the chat')
-      track('ui-click', { target: 'ui:report-prompt', detail: { placed: !!afterText } })
+      await api.write(ws, slug, { text: request, ...(after ? { after } : {}) })
+      track('ui-click', { target: 'ui:report-prompt', detail: { after: after ?? null } })
       muted.current = true
       try {
         if (editor.document.some((b) => b.id === blockId)) editor.removeBlocks([blockId])
@@ -454,9 +515,44 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     },
     [editor, flush, ws, slug],
   )
-  const reportCtx = useMemo<ReportCtx>(() => ({ ws, slug, docRef, submitPrompt }), [ws, slug, submitPrompt])
+  // a card prompt's Enter (/card): the request goes to main as a `card` event under its own id, and the prompt stays,
+    // working, until the stream's `card-request` names the card made; its figure then takes the prompt's place. A prompt
+    // removed meanwhile leaves the card on the canvas only
+  const cardWaits = useRef(new Map<string, string>())
+  const captionRef = useRef(captionOf)
+  captionRef.current = captionOf
+  const submitCard = useCallback(
+    async (blockId: string, request: string) => {
+      const id = newRequest()
+      cardWaits.current.set(id, blockId)
+      try {
+        await api.askCard(ws, { text: request, request: id })
+      } catch (e) {
+        cardWaits.current.delete(id)
+        throw e
+      }
+      track('ui-click', { target: 'ui:report-card', detail: { request: id } })
+    },
+    [ws],
+  )
+  useEffect(
+    () =>
+      bus.on('cardRequest', ({ request, card }) => {
+        const blockId = cardWaits.current.get(request)
+        if (!blockId) return
+        cardWaits.current.delete(request)
+        void fetchFigureCell(ws, card).then((cell) => {
+          if (!editor.getBlock(blockId)) return
+          const caption = captionRef.current?.(card) || readableText(cell?.takeaway || cell?.title || '').trim()
+          editor.replaceBlocks([blockId], [{ type: 'figure', props: { cell: `card:${card}`, caption } } as never])
+        })
+      }),
+    [editor, ws],
+  )
+  const reportCtx = useMemo<ReportCtx>(() => ({ ws, slug, docRef, submitPrompt, submitCard }), [ws, slug, submitPrompt, submitCard])
 
-  // a block turned into another kind from its type menu or the slash menu: the block keeps its id and its text
+  // a block turned into another kind from its type menu or the slash menu: the block keeps its id and its text, so the
+  // save carries its lock and the comments on it into the new kind (report_types.apply_blocks)
   const turnInto = useCallback(
     (blockId: string, kind: BlockKind) => {
       const block = editor.getBlock(blockId)
@@ -477,8 +573,91 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     if (inflight.current) await inflight.current.catch(() => undefined)
   }, [flush])
 
+  // ⌘↵ in a text block (lib/agentKey): its text goes to main as a request after the passage above it. The block gives
+  // way to an unsaved sent prompt, which main's card replaces, or which goes once main's turn ends without one. The
+  // document is saved first so the passage exists on the server; a request that fails puts the block back
+  const idleWatch = useRef(new Map<string, () => void>())
+  useEffect(() => () => idleWatch.current.forEach((cancel) => cancel()), [])
+  const sendBlock = useCallback(
+    async (blockId: string) => {
+      const block = editor.getBlock(blockId)
+      const text = block ? textFromContent(block.content as InlinePart[] | undefined) : ''
+      if (!block || !text) return
+      const above = anchorAbove(editor.document as EditorBlockLike[], blockId)
+      const after = above ? `report:${slug}#${editor.getBlock(above)?.type === 'paragraph' ? 'p' : ''}${above}` : undefined
+      const original = { type: block.type, props: block.props, content: block.content }
+      const sent = editor.replaceBlocks([blockId], [{ type: PROMPT_TYPE, props: { mode: 'card', sent: text } } as never]).insertedBlocks[0]?.id
+      if (!sent) return
+      try {
+        await saveNow()
+        const request = await askMain(ws, text, { doc: slug, ...(after ? { after } : {}) })
+        cardWaits.current.set(request, sent)
+        track('ui-click', { target: 'ui:report-ask', detail: { request, after: after ?? null } })
+        idleWatch.current.set(
+          sent,
+          whenMainIdle(ws, () => {
+            idleWatch.current.delete(sent)
+            cardWaits.current.delete(request)
+            if (editor.getBlock(sent)) editor.removeBlocks([sent])
+          }),
+        )
+      } catch (e) {
+        if (editor.getBlock(sent)) editor.replaceBlocks([sent], [original as never])
+        bus.emit('toast', { text: `Could not send the request. ${(e as Error).message}`, kind: 'error' })
+      }
+    },
+    [editor, saveNow, ws, slug],
+  )
+  // the block ⌘↵ sends: a text block (not the title) with text and no children, the caret in the editor's text
   const zone = useRef<HTMLDivElement | null>(null)
-  const scrolledAt = useRef(0)
+  useEffect(() => {
+    const root = zone.current
+    if (!root) return
+    const tint = (id: string | null) => {
+      ctx.current.agent = id
+      refreshMarks(editor)
+    }
+    return addAgentZone(root, () => {
+      const view = editor.prosemirrorView
+      if (!view || document.activeElement !== view.dom) return null
+      const block = editor.getTextCursorPosition().block
+      if (!kindOf(block) || block.children?.length || !textFromContent(block.content as InlinePart[] | undefined)) return null
+      return { tint: (on) => tint(on ? block.id : null), send: () => void sendBlock(block.id) }
+    })
+  }, [editor, sendBlock])
+
+  // the analyst's lock on one block: unsaved edits are saved first, then the lock lands and the stored document comes
+  // back (the server records the telemetry). The lock shows at once and reverts on failure, since a save and a lock can
+  // take seconds on a slow server. Clicks go to the server in order, so a second click undoes the first
+  const [pendingLocks, setPendingLocks] = useState<ReadonlyMap<string, boolean>>(() => new Map())
+  const lockQueue = useRef<Promise<void>>(Promise.resolve())
+  const toggleLock = useCallback(
+    (blockId: string, locked: boolean) => {
+      setPendingLocks((m) => new Map(m).set(blockId, locked))
+      const run = async () => {
+        try {
+          await saveNow()
+          const saved = await reportApi.lock(ws, slug, blockId, { locked, client })
+          own.current = saved
+          docRef.current = saved
+          onSaved(saved)
+        } catch (e) {
+          bus.emit('toast', { text: `Could not ${locked ? 'lock' : 'unlock'} the block. ${(e as Error).message}`, kind: 'error' })
+        } finally {
+          setPendingLocks((m) => {
+            if (m.get(blockId) !== locked) return m
+            const next = new Map(m)
+            next.delete(blockId)
+            return next
+          })
+        }
+      }
+      lockQueue.current = lockQueue.current.then(run)
+      return lockQueue.current
+    },
+    [saveNow, ws, slug, client, onSaved],
+  )
+  const shownLocks = useMemo(() => locksShown(lockedBlocks(doc), pendingLocks), [doc, pendingLocks])
 
   // the chat about a block, on the block's anchor. A block typed since the last save has no anchor yet, so the document
     // is saved first and the marks rebuilt from it
@@ -493,9 +672,10 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
       let el = anchorOf()
       if (!el) {
         await saveNow()
-        const kept = docRef.current
-        if (kept) {
-          ctx.current.doc = kept
+        const stored = docRef.current
+        if (stored) {
+          ctx.current.doc = stored
+          ctx.current.locked = lockedBlocks(stored)
           refreshMarks(editor)
         }
         el = anchorOf()
@@ -504,7 +684,7 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     },
     [editor, saveNow],
   )
-  const actsCtx = useMemo<ActsCtx>(() => ({ slug, chat: (id) => void chatAbout(id), turn: turnInto }), [slug, chatAbout, turnInto])
+  const actsCtx = useMemo<ActsCtx>(() => ({ slug, locked: shownLocks, toggle: (id, next) => void toggleLock(id, next), chat: (id) => void chatAbout(id), turn: turnInto }), [slug, shownLocks, toggleLock, chatAbout, turnInto])
 
   // an empty report is one empty block after the title, drawn as an empty cell (report.css `.wu-zone-empty`) until
   // something is written
@@ -567,20 +747,6 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     if (doc === own.current) return
     const wire = blocksFromDoc(doc)
     const current = wireFromEditor(editor.document as EditorBlockLike[], orig.current)
-    // Claude's write as it streams in: shown as it grows, its growing block kept in view unless the analyst scrolls,
-    // and never saved from here; the saved document that ends it comes through the paths below
-    if (doc.drafting) {
-      dirty.current = false
-      lastSaved.current = wire
-      orig.current = origTexts(wire)
-      if (sameWire(wire, current)) return
-      const grows = lastChanged(current, wire)
-      showStored(wire)
-      if (grows && Date.now() - scrolledAt.current > FOLLOW_AFTER_SCROLL_MS) {
-        zone.current?.querySelector(`[data-id="${CSS.escape(grows)}"]`)?.scrollIntoView({ block: 'nearest' })
-      }
-      return
-    }
     if (!dirty.current && !inflight.current) {
       if (!sameWire(wire, current)) showStored(wire)
       lastSaved.current = wire
@@ -599,9 +765,10 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     ctx.current.doc = doc
     ctx.current.flags = flags
     ctx.current.filter = filter?.sets ?? null
+    ctx.current.locked = shownLocks
     ctx.current.slug = slug
     refreshMarks(editor)
-  }, [doc, flags, filter, slug, editor])
+  }, [doc, flags, filter, slug, editor, shownLocks])
 
   // a card from the sidebar: a figure block before the block `before` names, else after the document's last block
   // that says something (the trailing empty line stays last)
@@ -785,8 +952,6 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
       <div
         className={['wu-zone', empty ? 'wu-zone-empty' : ''].filter(Boolean).join(' ')}
         ref={zone}
-        onWheelCapture={() => (scrolledAt.current = Date.now())}
-        onTouchMoveCapture={() => (scrolledAt.current = Date.now())}
         onDragOverCapture={onDragOver}
         onDragLeaveCapture={onDragLeave}
         onDropCapture={onDrop}
@@ -794,7 +959,6 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
         {line && <div className="wu-dropline" style={{ top: line.top }} />}
         <BlockNoteView
           editor={editor}
-          editable={!doc.drafting}
           theme={resolved}
           className="wu-editor"
           slashMenu={false}
@@ -813,6 +977,7 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
                 <BasicTextStyleButton basicTextStyle="italic" key="italic" />
                 <BasicTextStyleButton basicTextStyle="code" key="code" />
                 <CreateLinkButton key="link" />
+                {onComment && <CommentButton key="comment" onComment={onComment} />}
               </FormattingToolbar>
             )}
           />

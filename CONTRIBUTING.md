@@ -31,8 +31,8 @@ scripts/check.sh validate   # claude plugin validate plugin
 scripts/check.sh plugin     # the plugin's hooks tests, plugin/tests/*.test.ts, with claude plugin test
 scripts/check.sh node       # node --test over plugin/**/*.test.mjs
 scripts/check.sh python     # pytest over plugin/ (the kernel)
-scripts/check.sh parity     # the browser's shared prompts still apply to the plugin's texts
-scripts/check.sh server     # the browser workbench's server tests (browser/server/tests)
+scripts/check.sh parity     # the browser's prompts render and name only what its code has
+scripts/check.sh server     # the browser workbench's server tests (browser/backend/tests_public)
 scripts/check.sh page       # the page's type check, unit tests and build (browser/frontend)
 ```
 
@@ -73,13 +73,11 @@ The browser workbench, `browser/`:
 | What | Where |
 |---|---|
 | the page (React and Vite), and its unit tests | `browser/frontend/src`, `browser/frontend/tests/public` |
-| the server: sign-in, the folder's readers, the workspace, the agents' loop and their tools | `browser/server/thimble_browser/` |
-| the features (cards, citations, lenses, labels, report, views), registered in one place, each one module with its routes, tools and prompt part | `browser/server/thimble_browser/features/` |
-| the sandbox that card code and view readers run in: its rules, and srt's install (`browser/server/sandbox`, whose `package.json` and lock file link to the plugin's pin) | `browser/server/thimble_browser/cards/sandbox.py`, `browser/server/sandbox/` |
-| the card toolkit that card code draws with, in the sandbox and the page | `browser/kit/` |
-| the texts Claude reads, and the parts it reads from the plugin | `browser/prompts/`, `browser/prompts/shared.json` |
-| the view kit's guides and worked examples, which the view builder reads | `browser/docs/`, `browser/samples/views/` |
-| the server's tests | `browser/server/tests/` |
+| the server: the workspace, the tools, the agents' sessions, the card harness | `browser/backend/app/` |
+| the Claude Code plugin the session loads: MCP shim, hooks, hooks module, skills | `browser/plugin/` |
+| the texts Claude reads | `browser/prompts/` |
+| the view kit's guides and worked examples, which the view builder reads | `browser/docs/`, `browser/plugin/viewers/` |
+| the server's tests | `browser/backend/tests_public/` |
 | the launcher that `scripts/install.sh` puts on `PATH` | `browser/scripts/thimble-browser` |
 
 `scripts/` holds `install.sh`, `check.sh`, `scan.sh` and the git hooks.
@@ -111,10 +109,8 @@ When the model does something you do not want, change the cause, not the symptom
    status) is fixed in code.
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
-The browser workbench reads one of those texts from `plugin/` when it makes a prompt: the label classifier. Its few
-changes for the browser, each a pair of exact strings, are listed in `browser/prompts/shared.json`. When you reword the
-classifier, the parity test says which change no longer applies; fix the pair in `shared.json`. The browser keeps its
-own copies of the other texts it used to share.
+The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`, and reads
+none of these.
 
 ## Pull requests
 

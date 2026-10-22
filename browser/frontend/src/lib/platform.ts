@@ -7,6 +7,7 @@
 // (thimble's config `askKey`, shell/SettingsPopover): "meta", ⌘ (Ctrl or the Windows or Super key elsewhere), by
 // default, or "alt", ⌥ (Alt elsewhere). The other key places a card freely on the canvas while it is dragged
 // (freeKeyHeld). The choice is kept in browser storage too, so a page opened again knows it before the settings load.
+import { useSyncExternalStore } from 'react'
 
 /** Whether the page runs on a Mac (or an iPad or iPhone), from the browser's platform. */
 export function isMacPlatform(platform: string | undefined = currentPlatform()): boolean {
@@ -54,6 +55,11 @@ export function setAskKey(key: string | null | undefined): void {
 export function onAskKey(fn: () => void): () => void {
   subs.add(fn)
   return () => void subs.delete(fn)
+}
+
+/** The ask key as a component reads it. */
+export function useAskKey(): AskKey {
+  return useSyncExternalStore(onAskKey, getAskKey, () => 'meta' as AskKey)
 }
 
 /** Whether the shortcuts' modifier is held in the event: ⌘ on a Mac, Ctrl or the Windows or Super key elsewhere. */

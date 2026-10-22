@@ -5,6 +5,7 @@
 // with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
 // about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
 // at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
+import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
 
@@ -636,6 +637,7 @@ export const stepZoom = (scale: number, dir: 1 | -1): number =>
 
 export const panBy = (view: View, dx: number, dy: number): View => ({ ...view, x: view.x + dx, y: view.y + dy })
 export const toPlane = (view: View, px: number, py: number): Pos => ({ x: (px - view.x) / view.scale, y: (py - view.y) / view.scale })
+export const toScreen = (view: View, x: number, y: number): Pos => ({ x: x * view.scale + view.x, y: y * view.scale + view.y })
 
 export interface WheelLike {
   deltaX: number
@@ -794,6 +796,18 @@ export function scopeForUnit(unit: string | undefined): FilterScope | null {
 /** Whether `filters[scope]` is exactly this concept and value. */
 export const filterIs = (filters: Filters | null | undefined, scope: FilterScope, concept: string, value: string): boolean => filters?.[scope]?.concept === concept && filters?.[scope]?.value === value
 
+/** The chip tone for a `whoMade` word: thimble accent, orient warning, the analyst and anyone else neutral. */
+export const WHO_TONE: Readonly<Record<string, ChipTone>> = { thimble: 'accent', orient: 'warning' }
+export const whoTone = (who: string): ChipTone => WHO_TONE[who] ?? 'neutral'
+
+/** `you` for the analyst, `thimble` for a chat, `orient` for the orientation, else the creator as written. */
+export function whoMade(createdBy: string | null | undefined): string {
+  const c = createdBy ?? ''
+  if (!c || c === 'user' || c === 'terminal') return 'you'
+  if (c.startsWith('chat:')) return 'thimble'
+  return c
+}
+
 /** The thread a card came from: its chat, and its name as the card's foot shows it. */
 export interface CellThread {
   /** the chat to go back to; null when the maker is not a chat */
@@ -830,4 +844,88 @@ export const isRunnable = (c: Cell): boolean => {
   if (!RUNNABLE.has(k)) return false
   if (k === 'timeline' || k === 'diagram') return !!c.code || (c.payload as { dataset?: unknown } | undefined)?.dataset == null
   return true
+}
+
+// ---- the comments beside the cards ----
+
+/** a comment's width on the plane, the gap between its card's outermost frame and it, the gap between two stacked
+ * comments, and how far below its card's top a comment on the card sits */
+export const COMMENT_W = 300
+export const COMMENT_GAP_X = 18
+export const COMMENT_GAP_Y = 8
+export const COMMENT_LIFT = 14
+/** how far above its step's row a comment on a step sits */
+export const COMMENT_STEP_LIFT = 4
+
+/** A comment to place: its card, its height, and where in the card it points (`dy`, plane px below the card's top:
+ * COMMENT_LIFT for the card, its step row's offset less COMMENT_STEP_LIFT for a step). */
+export interface CommentSpot {
+  id: string
+  card: string
+  dy: number
+  h: number
+}
+
+/** Where a comment sits on the plane (`x`, `y`, its top left), and the point of its card it points at (`ax`, `ay`: the
+ * card's right edge, level with the comment's wanted top). */
+export interface CommentPlace {
+  x: number
+  y: number
+  ax: number
+  ay: number
+}
+
+/** The frame at the root of the frames a card is in, or null for a loose card. */
+export function rootFrameOf(board: Board, card: string): string | null {
+  let g = board.cellById.get(card)?.parent ?? null
+  const seen = new Set<string>()
+  while (g && !seen.has(g)) {
+    seen.add(g)
+    const up = board.group.get(g)?.parent ?? null
+    if (!up) return g
+    g = up
+  }
+  return g
+}
+
+/**
+ * Where each comment sits beside the canvas: COMMENT_GAP_X right of its card's outermost frame (a loose card's own
+ * right edge), at its card's top plus its `dy`; the comments are stacked in the order of their wanted tops, each pushed
+ * by COMMENT_GAP_Y below every comment placed before it that it would share columns with (two frames whose right edges
+ * differ by less than COMMENT_W), so none overlap. The `anchor` comment (the open one, or the one the keyboard is on)
+ * stands at its wanted top, level with its step, and the comments above it that it would meet move up instead, as
+ * the Report's margin stands its active comment at its passage (report/checkComments stackCards). A comment whose card
+ * is not drawn gets no place. Pure.
+ */
+export function commentPlaces(board: Board, lay: Layout, spots: readonly CommentSpot[], anchor: string | null = null): Map<string, CommentPlace> {
+  const list: { id: string; want: number; h: number; x: number; ax: number }[] = []
+  for (const s of spots) {
+    const r = lay.rects.get(s.card)
+    if (!r) continue
+    const root = rootFrameOf(board, s.card)
+    const outer = (root && lay.rects.get(root)) || r
+    list.push({ id: s.id, want: r.y + s.dy, h: s.h, x: outer.x + outer.w + COMMENT_GAP_X, ax: r.x + r.w })
+  }
+  list.sort((a, b) => a.want - b.want)
+  const meet = (a: { x: number }, b: { x: number }) => Math.abs(a.x - b.x) < COMMENT_W
+  const k = anchor == null ? -1 : list.findIndex((it) => it.id === anchor)
+  const ys: number[] = []
+  list.forEach((it, i) => {
+    if (i === k) {
+      ys.push(it.want)
+      return
+    }
+    // below each comment before it in its columns; past the anchor, not below one that will move up above the anchor
+    let low = -Infinity
+    for (let j = 0; j < i; j++) {
+      if (!meet(list[j], it) || (k >= 0 && j < k && i > k && meet(list[j], list[k]) && meet(it, list[k]))) continue
+      low = Math.max(low, ys[j] + list[j].h + COMMENT_GAP_Y)
+    }
+    ys.push(Math.max(it.want, low))
+  })
+  // the comments before the anchor move up above every later comment they would meet
+  for (let i = k - 1; i >= 0; i--) {
+    for (let j = i + 1; j < list.length; j++) if (meet(list[j], list[i])) ys[i] = Math.min(ys[i], ys[j] - list[i].h - COMMENT_GAP_Y)
+  }
+  return new Map(list.map((it, i) => [it.id, { x: it.x, y: ys[i], ax: it.ax, ay: it.want }]))
 }

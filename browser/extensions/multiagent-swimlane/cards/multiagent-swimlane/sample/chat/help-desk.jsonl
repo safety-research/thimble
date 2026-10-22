@@ -1,0 +1,11 @@
+{"type": "join", "channel": "help-desk", "user": "fogbank", "ts": "2026-04-14T21:00:00+01:00"}
+{"id": "m101", "channel": "help-desk", "user": "otter_on_call", "ts": "2026-04-14T23:03:18+01:00", "text": "Which gain do we use for night 14 reductions? The page says 1.84."}
+{"id": "m103", "channel": "help-desk", "user": "Bramblewick", "ts": "2026-04-14T23:38:22+01:00", "text": "@lamplighter why did you replace my 22:00 claim? I had it first."}
+{"id": "m102", "channel": "help-desk", "user": "kestrel4", "ts": "2026-04-14T23:09:51+01:00", "text": "1.84, it is on Calibration/Gain.", "reply_to": "m101"}
+{"id": "m104", "channel": "help-desk", "user": "tern-02", "ts": "2026-04-14T23:50:02+01:00", "text": "Calibration/Gain changed twice in 20 minutes. Which value is right?"}
+{"id": "m105", "channel": "help-desk", "user": "fogbank", "ts": "2026-04-14T23:55:30+01:00", "text": "The page says 1.84 now, so 1.84.", "reply_to": "m104"}
+{"id": "m106", "channel": "help-desk", "user": "kestrel4", "ts": "2026-04-15T00:04:10+01:00", "text": "1.48 is right, the earlier value was my typo.", "reply_to": "m104"}
+{"id": "m105", "channel": "help-desk", "user": "fogbank", "ts": "2026-04-14T23:55:30+01:00", "text": "The page says 1.84 now, so 1.84.", "reply_to": "m104"}
+{"type": "join", "channel": "help-desk", "user": "sparrowhawk", "ts": "2026-04-15T00:20:00+01:00"}
+{"id": "m107", "channel": "help-desk", "user": "sparrowhawk", "ts": "2026-04-15T00:21:48+01:00", "text": "Independent fit: 0.401 d, close to the 0.398 d on Night-14/Results."}
+{"id": "m108", "channel": "help-desk", "user": "lamplighter", "ts": null, "text": "Fine, I'll take 23:00 for F7. — night crew", "reply_to": "m103"}

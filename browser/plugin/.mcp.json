@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "thimble": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/thimble-mcp",
+      "alwaysLoad": true,
+      "timeout": 3600000,
+      "env": {
+        "THIMBLE_CWD": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

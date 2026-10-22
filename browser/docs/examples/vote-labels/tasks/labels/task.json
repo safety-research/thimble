@@ -1,0 +1,4 @@
+{
+  "description": "Three models label every item, and the value most of them give wins.",
+  "command": ["python", "labels.py"]
+}

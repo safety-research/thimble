@@ -1,17 +1,18 @@
-// The report's Write, on its toolbar: one small field for the analyst's instructions or feedback, such as "fill this in
-// for my team" or "shorter, lead with the number", and the button, Write on a report Claude has not written in yet and
-// Revise on one it has. Enter (or the button) gives them to Claude in the chat, which writes from the report as it
-// stands and keeps the analyst's own blocks; an empty field asks for the report as the analyst left it. While Claude
-// writes, the button reads Writing, with Stop beside it, which stops Claude's turn in the chat.
-import { useEffect, useState, type KeyboardEvent } from 'react'
-import { STOP_HOLD_MS, stopRun } from '../chat/ChatPanel'
+// The Report bar's primary action: Write on a document not written yet, which asks for it at once, and Revise on a
+// written one, which asks in a sheet under the button before a writer starts on a new draft. Writing while one runs,
+// with Stop beside it (StopWriter); while Claude Code asks that writer a permission prompt in the terminal, the words
+// TERMINAL_WAIT with a still dot in the button's place, since the writer does nothing until the analyst answers there.
+import { useEffect, useRef, useState } from 'react'
+import { stopSession } from '../chat/AgentCard'
+import { STOP_HOLD_MS } from '../chat/ChatPanel'
 import { Button } from '../components/Button'
-import { TextInput } from '../components/Field'
+import { Popover } from '../components/Menu'
+import { TERMINAL_WAIT } from '../chat/waiting'
 
-/** Stop beside Writing: stops Claude's turn in main, as the chat's own Stop does. Busy from the request until the turn
- * ends, which takes the button away, or STOP_HOLD_MS pass; a request that failed clears it at once, its toast saying
- * why. */
-export function StopWriter({ ws }: { ws: string }) {
+/** Stop on the writer that runs (`chat`), beside Writing: the same call as Stop in the writer's thread (the composer's
+ * Stop, chat/ChatPanel stopRun, which is stopSession). Busy from the request until the writer ends, which takes the
+ * button away, or STOP_HOLD_MS pass; a request that failed clears it at once, its toast saying why. */
+export function StopWriter({ ws, chat }: { ws: string; chat: string }) {
   const [stopping, setStopping] = useState(false)
   useEffect(() => {
     if (!stopping) return
@@ -21,7 +22,7 @@ export function StopWriter({ ws }: { ws: string }) {
   const stop = () => {
     if (stopping) return
     setStopping(true)
-    void stopRun(ws, { kind: 'chat', chat: 'main', label: '' }).then((ok) => ok || setStopping(false))
+    void stopSession(ws, chat, 'writer').then((ok) => ok || setStopping(false))
   }
   return (
     <Button variant="ghost" icon="stop" className="wu-stop" busy={stopping} onClick={stop}>
@@ -30,43 +31,67 @@ export function StopWriter({ ws }: { ws: string }) {
   )
 }
 
-/** The field's placeholder: what it takes. */
-export const WRITE_PLACEHOLDER = 'Instructions or feedback for Claude'
-
-export function WriteAction({ name, written, busy, disabled, onWrite }: {
-  /** the report's name, for the field's accessible name */
+export function WriteAction({ name, written, busy, waiting = false, disabled, history, onWrite }: {
+  /** the document's name, as the bar's chip shows it */
   name: string
-  /** Claude has written in the report before: the button reads Revise */
   written: boolean
   busy: boolean
+  /** while busy: the writer waits on a permission prompt in the terminal */
+  waiting?: boolean
   disabled?: boolean
-  /** sends the instructions (may be empty); resolves true when they went out */
-  onWrite: (instructions: string) => Promise<boolean>
+  /** its drafts are listed in History */
+  history?: boolean
+  onWrite: () => void
 }) {
-  const [text, setText] = useState('')
-  const [sending, setSending] = useState(false)
-  const send = async () => {
-    if (sending || busy || disabled) return
-    setSending(true)
-    try {
-      if (await onWrite(text.trim())) setText('')
-    } finally {
-      setSending(false)
-    }
+  const at = useRef<HTMLButtonElement>(null)
+  const cancel = useRef<HTMLButtonElement>(null)
+  const [asking, setAsking] = useState(false)
+  useEffect(() => {
+    if (busy || disabled || !written) setAsking(false)
+  }, [busy, disabled, written])
+  useEffect(() => {
+    if (asking) requestAnimationFrame(() => cancel.current?.focus())
+  }, [asking])
+  const click = () => {
+    if (busy) return
+    if (written) setAsking((a) => !a)
+    else onWrite()
   }
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      void send()
-    }
+  if (busy && waiting) {
+    return (
+      <span className="wu-wait" role="status">
+        <span className="dot tt-waiting wu-wait-dot" aria-hidden="true" />
+        {TERMINAL_WAIT}
+      </span>
+    )
   }
   return (
-    <span className="wu-write">
-      <TextInput className="wu-write-field" value={text} onChange={setText} onKeyDown={onKey} placeholder={WRITE_PLACEHOLDER} aria-label={`Instructions for Claude about ${name}`} disabled={busy || sending} spellCheck={false} />
-      {/* while Claude writes, the busy line above the chat's input box says so (lib/busy.ts): the button only waits */}
-      <Button variant="primary" className="wu-write-go" disabled={disabled || busy || sending} onClick={() => void send()}>
+    <>
+      <Button ref={at} variant="primary" busy={busy} disabled={disabled} aria-haspopup={written && !busy ? 'dialog' : undefined} aria-expanded={written && !busy ? asking : undefined} onClick={click}>
         {busy ? 'Writing' : written ? 'Revise' : 'Write'}
       </Button>
-    </span>
+      <Popover anchor={at} open={asking} onClose={() => setAsking(false)} align="end" label={`Revise the ${name}`} className="wu-revise" width={300}>
+        <div className="wu-revise-body">
+          <p>
+            Revise the {name}? A writer starts a new draft from the cards as they stand.{history ? ' Past drafts stay in History.' : ''}
+          </p>
+          <div className="wu-revise-actions">
+            <Button size="sm" ref={cancel} onClick={() => setAsking(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setAsking(false)
+                onWrite()
+              }}
+            >
+              Revise
+            </Button>
+          </div>
+        </div>
+      </Popover>
+    </>
   )
 }

@@ -1,8 +1,10 @@
 // The canvas: an infinite board of frames and cards on a dot grid. The layout is layout.ts's; this file handles what
 // the analyst does to it (drag, resize, marquee select, group, delete, rename, pan and zoom, teleports to a ref) and
-// writes every change through the notebook routes before re-reading. With no view kept it opens on its first frame; a
-// switch to the tab while it has its dot lands by landing.ts. Every card carries `data-anchor`, so ⌘-click reaches it.
-// A plan card main adds opens the frames it is in, so the next phase's plan shows below the finished one.
+// writes every change through the notebook routes before re-reading. With no view kept it opens on the orientation's
+// deck; a switch to the tab while it has its dot lands by landing.ts. Every card carries `data-anchor`, so ⌘-click
+// reaches it. The comments the checks over the cards leave sit beside the cards (CommentLayer.tsx), and the top bar's
+// Comments lists those checks with their switches (Controls.tsx, report/Checks.tsx CheckRows). A plan card main adds
+// opens the frames it is in, so the next phase's plan shows below the finished one.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ChipContext } from '../chat/markdown'
 import { readSeen } from '../chat/seen'
@@ -13,6 +15,8 @@ import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
 import { api, canvasApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
+import { isReplay } from '../lib/events'
+import { CHECK_WORDS, checkState, type CheckFilterState } from '../lib/cardCheck'
 import { freeKeyHeld, pointKeyHeld } from '../lib/platform'
 import { takesSideways } from '../lib/scrolls'
 import { registerCells } from '../lib/cellName'
@@ -23,7 +27,9 @@ import type { CanvasResponse, Cell, ChatMeta, Filters, Pos } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { anchorElement, capturePng, describeElement } from '../pointer/capture'
 import { NO_FILTER, activeParts, bothKeep, cardParts, keepShown, keptBy, readFilter, searchText, type CardFilter, type FilterCard, type FilterPart } from './cardFilter'
+import { useChecks } from '../report/Checks'
 import { CellCard, type CardAction, type CardField, type Edge } from './Cell'
+import { CommentLayer, shownCanvasComments, useCanvasComments } from './CommentLayer'
 import { newPlans } from './plan'
 import { conceptName, useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
@@ -122,17 +128,17 @@ const typing = (t: EventTarget | null): boolean => {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
 }
 
-const PART_WORD: Record<FilterPart, string> = { kinds: 'Kind', groups: 'Group', makers: 'Made by', starred: 'Starred', text: 'Text' }
+const PART_WORD: Record<FilterPart, string> = { kinds: 'Kind', groups: 'Group', makers: 'Made by', checks: 'Check', starred: 'Starred', locked: 'Locked', text: 'Text' }
 
 /** What a part of the card filter keeps, as its chip in the band names it: `Kind · plot, table`, `Starred`, `Text · "merge"`. */
 function partLabel(f: CardFilter, part: FilterPart, groupName: (id: string) => string): string {
-  if (part === 'starred') return PART_WORD[part]
+  if (part === 'starred' || part === 'locked') return PART_WORD[part]
   if (part === 'text') return `${PART_WORD[part]} · "${f.text.trim()}"`
-  const values = part === 'groups' ? f.groups.map(groupName) : f[part]
+  const values = part === 'groups' ? f.groups.map(groupName) : part === 'checks' ? f.checks.map((s) => CHECK_WORDS[s as CheckFilterState] ?? s) : f[part]
   return `${PART_WORD[part]} · ${values.join(', ')}`
 }
 
-const clearPart = (f: CardFilter, part: FilterPart): CardFilter => (part === 'starred' ? { ...f, starred: false } : part === 'text' ? { ...f, text: '' } : { ...f, [part]: [] })
+const clearPart = (f: CardFilter, part: FilterPart): CardFilter => (part === 'starred' || part === 'locked' ? { ...f, [part]: false } : part === 'text' ? { ...f, text: '' } : { ...f, [part]: [] })
 
 /** A card being resized, drawn at its new size (and, from its left or top edge, its new place) before it is written. */
 interface Sizing {
@@ -200,6 +206,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   // the viewport has been measured (a hidden tab measures 0 wide), so a view can be placed in it
   const [vpReady, setVpReady] = useState(false)
   const concepts = useConcepts(ws)
+  const checks = useChecks(ws)
+  const notes = useCanvasComments(ws)
   const vp = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -331,7 +339,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         void loadChats()
       }, REFETCH_DEBOUNCE_MS)
     }
-    const offs = [bus.on('cell', later), bus.on('chat', later), bus.on('filter', () => void loadFilters())]
+    const offs = [bus.on('cell', later), bus.on('chat', later), bus.on('orient', later), bus.on('filter', () => void loadFilters())]
     return () => {
       offs.forEach((f) => f())
       if (timer != null) window.clearTimeout(timer)
@@ -405,7 +413,9 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const shut = [...new Set(fresh.flatMap((id) => framesAbove(board, id)))].filter((g) => !open.has(g))
     if (shut.length) setOpen((cur) => new Set([...cur, ...shut]))
   }, [data, board, open, setOpen])
-  const content = useMemo(() => (lay ? extentOf([...lay.rects.values()]) : null), [lay])
+  // the box the comments beside the cards cover (CommentLayer), which Fit, the minimap and the Content pill take in
+  const [noteBox, setNoteBox] = useState<Rect | null>(null)
+  const content = useMemo(() => (lay ? extentOf([...lay.rects.values(), ...(noteBox ? [noteBox] : [])]) : null), [lay, noteBox])
 
   // the height of every card that has none of its own, measured as drawn (offsets ignore the zoom)
   const cardEls = useRef(new Map<string, HTMLElement>())
@@ -517,7 +527,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const filterCards = useMemo(
     (): FilterCard[] =>
       board
-        ? board.cells.map((c) => ({ id: c.id, kind: kindOf(c.cell), group: c.parent, maker: threadOf(c.cell).name, starred: !!c.cell.starred, text: searchText(c.cell.title, c.cell.takeaway) }))
+        ? board.cells.map((c) => ({ id: c.id, kind: kindOf(c.cell), group: c.parent, maker: threadOf(c.cell).name, check: checkState(c.cell), starred: !!c.cell.starred, locked: !!c.cell.locked, text: searchText(c.cell.title, c.cell.takeaway) }))
         : [],
     [board, threadOf],
   )
@@ -552,6 +562,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     setDetail(id)
   }, [])
   const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread, openDetail }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread, openDetail])
+  // the comments beside the cards: a check's while it is on, on a card that is drawn and that the filters keep
+  const shownNotes = useMemo(() => (lay ? shownCanvasComments(notes.comments, checks.on, (id) => lay.rects.has(id), kept) : []), [notes.comments, checks.on, lay, kept])
+  const cardEl = useCallback((id: string) => cardEls.current.get(id), [])
+  const titleOf = useCallback((id: string) => board?.cellById.get(id)?.cell.title ?? '', [board])
 
   // ---- pan and zoom ----
 
@@ -1011,6 +1025,12 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         void change((x) => patchCellLocal(x, id, { starred }), () => canvasApi.patchCell(ws, id, { starred }))
         return
       }
+      case 'lock': {
+        // the server records the lock in the telemetry itself (notebook.edit_cell), so no row is posted here
+        const locked = !cell.locked
+        void change((x) => patchCellLocal(x, id, { locked }), () => canvasApi.patchCell(ws, id, { locked }))
+        return
+      }
     }
   }
 
@@ -1135,7 +1155,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (p?.kind === 'cell') id = p.cellId
     else if (p?.kind === 'group') id = p.groupId
     else if (p?.kind === 'concept') id = data.cells.find((c) => (c.payload as { concept?: unknown } | undefined)?.concept === p.conceptId)?.id ?? null
-    // a label the workspace holds with no card of its own opens its
+    // a label the workspace holds with no card of its own (the orientation's, backend concepts.apply_scoped) opens its
     // review in the side panel; one not listed yet may be a label whose card is on its way, and is waited for
     if (p?.kind === 'concept' && !id && concepts.has(p.conceptId)) {
       pendingRef.current = null
@@ -1144,9 +1164,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       setLabelPanel(p.conceptId)
       return
     }
-    // a card left off the board (the server's `hidden`): the analyst is told so and the board opens on its first frame
+    // orientation scratch work is not on the board (backend notebook.canvas): the analyst is told so and the board opens
+    // on the deck instead
     if (p?.kind === 'cell' && id && data.hidden?.includes(id)) {
-      bus.emit('toast', { text: 'This card is not on the canvas.', kind: 'info' })
+      bus.emit('toast', { text: 'This card is scratch work of an older orientation, which is not on the canvas.', kind: 'info' })
       const deck = openingFrame(board, lay)
       pendingRef.current = deck ? `group:${deck}` : null
       pendingSince.current = 0
@@ -1217,7 +1238,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       window.setTimeout(() => {
         void revealCell(el, cited.col, cited.row, '.outputs-html table').then((td) => {
           if (!td) return flash(el)
-          centreOnPart(td as HTMLElement)
+          centreOnPart(td)
         })
       }, 120)
     } else if (el && cellId && p?.kind === 'cell' && p.out != null && p.line != null) {
@@ -1267,7 +1288,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     () =>
       bus.on('wsEvent', (ev) => {
         const e = ev as Record<string, unknown>
-        if (activeNow.current || e.type !== 'cell' || e.op !== 'created' || typeof e.cell !== 'string') return
+        if (activeNow.current || isReplay() || e.type !== 'cell' || e.op !== 'created' || typeof e.cell !== 'string') return
         arrived.current.push(e.cell)
       }),
     [],
@@ -1512,6 +1533,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                       />
                     )
                   })}
+                  <CommentLayer ws={ws} board={board} lay={lay} comments={shownNotes} look={checks.look} cardEl={cardEl} onResolve={notes.resolve} titleOf={titleOf} onExtent={setNoteBox} />
                   {drag?.ins && <div className="board-ins" style={{ left: drag.ins.bar.x, top: drag.ins.bar.y, width: drag.ins.bar.w, height: drag.ins.bar.h }} />}
                   {tag && drag && (
                     <div className="board-tag" style={{ left: drag.x + 8, top: drag.y - 30 }}>
@@ -1550,6 +1572,9 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                 onLabel={(concept, value) => void setLabelFilter(concept, value)}
                 keep={kept}
                 filterReady={filters != null}
+                ws={ws}
+                checks={checks}
+                comments={notes.comments}
               />
               {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} history={historyOf?.cell === detailCell.id ? historyOf.seq : 0} onClose={() => setDetail(null)} />}
               {labelPanel && !detailCell && <LabelPanel key={labelPanel} conceptId={labelPanel} onClose={() => setLabelPanel(null)} />}

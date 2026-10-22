@@ -3,6 +3,7 @@
 // rows left out). canvas/FrameTable reads only these. Numbers are formatted with d3-format in the backend's formats,
 // which produce the same strings (frames.show), so the card shows the string the citation check compared. Pure.
 import { format as d3format } from 'd3-format'
+import type { MimeBundle } from './types'
 
 export const FRAME_MIME = 'application/vnd.thimble.frame+json'
 
@@ -53,6 +54,8 @@ export function asFrame(v: unknown): Frame | null {
     },
   }
 }
+
+export const isFrameBundle = (b: MimeBundle | null | undefined): boolean => !!b && typeof b === 'object' && FRAME_MIME in b
 
 const formatters = new Map<string, ((n: number) => string) | null>()
 /** A formatter for a d3-format specifier, null when the specifier is not one. Cached. */

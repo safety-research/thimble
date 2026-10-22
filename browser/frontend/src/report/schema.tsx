@@ -1,5 +1,5 @@
-// The editor's schema: the default paragraph, heading, list and quote blocks, the `figure` and `prompt` blocks, the
-// `cite` inline atom that renders RefChip, and the toolbar's three text styles.
+// The editor's schema: the default paragraph, heading and list blocks, the `figure` and `prompt` blocks, the `cite`
+// inline atom that renders RefChip, and the toolbar's three text styles.
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs } from '@blocknote/core'
 import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
 import { GlyphCites, RefChip } from '../components/RefChip'
@@ -27,11 +27,13 @@ export const Figure = createReactBlockSpec(
   },
 )
 
-/** A request to Claude placed in the report (the slash menu's Ask Claude here), about the passage above it. */
+/** `mode`: `write`, a request for the writer about the passage above (the slash menu's Prompt), or `card`, a request
+ * to main whose card takes the block's place once made (/card). `sent`: the text of a block sent to main with ⌘↵,
+ * shown working until its card comes or main's turn ends. */
 export const Prompt = createReactBlockSpec(
-  { type: PROMPT_TYPE, propSchema: {}, content: 'none' } as const,
+  { type: PROMPT_TYPE, propSchema: { mode: { default: 'write', values: ['write', 'card'] }, sent: { default: '' } }, content: 'none' } as const,
   {
-    render: ({ block, editor }) => <PromptBlock block={block as unknown as { id: string }} editor={editor} />,
+    render: ({ block, editor }) => <PromptBlock block={block as unknown as { id: string; props: { mode: 'write' | 'card'; sent: string } }} editor={editor} />,
   },
 )
 
@@ -41,7 +43,6 @@ export const schema = BlockNoteSchema.create({
     heading: defaultBlockSpecs.heading,
     bulletListItem: defaultBlockSpecs.bulletListItem,
     numberedListItem: defaultBlockSpecs.numberedListItem,
-    quote: defaultBlockSpecs.quote,
     figure: Figure(),
     prompt: Prompt(),
   },
@@ -49,4 +50,5 @@ export const schema = BlockNoteSchema.create({
   styleSpecs: { bold: defaultStyleSpecs.bold, italic: defaultStyleSpecs.italic, code: defaultStyleSpecs.code },
 })
 
+export type ReportEditor = typeof schema.BlockNoteEditor
 export type ReportPartialBlock = typeof schema.PartialBlock

@@ -24,3 +24,5 @@ export function runTour(o: RunOptions): Tour {
   return tour
 }
 
+/** The tour once it has run, for the browser checks. */
+export const currentTour = (): Tour | null => tour

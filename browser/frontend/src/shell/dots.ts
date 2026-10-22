@@ -3,8 +3,8 @@
 // Files only a view built counts: a view proposal, a build under way or one that failed has nothing to open there.
 // While a writer writes a document, the Report tab shows a spinner in the dot's place, and the dot once it ends.
 import { useEffect, useState } from 'react'
-import { docsApi } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
+import { isReplay } from '../lib/events'
 
 export type Dots = Record<Tab, boolean>
 /** What a tab wears after its name: the accent dot, the spinner, or nothing. */
@@ -29,34 +29,17 @@ export function tabOfEvent(type: string, payload: Record<string, unknown>): Tab 
   }
 }
 
-/** Whether Claude is writing a report: one whose state says `generating` (GET …/investigations/main/types). Pure. */
-export function writing(types: Readonly<Record<string, { status?: string | null }>> | null): boolean {
-  return Object.values(types ?? {}).some((t) => t?.status === 'generating')
+/** Whether a writer is writing a document: a writer's chat whose session runs (its status `running`, or no status yet
+ * while the list says it runs). Pure. */
+export function writing(metas: Iterable<{ role?: string | null; status?: string | null; running?: boolean }>): boolean {
+  for (const m of metas) {
+    if (m.role !== 'writer') continue
+    if (m.status === 'running' || (!m.status && m.running)) return true
+  }
+  return false
 }
 
-/** The reports' states, read again on each `report` event, for the Report tab's spinner. */
-export function useReportTypes(ws: string): Readonly<Record<string, { status?: string | null }>> | null {
-  const [types, setTypes] = useState<Readonly<Record<string, { status?: string | null }>> | null>(null)
-  useEffect(() => {
-    let live = true
-    const read = () =>
-      docsApi
-        .types(ws)
-        .then((t) => live && setTypes(t))
-        .catch(() => undefined)
-    void read()
-    const off = bus.on('wsEvent', (ev) => {
-      if (ev.type === 'report') void read()
-    })
-    return () => {
-      live = false
-      off()
-    }
-  }, [ws])
-  return types
-}
-
-/** Each tab's signal: the Report tab's spinner while Claude writes a report (in place of its dot), else the dot where
+/** Each tab's signal: the Report tab's spinner while a writer writes (in place of its dot), else the dot where
  * something new landed. Pure. */
 export function tabSignals(dots: Dots, isWriting: boolean): Record<Tab, TabSignal> {
   const of = (t: Tab): TabSignal => (dots[t] ? 'dot' : null)
@@ -75,7 +58,7 @@ export function useTabDots(shown: readonly Tab[]): Dots {
     () =>
       bus.on('wsEvent', (ev) => {
         const tab = tabOfEvent(ev.type, ev as Record<string, unknown>)
-        if (!tab || key.split(' ').includes(tab)) return
+        if (!tab || key.split(' ').includes(tab) || isReplay()) return
         setDots((d) => (d[tab] ? d : { ...d, [tab]: true }))
       }),
     [key],

@@ -13,7 +13,7 @@ import { RefChip } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { Switch } from '../components/Switch'
 import { TipButton } from '../components/Tooltip'
-import { classesOf, colourVar, globPatterns, howMade, isFilesLabel, marksWord, nextColour } from '../files/labels'
+import { classesOf, colourVar, globPatterns, isFilesLabel, marksWord, nextColour } from '../files/labels'
 import { labelApi } from '../lib/api'
 import { glyphOf } from '../lib/fileGlyph'
 import { bus } from '../lib/bus'
@@ -123,7 +123,7 @@ function Computed({ concept, ws }: { concept: ConceptDetail; ws: string }) {
       <span className="label">computed</span>
       <div className="canvas-details-run">
         <Chip kind="status" tone="neutral">
-          {howMade(concept.kind)}
+          {concept.kind}
         </Chip>
         {concept.kind === 'prompt' && shownModel ? <Chip kind="value">{modelLabel(shownModel)}</Chip> : null}
         {typeof concept.version === 'number' && concept.version > 1 ? <Chip kind="value">v{concept.version}</Chip> : null}
