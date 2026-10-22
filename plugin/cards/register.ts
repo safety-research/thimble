@@ -15,7 +15,7 @@ import type { Register } from 'claude-code'
 
 import { failNotice } from '../bar/fix'
 import { featureOn } from '../settings/features.mjs'
-import { cardKey, cardPost, clientFault, frame, framesUnder, keepSearch, keptSearchEdit, noteColumns, revealCard, searchTyped } from './draw'
+import { cardKey, cardPost, clientFault, frame, framesUnder, keepSearch, keptSearchEdit, noteColumns, searchTyped } from './draw'
 import { callOf, cardIdOf, metaOf, restoreCards, searchNow } from './store'
 import { cardCall, registerCardTool } from './tool'
 
@@ -55,9 +55,8 @@ export const registerCards: Register = on => {
     if (meta.toolUseId !== e.props.tool_use_id) {
       const call = meta.calls[e.props.tool_use_id]
       if (!call || call.error) return own
-      // a press scrolls up to the card
-      const words = `↑ version ${call.version} of “${call.title ?? meta.title}” was drawn in the place of the card above${call.version < meta.version ? `, which now shows version ${meta.version}` : ''}`
-      return E.Box({ flexDirection: 'column', children: [own, E.Box({ key: 'moved', marginLeft: 2, children: [E.Button({ key: `moved-${e.props.tool_use_id}`, plain: true, label: 'show the card', onPress: () => revealCard($, meta.id), children: [E.Text({ dimColor: true, wrap: 'wrap', children: words })] })] })] })
+      const words = `  ↑ version ${call.version} of “${call.title ?? meta.title}” was drawn in the place of the card above${call.version < meta.version ? `, which now shows version ${meta.version}` : ''}`
+      return E.Box({ flexDirection: 'column', children: [own, E.Text({ key: 'moved', dimColor: true, wrap: 'wrap', children: words })] })
     }
     if (meta.anchorRow) return own
     return E.Box({ flexDirection: 'column', children: [own, await frame($, e, meta, null)] })

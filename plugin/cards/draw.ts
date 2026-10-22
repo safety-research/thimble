@@ -115,8 +115,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, note: string | nu
   // the title on a line of its own; under it, dim, where the card comes from when that is not plain from its place
   const about = [note, meta.version > 1 ? `version ${meta.version}${note ? '' : ', from a later call'}` : ''].filter(Boolean).join(' · ')
   const rows: Any[] = [
-    // a click on the title gives the card the keys, as a click inside it does
-    E.Button({ key: 'title', plain: true, label: `${meta.title}: take its keys`, onPress: () => setFocus($, meta.id), children: [E.Text({ bold: true, wrap: 'wrap', children: meta.title })] }),
+    E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
     ...(about ? [E.Text({ key: 'about', dimColor: true, wrap: 'truncate-end', children: about })] : []),
     drawn
       ? E.Client({ key: `card-${meta.id}`, module: './client.tsx', props: { tree: t!.tree, width: t!.width }, width: t!.width })
@@ -171,13 +170,7 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
   return out
 }
 
-/** Scroll the card's frame into view, the least that shows it (not at all while it shows). Claude Code moves the
- *  conversation only for the person's own input: a key, a press. */
-export async function revealCard($: Engine, id: string): Promise<void> {
-  try { await $.ui.scroll({ to: { key: `frame-${id}` }, block: 'nearest' }) } catch { /* it stays where it is */ }
-}
-
-/** A key at an empty prompt: the focused card's, when it lists it, and the card comes into view. `/` starts a search. */
+/** A key at an empty prompt: the focused card's, when it lists it. `/` starts a search. */
 export async function cardKey($: Engine, key: string): Promise<boolean> {
   const id = await focusNow($)
   const meta = id ? await metaOf($, id) : null
@@ -187,7 +180,6 @@ export async function cardKey($: Engine, key: string): Promise<boolean> {
     await applyAnswer($, meta, await askCard($, meta, 'query', { text: '' }))
   }
   await applyAnswer($, meta, await askCard($, meta, 'key', { key }))
-  await revealCard($, meta.id)
   return true
 }
 
@@ -199,7 +191,6 @@ export async function searchTyped($: Engine, text: string): Promise<void> {
   if (!meta) { await setSearch($, null); return }
   await setSearch($, text ? { id: meta.id, text } : null)
   await applyAnswer($, meta, await askCard($, meta, 'query', { text: text || null }))
-  await revealCard($, meta.id)
 }
 
 /** Enter while a search runs: the card keeps the search, and the prompt box is the person's again. Claude Code keeps a
