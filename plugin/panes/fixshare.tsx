@@ -83,7 +83,7 @@ export async function drawFixShare($: EngineInterface, e: Any, args: unknown, el
   String(s.issue).replace(/\s+$/, '').split('\n').forEach((line, i) => {
     const t = i === 0 ? line.replace(/^#\s*/, '') : line
     const parts = t.split(/(‹[^›]{1,40}›)/)
-    out.push(Text({ key: `l${i}`, wrap: 'wrap', children: ['  ', ...parts.map((p, j) => (/^‹.*›$/.test(p) ? Text({ key: `p${j}`, color: 'warning', children: p }) : Text({ key: `p${j}`, ...(i === 0 ? { bold: true } : {}), children: p || (j === 0 && !t ? ' ' : '') })))] }))
+    out.push(Box({ key: `l${i}`, marginLeft: 2, children: [Text({ wrap: 'wrap', children: parts.map((p, j) => (/^‹.*›$/.test(p) ? Text({ key: `p${j}`, color: 'warning', children: p }) : Text({ key: `p${j}`, ...(i === 0 ? { bold: true } : {}), children: p || (j === 0 && !t ? ' ' : '') }))) })] }))
   })
 
   // the pull request's files, or (d) the whole diff
