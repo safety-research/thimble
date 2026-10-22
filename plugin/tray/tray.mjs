@@ -309,3 +309,45 @@ export function lineWindow(line, room) {
   const moved = spans.map(([x, y]) => [Math.max(x, from) - from + head.length, Math.min(y, to) - from + head.length]).filter(([x, y]) => y > x)
   return { ...line, text: head + text.slice(from, to) + tail, spans: moved }
 }
+
+// a line that prints: Python's print, a shell's echo or printf, JavaScript's console.log, a write to stdout
+const PRINTS = /\b(print|printf|println|puts|echo)\b|console\.log|\.write\s*\(/
+
+/** The words a line of code writes out as they are: its string literals, without what f-strings, `{}`, %, a shell's
+ *  `$name` and a template's `${}` fill in. */
+function literalBits(line) {
+  const bits = []
+  for (const m of String(line).matchAll(/(["'])((?:\\.|(?!\1).)*)\1/g)) {
+    for (const part of m[2].split(/\$\{[^{}]*\}|\{[^{}]*\}|\$\w+|%[-+ #0]*\d*(?:\.\d+)?[sdifrxXeEgGc%]|\\[ntr]/)) {
+      const t = part.trim()
+      if (t.length >= 2) bits.push(t)
+    }
+  }
+  return bits
+}
+
+/**
+ * The one line of a check's code that printed an output line: of the lines that print, the one whose own words all
+ * stand in that output line (the most of them; the later one on a tie), else the last line that prints, else the
+ * last line with code. Trimmed; '' without code.
+ */
+export function printLine(code, out) {
+  const lines = String(code || '').split('\n')
+  const said = String(out || '')
+  let best = -1
+  let most = 0
+  let last = -1
+  let any = -1
+  lines.forEach((l, i) => {
+    if (!l.trim() || /^\s*(#|\/\/)/.test(l)) return
+    any = i
+    if (!PRINTS.test(l)) return
+    last = i
+    const bits = literalBits(l)
+    if (!bits.length || bits.some(b => !said.includes(b))) return
+    const n = bits.reduce((a, b) => a + b.length, 0)
+    if (n >= most) { best = i; most = n }
+  })
+  const i = best >= 0 ? best : last >= 0 ? last : any
+  return i >= 0 ? lines[i].trim() : ''
+}

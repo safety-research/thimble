@@ -9,7 +9,7 @@
 // answer view asks trayFocus). While it is open its keys are in the bar, after the busy step:
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed
-//   c code      a citation computed by code: its whole code and whole output in place of the one line, and back
+//   c           a citation computed by code: all its code and output in place of the one line, and back
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
@@ -36,7 +36,7 @@ import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
-import { highlighted, wrapCode } from '../marks/evidence'
+import { highlighted, wrapCode, type Theme } from '../marks/evidence'
 import { marksIn, withoutMarks } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
@@ -46,7 +46,7 @@ import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, pageOf, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  open, pageOf, printLine, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -416,7 +416,7 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   const zero: BarItem = { id: 'tray-0', key: '0', words: f.open || tray.stack.length > 1 ? 'back' : 'close', focus: true, press: () => goBack($) }
   if (f.kind === 'citation') {
     out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) })
-    if ((await itemOf($, f.row, f.n))?.evidence?.kind === 'computed') out.push({ id: 'tray-c', key: 'c', words: 'code', focus: true, press: () => toggleCode($) })
+    if ((await itemOf($, f.row, f.n))?.evidence?.kind === 'computed') out.push({ id: 'tray-c', key: 'c', words: f.open === 'code' ? 'one line' : 'all code and output', focus: true, press: () => toggleCode($) })
     out.push(zero, ...(await steps()))
     const inner = await innerOf($, f)
     if (inner) {
@@ -480,54 +480,74 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
   return drawsHyperlinks(env)
 }
 
+/** A citation's status as its header says it, beside the kind: a sign, the word and its color. */
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
-  verified: { word: 'verified', color: 'success' },
-  corrected: { word: 'corrected', color: 'merged' },
-  failed: { word: 'wrong', color: 'error' },
-  unconfirmed: { word: 'not confirmed', color: 'warning' },
+  verified: { word: '✓ verified', color: 'success' },
+  corrected: { word: '✓ corrected', color: 'success' },
+  failed: { word: '× wrong', color: 'error' },
+  unconfirmed: { word: '? not confirmed', color: 'warning' },
   unchecked: { word: 'not checked', dim: true },
 }
+
+const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status === 'failed' && m.failedBy === 'evidence' ? 'unconfirmed' : m.status] : null) ?? STATUS.unchecked!
+
+/** The color of a line of code, per theme: Claude Code's theme has no key for code, so a calm blue. */
+const CODE_INK = { dark: '#9cdcfe', light: '#2b5fa8' } as const
 
 /** A part of the tray's body and the rows it takes: an element, or a line of code (the code's lines draw as one Code). */
 type Unit = { h: number; el?: Any; code?: string }
 
-/** A citation's card. By default its status, why in one sentence, and the one line of its evidence that holds the
- *  cited value, the value in the citations' purple (a file's line with its number). With c, for a value code computed:
- *  the whole code, in code styling, then a blank line and the whole output, the value in purple as before. */
-function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number): Unit[] {
+/** A line of evidence in the ruled block under the code or the file's place: a dim rule on the left, so code and
+ *  output read apart, and the line, the cited words in the soft tint. */
+function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string, theme: Theme): Unit {
   const { Box, Text } = els
+  const h = rowsOf(text, w - 2)
+  return { h, el: Box({ key, flexDirection: 'row', children: [
+    Text({ key: 'rule', dimColor: true, children: Array(h).fill('│').join('\n') }),
+    Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [highlighted(els, text, spans, 't', theme)] }),
+  ] }) }
+}
+
+/** A citation's card under its header (the status is in the header). A corrected one says what it was; a wrong one,
+ *  or one the check could not confirm, why in one sentence; all dim. Then its evidence. For a value code computed: the
+ *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
+ *  block; with c, all the code (as code), then all the output in the ruled block. For a file: its place (`place`, a
+ *  click opens the side pane), then the cited line in the ruled block. The cited words in the soft tint. */
+function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, theme: Theme, place: Any | null): Unit[] {
+  const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
-  const unconfirmed = m.status === 'failed' && m.failedBy === 'evidence'
-  const st = STATUS[unconfirmed ? 'unconfirmed' : m.status] ?? STATUS.unchecked!
   const ev = m.evidence
-  const why = m.reason ? firstSentence(m.reason) : m.status === 'checking' ? 'The check is running.' : ev ? '' : 'The check gave no evidence for it.'
-  const rows: Unit[] = [{ h: rowsOf(`${st.word}${why ? `  ${why}` : ''}`, w), el: Text({ key: 'status', wrap: 'wrap', children: [
-    Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
-    ...(why ? [Text({ key: 'why', ...(m.status === 'failed' && !unconfirmed ? { color: st.color } : { dimColor: true }), children: `  ${why}` })] : []),
-  ] }) }]
-  if (!ev || m.status === 'checking') return rows
+  const rows: Unit[] = []
+  const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
+  if (m.status === 'corrected' && m.was) dim('was', `was ${m.was.replace(/\*\*|`/g, '')}`)
+  else if (m.status === 'failed' && m.reason) dim('why', firstSentence(m.reason))
+  else if (m.status === 'checking') dim('why', 'The check is running.')
+  if (!ev) {
+    if (m.status !== 'checking') dim('none', 'The check gave no evidence for it.')
+    return rows
+  }
+  if (m.status === 'checking') return rows
   if (ev.kind === 'computed' && f.open === 'code') {
     for (const line of wrapCode(ev.code, w).split('\n')) rows.push({ h: 1, code: line })
-    rows.push({ h: 1, el: Text({ key: 'gap', children: ' ' }) })
     const spans = (ev.highlight ?? []) as [number, number][]
     let at = 0
     String(ev.output ?? '').split('\n').forEach((line, i) => {
       const s0 = at
       at += line.length + 1
       const mine = spans.map(([a, b]) => [Math.max(a, s0) - s0, Math.min(b, s0 + line.length) - s0] as [number, number]).filter(([a, b]) => b > a)
-      rows.push({ h: rowsOf(line, w), el: highlighted(els, line, mine, `o${i}`) })
+      rows.push(ruled(els, line, mine, w, `o${i}`, theme))
     })
     return rows
   }
   const line = evidenceLine(ev)
   if (!line) return rows
-  const gutter = line.n !== undefined ? `${line.n} │ ` : ''
-  const cut = lineWindow(line, w - gutter.length)
-  rows.push({ h: 1, el: Box({ key: 'ev', flexDirection: 'row', children: [
-    ...(gutter ? [Text({ key: 'n', dimColor: true, children: gutter })] : []),
-    Box({ key: 'l', flexShrink: 1, children: [highlighted(els, cut.text, cut.spans, 't')] }),
-  ] }) })
+  if (ev.kind === 'computed') {
+    const said = printLine(ev.code, line.text)
+    if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK[theme], wrap: 'truncate-end', children: said }) })
+  } else if (place) rows.push({ h: 1, el: place })
+  const cut = lineWindow(line, w - 2)
+  rows.push(ruled(els, cut.text, cut.spans, w, 'ev', theme))
   return rows
 }
 
@@ -550,13 +570,13 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
   return out
 }
 
-/** Under a citation of a file's lines, the file's place (`runs.jsonl:41`): a click opens the citation's whole evidence
- *  in the side pane, which works over ssh too. Where Claude Code draws OSC 8 hyperlinks it is also a link to the file,
+/** In a citation of a file's lines, the file's place (`runs.jsonl:41`), dim: a click opens the citation's whole
+ *  evidence in the side pane, which works over ssh too. Where Claude Code draws OSC 8 hyperlinks it is also a link to the file,
  *  which a ctrl or cmd click opens on this machine. */
 async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Promise<Any | null> {
   const ev = m?.evidence
   if (!ev || ev.kind === 'computed' || f.kind !== 'citation') return null
-  const label = `${ev.file}:${ev.line}`
+  const label = `${ev.file}:${evidenceLine(ev)?.n ?? ev.line}`
   const openIt = () => {
     void openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).then(placed => {
       if (!placed) noticeLine($, 'Claude Code did not open the side pane here. Click the citation in the reply to see its evidence.', 'tray')
@@ -565,13 +585,14 @@ async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Pr
   if (els.Markdown && (await hyperlinksHere($))) {
     const start = await startDir($)
     const abs = ev.file.startsWith('/') ? ev.file : `${start.replace(/\/+$/, '')}/${ev.file}`
-    const href = fileHref(abs, ev.line)
+    const href = fileHref(abs, String(evidenceLine(ev)?.n ?? ev.line))
     return els.Markdown({ key: 'tray-file', text: `[${label.replace(/[[\]\\]/g, c => '\\' + c)}](${href})`, onLinkPress: openIt, pressableLinks: [href] })
   }
-  return els.Button({ key: 'tray-file', plain: true, label: `open ${label}`, onPress: openIt, children: [els.Text({ color: 'merged', underline: true, children: label })] })
+  return els.Button({ key: 'tray-file', plain: true, label: `open ${label}`, onPress: openIt, children: [els.Text({ dimColor: true, children: label })] })
 }
 
-/** The tray, drawn above the bar while it is open: one frame, its title and its kind (cite, explain, heads up) on top,
+/** The tray, drawn above the bar while it is open: one frame, its title and its kind (cite, explain, heads up) on top
+ *  (a citation's status beside its kind),
  *  the mark's card under them, its rows starting where the title starts. `room`: the rows it may take, so the bar
  *  under it stays on screen (0: no limit); a body taller than that shows the rows that fit, and m shows the next. */
 export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
@@ -584,13 +605,13 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const tones = TONES[await themeOf($)]
   let title = ''
   let units: Unit[] = []
-  let under: Any | null = null
   let words: { text: string; start: number; end: number } | null = null
+  let status: ReturnType<typeof statusOf> | null = null
   if (f.kind === 'citation') {
     const m = await itemOf($, f.row, f.n)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
-    units = citationBody(els, f, m, inner)
-    under = await fileLinkEl($, els, f, m)
+    status = statusOf(m)
+    units = citationBody(els, f, m, inner, await themeOf($), await fileLinkEl($, els, f, m))
   } else {
     const g = await glossOf($, f.row, f.id)
     const heads = f.kind === 'heads'
@@ -610,8 +631,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     Text({ key: 'q', children: asked.length > 60 ? asked.slice(0, 59) + '…' : asked }),
     Text({ key: 'b', dimColor: true, children: ' · a opens it' }),
   ] }) })
-  // what fits above the bar: the frame's two borders and title take three rows, the file's place under it one
-  const fit = room > 0 ? Math.max(3, room - 3 - (under ? 1 : 0)) : 0
+  // what fits above the bar: the frame's two borders and title take three rows
+  const fit = room > 0 ? Math.max(3, room - 3) : 0
   const page = pageOf(units.map(u => u.h), fit, f.page ?? 0)
   paged = page.next === null ? null : { f, next: page.next }
   const shown = units.slice(page.start, page.end)
@@ -636,17 +657,20 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
       Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
     ]
   }
-  // the right of the title says what kind of mark it is, nothing more
-  const right = f.kind === 'citation' ? 'cite' : f.kind === 'heads' ? 'heads up' : 'explain'
+  // the right of the title says what kind of mark it is, and a citation's status before it
+  const kind = f.kind === 'citation' ? 'cite' : f.kind === 'heads' ? 'heads up' : 'explain'
+  const right = status ? `${status.word} · ${kind}` : kind
   const avail = inner - 2
   const roomT = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
   const tone = tones[f.kind]
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
     Text({ key: 't', bold: true, color: tone, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
-    Text({ key: 'r', dimColor: true, children: right }),
+    status
+      ? Text({ key: 'r', children: [Text({ key: 's', ...(status.color ? { color: status.color } : { dimColor: true }), children: status.word }), Text({ key: 'k', dimColor: true, children: ` · ${kind}` })] })
+      : Text({ key: 'r', dimColor: true, children: right }),
   ] })
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: body })] })
-  return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame, ...(under ? [under] : [])] })]
+  return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }
 
 // ------------------------------------------------------------------------------------------------ hooks

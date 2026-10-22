@@ -4,6 +4,7 @@
 // the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { CITE_TINT } from '../marks/evidence'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,18 +83,18 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('12 of 40')
-  // the header's right says only the kind; the card: the status, why in one sentence, the one line that holds the value
-  expect(band).toContain('cite')
-  expect(band).not.toContain('cite ·')
-  expect(band).toContain('verified  Line 4 says 12 failed.')
-  expect(band).not.toContain('It counts every run')
-  expect(band).toContain('4 │ failed: 12')
+  // the header's right: the status beside the kind; verified says no reason; then the file's place, dim, and the one
+  // line that holds the value, after a rule
+  expect(band).toContain('✓ verified · cite')
+  expect(band).not.toContain('Line 4 says')
+  expect(band).toContain('runs/summary.txt:4│failed: 12')
+  expect(band).not.toContain('4 │')
   expect(band).not.toContain('runs: 40')
   expect(band).not.toContain('passed: 28')
-  expect(band).toContain('runs/summary.txt:4')
-  // the value in the citations' purple
-  const drawnBand = await $.ui.render(above())
-  expect(all(drawnBand).some(n => n.type === 'Text' && n.props?.backgroundColor === 'merged' && textOf(n) === '12')).toBe(true)
+  // the value in the soft tint, the place dim
+  const drawnBand = all(await $.ui.render(above()))
+  expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT.dark && textOf(n) === '12')).toBe(true)
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'runs/summary.txt:4')?.props).toMatchObject({ dimColor: true })
   expect(band).toContain('a ask')
   expect(band).toContain('0 close')
   expect(band).not.toContain('v card')
@@ -127,42 +128,59 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-test('a corrected value computed by code: purple in the reply; c shows the whole code, a blank line, the whole output; c again goes back', async ($, on) => {
+test('a corrected value computed by code: purple in the reply; the line that printed it, then its output; c shows all the code and output; c again goes back', async ($, on) => {
   const { clock } = await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11. One run was retried.',
-    evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint(count())', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
+    evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
   }, 's-tray-2')
   // the corrected words draw as a settled citation: purple, underlined
   const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === '11 of 40')?.props).toMatchObject({ color: 'merged', underline: true })
   expect(textOf(drawn)).not.toContain('corrected')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  let band = textOf(await $.ui.render(above()))
-  expect(band).toContain('corrected  The output says 11.')
-  expect(band).not.toContain('was 12 of 40')
-  expect(band).toContain('failed: 11')
+  let drawnBand = all(await $.ui.render(above()))
+  let band = textOf(drawnBand)
+  // the header's status, what it was under it (no reason), the code line that printed the value, its output line
+  expect(band).toContain('✓ corrected · cite')
+  expect(band).toContain('was 12 of 40')
+  expect(band).not.toContain('The output says 11')
+  expect(band).toContain('print(f"failed: {bad}")│failed: 11')
   expect(band).not.toContain('runs: 40')
-  expect(band).not.toContain('print(count())')
-  expect(band).toContain('c code')
+  expect(band).not.toContain('print("runs:", n)')
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('#9cdcfe')
+  expect(drawnBand.some(n => n.type === 'Code')).toBe(false)
+  expect(band).toContain('c all code and output')
   // (keys apart, so they are not a word typed)
   await clock.advance(2000)
-  // c: the code (as code), then a blank line, then the whole output, its value still purple; no headings
+  // c: all the code (as code), then all the output after the rule, its value still in the tint; no headings
   expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
   const open = await $.ui.render(above())
   const code = all(open).find(n => n.type === 'Code')
-  expect(code?.props?.source).toBe('import json\nprint(count())')
+  expect(code?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
   band = textOf(open)
-  expect(band).toContain('runs: 40')
-  expect(band).toContain('passed: 29')
+  expect(band).toContain('│runs: 40│failed: 11│passed: 29')
+  expect(band).toContain('c one line')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')
-  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === 'merged' && textOf(n) === '11')).toBe(true)
+  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === CITE_TINT.dark && textOf(n) === '11')).toBe(true)
   // c again: back to the one line
   await clock.advance(2000)
   await $.prompt.edit(key('c'))
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('runs: 40')
   expect(band).toContain('failed: 11')
+})
+
+test('a wrong citation: × wrong in the header, why in one dim sentence under it, then its evidence', async ($, on) => {
+  await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed, but 3 were retried. The rest passed.' }, 's-tray-5')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const drawn = all(await $.ui.render(above()))
+  const band = textOf(drawn)
+  expect(band).toContain('× wrong · cite')
+  expect(drawn.find(n => n.type === 'Text' && textOf(n) === '× wrong')?.props?.color).toBe('error')
+  expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'Line 4 counts 12 failed, but 3 were retried.')?.props).toMatchObject({ dimColor: true })
+  expect(band).not.toContain('The rest passed')
+  expect(band).toContain('failed: 12')
 })
 
 test('] stops on a card Claude drew inline, where it stands in the answer: here before the words, so first; a asks about it', async ($, on) => {
