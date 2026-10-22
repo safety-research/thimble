@@ -54,9 +54,10 @@ let fullscreen: boolean | undefined
 // that does not say where its rows are leaves a card out: then every card drawn takes keys)
 const heights = new Map<string, number>()
 const shown = new Map<string, boolean>()
-// the trees Claude Code's Client could not draw, by card: the runner's answer the tree came from, and why. The frame
-// says why in the card's place until the card has a newer tree, which is drawn again.
-const faulted = new Map<string, { seq: number; reason: string }>()
+// the trees Claude Code's Client could not draw, by card: the version (gen) and the runner's answer the tree came
+// from, and why. The frame says why in the card's place until the card has a newer tree or a new version, which is
+// drawn again.
+const faulted = new Map<string, { gen: number; seq: number; reason: string }>()
 
 /** The screen's size and layout, as the last drawing of a message or a card saw it. */
 export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?: boolean } | undefined): void {
@@ -81,6 +82,12 @@ export function cardWidth(columns?: number): number {
 }
 
 const about = (id: string) => `card:${id}`
+
+/** The key of a card's Client: one per version, so a new version is a new instance, and a Client that failed on an
+ *  earlier version (Claude Code draws a failed instance again only after a reload) does not stay in its place. */
+export const clientKey = (meta: CardMeta) => `card-${meta.id}-${meta.gen}`
+/** The card and version a Client key names, as ui.message and ui.fault give it. */
+export const cardOfKey = (key: string) => { const [, id, gen] = String(key).split('-'); return { id: id ?? '', gen: gen === undefined ? null : Number(gen) } }
 
 /** Load a card's version on screen into the runner, from its copy on disk. */
 async function loadCard($: Engine, meta: CardMeta, width: number): Promise<Any> {
@@ -169,14 +176,14 @@ export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   const focused = (await focusNow($)) === meta.id
   const current = t && t.gen === meta.gen ? t : null
   const f = faulted.get(meta.id)
-  const fault = f && current && f.seq === current.seq ? f.reason : null
+  const fault = f && current && f.gen === current.gen && f.seq === current.seq ? f.reason : null
   // a drawing that failed at another width: the card draws again at this one
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
   // the title on a line of its own, then the card
   const rows: Any[] = [
     E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
     ...(fault ? [] : [E.Client({
-      key: `card-${meta.id}`, module: './client.tsx', width: current?.width ?? width,
+      key: clientKey(meta), module: './client.tsx', width: current?.width ?? width,
       props: { tree: current?.tree ?? null, width: current?.width ?? width, need: current?.width === width && !failedElsewhere ? '' : `${meta.gen}:${width}` },
     })]),
   ]
@@ -195,12 +202,14 @@ export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
 }
 
 /** The card's Client failed on screen (Claude Code's ui.fault): its frame draws the reason in its place until the card
- *  has a newer tree, and the failure line says it until then. */
-export async function clientFault($: Engine, id: string, reason: string): Promise<void> {
+ *  has a newer tree or a new version, and the failure line says it until then. */
+export async function clientFault($: Engine, key: string, reason: string): Promise<void> {
+  const { id, gen } = cardOfKey(key)
   const meta = await metaOf($, id)
   const t = await treeOf($, id)
-  if (!meta || !t) return
-  faulted.set(id, { seq: t.seq, reason: reason.slice(0, 200) })
+  // the Client of an earlier version, which a new version's took the place of
+  if (!meta || !t || (gen !== null && gen !== meta.gen)) return
+  faulted.set(id, { gen: t.gen, seq: t.seq, reason: reason.slice(0, 200) })
   $.ui.invalidate('ui.render')
   failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
 }

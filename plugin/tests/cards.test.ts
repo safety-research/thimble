@@ -86,9 +86,11 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     // a view that does not parse, and one that throws at a narrow width
     if (op === 'load' && String(body.view).includes('BROKEN')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' }) } }
     if (op === 'draw' && body.width < 30) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'draw', error: 'line 4: Invalid count value: -1' }) } }
+    // a view whose tree the terminal refuses: a Text whose bold is not a boolean
+    const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : TREE
     const answers: Record<string, unknown> = {
       ping: { ok: true },
-      load: { ok: true, tree: TREE, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
+      load: { ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
       key: { ok: true, handled: body.key === 'o', tree: SORTED, state: '{"sorted":true}' },
       draw: { ok: true, tree: TREE, state: 'null' },
       copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
@@ -295,6 +297,29 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   // its call's row in the fork draws no second card
   const row = await $.ui.render(callRow('toolu_made_up_3', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).some(n => n.type === 'Client')).toBe(false)
+})
+
+test('a new version that draws clears the failure of the version before it, and draws in a Client of its own', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: `${VIEW}\n// BOLD` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_14', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const keyOf = (n: Any) => n?.props?.key ?? n?.key
+  const row = () => $.ui.render(callRow('toolu_made_up_14', input))
+  const first = keyOf(elements(await row()).find(n => n.type === 'Client'))
+  // the terminal cannot draw version 1's tree: Claude Code says so (ui.fault)
+  try { await shown($, callRow('toolu_made_up_14', input)) } catch { /* the drawing failed */ }
+  expect(textOf(await row())).toContain('must be a boolean')
+  // version 2 draws in its place: the failure goes, and a new Client draws it
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_14b', id, edits: [{ old: '// BOLD', new: '' }] } as never)) as Any
+  expect(String(r2.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
+  const after = await row()
+  expect(textOf(after)).not.toContain('must be a boolean')
+  const second = keyOf(elements(after).find(n => n.type === 'Client'))
+  expect(second).toBeTruthy()
+  expect(second).not.toBe(first)
+  expect(textOf(await $.ui.render(BAND))).not.toContain('must be a boolean')
 })
 
 test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {
