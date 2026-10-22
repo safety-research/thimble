@@ -1,5 +1,7 @@
-// The Labels sidebar, at the right of the page (release 0.10's Labels and Checks sidebar, its labels half): the one
-// place where the analyst sees, turns on and off, and opens the workspace's labels. The top bar's "Labels N" opens it.
+// The Labels and Comments sidebar, at the right of the page (release 0.10's Labels and Checks sidebar): the one place
+// where the analyst sees, turns on and off, and opens the workspace's labels, and, next to them, the open comments the
+// checks left (CommentsList.tsx), each of which Apply sends to Claude in the chat. The top bar's "Labels N" and
+// "Comments N", just above it, open it on their list; its head names the list it shows and has no tabs of its own.
 //
 // A row is a label: its color, name, question, values with their counts, Show in (Files · Cards · Report, where it
 // shows, with what it found there) and its switch. A row opens its detail in the sidebar: the label's definition (a
@@ -9,6 +11,8 @@
 // ends in "+ New label".
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
+import { LabelAsks } from '../chat/LabelAsk'
+import { CommentsList } from './CommentsList'
 import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
@@ -35,13 +39,16 @@ export function labelSurface(k: Pick<Concept, 'unit'>): 'files' | 'cards' | 'rep
   return k.unit === 'cell' ? 'cards' : k.unit === 'span' ? 'report' : 'files'
 }
 
-export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void }) {
+export type SideTab = 'labels' | 'comments'
+
+export function LabelsSidebar({ ws, tab = 'labels', onClose }: { ws: string; tab?: SideTab; onClose: () => void }) {
   const concepts = useConcepts(ws)
   const labels = useMemo(() => listedLabels(concepts), [concepts])
   const [detail, setDetail] = useState<string | null>(null)
   // a request from elsewhere to open one label's detail (a label's chip or tag)
   useEffect(() => bus.on('openLabels', (e) => setDetail(e.id ?? null)), [])
-  const label = detail ? concepts.get(detail) : undefined
+  useEffect(() => setDetail(null), [tab])
+  const label = detail && tab === 'labels' ? concepts.get(detail) : undefined
   // Escape goes back from a label's detail to the list, then closes the sidebar. It is heard on the window, after the
   // document's own listeners: a menu or popover open over the page and a field with words typed in it keep their Escape.
   useEffect(() => {
@@ -57,7 +64,7 @@ export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void
     return () => window.removeEventListener('keydown', onKey)
   }, [detail, onClose])
   return (
-    <aside className="lside" aria-label="Labels" data-tab="labels">
+    <aside className="lside" aria-label={tab === 'labels' ? 'Labels' : 'Comments'} data-tab={tab}>
       <header className="lside-head">
         {label ? (
           <button type="button" className="lside-back" onClick={() => setDetail(null)}>
@@ -65,19 +72,21 @@ export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void
             Labels
           </button>
         ) : (
-          <h2 className="lside-heading">Labels</h2>
+          <h2 className="lside-heading">{tab === 'labels' ? 'Labels' : 'Comments'}</h2>
         )}
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
       </header>
       <div className="lside-body">
-        {label ? (
+        {tab === 'comments' ? (
+          <CommentsList ws={ws} />
+        ) : label ? (
           <LabelDetail ws={ws} label={label} onGone={() => setDetail(null)} />
         ) : (
           labels.map((k) => <LabelRow key={k.id} ws={ws} label={k} onOpen={() => setDetail(k.id)} />)
         )}
-        {!label && !labels.length && <p className="lside-none">No labels yet.</p>}
+        {tab === 'labels' && !label && !labels.length && <p className="lside-none">No labels yet.</p>}
       </div>
-      {!label && <NewLabel />}
+      {tab === 'labels' && !label && <NewLabel />}
     </aside>
   )
 }
@@ -195,6 +204,8 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
         <span className="lside-title">{k.name}</span>
         <Switch checked={!!k.shown} onChange={(on) => void setLabel(ws, k.id, { shown: on })} label={`${k.name}: ${k.shown ? 'on' : 'off'}`} />
       </div>
+      {/* a big run of this label that waits for the person's choice, as above the chat's composer */}
+      <LabelAsks ws={ws} concept={k.id} />
       <h4 className="lside-label">Definition</h4>
       {k.kind === 'prompt' ? (
         <TextArea className="lside-ask" value={question} onChange={setQuestion} onBlur={() => question.trim() !== said && void setLabel(ws, k.id, { description: question.trim() })} autoGrow rows={2} aria-label="The label's definition" />

@@ -28,7 +28,7 @@ export interface LabelEditorProps {
   /** Label from prompt could not make the label: its card is filled with this draft */
   onDraft: (draft: LabelDraft) => void
   /** an apply started for a label, with the run record the server answered */
-  onRun: (id: string, run: ConceptRun) => void
+  onRun: (id: string, run: ConceptRun | null) => void
   inPopover?: boolean
 }
 

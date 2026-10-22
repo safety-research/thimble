@@ -260,7 +260,7 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
 
 # the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
 # MEANWHILE (prompts/main.md)
-QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types", "citations"})
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "label_ask", "view", "card_types", "citations"})
 MEANWHILE = "meanwhile:"
 HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts
 _held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notes, once read
@@ -291,6 +291,8 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"view built: {fields.get('view') or ''}"
     elif kind == "card_types":
         line = f"card types: {fields.get('types') or ''}"
+    elif kind == "label_ask":
+        line = f"label {fields.get('name') or ''}: the analyst chose {fields.get('choice') or ''}"
     elif kind == "label_done":
         line = f"label finished: {fields.get('name') or ''}"
     elif kind == "rerun":
