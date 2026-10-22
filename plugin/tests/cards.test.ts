@@ -65,10 +65,11 @@ function world(on: Any) {
       load: { ok: true, tree: TREE, pointer: false, state: 'null', query: null, keys: 's', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
       key: { ok: true, handled: body.key === 's', tree: SORTED, pointer: false, state: '{"sorted":true}', query: null },
       draw: { ok: true, tree: TREE, pointer: false, state: 'null', query: null, lines: ['ada 3', 'bram 5'], cut: [] },
+      undo: { ok: true, tree: TREE, pointer: false, state: 'null', query: null },
     }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answers[op] ?? { ok: false, error: 'no such request' }) } }
   })
-  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   return { files, asked, dirs, clock }
 }
@@ -113,7 +114,9 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(elements(second).some(n => n.type === 'Client')).toBe(true)
   const first = await $.ui.render(callRow('toolu_made_up_1', input))
   expect(elements(first).some(n => n.type === 'Client')).toBe(false)
-  expect(textOf(first)).toContain('↓ “Scores” is drawn further down, as version 2')
+  // the earlier call's result line says where the card is now, in place of what it read
+  const result = await $.ui.render({ ...(callRow('toolu_made_up_1', input) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_1', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
+  expect(textOf(result)).toBe('↓ version 1 · “Scores” is drawn further down, as version 2')
 })
 
 test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {
@@ -128,6 +131,10 @@ test('a key at an empty prompt reaches the focused card when it lists the key, a
   expect(w.asked).toContain('key')
   const row = await $.ui.render(callRow('toolu_made_up_2', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).find(n => n.type === 'Client')?.props.props.tree).toEqual(SORTED)
+  // a letter typed straight after a key the card took: a word that starts with that key, which goes back whole
+  expect((await edit('q')).text).toBe('sq')
+  expect(w.asked).toContain('undo')
+  await w.clock.advance(1000)
   expect((await edit('q')).text).toBe('q')
   expect((await edit('s', 'a')).text).toBe('as')
   // keys that come quickly arrive as one edit: each reaches the card; a burst with a letter no card takes is typed
@@ -135,7 +142,22 @@ test('a key at an empty prompt reaches the focused card when it lists the key, a
   const keysBefore = w.asked.filter(x => x === 'key').length
   expect(await burst('sss')).toEqual({ text: '', cursor: 0 })
   expect(w.asked.filter(x => x === 'key').length).toBe(keysBefore + 3)
+  await w.clock.advance(1000)
   expect((await burst('sq')).text).toBe('sq')
+})
+
+test('a card scrolled out of view takes no keys, and the one in view does', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_4', ...input } as never)
+  const at = (onScreen: Any) => ({ ...(callRow('toolu_made_up_4', input) as Any), props: { ...(callRow('toolu_made_up_4', input) as Any).props, onScreen } })
+  await shown($, at({ first: 0, last: 9, of: 10 }))
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  expect(await edit('s')).toEqual({ text: '', cursor: 0 })
+  await w.clock.advance(1000)
+  await $.ui.render(at(null))
+  expect((await edit('s')).text).toBe('s')
 })
 
 test('a card the designer fork drew draws under the answer v was pressed on, also in a resumed session', async ($, on) => {

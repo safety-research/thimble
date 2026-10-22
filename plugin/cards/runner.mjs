@@ -20,6 +20,7 @@
 //   press    {id, button}             a Button's onPress, by the number the tree gives it
 //   pointer  {id, down, up}           a click: the onPointer listener gets the down, then the up
 //   query    {id, text}               the `/` search: props.query (null ends it)
+//   undo     {id, n}                  the state and search as they were before the last n keys
 //   act      {id, actions, width}     keys, clicks and searches in order, a text copy after each, then the card as it was
 //   unload   {id}
 //   ping
@@ -47,7 +48,15 @@ const MAX_VIEW = 60000
 
 // ------------------------------------------------------------------------------------------------- static check
 
-/** The view's code with strings, template text and comments taken out, so a word inside them does not count. */
+/** Whether a `/` that follows `before` (the code so far) starts a regular expression rather than a division: after
+ *  an operator, an opening bracket, a comma or a keyword such as `return`, or at the start. */
+function regexAt(before) {
+  const t = before.trimEnd()
+  return !t || /[(,=:[!&|?{};+\-*%<>~^]$/.test(t) || /(^|[^\w$])(return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await)$/.test(t)
+}
+
+/** The view's code with strings, template text, regular expressions and comments taken out, so a word inside them
+ *  does not count. */
 function scrub(src) {
   let out = ''
   let i = 0
@@ -69,6 +78,20 @@ function scrub(src) {
     if (c === '/' && d === '*') { const j = src.indexOf('*/', i + 2); i = j < 0 ? n : j + 2; out += ' '; continue }
     if (c === '"' || c === "'") { i++; while (i < n && src[i] !== c && src[i] !== '\n') { if (src[i] === '\\') i++; i++ } i++; out += '""'; continue }
     if (c === '`') { i++; template(); continue }
+    if (c === '/' && regexAt(out)) {
+      let inClass = false
+      i++
+      while (i < n && src[i] !== '\n') {
+        if (src[i] === '\\') { i += 2; continue }
+        if (src[i] === '[') inClass = true
+        else if (src[i] === ']') inClass = false
+        else if (src[i] === '/' && !inClass) { i++; break }
+        i++
+      }
+      while (i < n && /[a-z]/.test(src[i])) i++
+      out += '""'
+      continue
+    }
     if (c === '{') depth++
     if (c === '}') { depth--; if (tpl.length && tpl[tpl.length - 1] === depth) { tpl.pop(); i++; out += ')'; template(); continue } }
     out += c
@@ -86,7 +109,6 @@ export function checkView(src) {
     if (new RegExp(`(^|[^A-Za-z0-9_$.])${w}(?![A-Za-z0-9_$])(?!\\s*:(?!:))`).test(code)) bad.push(`\`${w}\` is not allowed`)
   }
   for (const w of ['eval', 'Function']) if (new RegExp(`(^|[^A-Za-z0-9_$])${w}\\s*(\\)\\s*)?\\(`).test(code)) bad.push(`calling \`${w}(\` is not allowed`)
-  if (/(^|[^A-Za-z0-9_$])\$(?![A-Za-z0-9_$])|\$\$|(^|[^A-Za-z0-9_])\$[A-Za-z_]/.test(code)) bad.push('`$` is not allowed outside strings')
   if (!/function\s+view\s*\(/.test(src)) bad.push('define `function view(props, surface)`')
   return bad
 }
@@ -114,6 +136,8 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
   const BORDERS = ['single', 'double', 'round', 'bold', 'singleDouble', 'doubleSingle', 'classic', 'arrow', 'dashed', 'quote']
   let rows = [], data = null, title = '', state, query = null, columns = 80
   let fns = null, pointer = null, keyListener = null, handlers = [], dirty = false, nodes = 0, notes = []
+  // the state and search before each of the last keys, newest last, for undo; any other event of the person's ends it
+  let undoable = []
   const element = t => function (props) {
     const p = props && typeof props === 'object' ? props : {}
     if (arguments.length > 1) {
@@ -269,8 +293,16 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       return { handled: true }
     },
     query(a) { query = typeof a.text === 'string' ? a.text : null; return {} },
+    undo(a) {
+      const n = Math.min(undoable.length, Math.max(0, Math.trunc(Number(a.n) || 0)))
+      if (!n) return {}
+      const b = undoable.splice(undoable.length - n)[0]
+      state = b.state === 'null' ? undefined : parse(b.state)
+      query = b.query
+      return {}
+    },
     save() { return { saved: saved(), query } },
-    restore(a) { state = a.saved == null ? undefined : parse(a.saved); query = a.query; return {} },
+    restore(a) { state = a.saved == null ? undefined : parse(a.saved); query = a.query; undoable = []; return {} },
   }
   // an event the view fails on is undone: the card keeps the state and search it had before it
   function call(op, json) {
@@ -280,6 +312,8 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       const a = parse(json)
       const r = OPS[op](a)
       if (r.ok === false) return stringify(r)
+      if (op === 'key') undoable = undoable.concat([before]).slice(-16)
+      else if (before) undoable = []
       const d = draw()
       return stringify(Object.assign({ ok: true }, r, { tree: d.tree, pointer: d.pointer, notes: d.notes, state: saved(), query }))
     } catch (e) {
@@ -438,6 +472,7 @@ const OPS = {
   press: a => event(a, 'press', { button: Number(a.button) }),
   pointer: a => event(a, 'pointer', { down: a.down, up: a.up ?? a.down, button: a.button }),
   query: a => event(a, 'query', { text: typeof a.text === 'string' ? a.text : null }),
+  undo: a => event(a, 'undo', { n: Number(a.n) || 0 }),
   act,
   unload: a => ({ ok: cards.delete(a.id) }),
 }

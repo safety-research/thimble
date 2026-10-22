@@ -6,6 +6,8 @@
 //   {seen: true}                    once, when the instance is first drawn: the card is on screen, so it takes keys
 //   {draw: need}                    the drawing it needs (`<version>:<width>`), once for each: the card's first
 //                                   drawing in a resumed session, or the drawing at a new width
+//   {rows: n}                       the rows its region takes, when they change: where the card stands in its row,
+//                                   so the hooks know whether the screen shows it
 //   {press: n}                      a Button, by the number the runner gave its onPress
 //   {pointer: {down, up, button}}   a click, sent when the button comes up
 //
@@ -32,7 +34,7 @@ const BOX = ['flexDirection', 'flexGrow', 'flexShrink', 'flexWrap', 'alignItems'
 const TEXT = ['color', 'backgroundColor', 'dimColor', 'bold', 'italic', 'underline', 'strikethrough', 'inverse', 'wrap']
 const BUTTON = ['label', 'plain', 'dimColor', 'variant']
 
-type Instance = { id: string; n: number; queue: Array<Record<string, unknown>>; down: { x: number; y: number; button: string } | null; asked: string }
+type Instance = { id: string; n: number; queue: Array<Record<string, unknown>>; down: { x: number; y: number; button: string } | null; asked: string; rows: number }
 const instances = new WeakMap<object, Instance>()
 
 function pick(p: Record<string, unknown> | undefined, names: string[]): Record<string, unknown> {
@@ -50,7 +52,7 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   const width = Number(props?.width) || surface.columns || 80
   let I = instances.get(surface)
   if (!I) {
-    I = { id: Math.random().toString(36).slice(2, 10), n: 0, queue: [], down: null, asked: '' }
+    I = { id: Math.random().toString(36).slice(2, 10), n: 0, queue: [], down: null, asked: '', rows: 0 }
     instances.set(surface, I)
   }
   const fresh = I.n === 0
@@ -62,6 +64,10 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     surface.post({ client: me.id, events: me.queue })
   }
   if (fresh) send({ seen: true })
+  if (surface.rows && surface.rows !== me.rows) {
+    me.rows = surface.rows
+    send({ rows: surface.rows })
+  }
   const need = typeof props?.need === 'string' ? props.need : ''
   if (need && me.asked !== need) {
     me.asked = need

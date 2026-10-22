@@ -195,4 +195,19 @@ test('the static check names what a view must not hold, and leaves words in stri
   assert.deepEqual(checkView('function view() { return "import process eval( Function(" } // require'), [])
   assert.deepEqual(checkView('const x = 1'), ['define `function view(props, surface)`'])
   assert.ok(checkView('function view() { return import("x") }').some(s => /import/.test(s)))
+  // a regular expression is no code: its `$` and its words are not checked, a division still is code
+  assert.deepEqual(checkView('function view(p) { const a = 4 / 2 / 1; return "x in 2s".replace(/ in [\\d.]+s$|process/, "") }'), [])
+})
+
+test('the cards undo the last keys they took, and only those', async () => {
+  const { id } = await load(COUNTER)
+  await ask('key', { id, key: '+' })
+  await ask('key', { id, key: '+' })
+  await ask('key', { id, key: '+' })
+  const back = await ask('undo', { id, n: 2 })
+  assert.equal(JSON.parse(back.state).n, 1)
+  // a press ends what can be undone
+  await ask('press', { id, button: 0 })
+  const kept = await ask('undo', { id, n: 1 })
+  assert.equal(JSON.parse(kept.state).n, 11)
 })

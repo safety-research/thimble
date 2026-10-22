@@ -7,9 +7,11 @@
 //   framesUnder   the frames of the cards drawn under an answer
 //   askCard       a request to the runner about a card; a card the runner does not hold is loaded from its copy first
 //   applyAnswer   the runner's answer to an event: the new tree on screen, the state on disk, a failure said
-//   keyOwner      the card a key at an empty prompt goes to: the focused card when it lists the key, else the newest
-//                 card on screen that lists it
+//   noteShown     which of a row's cards the screen shows now, from the row's `onScreen` and each card's height
+//   keyOwner      the card a key at an empty prompt goes to: among the cards the screen shows, the focused card when it
+//                 lists the key, else the newest that lists it
 //   cardKey       a key at an empty prompt to its card; `/` starts a search typed in the prompt box, whose words reach
+//   undoKeys      the cards undo the keys they just took (the person typed a word that starts with them)
 //   searchTyped   the card as props.query at each keystroke; Enter keeps it (keepSearch), and the box is cleared when
 //   keepSearch    Claude Code puts the kept words back in it (searchRestored); an empty box ends a search
 //   cardPost      what a card's Client sends: Button presses and clicks
@@ -33,14 +35,28 @@ type Any = any
 const FRAME = 8
 const MIN_WIDTH = 20
 
+/** Rows a card's frame adds to its Client's: the title, a line under it, the keys' line and the two borders. */
+const FRAME_ROWS = 5
+
 let columnsSeen = 0
+let rowsSeen = 0
+// the rows each card's Client takes, as it last reported them, and whether the screen shows each card now (a surface
+// that does not say where its rows are leaves a card out: then every card drawn takes keys)
+const heights = new Map<string, number>()
+const shown = new Map<string, boolean>()
 // the trees Claude Code's Client could not draw, by card: the runner's answer the tree came from, and why. The frame
 // says why in the card's place until the card has a newer tree, which is drawn again.
 const faulted = new Map<string, { seq: number; reason: string }>()
 
-/** The screen's width, as the last drawing of a message or a card saw it. */
-export function noteColumns(columns: number | undefined): void {
-  if (columns && columns > 0) columnsSeen = columns
+/** The screen's size, as the last drawing of a message or a card saw it. */
+export function noteViewport(v: { columns?: number; rows?: number } | undefined): void {
+  if (v?.columns && v.columns > 0) columnsSeen = v.columns
+  if (v?.rows && v.rows > 0) rowsSeen = v.rows
+}
+
+/** The screen's rows, or 0 while no drawing said. */
+export function screenRows(): number {
+  return rowsSeen
 }
 
 export function cardWidth(columns?: number): number {
@@ -86,12 +102,35 @@ export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: num
   failNotice($, `The card “${cut(meta.title, 40)}” failed: ${error}`, about(meta.id))
 }
 
-/** The card a key at an empty prompt goes to: the focused card when it lists the key, else the newest card on screen
- *  that lists it; null when no card does, and the key is typed. A card is on screen once its frame was drawn since the
- *  plugin loaded, so a card a resumed session no longer shows takes no keys. */
+/** Which of the cards at the end of a row (its frames, the last first counted from the row's end) the screen shows
+ *  now: the row's `onScreen` names the rows of it in the viewport, null when none is. A card shows when one of its
+ *  frame's rows is in the viewport; a card whose height is not known yet takes the whole row. When the cards the
+ *  screen shows change, every card's frame draws again, since the keys each names depend on the others. */
+export function noteShown($: Engine, ids: string[], onScreen: { first: number; last: number; of: number } | null | undefined): void {
+  let changed = false
+  let end = onScreen?.of ?? 0
+  for (const id of [...ids].reverse()) {
+    let now = true
+    if (onScreen === null) now = false
+    else if (onScreen) {
+      const h = heights.get(id)
+      const start = h ? end - h - FRAME_ROWS : 0
+      now = onScreen.last >= start && onScreen.first < end
+      end = start
+    }
+    if (shown.get(id) !== now) { shown.set(id, now); changed = true }
+  }
+  if (changed) $.clock.after(0, () => $.ui.invalidate('ui.render'))
+}
+
+/** The card a key at an empty prompt goes to: among the cards on screen, the focused card when it lists the key, else
+ *  the newest that lists it; null when no card does, and the key is typed. A card is on screen when its frame was
+ *  drawn since the plugin loaded and the screen shows it now (noteShown), so a card scrolled out of view, and one a
+ *  resumed session no longer shows, takes no keys. */
 export async function keyOwner($: Engine, key: string): Promise<CardMeta | null> {
   const metas: CardMeta[] = []
   for (const id of await seenNow($)) {
+    if (shown.get(id) === false) continue
     const m = await metaOf($, id)
     if (m && m.version > 0 && m.keys.includes(key)) metas.push(m)
   }
@@ -164,11 +203,14 @@ export async function cardText($: Engine, id: string): Promise<string> {
 /** The cards an answer row holds, framed, under it: those still anchored there (a card main drew a new version of
  *  stands at main's call). */
 export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
-  const out: Any[] = []
+  const metas: CardMeta[] = []
   for (const id of await anchoredAt($, e.requestId)) {
     const meta = await metaOf($, id)
-    if (meta && meta.version > 0 && meta.anchorRow === e.requestId) out.push(await frame($, e, meta, 'drawn after you pressed v'))
+    if (meta && meta.version > 0 && meta.anchorRow === e.requestId) metas.push(meta)
   }
+  if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
+  const out: Any[] = []
+  for (const meta of metas) out.push(await frame($, e, meta, 'drawn after you pressed v'))
   return out
 }
 
@@ -176,17 +218,32 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
 // run at the same time and their requests could reach the runner in the other order
 let keys: Promise<unknown> = Promise.resolve()
 
-/** A key at an empty prompt to the card it reaches, if any, after the keys pressed before it. `/` starts a search. */
-export function cardKey($: Engine, key: string): Promise<boolean> {
+/** A key at an empty prompt to the card it reaches, if any, after the keys pressed before it: the card's id, or null.
+ *  `/` starts a search. */
+export function cardKey($: Engine, key: string): Promise<string | null> {
   const done = keys.then(async () => {
     const meta = await keyOwner($, key)
-    if (!meta) return false
+    if (!meta) return null
     if (key === '/') {
       await setSearch($, { id: meta.id, text: '' })
       await applyAnswer($, meta, await askCard($, meta, 'query', { text: '' }))
     }
     await applyAnswer($, meta, await askCard($, meta, 'key', { key }))
-    return true
+    return meta.id
+  })
+  keys = done.catch(() => undefined)
+  return done
+}
+
+/** The cards undo the keys they took last, one undo per key, after the keys pressed before. */
+export function undoKeys($: Engine, ids: string[]): Promise<void> {
+  const done = keys.then(async () => {
+    const n = new Map<string, number>()
+    for (const id of ids) n.set(id, (n.get(id) ?? 0) + 1)
+    for (const [id, count] of n) {
+      const meta = await metaOf($, id)
+      if (meta) await applyAnswer($, meta, await askCard($, meta, 'undo', { n: count }))
+    }
   })
   keys = done.catch(() => undefined)
   return done
@@ -225,6 +282,7 @@ const handled = new Map<string, number>()
 /** One event of a Client's: the card on screen, the drawing it needs, a Button press or a click. */
 async function clientEvent($: Engine, meta: CardMeta, ev: Any): Promise<Any> {
   if (ev.seen) { await markSeen($, meta.id); return null }
+  if (typeof ev.rows === 'number') { heights.set(meta.id, ev.rows); return null }
   if (typeof ev.draw === 'string') {
     const [gen, width] = ev.draw.split(':').map(Number)
     return gen === meta.gen && width ? { width, r: await askCard($, meta, 'draw', { width }) } : null

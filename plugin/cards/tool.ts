@@ -22,7 +22,7 @@ import { designAnchor } from '../designer/v'
 import { promptText } from '../prompts/prompts'
 import { record } from '../telemetry/telemetry'
 import { fill } from '../prompts/registry.mjs'
-import { askCard, applyAnswer, cardWidth } from './draw'
+import { askCard, applyAnswer, cardWidth, screenRows } from './draw'
 import { ask } from './ask'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, searchNow, setFocus, setSearch, setTree, treeOf, versionDir } from './store'
 
@@ -32,6 +32,8 @@ type Any = any
 
 const MAX_ROWS_BYTES = 64 * 1024 * 1024
 const COPY_LINES = 60
+/** Rows of the screen the card's frame, the prompt box and the bar above it take, besides the card's own. */
+const AROUND_ROWS = 14
 /** The conversation's width beside a side pane on a terminal of 120 columns, which the card is also drawn at for its
  *  text copy. */
 const NARROW_COLUMNS = 68
@@ -126,8 +128,11 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const before = isCardId(id) ? await metaOf($, id) : null
   if (update && !before) return { result: `There is no card "${oneLine(given, 40)}" to replace. Leave out \`id\` to draw a new card.` }
 
+  // a card stands at a call of main's, or under the answer the running designer fork draws for; another agent's call
+  // stands in that agent's own transcript, where the person never sees a card
   const fork = forkOf(input.agentId)
   const anchorRow = fork?.kind === 'designer' ? designAnchor(input.agentId) : null
+  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation and the copy that v starts draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
   const meta: CardMeta = before ?? {
     id, version: 0, title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
     keys: [], rows: 0, columns: [], file: '', gen: 0, error: null, calls: {}, at: Date.now(),
@@ -165,7 +170,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const next: CardMeta = {
     ...meta, version, title, keys, rows: r.summary.rows, columns: r.summary.columns, file: String(input.data),
     gen: meta.gen + 1, error: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
-    anchorRow: fork?.kind === 'designer' ? anchorRow ?? meta.anchorRow : null,
+    anchorRow,
     toolUseId: fork?.kind === 'designer' ? meta.toolUseId : toolUseId,
   }
   await remember(next, { version, title, file: String(input.data), rows: next.rows })
@@ -199,6 +204,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     if (narrow?.ok && (narrow.cut?.length || narrow.lines.length > r.lines.length)) out.push('', `At ${narrowWidth} columns, as when the analyst opens a side pane, it draws:`, ...copyText(narrow.lines, narrow.cut, narrowWidth))
   }
 
+  let tallest = r.lines.length
   const actions = Array.isArray(input.actions) ? input.actions : []
   if (actions.length) {
     const a = await askCard($, next, 'act', { actions, width })
@@ -209,8 +215,11 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
       }
       out.push('', 'The card is back as it was before these actions.')
       await applyAnswer($, next, a, width)
+      for (const c of a.copies as Any[]) if (!c.error) tallest = Math.max(tallest, c.lines.length)
     } else out.push('', `The actions did not run: ${a?.error ?? 'no answer'}`)
   }
+  const screen = screenRows()
+  if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
   void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: next.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0 })
   return { result: out.join('\n') }
 }
