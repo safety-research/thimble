@@ -32,6 +32,7 @@ import { failNotice } from '../bar/notice'
 import { frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
+import { claimsThreadScope } from '../claims/seam'
 import { cut, textWidth } from '../core/text.js'
 import { marksIn } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
@@ -238,7 +239,9 @@ async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> 
 
 /** The scope of a pane of thimble's, for the thread under it: what it shows, in words. */
 async function paneScope($: Engine, kind: string, args: Any): Promise<ThreadScope> {
-  const pane = { kind, args: args ?? {} }
+  // the claims pane: the claim selected, as its a asks it (one thread for both)
+  const claims = kind === 'claims' ? await claimsThreadScope($, args) : null
+  const pane = { kind, args: claims ? claims.args : args ?? {} }
   const known = threadOf(threadKey({ about: '', pane }))
   if (known) return { ...known.scope, pane }
   if (kind === 'evidence') {
@@ -247,7 +250,7 @@ async function paneScope($: Engine, kind: string, args: Any): Promise<ThreadScop
   }
   if (kind === 'labels') return { about: args?.label ? `the label ${args.label}${args.value && args.value !== '-' ? ` (${args.value})` : ''}` : 'the labels', pane }
   if (kind === 'coverage') return { about: 'coverage', pane }
-  if (kind === 'claims') return { about: 'the claims', pane }
+  if (claims) return { about: claims.about, pane }
   return { about: kind, pane }
 }
 

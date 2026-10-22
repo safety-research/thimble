@@ -76,6 +76,20 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
   return data
 }
 
+/** What the side thread under the claims pane is about (threads/pane.tsx): the claim selected, or where it was said,
+ *  as the pane's `a` asks it, so the input under the pane and `a` share one thread, as 0.10's panel input asked about
+ *  the claim selected. The arguments keep only what names the thing (not the e and h toggles). */
+export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: ClaimsArgs }> {
+  const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
+  const data = paneData(await claimsPaneStore($))
+  if (a.source) {
+    const c = data.claims.find((x: Any) => x.id === a.source) ?? null
+    return { about: threadAbout(c, true), args: { source: a.source, ...(a.row ? { row: a.row } : {}) } }
+  }
+  const c = a.claim ? data.claims.find((x: Any) => x.id === a.claim) ?? null : null
+  return { about: threadAbout(c), args: c ? { claim: c.id } : {} }
+}
+
 export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
   const W = Math.max(40, Number(e?.props?.bodyColumns) || 90)

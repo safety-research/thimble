@@ -5,7 +5,7 @@
 // and keys left empty by the seams. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { checkSpans, RESTORED_KEYS, type Span } from '../core/answerview'
+import { checkSpans, restoredKeys, type Span } from '../core/answerview'
 import { ownKeys } from '../hooks/keys'
 import { looksByWords } from '../marks/register'
 import { marksIn } from '../marks/message.js'
@@ -93,8 +93,8 @@ test("a version shown in place of Claude's words: its citations look as the chec
 })
 
 test("the features' letters are thimble's own, so no card takes them", () => {
-  expect(RESTORED_KEYS).toEqual(['s', 'c', 't'])
-  for (const k of RESTORED_KEYS) expect(ownKeys()).toContain(k)
+  expect(restoredKeys()).toEqual(['s', 'c', 't'])
+  for (const k of restoredKeys()) expect(ownKeys()).toContain(k)
 })
 
 const answer = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } }) as never

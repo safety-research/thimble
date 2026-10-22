@@ -26,7 +26,7 @@ import { failNotice } from '../bar/notice'
 import { FIX_KEYS } from '../bar/fixask.js'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
-import { RESTORED_KEYS, restoredKey } from '../core/answerview'
+import { restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 
 type Engine = EngineInterface
@@ -38,7 +38,7 @@ export const WORD_MS = 350
  *  core/answerview.ts, import the card tool, which reads them, so a list made as this module loads would read the
  *  features' keys before their modules set them.) */
 export function ownKeys(): string[] {
-  return ['v', ...FIX_KEYS, ...RESTORED_KEYS, ...BAR_KEYS]
+  return ['v', ...FIX_KEYS, ...restoredKeys(), ...BAR_KEYS]
 }
 
 /** How a taker takes a key: `card` (a card's own key: its keys typed quickly are not a word), `now` with its `undo`

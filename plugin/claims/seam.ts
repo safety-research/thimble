@@ -13,6 +13,8 @@
 //                                      look.out.clusters), placed by their words in the look's messages
 //   claimsLookFailed($, look, why)     a look that gave nothing: the turn's claims are missing, and why
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
+//   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, or
+//                                      where it was said (threads/pane.tsx)
 //   folderClaimsFromFeed($, ev)        a `folder_claims` line of the change feed: the folder's map kept by
 //                                      `thimble claims save`, brought into the claims
 //   registerClaims                     its own hooks (/claims)
@@ -22,7 +24,7 @@ import type { BarItem } from '../bar/bar'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
-import { drawClaims } from './pane'
+import { claimsThreadScope as threadScope, drawClaims } from './pane'
 import { claimsBarWords, claimsDigest, folderClaimsFromFeed as fromFeed, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
@@ -57,6 +59,10 @@ export async function claimsLookFailed($: Engine, look: Look, why: string): Prom
 
 export async function drawClaimsPane($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
   return drawClaims($, e, args, els)
+}
+
+export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: unknown }> {
+  return threadScope($, args)
 }
 
 export async function folderClaimsFromFeed($: Engine, ev: Any): Promise<void> {

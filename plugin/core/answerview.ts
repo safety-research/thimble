@@ -11,7 +11,7 @@
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row)
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray, the label ask)
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order
-//   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; RESTORED_KEYS are letters
+//   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
 //
@@ -50,8 +50,12 @@ export type Span = { id: string; start: number; end: number; look: SpanLook; foc
  *  MarkItem.n), or an explainer's or a heads-up's span by its id. */
 export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: string; kind: 'explain' | 'heads'; id: string }
 
-/** The letters the features take at an empty prompt, which no card may take. */
-export const RESTORED_KEYS = [...SQUEEZE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+/** The letters the features take at an empty prompt, which no card may take. (Read when asked: the features' seams
+ *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
+ *  keys before its module set them.) */
+export function restoredKeys(): string[] {
+  return [...SQUEEZE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+}
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
   try { return (await p) ?? none } catch { return none }

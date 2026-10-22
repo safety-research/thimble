@@ -12,6 +12,8 @@
 //   openThread($, scope)               the side pane on the thread about `scope` (a new one, or the one already about
 //                                      it), its input taking the keys: the tray's `a` on a mark, a claim's question in
 //                                      the claims pane; true when it opened
+//   threadAsked($, scope)              the first question of the thread about `scope`, or null when none was asked:
+//                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
 //   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
@@ -23,7 +25,7 @@ import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
 import { drawThreads, threadUnder as under } from './pane'
-import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount } from './thread'
+import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor } from './thread'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,6 +57,15 @@ export async function threadsBar($: Engine, _on: (key: string) => boolean, _prev
 
 export async function drawThreadsPane($: Engine, e: Any, kind: 'threads' | 'thread', args: unknown, els: Any): Promise<unknown> {
   return drawThreads($, e, kind, args, els)
+}
+
+/** The first question asked in the thread about `scope`, or null when it has none; read again when a thread changes. */
+export async function threadAsked($: Engine, scope: ThreadScope): Promise<string | null> {
+  await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
+  await restoreThreads($)
+  const t = threadFor(scope)
+  const q = t?.asks[0]?.text ?? t?.turns.find(x => x.role === 'person')?.text
+  return q ? String(q) : null
 }
 
 export async function threadUnder($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<unknown[]> {

@@ -34,6 +34,7 @@ import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 import { tracked } from '../telemetry/telemetry'
+import { trayOffRow } from '../tray/seam'
 import { answerCards, applyCards, showCards, type Answer } from './cards'
 import {
   ARRIVE, SCALE, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
@@ -256,14 +257,16 @@ async function once($: Engine, id: string, want: Want): Promise<void> {
   })
 }
 
-/** A version shown: the record kept, its cards set to the ones it shows, and the version marked for Claude to hear of
- *  with the person's next prompt. Text a call just `written` writes itself in from the top; a version that comes back
- *  from the record (the original at 0, or a level seen before) shows whole at once, since nothing is being written. */
+/** A version shown: the record kept, its cards set to the ones it shows, the tray off this row's moved marks, and the
+ *  version marked for Claude to hear of with the person's next prompt. Text a call just `written` writes itself in from
+ *  the top; a version that comes back from the record (the original at 0, or a level seen before) shows whole at once,
+ *  since nothing is being written. */
 async function settled($: Engine, id: string, rec: Rec, o: { written: boolean }): Promise<void> {
   const before = await recOf($, id)
   await saveRec($, rec)
   const stale = await showCards($, rec)
   if (stale.length) failNotice($, `A card could not be drawn at the version shown: ${stale.join('; ')}. Press 0 or pick the level again to try again.`, 'squeeze')
+  await trayOffRow($, id.replace(/#cu$/, ''))
   const was = before ? shownOf(before) : ''
   const now = shownOf(rec)
   if (now !== was && o.written) { await writeIn($, id, now.length); return }

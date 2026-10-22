@@ -40,7 +40,7 @@ import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeView } from '../squeeze/seam'
-import { openThread } from '../threads/seam'
+import { openThread, threadAsked } from '../threads/seam'
 import {
   BODY, aboutOf, back, base, cutTitle, drawsHyperlinks, explainerText, fileHref, indexOf, open, push,
   refOf, replyPlace, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, top, windowOf,
@@ -557,6 +557,13 @@ export async function trayBand($: Engine, els: Any, width: number): Promise<Any[
       })]
     }
   }
+  // the thread about this mark, once a question was asked in it: a opens it
+  const asked = f.open === 'code' ? null : await threadAsked($, { about: '', mark: refOf(f) as MarkRef })
+  if (asked) body = [...body, Text({ key: 'thread', wrap: 'truncate-end', children: [
+    Text({ key: 'a', dimColor: true, children: '↳ thread: ' }),
+    Text({ key: 'q', children: asked.length > 60 ? asked.slice(0, 59) + '…' : asked }),
+    Text({ key: 'b', dimColor: true, children: ' · a opens it' }),
+  ] })]
   const right = [where, from, f.open === 'code' ? 'code' : '', tray.stack.length > 1 ? String(tray.stack.length) : ''].filter(Boolean).join(' · ')
   const avail = inner - 2
   const room = title.length + (right ? right.length + 3 : 0) <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)

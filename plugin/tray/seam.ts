@@ -13,13 +13,15 @@
 //   markPressed($, row, n)             a press on citation `n` of the row: true when the tray took it (else the
 //                                      citation's evidence opens in the side pane, marks/register.ts)
 //   openTray($, mark)                  open the tray on a mark (an explainer's press, explain/seam.ts): true when it did
+//   trayOffRow($, row)                 close the tray when it stands on this row, whose text changed under its marks
+//                                      (a squeeze version shown, squeeze/term.ts)
 //   registerTray                       its own hooks (a question asked with the tray open, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayKey as key } from './tray'
+import { closeTray, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayKey as key, trayNow } from './tray'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,6 +49,11 @@ export async function markPressed($: Engine, row: string, n: number): Promise<bo
 
 export async function openTray($: Engine, mark: MarkRef): Promise<boolean> {
   return openOn($, mark)
+}
+
+export async function trayOffRow($: Engine, row: string): Promise<void> {
+  const tray = await trayNow($)
+  if (tray?.stack[0]?.row === row) await closeTray($)
 }
 
 export const registerTray: Register = (on, ctx) => register(on, ctx)
