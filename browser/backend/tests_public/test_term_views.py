@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -512,6 +513,45 @@ async def test_a_label_checked_in_color_by_is_turned_on_in_files_by_the_host(boa
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+TWO_FETCHES = r"""
+import { draw, fetch } from 'thimble-term'
+const got = {}
+for (const k of ['a', 'b']) fetch({ k }).then((v) => { got[k] = v })
+draw((d) => d.line(`a ${got.a ?? 'reading'} · b ${got.b ?? 'reading'}`))
+"""
+
+
+@needs_node
+def test_answers_that_come_in_one_read_are_all_drawn_before_the_program_says_it_is_idle():
+    """A program takes each answer in a then() of its own. When one read brings two answers, the second one's then()
+    runs after the redraw the first asked for, so the kit draws again once both have run, and the frames out before
+    the answer to the sync after them show both answers (Linked sessions stayed at "◌ reading the transcript" on a
+    loaded machine, where the reader's answers came together)."""
+    node = srt.node()
+    proc = subprocess.Popen([node, *term_views.node_flags(node), str(term_views.RUNTIME)], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        def send(*msgs: dict) -> None:
+            proc.stdin.write("".join(json.dumps(m) + "\n" for m in msgs))  # one write, so the program reads them at once
+            proc.stdin.flush()
+
+        def until(t: str) -> list[dict]:
+            got = []
+            while not got or got[-1]["t"] != t:
+                got.append(json.loads(proc.stdout.readline()))
+            return got
+
+        send({"t": "init", "source": TWO_FETCHES, "cols": 40, "rows": 3, "theme": "dark", "view": {"slug": "two"},
+              "state": {}, "labels": [], "open": None, "text": "plain"})
+        queries = [m for m in until("query") + until("query") if m["t"] == "query"]
+        send(*({"t": "answer", "id": q["id"], "data": q["q"]["k"].upper()} for q in queries), {"t": "sync", "id": 1})
+        frames = [m for m in until("synced") if m["t"] == "frame"]
+        assert frames and frames[-1]["text"].splitlines()[0].strip() == "a A · b B", frames
+    finally:
+        proc.kill()
+        proc.wait()
 
 
 # ------------------------------------------------------------------------------------------------------ Timeline

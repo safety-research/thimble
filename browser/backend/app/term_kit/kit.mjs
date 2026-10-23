@@ -1161,6 +1161,10 @@ export function handle(msg) {
         e.name = 'ReaderError'
         p.reject(e)
       } else p.resolve(msg.data)
+      // the program takes the answer in a then() of its own, a microtask queued behind the redraw below when one read
+      // brings several answers (the first answer's redraw is queued before the last answer's then()), so the view is
+      // drawn again once those have run: an answer the last flush missed is never left undrawn
+      setImmediate(redraw)
       break
     }
     case 'labels':
