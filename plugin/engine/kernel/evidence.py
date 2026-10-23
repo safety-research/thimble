@@ -287,6 +287,15 @@ def one_quote(s: str) -> str:
     return s.translate(QUOTES)
 
 
+MD_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+
+
+def md_unescaped(s: str) -> str:
+    """A reply's words with markdown's backslash escapes read as the marks they stand for (`GH\\#65915` is GH#65915,
+    `\\*` is *), as the person reads them; inside a code span a backslash is written as is."""
+    return "".join(p if p.startswith("`") else MD_ESCAPE.sub(r"\1", p) for p in re.split(r"(`[^`]*`)", s))
+
+
 def unmark(s: Any) -> str:
     """Markdown emphasis and code marks are formatting, not words."""
     return norm_ws(str(s).replace("**", "").replace("`", ""))
@@ -1853,8 +1862,10 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     cited words is a correction; one that keeps every word and cites fewer of them, a narrowing; any other, a rewrite
     (`rewrite`: the new sentence, in the form of `sentence`). For each, the evidence shows the cited words, and the words
     it puts outside the citation state no value the evidence does not show (uncited_values)."""
-    n, words = mark["n"], str(mark["words"])
-    out: dict[str, Any] = {"n": n, "status": "failed", "failedBy": "none", "shown": words, "reason": f"{NOT_RUN} Its answer left this citation out."}
+    # the words are checked as they read (markdown's `\#` is `#`) and shown as the reply wrote them
+    n, written = mark["n"], str(mark["words"])
+    words = md_unescaped(written)
+    out: dict[str, Any] = {"n": n, "status": "failed", "failedBy": "none", "shown": written, "reason": f"{NOT_RUN} Its answer left this citation out."}
     if not item:
         return out
     status, kind = item.get("status"), item.get("kind")
@@ -1932,7 +1943,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     # a narrowing puts no words in: the evidence shows the part it keeps
     changed = bool(new) and not narrow and loose(new) != loose(words)
     problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards)
-    res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
+    res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
     did = "cited only a part of these words" if narrow else "reworded the sentence" if rewrite else "offered other words"
