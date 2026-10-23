@@ -656,6 +656,8 @@ def _resolve_path(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
     from . import corpus  # lazy (import cycle)
 
     path, rel = _locate(corpus_dir, p["path"])
+    if path.is_dir() and not p.get("locator"):
+        return _resolve_folder(corpus_dir, rel, ref)
     if not path.is_file():
         raise RefError(f"no such file: {rel!r}", 404)
     src_kind = corpus.source_kind(rel)
@@ -694,6 +696,27 @@ def _resolve_path(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
     if p.get("locator"):
         out["locator"] = meta["locator"] = p["locator"]
     return out
+
+
+FOLDER_EXCERPT_ENTRIES = 12  # the entries a folder's excerpt names, its folders first
+
+
+def _resolve_folder(corpus_dir: Path, rel: str, ref: str) -> dict[str, Any]:
+    """A folder (`<path>/` or `<path>`): {ref, kind: path, path, excerpt: "Folder · N items" over its first entries, as
+    the Files listing gives them (corpus.folder_listing), meta.folder true}. 404 for a folder the listing leaves out."""
+    from . import corpus  # lazy (import cycle)
+
+    rel = rel.strip("/")
+    listing = corpus.folder_listing(corpus_dir, rel)
+    if listing is None:
+        raise RefError(f"no such folder: {rel!r}", 404)
+    names = [f["name"] + "/" for f in listing["folders"]] + [f["path"].rsplit("/", 1)[-1] for f in listing["files"]]
+    shown = names[:FOLDER_EXCERPT_ENTRIES]
+    more = [f"… {len(names) - len(shown)} more"] if len(names) > len(shown) else []
+    head = f"Folder · {len(names)} item{'' if len(names) == 1 else 's'}"
+    excerpt = "\n".join([head, *shown, *more]) if names else "Folder · empty"
+    meta = {"kind": "folder", "folder": True, "entries": len(names)}
+    return {"ref": ref, "kind": "path", "path": rel + "/", "record": None, "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}
 
 
 _MOMENT = re.compile(r"^t=([0-9:.]+)(?:,([0-9:.]+))?$")  # a video's or a recording's moment, the media fragment's form

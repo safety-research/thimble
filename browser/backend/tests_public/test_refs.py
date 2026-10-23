@@ -69,3 +69,12 @@ def test_resolve_cell(mini, workspaces_tmp):
     with pytest.raises(refs.RefError) as e:
         refs.resolve(mini, "card:nope")
     assert e.value.status == 404
+
+
+def test_resolve_folder(mini):
+    """A ref to a folder, with its slash or without, reads as the folder's entries, never a missing file."""
+    for ref in ("agents/", "agents"):
+        out = refs.resolve(mini, ref)
+        assert out["kind"] == "path" and out["path"] == "agents/" and out["meta"]["folder"], ref
+        head, *names = out["excerpt"].splitlines()
+        assert head.startswith("Folder · ") and "agent-01.jsonl" in names, ref
