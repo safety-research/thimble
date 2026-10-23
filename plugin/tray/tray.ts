@@ -507,7 +507,7 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   checking: { word: 'checking', dim: true },
   verified: { word: '✓ verified', color: 'success' },
   corrected: { word: '✓ verified', color: 'success' },
-  failed: { word: '? failed', color: 'warning' },
+  failed: { word: '× failed', color: 'error' },
 }
 
 /** A citation's status: the store's, and failed for one with no check (marks/store.ts notRun; one the store no longer

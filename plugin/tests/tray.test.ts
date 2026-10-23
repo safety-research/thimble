@@ -179,21 +179,21 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('failed: 11')
 })
 
-test('a citation the check found false: ? failed in the header, as any failed one, why in one dim sentence under it, x repair, then its evidence; x starts a check of it again in the background, no turn of main', async ($, on) => {
+test('a citation the check found false: × failed in the header, as any failed one, why in one dim sentence under it, x repair, then its evidence; x starts a check of it again in the background, no turn of main', async ($, on) => {
   const { submitted, clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed, but 3 were retried. The rest passed.' }, 's-tray-5')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('? failed · cite')
+  expect(band).toContain('× failed · cite')
   expect(band).not.toContain('wrong')
-  expect(drawn.find(n => n.type === 'Text' && textOf(n) === '? failed')?.props?.color).toBe('warning')
+  expect(drawn.find(n => n.type === 'Text' && textOf(n) === '× failed')?.props?.color).toBe('error')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'Line 4 counts 12 failed, but 3 were retried.')?.props).toMatchObject({ dimColor: true })
   expect(band).not.toContain('The rest passed')
   expect(band).toContain('failed: 12')
-  // the citation stays underlined in the reply, in the warning color, with ? after it
+  // the citation stays underlined in the reply, in the error red, with × after it
   const reply = all(await $.ui.render(answer('row-t1', TEXT)))
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'error', underline: true })
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ×')?.props?.color).toBe('error')
   // x repair: in the bar and in the card
   expect(band).toContain('x repair')
   expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'repair this citation')).toBe(true)
@@ -238,16 +238,16 @@ test('x and then a letter in the word window types the word and starts no repair
   expect(((await $.prompt.edit(key('y'))) as Any).text).toBe('xy')
   await clock.advance(2000)
   expect(spawns.length).toBe(0)
-  expect(textOf(await $.ui.render(above()))).toContain('? failed')
+  expect(textOf(await $.ui.render(above()))).toContain('× failed')
 })
 
-test('a citation not confirmed: ? in the warning color, underlined; a click on x repair in its card checks it again at once', async ($, on) => {
+test('a citation not confirmed: × in the error red, underlined; a click on x repair in its card checks it again at once', async ($, on) => {
   const { submitted, clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'evidence', reason: 'The quote is not in runs/summary.txt.' }, 's-tray-6')
   const reply = all(await $.ui.render(answer('row-t1', TEXT)))
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'error', underline: true })
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ×')?.props?.color).toBe('error')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(above()))).toContain('? failed · cite')
+  expect(textOf(await $.ui.render(above()))).toContain('× failed · cite')
   const btn = all(await $.ui.render(above())).find(n => n.type === 'Button' && n.props?.label === 'repair this citation')
   const ui = await $.ui.mount(above())
   await ui.press({ key: btn.props.key })
@@ -258,17 +258,17 @@ test('a citation not confirmed: ? in the warning color, underlined; a click on x
   expect(submitted.length).toBe(0)
 })
 
-test('a citation whose check did not run is failed: ? in the reply, ? failed in the card with the plain reason, and x starts its check', async ($, on) => {
+test('a citation whose check did not run is failed: × in the reply, × failed in the card with the plain reason, and x starts its check', async ($, on) => {
   // an earlier thimble kept it as unchecked, with no evidence: the resumed session finds it failed
   const { evidence: _e, ...words } = QUOTED
   const { clock, spawns, submitted } = await resumed($, on, { ...words, status: 'unchecked', reason: 'the reply was interrupted before its citations were checked' }, 's-tray-12')
   const reply = all(await $.ui.render(answer('row-t1', TEXT)))
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'error', underline: true })
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ×')?.props?.color).toBe('error')
   await $.prompt.edit(key(']'))
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('? failed · cite')
+  expect(band).toContain('× failed · cite')
   expect(band).not.toContain('not checked')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'The check did not run.')?.props).toMatchObject({ dimColor: true })
   expect(band).not.toContain('gave no evidence')
@@ -289,7 +289,7 @@ test('a check the session ended mid-way is failed when the session resumes, and 
   await resumed($, on, { ...words, status: 'checking' }, 's-tray-13')
   await $.prompt.edit(key(']'))
   const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('? failed · cite')
+  expect(band).toContain('× failed · cite')
   expect(band).toContain('The check did not run.')
   expect(band).not.toContain('session ended')
   expect(band).toContain('x repair')

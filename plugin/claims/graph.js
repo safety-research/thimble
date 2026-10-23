@@ -424,10 +424,11 @@ export function fitClusters(data, cap) {
   }
 }
 
-/** A claim's citations in the order the pane steps through them: the failed ones first. */
+/** A claim's citations in the order the pane steps through them: the failed ones first. One x checks again (`repair`)
+ *  keeps its place among them while it runs and after, so the pane goes on showing it. */
 export function evidenceOf(c) {
   const srcs = c.sources || []
-  const bad = s => s.status === 'failed'
+  const bad = s => s.status === 'failed' || !!s.repair
   return [...srcs.filter(bad), ...srcs.filter(s => !bad(s))]
 }
 
@@ -466,10 +467,10 @@ function layOf(claims, groups, edges, W, h, cols) {
 // claim counts it. Two outcomes: verified (a value the check corrected counts as verified; the claim says corrected),
 // and failed (the check could not confirm it, or did not run); and the states before an outcome
 const STATUS = {
-  verified: ['✓ verified', 'good'], corrected: ['✓ verified', 'good'], failed: ['? failed', 'warn'],
+  verified: ['✓ verified', 'good'], corrected: ['✓ verified', 'good'], failed: ['× failed', 'bad'],
   checking: ['checking', 'dim'], gone: ['no longer in the session', 'dim'],
 }
-const CHIP = [['good', '✓', 'verified'], ['warn', '?', 'failed'], ['checking', '…', 'checking'], ['dim', '·', 'not checked']]
+const CHIP = [['good', '✓', 'verified'], ['bad', '×', 'failed'], ['checking', '…', 'checking'], ['dim', '·', 'not checked']]
 // a status without an outcome (no check of it ran) is failed
 const statusKey = s => (STATUS[s.status] ? s.status : 'failed')
 
@@ -584,12 +585,12 @@ export function cardOf(s, W, { whole = false } = {}) {
 export const citationRows = (s, W) => cardOf(s, W).rows
 
 /** What a claim's citations' checks found, as chips: `✓ 3 citations verified` when all are alike, else each status
- *  counted (`✓ 10 verified  ? 2 failed`), each in its tone; `no citations` without. `short` (a narrow
+ *  counted (`✓ 10 verified  × 2 failed`), each in its tone; `no citations` without. `short` (a narrow
  *  pane) leaves out `citations`. Runs, two spaces between. */
 export function checkChips(c, { short = false } = {}) {
   const srcs = c.sources || []
   if (!srcs.length) return [{ s: 'no citations', tone: 'dim' }]
-  const count = { good: 0, warn: 0, checking: 0, dim: 0 }
+  const count = { good: 0, bad: 0, checking: 0, dim: 0 }
   for (const s of srcs) {
     const k = statusKey(s)
     count[k === 'checking' ? 'checking' : STATUS[k][1]]++
@@ -861,7 +862,7 @@ export function panelOf({ data, claim, group, tone, W, byId = new Map((data.clai
   const gtone = tone(cs[0] || claim || {})
   const rows = [[{ s: '─'.repeat(W), tone: 'dim-faint' }], ...nameRows(name, gtone, W, { after: clusterWords(cs), part: `g:${group}`, lit: !claim, narrow })]
   const fixes = claim ? correctionsOf(claim, byId).length : 0
-  const pickedRows = c => [...itemRows(c, W, { tone: gtone, picked: true, part: `g:${group}` }), fit([{ s: '    ' }, ...chipRuns(c, fixes, narrow)], W)]
+  const pickedRows = c => [...itemRows(c, W, { tone: gtone, picked: true, part: `c:${c.id}` }), fit([{ s: '    ' }, ...chipRuns(c, fixes, narrow)], W)]
   if (claim && st.open) {
     const ev = evidenceRows(claim, byId, W - 4, st)
     rows.push(...pickedRows(claim), ...indent(ev.rows, 4))
@@ -927,7 +928,7 @@ export function listOf({ data, claim, group, chosen, tone, W, byId = new Map((da
     if (rows.length > 1) rows.push([])
     rows.push(...nameRows(g.name, gtone, W, { after: clusterWords(cs), part: `g:${g.key}`, lit: mine && !claim, dim: chosen && !mine, narrow }))
     for (const c of cs) {
-      if (claim?.id === c.id) rows.push(...itemRows(c, W, { tone: gtone, picked: true, part: `g:${g.key}` }), fit([{ s: '    ' }, ...chipRuns(c, fixes, narrow)], W))
+      if (claim?.id === c.id) rows.push(...itemRows(c, W, { tone: gtone, picked: true, part: `c:${c.id}` }), fit([{ s: '    ' }, ...chipRuns(c, fixes, narrow)], W))
       else rows.push(...itemRows(c, W, { tone: gtone, dim: !!claim || (chosen && !mine), fresh: fresh.has(c.id), part: `n:${c.id}` }))
     }
   }

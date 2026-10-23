@@ -17,7 +17,7 @@
 //   glossesOf(list, text, skip)         -> the look's explainers as a part keeps them, those whose term the text holds
 //   headsOf(item, text)                 -> the look's heads-up as a part keeps it (one at most), or null
 //   mergeLook(msgs, out, memory)        -> what one look adds to each message's part, and the terms it explained
-//   markColors(theme)                   -> the explainers' and heads-ups' colors: theme keys, and a tint per theme
+//   markColors(theme)                   -> the explainers' and heads-ups' highlights, a fill per theme, and their frames' keys
 import { codeRanges, marksIn } from '../marks/message.js'
 
 const inside = (ranges, a, b) => ranges.some(([x, y]) => a < y && b > x)
@@ -325,15 +325,18 @@ export function mergeLook(msgs, out, memory) {
   return { parts, placed, heads }
 }
 
-/** The explainers' and heads-ups' colors. Their words are drawn in a color of Claude Code's theme, underlined, so the
- *  theme picks a shade that reads on its own background: an explainer teal (`planMode`), a heads-up orange (`claude`).
- *  A citation is purple and underlined (`merged`), and a citation the check could not confirm (failed) is amber,
- *  underlined, so the four stay apart. Inside a citation's words, which keep the citation's purple, an
- *  explainer or a heads-up shows as a faint tint of its own color behind them (`glossTint`, `headsTint`: one per theme,
- *  as a background takes no theme key); the one the tray shows is bold on that tint. */
+/** The explainers' and heads-ups' colors. Each is a highlight, as a highlighter pen marks words: a fill behind the
+ *  words, teal for an explainer (`glossBg`) and orange for a heads-up (`headsBg`), with the words in the theme's own text
+ *  color, so they read on it. A background takes no theme key, so each theme has its own shade: light fills under the
+ *  light theme's dark text, deep ones under the dark theme's light text. The one the tray shows is bold on a stronger
+ *  shade (`glossFocus`, `headsFocus`). A citation is purple text, underlined (`merged`), and a failed citation red with
+ *  ×, so a highlight never reads as a citation. Inside a citation's words, which keep the citation's purple and
+ *  underline, the fill shows behind them. `gloss` and `heads` are the theme keys of their frames in the tray. */
 export function markColors(theme) {
-  const tint = theme === 'light' ? { glossTint: '#d6e8e6', headsTint: '#f8e0d7' } : { glossTint: '#2b3b39', headsTint: '#47322b' }
-  return { gloss: 'planMode', heads: 'claude', ...tint }
+  const fill = theme === 'light'
+    ? { glossBg: '#c4eee6', headsBg: '#ffe0b8', glossFocus: '#8edccf', headsFocus: '#ffc98a' }
+    : { glossBg: '#1e4d47', headsBg: '#5c3a17', glossFocus: '#2b7068', headsFocus: '#80521f' }
+  return { gloss: 'planMode', heads: 'claude', ...fill }
 }
 
 /** The file places a text links to (`[words](path#L12-20)`, `[words](path:12)`), as {path, from, to}; no web link, no

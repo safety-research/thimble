@@ -1,8 +1,8 @@
 // register.ts: marks. Claude marks the claims of its reply as markdown links to `#` (`[352](#) of the [410](#) refund
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): purple underline, a turning glyph while
-// checking, corrected words in place (purple, as a verified one), the warning color with ? when the check could not
-// confirm it or did not run (failed), a note under the block whose words the check found false, and a footer under the reply while it is
+// checking, corrected words in place (purple, as a verified one), Claude Code's error red with × when the check could
+// not confirm it or did not run (failed), a note under the block whose words the check found false, and a footer under the reply while it is
 // checked. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):

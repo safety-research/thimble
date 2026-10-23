@@ -11,7 +11,7 @@
 // Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words.
 //
 // Two outcomes, as in the reply and the tray: verified (a corrected mark is verified too, and says what it was) and
-// failed, which says why in the warning color, with the evidence the check gave when it is real. The cited value is bold in the citations' purple (CITE_LOOK). What the check found wrong in the rest of the
+// failed, which says why in red (× failed), with the evidence the check gave when it is real. The cited value is bold in the citations' purple (CITE_LOOK). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
@@ -30,7 +30,7 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   verified: { word: 'verified', color: 'success' },
   corrected: { word: 'verified', color: 'success' },
   // a check that did not run is failed too (store.ts notRun); its reason says so
-  failed: { word: 'failed', color: 'warning' },
+  failed: { word: '× failed', color: 'error' },
 }
 
 /** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold in the citations'

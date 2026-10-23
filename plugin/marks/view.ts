@@ -18,14 +18,14 @@
 //   corrected    the corrected words in place of the marked ones, purple, underlined: once corrected it holds, so it
 //                looks as a verified one does (its tray card says it was corrected)
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
-//                did not show them), or it did not run or gave no answer: the warning color, underlined, with ` ?`
-//                after it. One look whatever the cause
+//                did not show them), or it did not run or gave no answer: Claude Code's error red, underlined, with
+//                ` ×` after it (a heads-up is orange, so a failed citation is not). One look whatever the cause
 //   unchecked    underlined in the text's color: words no check is for (a side thread's citations, or new ones in a
 //                version shown in place of Claude's words)
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
-// explainer in teal, underlined; a span inside a mark's words keeps the mark's press and look and adds its `tint` behind
-// them. While the tray shows
+// explainer highlighted teal or a heads-up orange (a fill behind the words); a span inside a mark's words keeps the
+// mark's press and look and adds its fill behind them. While the tray shows
 // a mark (`focus`), it is drawn bold on the selection's background. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
@@ -94,7 +94,7 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     // a correction may hold markdown (a file's line as written): it draws as the reply's own words would
     out.push(...(look?.status === 'corrected' && look.shown ? inline(look.shown, 0, look.shown.length).map((x: Run) => ({ ...x, mark: r.mark })) : runs.slice(k, e + 1)))
     if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
-    if (look?.status === 'failed') out.push({ s: ' ?', mark: r.mark, tag: 'x' })
+    if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
     k = e
   }
   return out
@@ -132,7 +132,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   // the words underlined in every status; the turning glyph and the sign after them are not words
   if (!r.tag) p.underline = true
   if (r.tag === 'spin') p.color = PURPLE
-  else if (look.status === 'failed') p.color = 'warning'
+  else if (look.status === 'failed') p.color = 'error'
   else if (look.status !== 'unchecked') p.color = PURPLE
   // a span inside the mark's words: its tint under the mark's color
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined

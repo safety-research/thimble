@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { cardOf, checkChips, citationRows, correctionsOf, FEW, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, repairable, rowText, snippetOf, spread, wordDiff } from '../graph.js'
+import { cardOf, checkChips, citationRows, correctionsOf, evidenceOf, FEW, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, repairable, rowText, snippetOf, spread, wordDiff } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -124,7 +124,7 @@ test('the map takes the top of the pane; at rest nothing is chosen and no detail
     // a claim: the cluster's list stays, the claim ▸ and bold in the cluster's color, the others dim, and under it one
     // line of chips: its citations' checks and its turn; no evidence until e. A long list keeps a window round it
     const p = panel(sel)
-    assert.match(p, /^─+\n● group 5 · \d+ claims\n( {2}↑ \d+ earlier\n)?( {2}– Wiki .*\n)* {2}▸ Wiki 40 had 50 saves\.\n {4}\? 1 citation failed {2}turn 2\n {2}– Wiki /)
+    assert.match(p, /^─+\n● group 5 · \d+ claims\n( {2}↑ \d+ earlier\n)?( {2}– Wiki .*\n)* {2}▸ Wiki 40 had 50 saves\.\n {4}× 1 citation failed {2}turn 2\n {2}– Wiki /)
     // a list too long for the rows under the map keeps a window round the claim, and says which claims it shows
     if (sel.windowed) assert.match(p, /\n {2}(↓ \d+ more · )?claims \d+–\d+ of \d+$/)
     // above a claim the cluster's name is bold and plain, its dot in the color
@@ -201,6 +201,8 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   const said = rows.slice(at, at + 2).map(rowText)
   assert.match(said[0], /^ {2}▸ The keys \(v, s, \], 1, \{ \}\) need a reply .* returns null when there is no reply$/)
   assert.equal(said[1], '    yet.')
+  // every line of it is bold in its cluster's color and one press (pane.tsx draws the lines as one Button)
+  assert.ok(rows.slice(at, at + 2).every(r => r.every(x => x.part === 'c:c1') && r.filter(x => x.s.trim()).every(x => x.bold && /^c\d$/.test(x.tone))))
   assert.equal(rowText(rows[at + 2]), '    no citations  turn 1')
   // computed evidence: the cited words bold in the citation color and the check beside them, the code line that printed
   // the value, then the output line after │, the cited words tinted, and how many output lines more under it; a file's:
@@ -214,14 +216,14 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   const d2 = { ...data, claims: [c, ...data.claims.slice(1)] }
   const shut = graphView(d2, { claim: 'c1' }, { w: 110, h: 34 })
   assert.equal(shut.cites, 2)
-  assert.match(panel(shut), /\n {4}✓ 1 verified {2}\? 1 failed {2}turn 1\n {2}– Note/)
+  assert.match(panel(shut), /\n {4}✓ 1 verified {2}× 1 failed {2}turn 1\n {2}– Note/)
   assert.doesNotMatch(panel(shut), /print\(|│/)
   // e: the list goes, the claim stays with its evidence; the failed one comes first; ‹ i of n › under it, ‹ and › a
   // press that steps
   const v = graphView(d2, { claim: 'c1', open: true }, { w: 110, h: 34 })
-  assert.match(panel(v), /turn 1\n\n {4}When round #5 arrives, answer first {3}\? failed · cite\n {4}The file says it once\.\n {4}revisions\.jsonl:412\n {4}│ summary: When round #5 arrives, answer first, then\n\n {4}‹ 1 of 2 ›$/)
+  assert.match(panel(v), /turn 1\n\n {4}When round #5 arrives, answer first {3}× failed · cite\n {4}The file says it once\.\n {4}revisions\.jsonl:412\n {4}│ summary: When round #5 arrives, answer first, then\n\n {4}‹ 1 of 2 ›$/)
   assert.deepEqual(v.panel.at(-1).filter(x => x.part && x.s.trim()).map(x => [x.s, x.part]), [['‹', 'cite-prev'], ['›', 'cite-next']])
-  assert.doesNotMatch(panel(v), /×|wrong|problems first/)
+  assert.doesNotMatch(panel(v), /\?|wrong|problems first/)
   assert.ok(repairable(v.shown))
   assert.ok(v.panel.flat().some(x => x.tint && x.s === 'When round #5 arrives, answer first' && x.part === 'ev-1'))
   const second = graphView(d2, { claim: 'c1', open: true, cite: 1 }, { w: 110, h: 34 })
@@ -235,12 +237,14 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   // the chips count every check; a citation the check corrected says what it was; a long output line is cut round the
   // cited words, a long code line in the middle, and c shows both whole
   // two outcomes: verified (a corrected value too) and failed, whoever failed it
-  assert.equal(rowText(checkChips({ sources: [{ status: 'verified' }, { status: 'corrected' }, { status: 'failed', failedBy: 'check' }, { status: 'failed', failedBy: 'evidence' }, { status: 'checking' }] })), '✓ 2 verified  ? 2 failed  … 1 checking')
-  assert.match(rowText(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'check', reason: 'Line 4 says 12.' }, 60)[0]), /\? failed · cite$/)
+  assert.equal(rowText(checkChips({ sources: [{ status: 'verified' }, { status: 'corrected' }, { status: 'failed', failedBy: 'check' }, { status: 'failed', failedBy: 'evidence' }, { status: 'checking' }] })), '✓ 2 verified  × 2 failed  … 1 checking')
+  assert.match(rowText(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'check', reason: 'Line 4 says 12.' }, 60)[0]), /× failed · cite$/)
   assert.equal(rowText(checkChips({ sources: [{ status: 'verified' }, { status: 'verified' }] })), '✓ 2 citations verified')
   // a check that did not run is failed, with its plain reason, whatever status it came with
-  assert.equal(rowText(checkChips({ sources: [{ status: 'failed', failedBy: 'none' }, {}, { status: 'unchecked' }] })), '? 3 citations failed')
-  assert.deepEqual(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'none', reason: 'The check did not run. The reply was interrupted.' }, 60).map(rowText), ['9   ? failed · cite', 'The check did not run.'])
+  assert.equal(rowText(checkChips({ sources: [{ status: 'failed', failedBy: 'none' }, {}, { status: 'unchecked' }] })), '× 3 citations failed')
+  // the failed ones first; one x checks again keeps its place among them while it runs and after
+  assert.deepEqual(evidenceOf({ sources: [{ n: 1, status: 'verified' }, { n: 2, status: 'checking', repair: true }, { n: 3, status: 'failed' }, { n: 4, status: 'verified', repair: true }] }).map(s => s.n), [2, 3, 4, 1])
+  assert.deepEqual(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'none', reason: 'The check did not run. The reply was interrupted.' }, 60).map(rowText), ['9   × failed · cite', 'The check did not run.'])
   assert.equal(repairable({ row: 'r1', n: 2, status: 'failed', failedBy: 'none' }), true)
   const was = citationRows({ label: '12', shown: '12', was: '15', status: 'corrected', evidence: computed }, 60).map(rowText)
   assert.deepEqual(was.slice(0, 2), ['12   ✓ verified · cite', 'corrected; was 15'])
@@ -492,15 +496,15 @@ test('a short session has no map: its clusters are listed, each its name then it
   // its cluster
   const c = graphView(data, { claim: 'c2' }, { w: 70, h: 36 })
   const p = panel(c)
-  assert.match(p, /\n {2}▸ Review requests come second: 16 of 60\.\n {4}\? 1 citation failed {2}turn 1\n {2}– Claiming/)
+  assert.match(p, /\n {2}▸ Review requests come second: 16 of 60\.\n {4}× 1 citation failed {2}turn 1\n {2}– Claiming/)
   const picked = c.panel.find(r => rowText(r).includes('▸'))
-  assert.ok(picked.slice(1).every(x => x.bold && x.tone === 'c1' && x.part === `g:${data.groups[0].id}`))
+  assert.ok(picked.slice(1).every(x => x.bold && x.tone === 'c1' && x.part === 'c:c2'))
   assert.ok(c.panel.filter(r => /^ {2}– /.test(rowText(r))).every(r => r[2].tone === 'dim'))
   assert.equal(c.cites, 1)
   // e: only its cluster's name and the claim stay, its evidence under it
   const open = graphView(data, { claim: 'c2', open: true }, { w: 70, h: 36 })
   assert.ok(open.listed)
-  assert.match(panel(open), /^─+\n● posts · 4 claims\n {2}▸ Review requests come second: 16 of 60\.\n {4}\? 1 citation failed {2}turn 1\n\n {4}16 of 60 {3}\? failed · cite\n/)
+  assert.match(panel(open), /^─+\n● posts · 4 claims\n {2}▸ Review requests come second: 16 of 60\.\n {4}× 1 citation failed {2}turn 1\n\n {4}16 of 60 {3}× failed · cite\n/)
   assert.doesNotMatch(panel(open), /data|Claiming/)
   // a narrow pane lists them too, each row in its width
   const narrow = graphView(data, { claim: 'c1' }, { w: 40, h: 36 })
