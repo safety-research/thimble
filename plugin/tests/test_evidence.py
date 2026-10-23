@@ -36,7 +36,7 @@ def test_computed_evidence_is_the_real_call_that_printed_the_output_the_check_ga
     assert check_mark(mark("12 of 40"), computed("12 of 40"), [call(CODE, "11 of 40\n")], "/data")["status"] == "failed"
     # the call that printed the cited text must show the words
     other = check_mark(mark("12 of 40"), computed("of 40"), [call(CODE, "11 of 40\n")], "/data")
-    assert other["status"] == "failed" and "does not show" in other["reason"]
+    assert other["status"] == "failed" and other["reason"] == "The result reads “11 of 40”, not 12."
     # left-out text is "…", and white space is read loosely
     long = "rows: 40\nmerged:   12 of 40\n"
     assert check_mark(mark("12 of 40"), computed("rows: 40 … merged: 12 of 40"), [call(CODE, long)], "/data")["status"] == "verified"
@@ -93,7 +93,7 @@ def test_a_correction_is_confirmed_only_when_the_evidence_shows_the_words_it_put
     # a free description of what the output means: its quoted part is in the output, the words it puts in are not
     r = corrected('looking only at the file summary (git diff --stat) and running only the "weekly" tests')
     assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", was) and "was" not in r
-    assert r["reason"].startswith("Not confirmed: the check gave other words") and "looking only at" in r["reason"]
+    assert r["reason"].startswith("The check offered other words, but the result does not show “looking only at")
     # words the output holds as words, a changed count, and words only left out are confirmed
     assert corrected('reading the diff --stat and running only the "weekly" tests')["status"] == "corrected"
     assert corrected('running 9 "weekly" tests')["status"] == "corrected"
@@ -118,7 +118,7 @@ def test_quote_hit_and_miss(tmp_path: Path):
     assert ev["file"] == "board.md" and ev["line"] == "2" and [r["n"] for r in ev["lines"]] == [1, 2, 3]
     assert ev["lines"][1]["highlight"] == [10, 26]
     miss = check_mark(mark('"yes, that was me"'), quote("board.md", 3, "yes, that was not me"), [], str(tmp_path))
-    assert miss["status"] == "failed" and "does not hold" in miss["reason"] and miss["failedBy"] == "evidence"
+    assert miss["status"] == "failed" and miss["reason"] == "Line 3 of board.md reads “bye”, not these words." and miss["failedBy"] == "evidence"
     outside = check_mark(mark("x"), quote("../secret.txt", 1, "x"), [], str(tmp_path))
     assert "outside the folder" in outside["reason"]
 
@@ -137,7 +137,7 @@ def test_a_failed_mark_keeps_its_reason_and_a_missing_one_fails_as_not_run():
     out = check_all([mark("a", 1), mark("b", 2)], '```json\n[{"mark": 1, "status": "wrong", "reason": "no record says so"}]\n```', [], "/data")
     assert out["parsed"] is True
     assert [(r["status"], r.get("failedBy"), r["reason"]) for r in out["results"]] == [
-        ("failed", "check", "no record says so"), ("failed", "none", "The check did not run. Its answer left this citation out.")]
+        ("failed", "check", "No record says so."), ("failed", "none", "The check did not run. Its answer left this citation out.")]
     assert check_all([mark("a")], "I could not check it.", [], "/data")["parsed"] is False
 
 
@@ -214,14 +214,14 @@ def test_a_correction_whose_output_does_not_show_its_new_words_is_not_confirmed_
     item = {**computed(out, status="corrected", correction=corr), "reason": "the earliest report came at message 126"}
     r = check_mark(mark("in the first session, after 250 or more of its messages"), item, [call(CODE, out)], "/data")
     assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", "in the first session, after 250 or more of its messages")
-    assert r["reason"].startswith("Not confirmed: the check gave other words") and "125" in r["reason"] and "was" not in r
+    assert r["reason"].startswith("The check offered other words, but the result reads “") and r["reason"].endswith(", not 125.") and "was" not in r
 
 
 def test_an_unconfirmed_claim_is_not_confirmed_never_wrong():
     out = "62 of 68 set to /tmp, mktemp -d or the run folder; 6 read from files"
     item = {**computed(out), "status": "unconfirmed", "reason": "6 values come from files the commands do not print"}
     r = check_mark(mark("each one is set to a /tmp path"), item, [call(CODE, out)], "/data")
-    assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", "6 values come from files the commands do not print")
+    assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", "6 values come from files the commands do not print.")
     assert r["evidence"]["output"] == out
 
 
@@ -307,7 +307,7 @@ def test_a_claim_that_joins_two_places_cites_both(tmp_path: Path):
     r = check_mark(mark('written to a "shown" file'), item, [], str(tmp_path))
     assert r["status"] == "verified" and r["evidence"]["line"] == "1" and r["evidence"]["more"][0]["line"] == "82"
     wide = check_mark(mark("x"), quote("shell.tsx", "1-82", "x", kind="code"), [], str(tmp_path))
-    assert wide["status"] == "failed" and wide["reason"].startswith("Not confirmed:")
+    assert wide["status"] == "failed" and wide["reason"].startswith("The check cited lines 1-82, which are not one line")
 
 
 def test_a_note_on_the_rest_of_the_sentence_stays_beside_a_verified_mark():
@@ -439,7 +439,7 @@ def test_a_path_from_the_start_folder_holds_after_main_moved_the_shell(tmp_path:
     r = check_mark(mark("box"), quote("plugin/draw/box.mjs", 2, "export function box()", kind="code"), [], str(tmp_path / "plugin" / "draw"), str(tmp_path))
     assert r["status"] == "verified" and r["evidence"]["file"] == "plugin/draw/box.mjs"
     gone = check_mark(mark("box"), quote("plugin/draw/nobox.mjs", 2, "box", kind="code"), [], str(tmp_path / "plugin" / "draw"), str(tmp_path))
-    assert "there is no file plugin/draw/nobox.mjs" in gone["reason"]
+    assert "There is no file plugin/draw/nobox.mjs" in gone["reason"]
 
 
 def test_a_quote_inside_a_quote_may_use_the_other_quote_mark(tmp_path: Path):
@@ -479,7 +479,7 @@ def test_a_path_named_from_the_folder_a_call_moved_to_holds(tmp_path: Path):
     moved = {"command": "cd toy && python3 - <<'PY'\nprint(1)\nPY", "output": "1", "by": "checker"}
     item = quote("board.jsonl", 1, "yes, that was me")
     assert check_mark(mark('"yes, that was me"'), item, [moved], str(tmp_path))["status"] == "verified"
-    assert "there is no file" in check_mark(mark('"yes, that was me"'), item, [], str(tmp_path))["reason"]
+    assert "There is no file" in check_mark(mark('"yes, that was me"'), item, [], str(tmp_path))["reason"]
 
 
 def test_a_number_name_shows_as_its_number():
@@ -533,7 +533,7 @@ def test_the_words_stand_in_the_lines_the_check_copied():
     # a 3 of another row does not show the words' 3.0
     out = "a: median 3.1 min, n=315\nb: median 38.0 min, n=3"
     r = check_mark(mark("3.0 min"), computed("a: median 3.1 min"), [call(CODE, out)], "/data")
-    assert r["status"] == "failed" and "does not show" in r["reason"]
+    assert r["status"] == "failed" and r["reason"] == "The result reads “a: median 3.1 min, n=315”, not 3.0."
 
 
 def test_a_year_that_opens_a_line_is_its_subject_not_a_label():
@@ -670,7 +670,7 @@ def test_a_narrowing_cites_only_the_part_of_the_words_the_evidence_shows_and_lea
 
     kept = '5,217 deletions are by one username, "Kalmbot", with the summary "Seite gelöscht."'
     # as written, the gloss is in no output: not confirmed, the same answer again on a repair
-    assert answer("verified")["status"] == "failed" and "page deleted" in answer("verified")["reason"]
+    assert answer("verified")["status"] == "failed" and answer("verified")["reason"].endswith(", not “page deleted”.")
     # narrowed to the part the output shows: corrected in place, the rest stays in the reply as plain words
     r = answer("narrowed", kept)
     assert (r["status"], r["shown"], r["was"], r["narrowed"]) == ("corrected", kept, words, True)
@@ -686,7 +686,7 @@ def test_a_narrowing_cites_only_the_part_of_the_words_the_evidence_shows_and_lea
     assert (r["status"], r["failedBy"]) == ("failed", "evidence") and "state a value of the data" in r["reason"]
     # the part must still be shown by the evidence
     other = check_mark(m, computed(out.strip(), status="narrowed", correction={"words": kept}), [call(code, out.replace("5,217", "5,216"))], "/data")
-    assert other["status"] == "failed" and other["reason"].startswith("Not confirmed: the check cited only a part of the words")
+    assert other["status"] == "failed" and other["reason"].startswith("The check cited only a part of these words, but ")
     # a plain correction that drops words still takes them out of the reply: no narrowing
     assert "narrowed" not in answer("corrected", kept)
     # through the validator, as the plugin runs it
@@ -751,11 +751,11 @@ def test_a_paraphrase_no_record_shows_is_reworded_around_the_words_the_record_ho
     # cited words the line does not hold are no rewrite
     bad = {**item, "correction": {"sentence": "On the board, agent-07 wrote [“I will not merge”]."}}
     r = validated(board(tmp_path), [m], [bad])[0]
-    assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", words) and r["reason"].startswith("Not confirmed: the check rewrote the sentence")
+    assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", words) and r["reason"] == "The check reworded the sentence, but line 2 of board.jsonl reads “I will hold off on merging until the tests pass”, not the quoted words."
     # a value put outside the citation that the evidence does not show is a claim no evidence holds
     bad = {**item, "correction": {"sentence": "On the board, agent-07 wrote 3 times [“I will hold off on merging until the tests pass”]."}}
     r = validated(board(tmp_path), [m], [bad])[0]
-    assert (r["status"], r["failedBy"]) == ("failed", "evidence") and "“wrote 3 times”" in r["reason"] and "does not show" in r["reason"]
+    assert (r["status"], r["failedBy"]) == ("failed", "evidence") and r["reason"] == "The records do not show “wrote 3 times”, which the check's rewording states."
 
 
 def test_a_translation_quoted_as_the_record_s_words_cites_the_record_s_own_words_and_keeps_the_translation_uncited(tmp_path):
@@ -824,3 +824,88 @@ def test_a_sentence_is_rewritten_once():
     one, two = validated("/data", marks, [item(1, "Of all [40] pull requests, [13] were merged by agent-07."), item(2, "Of the [40] pull requests, agent-07 merged [12].")], calls)
     assert one["rewrite"] == "Of all [40] pull requests, [13] were merged by agent-07."
     assert (two["status"], two["shown"]) == ("failed", "13") and "rewrite" not in two
+
+
+# ------------------------------------------------------------------------------------------------ why a citation failed
+
+def one_sentence(s: str) -> bool:
+    """The reason reads as one sentence, as the tray cuts it (tray.mjs firstSentence)."""
+    import re
+    m = re.match(r"^.*?[.!?](?=\s+[A-Z0-9\"“(']|$)", s)
+    return bool(m) and m.group(0) == s
+
+
+def test_a_failed_citation_says_why_in_one_plain_sentence(tmp_path):
+    german = "Ich halte #42 zurück, bis die wackligen Tests in Quarantäne sind."
+    (tmp_path / "standup.jsonl").write_text(json.dumps({"agent": "agent-07", "text": german}, ensure_ascii=False) + "\n"
+                                            + json.dumps({"agent": "agent-03", "text": "Merged 4 PRs on 2026-06-12."}) + "\n")
+    english = '"I\'m holding #42 back until the flaky tests are quarantined."'
+    wrong_typed = 'n = 15\nprint(f"{n} of 40")'
+    cases = [
+        # what the records show in place of the words
+        (check_mark(mark("12 of 40"), computed("of 40"), [call(CODE, "11 of 40\n")], "/data"), "The result reads “11 of 40”, not 12."),
+        (check_mark(mark(english), quote("standup.jsonl", 1, english.strip('"')), [], str(tmp_path)),
+         f"Line 1 of standup.jsonl reads “{german}”, not these words."),
+        (check_mark(mark(english), {**quote("standup.jsonl", 1, german), "status": "verified"}, [], str(tmp_path)),
+         f"Line 1 of standup.jsonl reads “{german}”, not the quoted words."),
+        (check_mark(mark("merged 5 PRs"), quote("standup.jsonl", 2, "Merged"), [], str(tmp_path)), "Line 2 of standup.jsonl reads “Merged 4 PRs on 2026-06-12.”, not 5."),
+        (check_mark(mark("merged on 13 June 2026"), quote("standup.jsonl", 2, "Merged"), [], str(tmp_path)),
+         "Line 2 of standup.jsonl reads “Merged 4 PRs on 2026-06-12.”, not the day 13 June 2026."),
+        (check_mark(mark("13"), card("card:k3f9a1#merged/agent-07"), [], "/data", cards=CARDS), "The card's merged for agent-07 shows 12, not 13."),
+        (check_mark(mark("13 merged"), card("card:k3f9a1@out1#L3"), [], "/data", cards=CARDS), "Line 3 of the card's output reads “agent-07 12 40”, not 13."),
+        (check_mark(mark("15 of 40"), computed("12 of 40", status="corrected", correction={"words": "13 of 40"}), [call(CODE, "12 of 40")], "/data"),
+         "The check offered other words, but the result reads “12 of 40”, not 13."),
+        # what is missing
+        (check_mark(mark("15 of 40"), computed("15 of 40"), [call(wrong_typed, "15 of 40")], "/data"),
+         "The code typed 15 and 40 in by hand instead of computing them from the records."),
+        (check_mark(mark("15 of 40"), computed("15 of 40"), [call(CODE, "12 of 40")], "/data"), "No command of this session printed the result the check gave."),
+        (check_mark(mark("x"), quote("nope.txt", 1, "x"), [], str(tmp_path)), "There is no file nope.txt in this session's folder."),
+        # the check's own reason, when it found the claim wrong or could not confirm it
+        (check_mark(mark("15"), {**computed("12 of 40", status="wrong"), "reason": "the board shows agent-05 merged #118, not agent-07"}, [call(CODE, "12 of 40")], "/data"),
+         "The board shows agent-05 merged #118, not agent-07."),
+        (check_mark(mark("agent-07 merged it"), {**computed("12 of 40", status="unconfirmed"), "reason": "agent-07 posted no merge on the board"}, [call(CODE, "12 of 40")], "/data"),
+         "agent-07 posted no merge on the board."),
+        (check_mark(mark("15"), {"kind": "computed", "status": "unconfirmed", "evidence": {}}, [], "/data"),
+         "The check found no records that show this claim true or false."),
+    ]
+    for r, why in cases:
+        assert (r["status"], r["reason"]) == ("failed", why), (r["reason"], why)
+        assert one_sentence(r["reason"]), r["reason"]
+        for word in ("Not confirmed", "output of that call", "evidence", "mark"):
+            assert word not in r["reason"], (word, r["reason"])
+    # the reason never quotes the whole cited words back
+    long = "the nightly job failed on 14 of the 40 runs after the config change"
+    r = check_mark(mark(long), computed("of the 40 runs"), [call(CODE, "the nightly job failed on 12 of the 40 runs\n")], "/data")
+    assert r["reason"] == "The result reads “the nightly job failed on 12 of the 40 runs”, not 14." and long not in r["reason"]
+
+
+def test_a_case_the_check_can_repair_is_corrected_by_the_first_check(tmp_path):
+    """A wrong value with the right one found, a gloss, a paraphrase and a wrong place: each verdict the checker gives
+    for them ends corrected, never failed."""
+    m = {"n": 1, "words": "13 of 40", "sentence": "agent-07 merged [13 of 40] pull requests."}
+    calls = [call(CODE, "12 of 40\n")]
+    for status in ("corrected", "wrong"):
+        r = check_mark(m, computed("12 of 40", status=status, correction={"words": "12 of 40"}), calls, "/data")
+        assert (r["status"], r["shown"]) == ("corrected", "12 of 40"), status
+    words = 'one user, "Kalmbot", with the summary "Seite gelöscht." ("page deleted")'
+    kept = 'one user, "Kalmbot", with the summary "Seite gelöscht."'
+    g = {"n": 1, "words": words, "sentence": f"Most deletions are by [{words}]."}
+    for status in ("narrowed", "corrected"):
+        corr = {"words": kept} if status == "narrowed" else {"sentence": f'Most deletions are by [{kept}] ("page deleted").'}
+        r = check_mark(g, computed(kept, status=status, correction=corr), [call("print(1)", kept + "\n")], "/data")
+        assert (r["status"], r.get("narrowed")) == ("corrected", True), status
+    board(tmp_path)
+    p = {"n": 1, "words": "refused to merge the pull request", "sentence": "On the board, agent-07 [refused to merge the pull request]."}
+    item = {"kind": "quote", "evidence": {"file": "board.jsonl", "line": 2, "substring": "I will hold off on merging until the tests pass"},
+            "correction": {"sentence": "On the board, agent-07 wrote [“I will hold off on merging until the tests pass”]."}, "reason": "no record says it refused"}
+    for status in ("corrected", "wrong", "verified"):
+        assert check_mark(p, {**item, "status": status}, [], str(tmp_path))["status"] == "corrected", status
+    w = "“yes, that was me”"
+    place = {"n": 1, "words": w, "sentence": f"On line 29 of board.jsonl, agent-07 wrote [{w}]."}
+    item = {"kind": "quote", "evidence": {"file": "board.jsonl", "line": 27, "substring": "yes, that was me"}, "status": "corrected",
+            "correction": {"words": w, "sentence": f"On line 27 of board.jsonl, agent-07 wrote [{w}]."}, "reason": "the words are on line 27"}
+    r = check_mark(place, item, [], str(tmp_path))
+    assert (r["status"], r["rewrite"]) == ("corrected", f"On line 27 of board.jsonl, agent-07 wrote [{w}].")
+    # the place told as a note keeps the citation verified, the note under it
+    r = check_mark(place, {**item, "status": "verified", "correction": None, "note": "The words are on line 27, not line 29."}, [], str(tmp_path))
+    assert (r["status"], r["note"]) == ("verified", "The words are on line 27, not line 29.")
