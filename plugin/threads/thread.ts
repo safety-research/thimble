@@ -319,7 +319,11 @@ async function refresh($: Engine, agentId: string, status: Thread['status']): Pr
   } catch {
     // the turns stay as they were; the status still moves
   }
-  await keep($, { ...t, turns, status })
+  // the thread as it stands after the read: a poll's read that the fork's end overtook (status done) leaves it done, so
+  // the pane does not show the thread answering for ever, without m
+  const now = threads.get(key!)
+  if (!now || (status === 'running' && now.status !== 'running')) return
+  await keep($, { ...now, turns, status })
 }
 
 /** Read the running threads' turns again every few seconds until none runs: only after a question the person asked. */

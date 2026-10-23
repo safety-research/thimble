@@ -337,3 +337,29 @@ test("a passage's thread shows the passage as the reply reads, under one label: 
   expect(nodes(subject).filter(n => n.props?.underline).map(textOf)).toEqual(['June 18, with 6,543 saves under 906 names', 'after noon'])
   expect(passageRuns('a [b](#) c', 4).map(r => r.s).join('')).toBe('a b…')
 })
+
+// The pane reads a running thread's turns every few seconds. A read that started before the fork ended, and ends after
+// the end marked the thread done, leaves it done: else the pane shows it answering for ever, without m
+test("a read of a running thread's turns that the fork's end overtakes leaves the thread done", async () => {
+  const s = setup()
+  let poll: (() => void) | null = null
+  s.$.clock.every = (_ms: number, f: () => void) => { poll = f; return () => undefined }
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  expect(threadOf(KEY)!.status).toBe('running')
+  expect(poll).not.toBe(null)
+  s.answer('agent-1', 'The config gives the timeout in minutes (ci.yml:12).')
+  // the poll's read waits; the fork's end reads at once
+  const read = s.$.session.messages
+  let release: (() => void) | null = null
+  s.$.session.messages = async (a: Any) => { s.$.session.messages = read; await new Promise<void>(r => { release = r }); return read(a) }
+  poll!()
+  await settle()
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  expect(threadOf(KEY)!.status).toBe('done')
+  release!()
+  await settle()
+  expect(threadOf(KEY)!.status).toBe('done')
+})
