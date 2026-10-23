@@ -238,10 +238,11 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (r.tag === 'spin') p.color = PURPLE
   else if (r.tag) p.color = 'error'
   else Object.assign(p, wordsLook(look.status, id))
-  // a span inside the mark's words: its fill at rest, the citation's tint on hover
+  // a span inside the mark's words (a heads-up, an explainer): its fill at rest and no underline, as a span never has
+  // one; the citation's other words keep theirs. The citation's tint on hover, its press and hover group, as the rest
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
-  if (bg) p.backgroundColor = bg
+  if (bg) { p.backgroundColor = bg; delete p.underline }
   // the one the tray shows: bold, and its tint kept, so the open one is easy to find
   if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)

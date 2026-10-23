@@ -74,15 +74,23 @@ test('a span is a press of its own, highlighted; inside a citation it keeps the 
   // the citation the tray shows keeps the citation's tint, bold, so the open one is easy to find
   expect(innerText.props).toMatchObject({ backgroundColor: citeTint(), bold: true })
   // the span's own words: a highlight, the fill behind them in the text's own color, not underlined (a citation is);
-  // inside the citation: underlined in the text's color on the span's fill, in place of the citation's tint
+  // inside the citation: the span's fill, not underlined, in the text's color; the citation's other words underlined,
+  // and every piece of it one hover group with the citation's tint
   const ownText = all(own).find(n => n.type === 'Text' && n.props.children === 'hydrate')
   expect(ownText.props).toMatchObject({ backgroundColor: '#1e4d47' })
   expect(ownText.props.underline).toBe(undefined)
   expect(ownText.props.color).toBe(undefined)
   const calm = messageEl(ELS, { text: TEXT, marks, looks: [{ n: 1, status: 'verified' }], key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, spans, focus: null })
   const tinted = all(calm).find(n => n.type === 'Text' && n.props.children === 'user query')
-  expect(tinted.props).toMatchObject({ underline: true, backgroundColor: '#1e4d47', hover: { backgroundColor: citeTint() } })
+  expect(tinted.props).toMatchObject({ backgroundColor: '#1e4d47', hover: { backgroundColor: citeTint() } })
+  expect(tinted.props.underline).toBe(undefined)
   expect(tinted.props.color).toBe(undefined)
+  const rest = all(calm).filter(n => n.type === 'Text' && (n.props.children === 'the ' || n.props.children === ' ends'))
+  expect(rest.length).toBe(2)
+  for (const t of rest) {
+    expect(t.props).toMatchObject({ underline: true, hover: { scope: tinted.props.hover.scope, backgroundColor: citeTint() } })
+    expect(t.props.backgroundColor).toBe(undefined)
+  }
   // dim words and the ▸ of an answer picked for the keys
   const dim = messageEl(ELS, { text: 'Two runs failed.', marks: [], looks: [], key: 'd', cols: 100, first: true, spin: '⠋', onMark: () => undefined, dim: true, lead: '▸' })
   expect(textOf(dim)).toContain('▸Two runs failed.')
@@ -206,4 +214,32 @@ test('{ at an empty prompt picks the answer before for the keys, drawn with ▸;
   expect(band).toContain('s squeeze')
   await turn('t3', 'You are welcome.')
   expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toBe('the engine')
+})
+
+test('a heads-up inside a citation: its words on the orange fill, never underlined; the citation\'s other words underlined; one press and hover group; a failed one keeps red and ×', () => {
+  const text = 'agent-10 went [60 minutes without a forge action, from 15:40 to 16:40](#), between two posts.'
+  const words = '60 minutes without a forge action'
+  const ORANGE = { backgroundColor: '#ffe0b8', hoverBg: '#ffc98a' }
+  const pressed: string[] = []
+  const spans = [{ start: text.indexOf(words), end: text.indexOf(words) + words.length, look: ORANGE, label: 'heads up', onPress: () => pressed.push('heads') }]
+  for (const status of ['verified', 'failed'] as const) {
+    const drawn = messageEl(ELS, { text, marks: marksIn(text), looks: [{ n: 1, status }], key: 'r', cols: 200, first: true, spin: '', onMark: () => pressed.push('mark'), spans })
+    const texts = all(drawn).filter(n => n.type === 'Text' && typeof n.props.children === 'string')
+    const heads = texts.find(n => n.props.children === words)!
+    const rest = texts.find(n => n.props.children === ', from 15:40 to 16:40')!
+    expect(heads.props.backgroundColor).toBe('#ffe0b8')
+    expect(heads.props.underline).toBe(undefined)
+    expect(rest.props.underline).toBe(true)
+    expect(rest.props.backgroundColor).toBe(undefined)
+    expect(heads.props.hover.scope).toBe(rest.props.hover.scope)
+    expect(heads.props.hover.backgroundColor).toBe(citeTint(status))
+    if (status === 'failed') {
+      expect(rest.props.color).toBe('error')
+      expect(texts.some(n => n.props.children === ' ×' && n.props.color === 'error')).toBe(true)
+    }
+    const presses = all(drawn).filter(n => n.type === 'Button' && n.props.label.startsWith('citation 1'))
+    expect(presses.map(textOf).join('')).toContain(`${words}, from 15:40 to 16:40`)
+    presses.find(b => textOf(b) === words)!.props.onPress()
+  }
+  expect(pressed).toEqual(['mark', 'mark'])
 })
