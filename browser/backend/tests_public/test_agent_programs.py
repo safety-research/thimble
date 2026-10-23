@@ -357,6 +357,36 @@ def test_a_program_s_sessions_do_their_own_work_unasked_where_thimble_s_own_sess
     assert f"Edit(/{view}/**)" in dev["permissions"]["allow"] and str(view) in dev["sandbox"]["filesystem"]["allowWrite"]
 
 
+async def test_a_program_s_session_gets_a_short_private_tmpdir_and_a_required_sandbox(tmp_path, workspaces_tmp,
+                                                                                       monkeypatch):
+    """Claude Code puts its sandbox's proxy sockets in TMPDIR, and a Unix socket's path holds at most 108 bytes (104 on
+    macOS), so with a long TMPDIR the sandbox did not start and Bash ran outside it. A program's session gets a short
+    private TMPDIR of its own, whatever the server's, which its sandbox may write and which goes when the session
+    ends, and its sandbox is required with sandbox.enforce off too, so one that cannot start refuses Bash."""
+    from app import runtime_cc
+
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    monkeypatch.setenv("TMPDIR", str(tmp_path / ("a-rather-long-temp-folder-of-a-long-user-name-" * 3)))
+    _config({"sandbox": {"enforce": False}})
+    stub = tmp_path / "claude"
+    stub.write_text(f"#!{sys.executable}\nimport json, os, stat, sys\nsys.stdin.read()\nt = os.environ['TMPDIR']\n"
+                    "got = {'tmp': t, 'mode': stat.S_IMODE(os.stat(t).st_mode),\n"
+                    "       'settings': sys.argv[sys.argv.index('--settings') + 1]}\n"
+                    "print(json.dumps({'result': json.dumps(got)}))\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(agent_session, "CLAUDE_BIN", str(stub))
+    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
+    job = harness.Job(CORPUS, "writer", "writer:k", "Write", {}, ("list_cards",),
+                      tmp_path / ("workspaces-of-a-long-workspace-name-" * 3) / "tasks" / "work" / "0123456789ab")
+    run = harness.Run(job, part, userconf.session(CORPUS, "writer", sandbox=True), "t", "t.s")
+    got = json.loads(await harness.session_call(run, {"prompt": "hi"}))
+    assert len(got["tmp"]) <= runtime_cc.TMP_MAX and got["mode"] == 0o700
+    assert not Path(got["tmp"]).exists(), "the session's TMPDIR goes when it ends"
+    box = json.loads(got["settings"])["sandbox"]
+    assert box["failIfUnavailable"] is True and box["allowUnsandboxedCommands"] is False
+    assert got["tmp"] in box["filesystem"]["allowWrite"]
+
+
 def test_a_program_s_session_loads_thimble_s_plugin_once(tmp_path, workspaces_tmp, monkeypatch):
     """A program's session loads thimble's plugin from --plugin-dir alone: its --settings turn off each thimble@* the
     analyst's user, project or local settings enable, which would load a second MCP server and second hooks; other

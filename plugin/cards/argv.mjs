@@ -12,7 +12,12 @@
 //       own folder, wraps an empty environment (`env -i`) and runnerCommand in srt with runnerRules
 //
 // `node` is the absolute path of the Node binary (process.execPath), `srt` the folder srt is installed in
-// (setup.mjs), `run` the runner's own folder (mode 700), which holds its socket `sock`.
+// (setup.mjs), `run` the runner's own folder (mode 700), which holds its socket `sock` (a path of at most SOCKET_MAX
+// characters) and is its TMPDIR. srt itself makes no socket for the runner: it starts no proxy, since no domain is
+// allowed.
+
+// the longest path of the runner's socket: a Unix socket's path holds at most 108 bytes on Linux, 104 on macOS
+export const SOCKET_MAX = 100
 
 // Linux: what is shown of the system, for Node and the shell srt starts it from
 export const LINUX_SYSTEM = ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/lib32', '/etc/ld.so.cache']

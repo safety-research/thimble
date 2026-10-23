@@ -6,7 +6,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -101,6 +101,16 @@ test('in the sandbox: no network, and no variable of the session\'s', () => {
   assert.notEqual(out, 'connected')
   assert.notEqual(inSandbox('fetch("https://example.com").then(() => console.log("fetched"), () => console.log("no"))'), 'fetched')
   assert.deepEqual(JSON.parse(inSandbox('console.log(JSON.stringify(Object.keys(process.env)))')), ['PATH'])
+})
+
+test('the probe\'s runner starts with a temp folder too long for a socket in it, and the folder stays empty', () => {
+  // a Unix socket's path holds at most 108 bytes (104 on macOS): a long TMPDIR kept the probe's runner from listening
+  const long = join(dir, 'a-rather-long-temp-folder-of-a-long-user-name-'.repeat(2))
+  mkdirSync(long)
+  const r = spawnSync(s.node, [SETUP, '--json', '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, THIMBLE_HOME: process.env.THIMBLE_HOME, TMPDIR: long } })
+  const got = JSON.parse(r.stdout)
+  assert.equal(got.ok, true, `${got.why}. ${got.fix}`)
+  assert.deepEqual(readdirSync(long), [])
 })
 
 test('setup.mjs names what srt lacks on Linux, with the one command that installs it', { skip: process.platform !== 'linux' }, () => {

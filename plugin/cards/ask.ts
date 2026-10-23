@@ -2,9 +2,10 @@
 // in Anthropic's sandbox runtime (srt; argv.mjs says how), and reached over a Unix socket ($.http.fetch with
 // socketPath: a round trip takes a millisecond or two). The runner has a folder of its own, mode 700, which holds only
 // its socket and is the one folder it may write: `cards-<hash>` in the first of these folders whose path is short
-// enough for a socket (at most about 100 bytes: 108 on Linux, 104 on macOS): <THIMBLE_HOME>/run,
-// $XDG_RUNTIME_DIR/thimble, <temp folder>/thimble-<user>, /tmp/thimble-<user>; each is made with mode 700 and used only
-// when it is a folder this user owns, not a link. The hash is of THIMBLE_HOME and the conversation, so a reload of the
+// enough for a socket (argv.mjs's SOCKET_MAX: 108 bytes on Linux, 104 on macOS): <THIMBLE_HOME>/run,
+// $XDG_RUNTIME_DIR/thimble, <temp folder>/thimble-<user>, /tmp/thimble-<user>, and /tmp/thimble-<hash of the user>,
+// which fits whatever the names; each is made with mode 700 and used only when it is a folder this user owns, not a
+// link. The hash is of THIMBLE_HOME and the conversation, so a reload of the
 // module finds the runner again, and two homes or two conversations never share one. A runner that is not there (it
 // never started, it stopped, the session was resumed) is started again, and a card it does not hold is loaded again
 // from its copy on disk (draw.ts).
@@ -34,7 +35,7 @@ import { tempDir, thimbleHome } from '../core/home'
 import { runDir, shortHash } from '../core/layout.mjs'
 import { themeNow } from '../core/theme'
 import { sessionKey } from '../hooks/conversation'
-import { runnerArgv } from './argv.mjs'
+import { SOCKET_MAX, runnerArgv } from './argv.mjs'
 import { cardsDir } from './store'
 
 type Engine = EngineInterface
@@ -51,7 +52,6 @@ const downOf = (s: Sandbox): Down => ({ why: sandboxWhy(s), machine: !!s.fix })
 const START_MS = 5000
 // npm installs srt the first time: seconds, longer on a slow network
 const SETUP_MS = 300000
-const SOCKET_MAX = 100
 const runner = { up: false, starting: null as Promise<Down | null> | null, exit: '', sock: '', stop: null as null | (() => void), current: null as object | null }
 let works: Sandbox | null = null
 
@@ -104,7 +104,7 @@ async function socketPath($: Engine): Promise<{ sock?: string; error?: string }>
   const name = `cards-${shortHash(id)}`
   const user = String((await $.env.get('USER')) || (await $.env.get('LOGNAME')) || 'user').replace(/[^A-Za-z0-9_-]/g, '')
   const xdg = String((await $.env.get('XDG_RUNTIME_DIR')) || '').replace(/\/+$/, '')
-  const dirs = [runDir(home), xdg && `${xdg}/thimble`, `${await tempDir($)}/thimble-${user}`, `/tmp/thimble-${user}`].filter(Boolean) as string[]
+  const dirs = [runDir(home), xdg && `${xdg}/thimble`, `${await tempDir($)}/thimble-${user}`, `/tmp/thimble-${user}`, `/tmp/thimble-${shortHash(user)}`].filter(Boolean) as string[]
   for (const dir of dirs) {
     const sock = `${dir}/${name}/cards.sock`
     if (sock.length > SOCKET_MAX) continue

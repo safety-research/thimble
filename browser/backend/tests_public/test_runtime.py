@@ -336,6 +336,30 @@ def test_short_tmp_stays_short_where_the_temp_folder_is_long(monkeypatch, tmp_pa
     assert runtime_cc.short_tmp() is None, "no folder rather than one too long for the sandbox's sockets"
 
 
+async def test_the_api_key_s_bash_runs_in_its_sandbox_with_long_folder_names(tmp_path):
+    """The API key's Bash (runtime_tools._bash) runs under the sandbox runtime with no network rule, so srt starts no
+    proxy and makes no socket: a TMPDIR of any length (here over 200 characters, from a long user and workspace name)
+    starts it. The command writes its TMPDIR and the workspace, and its write to the data folder is refused."""
+    from app import runtime_tools
+
+    if why := runtime_tools.sandbox_reason():
+        pytest.skip(why)
+    long = tmp_path / "home" / ("a-rather-long-user-name-" * 3)
+    ws = long / ".thimble-browser" / "workspaces" / ("a-long-workspace-name-" * 3)
+    corpus = tmp_path / "data" / ("a-long-data-folder-name-" * 3)
+    home = ws / "runtime" / "home" / ("conv-" + "x" * 30)
+    for p in (ws, corpus, home):
+        p.mkdir(parents=True)
+    (corpus / "rows.txt").write_text("ada 3\n")
+    assert len(str(home / "tmp")) > 200
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus], write_roots=[ws], home=home)
+    out = await runtime_tools._bash(box, {"command": (
+        f"cat rows.txt; mktemp >/dev/null && echo tmp-ok; echo x > {ws}/w && echo ws-ok; "
+        "(echo x > new.txt) 2>/dev/null && echo DATA-WRITTEN || echo data-refused")})
+    assert not out.is_error and out.text.split() == ["ada", "3", "tmp-ok", "ws-ok", "data-refused"], out.text
+    assert not (corpus / "new.txt").exists() and (ws / "w").is_file()
+
+
 async def test_a_thimble_call_in_a_headless_session_runs_as_its_caller(on, monkeypatch):
     seen: dict[str, Any] = {}
     fake_sdk(monkeypatch, [], seen)

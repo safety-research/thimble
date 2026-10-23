@@ -32,7 +32,11 @@ theirs (UNASKED_ROLES), and the program's allowed tools, plugins, setting source
 that run outside it are dropped, as are its subagents' permission modes, hooks, memory and such servers (own_agents).
 Its words never name one of claude's commands (SUBCOMMANDS). On a stdin in stream-json, StdinFilter holds the same
 line against the Agent SDK's control requests. Its permission requests show on the run's chat (agent_session.host).
-A run holds at most MAX_SESSIONS sessions at once.
+A run holds at most MAX_SESSIONS sessions at once. Claude Code puts its sandbox's proxy sockets in TMPDIR, and a Unix
+socket's path holds at most 104 (macOS) or 108 (Linux) bytes, so each session gets a short private TMPDIR of its own
+(runtime_cc.short_tmp, removed when it ends: _session_tmp) and its sandbox is required (failIfUnavailable): a sandbox
+that still cannot start refuses each Bash call rather than run it outside. The program's own box needs no such folder:
+srt starts no proxy for it.
 
 Requests. On stdout a program writes JSON lines (agent_kit/thimble.py): `log` lines go into its thread, `output` is
 what the role returns, and `tool`, `ask` and `session` requests are answered on stdin. Any other line on stdout, and
@@ -486,8 +490,8 @@ async def session_call(run: Run, payload: dict[str, Any]) -> str:
     for key, flag in (("model", "--model"), ("effort", "--effort")):
         if isinstance(payload.get(key), str) and payload[key].strip():
             argv += [flag, payload[key].strip()]
-    async with run.slots:
-        final, folder, env = claude_argv(run, argv)
+    async with run.slots, _session_tmp(run) as tmp:
+        final, folder, env = claude_argv(run, argv, tmp)
         proc = await asyncio.create_subprocess_exec(*final, cwd=str(folder), env=env, stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                     start_new_session=True, limit=LINE_LIMIT)
@@ -655,9 +659,25 @@ def own_line(raw: bytes) -> bytes | None:
     return json.dumps(msg, ensure_ascii=False).encode("utf-8")
 
 
-def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, str]]:
+@contextlib.asynccontextmanager
+async def _session_tmp(run: Run) -> Any:
+    """A short private TMPDIR for one session of `run` (runtime_cc.short_tmp, module note, sessions), removed when the
+    block ends; None when no short folder could be made, and the session keeps the server's TMPDIR."""
+    from . import runtime_cc  # noqa: PLC0415
+
+    tmp = runtime_cc.short_tmp()
+    if tmp is None:
+        log.warning("%s: no short TMPDIR for a session of %s; its sandbox may not start", run.c, run.job.what)
+    try:
+        yield tmp
+    finally:
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def claude_argv(run: Run, argv: list[str], tmp: Path | None = None) -> tuple[list[str], Path, dict[str, str]]:
     """(the session's argv, the folder it runs in, its environment) for a session a program asked for with `argv`
-    (module note, sessions)."""
+    (module note, sessions); `tmp` is the session's TMPDIR (_session_tmp), which its sandboxed commands may write too."""
     from . import agent_session, cc_settings  # noqa: PLC0415 — agent_session imports this module's callers
 
     job, conf = run.job, run.conf
@@ -714,18 +734,20 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     # a run with no chat (a task's program) has nobody to ask, so what would ask is refused
     data = conf.data if run.chat or conf.data != "ask" else "off"
     web = conf.web if run.chat or conf.web != "ask" else "off"
+    # the sandbox, where the session has one, is required: one that cannot start refuses Bash (module note, sessions)
     fenced = agent_session.fence(corpus, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                                 auto_allow=False, required=conf.enforced, data=data)
+                                 auto_allow=False, required=True, data=data)
     perms = {**settings["permissions"]}
     for k, rules in fenced["permissions"].items():
         perms[k] = list(dict.fromkeys([*(perms.get(k) or []), *rules])) if isinstance(rules, list) else rules
     if job.writes:
         perms["allow"] = list(dict.fromkeys([*(perms.get("allow") or []), *(f"Edit(/{w}/**)" for w in job.writes)]))
-        if isinstance(fenced.get("sandbox"), dict):
-            box = dict(fenced["sandbox"])
-            fs = dict(box.get("filesystem") or {})
-            fs["allowWrite"] = list(dict.fromkeys([*(fs.get("allowWrite") or []), *map(str, job.writes)]))
-            fenced = {**fenced, "sandbox": {**box, "filesystem": fs}}
+    box_writes = [*map(str, job.writes), *([str(tmp)] if tmp is not None else [])]
+    if box_writes and isinstance(fenced.get("sandbox"), dict):
+        box = dict(fenced["sandbox"])
+        fs = dict(box.get("filesystem") or {})
+        fs["allowWrite"] = list(dict.fromkeys([*(fs.get("allowWrite") or []), *box_writes]))
+        fenced = {**fenced, "sandbox": {**box, "filesystem": fs}}
     settings = {**fenced, "permissions": perms}
     settings = agent_session.with_config(settings, conf.settings())
     if web == "ask":
@@ -752,7 +774,10 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     final = [agent_session.CLAUDE_BIN, *kept, "--plugin-dir", str(agent_session.PLUGIN_DIR), "--add-dir", str(corpus), *added,
              "--settings", json.dumps(settings), "--append-system-prompt", append, "--permission-mode", permission_mode,
              "--allowedTools", ",".join(agent_session.own_rules()), "--disallowedTools", ",".join(deny)]
-    return final, work, agent_session.environ()
+    env = agent_session.environ()
+    if tmp is not None:
+        env["TMPDIR"] = str(tmp)
+    return final, work, env
 
 
 def _proven(headers: Any) -> Run | None:
@@ -794,9 +819,9 @@ async def session_route(ws: WebSocket) -> None:
         await ws.send_text(json.dumps({"exit": proc.returncode or 0}))
         await ws.close()
         return
-    async with run.slots:
+    async with run.slots, _session_tmp(run) as tmp:
         try:
-            final, folder, env = claude_argv(run, argv)
+            final, folder, env = claude_argv(run, argv, tmp)
             proc = await asyncio.create_subprocess_exec(*final, cwd=str(folder), env=env,
                                                         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                                                         stderr=asyncio.subprocess.PIPE, start_new_session=True)
