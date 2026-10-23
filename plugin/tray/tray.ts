@@ -44,7 +44,7 @@ import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../
 import { launchRepair, repairOf } from '../marks/checker'
 import { highlighted, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
-import { marksIn, withoutMarks } from '../marks/message.js'
+import { marksIn, plainSentence, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
@@ -117,7 +117,10 @@ async function shownOf($: Engine, row: string): Promise<{ text: string; marks: {
   const shown = typeof v?.text === 'string' ? v.text : raw
   const marksOn = featureOn('marks')
   const text = marksOn ? shown : withoutMarks(shown)
-  return { text, marks: marksOn ? marksIn(text) : [], own: text === raw }
+  const own = text === raw
+  // Claude's own words, with each sentence a check rewrote in place of the one Claude wrote (marks/register.ts)
+  const drawn = own && marksOn ? withRewrites(text, (await rowMarks($, row))?.items ?? []) : text
+  return { text: drawn, marks: marksOn ? marksIn(drawn) : [], own }
 }
 
 /** The row's citations as it shows them: each with its number in the reply (0: one the check does not know). */
@@ -546,9 +549,10 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  const fixed = m.narrowed ? (m.repair ? 'repaired by narrowing; ' : 'narrowed; ') : m.repair ? 'repaired; ' : 'corrected; '
+  const fixed = m.rewrite ? (m.repair ? 'repaired by rewriting the sentence; ' : 'sentence rewritten; ') : m.narrowed ? (m.repair ? 'repaired by narrowing; ' : 'narrowed; ') : m.repair ? 'repaired; ' : 'corrected; '
   const notFixed = m.repair ? 'not repaired: ' : ''
-  if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${m.was.replace(/\*\*|`/g, '')}`)
+  // a rewrite's history is the sentence Claude wrote
+  if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}`)
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)

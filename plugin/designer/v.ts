@@ -37,6 +37,7 @@ import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut, fenced } from '../core/text.js'
 import { mainRuns } from '../core/turn'
+import { plainSentence } from '../marks/message.js'
 import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
@@ -130,7 +131,7 @@ async function checkedSince($: Engine, row: string): Promise<string> {
   // a narrowing changes no value: it cites fewer of the words
   const changed = (reply?.items ?? []).filter(m => (m.status === 'corrected' && !m.narrowed) || m.status === 'failed')
   if (!changed.length) return ''
-  const lines = changed.map(m => (m.status === 'corrected' ? `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"`
+  const lines = changed.map(m => (m.status === 'corrected' ? (m.rewrite ? `- "${plainSentence(m.sentence)}" is wrong; it is "${plainSentence(m.rewrite)}"` : `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"`)
     : m.failedBy === 'check' ? `- "${m.words}" is wrong${m.reason ? `: ${m.reason}` : ''}` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
   return `\n\nSince that answer, thimble checked its citations against the data. The check found (its words quote the records):\n${fenced(lines.join('\n'))}\nThe card shows the corrected values, computed from the records.`
 }

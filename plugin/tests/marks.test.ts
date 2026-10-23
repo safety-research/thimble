@@ -8,7 +8,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
 import { awaitsCheck, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
-import { marksIn } from '../marks/message.js'
+import { marksIn, withRewrites } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { footerEl, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
@@ -327,7 +327,7 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
   expect(seen.spawned.length).toBe(2)
   expect(seen.spawned[1].description).toBe('checking a citation again (x)')
-  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start, and look in the records for the right value. When you find it, answer `corrected` with the true words and the evidence that shows them.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
+  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start, and make the citation correct: change the cited words, the sentence or the evidence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
   // while it runs the citation spins; the other marks keep their results; no second repair of it starts
   expect(await drawn($)).toContain('"ship it" ⠋')
   expect(await drawn($)).toContain('merged 12 of 40.')
@@ -341,6 +341,29 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(told['marks:row-1:repair:3']).toContain('- "ship it" is corrected to "ship it now" (the check: "line 9 holds these words")')
   // the reply's own report stays as its check left it
   expect(told['marks:row-1']).toContain('"ship it" is flagged as wrong')
+})
+
+test("x whose check rewrites the citation's sentence: the reply shows the new sentence, history keeps the old one, main reads both", async () => {
+  let runs = 0
+  const rewrite = 'It said ["ship it now"] on line 9.'
+  const repaired = { parsed: true, results: [{ n: 3, status: 'corrected', shown: '"ship it now"', was: '"ship it"', rewrite, reason: 'line 9 holds these words' }] }
+  const { $ } = engine(() => ({ exitCode: 0, stdout: JSON.stringify(runs++ ? repaired : VALIDATED), stderr: '' }))
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  await launchRepair($, (await repairOf($, 'row-1', 3)) as Any, { until: 0, cancelled: false })
+  await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
+  const items = (await rowMarks($, 'row-1'))!.items
+  expect(items[2]).toMatchObject({ status: 'corrected', shown: '"ship it now"', was: '"ship it"', rewrite, sentence: 'It said ["ship it"].' })
+  // the row draws the rewritten sentence, its citation a mark in its place; the other sentences as Claude wrote them
+  const text = withRewrites(REPLY, items)
+  expect(text).toBe('Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it now"](#) on line 9.')
+  const looks = items.map(m => ({ n: m.n, status: m.status, shown: m.shown }))
+  const body = textOf(messageEl(ELS, { text, marks: marksIn(text), looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
+  expect(body).toContain('It said "ship it now" on line 9.')
+  expect(body).toContain('merged 12 of 40.')
+  const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['marks:row-1:repair:3']).toContain('- the sentence "It said "ship it"." is rewritten as "It said "ship it now" on line 9.", which cites "ship it now" (the check: "line 9 holds these words")')
 })
 
 test('a repair whose fork does not start leaves the citation as it was and says why', async () => {

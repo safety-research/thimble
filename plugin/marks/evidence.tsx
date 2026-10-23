@@ -166,14 +166,15 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     Text({ key: 'w', children: `  ${m.shown.replace(/\*\*|`/g, '')}` }),
   ] })
   const rows: Any[] = [head]
-  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.narrowed ? 'narrowed' : 'corrected'}; was ${m.was.replace(/\*\*|`/g, '')}` }))
+  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.rewrite ? 'sentence rewritten' : m.narrowed ? 'narrowed' : 'corrected'}; was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}` }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
-  // the sentence as the person read it, the mark's own words in bold
-  const sentence = plainSentence(m.sentence)
-  const at = sentence.indexOf(m.words.replace(/`/g, ''))
+  // the sentence as the person reads it (a rewrite's, once the check rewrote it), the cited words in bold
+  const sentence = plainSentence(m.rewrite ?? m.sentence)
+  const cited = (m.rewrite ? m.shown : m.words).replace(/`/g, '')
+  const at = sentence.indexOf(cited)
   rows.push(Text({ key: 'sent', dimColor: true, italic: true, wrap: 'wrap', children: at < 0 ? sentence : [
-    sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + m.words.replace(/`/g, '').length) }), sentence.slice(at + m.words.replace(/`/g, '').length),
+    sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + cited.length) }), sentence.slice(at + cited.length),
   ] }))
   if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'checking…' }))
   if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60) }))

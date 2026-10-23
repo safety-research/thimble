@@ -7,6 +7,8 @@
 //
 //   marksIn(text)              -> each mark of a text: {start, end, words} (start..end the whole link, words as written)
 //   sentenceOf(text, mark)     -> the sentence that holds a mark, on one line, each mark as `[words]`
+//   sentenceSpan(text, mark)   -> where that sentence stands in the text, [start, end)
+//   withRewrites(text, items)  -> the text with the sentences its marks' checks rewrote in place of its own
 //   plainSentence(sentence)    -> that sentence as a person reads it: no markdown, a table row's cells joined by ` · `
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
@@ -83,6 +85,18 @@ export function withoutMarks(text) {
  */
 export function sentenceOf(text, mark) {
   const s = String(text || '')
+  const [a, b] = sentenceSpan(s, mark)
+  const part = s.slice(a, b)
+  let out = ''
+  let at = 0
+  for (const m of marksIn(part)) { out += part.slice(at, m.start) + `[${m.words}]`; at = m.end }
+  // bold as `**` or `__`; a `__` between two letters or digits is part of a name (`chess-nano__goal`)
+  return (out + part.slice(at)).replace(/\*\*|(?<![\p{L}\p{N}])__|__(?![\p{L}\p{N}])/gu, '').replace(/\s+/g, ' ').trim()
+}
+
+/** Where the sentence that holds a mark stands in the text, as [start, end): sentenceOf's words as written. */
+export function sentenceSpan(text, mark) {
+  const s = String(text || '')
   let a = s.lastIndexOf('\n', mark.start - 1) + 1
   let b = s.indexOf('\n', mark.end)
   if (b < 0) b = s.length
@@ -93,12 +107,50 @@ export function sentenceOf(text, mark) {
     if (after <= mark.start) a = after
     else if (e.index >= mark.end - 1) { b = after; break }
   }
-  const part = s.slice(a, b)
+  return [a, b]
+}
+
+/**
+ * The text with the sentences its checks rewrote: `items` are the text's marks' checks by their place (marks/store.ts
+ * MarkItem), and a corrected one's `rewrite` is the sentence that stands in place of its own, written as sentenceOf
+ * writes one (each citation `[words]`, engine/kernel/evidence.py sentence_rewrite). The white space around the sentence
+ * stays; a second rewrite of one sentence is left out. The text as it was when the rewritten one would not hold the
+ * same number of marks, so each mark keeps its place among them.
+ */
+export function withRewrites(text, items) {
+  const s = String(text || '')
+  const spans = marksIn(s).flatMap((m, k) => (items[k]?.status === 'corrected' && String(items[k]?.rewrite || '').trim() ? [{ span: sentenceSpan(s, m), sentence: String(items[k].rewrite) }] : []))
+    .sort((x, y) => y.span[0] - x.span[0])
+  let out = s
+  let floor = Infinity
+  for (const { span: [a, b], sentence } of spans) {
+    if (b > floor) continue
+    const raw = s.slice(a, b)
+    const lead = raw.match(/^\s*/)[0]
+    const trail = raw.slice(lead.length).match(/\s*$/)[0]
+    out = out.slice(0, a) + lead + asMarks(sentence) + trail + out.slice(b)
+    floor = a
+  }
+  return marksIn(out).length === marksIn(s).length ? out : s
+}
+
+/** A sentence written as sentenceOf writes one, each citation `[words]` a mark again (`[words](#)`). */
+function asMarks(sentence) {
   let out = ''
-  let at = 0
-  for (const m of marksIn(part)) { out += part.slice(at, m.start) + `[${m.words}]`; at = m.end }
-  // bold as `**` or `__`; a `__` between two letters or digits is part of a name (`chess-nano__goal`)
-  return (out + part.slice(at)).replace(/\*\*|(?<![\p{L}\p{N}])__|__(?![\p{L}\p{N}])/gu, '').replace(/\s+/g, ' ').trim()
+  let i = 0
+  while (i < sentence.length) {
+    if (sentence[i] !== '[') { out += sentence[i++]; continue }
+    let depth = 0
+    let close = -1
+    for (let j = i; j < sentence.length; j++) {
+      if (sentence[j] === '[') depth++
+      else if (sentence[j] === ']' && --depth === 0) { close = j; break }
+    }
+    if (close < 0) { out += sentence.slice(i); break }
+    out += `${sentence.slice(i, close + 1)}(#)`
+    i = close + 1
+  }
+  return out
 }
 
 /** A sentence of sentenceOf as a person reads it: no heading, quote or list marker, a table row's cells joined by

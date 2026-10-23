@@ -39,10 +39,12 @@ export type Evidence =
  *  sentence outside the mark.
  *  `repair`: the person pressed x on it, and this check is the one x started (checker.ts startRepair).
  *  `narrowed`: a `corrected` mark whose check cites only a part of its words (`shown`): the rest is Claude's own wording,
- *  such as a translation, which the reply shows as plain words. */
+ *  such as a translation, which the reply shows as plain words.
+ *  `rewrite`: a `corrected` mark whose check rewrote its whole sentence (written as `sentence`, each citation
+ *  `[words]`), which the reply shows in place of the old one; `sentence` and `was` keep what Claude wrote. */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string
 }
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[] }
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */

@@ -696,3 +696,131 @@ def test_a_narrowing_cites_only_the_part_of_the_words_the_evidence_shows_and_lea
     ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
     res = json.loads(ran.stdout)["results"][0]
     assert (res["status"], res["shown"], res["was"], res["narrowed"]) == ("corrected", kept, words, True)
+
+
+# ------------------------------------------------------------------------------------------------ one path to a correct citation
+
+def validated(cwd, marks: list[dict], items: list[dict], calls: list[dict] = ()) -> list[dict]:
+    """The validator's results, as the plugin runs it."""
+    req = {"cwd": str(cwd), "marks": marks, "calls": list(calls), "answer": "```json\n" + json.dumps(items) + "\n```"}
+    ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
+    return json.loads(ran.stdout)["results"]
+
+
+BOARD = [
+    {"user": "agent-03", "text": "starting on the parser"},
+    {"user": "agent-07", "text": "I will hold off on merging until the tests pass"},
+    *({"user": f"agent-{i:02d}", "text": "ok"} for i in range(10, 34)),
+    {"user": "agent-07", "text": "yes, that was me"},
+]
+
+
+def board(tmp_path) -> Path:
+    (tmp_path / "board.jsonl").write_text("".join(json.dumps(r) + "\n" for r in BOARD))
+    return tmp_path
+
+
+def test_a_wrong_number_is_corrected_whether_the_check_gives_the_words_or_the_whole_sentence():
+    m = {"n": 1, "words": "13 of 40", "sentence": "agent-07 merged [13 of 40] pull requests."}
+    calls = [call(CODE, "12 of 40\n")]
+    for corr in ({"words": "12 of 40"}, {"words": "12 of 40", "sentence": "agent-07 merged [12 of 40] pull requests."}):
+        r = validated("/data", [m], [{"mark": 1, **computed("12 of 40", status="corrected", correction=corr)}], calls)[0]
+        # only the cited words change: a correction in place, no rewrite of the sentence
+        assert (r["status"], r["shown"], r["was"]) == ("corrected", "12 of 40", "13 of 40") and "rewrite" not in r
+
+
+def test_a_gloss_given_as_the_sentence_with_fewer_words_cited_is_a_narrowing():
+    words = 'one user, "Kalmbot", with the summary "Seite gelöscht." ("page deleted")'
+    m = {"n": 1, "words": words, "sentence": f"Most deletions are by [{words}]."}
+    out = 'one user, "Kalmbot", with the summary "Seite gelöscht."\n'
+    sentence = 'Most deletions are by [one user, "Kalmbot", with the summary "Seite gelöscht."] ("page deleted").'
+    r = validated("/data", [m], [{"mark": 1, **computed(out.strip(), status="corrected", correction={"sentence": sentence})}], [call("print(1)", out)])[0]
+    assert (r["status"], r["shown"], r["narrowed"]) == ("corrected", 'one user, "Kalmbot", with the summary "Seite gelöscht."', True) and "rewrite" not in r
+
+
+def test_a_paraphrase_no_record_shows_is_reworded_around_the_words_the_record_holds(tmp_path):
+    words = "refused to merge the pull request"
+    m = {"n": 1, "words": words, "sentence": f"On the board, agent-07 [{words}]."}
+    ev = {"file": "board.jsonl", "line": 2, "substring": "I will hold off on merging until the tests pass"}
+    new = "On the board, agent-07 wrote [“I will hold off on merging until the tests pass”]."
+    item = {"mark": 1, "kind": "quote", "evidence": ev, "status": "corrected", "correction": {"sentence": new}, "reason": "agent-07 held off; no record says it refused"}
+    r = validated(board(tmp_path), [m], [item])[0]
+    assert (r["status"], r["shown"], r["was"], r["rewrite"]) == ("corrected", "“I will hold off on merging until the tests pass”", words, new)
+    # the check's own place is the citation's evidence
+    assert (r["evidence"]["file"], r["evidence"]["line"]) == ("board.jsonl", "2")
+    # cited words the line does not hold are no rewrite
+    bad = {**item, "correction": {"sentence": "On the board, agent-07 wrote [“I will not merge”]."}}
+    r = validated(board(tmp_path), [m], [bad])[0]
+    assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", words) and r["reason"].startswith("Not confirmed: the check rewrote the sentence")
+    # a value put outside the citation that the evidence does not show is a claim no evidence holds
+    bad = {**item, "correction": {"sentence": "On the board, agent-07 wrote 3 times [“I will hold off on merging until the tests pass”]."}}
+    r = validated(board(tmp_path), [m], [bad])[0]
+    assert (r["status"], r["failedBy"]) == ("failed", "evidence") and "“wrote 3 times”" in r["reason"] and "does not show" in r["reason"]
+
+
+def test_a_translation_quoted_as_the_record_s_words_cites_the_record_s_own_words_and_keeps_the_translation_uncited(tmp_path):
+    german = "Ich halte #42 zurück, bis die wackligen Tests in Quarantäne sind."
+    (tmp_path / "standup.jsonl").write_text(json.dumps({"agent": "agent-07", "text": german}, ensure_ascii=False) + "\n")
+
+    def check(words: str) -> dict:
+        m = {"n": 2, "words": words, "sentence": f"In English, agent-07 said: [{words}]"}
+        # as the check wrote it in a live session: the citation as the reply writes one, `[words](#)`
+        new = f'In English, agent-07 said: {words} (original: ["{german}"](#))'
+        item = {"mark": 2, "kind": "quote", "evidence": {"file": "standup.jsonl", "line": 1, "substring": german}, "status": "corrected",
+                "correction": {"words": german, "sentence": new}, "reason": "the record holds only the German words"}
+        return validated(tmp_path, [m], [item])[0]
+
+    words = '"I\'m holding #42 back until the flaky tests are quarantined. I\'ll look again."'
+    r = check(words)
+    assert (r["status"], r["shown"], r["was"]) == ("corrected", f'"{german}"', words)
+    assert r["rewrite"] == f'In English, agent-07 said: {words} (original: ["{german}"])'
+    # a translation that states a value the citation cited (two) and no longer does is not confirmed
+    r = check(words.replace("the flaky", "the two flaky"))
+    assert (r["status"], r["failedBy"]) == ("failed", "evidence") and "a value of the data" in r["reason"]
+
+
+def test_a_wrong_place_takes_the_check_s_place_in_the_sentence_and_as_the_evidence(tmp_path):
+    words = "“yes, that was me”"
+    m = {"n": 1, "words": words, "sentence": f"On line 29 of board.jsonl, agent-07 wrote [{words}]."}
+    item = {"mark": 1, "kind": "quote", "evidence": {"file": "board.jsonl", "line": 27, "substring": "yes, that was me"},
+            "status": "corrected", "correction": {"words": words, "sentence": f"On line 27 of board.jsonl, agent-07 wrote [{words}]."},
+            "reason": "the words are on line 27"}
+    r = validated(board(tmp_path), [m], [item])[0]
+    assert (r["status"], r["shown"], r["was"]) == ("corrected", words, words)
+    assert r["rewrite"] == f"On line 27 of board.jsonl, agent-07 wrote [{words}]." and r["evidence"]["line"] == "27"
+    # a line the evidence does not cite is not confirmed
+    wrong = {**item, "correction": {"sentence": f"On line 28 of board.jsonl, agent-07 wrote [{words}]."}}
+    r = validated(board(tmp_path), [m], [wrong])[0]
+    assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", words) and "“28”" in r["reason"]
+    # the old way still holds: a correction that changes no words found an error around them
+    r = validated(board(tmp_path), [m], [{**item, "correction": {"words": words}}])[0]
+    assert (r["status"], r["failedBy"]) == ("failed", "check")
+
+
+def test_a_rewrite_stays_within_its_sentence_and_keeps_the_other_citations():
+    m = {"n": 2, "words": "13", "sentence": "Of the [40] pull requests, [13] were merged by agent-07."}
+    calls = [call(CODE, "12 merged by agent-07\n")]
+
+    def one(sentence: str) -> dict:
+        item = {"mark": 2, **computed("12 merged by agent-07", status="corrected", correction={"sentence": sentence})}
+        return validated("/data", [m], [item], calls)[0]
+
+    r = one("Of the [40] pull requests, agent-07 merged [12].")
+    assert (r["status"], r["shown"], r["rewrite"]) == ("corrected", "12", "Of the [40] pull requests, agent-07 merged [12].")
+    # the other citation written with no brackets is bracketed where it stands
+    assert one("Of the 40 pull requests, agent-07 merged [12].")["rewrite"] == "Of the [40] pull requests, agent-07 merged [12]."
+    for sentence, why in (("Of the [41] pull requests, agent-07 merged [12].", "changes the other citations"),
+                          ("Of the [40] pull requests, agent-07 merged [12]. The rest are open.", "adds a sentence"),
+                          ("Of the [40] pull requests, [12] were merged by agent-07, not 13.", "leaves “not 13.” out of the citation")):
+        r = one(sentence)
+        assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", "13") and why in r["reason"], (sentence, r["reason"])
+
+
+def test_a_sentence_is_rewritten_once():
+    sentence = "Of the [40] pull requests, [13] were merged by agent-07."
+    marks = [{"n": 1, "words": "40", "sentence": sentence}, {"n": 2, "words": "13", "sentence": sentence}]
+    calls = [call(CODE, "12 of 40 merged by agent-07\n")]
+    item = lambda k, s: {"mark": k, **computed("12 of 40 merged by agent-07", status="corrected", correction={"sentence": s})}  # noqa: E731
+    one, two = validated("/data", marks, [item(1, "Of all [40] pull requests, [13] were merged by agent-07."), item(2, "Of the [40] pull requests, agent-07 merged [12].")], calls)
+    assert one["rewrite"] == "Of all [40] pull requests, [13] were merged by agent-07."
+    assert (two["status"], two["shown"]) == ("failed", "13") and "rewrite" not in two
