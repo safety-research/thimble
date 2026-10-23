@@ -13,8 +13,10 @@
 //     proposal shows above the composer only once the tour ends; step 1's example
 //     sits 8 px or more inside its cutout, which lies inside the chat panel; step 3, Files, says what the files browser
 //     shows;
-//   - step 4: the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
-//     height, the cutout and the Labels pane still and the ruler's thumb following, and the wheel over the ruler too;
+//   - step 4: the step opens the real Labels sidebar with the top bar's Labels button and lays the example sidebar
+//     exactly over it, beside the transcript; the wheel scrolls the labels' transcript in steps with every record
+//     moving by exactly the scroll, its height, the cutout and the example sidebar still and the ruler's thumb
+//     following, and the wheel over the ruler too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
 //     another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, there is no
 //     label control (the page draws its own), the line under the name starts where the name does, the unreadable line
@@ -365,7 +367,8 @@ const takeLog7 = (page: Page): Promise<Log7[]> =>
  * it was first seen through 3 or more places, and stood within 3 px of 08:04 when the source first showed, the card not
  * moving from the pointer's first frame on. */
 const judge7 = (log: Log7[], maxMs = 2000) => {
-  const on = log.filter((x) => x.n === 6)
+  // the cards step is step 5
+  const on = log.filter((x) => x.n === 5)
   const firstAt = on.find((x) => x.at)
   const srcAt = on.find((x) => x.src && x.at)
   const pts = on.filter((x) => x.at).map((x) => x.at!)
@@ -578,6 +581,7 @@ const FIGS = () => {
     const el = f.querySelector('.outputs-vega svg') || f.querySelector('table')
     return {
       id: (f.getAttribute('data-tour-anchor') || '').slice(5),
+      table: el?.tagName === 'TABLE',
       content: Math.round((body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) * k * 10) / 10,
       width: el ? Math.round(el.getBoundingClientRect().width * 10) / 10 : null,
     }
@@ -607,9 +611,9 @@ async function ownReport(panel: number) {
 }
 
 /** The whole tour from step 1, with the assertions of each step. */
-async function walk(page: Page, tag: string, folds?: boolean, send = false) {
+async function walk(page: Page, tag: string, send = false) {
   // 1 the chat
-  await onStep(page, 1, 'Your Claude Code session')
+  await onStep(page, 1, 'Your chat with Claude')
   let g = await measure(page, `${tag} 1`)
   assert.deepEqual(await buttons(page), ['skip', 'next'], `${tag} 1: Skip tour and Next`)
   const inset = await page.evaluate((h) => {
@@ -632,7 +636,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   // 2 Files
   await onStep(page, 2, 'Files')
   g = await measure(page, `${tag} 2`)
-  assert.equal(await body(page), 'The files browser exposes global views on the corpus.', `${tag} 2: what the files browser shows`)
+  assert.equal(await body(page), 'The file browser lists the folder’s files. Click one to read it.', `${tag} 2: what the file browser shows`)
   const files = await page.evaluate(() => {
     const b = document.querySelector('[data-panel="files"].shell-panel')!.getBoundingClientRect()
     return [b.x, b.y, b.width, b.height]
@@ -643,15 +647,18 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await onStep(page, 3, 'Labels')
   await sleep(400)
   await measure(page, `${tag} 3`)
-  // the example's Labels pane and transcript side by side inside the Files panel, whether its sidebar docks or folds
+  // the step opened the real Labels sidebar with the top bar's Labels button; the example's sidebar lies exactly over
+  // it, and the example's transcript inside the Files panel, beside it
   const lay = await page.evaluate(() => {
     const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect()
-    const P = r('[data-panel="files"].shell-panel'), lab = r('.tour-ex-labels'), rd = r('.tour-ex-reader')
-    const inside = (b: DOMRect) => b.left >= P.left - 0.5 && b.right <= P.right + 0.5 && b.top >= P.top - 0.5 && b.bottom <= P.bottom + 0.5
-    return { folded: ![...document.querySelectorAll('.files-labels')].some((e) => !e.closest('.tour-root')), inside: inside(lab) && inside(rd), apart: lab.right <= rd.left + 0.5 }
+    const real = [...document.querySelectorAll('aside.lside')].find((e) => !e.closest('.tour-root'))
+    const S = real?.getBoundingClientRect(), side = r('.tour-ex-side'), rd = r('.tour-ex-reader'), P = r('[data-panel="files"].shell-panel')
+    const same = !!S && [S.x - side.x, S.y - side.y, S.width - side.width, S.height - side.height].every((d) => Math.abs(d) <= 1)
+    const inside = rd.left >= P.left - 0.5 && rd.right <= P.right + 0.5 && rd.top >= P.top - 0.5 && rd.bottom <= P.bottom + 0.5
+    return { open: real?.getAttribute('data-section') ?? null, same, inside, apart: rd.right <= side.left + 0.5, pressed: document.querySelector('.shell-side-btn[data-side="labels"]')?.getAttribute('aria-pressed') ?? null }
   })
-  assert.ok(lay.inside && lay.apart, `${tag} 3: the labels pane and the transcript lie apart inside the Files panel ${JSON.stringify(lay)}`)
-  if (folds !== undefined) assert.equal(lay.folded, folds, `${tag} 3: the Files sidebar ${folds ? 'folds' : 'docks'}`)
+  assert.ok(lay.open === 'labels' && lay.same && lay.inside && lay.apart && lay.pressed === 'true', `${tag} 3: the Labels sidebar is open with the example over it, beside the transcript ${JSON.stringify(lay)}`)
+  assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.', `${tag} 3: what a label is`)
   // in wheel steps of 100 px down and back up, every record on screen moves by exactly the scroll, and the transcript's
   // height, the cutout and the Labels pane hold still while the ruler's thumb follows
   const look5 = () =>
@@ -663,7 +670,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
         const q = r.getBoundingClientRect()
         if (q.bottom > b.top + 10 && q.top < b.bottom - 10) rows[r.querySelector('[data-line]')?.getAttribute('data-line') ?? ''] = q.top
       }
-      const L = document.querySelector('.tour-ex-labels')!.getBoundingClientRect()
+      const L = document.querySelector('.tour-ex-side')!.getBoundingClientRect()
       const holes = (window as any).__tour().geometry().holes as { x: number; y: number; w: number; h: number }[]
       const fixed = [[L.x, L.y, L.width, L.height], ...holes.map((h) => [h.x, h.y, h.w, h.h])].map((v) => v.map(Math.round).join()).join(';')
       return { top: sc.scrollTop, sh: sc.scrollHeight, rows, fixed, thumb: document.querySelector('.tour-ex-reader .reader-ruler-thumb')?.getBoundingClientRect().top ?? null, mid: { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
@@ -963,10 +970,11 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
     badge9 = await page.evaluate(REPORTBADGE)
   }
   assert.ok(badge9.shown && badge9.inBar && badge9.dy != null && Math.abs(badge9.dy) <= 1 && !badge9.hits.length && badge9.texts > 50, `${tag} 7: the Example badge sits in the report's bar, level with its + New, and covers nothing ${JSON.stringify(badge9)}`)
-  // every chart and table as wide as its figure; no comment margin until the check is made, so the text column is as
-  // wide as thimble's own Report draws it with no check on, for a panel as wide as the example is laid out
+  // every chart as wide as its figure, and every table at most as wide (a figure's table keeps its own width, as in
+  // thimble's Report); no comment margin until the check is made, so the text column is as wide as thimble's own Report
+  // draws it with no check on, for a panel as wide as the example is laid out
   const figs = await page.evaluate(FIGS)
-  assert.ok(figs.length === 5 && figs.every((f) => f.width != null && Math.abs(f.width - f.content) <= 3), `${tag} 7: every chart and table as wide as its figure ${JSON.stringify(figs)}`)
+  assert.ok(figs.length === 5 && figs.every((f) => f.width != null && (f.table ? f.width <= f.content + 3 : Math.abs(f.width - f.content) <= 3)), `${tag} 7: every chart as wide as its figure, every table at most as wide ${JSON.stringify(figs)}`)
   const col9 = await page.evaluate(REPORTCOL)
   const own = await ownReport(col9.inner)
   assert.ok(!col9.margin && Math.abs(col9.col - own.col) <= 1, `${tag} 7: no comment margin, and the column as wide as thimble's own Report ${JSON.stringify({ col9, own })}`)
@@ -1148,7 +1156,7 @@ for (const cfg of [
       const panel = await page.evaluate(() => Math.round(document.querySelector('.chat[data-panel="chat"]')!.getBoundingClientRect().width))
       assert.ok(Math.abs(panel - cfg.chat) <= 2, `the chat column is ${panel}px`)
       await page.click('.tour-pop [data-tour="begin"]')
-      await walk(page, tag, cfg.folds, cfg.send)
+      await walk(page, tag, cfg.send)
       // the layout's own surface again (the stored layout was on the Report)
       assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.shell-tabs .tab.active')?.dataset.tab), 'report')
       assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'the tour wrote nothing to the workspace')
@@ -1253,7 +1261,7 @@ test('the cards demo waits for a Canvas drawn late, and a hover that stops it le
       const l = (window as any).__log8
       ;(window as any).__log8 = null
       return l
-    })) as { t: number; n: number; at: string | null; key: boolean; src: number }[]).filter((x) => x.n === 7)
+    })) as { t: number; n: number; at: string | null; key: boolean; src: number }[]).filter((x) => x.n === 6) // the ⌘ step is step 6
     const first8 = l8.find((x) => x.at)
     const r8 = { first: first8?.t ?? null, places: new Set(l8.filter((x) => x.at).map((x) => x.at)).size, key: l8.some((x) => x.key), src: l8.length ? l8[l8.length - 1].src : null }
     assert.ok(r8.first != null && r8.first <= 1000 && r8.places >= 10 && r8.key && r8.src === 0, `the ⌘ demo plays at once and the hovered source is closed ${JSON.stringify(r8)}`)
@@ -1274,7 +1282,7 @@ test('Settings’ Take the tour replays the tour from step 1, without the welcom
     const foot = await page.evaluate(() => [...document.querySelectorAll('.settings-foot button')].map((b) => b.textContent?.trim()))
     assert.deepEqual(foot, ['Take the tour', 'Cancel', 'Save'])
     await page.click('.settings-foot .settings-tour')
-    await onStep(page, 1, 'Your Claude Code session')
+    await onStep(page, 1, 'Your chat with Claude')
     const st = await state(page)
     assert.ok(st && !st.welcome && st.i === 0 && st.total === 8, 'step 1 of 8, no welcome')
     await page.keyboard.press('Escape')
@@ -1292,7 +1300,7 @@ test('with the chat column folded the tour leaves out its chat step and starts o
     await page.click('.tour-pop [data-tour="begin"]')
     await onStep(page, 1, 'Files')
     assert.equal((await state(page))!.total, 7)
-    assert.equal(await body(page), 'The files browser exposes global views on the corpus.')
+    assert.equal(await body(page), 'The file browser lists the folder’s files. Click one to read it.')
     await measure(page, 'chat folded 1')
     assert.deepEqual(await buttons(page), ['skip', 'next'])
   } finally {
@@ -1322,7 +1330,7 @@ test('an ask box left open closes when Settings’ Take the tour starts the tour
     await page.keyboard.type('A draft')
     await page.click('[data-tel="settings"]')
     await page.click('.settings-foot .settings-tour')
-    await onStep(page, 1, 'Your Claude Code session')
+    await onStep(page, 1, 'Your chat with Claude')
     assert.equal(await page.evaluate(() => [...document.querySelectorAll('.pointer-box')].some((x) => !x.closest('.tour-root'))), false, 'the ask box closed')
     await page.keyboard.press('Enter')
     await sleep(300)
