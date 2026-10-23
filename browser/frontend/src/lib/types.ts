@@ -1116,12 +1116,13 @@ export interface Check {
   ts: string
   version: number
   runs: Record<string, CheckRun>
-  /** what it comments on: the documents, the cards (its runs on them are `runs['@canvas']`) or both */
+  /** what it comments on: the documents, the cards (its runs on them are `runs['@canvas']`), Claude's answers in the
+   * chat (`runs['@answers']`), or several */
   covers?: CheckCover[]
 }
 
-/** What a check comments on (backend checks.COVERS). */
-export type CheckCover = 'documents' | 'cards'
+/** What a check comments on (backend checks.COVERS): `answers` is Claude's answers in the chat, Show in's Chat. */
+export type CheckCover = 'documents' | 'cards' | 'answers'
 
 /** `PATCH /ws/{c}/checks/{id}`: what the sidebar changes. */
 export interface CheckPatch {

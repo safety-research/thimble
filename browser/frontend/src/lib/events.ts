@@ -79,6 +79,9 @@ function fanOut(ev: WsEvent): void {
     case 'checks':
       bus.emit('checks', { id: typeof rest.id === 'string' ? rest.id : undefined })
       return
+    case 'answer-comments':
+      bus.emit('answerComments', {})
+      return
     case 'canvas-comments':
       bus.emit('canvasComments', { card: typeof rest.card === 'string' ? rest.card : undefined })
       return

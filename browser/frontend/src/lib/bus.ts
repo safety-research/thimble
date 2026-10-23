@@ -37,6 +37,8 @@ export type Events = {
   checks: { id?: string }
   /** the comments on the cards changed (the stream's `canvas-comments` record) */
   canvasComments: { card?: string }
+  /** the checks' comments on Claude's answers changed (the stream's `answer-comments` record, chat/answerComments.ts) */
+  answerComments: Record<string, never>
   /** the stream connected or dropped */
   wsStream: { connected: boolean }
   /** a lazy chunk did not load and the server serves another build: ask for a reload (lib/chunkRecovery) */

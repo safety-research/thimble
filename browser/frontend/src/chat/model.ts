@@ -34,6 +34,9 @@ export interface TextRow {
   checks?: (MarkItem | undefined)[]
   /** the turn's marks, on the turn's last text row (its reply), for the footer under it */
   turnMarks?: MarkItem[]
+  /** the id of main's turn this row answers, which its `done` record names: the checks' comments on the answer name it
+   * (chat/answerComments.ts) */
+  turn?: string
 }
 export interface ToolResult {
   summary: string
@@ -289,7 +292,10 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'done':
-        if (typeof e.turn === 'string' && e.turn) turns.set(e.turn, turnTexts)
+        if (typeof e.turn === 'string' && e.turn) {
+          turns.set(e.turn, turnTexts)
+          for (const row of turnTexts) row.turn = e.turn
+        }
         turnTexts = []
         afterDone = true
         return

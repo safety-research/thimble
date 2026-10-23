@@ -1,11 +1,13 @@
 // The comments of the shared Labels and Comments sidebar (LabelsSidebar.tsx): every open comment the checks (and
-// main's and the analyst's notes) left on the cards and in the report. A comment's row says where it is, as a link that
+// main's and the analyst's notes) left on the cards and in the report, and the checks' comments on Claude's answers in
+// the chat (chat/answerComments.ts). A comment's row says where it is, as a link that
 // goes there (a card, or the passage in the report), its passage, its statement and, a click away, its details. Apply
 // sends the comment to main in the chat as the analyst's message (bus openChat with `send`, the composer's own path),
 // so Claude makes the change there; Go to it opens the card or the passage; Done resolves it, as the comment's check
 // mark does where it stands.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCanvasComments } from '../canvas/CommentLayer'
+import { plainQuote, useAnswerComments } from '../chat/answerComments'
 import { Button } from '../components/Button'
 import { docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -15,10 +17,10 @@ import { commentsApi } from '../report/commentsApi'
 
 const REPORT = 'report'
 
-/** One open comment, from the cards or the report. */
+/** One open comment, from the cards, the report or Claude's answers in the chat. */
 export interface CommentItem {
   id: string
-  surface: 'canvas' | 'report'
+  surface: 'canvas' | 'report' | 'chat'
   check: string | null
   author: string
   text: string
@@ -27,14 +29,15 @@ export interface CommentItem {
   ref: string
   /** where it stands, in words: "card abc · step 2", "the report" */
   where: string
-  /** the passage's words, for a comment in the report */
+  /** the passage's words, for a comment in the report or on an answer */
   quote?: string | null
 }
 
 /** The message Apply sends to main: which comment, where, and what it says. Pure. */
 export function applyText(c: CommentItem, name: string): string {
   const who = c.check != null ? `the check “${name}”` : c.author === 'claude' ? 'your own note' : 'my note'
-  const at = c.surface === 'report' ? `in the report${c.quote ? ` at “${c.quote}”` : ''} (${c.ref})` : `on ${c.ref}`
+  const at =
+    c.surface === 'report' ? `in the report${c.quote ? ` at “${c.quote}”` : ''} (${c.ref})` : c.surface === 'chat' ? `on your answer${c.quote ? ` at “${c.quote}”` : ''}` : `on ${c.ref}`
   const said = [c.text.trim(), c.details.trim()].filter(Boolean).join('\n\n')
   return `Apply this comment of ${who} ${at}: ${said}`
 }
@@ -55,10 +58,11 @@ function useReportComments(ws: string): { comments: WriteupComment[]; reload: ()
   return { comments, reload }
 }
 
-/** Every open comment, on the cards and in the report, with what Done needs. */
+/** Every open comment, on the cards, in the report and on Claude's answers, with what Done needs. */
 export function useCommentItems(ws: string) {
   const cards = useCanvasComments(ws)
   const report = useReportComments(ws)
+  const answers = useAnswerComments(ws)
   const items = useMemo<CommentItem[]>(
     () => [
       ...cards.comments.map((c) => ({
@@ -82,16 +86,33 @@ export function useCommentItems(ws: string) {
         where: 'the report',
         quote: c.quote ?? null,
       })),
+      ...answers.comments
+        .filter((c) => c.status === 'open')
+        .map((c) => ({
+          id: c.id,
+          surface: 'chat' as const,
+          check: c.check,
+          author: 'check',
+          text: c.text,
+          details: c.details ?? '',
+          ref: c.ref,
+          where: "Claude's answer",
+          quote: plainQuote(c.quote) || null,
+        })),
     ],
-    [cards.comments, report.comments],
+    [cards.comments, report.comments, answers.comments],
   )
-  return { items, cards, report }
+  return { items, cards, report, answers }
 }
 
 /** The open comments with Done: on a card it resolves the card's comment, in the report the passage's. */
 export function useComments(ws: string) {
-  const { items, cards, report } = useCommentItems(ws)
+  const { items, cards, report, answers } = useCommentItems(ws)
   const done = (c: CommentItem) => {
+    if (c.surface === 'chat') {
+      answers.dismiss(c.id).catch((e: Error) => bus.emit('toast', { text: `Could not resolve the comment. ${e.message}`, kind: 'error' }))
+      return
+    }
     if (c.surface === 'canvas') {
       const found = cards.comments.find((x) => x.id === c.id)
       if (found) void cards.resolve(found)

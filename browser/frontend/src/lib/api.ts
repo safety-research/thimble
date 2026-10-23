@@ -54,6 +54,7 @@ import type {
   WorkspaceRow,
   Writeup,
 } from './types'
+import type { AnswerComments } from '../chat/answerComments'
 import { bus } from './bus'
 import { heavy } from './limit'
 import { clearCodeGone, setBrowserId, showCodeGone } from './notices'
@@ -899,4 +900,9 @@ export const checksApi = {
   run: (c: string, id: string, doc: string) => j<CheckRun>(`${ws(c)}/checks/${enc(id)}/run`, { method: 'POST', body: JSON.stringify({ doc }) }),
   /** `POST /checks/{id}/runs/{doc}/stop`: stop the check's run on one document; answers the check. */
   stop: (c: string, id: string, doc: string) => j<Check>(`${ws(c)}/checks/${enc(id)}/runs/${enc(doc)}/stop`, { method: 'POST' }),
+  // ---- the checks' comments on Claude's answers (backend answer_comments.py; chat/answerComments.ts) ----
+  /** `GET /answer-comments`: the open comments of the checks that are on and show in the chat */
+  answerComments: (c: string) => j<AnswerComments>(`${ws(c)}/answer-comments`),
+  /** Done on a comment on an answer: its tint goes */
+  dismissAnswerComment: (c: string, id: string) => j<{ id: string }>(`${ws(c)}/answer-comments/${enc(id)}/dismiss`, { method: 'POST' }),
 }

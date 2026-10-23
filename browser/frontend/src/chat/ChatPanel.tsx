@@ -386,6 +386,15 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     [ws],
   )
 
+  // Go to it on a check's comment on Claude's answer, `answer:<turn>#s<n>`: main's chat opens, where Rows opens the comment
+  useEffect(
+    () =>
+      bus.on('openRef', (e) => {
+        if (e.ref.startsWith('answer:')) setCurrent('main')
+      }),
+    [],
+  )
+
   // what asked for the chat while its column was folded (chat/pending.ts), once the listeners above are subscribed
   useEffect(() => {
     replayHeld()

@@ -1,7 +1,7 @@
 ---
 name: Important details
 color: 2
-covers: [documents, cards]
+covers: [documents, cards, answers]
 shown: true
 ---
 

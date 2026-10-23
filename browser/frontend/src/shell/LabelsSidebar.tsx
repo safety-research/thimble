@@ -77,7 +77,7 @@ export function withCover(check: Pick<Check, 'covers'>, cover: CheckCover, on: b
   const now = new Set(coversOf(check))
   if (on) now.add(cover)
   else now.delete(cover)
-  const next = (['documents', 'cards'] as const).filter((k) => now.has(k))
+  const next = (['documents', 'cards', 'answers'] as const).filter((k) => now.has(k))
   return next.length ? next : null
 }
 
@@ -421,12 +421,9 @@ function NewLabel() {
 
 // ---- the comment categories
 
-/** what Show in's Chat says while no check reads the chat */
-const NO_CHAT = 'Checks read the cards and the report; none reads the chat yet'
-
-/** A category's Show in: Chat · Cards · Report, each with its open comments there. Cards and Report turn the check's
- * covers on and off (the last one stays on: the switch hides a check everywhere); Notes, which no check made, and
- * Chat are fixed. */
+/** A category's Show in: Chat · Cards · Report, each with its open comments there. Each turns the check's covers on
+ * and off (Chat is its `answers`: it reads each of Claude's answers when the turn ends; the last one stays on: the
+ * switch hides a check everywhere); Notes, which no check made, are fixed. */
 function categoryShowIn(ws: string, c: Category) {
   const n = (s: CommentItem['surface']) => c.items.filter((x) => x.surface === s).length
   const covers = c.check ? coversOf(c.check) : []
@@ -440,7 +437,7 @@ function categoryShowIn(ws: string, c: Category) {
   return (
     <ShowIn
       items={[
-        { key: 'chat', label: 'Chat', on: false, n: 0, disabled: true, title: NO_CHAT },
+        { key: 'answers', label: 'Chat', on: check ? covers.includes('answers') : n('chat') > 0, n: n('chat'), disabled: !check || only('answers') },
         { key: 'cards', label: 'Cards', on: check ? covers.includes('cards') : n('canvas') > 0, n: n('canvas'), disabled: !check || only('cards') },
         { key: 'documents', label: 'Report', on: check ? covers.includes('documents') : n('report') > 0, n: n('report'), disabled: !check || only('documents') },
       ]}

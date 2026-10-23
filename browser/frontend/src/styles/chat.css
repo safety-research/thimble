@@ -1979,3 +1979,38 @@ button.view-chip-values[aria-expanded='true'] {
 .label-ask-acts { flex-wrap: wrap; }
 .label-ask-meta { color: var(--text-tertiary, var(--text-secondary)); font: var(--type-ui-sm); }
 .lside-detail .label-ask { margin: 4px 0 8px; box-shadow: none; }
+/* -------- a check's comment on a passage of Claude's answer (chat/answerComments.ts): the passage tinted in its check's
+   color as the report tints a commented passage (report.css .wu-flag), 16%, and 30% while its comment is open under the
+   answer -------- */
+.chat-text mark.answer-tint {
+  color: inherit;
+  background: color-mix(in oklab, var(--tint) 16%, transparent);
+  border-radius: var(--radius-hl);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.chat-text mark.answer-tint-open {
+  background: color-mix(in oklab, var(--tint) 30%, transparent);
+}
+.chat-text mark.answer-tint:focus-visible {
+  outline: 1px solid var(--tint);
+}
+/* the comment under the answer (chat/AnswerComment.tsx) is the canvas's comment card (report.css .wu-cm) in the column's
+   flow: as wide as a comment on the canvas, with the same shadow, which grows while it is hovered or active */
+.wu-cm.answer-cm {
+  position: relative;
+  left: auto;
+  right: auto;
+  max-width: 300px;
+  margin-top: 8px;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1), 0 10px 28px -18px rgba(var(--ink-rgb), 0.35);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.wu-cm.answer-cm:hover,
+.wu-cm.answer-cm:focus-within,
+.wu-cm.answer-cm.wu-cm-active {
+  left: auto;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16), 0 14px 32px -12px rgba(0, 0, 0, 0.3);
+}

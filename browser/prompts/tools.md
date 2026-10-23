@@ -293,7 +293,7 @@ Comment on one sentence, paragraph or heading of a written document, or on a car
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step."},
+    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step, answer:<turn>#s<n> of a sentence of Claude's answer."},
     "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
     "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
   },

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // The shared Labels and Comments sidebar (src/shell/LabelsSidebar.tsx, src/shell/CommentsList.tsx): one sidebar with the
-// labels and the comment categories; a category's Show in sets where its check comments, its detail edits its
-// definition and lists its open comments as links, and Apply sends a comment to Claude in main's chat.
+// labels and the comment categories; a category's Show in sets where its check comments (Chat: Claude's answers), its
+// detail edits its definition and lists its open comments as links, those on Claude's answers too, and Apply sends a
+// comment to Claude in main's chat.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { applyText, type CommentItem } from '../../src/shell/CommentsList.tsx'
@@ -18,10 +19,11 @@ afterEach(() => {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
 const CARD_NOTE = { id: 'n1', card: 'c7', step: null, n: null, ref: 'card:c7', check: 'details', run: 'r1', author: 'check', text: 'The chart leaves out June.', details: 'June has 40 rows.', ts: '', status: 'open' }
+const ANSWER_NOTE = { id: 'a1', check: 'details', check_name: 'Important details', color: 1, turn: 't1', row: '0', ref: 'answer:t1#s2', start: 0, end: 20, quote: 'Most runs **fail** at night.', text: 'Only the nightly runs fail.', details: '', status: 'open' }
 const REPORT_NOTE = { id: 'm1', sentence_id: 's3', text: 'This number has no citation.', author: 'check', ts: '', reply: null, status: 'open', check: 'details', quote: 'Most runs fail' }
 
 const CHECKS = [
-  { id: 'details', name: 'Important details', prompt: 'Mark what the reader should know.', colour: 1, builtin: true, shown: true, covers: ['documents', 'cards'] },
+  { id: 'details', name: 'Important details', prompt: 'Mark what the reader should know.', colour: 1, builtin: true, shown: true, covers: ['documents', 'cards', 'answers'] },
   { id: 'judgment', name: 'Judgment calls', prompt: 'Mark the calls Claude made for the reader.', colour: 2, builtin: true, shown: false, covers: ['documents'] },
 ]
 
@@ -32,6 +34,7 @@ function serve(patches: { url: string; body: unknown }[] = []) {
       return json({ ...CHECKS[1], ...JSON.parse(String(init.body)) })
     }
     if (url.includes('/canvas/comments')) return json({ comments: [CARD_NOTE] })
+    if (url.includes('/answer-comments')) return json({ comments: [ANSWER_NOTE, { ...ANSWER_NOTE, id: 'a2', status: 'dismissed' }], running: [] })
     if (url.includes('/types/report')) return json({ title: 'Report', sections: [], comments: [REPORT_NOTE, { ...REPORT_NOTE, id: 'm2', status: 'dismissed' }, { ...REPORT_NOTE, id: 'm3', check: null, author: 'analyst', text: 'Say why.' }] })
     if (url.endsWith('/checks')) return json(CHECKS)
     if (url.includes('/concepts')) return json([])
@@ -46,6 +49,8 @@ test("Apply's message names the check, the place and what the comment says", () 
   expect(applyText(item, 'Important details')).toBe('Apply this comment of the check “Important details” on card:c7: The chart leaves out June.\n\nJune has 40 rows.')
   const inReport = { ...item, surface: 'report' as const, ref: 'report:report#s3', quote: 'Most runs fail', details: '' }
   expect(applyText(inReport, 'Important details')).toBe('Apply this comment of the check “Important details” in the report at “Most runs fail” (report:report#s3): The chart leaves out June.')
+  const onAnswer = { ...item, surface: 'chat' as const, ref: 'answer:t1#s2', quote: 'Most runs fail', details: '' }
+  expect(applyText(onAnswer, 'Important details')).toBe('Apply this comment of the check “Important details” on your answer at “Most runs fail”: The chart leaves out June.')
 })
 
 const item = (id: string, check: string | null, surface: 'canvas' | 'report'): CommentItem => ({ id, surface, check, author: check ? 'check' : 'analyst', text: id, details: '', ref: `card:${id}`, where: id })
@@ -68,12 +73,12 @@ test('one sidebar holds the labels and the comment categories, each with its cou
   expect([...el.querySelectorAll('.lside-section')].map((s) => s.getAttribute('data-section'))).toEqual(['labels', 'comments'])
   const rows = [...el.querySelectorAll('[data-category]')]
   expect(rows.map((r) => r.getAttribute('data-category'))).toEqual(['details', 'judgment', NOTES])
-  expect(rows[0].querySelector('.lside-name')?.textContent).toBe('Important details2')
+  expect(rows[0].querySelector('.lside-name')?.textContent).toBe('Important details3')
   const chips = [...rows[0].querySelectorAll('.lside-chip')].map((b) => [b.textContent, b.getAttribute('aria-checked'), (b as HTMLButtonElement).disabled])
-  expect(chips).toEqual([['Chat', 'false', true], ['Cards1', 'true', false], ['Report1', 'true', false]])
+  expect(chips).toEqual([['Chat1', 'true', false], ['Cards1', 'true', false], ['Report1', 'true', false]])
   // the only surface a check covers stays on
   const judgment = [...rows[1].querySelectorAll('.lside-chip')] as HTMLButtonElement[]
-  expect(judgment.map((b) => b.disabled)).toEqual([true, false, true])
+  expect(judgment.map((b) => b.disabled)).toEqual([false, false, true])
 })
 
 test("Cards on a category's Show in makes its check comment on the cards", async () => {
@@ -86,6 +91,17 @@ test("Cards on a category's Show in makes its check comment on the cards", async
   expect(patches).toEqual([{ url: expect.stringContaining('/checks/judgment'), body: { covers: ['documents', 'cards'] } }])
 })
 
+test("Chat on a category's Show in makes its check read Claude's answers", async () => {
+  const patches: { url: string; body: unknown }[] = []
+  serve(patches)
+  const el = await mount(<LabelsSidebar ws="w1" onClose={() => undefined} />)
+  await settle()
+  const chat = [...el.querySelectorAll('[data-category="judgment"] .lside-chip')][0] as HTMLButtonElement
+  expect(chat.textContent).toBe('Chat')
+  await act(async () => chat.click())
+  expect(patches).toEqual([{ url: expect.stringContaining('/checks/judgment'), body: { covers: ['documents', 'answers'] } }])
+})
+
 test("a category's detail edits its definition and lists its comments as links, and Apply sends one to main", async () => {
   serve()
   const asked: { chatId: string; send?: string }[] = []
@@ -96,9 +112,10 @@ test("a category's detail edits its definition and lists its comments as links, 
   await act(async () => open.click())
   expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Mark what the reader should know.')
   const rows = [...el.querySelectorAll('.lside-comment')]
-  expect(rows.map((r) => r.getAttribute('data-surface'))).toEqual(['canvas', 'report'])
-  expect(rows.map((r) => r.querySelector('.lside-comment-where')?.textContent)).toEqual(['card c7', 'the report'])
+  expect(rows.map((r) => r.getAttribute('data-surface'))).toEqual(['canvas', 'report', 'chat'])
+  expect(rows.map((r) => r.querySelector('.lside-comment-where')?.textContent)).toEqual(['card c7', 'the report', "Claude's answer"])
   expect(el.textContent).toContain('“Most runs fail”')
+  expect(rows[2].querySelector('.lside-comment-quote')?.textContent).toBe('“Most runs fail at night.”')
   const apply = [...rows[0].querySelectorAll('button')].find((b) => b.textContent === 'Apply')!
   await act(async () => apply.click())
   expect(asked).toEqual([{ chatId: 'main', send: 'Apply this comment of the check “Important details” on card:c7: The chart leaves out June.\n\nJune has 40 rows.' }])
