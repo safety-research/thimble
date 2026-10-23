@@ -22,7 +22,7 @@ import type { EngineInterface } from 'claude-code'
 import { quiet } from '../core/askcell.js'
 import { openPane } from '../core/pane'
 import { cut, textWidth } from '../core/text.js'
-import { ACCENT } from '../core/theme'
+import { accent } from '../core/theme'
 import { testsWord } from './fixer'
 import { allOffOn, applyFix, type Fix, fixesNow, refreshFixes, removeFix, shownPath, sizeOf, undoFix } from './fixes'
 import { mergeFixes } from './merge'
@@ -35,16 +35,14 @@ type Engine = EngineInterface
 type Any = any
 
 const VIEW = { plugin: 'thimble', key: 'fixView' } as const
-/** A key the person can press, in thimble's accent as the bar draws its keys (core/theme.ts). */
-const KEY_COLOR = ACCENT
 
 type View = { sel: number | null; marked: number[]; diff: boolean; share: boolean }
 
-/** How each state is drawn: a glyph, its word, its color. */
+/** How each state is drawn: a glyph, its word, its color ('accent': thimble's, core/theme.ts, read as it draws). */
 const LOOK: Record<string, { g: string; w: string; c?: string; dim?: boolean }> = {
   on: { g: '●', w: 'on', c: 'success' }, off: { g: '○', w: 'off', dim: true }, ready: { g: '◆', w: 'ready', c: 'warning' },
   working: { g: '…', w: 'working', dim: true }, failed: { g: '×', w: 'failed', c: 'error' }, redo: { g: '!', w: 'redo', c: 'warning' },
-  request: { g: '◇', w: 'request', c: KEY_COLOR }, sent: { g: '↑', w: 'sent', c: KEY_COLOR }, saved: { g: '↓', w: 'saved', dim: true },
+  request: { g: '◇', w: 'request', c: 'accent' }, sent: { g: '↑', w: 'sent', c: 'accent' }, saved: { g: '↓', w: 'saved', dim: true },
   released: { g: '✓', w: 'released', dim: true }, pending: { g: '○', w: 'off', dim: true },
 }
 
@@ -149,11 +147,11 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
   const tw = Math.max(16, Math.min(40, W - 34))
   const rows = fixes.map(f => {
     const look = LOOK[f.state] ?? { g: '·', w: f.state, dim: true }
-    const tone = look.c ? { color: look.c } : { dimColor: true }
+    const tone = look.c ? { color: look.c === 'accent' ? accent() : look.c } : { dimColor: true }
     const marked = v.marked.includes(f.id)
     return Button({ key: `fix-${f.id}`, plain: true, label: `fix ${f.id} ${f.title}`, onPress: () => setView($, { sel: f.id }), ...(f.id === sel.id ? { autoFocus: true } : {}), children: [
       Text({ key: 'p', children: f.id === sel.id ? '▸ ' : '  ' }),
-      Text({ key: 'm', color: KEY_COLOR, children: marked ? '☑ ' : '  ' }),
+      Text({ key: 'm', color: accent(), children: marked ? '☑ ' : '  ' }),
       Text({ key: 'g', ...tone, children: `${look.g} ${look.w.padEnd(9)}` }),
       Text({ key: 't', ...(f.state === 'on' || f.state === 'ready' ? { bold: f.id === sel.id } : { dimColor: f.state === 'released' || f.state === 'off' }), children: cut(f.title, tw).padEnd(tw) }),
       Text({ key: 'd', dimColor: true, children: `  ${date(f.created)}  ` }),

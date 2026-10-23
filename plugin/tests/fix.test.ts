@@ -96,12 +96,17 @@ function setup() {
       if (r > 0) Object.assign(fix, { refines: Number(argv[r + 1]), refines_always: argv.includes('--always') })
       return ok(fix)
     }
+    // the check refused the change: another round in the same copy; the test's refusal was for the first round only
+    if (verb === 'again') { Object.assign(fix, { state: 'working', rounds: fix.rounds + 1, refuse: null }); return ok(fix) }
     if (verb === 'round') { Object.assign(fix, { words: [...fix.words, stdin], rounds: fix.rounds + 1, state: 'working' }); return ok(fix) }
     if (verb === 'done') {
       const t = argv.indexOf('--title')
       Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
-      // the kernel's check after the fixer's end refused it (fix.refused is the reason a test gives)
-      if (fix.refused) Object.assign(fix, { state: 'failed', tests: null, error: fix.refused })
+      // the kernel's check after the fixer's end refused it (fix.refuse is the reason a test gives); a refusal for
+      // safety files is kept on the record (refused) until the next check
+      if (argv.includes('--cannot')) { Object.assign(fix, { state: 'failed', tests: null, error: stdin, refused: null }); return ok(fix) }
+      if (fix.refuse) Object.assign(fix, { state: 'failed', tests: null, error: fix.refuse, refused: /safety files/.test(fix.refuse) ? { why: fix.refuse, files: ['plugin/engine/kernel/privacy.py'] } : { why: fix.refuse, files: [], tests: 'FAIL made-up test' } })
+      else fix.refused = null
       // the end said `Changes fix N` (or the person named it): the change goes into fix N, unless it does not fit
       const c = argv.indexOf('--changes')
       const into = others.find(f => f.id === (c > 0 ? Number(argv[c + 1]) : fix.refines_always ? fix.refines : -1))
@@ -127,7 +132,7 @@ function setup() {
       const t = argv.indexOf('--title')
       return ok({ id: ids[0], title: t > 0 ? argv[t + 1] : 'first', merged: ids.slice(1), redo: [], reload: true })
     }
-    if (verb === 'redo') { Object.assign(fix, { state: 'working', refused: null }); return ok(fix) }
+    if (verb === 'redo') { Object.assign(fix, { state: 'working', refuse: null }); return ok(fix) }
     if (verb === 'undo') { fix.state = 'off'; return ok({ id: 1, reload: true }) }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
@@ -404,29 +409,56 @@ test('n leaves the fix ready in the list, where y turns it on; a fixer that chan
   expect(textOf(await fixLineRows(t.$, ELS, 110))).toContain('Saved as a request with no code: Explain terms of my field')
 })
 
-test('a refused fix shows its whole reason: a long one on a row of its own, a short one after the title; d shows what changed', async () => {
+test('a refused change goes back to a new fixer in the same copy, told what was refused and why; its next round passes, and the person sees no failure', async () => {
   const s = setup()
-  s.fix.refused = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  const why = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  s.fix.refuse = why
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  expect(s.verbs()).toContain('again 1')
+  expect(s.spawns.length).toBe(2)
+  const second = String(s.spawns[1].prompt)
+  expect(second).toContain(`thimble did not use the last change for this fix: ${why}. Your last change is in your copy. Leave plugin/engine/kernel/privacy.py as it is and make the change in other files. When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`)
+  expect(String(s.spawns[0].prompt)).not.toContain('did not use the last change')
+  // no failure line and no notification while the next round works
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).not.toContain('did not pass')
+  expect(s.notes).toEqual([])
+  await s.end('Title: Skip the scan for my notes\nWhat it does: The notes you name are left out of what the scan reads.', 'agent-fixer-2')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Skip the scan for my notes · tests pass')
+  expect(s.verbs().filter(v => v.startsWith('again'))).toEqual(['again 1'])
+  // failing tests go back too, with the end of their output
+  const t = setup()
+  t.fix.refuse = 'its tests failed in the sandbox'
+  await requested(t)
+  expect(String(t.spawns[1].prompt)).toContain('thimble did not use the last change for this fix: its tests failed in the sandbox. Your last change is in your copy. The end of their output:\n\nFAIL made-up test\n\nFix what fails.')
+})
+
+test('a fixer that finds the request cannot be met ends with Cannot: the line shows its words, long on a row of its own, short after the title; d shows what changed, r redoes', async () => {
+  const s = setup()
+  const why = 'The scan is part of what keeps your data private, and a fix may not change it, so notes cannot skip it.'
+  s.fix.refuse = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await s.end(`I could not do this.\n\nCannot: ${why}`, 'agent-fixer-2')
+  expect(s.ran.find(x => x.argv.includes('--cannot'))?.stdin).toBe(why)
   let rows = await fixLineRows(s.$, ELS, 110)
   expect(textOf(rows)).toContain('× Fix 1 did not pass: Skip the scan for my notes')
   expect(rows.map((r: Any) => r.props.key)).toEqual(['fix-line-1', 'fix-line-why', 'fix-line-2'])
-  expect(textOf(rows[1])).toBe(`    ${s.fix.refused}`)
+  expect(textOf(rows[1])).toBe(`    ${why}`)
   expect(textOf(rows[2])).toBe('    d what changed · r redo · n later')
   expect(s.notes).toEqual([])
   await (await fixKey(s.$, 'd'))!.later()
   rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows.at(-2))).toBe(`    Changed     1 file · ${s.fix.refused}`)
+  expect(textOf(rows.at(-2))).toBe(`    Changed     1 file · ${why}`)
   expect(textOf(rows.at(-1))).toBe('    r redo · n later')
-  // r: a new fixer, told where the earlier change is
+  // r, the person's own: a new fixer, told where the earlier change is
   await (await fixKey(s.$, 'r'))!.later()
-  expect(s.spawns.length).toBe(2)
-  expect(String(s.spawns[1].prompt)).toContain(`is in ${HOME}/fixes/tmp/1/earlier.patch;`)
+  expect(s.spawns.length).toBe(3)
+  expect(String(s.spawns[2].prompt)).toContain(`is in ${HOME}/fixes/tmp/1/earlier.patch;`)
   const t = setup()
-  t.fix.refused = 'its tests failed'
+  t.fix.refuse = 'its tests failed in the sandbox'
   await requested(t, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await t.end('Cannot: it needs the scan off', 'agent-fixer-2')
   rows = await fixLineRows(t.$, ELS, 110)
-  expect(textOf(rows[0])).toBe('  × Fix 1 did not pass: Skip the scan for my notes · its tests failed')
+  expect(textOf(rows[0])).toBe('  × Fix 1 did not pass: Skip the scan for my notes · it needs the scan off')
   expect(rows.map((r: Any) => r.props.key)).not.toContain('fix-line-why')
 })
 
@@ -643,6 +675,9 @@ test('words while the fix applied last is on: the fixer hears of it, and its end
   const first = String(s.spawns[0].prompt)
   expect(first).toContain('The person applied fix 5 ("Bar says read": The bar says read.; asked in the words "say read, not coverage") last')
   expect(first).toContain('end with the line `Changes fix N` (its number) in place of the Title line')
+  // a repair of what that fix added is a change to it; only a change clearly about something else is a fix of its own
+  expect(first).toContain('When your change is about the same feature or part of thimble as one of these fixes (a repair of something it added included)')
+  expect(first).toContain('only a change clearly about something else ends with a title of its own')
   await s.end('Done.\n\nChanges fix 5\nWhat it does: The bar says read and keeps the percent.')
   expect(s.verbs()).toContain('done 1 --summary - --changes 5')
   let rows = await fixLineRows(s.$, ELS, 110)

@@ -23,7 +23,7 @@ import type { BarItem } from '../bar/bar'
 import { markPressed } from '../core/answerview'
 import { actingRow, pickAnswer, pickedRow } from '../core/answers'
 import { openPane } from '../core/pane'
-import { ACCENT } from '../core/theme'
+import { accent } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import type { Take } from '../hooks/keys'
 import { marksIn } from '../marks/message.js'
@@ -45,10 +45,6 @@ const OPEN = { plugin: 'thimble', key: 'squeezeOpen' } as const
 const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
 /** What [ and ] do to each chip, in its words: the way down, then the way up. */
 const WAYS: Record<string, string> = { length: 'shorter / longer', interpret: 'facts / interpretation', familiarity: 'newer / more expert' }
-/** thimble's color, as the rule down a catch-up's side and its name in its head line. */
-const RULE = ACCENT
-/** The color of a key the bar names, lit (as bar.tsx's keys). */
-const LIT = ACCENT
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 
@@ -344,7 +340,7 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const now = await recOf($, id)
   const lit = now && !now.catchup && typeof now.shown === 'string'
   const words = lit ? `● ${setWords(now) || 'squeezed'}` : pile ? 'squeeze or catch up' : 'squeeze'
-  return [{ id: 'squeeze', key: 's', words, ...(lit ? { color: LIT } : {}), press: () => openChips($, id) }]
+  return [{ id: 'squeeze', key: 's', words, ...(lit ? { color: accent() } : {}), press: () => openChips($, id) }]
 }
 
 async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
@@ -392,12 +388,12 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
 async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   const open = await openNow($)
   const rec = await recOf($, id)
-  if (!open || !rec) return { items: [], plus: null, catchup: null, width }
+  if (!open || !rec) return { items: [], plus: null, catchup: null, width, color: accent() }
   const row = rowOf(rec, (await levelsNow($, rec)).at)
   const focus = row.some((c: Any) => c.id === open.focus) ? open.focus : row[0].id
   return {
     items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, word: levelWords(c), picked: c.id === focus && open.typing == null })),
-    plus: open.typing, catchup: open.id === id ? await catchUpChip($, open, rec, row.length) : null, width,
+    plus: open.typing, catchup: open.id === id ? await catchUpChip($, open, rec, row.length) : null, width, color: accent(),
   }
 }
 
@@ -470,10 +466,10 @@ export async function catchUpEl($: Engine, els: Any, row: string, cols: number):
       await openPane($, 'evidence', { row: it.row, n: it.n }, `citation ${it.n}`)
     },
   })
-  const head = els.Text({ key: 'cu-head', children: [els.Text({ color: RULE, bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} since your last message` })] })
+  const head = els.Text({ key: 'cu-head', children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} since your last message` })] })
   // the rule: as tall as the text is likely to be, cut at the catch-up's own height
   const tall = rowsOf(text, w) + 4
-  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', flexDirection: 'column', children: [els.Text({ color: RULE, children: Array.from({ length: tall }, () => '▎').join('\n') })] })
+  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', flexDirection: 'column', children: [els.Text({ color: accent(), children: Array.from({ length: tall }, () => '▎').join('\n') })] })
   return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [
     els.Box({ key: 'cu-ruled', flexDirection: 'column', paddingLeft: 2, children: [rule, head, body] }),
   ] })

@@ -41,7 +41,13 @@ export type Fix = {
   folded?: number; fold_failed?: number | string
   /** the Claude Code session whose fixer works on it (new, round, redo): only that session ends it */
   session?: string | null
+  /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
+   *  (another round, at once, or r) is told */
+  refused?: Refusal | null
 }
+/** Why the check did not use a fixer's change: the files it may not change (safety files, a binary file), or the end of
+ *  the tests' output when they failed. */
+export type Refusal = { why: string; files: string[]; tests?: string }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
  *  u), failed (d what changed · r redo · n later), request (no code), a new release with the fixes replayed on it
@@ -67,7 +73,7 @@ export async function sessionIdNow($: Engine): Promise<string> {
 
 /** The verbs that start or end a fixer's work: the kernel records the session on them, and done refuses a fix whose
  *  fixer works in another session. */
-const SESSION_VERBS = new Set(['new', 'round', 'redo', 'done'])
+const SESSION_VERBS = new Set(['new', 'round', 'again', 'redo', 'done'])
 
 export async function kernelFix($: Engine, args: string[], o: { stdin?: string; timeoutMs?: number; doing?: string } = {}): Promise<{ ok: boolean; out: string; err: string }> {
   if (SESSION_VERBS.has(args[0] ?? '')) {

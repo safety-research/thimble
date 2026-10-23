@@ -16,7 +16,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
 import { cut, textWidth } from '../core/text.js'
-import { ACCENT } from '../core/theme'
+import { accent } from '../core/theme'
 import { vReady } from '../designer/v'
 import { fixLineRows } from '../fix/line'
 import { featureOn } from '../settings/features.mjs'
@@ -28,9 +28,6 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The colors of the bar: thimble's name, and a key the person can press, both thimble's purple. */
-const NAME_COLOR = ACCENT
-const KEY_COLOR = ACCENT
 
 
 /** What a press on a part of the bar does; register.ts gives them, so this module draws and decides nothing else. */
@@ -99,15 +96,15 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + room())) }
 
   const words = (x: Item, i: number): Any[] => [
-    ...(x.glyph ? [Text({ key: `g${i}`, color: NAME_COLOR, children: `${x.glyph} ` })] : []),
-    ...(x.key ? [Text({ key: `k${i}`, color: KEY_COLOR, bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
+    ...(x.glyph ? [Text({ key: `g${i}`, color: accent(), children: `${x.glyph} ` })] : []),
+    ...(x.key ? [Text({ key: `k${i}`, color: accent(), bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
   ]
   const drawn = (x: Item, i: number): Any => (x.press
     ? Button({ key: `bar-${x.id}`, plain: true, label: `${x.key ? `${x.key} ` : ''}${x.words}`, onPress: x.press, children: words(x, i) })
     : Text({ key: `bar-${x.id}`, children: words(x, i) }))
   const joined = (xs: Item[], at: number): Any[] => xs.flatMap((x, i) => [...(i ? [Text({ key: `s${at + i}`, dimColor: true, children: ' · ' })] : []), drawn(x, at + i)])
 
-  const name = Text({ key: 'name', color: NAME_COLOR, bold: true, children: 'thimble' })
+  const name = Text({ key: 'name', color: accent(), bold: true, children: 'thimble' })
   const label = presses ? Button({ key: 'bar-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name
   const bar = Box({ key: 'bar', flexDirection: 'row', justifyContent: 'space-between', width, ...(preview ? { flexWrap: 'wrap' } : {}), children: [
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),

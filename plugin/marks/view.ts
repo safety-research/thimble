@@ -42,7 +42,7 @@
 // purple ↳ once a thread was asked about it.
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
-import { ACCENT, themeLast, type Theme } from '../core/theme'
+import { accent, themeLast, type Theme } from '../core/theme'
 import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -244,7 +244,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   // group of its own by its place, so the pointer over it lights it alone
   const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
   const tint = citeHover(id, look.status)
-  if (r.tag === 'spin') p.color = ACCENT
+  if (r.tag === 'spin') p.color = accent()
   else if (r.tag) p.color = 'error'
   else Object.assign(p, wordsLook(look.status, id))
   // a span inside the mark's words (a heads-up, an explainer): its fill at rest and no underline, as a span never has
@@ -364,9 +364,9 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     const lead = dot && o.lead
     const glyph = dot ? '●' : ' '
     const cell = lead
-      ? Box({ width: 2, flexShrink: 0, children: [Text({ color: ACCENT, bold: true, children: o.lead })] })
+      ? Box({ width: 2, flexShrink: 0, children: [Text({ color: accent(), bold: true, children: o.lead })] })
       : o.passages
-        ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph })
+        ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
         : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
     rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false

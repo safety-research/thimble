@@ -40,7 +40,7 @@ import { metaOf, treeOf } from '../cards/store'
 import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
-import { ACCENT } from '../core/theme'
+import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
@@ -59,8 +59,6 @@ export type LabelAsk = { root: string; name: string; ask: string; text: string; 
 type Choice = 'all' | 'sample' | 'cancel'
 
 const LABELASK = { plugin: 'thimble', key: 'labelAsk' } as const
-/** The color of a key the person can press, as the bar draws one. */
-const KEY_COLOR = ACCENT
 /** The values a row names at most. */
 const VALUES_SHOWN = 8
 
@@ -276,7 +274,7 @@ export async function labelAskBand($: Engine, els: Any, _width: number): Promise
   if (!a) return []
   const { Box, Text, Button } = els
   const choice = (c: { key: string; words: string; choice: Choice }) =>
-    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [Text({ key: 'k', color: KEY_COLOR, bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` })] })] })
+    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [Text({ key: 'k', color: accent(), bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` })] })] })
   return [Box({ key: 'label-ask', flexDirection: 'column', children: [
     Text({ key: 'ask-text', wrap: 'wrap', children: [Text({ key: 'n', dimColor: true, children: `label ${a.name}  ` }), `${a.text}?`] }),
     Box({ key: 'ask-keys', flexDirection: 'row', flexWrap: 'wrap', children: askChoices(a).map(choice) }),

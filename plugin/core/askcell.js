@@ -9,9 +9,6 @@
 //   passageLabel(text)     a passage's few words: a heading's section by its heading, else its first words
 //   quiet(key, over)       a press's `hover`: a group of its own, no inverse, its words underlined
 
-/** The color of a key the person can press: thimble's purple, as the bar's (core/theme.ts ACCENT). */
-const KEY_COLOR = 'merged'
-
 /** A short, stable name for a string (Claude Code takes at most 64 characters for a hover group). */
 function scopeOf(s) {
   let h = 0x811c9dc5
@@ -26,13 +23,13 @@ export function quiet(key, over = {}) {
 }
 
 /**
- * The cell. o: {key, label, has, press, glyph?}: `label` names the thing in words (`"Two runs failed."`, `the card
+ * The cell. o: {key, label, has, press, color, glyph?}: `color` is thimble's (core/theme.ts accent()); `label` names the thing in words (`"Two runs failed."`, `the card
  * "Saves per day"`); `has`: a side thread was asked about it; `press` asks about it, or opens its thread.
  */
 export function askCell(els, o) {
   const glyph = o.glyph ?? ' '
-  if (o.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${o.key}-asked`, plain: true, label: `open the thread about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-asked`), children: [els.Text({ color: KEY_COLOR, children: '↳' })] })] })
-  const q = els.Button({ key: `${o.key}-ask`, plain: true, label: `ask about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-ask`), children: [els.Text({ color: KEY_COLOR, bold: true, children: '?' })] })
+  if (o.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${o.key}-asked`, plain: true, label: `open the thread about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-asked`), children: [els.Text({ color: o.color, children: '↳' })] })] })
+  const q = els.Button({ key: `${o.key}-ask`, plain: true, label: `ask about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-ask`), children: [els.Text({ color: o.color, bold: true, children: '?' })] })
   return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ children: glyph }), els.Box({ width: 1, display: 'none', hover: { display: 'flex' }, position: 'absolute', top: 0, left: 0, children: [q] })] })
 }
 

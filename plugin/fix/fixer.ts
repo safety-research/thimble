@@ -15,7 +15,10 @@
 //   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
 //                               then the line above the bar asks whether to use it (y; the person's key applies it), and
 //                               Claude Code sends a notification. When Claude started the fix, Claude is told, so that it
-//                               can tell the person.
+//                               can tell the person. When the check does not use the change (a safety file, a binary
+//                               file, failing tests), a new fixer gets another round in the same copy at once
+//                               (`thimble fix again`), told why; the person sees a failure only when a fixer ends with
+//                               `Cannot: <why>`.
 //
 //   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id), fixerBox (the sandbox
 //          command's start, by the fix's id)
@@ -28,7 +31,7 @@ import { thimbleHome } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
-import { type Fix, fixesDir, fixesNow, fixOf, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
+import { type Fix, type Refusal, fixesDir, fixesNow, fixOf, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -84,12 +87,23 @@ export function refinesText(f: Fix, always: boolean, others: Fix[] = []): string
   return [
     `The person ${f.state === 'on' ? 'applied' : 'has'} ${fixText(f)}${f.state === 'on' ? ' last' : ''}, and its change is in your copy. These words may ask to change that fix.`,
     ...(rest.length ? [`Their other fixes that are on, also in your copy: ${rest.map(fixText).join('; ')}.`] : []),
-    `When your change refines one of these fixes, end with the line \`Changes fix N\` (its number) in place of the Title line; when it is a change of its own, end with a title as usual. When the words could be about more than one of them and the conversation does not tell which, change nothing and end with one line \`Which fix: <one short question>\`.`,
+    `When your change is about the same feature or part of thimble as one of these fixes (a repair of something it added included), end with the line \`Changes fix N\` (its number) in place of the Title line; only a change clearly about something else ends with a title of its own. When the words could be about more than one of them and the conversation does not tell which, change nothing and end with one line \`Which fix: <one short question>\`.`,
   ].join(' ')
 }
 
+/** For the next fixer after the check did not use a change (another round in the same copy, or r in a new one): what
+ *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
+ *  not list the safety files; this names only the ones the change touched. `earlier`: r, whose copy is new. */
+export function refusedText(r: Refusal, earlier: boolean): string {
+  const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
+  const fix = r.files?.length
+    ? `Leave ${r.files.join(', ')} as ${r.files.length > 1 ? 'they are' : 'it is'} and make the change in other files${earlier ? ', without the earlier change\'s parts in them' : ''}.`
+    : `The end of their output:\n\n${r.tests ?? ''}\n\nFix what fails.`
+  return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
+}
+
 /** The fixer's first message: the task (prompts/fixer.md), the words of each round, where it works, the fix these
- *  words may change, and a text copy of what thimble shows now. */
+ *  words may change, what the check refused last time, and a text copy of what thimble shows now. */
 function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker, screen: string, refines: Fix | null = null, others: Fix[] = []): string {
   const words = fix.words || []
   const asked = words.length > 1
@@ -106,7 +120,8 @@ function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker,
     '',
     ...(refines ? [refinesText(refines, !!fix.refines_always, others), ''] : []),
     `Your working folder is the copy: ${fix.work}.`,
-    ...(earlier ? [`An earlier change for this request, which did not fit or failed its tests, is in ${earlier}; start from it when it helps.`] : []),
+    ...(earlier ? [`An earlier change for this request, which thimble did not use, is in ${earlier}; start from it when it helps.`] : []),
+    ...(fix.refused?.why ? [refusedText(fix.refused, !!earlier)] : []),
     '',
     'What thimble shows on the person\'s screen now, as text (the conversation above does not hold it):',
     '',
@@ -256,14 +271,15 @@ export async function liveFixer($: Engine): Promise<{ fix: Fix; agentId: string 
 
 /** What the fixer's last message says: its title, what it does, or that it is a request with no code; `changes`: the
  *  fix its change refines (a line `Changes fix N`). */
-export function endOf(answer: string): { title: string; summary: string; request: boolean; changes: number | null; which: string | null } {
+export function endOf(answer: string): { title: string; summary: string; request: boolean; changes: number | null; which: string | null; cannot: string | null } {
   const text = String(answer || '')
   const title = /^\s*\**title\**\s*:\s*(.+)$/im.exec(text)?.[1]?.replace(/\*+/g, '').trim() ?? ''
   const changes = /^\s*\**changes fix\s+#?(\d+)\b/im.exec(text)?.[1]
   const which = /^\s*\**which fix\**\s*:\s*(.+)$/im.exec(text)?.[1]?.replace(/\*+/g, '').trim() || null
+  const cannot = /^\s*\**cannot\**\s*:\s*(.+)$/im.exec(text)?.[1]?.replace(/\*+/g, '').trim() || null
   const req = /^\s*\**request\**\s*:\s*([\s\S]+)$/im.exec(text)?.[1]?.trim()
   const does = /^\s*\**what it does\**\s*:\s*([\s\S]+)$/im.exec(text)?.[1]?.trim()
-  return { title: cut(title, 60), summary: cut((req ?? does ?? '').replace(/\s+/g, ' '), 1200), request: req != null && does == null, changes: changes ? Number(changes) : null, which: which ? cut(which, 200) : null }
+  return { title: cut(title, 60), summary: cut((req ?? does ?? '').replace(/\s+/g, ' '), 1200), request: req != null && does == null, changes: changes ? Number(changes) : null, which: which ? cut(which, 200) : null, cannot: cannot ? cut(cannot, 300) : null }
 }
 
 /** The fixer ended: thimble commits its change and tests it, then the line says what came of it. */
@@ -272,19 +288,30 @@ const ending = new Set<number>()
 export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
   if (ending.has(id)) return
   ending.add(id)
+  let again: Fix | null = null
   try {
-    await ended($, e, id)
+    again = await ended($, e, id)
   } catch (err) {
     await setFixLine($, { id, kind: 'problem', said: `Fix ${id} could not be checked: ${cut(String((err as Error)?.message || err), 200)}. /thimble-fix lists it.` }).catch(() => undefined)
   } finally {
     ending.delete(id)
   }
+  if (!again) return
+  // the check did not use the change: a new fixer in the same copy, told why (firstMessage); a fixer that cannot start
+  // ends the fix with that reason, so that no look for ended fixers starts it again
+  const bad = await startFixer($, again)
+  if (bad) {
+    await kernelFix($, ['done', String(id), '--cannot', '-'], { stdin: bad, timeoutMs: 60000 })
+    await refreshFixes($)
+    await setFixLine($, { id, kind: 'failed' })
+  }
 }
 
-async function ended($: Engine, e: Any, id: number): Promise<void> {
+/** The fixer's end, checked; the fix again when the check did not use its change and a new round should answer it. */
+async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   // the kernel's record as it is now: another session or the shell may have changed it since this session's list
   const now = (await refreshFixes($))?.fixes.find(f => f.id === id)
-  if (now?.state !== 'working' || !(await ownFixes($, [now])).length) return
+  if (now?.state !== 'working' || !(await ownFixes($, [now])).length) return null
   const all = await fixers($)
   delete all[String(e.agentId)]
   await $.state.set(FIXERS, all as never)
@@ -292,17 +319,27 @@ async function ended($: Engine, e: Any, id: number): Promise<void> {
   const fix = await fixOf($, id)
   if (end.which && fix) {
     await askWhich($, fix, end.which)
-    return
+    return null
   }
-  const args = ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : []),
-    ...(end.changes != null && !end.request ? ['--changes', String(end.changes)] : [])]
-  const r = await kernelFix($, args, { stdin: end.summary || ' ', timeoutMs: 600000, doing: `testing fix ${id}${fix ? `: ${cut(end.title || fix.title, 28)}` : ''}` })
+  // `Cannot: <why>`: the fixer found that the request cannot be met; the fix fails with its words
+  const args = end.cannot
+    ? ['done', String(id), '--cannot', '-']
+    : ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : []),
+        ...(end.changes != null && !end.request ? ['--changes', String(end.changes)] : [])]
+  const r = await kernelFix($, args, { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000, doing: `testing fix ${id}${fix ? `: ${cut(end.title || fix.title, 28)}` : ''}` })
   await refreshFixes($)
   if (!r.ok) {
     await setFixLine($, { id, kind: 'problem', said: `Fix ${id} could not be checked: ${cut(r.err || 'thimble fix done gave nothing', 200)}` })
-    return
+    return null
   }
   const done = jsonOf<Fix>(r.out)
+  // the check did not use the change (a safety file, a binary file, failing tests): another round in the same copy
+  if (!end.cannot && done?.state === 'failed' && done.refused && done.work) {
+    const a = await kernelFix($, ['again', String(id)], { timeoutMs: 60000 })
+    const next = a.ok ? jsonOf<Fix>(a.out) : null
+    await refreshFixes($)
+    if (next?.state === 'working') return next
+  }
   const kind = done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'
   // a change that went into the fix it refines: the line is that fix's; one that did not fit it is a new fix
   const changed = kind === 'ready' && done?.folded != null && done.id !== id
@@ -324,6 +361,7 @@ async function ended($: Engine, e: Any, id: number): Promise<void> {
       ? `thimble's fixer changed fix ${at} ("${title}"); it is off until the person's y turns the changed fix on. Nothing for you to do.`
       : `thimble's fixer finished fix ${id} ("${title}"); it waits for the person's y. Nothing for you to do.`)
   }
+  return null
 }
 
 /** The fixer could not tell which fix the words are for: its copy goes, and the line asks the person (a number key

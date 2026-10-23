@@ -35,7 +35,7 @@ import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, underCard } from '../core/answerview'
 import { askCell } from '../core/askcell.js'
 import { cut } from '../core/text.js'
-import { themeNow, type Theme } from '../core/theme'
+import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
@@ -265,7 +265,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
   // (its title and what it shows); the row's keyed Box scopes the ?'s hover, so it shows while the pointer is on the card
   const framed = ask
-    ? E.Box({ key: `ask-row-${meta.id}`, flexDirection: 'row', children: [E.Box({ width: 2, flexShrink: 0, paddingTop: 1 + (sel ? titleRows + sel.row : 0), children: [askCell(E, { key: `card-ask-${meta.id}`, ...ask })] }), box] })
+    ? E.Box({ key: `ask-row-${meta.id}`, flexDirection: 'row', children: [E.Box({ width: 2, flexShrink: 0, paddingTop: 1 + (sel ? titleRows + sel.row : 0), children: [askCell(E, { key: `card-ask-${meta.id}`, ...ask, color: accent() })] }), box] })
     : box
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const under = await underCard($, E, meta.id, inside)

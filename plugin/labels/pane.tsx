@@ -27,7 +27,7 @@ import { quiet } from '../core/askcell.js'
 import { rootHere, startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { textWidth } from '../core/text.js'
-import { ACCENT, themeLast, themeNow } from '../core/theme'
+import { accent, themeLast, themeNow } from '../core/theme'
 import { rowsUnder } from '../threads/seam'
 import { checkRecord, labelsData } from './labels'
 import { chosenOf, definition, examples, isNegative, ledgerTop, NONE, partOf, partsOf, valueOrder } from './ledger.mjs'
@@ -62,7 +62,7 @@ function lookOf(r: Run): Record<string, unknown> {
   const t = r.tone
   const out: Record<string, unknown> = {}
   if (t === 'dim') out.dimColor = true
-  else if (t === 'accent') out.color = ACCENT // the lit marks (the ▸), as thimble's other panes draw them
+  else if (t === 'accent') out.color = accent() // the lit marks (the ▸), as thimble's other panes draw them
   else if (t === 'err') out.color = 'error'
   else if (t === 'none') out.color = 'inactive'
   else if (t === 'neg') out.color = NEG

@@ -29,7 +29,11 @@ release's version with the commit of mine after it (0.10.2+fix.4e1a9c2), written
 
 A fix may not change the files that keep the person safe (PROTECTED): the fix flow, the privacy scan, the sandbox and
 its settings, the hooks file and its command hooks, the launcher, thimble's scripts, and lock files. Binary files are
-refused too. thimble checks this when the fixer ends (done); the fixer's prompt does not list these files.
+refused too. thimble checks this when the fixer ends (done); the fixer's prompt does not list these files. A check that
+refuses a change (these files, a binary file, failing tests) keeps the refusal on the record (refused: why, the files,
+the tests' output) until the next check, and the plugin gives it back to a fixer in the same copy (again): the fixer
+puts the change elsewhere or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is the
+failure the person sees.
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -574,6 +578,18 @@ def _give_types(wt: Path) -> None:
             return
 
 
+def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
+    """The check refused the fixer's change: another round in the same copy, with no new words; its fixer is told the
+    refusal (refused), which stays on the record until the next check."""
+    rec = get(fid)
+    if rec.get("state") != "failed" or not rec.get("refused"):
+        raise FixError(f"fix {rec['id']} is {state_word(rec)}, with no refusal to answer")
+    if not _is_checkout(rec.get("work")):
+        raise FixError(f"fix {rec['id']} has no copy any more; r starts it again in a new copy")
+    rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1, **({"session": session} if session else {}))
+    return put(rec)
+
+
 def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, Any]:
     """More words for a fix whose copy is still there: a new round of the same fix, whose fixer works in `session`."""
     rec = get(fid)
@@ -620,16 +636,22 @@ def _is_checkout(work: str | None) -> bool:
 
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
-         tests: bool = True, changes: int | str | None = None, session: str | None = None) -> dict[str, Any]:
+         tests: bool = True, changes: int | str | None = None, session: str | None = None,
+         cannot: str | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
     the sandbox. ready, failed (with the reason), or a request with no code. `changes`: the fixer's end said its
     change refines that fix (or the person asked to change it, refines_always): a ready change goes into it (fold).
-    `session`: the session that asks; a fix whose fixer works in another session is that session's to check."""
+    `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
+    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r."""
     rec = get(fid)
     if session and rec.get("session") and rec["session"] != session:
         raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
+    if cannot is not None and cannot.strip():
+        rec.pop("refused", None)
+        rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300))
+        return put(rec)
     rec = _done(fid, title, summary, request, tests)
     target = changes if changes not in (None, "") else rec.get("refines") if rec.get("refines_always") else None
     if target is not None and rec.get("state") == "ready":
@@ -705,6 +727,7 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
                          "r starts it again in a new copy")
         return put(rec)
     wt = Path(rec["work"])
+    rec.pop("refused", None)
     if title and title.strip():
         rec["title"] = short(title, 60)
     rec["summary"] = (summary or "").strip()[:2000]
@@ -726,15 +749,18 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     bad = protected_of([f["path"] for f in files])
     binary = [f["path"] for f in files if f["add"] is None]
     if bad:
-        rec.update(state="failed", tests=None, error=protected_why(bad))
+        rec.update(state="failed", tests=None, error=protected_why(bad), refused={"why": protected_why(bad), "files": bad})
         return put(rec)
     if binary:
-        rec.update(state="failed", tests=None, error=f"it adds or changes a binary file ({binary[0]}); a fix changes text only")
+        why = f"it adds or changes a binary file ({binary[0]}); a fix changes text only"
+        rec.update(state="failed", tests=None, error=why, refused={"why": why, "files": binary})
         return put(rec)
     if tests:
         ok, tail = run_tests(rec["id"])
         rec.update(tests="passed" if ok else "failed", tests_tail=tail)
         rec.update(state="ready" if ok else "failed", error=None if ok else "its tests failed in the sandbox")
+        if not ok:
+            rec["refused"] = {"why": "its tests failed in the sandbox", "files": [], "tests": tail}
     else:
         rec.update(tests="skipped", state="ready", error=None)
     return put(rec)
@@ -2170,9 +2196,14 @@ def cmd(a) -> int:
             out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.refines, a.always, a.session))
         elif verb == "round":
             out_json(round_(a.id, stdin_text() or a.words or "", a.session))
+        elif verb == "again":
+            out_json(again(a.id, a.session))
         elif verb == "done":
-            summary = stdin_text() if a.summary == "-" else (a.summary or "")
-            out_json(done(a.id, a.title, summary, a.request, not a.no_tests, a.changes, a.session))
+            if a.cannot == "-":
+                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done"))
+            else:
+                summary = stdin_text() if a.summary == "-" else (a.summary or "")
+                out_json(done(a.id, a.title, summary, a.request, not a.no_tests, a.changes, a.session))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))

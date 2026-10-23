@@ -20,7 +20,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { failNotice } from '../bar/notice'
-import { ACCENT } from '../core/theme'
+import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
@@ -46,7 +46,7 @@ export async function claimsBar($: Engine, on: (key: string) => boolean, preview
   if (!(await claimCount($))) return []
   const words = await claimsBarWords($)
   // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims
-  const look = await claimsLit($) ? { color: ACCENT } : {}
+  const look = await claimsLit($) ? { color: accent() } : {}
   return [{ id: 'claims', key: 'c', words, ...look, ...(await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
 }
 

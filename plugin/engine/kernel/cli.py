@@ -556,7 +556,7 @@ def main(argv: list[str] | None = None) -> int:
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
     p.add_argument("verb", nargs="?", default="list",
-                   choices=("list", "show", "diff", "export", "share", "off", "on", "update", "new", "round", "done", "apply", "merge", "notnow",
+                   choices=("list", "show", "diff", "export", "share", "off", "on", "update", "new", "round", "again", "done", "apply", "merge", "notnow",
                             "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
@@ -574,7 +574,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--refines", help=argparse.SUPPRESS)  # new: a fix these words may change
     p.add_argument("--always", action="store_true", help=argparse.SUPPRESS)  # new: they change it, whatever the end says
     p.add_argument("--changes", help=argparse.SUPPRESS)  # done: the fixer's end said its change refines this fix
-    p.add_argument("--session", help=argparse.SUPPRESS)  # new, round, redo, done: the Claude Code session of the fixer
+    p.add_argument("--cannot", help=argparse.SUPPRESS)  # done: the fixer's end said why it cannot be done (-: stdin)
+    p.add_argument("--session", help=argparse.SUPPRESS)  # new, round, again, redo, done: the Claude Code session of the fixer
     p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_fix)

@@ -29,7 +29,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { thimbleHome } from '../core/home'
 import { cut, textWidth } from '../core/text.js'
-import { ACCENT } from '../core/theme'
+import { accent } from '../core/theme'
 import { testsWord } from './fixer'
 import { applyFix, type Fix, fixesDir, fixesNow, type FixLine, fixLineNow, fixOf, notNow, setFixLine, shownPath, undoFix } from './fixes'
 import { redoFix, request } from './request'
@@ -37,9 +37,6 @@ import { redoFix, request } from './request'
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-
-/** A key the person can press, in thimble's accent as the bar draws its keys (core/theme.ts). */
-const KEY_COLOR = ACCENT
 
 /** The keys the line takes now, by its kind. */
 const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'], ask: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'n'] }
@@ -90,7 +87,7 @@ export async function lineSeen($: Engine): Promise<void> {
 function keyText(els: Any, k: string, words: string, i: number): Any[] {
   const { Text } = els
   return [...(i ? [Text({ key: `s${i}`, dimColor: true, children: ' · ' })] : []),
-    Text({ key: `k${i}`, color: KEY_COLOR, bold: true, children: k }), Text({ key: `w${i}`, children: ` ${words}` })]
+    Text({ key: `k${i}`, color: accent(), bold: true, children: k }), Text({ key: `w${i}`, children: ` ${words}` })]
 }
 
 /** The keys' row: each key and its words, after the row's indent. */
@@ -161,14 +158,14 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     if (!fits) why = [Text({ key: 'w', dimColor: true, wrap: 'wrap', children: `  ${reason}` })]
     second = keysRow(els, [['d', 'what changed'], ['r', 'redo'], ['n', 'later']])
   } else if (l.kind === 'request') {
-    first = [Text({ key: 'g', color: KEY_COLOR, children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
+    first = [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
     second = [...keysRow(els, [['n', 'ok']]), dim('m', ' · /thimble-fix lists it, and s submits it')]
   } else if (l.kind === 'update') {
-    first = [Text({ key: 'g', color: KEY_COLOR, children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · /thimble-fix lists your fixes')]
+    first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · /thimble-fix lists your fixes')]
   } else if (l.kind === 'release') {
-    first = [Text({ key: 'g', color: KEY_COLOR, children: '↑ ' }), Text({ key: 't', children: l.said || 'a new thimble release is out' })]
+    first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'a new thimble release is out' })]
   } else if (l.kind === 'ask') {
-    first = [Text({ key: 'g', color: KEY_COLOR, children: '? ' }), Text({ key: 't', wrap: 'wrap', children: l.said || 'Which fix are these words for?' })]
+    first = [Text({ key: 'g', color: accent(), children: '? ' }), Text({ key: 't', wrap: 'wrap', children: l.said || 'Which fix are these words for?' })]
     const fixes = (await fixesNow($))?.fixes ?? []
     second = keysRow(els, [...(l.choices ?? []).map(id => [String(id), cut(fixes.find(f => f.id === id)?.title || `fix ${id}`, 28)] as [string, string]), ['0', 'a new fix'], ['n', 'never mind']])
   } else if (l.kind === 'problem') {

@@ -19,8 +19,6 @@ import type { ClientModule, ClientSurface } from 'claude-code'
 type Any = any
 type Item = { id: string; n: number; name: string; levels: string[]; level: number; word: string; picked: boolean }
 type Instance = { id: string; n: number; queue: Array<Record<string, unknown>> }
-/** The color of a key the person can press: thimble's purple, as the bar's (core/theme.ts ACCENT). */
-const KEY_COLOR = 'merged'
 const instances = new WeakMap<object, Instance>()
 
 const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
@@ -44,24 +42,26 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
 
   const items: Item[] = Array.isArray(props?.items) ? props.items : []
   const plus = typeof props?.plus === 'string' ? props.plus : null
+  // a key the person can press, in thimble's color as the hooks module read it (core/theme.ts accent())
+  const keyColor = typeof props?.color === 'string' ? props.color : undefined
   const press = (id: string, label: string, kids: Any[]) => E.Button({ key: id, plain: true, label, onPress: () => send({ press: id }), children: kids })
   const chip = (c: Item) => {
     const tone = c.picked ? { color: 'warning' } : { dimColor: true }
     const dots = c.levels.map((lv, i) => press(`lvl-${c.id}-${i}`, `${c.name}: ${lv}`, [E.Text({ ...tone, children: i === c.level ? '●' : '○' })]))
     return E.Box({ key: `c-${c.id}`, flexDirection: 'row', marginRight: 3, children: [
-      press(`chip-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ color: KEY_COLOR, bold: true, children: `${c.n} ` }), E.Text({ ...tone, bold: c.picked, children: `${c.name} ` })]),
+      press(`chip-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ color: keyColor, bold: true, children: `${c.n} ` }), E.Text({ ...tone, bold: c.picked, children: `${c.name} ` })]),
       ...dots,
       press(`word-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ bold: c.picked, ...(c.picked ? { color: 'warning' } : {}), children: ` ${c.word}` })]),
     ] })
   }
   const cu = props?.catchup && typeof props.catchup === 'object' ? props.catchup : null
   const catchup = cu ? [E.Box({ key: 'c-catchup', flexDirection: 'row', marginRight: 3, children: [
-    press('catchup', `catch up on ${cu.replies} replies`, [E.Text({ color: KEY_COLOR, bold: true, children: `${cu.n} ` }), E.Text({ children: `Catch up on ${cu.replies} replies` })]),
+    press('catchup', `catch up on ${cu.replies} replies`, [E.Text({ color: keyColor, bold: true, children: `${cu.n} ` }), E.Text({ children: `Catch up on ${cu.replies} replies` })]),
   ] })] : []
   const add = press('add', 'add a chip of your own', [E.Text(plus != null ? { color: 'warning', bold: true, children: `+ ${plus}▏` } : { dimColor: true, children: '+' })])
-  // s close, its key as the bar draws its keys (bar.tsx KEY_COLOR), so leaving is named where the person looks
+  // s close, its key as the bar draws its keys (props.color: core/theme.ts accent()), so leaving is named where the person looks
   const close = plus == null ? [E.Box({ key: 'c-close', flexDirection: 'row', marginLeft: 3, children: [
-    press('close', 's close', [E.Text({ color: KEY_COLOR, bold: true, children: 's' }), E.Text({ dimColor: true, children: ' close' })]),
+    press('close', 's close', [E.Text({ color: keyColor, bold: true, children: 's' }), E.Text({ dimColor: true, children: ' close' })]),
   ] })] : []
   return E.Box({ flexDirection: 'row', flexWrap: 'wrap', width: Number(props?.width) || surface.columns || 80, children: [...items.map(chip), ...catchup, add, ...close] })
 }

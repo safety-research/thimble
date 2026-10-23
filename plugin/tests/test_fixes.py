@@ -214,6 +214,59 @@ def test_a_fix_may_not_touch_what_keeps_the_person_safe(world):
         "thimble does not apply changes to its safety files")
 
 
+def test_a_refused_change_goes_back_to_the_fixer_in_the_same_copy_and_the_next_round_passes(world, monkeypatch):
+    # round 1 changes a safety file: refused, the refusal kept on the record, the copy kept
+    r = FX.new("make the fix line blue")
+    wt = Path(r["work"])
+    (wt / "plugin" / "fix").mkdir(parents=True)
+    (wt / "plugin" / "fix" / "line.ts").write_text("const KEY_COLOR = 'blue'\n")
+    r = FX.done(r["id"], "Blue fix line", "")
+    assert r["state"] == "failed" and r["work"] == str(wt)
+    assert r["refused"] == {"why": r["error"], "files": ["plugin/fix/line.ts"]}
+    # again: another round in the same copy, no new words, the refusal still there for the fixer
+    r = FX.again(r["id"], session="s-made-up")
+    assert r["state"] == "working" and r["rounds"] == 2 and r["words"] == ["make the fix line blue"]
+    assert r["refused"]["files"] == ["plugin/fix/line.ts"] and r["work"] == str(wt) and r["session"] == "s-made-up"
+    # round 2 puts the change elsewhere: it passes, and the refusal is gone
+    (wt / "plugin" / "fix" / "line.ts").unlink()
+    (wt / "plugin" / "fix").rmdir()
+    p = wt / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text() + "const accent = 'blue'\n")
+    r = FX.done(r["id"], "Blue accent", "thimble's color is blue.")
+    assert r["state"] == "ready" and "refused" not in r and [f["path"] for f in r["files"]] == ["plugin/bar/bar.tsx"]
+    with pytest.raises(FX.FixError, match="no refusal"):
+        FX.again(r["id"])
+    # failing tests: the refusal carries the end of their output
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "echo made-up-failure; false")
+    t = made(world)
+    t = FX.done(t["id"], "Bar says read", "")
+    assert t["state"] == "failed" and t["refused"]["files"] == [] and "made-up-failure" in t["refused"]["tests"]
+    # the fixer ends saying why it cannot be done: that is the failure the person reads, the copy kept for r
+    t = FX.again(t["id"])
+    t = FX.done(t["id"], cannot="The color of the fix line is drawn by thimble's own fix flow, which a fix may not change.")
+    assert t["state"] == "failed" and t["error"].startswith("The color of the fix line") and "refused" not in t
+    assert Path(t["work"]).is_dir()
+
+
+def test_a_follow_up_made_a_fix_of_its_own_merges_into_the_fix_it_repairs(world):
+    # fix 1 is on; a follow-up about what it added became fix 2, ready; merge 1 2 makes them one fix, on
+    a = on_fix(world)
+    b = FX.new("clicking the read item crashes it")
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    assert "read ${n}" in p.read_text()
+    p.write_text(p.read_text().replace("read ${n}", "read ${n ?? 0}"))
+    b = FX.done(b["id"], "Clicking read no longer crashes", "The read item works when clicked.")
+    assert b["state"] == "ready"
+    out = FX.merge([a["id"], b["id"]], press(a["id"]))
+    assert out["merged"] == [b["id"]]
+    m = FX.get(a["id"])
+    assert m["state"] == "on" and m["title"] == "Bar says read" and m["rounds"] == 2
+    assert m["words"] == ["say read, not coverage", "clicking the read item crashes it"]
+    assert FX.get(b["id"])["state"] == "merged" and [r["id"] for r in FX.listing()["fixes"]] == [a["id"]]
+    assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read", "thimble 0.10.2"]
+    assert "read ${n ?? 0}" in live_file("plugin/bar/bar.tsx")
+
+
 def test_failed_tests_no_change_and_not_now(world, monkeypatch):
     monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
     r = made(world)
